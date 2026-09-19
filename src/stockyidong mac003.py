@@ -44087,17 +44087,18 @@ class StockKeywordAnalyzerGUI:
                 dapan_data["trend10"] = trend10
 
                 # 5.6 把 breadth 实时数据 (up/dn/zt/dt) 合并进 trend10 最新一天
-                if trend10 and 'up' in dir() and up is not None:
+                # 注: up/dn/zt/dt 在 Step 1 已初始化 (L43692), 这里直接检查 is not None
+                if trend10 and up is not None:
                     _td_full = _trade_date_dapan[:4]+"-"+_trade_date_dapan[4:6]+"-"+_trade_date_dapan[6:8] if _trade_date_dapan else None
+                    _merged = False
                     for _tr in trend10:
                         if _td_full and _tr.get("full_date") == _td_full:
                             _tr["up"] = up; _tr["dn"] = dn; _tr["zt"] = zt; _tr["dt"] = dt
-                            break
-                    else:
-                        # 没匹配上就填最新一天
+                            _merged = True; break
+                    if not _merged:
                         trend10[-1]["up"] = up; trend10[-1]["dn"] = dn
                         trend10[-1]["zt"] = zt; trend10[-1]["dt"] = dt
-                    print(f"[大盘] ✅ breadth 已合并: up={up} dn={dn} zt={zt} dt={dt}")
+                    print(f"[大盘] ✅ breadth 已合并: up={up} dn={dn} zt={zt} dt={dt} (trend10[{len(trend10)-1}])")
 
                 # 5.5 后台直接同步 trend10 → emo_hist (后台线程, 不依赖 UI)
                 try:
@@ -44486,7 +44487,7 @@ class StockKeywordAnalyzerGUI:
                     _tip_state = {"col": -1, "after": None, "items": None}
 
                     def _build_tip_items(d):
-                        """返回 [(文本,颜色), ...]"""
+                        """返回 [(文本,颜色), ...] — 用原版 Toplevel 配色 (深色醒目)"""
                         full_d = _local_hist_tip.get(d.get("full_date",""), {})
                         _up = d.get("up") if d.get("up") is not None else full_d.get("up")
                         _dn = d.get("dn") if d.get("dn") is not None else full_d.get("dn")
@@ -44497,25 +44498,26 @@ class StockKeywordAnalyzerGUI:
                         _stage = full_d.get("stage", "")
                         _emo_map = {"冰点":"❄️","启动":"🌱","发酵":"🔥","高潮":"💥","分歧":"⚡","退潮":"📉"}
                         _emo_ico = _emo_map.get(_stage, "📊")
-                        _pnl_col = "#FFCDD2" if _pnl == "赚钱" else ("#C8E6C9" if _pnl == "亏钱" else "#E0E0E0")
-                        _ths_col = "#FFCDD2" if _ths == "向上" else ("#C8E6C9" if _ths == "向下" else "#E0E0E0")
-                        _pct_col = "#FFCDD2" if d["pct"] >= 0 else "#C8E6C9"
+                        # —— 原版配色 (深色醒目, 在深背景 #263238 上清晰) ——
+                        _pnl_col = "#C62828" if _pnl == "赚钱" else ("#2E7D32" if _pnl == "亏钱" else "#ECEFF1")
+                        _ths_col = "#C62828" if _ths == "向上" else ("#2E7D32" if _ths == "向下" else "#ECEFF1")
+                        _pct_col = "#C62828" if d["pct"] >= 0 else "#2E7D32"
                         items = [
-                            (f"📅 {d.get('full_date', d['date'])}", "#FFD54F"),
-                            (f"{_emo_ico} {_stage or '-'}", "#FF8A65"),
-                            (f"📊 emo={d['emo']:.0f}", "#FFB74D"),
-                            (f"📈 {d['pct']:+.2f}%", _pct_col),
-                            (f"💰 {_pnl or '-'}", _pnl_col),
-                            (f"🧠 {_ths or '-'}", _ths_col),
+                            (f"📅 {d.get('full_date', d['date'])}", "#FFD54F"),  # 金色日期
+                            (f"{_emo_ico} 情绪阶段: {_stage or '-'}", "#FF8A65"), # 橙色
+                            (f"📊 情绪分: {d['emo']:.0f}", "#FFB74D"),            # 琥珀
+                            (f"📈 上证涨跌: {d['pct']:+.2f}%", _pct_col),
+                            (f"💰 账户盈亏: {_pnl}", _pnl_col),
+                            (f"🧠 同花顺指数: {_ths}", _ths_col),
                         ]
                         if _up is not None and _dn is not None:
-                            _bc = "#FFCDD2" if _up > _dn else ("#C8E6C9" if _up < _dn else "#FFECB3")
-                            _bs = f"↑{_up} ↓{_dn}"
+                            _bc = "#C62828" if _up > _dn else ("#2E7D32" if _up < _dn else "#FFD54F")
+                            _bs = f"📊 涨{_up}/跌{_dn}"
                             if _zt: _bs += f" 🔥{_zt}"
                             if _dt: _bs += f" ⚠️{_dt}"
                             items.append((_bs, _bc))
                         elif _zt:
-                            items.append((f"🔥{_zt}", "#FF8A65"))
+                            items.append((f"🔥 涨停数: {_zt}", "#FF8A65"))
                         return items
 
                     def _draw_tip(col_idx):
