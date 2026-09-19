@@ -4069,6 +4069,11 @@ class StockKeywordAnalyzerGUI:
         updn_frame = tk.Frame(top_bar, bg="#1A237E"); updn_frame.pack(side=tk.RIGHT)
         tk.Label(updn_frame, textvariable=self._dapan_updn_var, bg="#1A237E", fg="#E3F2FD",
                  font=("", 9)).pack(side=tk.RIGHT, padx=4)
+        self._dapan_stop_btn = tk.Button(top_bar, text="⏹️", bg="#555", fg="white",
+                                          font=("", 9, "bold"), padx=6, pady=0,
+                                          cursor="hand2", state="disabled",
+                                          command=lambda: self._dapan_stop_event.set())
+        self._dapan_stop_btn.pack(side=tk.RIGHT, padx=2)
         tk.Button(top_bar, text="🔄", bg="#C62828", fg="white", font=("", 9, "bold"),
                   padx=6, pady=0, cursor="hand2",
                   command=lambda: self._bg_load_dapan()).pack(side=tk.RIGHT, padx=6)
@@ -4080,6 +4085,9 @@ class StockKeywordAnalyzerGUI:
         self._dapan_trend_canvas = tk.Canvas(trend_bar, bg="#ECEFF1", height=72,
                                               highlightthickness=1, highlightbackground="#B0BEC5")
         self._dapan_trend_canvas.pack(fill=tk.BOTH, expand=True)
+        # 缓存 trend10 数据, 供 Canvas resize 时自动重绘
+        self._dapan_trend_data = None
+        self._dapan_trend_canvas.bind("<Configure>", lambda e: self._redraw_trend_if_width_ok())
         # 默认占位提示
         self._dapan_trend_canvas.create_text(200, 36, text="⏳ 加载最近10日趋势中...",
                                               fill="#90A4AE", font=("", 9))
@@ -4172,6 +4180,12 @@ class StockKeywordAnalyzerGUI:
         #     self.root.after(1500, self._bg_load_dapan)
         # except Exception as e:
         #     print(f"[大盘分析] 自动加载调度失败: {e}")
+
+        # ✅ 启动时秒出旧数据: 读本地 snapshot → 没有 snapshot 则从 emo_history 渲染趋势
+        try:
+            self._try_load_dapan_snapshot()
+        except Exception as _e_load:
+            print(f"[大盘] snapshot 加载异常: {_e_load}", flush=True)
 
         # 仓位标签页
         position_tab = ttk.Frame(self.position_trading_notebook, padding=2)
@@ -43664,11 +43678,24 @@ class StockKeywordAnalyzerGUI:
         except Exception as e:
             return {"scores": {}, "avg_score": None, "error": str(e)}
 
+
     def _bg_load_dapan(self):
         """大盘分析Tab后台加载: 红绿灯+四维度+情绪周期+板块
         ⚠️ 线程安全: 后台线程只放数据到 _dapan_pending, 主线程用 root.after 轮询"""
         import threading as _th
-        self._dapan_pending = None  # 线程安全缓冲区
+        # 停止信号 + 进度回调
+        self._dapan_stop_event = _th.Event()
+        _stop = self._dapan_stop_event
+        def _step(name):
+            """每步开始前调, 更新状态 + 检查停止信号"""
+            if _stop.is_set():
+                print(f"[大盘] ⏹️ 用户停止 (在: {name})", flush=True)
+                return False
+            self.root.after(0, lambda n=name: setattr(
+                self, '_dapan_alert_var', None) or (  # 不直接设 StringVar, 用下面的
+                    self._dapan_alert_var.set(f"⏳ {n}...")) if hasattr(self, '_dapan_alert_var') else None)
+            return True
+        self._dapan_pending = None
         if not hasattr(self, "_dapan_polling"):
             self._dapan_polling = True
             def _poll():
@@ -43677,7 +43704,9 @@ class StockKeywordAnalyzerGUI:
                     self._dapan_pending = None
                     self._dapan_update_ui(data)
                 self.root.after(300, _poll)
-            self.root.after(500, _poll)  # 启动轮询
+            self.root.after(500, _poll)
+        # 启用 ⏹️ 停止按钮
+        self.root.after(0, lambda: self._dapan_stop_btn.config(state="normal", bg="#E53935"))
         def _run():
             try:
                 import json as _js
@@ -43685,6 +43714,7 @@ class StockKeywordAnalyzerGUI:
                 import subprocess as _sp
                 import time as _t_dp
 
+                if not _step("初始化 tushare"): return
                 import akshare as ak
                 print("[大盘分析] ⏳ 开始加载...", flush=True)
                 dapan_data = {"dims": {}, "hld": {}, "emo": {}, "sectors": {}}
@@ -43715,15 +43745,13 @@ class StockKeywordAnalyzerGUI:
                     print(f"[大盘] tushare兜底初始化fail: {_e_init}")
                     _tb.print_exc()
 
-                # --- 1. 涨跌停广度 (核心! 加重试 + tushare兜底) ---
+                # --- 1. 涨跌停广度 (核心! 1次尝试 + tushare兜底, 东财限流时不白等) ---
+                if not _step("拉涨跌停广度"): return
                 spot = None
-                for _try in range(3):
-                    try:
-                        spot = ak.stock_zh_a_spot_em()
-                        break
-                    except Exception as e:
-                        print(f"[大盘] spot try {_try+1} fail: {e}")
-                        _t_dp.sleep(1.5)
+                try:
+                    spot = ak.stock_zh_a_spot_em()
+                except Exception as e:
+                    print(f"[大盘] spot akshare fail → 直接兜底: {str(e)[:40]}")
                 total = up = dn = flat = zt = dt = breadth_score = None
                 if spot is not None and len(spot) > 0:
                     total = len(spot)
@@ -43757,6 +43785,7 @@ class StockKeywordAnalyzerGUI:
                     dapan_data["hld"]["breadth_score"] = 50
 
                 # --- 2. 北向资金 (沪股通+深股通 + tushare兜底) ---
+                if not _step("拉北向资金"): return
                 north_ok = False
                 try:
                     import pandas as _pd_dp
@@ -43817,6 +43846,7 @@ class StockKeywordAnalyzerGUI:
                     dapan_data["hld"]["north_score"] = 50
 
                 # --- 3. 融资融券 (+ tushare兜底) ---
+                if not _step("拉融资融券"): return
                 margin_ok = False
                 try:
                     margin_sh = ak.macro_china_market_margin_sh()
@@ -43864,6 +43894,7 @@ class StockKeywordAnalyzerGUI:
                     dapan_data["hld"]["margin_score"] = 50
 
                 # --- 4. 换手率/成交额 (+ tushare兜底) ---
+                if not _step("拉换手率"): return
                 turn_ok = False
                 try:
                     sh2 = ak.stock_zh_index_daily_em(symbol="sh000001")
@@ -43906,16 +43937,36 @@ class StockKeywordAnalyzerGUI:
                 dapan_data["hld"]["col"] = hld_col
                 dapan_data["hld"]["lvl"] = hld_lvl
 
-                # --- 情绪引擎 ---
+                # --- 情绪引擎 (+ tushare 数据兜底校验) ---
+                if not _step("计算情绪引擎"): return
                 emo_stage = "震荡"
                 skill_py = _os.path.expanduser("~/.qclaw/workspace-ek2hwmmwwhxi3mz3/skills/情绪周期流/scripts/情绪周期流_engine.py")
+                emo_engine_data = None
                 if _os.path.exists(skill_py):
                     try:
-                        r = _sp.run(["python3", skill_py, "--market", "--json"],
-                                    capture_output=True, text=True, timeout=8)
+                        r = _sp.run(["/Library/Frameworks/Python.framework/Versions/3.11/bin/python3", skill_py, "--market", "--json"],
+                                    capture_output=True, text=True, timeout=15)
                         if r.returncode == 0 and r.stdout.strip():
-                            emo_data = _js.loads(r.stdout.strip())
-                            emo_stage = emo_data.get("emotion_stage", emo_data.get("stage", "震荡"))
+                            emo_engine_data = _js.loads(r.stdout.strip())
+                            emo_stage = emo_engine_data.get("emotion_stage", emo_engine_data.get("stage", "震荡"))
+                            # 校验: 引擎的新浪数据源可能挂了 → 用 tushare 算的真实数据覆盖
+                            _engine_zt = emo_engine_data.get("limit_up_count", 0)
+                            _engine_up_ratio = emo_engine_data.get("breadth_up_ratio", 0.5)
+                            _tushare_zt = zt if 'zt' in dir() and zt else 0
+                            _tushare_up = up if 'up' in dir() and up else 0
+                            _tushare_dn = dn if 'dn' in dir() and dn else 0
+                            # 如果引擎返回的涨停 < 10 但 tushare 有真实数据 → 引擎脏了, 用 tushare 重算
+                            if _engine_zt < 10 and _tushare_zt > 10:
+                                print(f"[大盘] ⚠️ 情绪引擎新浪数据源挂了 (engine_zt={_engine_zt}, tushare_zt={_tushare_zt}), 用 tushare 重算情绪")
+                                _total_t = (_tushare_up or 0) + (_tushare_dn or 0)
+                                _up_ratio = _tushare_up / _total_t if _total_t > 0 else 0.5
+                                if _tushare_zt >= 80 and _up_ratio >= 0.7: emo_stage = "高潮"
+                                elif _tushare_zt >= 40 and _up_ratio >= 0.55: emo_stage = "发酵"
+                                elif _tushare_zt >= 15 and _up_ratio >= 0.5: emo_stage = "启动"
+                                elif _tushare_zt < 10 and _up_ratio < 0.4: emo_stage = "冰点"
+                                elif _up_ratio < 0.45: emo_stage = "退潮"
+                                else: emo_stage = "震荡"
+                                print(f"[大盘] ✅ tushare 情绪重算 stage={emo_stage} zt={_tushare_zt} up_ratio={_up_ratio:.2f}")
                     except Exception as e:
                         print(f"[大盘] emo engine fail: {e}")
                 dapan_data["emo"]["stage"] = emo_stage
@@ -43925,36 +43976,37 @@ class StockKeywordAnalyzerGUI:
                 dapan_data["emo"]["dt"] = dt if 'dt' in dir() else 0
 
                 # --- 热门/冷门板块 (多源 fallback, 热门12+冷门9) ---
+                # 🔥 快速路径: 同花顺优先 (0.4s), 东财限流要 10s+ 超时
                 hot8 = cold8 = None
-                # 源1: 东方财富 概念板块
+                # 源1: 同花顺 行业板块
                 try:
-                    cons = ak.stock_board_concept_name_em()
-                    if cons is not None and len(cons) > 0 and "涨跌幅" in cons.columns:
-                        cs = cons.sort_values(by="涨跌幅", ascending=False)
-                        hot8 = [(str(row.get("板块名称", "")), row.get("涨跌幅", 0))
-                                for _, row in cs.head(12).iterrows()]
-                        cold8 = [(str(row.get("板块名称", "")), row.get("涨跌幅", 0))
-                                 for _, row in cs.tail(9).iterrows()]
-                        print("[大盘] ✅ 板块源=东财概念")
-                except Exception as e:
-                    print(f"[大盘] 东财概念板块fail: {e}")
-                # 源2 fallback: 同花顺 行业板块
+                    ind = ak.stock_board_industry_summary_ths()
+                    if ind is not None and len(ind) > 0 and "涨跌幅" in ind.columns:
+                        ind_sorted = ind.sort_values(by="涨跌幅", ascending=False)
+                        hot8 = []
+                        for _, row in ind_sorted.head(12).iterrows():
+                            hot8.append((str(row.get("板块", "")), row.get("涨跌幅", 0),
+                                         f"净流入{row.get('净流入',0)}亿 领涨{row.get('领涨股','')}"))
+                        cold8 = []
+                        for _, row in ind_sorted.tail(9).iterrows():
+                            cold8.append((str(row.get("板块", "")), row.get("涨跌幅", 0),
+                                          f"净流入{row.get('净流入',0)}亿 领涨{row.get('领涨股','')}"))
+                        print(f"[大盘] ✅ 板块源=同花顺行业 {len(ind)}行")
+                except Exception as ths_e:
+                    print(f"[大盘] 同花顺行业fail → 兜底东财: {str(ths_e)[:40]}")
+                # 源2 fallback: 东方财富 概念板块
                 if hot8 is None:
                     try:
-                        ind = ak.stock_board_industry_summary_ths()
-                        if ind is not None and len(ind) > 0 and "涨跌幅" in ind.columns:
-                            ind_sorted = ind.sort_values(by="涨跌幅", ascending=False)
-                            hot8 = []
-                            for _, row in ind_sorted.head(12).iterrows():
-                                hot8.append((str(row.get("板块", "")), row.get("涨跌幅", 0),
-                                             f"净流入{row.get('净流入',0)}亿 领涨{row.get('领涨股','')}"))
-                            cold8 = []
-                            for _, row in ind_sorted.tail(9).iterrows():
-                                cold8.append((str(row.get("板块", "")), row.get("涨跌幅", 0),
-                                              f"净流入{row.get('净流入',0)}亿 领涨{row.get('领涨股','')}"))
-                            print(f"[大盘] ✅ 板块源=同花顺行业 {len(ind)}行")
+                        cons = ak.stock_board_concept_name_em()
+                        if cons is not None and len(cons) > 0 and "涨跌幅" in cons.columns:
+                            cs = cons.sort_values(by="涨跌幅", ascending=False)
+                            hot8 = [(str(row.get("板块名称", "")), row.get("涨跌幅", 0))
+                                    for _, row in cs.head(12).iterrows()]
+                            cold8 = [(str(row.get("板块名称", "")), row.get("涨跌幅", 0))
+                                     for _, row in cs.tail(9).iterrows()]
+                            print("[大盘] ✅ 板块源=东财概念")
                     except Exception as e:
-                        print(f"[大盘] 同花顺行业板块fail: {e}")
+                        print(f"[大盘] 东财概念fail (跳过): {str(e)[:40]}")
                 # 源3 fallback: tushare 申万行业分类 + 指数日线
                 if hot8 is None:
                     try:
@@ -43994,66 +44046,162 @@ class StockKeywordAnalyzerGUI:
                     dapan_data["sectors"]["hot"] = hot8
                     dapan_data["sectors"]["cold"] = cold8
 
-                # ======== 5. 最近10日趋势 (上证涨跌幅 + 情绪分) ========
-                # 优先复用红绿灯弹窗的 market_sentiment_data.json (已含 sentiment_score)
+                # ======== 5. 最近20日趋势 (上证涨跌幅 + 情绪分) ========
+                if not _step("拉20日趋势"): return
+                # 策略: tushare 拉最新20交易日做基础, JSON sentiment_score 能取到则覆盖
                 trend10 = []
+                # Step 1: tushare 拉最新 20 交易日上证数据 (日期永远新鲜)
                 try:
-                    _emo_json = _os.path.expanduser("~/.qclaw/workspace-agent-85985980/market_sentiment_data.json")
+                    import tushare as _ts_trend2
+                    from datetime import date as _dt_date_t2
+                    _today_yyyymmdd = _dt_date_t2.today().strftime("%Y%m%d")
+                    _pro2 = _ts_trend2.pro_api()
+                    _cal2 = _pro2.trade_cal(exchange="SSE", start_date="20250101",
+                                            end_date=_today_yyyymmdd, is_open="1")
+                    _td_list2 = sorted(_cal2["cal_date"].tolist())[-22:] if _cal2 is not None else []
+                    _t10_2 = _td_list2[-20:] if len(_td_list2) >= 20 else _td_list2
+                    _tushare_map = {}
+                    for _td2 in _t10_2:
+                        try:
+                            _df2 = _pro2.index_daily(ts_code="000001.SH", trade_date=_td2)
+                            if _df2 is None or len(_df2) == 0: continue
+                            _r2 = _df2.iloc[0]
+                            _pct3 = float(_r2.get("pct_chg", 0) or 0)
+                            _vol3 = float(_r2.get("amount", 0) or 0) / 1e5
+                            _tr3 = float(_r2.get("turnover_rate", 0) or 0)
+                            _close3 = float(_r2.get("close", 0) or 0)
+                            # 自算 emo score (近似 market_sentiment_data.json 的算法)
+                            _base3 = 50
+                            if _pct3 > 1: _base3 += 20
+                            elif _pct3 > 0: _base3 += 8
+                            elif _pct3 < -1: _base3 -= 20
+                            elif _pct3 < 0: _base3 -= 8
+                            if _vol3 > 5000: _base3 += 10
+                            elif _vol3 < 3000: _base3 -= 5
+                            if _tr3 > 2: _base3 += 8
+                            elif _tr3 < 0.5: _base3 -= 5
+                            _emo_s3 = max(10, min(95, _base3))
+                            _full_k = _td2[:4]+"-"+_td2[4:6]+"-"+_td2[6:8]
+                            _tushare_map[_full_k] = {
+                                "full_date": _full_k,
+                                "date": _td2[4:6]+"/"+_td2[6:8],
+                                "pct": _pct3,
+                                "emo": _emo_s3,
+                                "zt": 0,
+                                "close": _close3,
+                            }
+                        except Exception: continue
+                    print(f"[大盘] tushare trend10 拉到: {len(_tushare_map)}天, 最新={max(_tushare_map.keys()) if _tushare_map else '无'}")
+                except Exception as _e_ts:
+                    print(f"[大盘] tushare trend10 fail: {_e_ts}")
+                    _tushare_map = {}
+
+                # Step 2: 读 market_sentiment_data.json (可能过时, 但 sentiment_score 更准)
+                _emo_json = _os.path.expanduser("~/.qclaw/workspace-agent-85985980/market_sentiment_data.json")
+                _json_map = {}
+                try:
                     if _os.path.exists(_emo_json):
                         with open(_emo_json) as _fj:
                             _sd = _js.load(_fj)
                         _dl = _sd.get("data", [])
-                        # 取最近10天
-                        for _d in _dl[-10:]:
+                        for _d in _dl:
                             _dt2 = str(_d.get("date", ""))
-                            _pct2 = float(_d.get("sh_chg", 0) or 0)
-                            _emo2 = float(_d.get("sentiment_score", 50) or 50)
-                            trend10.append({
-                                "date": _dt2[4:6]+"/"+_dt2[6:8],
-                                "pct": _pct2,
-                                "emo": _emo2,
-                                "zt": int(_d.get("zt_count", 0) or 0),
-                                "close": _d.get("index_close", 0),
-                            })
-                        print(f"[大盘] ✅ 10日趋势(读JSON): {len(trend10)}天")
-                except Exception as e:
-                    print(f"[大盘] trend10 JSON fail: {e}, fallback tushare")
-                    # Fallback: tushare 逐行拉 (慢但稳定)
+                            if len(_dt2) == 8:
+                                _full2 = _dt2[:4]+"-"+_dt2[4:6]+"-"+_dt2[6:8]
+                            else:
+                                _full2 = _dt2
+                            _json_map[_full2] = float(_d.get("sentiment_score", 50) or 50)
+                        print(f"[大盘] JSON 有 sentiment_score: {len(_json_map)}天, 最新={max(_json_map.keys()) if _json_map else '无'}")
+                except Exception as _e_j:
+                    print(f"[大盘] JSON trend10 fail: {_e_j}")
+
+                # Step 3: 合并 — tushare 做底 (日期永远新鲜), JSON sentiment_score 覆盖
+                if _tushare_map:
+                    for _k, _rec in _tushare_map.items():
+                        if _k in _json_map:
+                            _rec["emo"] = _json_map[_k]  # JSON 情绪分更准则覆盖
+                        trend10.append(_rec)
+                    trend10.sort(key=lambda x: x["full_date"])
+                    print(f"[大盘] ✅ 10日趋势: {len(trend10)}天, 最新={trend10[-1]['full_date']}")
+                else:
+                    # tushare 也挂了 → 退回到纯 JSON (可能过时)
                     try:
-                        import tushare as _ts_trend2
-                        _pro2 = _ts_trend2.pro_api()
-                        _cal2 = _pro2.trade_cal(exchange="SSE", start_date="20250701",
-                                                end_date=_tod2 or _dt_str, is_open="1")
-                        _td_list2 = sorted(_cal2["cal_date"].tolist())[-12:] if _cal2 is not None else []
-                        _t10_2 = _td_list2[-10:] if len(_td_list2) >= 10 else _td_list2
-                        for _td2 in _t10_2:
-                            try:
-                                _df2 = _pro2.index_daily(ts_code="000001.SH", trade_date=_td2)
-                                if _df2 is None or len(_df2) == 0: continue
-                                _r2 = _df2.iloc[0]
-                                _pct3 = float(_r2.get("pct_chg", 0) or 0)
-                                _vol3 = float(_r2.get("amount", 0) or 0) / 1e5
-                                _tr3 = float(_r2.get("turnover_rate", 0) or 0)
-                                _base3 = 50
-                                if _pct3 > 1: _base3 += 20
-                                elif _pct3 > 0: _base3 += 8
-                                elif _pct3 < -1: _base3 -= 20
-                                elif _pct3 < 0: _base3 -= 8
-                                if _vol3 > 5000: _base3 += 10
-                                elif _vol3 < 3000: _base3 -= 5
-                                if _tr3 > 2: _base3 += 8
-                                elif _tr3 < 0.5: _base3 -= 5
-                                _emo_s3 = max(10, min(95, _base3))
-                                trend10.append({"date": _td2[4:6]+"/"+_td2[6:8],
-                                                "pct": _pct3, "emo": _emo_s3})
-                            except Exception:
-                                continue
-                        print(f"[大盘] ✅ 10日趋势(tushare fallback): {len(trend10)}天")
-                    except Exception as e2:
-                        print(f"[大盘] trend10 tushare fallback fail: {e2}")
+                        if _os.path.exists(_emo_json):
+                            with open(_emo_json) as _fj:
+                                _sd = _js.load(_fj)
+                            _dl = _sd.get("data", [])
+                            for _d in _dl[-10:]:
+                                _dt2 = str(_d.get("date", ""))
+                                if len(_dt2) == 8:
+                                    _full2 = _dt2[:4]+"-"+_dt2[4:6]+"-"+_dt2[6:8]
+                                else:
+                                    _full2 = _dt2
+                                trend10.append({
+                                    "full_date": _full2,
+                                    "date": _dt2[4:6]+"/"+_dt2[6:8],
+                                    "pct": float(_d.get("sh_chg", 0) or 0),
+                                    "emo": float(_d.get("sentiment_score", 50) or 50),
+                                    "zt": int(_d.get("zt_count", 0) or 0),
+                                    "close": _d.get("index_close", 0),
+                                })
+                            print(f"[大盘] ⚠️ tushare挂了, 纯JSON fallback: {len(trend10)}天 (可能过时)")
+                    except Exception as _e_last:
+                        print(f"[大盘] ❌ trend10 全部数据源挂了: {_e_last}")
                 dapan_data["trend10"] = trend10
 
+                # 5.5 后台直接同步 trend10 → emo_hist (后台线程, 不依赖 UI)
+                try:
+                    import json as _js_as, os as _os_as
+                    _asp = _os_as.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
+                    if trend10:
+                        if _os_as.path.exists(_asp):
+                            with open(_asp) as _af: _hr = _js_as.load(_af)
+                            if isinstance(_hr, list):
+                                _h2 = {}
+                                for _x in _hr: _h2[_x.get("date","")] = _x
+                                _hr = _h2
+                        else:
+                            _hr = {}
+                        _achg = False
+                        for _d in trend10:
+                            _k = _d.get("full_date"); _es = float(_d.get("emo",50) or 50); _pc = float(_d.get("pct",0) or 0)
+                            if _es >= 70: _ast = "高潮"
+                            elif _es >= 60: _ast = "发酵"
+                            elif _es >= 50: _ast = "启动"
+                            elif _es >= 40: _ast = "震荡"
+                            elif _es >= 30: _ast = "分歧"
+                            else: _ast = "退潮"
+                            if _k in _hr:
+                                _r = _hr[_k]; _r["emo_score"] = _es; _r["pct"] = _pc
+                                if not _r.get("stage") or _r.get("stage","").strip() in ("震荡",""): _r["stage"] = _ast
+                                _achg = True
+                            else:
+                                _hr[_k] = {"date":_k,"pnl":"","ths":"","stage":_ast,
+                                           "emo_score":_es,"pct":_pc,"close":_d.get("close",0),"zt":_d.get("zt",0)}
+                                _achg = True
+                        if _achg:
+                            with open(_asp, "w") as _af: _js_as.dump(_hr, _af, ensure_ascii=False, indent=2)
+                            print(f"[大盘] ✅ emo_hist 已同步 {len(_hr)}天 → {_asp}", flush=True)
+                            # 后台线程: 自动 push 到 Gist
+                            try:
+                                import threading as _th_as2
+                                def _bg_gist():
+                                    try:
+                                        _cfg = self._get_emo_sync_config()
+                                        if _cfg.get("gist_token") and _cfg.get("gist_id"):
+                                            _r2 = self._emo_gist_push(_hr)
+                                            print(f"[大盘] ☁️ Gist push: {_r2.get('msg','')}", flush=True)
+                                    except Exception as _gx:
+                                        print(f"[大盘] Gist push skip: {_gx}")
+                                _th_as2.Thread(target=_bg_gist, daemon=True).start()
+                            except: pass
+                        else:
+                            print(f"[大盘] emo_hist 无变化 ({len(_hr)}天)", flush=True)
+                except Exception as _e_as:
+                    print(f"[大盘] emo_hist 后台同步fail: {_e_as}", flush=True)
+
                 # ======== 盘中警告数据 ========
+                if not _step("拉盘中警告"): return
                 try:
                     print("[大盘] ⏳ 盘中警告拉取...", flush=True)
                     alert = self._fetch_intraday_alert_data()
@@ -44071,10 +44219,18 @@ class StockKeywordAnalyzerGUI:
             except Exception as e:
                 import traceback; traceback.print_exc()
                 print(f"[大盘分析] ❌ 总体异常: {e}", flush=True)
+            finally:
+                # 禁用 ⏹️ 停止按钮, 不管成功/失败/停止
+                try:
+                    self.root.after(0, lambda: self._dapan_stop_btn.config(state="disabled", bg="#555"))
+                except Exception:
+                    pass
         _th.Thread(target=_run, daemon=True).start()
 
     def _dapan_update_ui(self, data):
         """主线程UI更新: 把后台线程拉到的数据渲染到控件上"""
+        # 缓存完整数据, Canvas <Configure> 事件触发重绘时用
+        self._dapan_full_data = data
         try:
             hld = data.get("hld", {})
             dims = data.get("dims", {})
@@ -44234,11 +44390,18 @@ class StockKeywordAnalyzerGUI:
             _render_grid(self._dapan_hot_inner, sec.get("hot", []), True, 3)
             _render_grid(self._dapan_cold_inner, sec.get("cold", []), False, 3)
 
-            # 6. 10日趋势 Canvas (涨跌幅柱状图 + 情绪分折线 + 热力图方块)
+            # 6. 近 N 日趋势 Canvas
+            trend10 = data.get("trend10", [])
+            self._dapan_trend_data = trend10  # 缓存, Canvas resize 时自动重绘
             try:
                 tc = self._dapan_trend_canvas
                 tc.delete("all")
-                trend10 = data.get("trend10", [])
+                cw = tc.winfo_width()
+                # 还没布局完 (winfo_width 返回 1), 先跳过, 等 <Configure> 事件重绘
+                if cw < 100 and trend10:
+                    tc.create_text(400, 80, text="⏳ 等待布局...", fill="#90A4AE", font=("", 10))
+                    return
+                cw = cw or 900
                 # 颜色映射: 情绪分→颜色
                 def _emo_col(s):
                     if s >= 70: return "#C62828"
@@ -44248,82 +44411,227 @@ class StockKeywordAnalyzerGUI:
                     if s >= 30: return "#9E9E9E"
                     return "#2E7D32"
                 if not trend10:
-                    tc.create_text(200, 36, text="⏳ 暂无10日趋势数据", fill="#90A4AE", font=("", 9))
+                    tc.create_text(400, 80, text="⏳ 暂无10日趋势数据",
+                                   fill="#90A4AE", font=("", 10))
                 else:
-                    cw = tc.winfo_width() or 900
-                    ch = 72
-                    pad_l, pad_r, pad_t, pad_b = 30, 10, 4, 18
+                    # cw 已在外层算好
+                    ch = 160
+                    pad_l, pad_r, pad_t = 8, 8, 4
                     plot_w = cw - pad_l - pad_r
-                    plot_h = ch - pad_t - pad_b - 14  # 留14给热力条
                     n = len(trend10)
-                    bar_w = plot_w / n * 0.6
-                    gap = plot_w / n
-                    # 标题
-                    tc.create_text(cw/2, 2, text="📈 近10日上证涨跌 + 情绪分趋势",
-                                   fill="#1A237E", font=("", 8, "bold"), anchor="n")
-                    # 画涨跌柱子 (左半边空间的下半部)
+                    col_w = plot_w / n
+
+                    # ======== 第1行: 标题 + 图例 ========
+                    tc.create_text(cw/2, 8, text=f"📈 近{n}日上证涨跌 + 情绪分趋势",
+                                   fill="#1A237E", font=("", 9, "bold"))
+                    tc.create_text(pad_l+4, 18, text="●情绪分", fill="#FF6F00",
+                                   font=("", 8), anchor="w")
+                    tc.create_text(pad_l+60, 18, text="▌上证涨跌", fill="#C62828",
+                                   font=("", 8), anchor="w")
+
+                    # ======== 每天一列 ========
+                    col_x = [pad_l + i * col_w for i in range(n)]
                     max_abs = max(abs(d["pct"]) for d in trend10) if trend10 else 1
                     if max_abs == 0: max_abs = 1
-                    mid_y = pad_t + plot_h/2
+
+                    # 各区域 Y 坐标
+                    Y_LABEL_TOP = 24    # 日期标签
+                    Y_LABEL_BTM = 40
+                    Y_HEAT_TOP  = 44    # 热力方块
+                    Y_HEAT_BTM  = 58
+                    Y_SCORE_TOP = 62    # 情绪分数字
+                    Y_SCORE_BTM = 74
+                    Y_CHART_TOP = 78    # 涨跌柱 + 折线区域
+                    Y_CHART_BTM = 140
+                    mid_y = (Y_CHART_TOP + Y_CHART_BTM) / 2
+
                     for i, d in enumerate(trend10):
-                        x1 = pad_l + i * gap + (gap - bar_w) / 2
-                        x2 = x1 + bar_w
+                        cx = col_x[i] + col_w / 2
+                        cx_l = col_x[i] + 2  # 列左边界
+                        cx_r = col_x[i] + col_w - 2  # 列右边界
                         chg = d["pct"]
-                        bh = int(abs(chg) / max_abs * (plot_h/2 - 2))
+                        emo_s = d["emo"]
+                        date_str = d["date"]
+                        full_date = d.get("full_date", date_str)
+                        is_today = (i == n-1)
+
+                        # 背景卡片 (最后一天加金色边框)
+                        card_bg = "#FFF8E1" if is_today else "#FFFFFF"
+                        card_bd = "#FF6F00" if is_today else "#CFD8DC"
+                        tc.create_rectangle(cx_l, Y_LABEL_TOP - 2, cx_r, 152,
+                                            fill=card_bg, outline=card_bd, width=1 if is_today else 1)
+
+                        # ① 日期标签
+                        date_fg = "#B71C1C" if is_today else "#455A64"
+                        date_font = ("", 9, "bold") if is_today else ("", 8)
+                        tc.create_text(cx, (Y_LABEL_TOP+Y_LABEL_BTM)/2,
+                                       text=date_str, fill=date_fg, font=date_font)
+                        if is_today:
+                            tc.create_text(cx, Y_LABEL_TOP - 2, text="★",
+                                           fill="#FF6F00", font=("", 9, "bold"), anchor="s")
+
+                        # ② 热力方块
+                        heat_col = _emo_col(emo_s)
+                        tc.create_rectangle(cx_l + 6, Y_HEAT_TOP, cx_r - 6, Y_HEAT_BTM,
+                                            fill=heat_col, outline="white", width=1)
+
+                        # ③ 情绪分数字 (热力方块里面)
+                        tc.create_text(cx, (Y_HEAT_TOP+Y_HEAT_BTM)/2,
+                                       text=f"{emo_s:.0f}", fill="white",
+                                       font=("", 9, "bold"))
+
+                        # ④ 情绪分折线圆点 (在 CHART_TOP 线上方)
+                        emo_y = Y_CHART_TOP - 4 - (emo_s / 100 * 10)  # emo 越高越往上
+                        tc.create_oval(cx-3, emo_y-3, cx+3, emo_y+3,
+                                       fill=heat_col, outline="white", width=1)
+
+                        # ⑤ 涨跌幅柱子
+                        bh = int(abs(chg) / max_abs * ((Y_CHART_BTM - Y_CHART_TOP)/2 - 2))
                         if chg >= 0:
-                            # 红柱 (从中间向上)
-                            tc.create_rectangle(x1, mid_y - bh, x2, mid_y,
+                            tc.create_rectangle(cx-5, mid_y - bh, cx+5, mid_y,
                                                 fill="#C62828", outline="#C62828")
                         else:
-                            # 绿柱 (从中间向下)
-                            tc.create_rectangle(x1, mid_y, x2, mid_y + bh,
+                            tc.create_rectangle(cx-5, mid_y, cx+5, mid_y + bh,
                                                 fill="#2E7D32", outline="#2E7D32")
-                        # 涨跌%标注 (最新一天标大)
-                        fsize = 8 if i == n-1 else 7
+
+                        # ⑥ 涨跌%标注
                         tcol = "#C62828" if chg >= 0 else "#2E7D32"
-                        tc.create_text((x1+x2)/2, mid_y - bh - 2 if chg >= 0 else mid_y + bh + 2,
-                                       text=f"{chg:+.1f}", fill=tcol, font=("", fsize), anchor="s" if chg>=0 else "n")
-                    # 中间零线
-                    tc.create_line(pad_l, mid_y, pad_l+plot_w, mid_y, fill="#B0BEC5", width=1)
-                    # 情绪分折线 (上半区)
-                    emo_top = pad_t + 2
-                    emo_btm = pad_t + plot_h/2 - 4
-                    pts = []
-                    for i, d in enumerate(trend10):
-                        ex = pad_l + i * gap + gap/2
-                        ey = emo_btm - (d["emo"] / 100 * (emo_btm - emo_top))
-                        pts.append((ex, ey))
+                        tc.create_text(cx, mid_y - bh - 3 if chg >= 0 else mid_y + bh + 3,
+                                       text=f"{chg:+.1f}", fill=tcol,
+                                       font=("", 8, "bold"),
+                                       anchor="s" if chg >= 0 else "n")
+
+                        # 保存坐标给折线用
+                        d["_cx"] = cx
+                        d["_emo_y"] = emo_y
+
+                    # ======== 画情绪分折线 (连圆点) ========
+                    pts = [(d["_cx"], d["_emo_y"]) for d in trend10]
                     if len(pts) >= 2:
                         flat = [coord for p in pts for coord in p]
                         tc.create_line(*flat, fill="#FF6F00", width=2, smooth=True)
-                    # 情绪分圆点
-                    for i, (px, py) in enumerate(pts):
-                        col = _emo_col(trend10[i]["emo"])
-                        tc.create_oval(px-3, py-3, px+3, py+3, fill=col, outline="white", width=1)
-                    # 图例
-                    tc.create_text(pad_l+4, pad_t+2, text="●情绪分", fill="#FF6F00", font=("", 7), anchor="w")
-                    tc.create_text(pad_l+70, pad_t+2, text="▌上证涨跌", fill="#C62828", font=("", 7), anchor="w")
-                    # 底部热力条 (10个彩色方块)
-                    heat_y = pad_t + plot_h + 2
-                    sq_size = min(14, (cw - pad_l - pad_r - (n-1)*2) / n)
-                    for i, d in enumerate(trend10):
-                        sx = pad_l + i * (sq_size + 2)
-                        col = _emo_col(d["emo"])
-                        tc.create_rectangle(sx, heat_y, sx+sq_size, heat_y+sq_size,
-                                            fill=col, outline="white", width=1)
-                        # 日期标签
-                        tc.create_text(sx+sq_size/2, heat_y+sq_size+2, text=d["date"],
-                                       fill="#546E7A", font=("", 7), anchor="n")
-                        # 最新一天标星
-                        if i == n-1:
-                            tc.create_text(sx+sq_size/2, heat_y-4, text="★",
-                                           fill="#FF6F00", font=("", 8, "bold"))
+
+                    # ======== 中间零线 ========
+                    tc.create_line(pad_l, mid_y, pad_l + plot_w, mid_y,
+                                   fill="#B0BEC5", width=1, dash=(2, 2))
+
+                    # ======== 悬停 tooltip (鼠标 enter 显示完整信息) ========
+                    def _on_trend_enter(event, idx=None):
+                        # 简单 tooltip: 在 Canvas 顶部中央显示当天完整信息
+                        tc.delete("tooltip")
+                        mx = event.x
+                        if mx < pad_l or mx > pad_l + plot_w: return
+                        col = int((mx - pad_l) / col_w)
+                        if col < 0 or col >= n: return
+                        d = trend10[col]
+                        tip = (f"📅 {d.get('full_date', d['date'])}  "
+                               f"📊情绪={d['emo']:.0f}  "
+                               f"📈上证={d['pct']:+.2f}%  "
+                               f"ZT={d.get('zt','?')}")
+                        tc.create_text(cw/2, 158, text=tip, fill="#1A237E",
+                                       font=("", 9, "bold"), anchor="s", tags="tooltip")
+                    def _on_trend_leave(event):
+                        tc.delete("tooltip")
+                    tc.bind("<Motion>", _on_trend_enter)
+                    tc.bind("<Leave>", _on_trend_leave)
             except Exception as e: print(f"[大盘] trend10 Canvas fail: {e}")
 
-            print("[大盘分析] ✅ UI更新完成", flush=True)
+            # 注意: emo_hist 同步已移到后台数据收集线程 (trend10 赋值后立即执行)
+            # 这里不再重复做, 避免 UI 更新时再跑一遍
+
+            # ✅ 保存大盘 snapshot 到本地 (启动时秒出旧数据)
+            try:
+                self._save_dapan_snapshot(data)
+            except Exception as _e_ss:
+                pass  # snapshot 保存失败不影响 UI
+
         except Exception as e:
             import traceback; traceback.print_exc()
             print(f"[大盘分析] ❌ UI更新异常: {e}", flush=True)
+
+    @staticmethod
+    def _dapan_snapshot_path():
+        return os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_dapan_snapshot.json")
+
+    def _save_dapan_snapshot(self, data):
+        """保存大盘数据 snapshot 到本地 JSON (供启动时秒出旧数据)"""
+        import json as _js
+        path = self._dapan_snapshot_path()
+        # 清理不能序列化的字段 (带 _ 前缀的临时字段)
+        clean = {}
+        for k, v in data.items():
+            if isinstance(k, str) and k.startswith("_"):
+                continue
+            clean[k] = v
+        clean["_saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(path, "w") as f:
+            _js.dump(clean, f, ensure_ascii=False, indent=2, default=str)
+
+    def _try_load_dapan_snapshot(self):
+        """启动时尝试读大盘 snapshot 秒出旧数据, 失败则放弃"""
+        import json as _js
+        import os as _os
+        path = self._dapan_snapshot_path()
+        if not _os.path.exists(path):
+            print("[大盘] 📂 无 snapshot, 显示占位符", flush=True)
+            # 没有 snapshot 时, 至少从 emo_history 渲染 10 日趋势
+            self._render_trend_from_emo_history()
+            return False
+        try:
+            with open(path) as f:
+                data = _js.load(f)
+            saved_at = data.get("_saved_at", "?")
+            print(f"[大盘] 📂 读 snapshot 成功 (保存于 {saved_at}), 秒出", flush=True)
+            self._dapan_update_ui(data)
+            return True
+        except Exception as e:
+            print(f"[大盘] snapshot 读取失败: {e}, 尝试 emo_history", flush=True)
+            self._render_trend_from_emo_history()
+            return False
+
+    def _redraw_trend_if_width_ok(self):
+        """Canvas <Configure> 事件触发: 宽度够了就用缓存的完整数据重绘所有控件"""
+        tc = getattr(self, '_dapan_trend_canvas', None)
+        data = getattr(self, '_dapan_full_data', None)
+        if not tc or not data:
+            return
+        cw = tc.winfo_width()
+        if cw < 100:
+            return
+        try:
+            self._dapan_update_ui(data)
+        except Exception:
+            pass
+
+    def _render_trend_from_emo_history(self):
+        """从 emo_history.json 渲染全部天数趋势图"""
+        import json as _js, os as _os
+        path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
+        if not _os.path.exists(path):
+            return
+        try:
+            with open(path) as f:
+                hist = _js.load(f)
+            if not isinstance(hist, dict) or not hist:
+                return
+            # 取全部天数 (按日期排序)
+            sorted_dates = sorted(hist.keys())
+            trend10 = []
+            for d in sorted_dates:
+                v = hist[d]
+                trend10.append({
+                    "full_date": d,
+                    "date": d[5:10],
+                    "pct": float(v.get("pct", 0) or 0),
+                    "emo": float(v.get("emo_score", 50) or 50),
+                    "zt": int(v.get("zt", 0) or 0),
+                    "close": v.get("close", 0),
+                })
+            if trend10:
+                self._dapan_update_ui({"trend10": trend10})
+                print(f"[大盘] 📂 从 emo_history 渲染全部 {len(trend10)} 天趋势", flush=True)
+        except Exception as e:
+            print(f"[大盘] emo_history 渲染失败: {e}", flush=True)
 
     def _fetch_sector_cons(self, sector_name):
         """获取板块成分股列表 [多源 fallback], 返回 [(code, name, pct_chg), ...]"""
@@ -75810,14 +76118,14 @@ class StockKeywordAnalyzerGUI:
             txt.insert("1.0", "加载中...\n")
             txt.config(state=tk.DISABLED)
             self.sentiment_zone_text_widgets["overview"] = txt
-            # ---- Tab 2: 📈 情绪周期图 (从 emo_history.json 渲染) ----
+            # ---- Tab 2: 🗓️ 情绪周期日历 ----
             try:
-                emo_tab = ttk.Frame(notebook)
-                notebook.add(emo_tab, text="📈 情绪周期图")
-                self._build_emo_cycle_chart_tab(emo_tab)
+                cal_tab = ttk.Frame(notebook)
+                notebook.add(cal_tab, text="🗓️ 情绪周期日历")
+                self._build_emo_cycle_calendar(cal_tab, notebook=notebook)
             except Exception as _e_emo_tab:
                 import traceback; traceback.print_exc()
-                print(f"[情绪周期图] tab创建失败: {_e_emo_tab}", flush=True)
+                print(f"[情绪周期日历] tab创建失败: {_e_emo_tab}", flush=True)
             self._refresh_sentiment_zone_tabs_async()
         except Exception as e:
             ttk.Label(parent, text=f"情绪区间标签页创建失败: {e}", foreground="red").pack(expand=True)
