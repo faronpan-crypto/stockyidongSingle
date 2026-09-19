@@ -44086,6 +44086,19 @@ class StockKeywordAnalyzerGUI:
                         print(f"[大盘] ❌ trend10 全部数据源挂了: {_e_last}")
                 dapan_data["trend10"] = trend10
 
+                # 5.6 把 breadth 实时数据 (up/dn/zt/dt) 合并进 trend10 最新一天
+                if trend10 and 'up' in dir() and up is not None:
+                    _td_full = _trade_date_dapan[:4]+"-"+_trade_date_dapan[4:6]+"-"+_trade_date_dapan[6:8] if _trade_date_dapan else None
+                    for _tr in trend10:
+                        if _td_full and _tr.get("full_date") == _td_full:
+                            _tr["up"] = up; _tr["dn"] = dn; _tr["zt"] = zt; _tr["dt"] = dt
+                            break
+                    else:
+                        # 没匹配上就填最新一天
+                        trend10[-1]["up"] = up; trend10[-1]["dn"] = dn
+                        trend10[-1]["zt"] = zt; trend10[-1]["dt"] = dt
+                    print(f"[大盘] ✅ breadth 已合并: up={up} dn={dn} zt={zt} dt={dt}")
+
                 # 5.5 后台直接同步 trend10 → emo_hist (后台线程, 不依赖 UI)
                 try:
                     import json as _js_as, os as _os_as
@@ -44111,10 +44124,16 @@ class StockKeywordAnalyzerGUI:
                             if _k in _hr:
                                 _r = _hr[_k]; _r["emo_score"] = _es; _r["pct"] = _pc
                                 if not _r.get("stage") or _r.get("stage","").strip() in ("震荡",""): _r["stage"] = _ast
+                                # breadth 数据: 有就更新, 没有就保留原值
+                                if _d.get("up") is not None: _r["up"] = _d.get("up")
+                                if _d.get("dn") is not None: _r["dn"] = _d.get("dn")
+                                if _d.get("zt"): _r["zt"] = _d.get("zt")
+                                if _d.get("dt") is not None: _r["dt"] = _d.get("dt")
                                 _achg = True
                             else:
                                 _hr[_k] = {"date":_k,"pnl":"","ths":"","stage":_ast,
-                                           "emo_score":_es,"pct":_pc,"close":_d.get("close",0),"zt":_d.get("zt",0)}
+                                           "emo_score":_es,"pct":_pc,"close":_d.get("close",0),
+                                           "zt":_d.get("zt",0),"up":_d.get("up"),"dn":_d.get("dn"),"dt":_d.get("dt")}
                                 _achg = True
                         if _achg:
                             with open(_asp, "w") as _af: _js_as.dump(_hr, _af, ensure_ascii=False, indent=2)
@@ -44487,10 +44506,14 @@ class StockKeywordAnalyzerGUI:
                         top.attributes("-topmost", True)
                         # 从 emo_history 读完整数据
                         full_d = _local_hist.get(d.get("full_date",""), {})
+                        # 优先从 trend10 实时 breadth 数据取, fallback 到 emo_history JSON
+                        _zt = d.get("zt") or full_d.get("zt", "")
+                        _up = d.get("up") if d.get("up") is not None else full_d.get("up")
+                        _dn = d.get("dn") if d.get("dn") is not None else full_d.get("dn")
+                        _dt = d.get("dt") if d.get("dt") is not None else full_d.get("dt")
                         _pnl = full_d.get("pnl", "")
                         _ths = full_d.get("ths", "")
                         _stage = full_d.get("stage", "")
-                        _zt = full_d.get("zt", "")
                         # 阶段 emoji 映射
                         _emo_map = {"冰点":"❄️","启动":"🌱","发酵":"🔥","高潮":"💥","分歧":"⚡","退潮":"📉"}
                         _emo_ico = _emo_map.get(_stage, "📊")
@@ -44507,7 +44530,14 @@ class StockKeywordAnalyzerGUI:
                             f"💰 账户盈亏: {_pnl}",
                             f"🧠 同花顺指数: {_ths}",
                         ]
-                        if _zt:
+                        # 涨跌个数行
+                        if _up is not None and _dn is not None:
+                            _breadth_col = "#C62828" if _up > _dn else ("#2E7D32" if _up < _dn else "#FFD54F")
+                            _breadth_str = f"📊 涨{_up}/跌{_dn}"
+                            if _zt: _breadth_str += f"  🔥{_zt}"
+                            if _dt: _breadth_str += f"  ⚠️{_dt}"
+                            lines_tip.append(_breadth_str)
+                        elif _zt:
                             lines_tip.append(f"🔥 涨停数: {_zt}")
                         # 渲染浮动窗口
                         frm = tk.Frame(top, bg="#263238", bd=2, relief="solid")
@@ -44520,6 +44550,7 @@ class StockKeywordAnalyzerGUI:
                             elif "上证涨跌" in _tl: _fg = _pct_col
                             elif "账户盈亏" in _tl: _fg = _pnl_col
                             elif "同花顺" in _tl: _fg = _ths_col
+                            elif "涨" in _tl and "/跌" in _tl: _fg = _breadth_col
                             tk.Label(frm, text=_tl, bg="#263238", fg=_fg,
                                      font=("", 10, "bold"), anchor="w", padx=10, pady=1).pack(fill=tk.X)
                         # 定位 (跟随鼠标, 避免超出屏幕)
