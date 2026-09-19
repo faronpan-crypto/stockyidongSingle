@@ -3697,6 +3697,8 @@ def parse_skill_md_for_usage(skill_md_path: str, max_body_chars: int = 8000):
     return out
 class StockKeywordAnalyzerGUI:
     def __init__(self, root):
+        import time as _t_init
+        _t0 = _t_init.time()
         self.root = root
         # 安全更新窗口方法 - macOS上直接跳过
         def _safe_update():
@@ -8103,23 +8105,51 @@ class StockKeywordAnalyzerGUI:
                                              text="开", command=self._on_auto_collect_toggle)
         auto_collect_switch.pack(side=tk.LEFT)
         # 创建持仓标签页(使用辅助函数)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "持仓", 1)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
         # 创建持仓2、持仓3、持仓4、持仓历史股标签页
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "龙头股", 2)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "15Min", 3)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "Main", 4)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "持仓历史股", 5)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
         # 创建同花顺标签页(持仓6)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "同花顺", 6)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
         # 创建持仓1-持仓8标签页(持仓7-14,用于从资讯表按日期+频次展示)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "持仓1", 7)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "持仓2", 8)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "持仓3", 9)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "持仓4", 10)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "持仓5", 11)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "持仓6", 12)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "持仓7", 13)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
+        _t1 = _t_init.time()
         self._create_holding_tab(self.position_trading_notebook, "持仓8", 14)
+        print(f"⏱ _create_holding_tab: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
         # 从配置文件恢复标签页名称(如果有保存的名称;持仓7-14 之后由从资讯刷新覆盖)
         try:
             saved_tab_names = self.ai_config_manager.config.get("holding_tab_names", {})
@@ -8415,7 +8445,9 @@ class StockKeywordAnalyzerGUI:
         # 确保在创建按钮之前先加载配置(如果还没有加载的话)
         if not self.crawler_config or (isinstance(self.crawler_config, dict) and len(self.crawler_config) == 0):
             self.crawler_config = self.load_crawler_config()
+        _t1 = _t_init.time()
         self._build_crawler_buttons(row1, row2)
+        print(f"⏱ _build_crawler_buttons: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
         emotion_lights_strip = ttk.Frame(crawler_frame)
         emotion_lights_strip.pack(fill=tk.X, pady=(4, 0))
         emotion_lights_frame = ttk.Frame(emotion_lights_strip)
@@ -8534,7 +8566,9 @@ class StockKeywordAnalyzerGUI:
                 self.market_nav_config = self.load_market_nav_config()
             except Exception:
                 self.market_nav_config = {}
+        _t1 = _t_init.time()
         self._build_market_nav_section(self.market_nav_container)
+        print(f"⏱ _build_market_nav_section: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
         # 文本控制标签页(在快速爬取/文本控制标签页控件框中)
         control_frame = ttk.Frame(crawler_control_notebook, padding=5)
         crawler_control_notebook.add(control_frame, text="文本控制")
@@ -8772,7 +8806,9 @@ class StockKeywordAnalyzerGUI:
         # 内容区域(使用标签页展示结构化指标)
         self.holding_analysis_container = ttk.Frame(holding_analysis_frame)
         self.holding_analysis_container.pack(fill=tk.BOTH, expand=True)
+        _t1 = _t_init.time()
         self._build_sentiment_zone_tabs(self.holding_analysis_container)
+        print(f"⏱ _build_sentiment_zone_tabs: {_t_init.time()-_t1:.2f}s (累计{_t_init.time()-_t0:.2f}s)", flush=True)
         # 下半部分:原有的分析结果和词云区域
         bottom_right_frame = ttk.Frame(right_paned)
         right_paned.add(bottom_right_frame, weight=2)
@@ -9029,6 +9065,7 @@ class StockKeywordAnalyzerGUI:
             self.root.after(15000, self._th_reminder_tick)  # 延后 15s
         except Exception:
             pass
+        print(f"⏱ __init__ 总耗时: {_t_init.time()-_t0:.2f}s", flush=True)
     def _popup_font_family(self):
         import tkinter.font as tkfont
         try:
