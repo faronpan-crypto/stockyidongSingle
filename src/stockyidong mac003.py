@@ -44474,146 +44474,7 @@ class StockKeywordAnalyzerGUI:
                     tc.create_line(pad_l, mid_y, pad_l + plot_w, mid_y,
                                    fill="#B0BEC5", width=1, dash=(2, 2))
 
-                    # ======== 悬停 tooltip (单实例复用 + 200ms 延迟 + 列不变只移动) ========
-                    # 预加载 emo_history 完整数据
-                    import json as _j2, os as _o2
-                    _hist_path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
-                    _local_hist = {}
-                    try:
-                        if _o2.path.exists(_hist_path):
-                            with open(_hist_path) as _fh: _local_hist = _j2.load(_fh)
-                    except Exception: pass
-
-                    # 单实例 tooltip 状态
-                    _tip_state = {"win": None, "frame": None, "labels": None, "last_col": -1,
-                                  "last_mx": 0, "last_my": 0, "after_id": None}
-
-                    def _build_tip_lines(d):
-                        """根据 trend10 记录构造 tooltip 内容 (返回 [(text, color), ...])"""
-                        full_d = _local_hist.get(d.get("full_date",""), {})
-                        _zt = d.get("zt") or full_d.get("zt", "")
-                        _up = d.get("up") if d.get("up") is not None else full_d.get("up")
-                        _dn = d.get("dn") if d.get("dn") is not None else full_d.get("dn")
-                        _dt = d.get("dt") if d.get("dt") is not None else full_d.get("dt")
-                        _pnl = full_d.get("pnl", "")
-                        _ths = full_d.get("ths", "")
-                        _stage = full_d.get("stage", "")
-                        _emo_map = {"冰点":"❄️","启动":"🌱","发酵":"🔥","高潮":"💥","分歧":"⚡","退潮":"📉"}
-                        _emo_ico = _emo_map.get(_stage, "📊")
-                        _pnl_col = "#C62828" if _pnl == "赚钱" else ("#2E7D32" if _pnl == "亏钱" else "#ECEFF1")
-                        _ths_col = "#C62828" if _ths == "向上" else ("#2E7D32" if _ths == "向下" else "#ECEFF1")
-                        _pct_col = "#C62828" if d["pct"] >= 0 else "#2E7D32"
-                        _date_col = "#FFD54F"; _stage_col = "#FF8A65"; _emo_col = "#FFB74D"
-                        lines = [
-                            (f"📅 {d.get('full_date', d['date'])}", _date_col),
-                            (f"{_emo_ico} 情绪阶段: {_stage or '-'}", _stage_col),
-                            (f"📊 情绪分: {d['emo']:.0f}", _emo_col),
-                            (f"📈 上证涨跌: {d['pct']:+.2f}%", _pct_col),
-                            (f"💰 账户盈亏: {_pnl}", _pnl_col),
-                            (f"🧠 同花顺指数: {_ths}", _ths_col),
-                        ]
-                        if _up is not None and _dn is not None:
-                            _bc = "#C62828" if _up > _dn else ("#2E7D32" if _up < _dn else "#FFD54F")
-                            _bs = f"📊 涨{_up}/跌{_dn}"
-                            if _zt: _bs += f"  🔥{_zt}"
-                            if _dt: _bs += f"  ⚠️{_dt}"
-                            lines.append((_bs, _bc))
-                        elif _zt:
-                            lines.append((f"🔥 涨停数: {_zt}", "#FF8A65"))
-                        return lines
-
-                    def _ensure_tip_win():
-                        """懒加载: 第一次需要时才创建 Toplevel"""
-                        if _tip_state["win"] is not None:
-                            return
-                        top = tk.Toplevel(tc)
-                        top.overrideredirect(True)
-                        top.attributes("-topmost", True)
-                        top.withdraw()  # 创建后先隐藏
-                        frm = tk.Frame(top, bg="#263238", bd=2, relief="solid")
-                        frm.pack(fill=tk.BOTH, expand=True)
-                        _tip_state["win"] = top
-                        _tip_state["frame"] = frm
-                        _tip_state["labels"] = []
-
-                    def _update_tip_content(lines):
-                        """复用 Toplevel: 清空旧 Label → 创建新 Label"""
-                        frm = _tip_state["frame"]
-                        # 销毁旧 Label
-                        for _lb in _tip_state["labels"]:
-                            try: _lb.destroy()
-                            except Exception: pass
-                        _tip_state["labels"] = []
-                        for _text, _fg in lines:
-                            _lb = tk.Label(frm, text=_text, bg="#263238", fg=_fg,
-                                           font=("", 10, "bold"), anchor="w", padx=10, pady=1)
-                            _lb.pack(fill=tk.X)
-                            _tip_state["labels"].append(_lb)
-
-                    def _move_tip_win(mx, my):
-                        """只移动位置, 不更新内容"""
-                        top = _tip_state["win"]
-                        top.update_idletasks()
-                        w = top.winfo_width(); h = top.winfo_height()
-                        sx = tc.winfo_rootx() + mx + 12
-                        sy = tc.winfo_rooty() + my + 12
-                        sw = tc.winfo_screenwidth(); sh = tc.winfo_screenheight()
-                        if sx + w > sw - 10: sx = tc.winfo_rootx() + mx - w - 12
-                        if sy + h > sh - 10: sy = tc.winfo_rooty() + my - h - 12
-                        top.geometry(f"+{sx}+{sy}")
-
-                    def _show_tip_at(mx, my, col):
-                        """真正显示 tooltip (after 延迟到期后调用)"""
-                        d = trend10[col]
-                        # 高亮列
-                        tc.delete("hover_card")
-                        tc.create_rectangle(col_x[col], Y_LABEL_TOP-3, col_x[col]+col_w, 152,
-                                             fill="#FFFDE7", outline="#FF6F00", width=2, tags="hover_card")
-                        _ensure_tip_win()
-                        lines = _build_tip_lines(d)
-                        if col != _tip_state["last_col"]:
-                            _update_tip_content(lines)
-                        _move_tip_win(mx, my)
-                        _tip_state["win"].deiconify()  # 显示
-                        _tip_state["last_col"] = col
-
-                    def _on_motion(event):
-                        """Motion 事件: 200ms debounce + 列不变只移动"""
-                        mx = event.x; my = event.y
-                        # 取消之前的延迟任务
-                        if _tip_state["after_id"]:
-                            try: tc.after_cancel(_tip_state["after_id"])
-                            except Exception: pass
-                            _tip_state["after_id"] = None
-                        # 边界检查
-                        if mx < pad_l or mx > pad_l + plot_w:
-                            _hide_tip(); return
-                        col = int((mx - pad_l) / col_w)
-                        if col < 0 or col >= n:
-                            _hide_tip(); return
-                        # 同列 + 窗口已显示 → 只移动, 不重建
-                        if col == _tip_state["last_col"] and _tip_state["win"] is not None:
-                            try:
-                                _move_tip_win(mx, my)
-                            except Exception:
-                                _hide_tip()
-                            return
-                        # 不同列: 200ms 延迟后才显示 (快速划过时不触发)
-                        _tip_state["after_id"] = tc.after(200, lambda: _show_tip_at(mx, my, col))
-
-                    def _hide_tip(event=None):
-                        tc.delete("hover_card")
-                        if _tip_state["after_id"]:
-                            try: tc.after_cancel(_tip_state["after_id"])
-                            except Exception: pass
-                            _tip_state["after_id"] = None
-                        if _tip_state["win"] is not None:
-                            try: _tip_state["win"].withdraw()
-                            except Exception: pass
-                        _tip_state["last_col"] = -1
-
-                    tc.bind("<Motion>", _on_motion)
-                    tc.bind("<Leave>", _hide_tip)
+                    # (tooltip 已移除 - 精要数据直接显示在情绪周期日历格子里)
             except Exception as e: print(f"[大盘] trend10 Canvas fail: {e}")
 
             # 注意: emo_hist 同步已移到后台数据收集线程 (trend10 赋值后立即执行)
@@ -46147,6 +46008,10 @@ class StockKeywordAnalyzerGUI:
                 stage_fg = "#FFD54F" if stage_v in ("冰点","退潮") else "#FFFFFF"
                 emo_s = rec.get("emo_score") if rec else None
                 pct_v2 = rec.get("pct") if rec else None
+                up_v = rec.get("up") if rec else None
+                dn_v = rec.get("dn") if rec else None
+                zt_v = rec.get("zt") if rec else None
+                dt_v = rec.get("dt") if rec else None
 
                 wl = []
                 # 行1: 日期(左) + 同花顺(右)
@@ -46159,12 +46024,22 @@ class StockKeywordAnalyzerGUI:
                 p = tk.Label(cell, text=pnl_sym, bg=bg, fg="white", font=("", 14, "bold")); p.pack(pady=0); wl.append(p)
                 # 行3: stage阶段文字 (居中)
                 s = tk.Label(cell, text=stage_v or "·", bg=bg, fg=stage_fg, font=("", 10, "bold")); s.pack(pady=0); wl.append(s)
-                # 行4: emo分 + 涨跌幅 (居中)
-                info_txt = ""
-                if emo_s is not None: info_txt += f"emo{emo_s:.0f}"
-                if pct_v2 is not None: info_txt += f" {pct_v2:+.1f}%"
-                if not info_txt: info_txt = "·"
-                inf = tk.Label(cell, text=info_txt.strip(), bg=bg, fg="#B0BEC5", font=("", 9)); inf.pack(pady=0); wl.append(inf)
+                # 行4: 优先显示涨跌广度, fallback emo+涨跌幅
+                info_txt = ""; info_fg = "#B0BEC5"
+                if up_v is not None and dn_v is not None:
+                    # 有涨跌数据 → 显示广度
+                    info_txt = f"↑{up_v} ↓{dn_v}"
+                    if zt_v: info_txt += f" 🔥{zt_v}"
+                    if dt_v: info_txt += f" ⚠️{dt_v}"
+                    # 颜色: 涨多红/跌多绿/持平金
+                    info_fg = "#FFCDD2" if up_v > dn_v else ("#C8E6C9" if up_v < dn_v else "#FFECB3")
+                else:
+                    # 无广度数据 → fallback emo分+涨跌幅
+                    if emo_s is not None: info_txt += f"emo{emo_s:.0f}"
+                    if pct_v2 is not None: info_txt += f" {pct_v2:+.1f}%"
+                    if not info_txt: info_txt = "·"
+                inf = tk.Label(cell, text=info_txt.strip(), bg=bg, fg=info_fg,
+                               font=("", 9)); inf.pack(pady=0); wl.append(inf)
                 wl.append(cell)
 
                 def _bind_all(wlist, _ds=ds):
