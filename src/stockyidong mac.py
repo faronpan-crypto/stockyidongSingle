@@ -45616,6 +45616,7 @@ class StockKeywordAnalyzerGUI:
 
     def _build_emo_cycle_calendar(self, parent_frame, notebook=None):
         """🎭 在容器 frame 里直接渲染情绪周期三维度日历 (不弹窗, 嵌入 Notebook tab)。"""
+        print("[情绪周期] 🎭 开始构建 Notebook tab 日历...", flush=True)
         import json as _j, os as _os, datetime as _dt
         from datetime import datetime as _dt2, timedelta as _td
 
@@ -45958,120 +45959,125 @@ class StockKeywordAnalyzerGUI:
 
         # ---- 渲染日历 ----
         def _render_month():
-            _reload_hist()
-            is_rebuilding[0] = True
-            for w in grid_f.winfo_children(): w.destroy()
-            ym = view_month[0]
-            month_lbl.config(text=f"{ym.year} 年 {ym.month} 月")
-            first = ym.replace(day=1)
-            first_wd = first.weekday()
-            if ym.month == 12:
-                nx = ym.replace(year=ym.year+1, month=1, day=1)
-            else:
-                nx = ym.replace(month=ym.month+1, day=1)
-            dim = (nx - _td(days=1)).day
-            today_str = _dt2.now().strftime("%Y-%m-%d")
-
-            row = 0; col = first_wd
-            for d in range(1, dim + 1):
-                ds = f"{ym.year:04d}-{ym.month:02d}-{d:02d}"
-                is_today = (ds == today_str)
-                rec = hist_dict.get(ds)
-
-                # 背景色 (A股)
-                if rec:
-                    pnl = rec.get("pnl","")
-                    ths = rec.get("ths","")
-                    pct_v = rec.get("pct")
-                    if pnl == "赚钱": bg = "#B71C1C"
-                    elif pnl == "亏钱": bg = "#1B5E20"
-                    elif pct_v is not None:
-                        bg = "#B71C1C" if pct_v > 0 else ("#1B5E20" if pct_v < 0 else "#455A64")
-                    else: bg = "#455A64"
-                    bd = "#E65100" if ths == "向下" else None
+            print(f"[情绪周期] 🎨 Notebook _render_month 开始, hist={len(hist_dict)}天", flush=True)
+            try:
+                _reload_hist()
+                is_rebuilding[0] = True
+                for w in grid_f.winfo_children(): w.destroy()
+                ym = view_month[0]
+                month_lbl.config(text=f"{ym.year} 年 {ym.month} 月")
+                first = ym.replace(day=1)
+                first_wd = first.weekday()
+                if ym.month == 12:
+                    nx = ym.replace(year=ym.year+1, month=1, day=1)
                 else:
-                    bg = "#37474F"; bd = None
+                    nx = ym.replace(month=ym.month+1, day=1)
+                dim = (nx - _td(days=1)).day
+                today_str = _dt2.now().strftime("%Y-%m-%d")
 
-                cell = tk.Frame(grid_f, bg=bg, width=95, height=65,
-                                highlightbackground=bd or "#1A1A2E",
-                                highlightthickness=3 if bd else 1, cursor="hand2")
-                cell.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
-                cell.grid_propagate(False)
+                row = 0; col = first_wd
+                for d in range(1, dim + 1):
+                    ds = f"{ym.year:04d}-{ym.month:02d}-{d:02d}"
+                    is_today = (ds == today_str)
+                    rec = hist_dict.get(ds)
 
-                ths_v = rec.get("ths","") if rec else ""
-                ths_icon = "📈" if ths_v=="向上" else ("📉" if ths_v=="向下" else "·")
-                ths_fg = "#81D4FA" if ths_v else "#78909C"
-                pnl_v = rec.get("pnl","") if rec else ""
-                pnl_sym = "💰" if pnl_v=="赚钱" else ("💸" if pnl_v=="亏钱" else "·")
-                stage_v = rec.get("stage","") if rec else ""
-                stage_v = re.sub(r'[^\u4e00-\u9fa5A-Za-z0-9 ]+', '', str(stage_v or '')).strip()
-                stage_fg = "#FFD54F" if stage_v in ("冰点","退潮") else "#FFFFFF"
-                emo_s = rec.get("emo_score") if rec else None
-                pct_v2 = rec.get("pct") if rec else None
-                up_v = rec.get("up") if rec else None
-                dn_v = rec.get("dn") if rec else None
-                zt_v = rec.get("zt") if rec else None
-                dt_v = rec.get("dt") if rec else None
+                    # 背景色 (A股)
+                    if rec:
+                        pnl = rec.get("pnl","")
+                        ths = rec.get("ths","")
+                        pct_v = rec.get("pct")
+                        if pnl == "赚钱": bg = "#B71C1C"
+                        elif pnl == "亏钱": bg = "#1B5E20"
+                        elif pct_v is not None:
+                            bg = "#B71C1C" if pct_v > 0 else ("#1B5E20" if pct_v < 0 else "#455A64")
+                        else: bg = "#455A64"
+                        bd = "#E65100" if ths == "向下" else None
+                    else:
+                        bg = "#37474F"; bd = None
 
-                wl = []
-                # 行1: 日期(左) + 同花顺(右)
-                l1 = tk.Frame(cell, bg=bg); l1.pack(fill="x", pady=(2,0)); wl.append(l1)
-                fg = "#FFD54F" if is_today else "white"
-                n = tk.Label(l1, text=str(d), bg=bg, fg=fg,
-                            font=("", 11, "bold" if is_today else "normal")); n.pack(side="left", padx=3); wl.append(n)
-                t = tk.Label(l1, text=f"{ths_icon}", bg=bg, fg=ths_fg, font=("", 10)); t.pack(side="right", padx=3); wl.append(t)
-                # 行2: 盈亏emoji (居中大号)
-                p = tk.Label(cell, text=pnl_sym, bg=bg, fg="white", font=("", 14, "bold")); p.pack(pady=0); wl.append(p)
-                # 行3: stage阶段文字 (居中)
-                s = tk.Label(cell, text=stage_v or "·", bg=bg, fg=stage_fg, font=("", 10, "bold")); s.pack(pady=0); wl.append(s)
-                # 行4: 优先显示涨跌广度, fallback emo+涨跌幅
-                info_txt = ""; info_fg = "#B0BEC5"
-                if up_v is not None and dn_v is not None:
-                    # 有涨跌数据 → 显示广度
-                    info_txt = f"↑{up_v} ↓{dn_v}"
-                    if zt_v: info_txt += f" 🔥{zt_v}"
-                    if dt_v: info_txt += f" ⚠️{dt_v}"
-                    # 颜色: 涨多红/跌多绿/持平金
-                    info_fg = "#FFCDD2" if up_v > dn_v else ("#C8E6C9" if up_v < dn_v else "#FFECB3")
-                else:
-                    # 无广度数据 → fallback emo分+涨跌幅
-                    if emo_s is not None: info_txt += f"emo{emo_s:.0f}"
-                    if pct_v2 is not None: info_txt += f" {pct_v2:+.1f}%"
-                    if not info_txt: info_txt = "·"
-                inf = tk.Label(cell, text=info_txt.strip(), bg=bg, fg=info_fg,
-                               font=("", 9)); inf.pack(pady=0); wl.append(inf)
-                wl.append(cell)
+                    cell = tk.Frame(grid_f, bg=bg, width=95, height=65,
+                                    highlightbackground=bd or "#1A1A2E",
+                                    highlightthickness=3 if bd else 1, cursor="hand2")
+                    cell.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
+                    cell.grid_propagate(False)
 
-                def _bind_all(wlist, _ds=ds):
-                    def _click(e):
-                        if not is_rebuilding[0]: _open_day_editor(_ds)
-                    def _ent(e):
-                        _r = hist_dict.get(_ds, {})
-                        _t = (f"📅 {_ds}  ①{_r.get('stage','未填') or '未填'}  "
-                              f"②同花顺:{_r.get('ths','未填')}  ③盈亏:{_r.get('pnl','未填')}  "
-                              f"📊emo={_r.get('emo_score','--')}  📈上证={_r.get('pct','--')}")
-                        detail_lbl.config(text=_t, fg="#FFD54F")
-                    def _lv(e):
-                        detail_lbl.config(text="点击格子补录/修改, 鼠标悬停看三维度详情", fg="#90A4AE")
-                    for w in wlist:
-                        try:
-                            w.bind("<Button-1>", _click)
-                            w.bind("<Enter>", _ent)
-                            w.bind("<Leave>", _lv)
-                        except: pass
-                _bind_all(wl)
+                    ths_v = rec.get("ths","") if rec else ""
+                    ths_icon = "📈" if ths_v=="向上" else ("📉" if ths_v=="向下" else "·")
+                    ths_fg = "#81D4FA" if ths_v else "#78909C"
+                    pnl_v = rec.get("pnl","") if rec else ""
+                    pnl_sym = "💰" if pnl_v=="赚钱" else ("💸" if pnl_v=="亏钱" else "·")
+                    stage_v = rec.get("stage","") if rec else ""
+                    stage_v = re.sub(r'[^\u4e00-\u9fa5A-Za-z0-9 ]+', '', str(stage_v or '')).strip()
+                    stage_fg = "#FFD54F" if stage_v in ("冰点","退潮") else "#FFFFFF"
+                    emo_s = rec.get("emo_score") if rec else None
+                    pct_v2 = rec.get("pct") if rec else None
+                    up_v = rec.get("up") if rec else None
+                    dn_v = rec.get("dn") if rec else None
+                    zt_v = rec.get("zt") if rec else None
+                    dt_v = rec.get("dt") if rec else None
 
-                col += 1
-                if col > 6: col = 0; row += 1
+                    wl = []
+                    # 行1: 日期(左) + 同花顺(右)
+                    l1 = tk.Frame(cell, bg=bg); l1.pack(fill="x", pady=(2,0)); wl.append(l1)
+                    fg = "#FFD54F" if is_today else "white"
+                    n = tk.Label(l1, text=str(d), bg=bg, fg=fg,
+                                font=("", 11, "bold" if is_today else "normal")); n.pack(side="left", padx=3); wl.append(n)
+                    t = tk.Label(l1, text=f"{ths_icon}", bg=bg, fg=ths_fg, font=("", 10)); t.pack(side="right", padx=3); wl.append(t)
+                    # 行2: 盈亏emoji (居中大号)
+                    p = tk.Label(cell, text=pnl_sym, bg=bg, fg="white", font=("", 14, "bold")); p.pack(pady=0); wl.append(p)
+                    # 行3: stage阶段文字 (居中)
+                    s = tk.Label(cell, text=stage_v or "·", bg=bg, fg=stage_fg, font=("", 10, "bold")); s.pack(pady=0); wl.append(s)
+                    # 行4: 优先显示涨跌广度, fallback emo+涨跌幅
+                    info_txt = ""; info_fg = "#B0BEC5"
+                    if up_v is not None and dn_v is not None:
+                        info_txt = f"↑{up_v} ↓{dn_v}"
+                        if zt_v: info_txt += f" 🔥{zt_v}"
+                        if dt_v: info_txt += f" ⚠️{dt_v}"
+                        info_fg = "#FFCDD2" if up_v > dn_v else ("#C8E6C9" if up_v < dn_v else "#FFECB3")
+                    else:
+                        if emo_s is not None: info_txt += f"emo{emo_s:.0f}"
+                        if pct_v2 is not None: info_txt += f" {pct_v2:+.1f}%"
+                        if not info_txt: info_txt = "·"
+                    inf = tk.Label(cell, text=info_txt.strip(), bg=bg, fg=info_fg,
+                                   font=("", 9)); inf.pack(pady=0); wl.append(inf)
+                    wl.append(cell)
 
-            for ci in range(7): grid_f.grid_columnconfigure(ci, weight=1)
-            is_rebuilding[0] = False
-            _refresh_stats()
+                    def _bind_all(wlist, _ds=ds):
+                        def _click(e):
+                            if not is_rebuilding[0]: _open_day_editor(_ds)
+                        def _ent(e):
+                            _r = hist_dict.get(_ds, {})
+                            _t = (f"📅 {_ds}  ①{_r.get('stage','未填') or '未填'}  "
+                                  f"②同花顺:{_r.get('ths','未填')}  ③盈亏:{_r.get('pnl','未填')}  "
+                                  f"📊emo={_r.get('emo_score','--')}  📈上证={_r.get('pct','--')}")
+                            detail_lbl.config(text=_t, fg="#FFD54F")
+                        def _lv(e):
+                            detail_lbl.config(text="点击格子补录/修改, 鼠标悬停看三维度详情", fg="#90A4AE")
+                        for w in wlist:
+                            try:
+                                w.bind("<Button-1>", _click)
+                                w.bind("<Enter>", _ent)
+                                w.bind("<Leave>", _lv)
+                            except: pass
+                    _bind_all(wl)
+
+                    col += 1
+                    if col > 6: col = 0; row += 1
+
+                for ci in range(7): grid_f.grid_columnconfigure(ci, weight=1)
+                is_rebuilding[0] = False
+                _refresh_stats()
+                print(f"[情绪周期] ✅ Notebook 渲染完成, cells={row*7+col if col else row*7}", flush=True)
+            except Exception as _e:
+                import traceback as _tb; _tb.print_exc()
+                print(f"[情绪周期] ❌ Notebook _render_month 失败: {_e}", flush=True)
+                is_rebuilding[0] = False
 
         _render_month()
 
     def _show_emo_cycle_dialog(self):
         """🎭 情绪周期三维度输入 → 自动风控警告（系统红灯+同花顺+自己账户盈亏）+ 日历补录"""
+        print("[情绪周期] 🔧 _show_emo_cycle_dialog 被调用", flush=True)
         import json as _j_emo, os as _os_emo, datetime as _dt_emo
         from datetime import datetime as _dt2, timedelta as _td_emo
         EMO_HIST = _os_emo.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
@@ -46293,6 +46299,7 @@ class StockKeywordAnalyzerGUI:
         # ==================== 📅 日历补录弹窗 ====================
         def _open_calendar():
             """月度日历, 点击日期可补录/修改/删除三维度数据"""
+            print("[日历] 📅 _open_calendar 被调用", flush=True)
             cal_win = tk.Toplevel(self.root)
             cal_win.title("📅 情绪周期日历 · 补录历史")
             cal_win.geometry("800x620")
