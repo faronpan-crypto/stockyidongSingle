@@ -1,0 +1,5 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0.0
+# 可选：与桌面版一致用于无缓存时拉取 A 股列表
+# akshare>=1.14.0

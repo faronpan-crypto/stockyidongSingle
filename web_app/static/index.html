@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>股票异动 Web · 对齐桌面版布局</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <strong>股票异动</strong>
+        <span>侧栏结构对齐桌面左侧区</span>
+      </div>
+      <div class="sidebar-scroll">
+        <div class="nav-group-title">仓位 / 交易 Notebook</div>
+        <button type="button" class="nav-btn active" data-view="position">仓位</button>
+        <button type="button" class="nav-btn" data-view="trading">交易</button>
+
+        <div class="nav-group-title">自持仓（14 组 × 80 格）</div>
+        <div id="navHoldingsGroups" class="nav-sub"></div>
+
+        <div class="nav-group-title">工具条（与桌面「全 / 自选股管理 …」）</div>
+        <button type="button" class="nav-btn nav-stub" data-stub="全景市场：桌面版 show_market_situation">全</button>
+        <button type="button" class="nav-btn nav-stub" data-stub="自选股与标签管理弹窗">自选股管理</button>
+        <button type="button" class="nav-btn nav-stub" data-stub="analyze_latest_n_stocks">最新N条分析</button>
+        <button type="button" class="nav-btn nav-stub" data-stub="show_batch_stock_analyzer">📊 批量股票分析</button>
+        <button type="button" class="nav-btn nav-stub" data-stub="show_top_list_dialog">龙虎榜</button>
+        <button type="button" class="nav-btn nav-stub" data-stub="batch_crawl_news">批量爬取资讯</button>
+        <button type="button" class="nav-btn nav-stub" data-stub="show_signal_all_holdings_detection">信号</button>
+        <button type="button" class="nav-btn nav-stub" data-stub="show_backtest_dialog">回测</button>
+        <button type="button" class="nav-btn nav-stub" data-stub="show_five_star_follow_dialog">五星跟随</button>
+        <button type="button" class="nav-btn nav-stub" data-stub="仓库 public_opinion_analyzer 下 keyword_search；可运行 python public_opinion_analyzer/keyword_search_app.py">新闻搜索</button>
+
+        <div class="nav-group-title">爬取 Notebook</div>
+        <button type="button" class="nav-btn" data-view="crawl-fast">快速爬取</button>
+        <button type="button" class="nav-btn" data-view="crawl-text">文本控制</button>
+        <button type="button" class="nav-btn" data-view="crawl-wait">等待</button>
+
+        <div class="nav-group-title">数据与资讯</div>
+        <button type="button" class="nav-btn" data-view="news">资讯数据表</button>
+        <button type="button" class="nav-btn" data-view="digest">从资讯刷新 / digest</button>
+        <button type="button" class="nav-btn" data-view="data">库表概览 / 逻辑 / 凯利</button>
+      </div>
+    </aside>
+
+    <div class="main-area">
+      <div class="top-bar">
+        <span class="hint">对齐 desktop「左侧 Notebook + 工具条 + 爬虫区」信息架构</span>
+        <span class="db-path" id="dbPath" title=""></span>
+      </div>
+
+      <!-- 仓位 -->
+      <div id="view-position" class="view-panel visible">
+        <div class="panel">
+          <h2>仓位分析</h2>
+          <div class="row">
+            <label>情绪 <select id="emotion"></select></label>
+            <label>大V <select id="vJudge"></select></label>
+            <label>昨日 <select id="yesterday"></select></label>
+            <button type="button" class="secondary nav-stub" data-stub="安全流动利润 / 基本面技术面情绪面综合弹窗">🛡️💧📈 安全流动利润</button>
+          </div>
+          <div class="row">
+            <label>基本面 <input type="number" id="fundamental" min="0" max="30" value="20" /></label>
+            <label>技术面 <input type="number" id="technical" min="0" max="30" value="20" /></label>
+            <label>情绪面 <input type="number" id="sentimentDim" min="0" max="30" value="20" /></label>
+            <button type="button" class="primary" id="btnPosition">计算仓位</button>
+          </div>
+          <div class="row hint">做T（桌面为只读提示）: <span id="tTradingRo">—</span></div>
+          <div class="row">
+            <label>警世通言 <select id="warnType"><option>失败</option><option>成功</option><option>醒悟</option></select></label>
+            <button type="button" class="secondary nav-stub" data-stub="写入 news_info 警示类记录">创建警示记录</button>
+          </div>
+          <div class="row">
+            <span class="hint">2开新仓:</span>
+            <button type="button" class="secondary nav-stub" data-stub="开龙头新仓">开龙头新仓</button>
+            <button type="button" class="secondary nav-stub" data-stub="开强势股新仓">开强势股新仓</button>
+            <button type="button" class="secondary nav-stub" data-stub="开绩优股新仓">开绩优股新仓</button>
+            <button type="button" class="secondary nav-stub" data-stub="开朋友新仓">开朋友新仓</button>
+            <button type="button" class="secondary nav-stub" data-stub="开均值回归新仓">开均值回归新仓</button>
+          </div>
+          <div class="position-result">
+            <div class="indicator" id="posIndicator"></div>
+            <div>
+              <div class="big-pct" id="posPct">+0%</div>
+              <div class="hint" id="posHint"></div>
+            </div>
+          </div>
+          <p class="hint">注：具体T的仓位请按照凯利公式计算执行（与桌面一致）。</p>
+        </div>
+        <div class="panel">
+          <h2>凯利公式速算</h2>
+          <div class="row">
+            <label>盈亏比 b <input type="number" id="kellyB" step="0.1" value="3" min="0.01" /></label>
+            <label>胜率 p <input type="number" id="kellyP" step="0.01" value="0.6" min="0.01" max="0.99" /></label>
+            <button type="button" class="secondary" id="btnKelly">计算</button>
+          </div>
+          <div id="kellyOut" class="hint"></div>
+        </div>
+      </div>
+
+      <!-- 交易 -->
+      <div id="view-trading" class="view-panel">
+        <div class="panel">
+          <h2>交易功能（桌面 trading_buttons_frame）</h2>
+          <div class="btn-grid">
+            <button type="button" class="secondary nav-stub" data-stub="持仓实时统计窗口">📊 持仓实时</button>
+            <button type="button" class="secondary nav-stub" data-stub="粘贴实时">📋 粘贴实时</button>
+            <button type="button" class="secondary nav-stub" data-stub="坐电梯条件选股">🛗 坐电梯</button>
+            <button type="button" class="secondary nav-stub" data-stub="咨询分析 GUI">💼 咨询分析</button>
+            <button type="button" class="secondary nav-stub" data-stub="投资分析">💰 投资</button>
+            <button type="button" class="secondary nav-stub" data-stub="系统">📊 系统</button>
+          </div>
+          <div class="btn-grid" style="margin-top:8px">
+            <button type="button" class="secondary nav-stub" data-stub="赌博分析">🎲 赌博</button>
+            <button type="button" class="secondary nav-stub" data-stub="图文/交割单分析">📋 图文分析</button>
+            <button type="button" class="secondary nav-stub" data-stub="交易体系">📈 交易体系</button>
+            <button type="button" class="secondary nav-stub" data-stub="基本面分析">📑 基本面分析</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>预警与监测开关（Web 仅本地记忆，不与桌面共用配置）</h2>
+          <div class="check-row" id="alertSwitches"></div>
+          <div class="btn-grid" style="margin-top:10px">
+            <button type="button" class="secondary nav-stub" data-stub="可转债套利弹窗">可转债</button>
+            <button type="button" class="secondary nav-stub" data-stub="筹码成本">筹码成本</button>
+            <button type="button" class="secondary nav-stub" data-stub="机会 AI 股评">机会</button>
+            <button type="button" class="secondary nav-stub" data-stub="板块指数维护">板块指数 · 维护</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>情绪灯 + 下行滚动提示区（桌面右侧）</h2>
+          <div class="emotion-strip">
+            <div class="scroll-box" id="emotionScroll">情绪下行，谨慎操作<br />禁止开新仓<br />减仓观望</div>
+            <div class="emotion-bulb" id="bulb1" title="情绪灯1"></div>
+            <div class="emotion-bulb" id="bulb2" title="情绪灯2"></div>
+            <button type="button" class="secondary nav-stub" data-stub="管理红灯滚动文案">管理</button>
+          </div>
+          <p class="hint">Web 端不连接实盘行情；灯泡仅为占位。</p>
+        </div>
+      </div>
+
+      <!-- 持仓 -->
+      <div id="view-holdings" class="view-panel">
+        <div class="panel">
+          <h2>自持仓管理（当前组）</h2>
+          <div class="holding-subtabs" id="holdingSubTabs"></div>
+          <div class="btn-grid" id="holdingToolbar"></div>
+          <p class="hint" id="holdingSectorHint">板块: —（桌面在持仓7–14 底部显示；Web 占位）</p>
+          <div class="grid-wrap">
+            <div class="holding-grid" id="holdingGrid"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 快速爬取 -->
+      <div id="view-crawl-fast" class="view-panel">
+        <div class="panel">
+          <h2>批量流水线</h2>
+          <div class="row">
+            <button type="button" class="primary warn nav-stub" data-stub="one_click_pipeline：韭研/淘股吧/一键爬取/分析/资讯">一键操作</button>
+            <span class="hint">依次执行爬取、分析与资讯入库</span>
+          </div>
+          <div class="btn-grid" style="margin-top:8px">
+            <button type="button" class="secondary nav-stub" data-stub="一键思考">一键思考</button>
+            <button type="button" class="secondary nav-stub" data-stub="一键爬虫">一键爬虫</button>
+            <button type="button" class="secondary nav-stub" data-stub="蜘蛛读取">🕷️ 蜘蛛读取</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>一键系列</h2>
+          <div class="btn-grid">
+            <button type="button" class="secondary nav-stub" data-stub="batch_crawl_and_analyze">一键爬取</button>
+            <button type="button" class="secondary nav-stub" data-stub="one_click_analyze_tabs">一键分析</button>
+            <button type="button" class="secondary nav-stub" data-stub="one_click_save_news">一键资讯</button>
+            <button type="button" class="warn nav-stub" data-stub="one_click_screenshot">一键截图</button>
+            <button type="button" class="secondary nav-stub" data-stub="_crawl_hot_stocks_combined">爬取热门股</button>
+            <button type="button" class="secondary nav-stub" data-stub="热门股非去重">热门股非去重</button>
+            <button type="button" class="secondary nav-stub" data-stub="坐电梯">坐电梯</button>
+          </div>
+          <div class="btn-grid" style="margin-top:8px">
+            <button type="button" class="secondary nav-stub" data-stub="OCR 爬虫">OCR识别</button>
+            <button type="button" class="secondary nav-stub" data-stub="自持股监测">自持股监测</button>
+            <button type="button" class="secondary nav-stub" data-stub="近期资讯">近期资讯分析</button>
+            <button type="button" class="secondary nav-stub" data-stub="资讯AI分析">资讯AI分析</button>
+            <button type="button" class="secondary nav-stub" data-stub="预测">预测</button>
+            <button type="button" class="secondary nav-stub" data-stub="tushare">tushare</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>单个爬虫（Web 可执行白名单脚本）</h2>
+          <div class="row">
+            <select id="crawlerScript">
+              <option value="jiuyan_gongshe_crawler.py">爬取韭研 jiuyan_gongshe_crawler.py</option>
+              <option value="taoguba_100_posts_crawler.py">爬取淘股吧 taoguba_100_posts_crawler.py</option>
+            </select>
+            <button type="button" class="primary" id="btnRunCrawler">运行脚本</button>
+            <button type="button" class="secondary" id="btnReloadDict">重载股票字典缓存</button>
+          </div>
+          <p class="hint">桌面还有大量「勾选爬取项后执行」的动态按钮，由 config 生成；Web 未连接该 JSON，完整列表请用桌面版。</p>
+          <pre class="log" id="crawlerLog"></pre>
+        </div>
+      </div>
+
+      <!-- 文本控制 -->
+      <div id="view-crawl-text" class="view-panel">
+        <div class="panel">
+          <h2>字体</h2>
+          <div class="row">
+            <button type="button" class="secondary nav-stub" data-stub="decrease_font_size">A-</button>
+            <button type="button" class="secondary nav-stub" data-stub="increase_font_size">A+</button>
+            <span class="hint">当前 <span id="fontSizeLbl">12</span>（Web 占位）</span>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>查找</h2>
+          <div class="row">
+            <input type="text" id="fakeSearch" placeholder="查找文本" />
+            <button type="button" class="secondary nav-stub" data-stub="search_text">查找</button>
+            <button type="button" class="secondary nav-stub" data-stub="search_next">下一个</button>
+            <button type="button" class="secondary nav-stub" data-stub="search_prev">上一个</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>文本导入方式</h2>
+          <div class="btn-grid">
+            <button type="button" class="secondary nav-stub" data-stub="load_excel">上传Excel</button>
+            <button type="button" class="secondary nav-stub" data-stub="paste_webpage">粘贴网页</button>
+            <button type="button" class="secondary nav-stub" data-stub="paste_text">粘贴文本</button>
+            <button type="button" class="secondary nav-stub" data-stub="load_text_file">读取文件</button>
+            <button type="button" class="secondary nav-stub" data-stub="merge_upload">合并上传</button>
+            <button type="button" class="secondary nav-stub" data-stub="clear_content">清空内容</button>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <label style="flex:1;display:flex;align-items:center;gap:6px">URL
+              <input type="text" id="urlFetch" placeholder="https://…" style="flex:1" />
+            </label>
+            <button type="button" class="secondary nav-stub" data-stub="get_from_url">获取</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 等待 -->
+      <div id="view-crawl-wait" class="view-panel">
+        <div class="panel">
+          <h2>等待</h2>
+          <p class="hint">桌面「等待」标签页用于爬取间隔与队列控制；Web 版无后台 Tk 定时器，此处仅占位说明。若需相同节奏，请使用 stockyidong.py。</p>
+        </div>
+      </div>
+
+      <!-- 资讯 -->
+      <div id="view-news" class="view-panel">
+        <div class="two-col">
+          <div class="panel">
+            <h2>资讯列表 news_info</h2>
+            <div class="row">
+              <input type="text" id="newsSearch" placeholder="搜索" style="flex:1;min-width:160px" />
+              <button type="button" class="secondary" id="btnNewsSearch">搜索</button>
+            </div>
+            <div class="news-list" id="newsList"></div>
+          </div>
+          <div class="panel">
+            <h2>详情 / 新建（对齐「保存到股票资讯表」）</h2>
+            <div class="row">
+              <label>tab_name <input type="text" id="newTabName" style="min-width:220px" /></label>
+            </div>
+            <textarea id="newsContent" placeholder="content"></textarea>
+            <div class="row">
+              <button type="button" class="primary" id="btnSaveNews">保存到资讯表</button>
+              <span class="hint" id="newsDetailMeta"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- digest -->
+      <div id="view-digest" class="view-panel">
+        <div class="panel">
+          <h2>从资讯按日提取六位代码频次</h2>
+          <div class="row">
+            <label>天数 <input type="number" id="digestDays" min="1" max="30" value="8" /></label>
+            <button type="button" class="primary" id="btnDigest">拉取 digest</button>
+            <button type="button" class="warn" id="btnRefreshHoldingsFromNews">从资讯刷新（写入组7–14 + MMDD 标签）</button>
+            <span class="hint">对齐桌面「从资讯刷新」整块逻辑</span>
+          </div>
+          <p class="hint" id="digestMeta"></p>
+          <div id="digestOut"></div>
+        </div>
+      </div>
+
+      <!-- data -->
+      <div id="view-data" class="view-panel">
+        <div class="panel">
+          <h2>库表行数</h2>
+          <button type="button" class="secondary" id="btnReloadStats">刷新统计</button>
+          <pre class="log" id="statsOut"></pre>
+        </div>
+        <div class="two-col">
+          <div class="panel">
+            <h2>stock_logic 最近</h2>
+            <div class="data-table-wrap">
+              <table class="data" id="tblLogic"><thead><tr><th>id</th><th>名称</th><th>逻辑</th><th>日期</th></tr></thead><tbody></tbody></table>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>kelly_records 最近</h2>
+            <div class="data-table-wrap">
+              <table class="data" id="tblKelly"><thead><tr><th>名</th><th>时间</th><th>b</th><th>p</th><th>f</th></tr></thead><tbody></tbody></table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="note">研究整理工具，非投资建议。完整功能（词云、OCR、同花顺实时、一键流水线内嵌脚本等）仍依赖桌面版。</footer>
+
+  <div id="stubModal" class="modal-overlay" aria-hidden="true">
+    <div class="modal-box">
+      <h3 id="stubTitle">桌面版功能</h3>
+      <p id="stubBody"></p>
+      <button type="button" class="primary" id="stubClose">关闭</button>
+    </div>
+  </div>
+
+  <dialog id="cellDialog">
+    <div id="cellForm">
+      <p>编辑格子 <span id="cellIdx"></span></p>
+      <label>名称 <input type="text" id="cellName" /></label>
+      <label>代码 <input type="text" id="cellCode" maxlength="6" /></label>
+      <div class="row" style="margin-top:0.75rem">
+        <button type="button" class="primary" id="cellSave">保存</button>
+        <button type="button" class="secondary" id="cellClear">清空</button>
+        <button type="button" class="secondary" id="cellCancel">取消</button>
+      </div>
+    </div>
+  </dialog>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

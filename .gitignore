@@ -1,0 +1,37 @@
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+*.db
+.idea/
+.vscode/
+
+# --- backup cleanup (added 2026-09-19) ---
+*.bak
+*.bak*
+auto_backups/
+.trae/
+.DS_Store
+*.log
+data/
+report/
+reports/
+*.xlsx
+*.xls
+*.png
+*.jpg
+*.jpeg
+D:\\StockAnalyzer/
+config copy/
+build/
+dist/
+*.egg-info/
+
+src/*.txt
+web_data/
+*.restore_backup
+*.snapshot_version_backup
+*.working
+*.revert_backup*
+src copy/

@@ -1,0 +1,294 @@
+[
+  {
+    "name": "东方财富",
+    "url": "https://www.eastmoney.com/"
+  },
+  {
+    "name": "同花顺财经",
+    "url": "https://news.10jqka.com.cn/"
+  },
+  {
+    "name": "上证报",
+    "url": "https://www.cnstock.com/"
+  },
+  {
+    "name": "证券时报",
+    "url": "https://www.stcn.com/"
+  },
+  {
+    "name": "第一财经",
+    "url": "https://www.yicai.com/"
+  },
+  {
+    "name": "新浪财经",
+    "url": "https://finance.sina.com.cn/"
+  },
+  {
+    "name": "财联社",
+    "url": "https://www.cls.cn/"
+  },
+  {
+    "name": "选股宝",
+    "url": "https://xuangubao.cn/"
+  },
+  {
+    "name": "淘股吧",
+    "url": "https://www.taoguba.com.cn/"
+  },
+  {
+    "name": "东方财富股吧",
+    "url": "https://guba.eastmoney.com/"
+  },
+  {
+    "name": "雪球",
+    "url": "https://xueqiu.com/"
+  },
+  {
+    "name": "21财经",
+    "url": "https://www.21jingji.com/"
+  },
+  {
+    "name": "和讯财经",
+    "url": "https://www.hexun.com/"
+  },
+  {
+    "name": "华尔街见闻",
+    "url": "https://wallstreetcn.com/"
+  },
+  {
+    "name": "央视财经",
+    "url": "https://finance.cctv.com/"
+  },
+  {
+    "name": "界面新闻",
+    "url": "https://www.jiemian.com/finance.shtml"
+  },
+  {
+    "name": "蓝鲸财经",
+    "url": "https://www.lanjinger.com/"
+  },
+  {
+    "name": "每日经济新闻",
+    "url": "https://www.nbd.com.cn/"
+  },
+  {
+    "name": "财新网",
+    "url": "https://www.caixin.com/"
+  },
+  {
+    "name": "中国基金报",
+    "url": "https://www.chnfund.com/"
+  },
+  {
+    "name": "券商中国",
+    "url": "https://www.stcn.com/qs/"
+  },
+  {
+    "name": "中证网",
+    "url": "http://www.cs.com.cn/"
+  },
+  {
+    "name": "经济参考网",
+    "url": "http://www.jjckb.cn/"
+  },
+  {
+    "name": "中新经纬",
+    "url": "https://www.jwview.com/"
+  },
+  {
+    "name": "证券日报网",
+    "url": "http://www.zqrb.cn/"
+  },
+  {
+    "name": "中国新闻网财经",
+    "url": "https://www.chinanews.com.cn/finance/"
+  },
+  {
+    "name": "网易财经",
+    "url": "https://money.163.com/"
+  },
+  {
+    "name": "搜狐财经",
+    "url": "https://business.sohu.com/"
+  },
+  {
+    "name": "凤凰财经",
+    "url": "https://finance.ifeng.com/"
+  },
+  {
+    "name": "腾讯财经",
+    "url": "https://finance.qq.com/"
+  },
+  {
+    "name": "韭研公社",
+    "url": "https://www.jiuyangongshe.com/"
+  },
+  {
+    "name": "财联社内参",
+    "url": "https://www.cls.cn/telegraph"
+  },
+  {
+    "name": "选股宝内参",
+    "url": "https://xuangubao.cn/neican"
+  },
+  {
+    "name": "同花顺内参",
+    "url": "https://news.10jqka.com.cn/stock/"
+  },
+  {
+    "name": "东方财富内参",
+    "url": "https://finance.eastmoney.com/news/"
+  },
+  {
+    "name": "雪球24小时",
+    "url": "https://xueqiu.com/statuses/hot"
+  },
+  {
+    "name": "淘股吧实时",
+    "url": "https://www.taoguba.com.cn/Article"
+  },
+  {
+    "name": "韭研公社实时",
+    "url": "https://www.gogudata.com/"
+  },
+  {
+    "name": "Reuters",
+    "url": "https://www.reuters.com/finance/"
+  },
+  {
+    "name": "Bloomberg",
+    "url": "https://www.bloomberg.com/markets"
+  },
+  {
+    "name": "Financial Times",
+    "url": "https://www.ft.com/"
+  },
+  {
+    "name": "WSJ",
+    "url": "https://www.wsj.com/"
+  },
+  {
+    "name": "CNBC",
+    "url": "https://www.cnbc.com/world/?region=world"
+  },
+  {
+    "name": "Yahoo Finance",
+    "url": "https://finance.yahoo.com/"
+  },
+  {
+    "name": "MarketWatch",
+    "url": "https://www.marketwatch.com/"
+  },
+  {
+    "name": "Barron's",
+    "url": "https://www.barrons.com/"
+  },
+  {
+    "name": "The Economist",
+    "url": "https://www.economist.com/"
+  },
+  {
+    "name": "Business Insider",
+    "url": "https://www.businessinsider.com/"
+  },
+  {
+    "name": "Forbes",
+    "url": "https://www.forbes.com/"
+  },
+  {
+    "name": "Fortune",
+    "url": "https://fortune.com/"
+  },
+  {
+    "name": "NPR Business",
+    "url": "https://www.npr.org/sections/business/"
+  },
+  {
+    "name": "AP Business",
+    "url": "https://apnews.com/hub/business"
+  },
+  {
+    "name": "New York Times Business",
+    "url": "https://www.nytimes.com/section/business"
+  },
+  {
+    "name": "Washington Post Business",
+    "url": "https://www.washingtonpost.com/business/"
+  },
+  {
+    "name": "The Atlantic Economy",
+    "url": "https://www.theatlantic.com/economy/"
+  },
+  {
+    "name": "Morningstar",
+    "url": "https://www.morningstar.com/"
+  },
+  {
+    "name": "Seeking Alpha",
+    "url": "https://seekingalpha.com/"
+  },
+  {
+    "name": "Investopedia",
+    "url": "https://www.investopedia.com/"
+  },
+  {
+    "name": "BBC Business",
+    "url": "https://www.bbc.com/news/business"
+  },
+  {
+    "name": "The Guardian Business",
+    "url": "https://www.theguardian.com/uk/business"
+  },
+  {
+    "name": "Al Jazeera Business",
+    "url": "https://www.aljazeera.com/economy/"
+  },
+  {
+    "name": "日経新聞",
+    "url": "https://www.nikkei.com/"
+  },
+  {
+    "name": "日本経済新聞",
+    "url": "https://www.nikkei.com/"
+  },
+  {
+    "name": "東洋経済",
+    "url": "https://toyokeizai.net/"
+  },
+  {
+    "name": "ダイヤモンド",
+    "url": "https://diamond.jp/"
+  },
+  {
+    "name": "週刊エコノミスト",
+    "url": "https://weekly-economist.mainichi.jp/"
+  },
+  {
+    "name": "日本経済新聞 中国",
+    "url": "https://cn.nikkei.com/"
+  },
+  {
+    "name": "韭研公社",
+    "url": "https://www.gogudata.com/"
+  },
+  {
+    "name": "韭菜研究公社",
+    "url": "https://www.jiuyangongshe.com/"
+  },
+  {
+    "name": "行鱼复盘",
+    "url": "https://xueqiu.com/9578529189/column"
+  },
+  {
+    "name": "东方财富前100",
+    "url": "https://guba.eastmoney.com/rank/"
+  },
+  {
+    "name": "https://tushare.pro/news/sina",
+    "url": "t新浪"
+  },
+  {
+    "name": "https://tushare.pro/news/xq",
+    "url": "t雪球"
+  }
+]

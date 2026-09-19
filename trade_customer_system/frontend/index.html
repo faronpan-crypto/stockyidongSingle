@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>外贸获客系统</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <div id="login-screen" class="screen active">
+            <div class="login-container">
+                <div class="login-header">
+                    <h1>外贸获客系统</h1>
+                    <p>登录您的账户</p>
+                </div>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label>邮箱</label>
+                        <input type="email" id="login-email" placeholder="请输入邮箱" required>
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" id="login-password" placeholder="请输入密码" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">登录</button>
+                </form>
+                <p class="login-hint">默认账户: admin@example.com / admin123</p>
+                <div id="login-error" class="error-message"></div>
+            </div>
+        </div>
+
+        <div id="main-screen" class="screen">
+            <header class="main-header">
+                <div class="header-left">
+                    <h1>外贸获客系统</h1>
+                </div>
+                <div class="header-right">
+                    <span id="user-info"></span>
+                    <button id="logout-btn" class="btn btn-secondary">退出登录</button>
+                </div>
+            </header>
+
+            <nav class="sidebar">
+                <ul>
+                    <li><a href="#" data-view="dashboard" class="nav-link active">仪表盘</a></li>
+                    <li><a href="#" data-view="customers" class="nav-link">客户管理</a></li>
+                    <li><a href="#" data-view="inquiries" class="nav-link">询盘管理</a></li>
+                    <li><a href="#" data-view="products" class="nav-link">产品管理</a></li>
+                    <li><a href="#" data-view="emails" class="nav-link">邮件营销</a></li>
+                    <li><a href="#" data-view="tasks" class="nav-link">任务管理</a></li>
+                    <li><a href="#" data-view="events" class="nav-link">展会活动</a></li>
+                </ul>
+            </nav>
+
+            <main class="main-content">
+                <div id="dashboard-view" class="view active">
+                    <div class="page-header">
+                        <h2>业务概览</h2>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon customers-icon">👥</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-customers">0</div>
+                                <div class="stat-label">客户总数</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon inquiries-icon">📩</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-inquiries">0</div>
+                                <div class="stat-label">询盘总数</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon pending-icon">⏳</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-pending">0</div>
+                                <div class="stat-label">待处理询盘</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon rate-icon">📊</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-rate">0%</div>
+                                <div class="stat-label">转化率</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="charts-section">
+                        <div class="chart-card">
+                            <h3>客户分布（按状态）</h3>
+                            <div id="customer-status-chart" class="chart"></div>
+                        </div>
+                        <div class="chart-card">
+                            <h3>客户分布（按国家）</h3>
+                            <div id="customer-country-chart" class="chart"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="customers-view" class="view">
+                    <div class="page-header">
+                        <h2>客户管理</h2>
+                        <button id="add-customer-btn" class="btn btn-primary">添加客户</button>
+                    </div>
+                    <div class="search-bar">
+                        <input type="text" id="customer-search" placeholder="搜索客户名称或联系人">
+                        <select id="customer-status-filter">
+                            <option value="">全部状态</option>
+                            <option value="potential">潜在客户</option>
+                            <option value="contacted">已联系</option>
+                            <option value="negotiating">洽谈中</option>
+                            <option value="converted">已成交</option>
+                        </select>
+                    </div>
+                    <table id="customers-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>公司名称</th>
+                                <th>联系人</th>
+                                <th>邮箱</th>
+                                <th>国家</th>
+                                <th>状态</th>
+                                <th>评分</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <div id="inquiries-view" class="view">
+                    <div class="page-header">
+                        <h2>询盘管理</h2>
+                        <button id="add-inquiry-btn" class="btn btn-primary">添加询盘</button>
+                    </div>
+                    <div class="search-bar">
+                        <select id="inquiry-status-filter">
+                            <option value="">全部状态</option>
+                            <option value="pending">待处理</option>
+                            <option value="replied">已回复</option>
+                            <option value="negotiating">洽谈中</option>
+                            <option value="closed">已关闭</option>
+                        </select>
+                    </div>
+                    <table id="inquiries-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>主题</th>
+                                <th>客户</th>
+                                <th>产品</th>
+                                <th>数量</th>
+                                <th>预算</th>
+                                <th>状态</th>
+                                <th>优先级</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <div id="products-view" class="view">
+                    <div class="page-header">
+                        <h2>产品管理</h2>
+                        <button id="add-product-btn" class="btn btn-primary">添加产品</button>
+                    </div>
+                    <table id="products-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>产品名称</th>
+                                <th>类别</th>
+                                <th>型号</th>
+                                <th>价格</th>
+                                <th>最小订单</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <div id="emails-view" class="view">
+                    <div class="page-header">
+                        <h2>邮件营销</h2>
+                        <button id="send-email-btn" class="btn btn-primary">发送邮件</button>
+                    </div>
+                    <div class="search-bar">
+                        <input type="number" id="email-customer-filter" placeholder="客户ID">
+                    </div>
+                    <table id="emails-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>客户ID</th>
+                                <th>主题</th>
+                                <th>状态</th>
+                                <th>发送时间</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <div id="tasks-view" class="view">
+                    <div class="page-header">
+                        <h2>任务管理</h2>
+                        <button id="add-task-btn" class="btn btn-primary">添加任务</button>
+                    </div>
+                    <div class="search-bar">
+                        <select id="task-status-filter">
+                            <option value="">全部状态</option>
+                            <option value="pending">待处理</option>
+                            <option value="in_progress">进行中</option>
+                            <option value="completed">已完成</option>
+                        </select>
+                    </div>
+                    <table id="tasks-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>标题</th>
+                                <th>描述</th>
+                                <th>优先级</th>
+                                <th>状态</th>
+                                <th>截止日期</th>
+                                <th>负责人</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <div id="events-view" class="view">
+                    <div class="page-header">
+                        <h2>展会活动</h2>
+                        <button id="add-event-btn" class="btn btn-primary">添加活动</button>
+                    </div>
+                    <table id="events-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>活动名称</th>
+                                <th>描述</th>
+                                <th>日期</th>
+                                <th>地点</th>
+                                <th>类型</th>
+                                <th>预计人数</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div id="modal-overlay" class="modal-overlay">
+        <div id="modal-content" class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">添加客户</h3>
+                <button id="close-modal" class="close-modal">×</button>
+            </div>
+            <form id="modal-form">
+                <div id="modal-body"></div>
+                <div class="modal-footer">
+                    <button type="button" id="cancel-modal" class="btn btn-secondary">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

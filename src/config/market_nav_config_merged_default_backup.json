@@ -1,0 +1,276 @@
+{
+  "indices": [
+    {
+      "name": "热门概念股",
+      "url": "https://www.n.cn/search/bcbe84caae4841349b61c4b30944a67b?fr=senm_add_so&src=senm_add_so",
+      "desc": "雪球，同花顺，东财等概念股",
+      "sort_order": 3
+    },
+    {
+      "name": "情绪温度炒什么",
+      "url": "https://www.iwencai.com/unifiedwap/result?w=%E5%90%8C%E8%8A%B1%E9%A1%BA%E6%83%85%E7%BB%AA%E6%B8%A9%E5%BA%A6%EF%BC%8C&querytype=zhishu&issugs&sign=1766652692602",
+      "desc": "同花顺情绪温度",
+      "bg_color": "#ffff00",
+      "sort_order": 6
+    },
+    {
+      "name": "同花顺前100",
+      "url": "https://www.iwencai.com/unifiedwap/result?w=%E4%B8%AA%E8%82%A1%E7%83%AD%E5%BA%A6%E6%8E%92%E5%90%8D%E5%89%8D100%E5%8F%8A%E5%85%B6%E9%80%BB%E8%BE%91%EF%BC%8C%E8%B5%84%E9%87%91%E6%B5%81%E5%90%91%20%20%E6%A6%82%E5%BF%B5%E5%92%8C%E6%89%80%E5%B1%9E%E6%9D%BF%E5%9D%97&querytype=stock",
+      "desc": "热门100",
+      "bg_color": "#ff8000",
+      "fg_color": "#000000",
+      "sort_order": 9
+    },
+    {
+      "name": "淘股吧精华帖",
+      "url": "https://www.tgb.cn/jinghua/",
+      "desc": "短端利率，观察资金松紧",
+      "sort_order": 11
+    },
+    {
+      "name": "同花顺板块",
+      "url": "https://eq.10jqka.com.cn/frontend/thsTopRank/index.html#/",
+      "desc": "热门板块",
+      "sort_order": 14
+    },
+    {
+      "name": "港股",
+      "url": "https://eq.10jqka.com.cn/frontend/thsTopRank/index.html#/",
+      "desc": "港股",
+      "sort_order": 16
+    },
+    {
+      "name": "同花顺情绪指数",
+      "url": "https://www.iwencai.com/unifiedwap/result?w=%E5%90%8C%E8%8A%B1%E9%A1%BA%E6%83%85%E7%BB%AA%E6%8C%87%E6%95%B0&querytype=zhishu",
+      "desc": "同花顺情绪指数",
+      "sort_order": 19
+    },
+    {
+      "name": "巨潮资讯网",
+      "url": "http://www.cninfo.com.cn",
+      "desc": "证监会指定信息披露平台，上市公司公告/年报权威来源",
+      "sort_order": 22
+    },
+    {
+      "name": "中证指数有限公司",
+      "url": "http://www.csindex.com.cn",
+      "desc": "指数编制机构，查询沪深300等成分股及估值",
+      "sort_order": 25
+    }
+  ],
+  "portals": [
+    {
+      "name": "韭研公社",
+      "url": "https://www.jiuyangongshe.com/",
+      "sort_order": 4
+    },
+    {
+      "name": "N股市风险点及后续",
+      "url": "https://www.n.cn/search/613bc2b98e4e4234bfacb5a110b43f3a?fr=senm_add_so&src=senm_add_so",
+      "bg_color": "#00ffff",
+      "fg_color": "#ff0000",
+      "sort_order": 5
+    },
+    {
+      "name": "选股宝行情",
+      "url": "https://xuangutong.com.cn/dingpan",
+      "sort_order": 8
+    },
+    {
+      "name": "选股宝早知道",
+      "url": "https://xuangutong.com.cn/zzd/home",
+      "sort_order": 13
+    },
+    {
+      "name": "东方财富网",
+      "url": "https://www.eastmoney.com/",
+      "desc": "行情数据+社区+基金销售，主力持仓查询工具",
+      "sort_order": 15
+    },
+    {
+      "name": "同花顺财经",
+      "url": "https://www.10jqka.com.cn/",
+      "desc": "实时行情、智能选股、两融数据跟踪",
+      "sort_order": 17
+    },
+    {
+      "name": "新浪财经",
+      "url": "https://finance.sina.com.cn/",
+      "desc": "全球市场覆盖，外汇/期货实时行情",
+      "sort_order": 20
+    },
+    {
+      "name": "雪球",
+      "url": "https://xueqiu.com/",
+      "desc": "投资者社交平台，大V实盘分享",
+      "sort_order": 23
+    },
+    {
+      "name": "选股宝早知道",
+      "url": "https://xuangutong.com.cn/zzd/home",
+      "sort_order": 26
+    },
+    {
+      "name": "萝卜投研",
+      "url": "https://robo.datayes.com/",
+      "desc": "免费研报平台，行业数据可视化",
+      "sort_order": 28
+    },
+    {
+      "name": "财联社",
+      "url": "https://www.cls.cn/",
+      "desc": "24小时电报快讯，政策/突发事件预警",
+      "sort_order": 30
+    },
+    {
+      "name": "TradingView",
+      "url": "https://www.tradingview.com/",
+      "desc": "国际级K线分析工具，多市场技术指标",
+      "sort_order": 31
+    },
+    {
+      "name": "Wind资讯",
+      "url": "https://www.wind.com.cn/",
+      "desc": "机构级资讯与数据终端",
+      "sort_order": 32
+    },
+    {
+      "name": "中金在线",
+      "url": "https://www.cnfol.com/",
+      "desc": "综合财经门户，期货外汇全覆盖",
+      "sort_order": 33
+    }
+  ],
+  "hot_sources": [
+    {
+      "name": "同花顺热股榜",
+      "url": "https://eq.10jqka.com.cn/frontend/thsTopRank/index.html#/",
+      "sort_order": 1
+    },
+    {
+      "name": "东方财富股吧热帖",
+      "url": "https://guba.eastmoney.com/",
+      "sort_order": 2
+    },
+    {
+      "name": "选股宝龙虎榜",
+      "url": "https://xuangutong.com.cn/",
+      "sort_order": 7
+    },
+    {
+      "name": "雪球热榜",
+      "url": "https://xueqiu.com/hq/lhb?market=CN&first_name=0&second_name=5",
+      "sort_order": 10
+    },
+    {
+      "name": "选股通主题库",
+      "url": "https://xuangutong.com.cn/zhutiku",
+      "sort_order": 12
+    },
+    {
+      "name": "新浪财经热股",
+      "url": "https://finance.sina.com.cn/stock/",
+      "sort_order": 18
+    },
+    {
+      "name": "财联社热门题材",
+      "url": "https://www.cls.cn/leaderboard",
+      "sort_order": 21
+    },
+    {
+      "name": "知乎股票热议",
+      "url": "https://www.zhihu.com/topic/19555515/hot",
+      "sort_order": 24
+    },
+    {
+      "name": "微博财经热搜",
+      "url": "https://s.weibo.com/top/summary",
+      "sort_order": 27
+    },
+    {
+      "name": "淘股吧",
+      "url": "https://www.taoguba.com.cn/",
+      "sort_order": 29
+    },
+    {
+      "name": "MACD俱乐部",
+      "url": "http://bbs.macd.cn/",
+      "desc": "技术指标讨论，公式编写教学",
+      "sort_order": 34
+    },
+    {
+      "name": "360导航-财经网址",
+      "url": "https://hao.360.com/sub/caijing_website_nav.html",
+      "desc": "聚合东方财富/和讯等头部入口",
+      "sort_order": 35
+    },
+    {
+      "name": "123网址之家-财经导航",
+      "url": "https://www.1234wu.com/wz/90_1.html",
+      "desc": "覆盖期货/外汇/股票社区链接",
+      "sort_order": 36
+    }
+  ],
+  "dv_accounts": [
+    {
+      "name": "葛卫东",
+      "url": "https://www.iwencai.com/unifiedwap/strategy-details?querytype=master&query=%E9%9D%9Est%EF%BC%8C%E9%9D%9E%E5%81%9C%E7%89%8C%EF%BC%8C%E9%9D%9E%E7%A7%91%E5%88%9B%E6%9D%BF%EF%BC%8C%E9%9D%9E%E9%80%80%E5%B8%82%EF%BC%8C%E6%B5%81%E9%80%9A%E5%B8%82%E5%80%BC%E5%A4%A7%E4%BA%8E10%E4%BA%BF%E5%89%8D%E5%8D%81%E5%A4%A7%E6%B5%81%E9%80%9A%E8%82%A1%E4%B8%9C%E5%90%8D%E7%A7%B0%28%E6%8A%A5%E5%91%8A%E6%9C%9F%29%E5%8C%85%E5%90%AB%E8%91%9B%E5%8D%AB%E4%B8%9C,%E5%8D%81%E5%A4%A7%E6%B5%81%E9%80%9A%E8%82%A1%E4%B8%9C%E6%8C%81%E8%82%A1%E6%AF%94%E4%BE%8B%E4%BB%8E%E5%A4%A7%E5%88%B0%E5%B0%8F%E6%8E%92%E5%BA%8F&strategyId=60ae1c6a351aad00b34d8b94&simulateId=60ae1c6a351aad00b34d8b94",
+      "desc": "包含葛卫东",
+      "sort_order": 1
+    },
+    {
+      "name": "同花顺精选策略",
+      "url": "https://www.iwencai.com/unifiedwap/strategy-list-page?querytype=master",
+      "desc": "精选策略",
+      "sort_order": 2
+    },
+    {
+      "name": "券商中国",
+      "url": "https://weixin.sogou.com/weixin?type=1&query=%E5%88%B8%E5%95%86%E4%B8%AD%E5%9B%BD",
+      "desc": "证券时报旗下官媒，热点政策速递",
+      "sort_order": 3
+    },
+    {
+      "name": "咩咩说",
+      "url": "https://weixin.sogou.com/weixin?type=1&query=%E5%92%A9%E5%92%A9%E8%AF%B4",
+      "desc": "券商研究视角，宏观与行业思考",
+      "sort_order": 4
+    },
+    {
+      "name": "月风投资笔记",
+      "url": "https://weixin.sogou.com/weixin?type=1&query=%E6%9C%88%E9%A3%8E%E6%8A%95%E8%B5%84%E7%AC%94%E8%AE%B0",
+      "desc": "私募经理吴悦风，宏观与个股解析",
+      "sort_order": 5
+    },
+    {
+      "name": "英为财情",
+      "url": "http://weixin.qq.com/r/nzhpcYvEHtZhrc8S922N",
+      "desc": "全球行情+工具，美股/大宗商品深度",
+      "sort_order": 6
+    },
+    {
+      "name": "李迅雷金融与投资",
+      "url": "https://weixin.sogou.com/weixin?type=1&query=%E6%9D%8E%E8%BF%85%E9%9B%B7",
+      "desc": "中泰证券首席，宏观策略观点",
+      "sort_order": 7
+    },
+    {
+      "name": "定投十年赚十倍",
+      "url": "https://weixin.sogou.com/weixin?type=1&query=%E5%AE%9A%E6%8A%95%E5%8D%81%E5%B9%B4%E8%B5%9A%E5%8D%81%E5%80%8D",
+      "desc": "银行螺丝钉基金定投与估值表",
+      "sort_order": 8
+    },
+    {
+      "name": "图解金融",
+      "url": "https://weixin.sogou.com/weixin?type=1&query=%E5%9B%BE%E8%A7%A3%E9%87%91%E8%9E%8D",
+      "desc": "图文并茂讲解金融知识",
+      "sort_order": 9
+    },
+    {
+      "name": "金融街老裘",
+      "url": "https://weixin.sogou.com/weixin?type=1&query=%E9%87%91%E8%9E%8D%E8%A1%97%E8%80%81%E8%A3%98",
+      "desc": "财务研究与行业分析，偏个股基本面",
+      "sort_order": 10
+    }
+  ]
+}

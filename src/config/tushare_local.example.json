@@ -1,0 +1,3 @@
+{
+  "token": "在这里填入你的 Tushare token，保存后复制为同目录下的 tushare_local.json（或设置环境变量 TUSHARE_TOKEN）"
+}

@@ -1,0 +1,61 @@
+# -*- mode: python ; coding: utf-8 -*-
+
+block_cipher = None
+
+
+a = Analysis(['stockyidong mac.py'],
+             pathex=['c:\\Users\\faron\\AppData\\Local\\Programs\\Lightly\\HTMLProject0111\\stockyidong_project\\src'],
+             binaries=[],
+             datas=[],
+             hiddenimports=[
+                 'tkinter',
+                 'tkinter.scrolledtext',
+                 'tkinter.ttk',
+                 'tkinter.filedialog',
+                 'tkinter.messagebox',
+                 'tkinter.colorchooser',
+                 'pandas',
+                 'numpy',
+                 'matplotlib',
+                 'matplotlib.backends.backend_tkagg',
+                 'sqlite3',
+                 'requests',
+                 'jieba',
+                 'akshare',
+                 'tushare',
+                 'webbrowser',
+                 'threading',
+                 'time',
+                 'datetime',
+                 'os',
+                 'json',
+                 're',
+                 'sys'
+             ],
+             hookspath=[],
+             runtime_hooks=[],
+             excludes=[],
+             win_no_prefer_redirects=False,
+             win_private_assemblies=False,
+             cipher=block_cipher,
+             noarchive=False)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+executable = EXE(pyz,
+              a.scripts,
+              a.binaries,
+              a.zipfiles,
+              a.datas,
+              [],
+              name='stockyidong',
+              debug=False,
+              bootloader_ignore_signals=False,
+              strip=False,
+              upx=True,
+              upx_exclude=[],
+              runtime_tmpdir=None,
+              console=False,
+              disable_windowed_traceback=False,
+              target_arch=None,
+              codesign_identity=None,
+              entitlements_file=None)

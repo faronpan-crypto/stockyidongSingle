@@ -1,0 +1,126 @@
+{
+  "xueqiu_v": [
+    {
+      "name": "但斌",
+      "url": "https://xueqiu.com/u/1234567890"
+    },
+    {
+      "name": "任泽平",
+      "url": "https://xueqiu.com/u/1234567891"
+    },
+    {
+      "name": "管清友",
+      "url": "https://xueqiu.com/u/1234567892"
+    },
+    {
+      "name": "叶檀",
+      "url": "https://xueqiu.com/u/1234567893"
+    },
+    {
+      "name": "李大霄",
+      "url": "https://xueqiu.com/u/1234567894"
+    },
+    {
+      "name": "水皮",
+      "url": "https://xueqiu.com/u/1234567895"
+    },
+    {
+      "name": "杨德龙",
+      "url": "https://xueqiu.com/u/1234567896"
+    },
+    {
+      "name": "郭施亮",
+      "url": "https://xueqiu.com/u/1234567897"
+    },
+    {
+      "name": "曹中铭",
+      "url": "https://xueqiu.com/u/1234567898"
+    },
+    {
+      "name": "皮海洲",
+      "url": "https://xueqiu.com/u/1234567899"
+    },
+    {
+      "name": "董登新",
+      "url": "https://xueqiu.com/u/1234567900"
+    },
+    {
+      "name": "苏渝",
+      "url": "https://xueqiu.com/u/1234567901"
+    },
+    {
+      "name": "玉名",
+      "url": "https://xueqiu.com/u/1234567902"
+    },
+    {
+      "name": "股海灯塔",
+      "url": "https://xueqiu.com/u/1234567903"
+    },
+    {
+      "name": "淘气天尊",
+      "url": "https://xueqiu.com/u/1234567904"
+    }
+  ],
+  "wechat_public": [
+    {
+      "name": "券商中国",
+      "url": "https://mp.weixin.qq.com/s/example1"
+    },
+    {
+      "name": "证券时报",
+      "url": "https://mp.weixin.qq.com/s/example2"
+    },
+    {
+      "name": "中国证券报",
+      "url": "https://mp.weixin.qq.com/s/example3"
+    },
+    {
+      "name": "上海证券报",
+      "url": "https://mp.weixin.qq.com/s/example4"
+    },
+    {
+      "name": "财联社",
+      "url": "https://mp.weixin.qq.com/s/example5"
+    },
+    {
+      "name": "华尔街见闻",
+      "url": "https://mp.weixin.qq.com/s/example6"
+    },
+    {
+      "name": "格隆汇",
+      "url": "https://mp.weixin.qq.com/s/example7"
+    },
+    {
+      "name": "格上理财",
+      "url": "https://mp.weixin.qq.com/s/example8"
+    },
+    {
+      "name": "股票大作手",
+      "url": "https://mp.weixin.qq.com/s/example9"
+    },
+    {
+      "name": "价值投资日志",
+      "url": "https://mp.weixin.qq.com/s/example10"
+    },
+    {
+      "name": "雪球",
+      "url": "https://mp.weixin.qq.com/s/example11"
+    },
+    {
+      "name": "东方财富网",
+      "url": "https://mp.weixin.qq.com/s/example12"
+    },
+    {
+      "name": "同花顺",
+      "url": "https://mp.weixin.qq.com/s/example13"
+    },
+    {
+      "name": "投资界",
+      "url": "https://mp.weixin.qq.com/s/example14"
+    },
+    {
+      "name": "36氪",
+      "url": "https://mp.weixin.qq.com/s/example15"
+    }
+  ]
+}
