@@ -46068,7 +46068,9 @@ class StockKeywordAnalyzerGUI:
             is_rebuilding[0] = False
             _refresh_stats()
 
-        _render_month()
+        # 首次渲染延后 150ms, 让主窗口先显示出来 (避免启动 beach ball)
+        try: self.root.after(150, _render_month)
+        except Exception: _render_month()
 
     def _show_emo_cycle_dialog(self):
         """🎭 情绪周期三维度输入 → 自动风控警告（系统红灯+同花顺+自己账户盈亏）+ 日历补录"""
@@ -76167,8 +76169,9 @@ class StockKeywordAnalyzerGUI:
         self._emo_chart_trend_canvas.bind("<Configure>", lambda e: self._render_emo_cycle_chart())
         self._emo_chart_heat_canvas.bind("<Configure>", lambda e: self._render_emo_cycle_chart())
 
-        # 立即渲染
-        self._render_emo_cycle_chart()
+        # 首次渲染延后 200ms, 让主窗口先显示出来
+        self.root.after(200, self._render_emo_cycle_chart)
+        self._emo_chart_status.set("⏳ 加载中...")
 
     def _render_emo_cycle_chart(self):
         """读取 emo_history.json 并渲染到情绪周期图 Canvas"""
