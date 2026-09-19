@@ -4139,40 +4139,7 @@ class StockKeywordAnalyzerGUI:
             self._dapan_dims[key] = {"lc": lc, "sv": sv}
 
         # ==== 右侧: 热门板块(3×3) + 冷门板块(3×3) 网格 ====
-        right_col = tk.Frame(main_row, bg="#FAFAFA"); right_col.grid(row=0, column=1, sticky="nsew")
-        right_col.columnconfigure(0, weight=1, uniform="bcol")
-        right_col.columnconfigure(1, weight=1, uniform="bcol")
-        right_col.rowconfigure(0, weight=1)
-
-        # --- 热门板块 3列×3行 网格 (可滚动) ---
-        hot_box = tk.LabelFrame(right_col, text="🔥 热门板块 TOP 9", bg="#FAFAFA", fg="#C62828",
-                                font=("", 9, "bold"), padx=3, pady=3)
-        hot_box.grid(row=0, column=0, sticky="nsew", padx=(0, 2))
-        # 用 Canvas + Scrollbar 实现可滚动 3×3 网格卡片
-        hot_canvas = tk.Canvas(hot_box, bg="#FAFAFA", highlightthickness=0, height=200)
-        hot_scroll = tk.Scrollbar(hot_box, orient="vertical", command=hot_canvas.yview)
-        hot_inner = tk.Frame(hot_canvas, bg="#FAFAFA")
-        hot_inner.bind("<Configure>", lambda e: hot_canvas.configure(scrollregion=hot_canvas.bbox("all")))
-        hot_canvas.create_window((0, 0), window=hot_inner, anchor="nw")
-        hot_canvas.configure(yscrollcommand=hot_scroll.set)
-        hot_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        hot_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self._dapan_hot_inner = hot_inner
-        self._dapan_hot_cards = []  # 保存引用供更新
-
-        # --- 冷门板块 3列×3行 网格 (可滚动) ---
-        cold_box = tk.LabelFrame(right_col, text="❄️ 冷门板块 BOTTOM 9", bg="#FAFAFA", fg="#2E7D32",
-                                 font=("", 9, "bold"), padx=3, pady=3)
-        cold_box.grid(row=0, column=1, sticky="nsew", padx=(2, 0))
-        cold_canvas = tk.Canvas(cold_box, bg="#FAFAFA", highlightthickness=0, height=200)
-        cold_scroll = tk.Scrollbar(cold_box, orient="vertical", command=cold_canvas.yview)
-        cold_inner = tk.Frame(cold_canvas, bg="#FAFAFA")
-        cold_inner.bind("<Configure>", lambda e: cold_canvas.configure(scrollregion=cold_canvas.bbox("all")))
-        cold_canvas.create_window((0, 0), window=cold_inner, anchor="nw")
-        cold_canvas.configure(yscrollcommand=cold_scroll.set)
-        cold_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        cold_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self._dapan_cold_inner = cold_inner
+        # ==== 热门/冷门板块已移除 (2026-09-19, 接口不出来) ====
 
         # 自动触发首次加载 — 已禁用, 避免后台线程抢 GIL 卡死 UI
         # 用户切到大盘页点右上角"刷新"按钮手动触发
@@ -44387,8 +44354,10 @@ class StockKeywordAnalyzerGUI:
                         det_lbl.pack(fill=tk.X); widgets.append(det_lbl)
                     _bind_dblclick(widgets, nm)
 
-            _render_grid(self._dapan_hot_inner, sec.get("hot", []), True, 3)
-            _render_grid(self._dapan_cold_inner, sec.get("cold", []), False, 3)
+            if hasattr(self, '_dapan_hot_inner'):
+                _render_grid(self._dapan_hot_inner, sec.get("hot", []), True, 3)
+            if hasattr(self, '_dapan_cold_inner'):
+                _render_grid(self._dapan_cold_inner, sec.get("cold", []), False, 3)
 
             # 6. 近 N 日趋势 Canvas
             trend10 = data.get("trend10", [])
@@ -44582,6 +44551,18 @@ class StockKeywordAnalyzerGUI:
                 data = _js.load(f)
             saved_at = data.get("_saved_at", "?")
             print(f"[大盘] 📂 读 snapshot 成功 (保存于 {saved_at}), 秒出", flush=True)
+            # snapshot 里 emo/hld 可能为空 (旧版本没写入), 从 trend10 推导
+            if data and not data.get("emo") and data.get("trend10"):
+                _lt = data["trend10"][-1]
+                _e2 = float(_lt.get("emo", 50))
+                _sc = max(0, min(100, int(_e2)))
+                _st2 = "高潮" if _e2 >= 70 else ("发酵" if _e2 >= 55 else ("启动" if _e2 >= 45 else ("震荡" if _e2 >= 35 else ("分歧" if _e2 >= 25 else "退潮"))))
+                data["emo"] = {"stage": _st2, "up": 0, "dn": 0, "zt": 0, "dt": 0, "score": _sc}
+                data["hld"] = {"avg": _sc, "lvl": "green" if _sc >= 60 else ("yellow" if _sc >= 35 else "red"),
+                               "breadth_score": _sc, "north_score": 50}
+                data["dims"] = {"breadth": ("gray", "-"), "north": ("gray", "-"),
+                                "moneyflow": ("gray", "-"), "turnover": ("gray", "-")}
+                print(f"[大盘] snapshot emo 已从 trend10 推导: stage={_st2}, emo={_sc}", flush=True)
             self._dapan_update_ui(data)
             return True
         except Exception as e:
@@ -44628,8 +44609,27 @@ class StockKeywordAnalyzerGUI:
                     "close": v.get("close", 0),
                 })
             if trend10:
-                self._dapan_update_ui({"trend10": trend10})
-                print(f"[大盘] 📂 从 emo_history 渲染全部 {len(trend10)} 天趋势", flush=True)
+                last = trend10[-1]
+                _es = float(last.get("emo", 50))
+                # 优先从 JSON 里直接读 stage (人工校准过更准), 没有再从 emo_score 推导
+                _raw = hist.get(last["full_date"], {})
+                _stage_from_json = _raw.get("stage", "")
+                if _stage_from_json and _stage_from_json not in ("-", ""):
+                    _stage = _stage_from_json
+                else:
+                    _stage = "高潮" if _es >= 70 else ("发酵" if _es >= 55 else ("启动" if _es >= 45 else ("震荡" if _es >= 35 else ("分歧" if _es >= 25 else "退潮"))))
+                _score = max(0, min(100, int(_es)))
+                data = {
+                    "trend10": trend10,
+                    "emo": {"stage": _stage, "up": 0, "dn": 0, "zt": 0, "dt": 0, "score": _score},
+                    "hld": {"avg": _score, "lvl": "green" if _score >= 60 else ("yellow" if _score >= 35 else "red"),
+                            "breadth_score": _score, "north_score": 50},
+                    "dims": {"breadth": ("gray", "-"), "north": ("gray", "-"),
+                             "moneyflow": ("gray", "-"), "turnover": ("gray", "-")},
+                    "sectors": {"hot": [], "cold": []}
+                }
+                self._dapan_update_ui(data)
+                print(f"[大盘] 📂 从 emo_history 渲染全部 {len(trend10)} 天趋势 (stage={_stage}, emo={_score})", flush=True)
         except Exception as e:
             print(f"[大盘] emo_history 渲染失败: {e}", flush=True)
 
@@ -76109,6 +76109,15 @@ class StockKeywordAnalyzerGUI:
             notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
             self.sentiment_zone_notebook = notebook
             self.sentiment_zone_text_widgets = {}
+            # ---- Tab 1: 🗓️ 情绪周期日历 (最先显示) ----
+            try:
+                cal_tab = ttk.Frame(notebook)
+                notebook.add(cal_tab, text="🗓️ 情绪周期日历")
+                self._build_emo_cycle_calendar(cal_tab, notebook=notebook)
+            except Exception as _e_emo_tab:
+                import traceback; traceback.print_exc()
+                print(f"[情绪周期日历] tab创建失败: {_e_emo_tab}", flush=True)
+            # ---- Tab 2: 情绪总览 ----
             tab = ttk.Frame(notebook)
             notebook.add(tab, text="情绪总览")
             txt = scrolledtext.ScrolledText(tab, wrap=tk.WORD, font=("Consolas", 11))
@@ -76118,14 +76127,6 @@ class StockKeywordAnalyzerGUI:
             txt.insert("1.0", "加载中...\n")
             txt.config(state=tk.DISABLED)
             self.sentiment_zone_text_widgets["overview"] = txt
-            # ---- Tab 2: 🗓️ 情绪周期日历 ----
-            try:
-                cal_tab = ttk.Frame(notebook)
-                notebook.add(cal_tab, text="🗓️ 情绪周期日历")
-                self._build_emo_cycle_calendar(cal_tab, notebook=notebook)
-            except Exception as _e_emo_tab:
-                import traceback; traceback.print_exc()
-                print(f"[情绪周期日历] tab创建失败: {_e_emo_tab}", flush=True)
             self._refresh_sentiment_zone_tabs_async()
         except Exception as e:
             ttk.Label(parent, text=f"情绪区间标签页创建失败: {e}", foreground="red").pack(expand=True)
