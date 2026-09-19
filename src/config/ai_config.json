@@ -450,6 +450,11 @@
   ],
   "history_holdings": [
     {
+      "stock_name": "兆易创新",
+      "stock_code": "603986",
+      "replaced_date": "2026-09-19 23:05:14"
+    },
+    {
       "stock_name": "影石创新",
       "stock_code": "688775",
       "replaced_date": "2026-09-19 22:22:19"
@@ -942,11 +947,6 @@
     {
       "stock_name": "深南电路",
       "stock_code": "002916",
-      "replaced_date": "2026-09-17 21:43:22"
-    },
-    {
-      "stock_name": "天通股份",
-      "stock_code": "600330",
       "replaced_date": "2026-09-17 21:43:22"
     }
   ],
@@ -1844,23 +1844,23 @@
     },
     {
       "index": 13,
-      "stock_name": "双星新材",
-      "stock_code": "002585"
-    },
-    {
-      "index": 14,
-      "stock_name": "通鼎互联",
-      "stock_code": "002491"
-    },
-    {
-      "index": 15,
       "stock_name": "中际旭创",
       "stock_code": "300308"
     },
     {
+      "index": 14,
+      "stock_name": "双星新材",
+      "stock_code": "002585"
+    },
+    {
+      "index": 15,
+      "stock_name": "通鼎互联",
+      "stock_code": "002491"
+    },
+    {
       "index": 16,
-      "stock_name": "众生药业",
-      "stock_code": "002317"
+      "stock_name": "永鼎股份",
+      "stock_code": "600105"
     },
     {
       "index": 17,
@@ -1869,13 +1869,13 @@
     },
     {
       "index": 18,
-      "stock_name": "永鼎股份",
-      "stock_code": "600105"
+      "stock_name": "众生药业",
+      "stock_code": "002317"
     },
     {
       "index": 19,
-      "stock_name": "寒武纪",
-      "stock_code": "688256"
+      "stock_name": "闽东电力",
+      "stock_code": "000993"
     },
     {
       "index": 20,
@@ -1884,48 +1884,48 @@
     },
     {
       "index": 21,
+      "stock_name": "平潭发展",
+      "stock_code": "000592"
+    },
+    {
+      "index": 22,
+      "stock_name": "寒武纪",
+      "stock_code": "688256"
+    },
+    {
+      "index": 23,
       "stock_name": "福瑞医科",
       "stock_code": "300049"
     },
     {
-      "index": 22,
-      "stock_name": "中国巨石",
-      "stock_code": "600176"
-    },
-    {
-      "index": 23,
-      "stock_name": "闽东电力",
-      "stock_code": "000993"
-    },
-    {
       "index": 24,
-      "stock_name": "山子高科",
-      "stock_code": "000981"
-    },
-    {
-      "index": 25,
-      "stock_name": "兆易创新",
-      "stock_code": "603986"
-    },
-    {
-      "index": 26,
       "stock_name": "北方华创",
       "stock_code": "002371"
     },
     {
+      "index": 25,
+      "stock_name": "太极实业",
+      "stock_code": "600667"
+    },
+    {
+      "index": 26,
+      "stock_name": "中国巨石",
+      "stock_code": "600176"
+    },
+    {
       "index": 27,
-      "stock_name": "众泰汽车",
-      "stock_code": "000980"
+      "stock_name": "山子高科",
+      "stock_code": "000981"
     },
     {
       "index": 28,
-      "stock_name": "启明信息",
-      "stock_code": "002232"
+      "stock_name": "兆易创新",
+      "stock_code": "603986"
     },
     {
       "index": 29,
-      "stock_name": "平潭发展",
-      "stock_code": "000592"
+      "stock_name": "众泰汽车",
+      "stock_code": "000980"
     },
     {
       "index": 30,
@@ -1939,8 +1939,8 @@
     },
     {
       "index": 32,
-      "stock_name": "太极实业",
-      "stock_code": "600667"
+      "stock_name": "启明信息",
+      "stock_code": "002232"
     },
     {
       "index": 33,
@@ -1959,8 +1959,8 @@
     },
     {
       "index": 36,
-      "stock_name": "长安汽车",
-      "stock_code": "000625"
+      "stock_name": "瑞泰新材",
+      "stock_code": "301238"
     },
     {
       "index": 37,
@@ -1969,53 +1969,53 @@
     },
     {
       "index": 38,
-      "stock_name": "瑞泰新材",
-      "stock_code": "301238"
-    },
-    {
-      "index": 39,
       "stock_name": "海马汽车",
       "stock_code": "000572"
     },
     {
-      "index": 40,
+      "index": 39,
       "stock_name": "东山精密",
       "stock_code": "002384"
     },
     {
-      "index": 41,
+      "index": 40,
       "stock_name": "华之杰",
       "stock_code": "603400"
     },
     {
+      "index": 41,
+      "stock_name": "三花智控",
+      "stock_code": "002050"
+    },
+    {
       "index": 42,
+      "stock_name": "长安汽车",
+      "stock_code": "000625"
+    },
+    {
+      "index": 43,
       "stock_name": "黑猫股份",
       "stock_code": "002068"
     },
     {
-      "index": 43,
+      "index": 44,
       "stock_name": "南网科技",
       "stock_code": "688248"
     },
     {
-      "index": 44,
+      "index": 45,
       "stock_name": "中钨高新",
       "stock_code": "000657"
     },
     {
-      "index": 45,
+      "index": 46,
       "stock_name": "华胜天成",
       "stock_code": "600410"
     },
     {
-      "index": 46,
+      "index": 47,
       "stock_name": "兴森科技",
       "stock_code": "002436"
-    },
-    {
-      "index": 47,
-      "stock_name": "翔丰华",
-      "stock_code": "300890"
     },
     {
       "index": 48,
@@ -2049,23 +2049,23 @@
     },
     {
       "index": 54,
-      "stock_name": "三花智控",
-      "stock_code": "002050"
-    },
-    {
-      "index": 55,
       "stock_name": "我爱我家",
       "stock_code": "000560"
     },
     {
-      "index": 56,
+      "index": 55,
       "stock_name": "哈药股份",
       "stock_code": "600664"
     },
     {
-      "index": 57,
+      "index": 56,
       "stock_name": "超声电子",
       "stock_code": "000823"
+    },
+    {
+      "index": 57,
+      "stock_name": "翔丰华",
+      "stock_code": "300890"
     },
     {
       "index": 58,
@@ -2074,33 +2074,33 @@
     },
     {
       "index": 59,
+      "stock_name": "贵州茅台",
+      "stock_code": "600519"
+    },
+    {
+      "index": 60,
       "stock_name": "康达新材",
       "stock_code": "002669"
     },
     {
-      "index": 60,
+      "index": 61,
       "stock_name": "天通股份",
       "stock_code": "600330"
     },
     {
-      "index": 61,
+      "index": 62,
       "stock_name": "长飞光纤",
       "stock_code": "601869"
     },
     {
-      "index": 62,
+      "index": 63,
       "stock_name": "宝鼎科技",
       "stock_code": "002552"
     },
     {
-      "index": 63,
+      "index": 64,
       "stock_name": "恒盛能源",
       "stock_code": "605580"
-    },
-    {
-      "index": 64,
-      "stock_name": "贵州茅台",
-      "stock_code": "600519"
     },
     {
       "index": 65,
@@ -2124,8 +2124,8 @@
     },
     {
       "index": 69,
-      "stock_name": "生益科技",
-      "stock_code": "600183"
+      "stock_name": "华正新材",
+      "stock_code": "603186"
     },
     {
       "index": 70,
@@ -2134,18 +2134,18 @@
     },
     {
       "index": 71,
-      "stock_name": "华正新材",
-      "stock_code": "603186"
-    },
-    {
-      "index": 72,
       "stock_name": "思特威",
       "stock_code": "688213"
     },
     {
+      "index": 72,
+      "stock_name": "生益科技",
+      "stock_code": "600183"
+    },
+    {
       "index": 73,
-      "stock_name": "金安国纪",
-      "stock_code": "002636"
+      "stock_name": "澳弘电子",
+      "stock_code": "605058"
     },
     {
       "index": 74,
@@ -2164,18 +2164,18 @@
     },
     {
       "index": 77,
-      "stock_name": "桂林旅游",
-      "stock_code": "000978"
+      "stock_name": "影石创新",
+      "stock_code": "688775"
     },
     {
       "index": 78,
-      "stock_name": "澳弘电子",
-      "stock_code": "605058"
+      "stock_name": "中国铀业",
+      "stock_code": "001280"
     },
     {
       "index": 79,
-      "stock_name": "影石创新",
-      "stock_code": "688775"
+      "stock_name": "美年健康",
+      "stock_code": "002044"
     }
   ],
   "holding_stocks_5": [
