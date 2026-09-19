@@ -76523,11 +76523,11 @@ class StockKeywordAnalyzerGUI:
                 continue
         return None
     def _build_sentiment_zone_tabs(self, parent):
-        """右上区域:情绪区间标签页(情绪周期日历 第1个tab, 情绪总览 第2个)。"""
+        """右上区域:情绪区间标签页(所有指标集中在第1页,数据来源问财)。"""
         try:
             top_bar = ttk.Frame(parent)
             top_bar.pack(fill=tk.X, padx=4, pady=(2, 4))
-            ttk.Label(top_bar, text="情绪周期 (三维度风控日历 + 情绪区间指标)", font=("TkDefaultFont", 10), foreground="#666666").pack(
+            ttk.Label(top_bar, text="情绪区间指标(全部来自问财)", font=("TkDefaultFont", 10), foreground="#666666").pack(
                 side=tk.LEFT, padx=(2, 8)
             )
             ttk.Button(top_bar, text="刷新", command=self._refresh_sentiment_zone_tabs_async, width=8).pack(side=tk.RIGHT)
@@ -76538,17 +76538,6 @@ class StockKeywordAnalyzerGUI:
             notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
             self.sentiment_zone_notebook = notebook
             self.sentiment_zone_text_widgets = {}
-
-            # ═════════════════════════════════════════════════
-            # TAB 1: 🎭 情绪周期日历 (默认选中, 第一个)
-            # ═════════════════════════════════════════════════
-            emo_tab = ttk.Frame(notebook)
-            notebook.add(emo_tab, text="🎭 情绪周期")
-            self._build_emo_cycle_calendar(emo_tab, notebook)  # 直接嵌入 Notebook tab
-
-            # ═════════════════════════════════════════════════
-            # TAB 2: 情绪总览 (原来的问财指标)
-            # ═════════════════════════════════════════════════
             tab = ttk.Frame(notebook)
             notebook.add(tab, text="情绪总览")
             txt = scrolledtext.ScrolledText(tab, wrap=tk.WORD, font=("Consolas", 11))
@@ -76558,19 +76547,6 @@ class StockKeywordAnalyzerGUI:
             txt.insert("1.0", "加载中...\n")
             txt.config(state=tk.DISABLED)
             self.sentiment_zone_text_widgets["overview"] = txt
-
-            # ═════════════════════════════════════════════════
-            # TAB 3: 🔥 热点板块 (热门/冷门 + 每个板块前3龙头)
-            # ═════════════════════════════════════════════════
-            print("[情绪区间] 准备加 tab3 热点板块...", flush=True)
-            hot_tab = ttk.Frame(notebook)
-            notebook.add(hot_tab, text="🔥热点板块")
-            try:
-                self._build_hot_sector_tab(hot_tab)
-                print("[情绪区间] ✅ tab3 热点板块构建成功", flush=True)
-            except Exception as _e_hs:
-                import traceback as _tb_hs; _tb_hs.print_exc()
-                print(f"[情绪区间] ❌ tab3 构建失败: {_e_hs}", flush=True)
             self._refresh_sentiment_zone_tabs_async()
         except Exception as e:
             ttk.Label(parent, text=f"情绪区间标签页创建失败: {e}", foreground="red").pack(expand=True)
@@ -93714,9 +93690,14 @@ def main():
                 root.after(500, lambda: app.show_unified_db_display(default_tab="ths"))
         except Exception as e:
             print(f"自动打开数据表窗口失败: {e}")
+        print("📣 DEBUG: about to call root.mainloop()...", flush=True)
         root.mainloop()
+        print("📣 DEBUG: mainloop returned!", flush=True)
+    except SystemExit:
+        print("📣 DEBUG: SystemExit caught!", flush=True)
+        raise
     except Exception as e:
-        import traceback
+        import traceback; traceback.print_exc()
         error_msg = f"程序启动失败: {e!s}\n{traceback.format_exc()}"
         print(error_msg)
         try:

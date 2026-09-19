@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional, Union
 
 import os
 import sys
@@ -159,10 +160,12 @@ except ImportError:
     ts = None
     TS_AVAILABLE = False
 
-# ===== Tushare API 频率保护: 全局 sleep + 自动重试 =====
+# ===== Tushare API 频率保护: 全局 sleep + 自动重试 (线程安全) =====
 import time as _ts_time
+import threading as _ts_threading
 
 _TS_PATCHED_IDS = set()  # 用 id() 跟踪, 避免 DataApi.__getattr__ 拦截
+_TS_CALL_LOCK = _ts_threading.Lock()  # 并发安全: 所有线程串行化 sleep + API 调用
 
 def _ts_patch_pro_api(_orig_pro_api):
     """包装 ts.pro_api(), 让返回的 client 方法自动 sleep + 限频重试"""
@@ -180,8 +183,9 @@ def _ts_patch_pro_api(_orig_pro_api):
                 last_e = None
                 for attempt in range(_TS_MAX_RETRY):
                     try:
-                        _ts_time.sleep(_TS_MIN_WAIT)
-                        return orig_query(*args, **kwargs)
+                        with _TS_CALL_LOCK:
+                            _ts_time.sleep(_TS_MIN_WAIT)
+                            return orig_query(*args, **kwargs)
                     except Exception as e:
                         last_e = e
                         msg = str(e)
@@ -3929,7 +3933,7 @@ class StockKeywordAnalyzerGUI:
         self.auto_collect_enabled = self.ai_config_manager.config.get("auto_collect_enabled", False)
         # 如果自动化采集已开启,延迟启动(等待界面加载完成)
         if self.auto_collect_enabled:
-            self.root.after(5000, self._start_auto_collect)  # 5秒后启动
+            self.root.after(30000, self._start_auto_collect)  # 延后 30s  # 5秒后启动
         self._nav_editor_window = None
         self._stock_mgmt_window = None
         self.pending_waiting_reason = None
@@ -4008,7 +4012,7 @@ class StockKeywordAnalyzerGUI:
         # ============ 🗺️ 大盘分析标签页 (重写版: 水温计+情绪地图+板块) ============
         dapan_tab = ttk.Frame(self.position_trading_notebook, padding=3)
         self.position_trading_notebook.add(dapan_tab, text="🗺️ 大盘分析")
-        self._dapan_hld_col = {"red": "#B71C1C", "yellow": "#F57F17", "green": "#1B5E20", "gray": "#BDBDBD"}
+        self._dapan_hld_col = {"red": "#C62828", "yellow": "#F57F17", "green": "#2E7D32", "gray": "#BDBDBD"}
 
         # ============ 顶部: 红绿灯 + 水温计 + 情绪周期 (一行) ============
         top_bar = tk.Frame(dapan_tab, bg="#1A237E"); top_bar.pack(fill=tk.X, pady=(0, 3))
@@ -4065,28 +4069,20 @@ class StockKeywordAnalyzerGUI:
         updn_frame = tk.Frame(top_bar, bg="#1A237E"); updn_frame.pack(side=tk.RIGHT)
         tk.Label(updn_frame, textvariable=self._dapan_updn_var, bg="#1A237E", fg="#E3F2FD",
                  font=("", 9)).pack(side=tk.RIGHT, padx=4)
-        self._dapan_stop_btn = tk.Button(top_bar, text="⏹️", bg="#555", fg="white",
-                                          font=("", 9, "bold"), padx=6, pady=0,
-                                          cursor="hand2", state="disabled",
-                                          command=lambda: self._dapan_stop_event.set())
-        self._dapan_stop_btn.pack(side=tk.RIGHT, padx=2)
         tk.Button(top_bar, text="🔄", bg="#C62828", fg="white", font=("", 9, "bold"),
                   padx=6, pady=0, cursor="hand2",
                   command=lambda: self._bg_load_dapan()).pack(side=tk.RIGHT, padx=6)
 
-        # ============ 10日情绪分 + 涨跌幅趋势条 (舒展 Canvas: 每天一张竖卡片) ============
-        trend_bar = tk.Frame(dapan_tab, bg="#ECEFF1", height=160)
+        # ============ 10日情绪分 + 涨跌幅趋势条 (紧凑 Canvas) ============
+        trend_bar = tk.Frame(dapan_tab, bg="#ECEFF1", height=72)
         trend_bar.pack(fill=tk.X, pady=(0, 3))
         trend_bar.pack_propagate(False)
-        self._dapan_trend_canvas = tk.Canvas(trend_bar, bg="#ECEFF1", height=160,
+        self._dapan_trend_canvas = tk.Canvas(trend_bar, bg="#ECEFF1", height=72,
                                               highlightthickness=1, highlightbackground="#B0BEC5")
         self._dapan_trend_canvas.pack(fill=tk.BOTH, expand=True)
-        # 缓存 trend10 数据, 供 Canvas resize 时自动重绘 (解决 winfo_width 还没布局完就渲染挤左边的问题)
-        self._dapan_trend_data = None
-        self._dapan_trend_canvas.bind("<Configure>", lambda e: self._redraw_trend_if_width_ok())
         # 默认占位提示
-        self._dapan_trend_canvas.create_text(400, 80, text="⏳ 加载中...",
-                                              fill="#90A4AE", font=("", 10))
+        self._dapan_trend_canvas.create_text(200, 36, text="⏳ 加载最近10日趋势中...",
+                                              fill="#90A4AE", font=("", 9))
 
         # ============ 情绪阶段可视化条 (明确标出当前位置) ============
         emo_strip = tk.Frame(dapan_tab, bg="#424242", height=26); emo_strip.pack(fill=tk.X, pady=(0, 3))
@@ -4095,10 +4091,10 @@ class StockKeywordAnalyzerGUI:
                                                   highlightthickness=0)
         self._dapan_emo_strip_canvas.pack(fill=tk.BOTH, expand=True)
         # 先画默认7阶段
-        _emo_stages_def = [("冰点", "#1B5E20"), ("启动", "#F57F17"),
-                           ("发酵", "#FF6F00"), ("高潮", "#B71C1C"),
+        _emo_stages_def = [("冰点", "#2E7D32"), ("启动", "#F57F17"),
+                           ("发酵", "#FF6F00"), ("高潮", "#C62828"),
                            ("分歧", "#6A1B9A"), ("退潮", "#455A64"),
-                           ("冰点", "#1B5E20")]
+                           ("冰点", "#2E7D32")]
         _seg_w = 90
         for _si, (_sn, _sc) in enumerate(_emo_stages_def):
             _x1 = _si * _seg_w + 2; _x2 = _x1 + _seg_w - 2
@@ -4170,15 +4166,12 @@ class StockKeywordAnalyzerGUI:
         cold_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self._dapan_cold_inner = cold_inner
 
-        # ⛔ 不再自动联网加载大盘数据 —— 用户手动点刷新按钮才触发
-        # try: self.root.after(1500, self._bg_load_dapan)
-        # except Exception as e: print(f"[大盘分析] 自动加载调度失败: {e}")
-
-        # ✅ 启动时秒出旧数据: 读本地 snapshot → 没有 snapshot 则从 emo_history 渲染趋势
-        try:
-            self._try_load_dapan_snapshot()
-        except Exception as _e_load:
-            print(f"[大盘] snapshot 加载异常: {_e_load}", flush=True)
+        # 自动触发首次加载 — 已禁用, 避免后台线程抢 GIL 卡死 UI
+        # 用户切到大盘页点右上角"刷新"按钮手动触发
+        # try:
+        #     self.root.after(1500, self._bg_load_dapan)
+        # except Exception as e:
+        #     print(f"[大盘分析] 自动加载调度失败: {e}")
 
         # 仓位标签页
         position_tab = ttk.Frame(self.position_trading_notebook, padding=2)
@@ -4246,33 +4239,31 @@ class StockKeywordAnalyzerGUI:
                                        values=["下行趋势 不可以做T", "谨慎做T", "上行趋势 可以做T"],
                                        state="disabled", width=18)
         t_trading_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        # 开新仓下拉框和按钮 (已重构: 按情绪周期判断)
+        # 开新仓下拉框和按钮
         new_position_frame = ttk.Frame(position_frame)
         new_position_frame.pack(fill=tk.X, pady=(0, 3))
-        ttk.Label(new_position_frame, text="仓位判断:", font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Label(new_position_frame, text="2开新仓:", font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=(0, 2))
         new_position_var = tk.StringVar(value="禁止开新仓")
         new_position_combo = ttk.Combobox(new_position_frame, textvariable=new_position_var,
                                           values=["禁止开新仓", "可以开新仓"],
                                           state="readonly", width=18)
         new_position_combo.pack(side=tk.LEFT, padx=(0, 5))
-        # 🔵 趋势新仓 (原 龙头+强势+绩优 合并, 核心: 趋势向上时追强)
-        new_position_btn_trend = ttk.Button(new_position_frame, text="📈 趋势新仓", state="disabled")
-        new_position_btn_trend.pack(side=tk.LEFT, padx=(0, 5))
-        # 🟢 均值回归新仓 (大跌到支撑位后反弹开仓)
-        new_position_btn_revert = ttk.Button(new_position_frame, text="📉 均值回归新仓", state="disabled")
-        new_position_btn_revert.pack(side=tk.LEFT, padx=(0, 5))
-        # 🤝 朋友新仓 (朋友介绍的低位股长期持有)
-        new_position_btn_friend = ttk.Button(new_position_frame, text="🤝 朋友新仓", state="disabled")
-        new_position_btn_friend.pack(side=tk.LEFT, padx=(0, 5))
-        self.new_position_button = new_position_btn_trend   # 兼容旧引用
-        self.new_position_button2 = new_position_btn_trend
-        self.new_position_button3 = new_position_btn_trend
-        self.new_position_button4 = new_position_btn_friend
-        self.new_position_button5 = new_position_btn_revert
-        # 存新名字引用方便后续逻辑
-        self._btn_trend = new_position_btn_trend
-        self._btn_revert = new_position_btn_revert
-        self._btn_friend = new_position_btn_friend
+        # 开新仓按钮组(初始状态为禁用)
+        new_position_button = ttk.Button(new_position_frame, text="开龙头新仓", state="disabled")
+        new_position_button.pack(side=tk.LEFT, padx=(0, 5))
+        new_position_button2 = ttk.Button(new_position_frame, text="开强势股新仓", state="disabled")
+        new_position_button2.pack(side=tk.LEFT, padx=(0, 5))
+        new_position_button3 = ttk.Button(new_position_frame, text="开绩优股新仓", state="disabled")
+        new_position_button3.pack(side=tk.LEFT, padx=(0, 5))
+        new_position_button4 = ttk.Button(new_position_frame, text="开朋友新仓", state="disabled")
+        new_position_button4.pack(side=tk.LEFT, padx=(0, 5))
+        new_position_button5 = ttk.Button(new_position_frame, text="开均值回归新仓", state="disabled")
+        new_position_button5.pack(side=tk.LEFT, padx=(0, 5))
+        self.new_position_button = new_position_button
+        self.new_position_button2 = new_position_button2
+        self.new_position_button3 = new_position_button3
+        self.new_position_button4 = new_position_button4
+        self.new_position_button5 = new_position_button5
         # 移除这些按钮,它们将移到右侧的交易标签页中
         # 标注提示(紧凑)
         note_label = ttk.Label(position_frame, text="注:具体T的仓位请按照凯利公式计算执行",
@@ -4663,13 +4654,29 @@ class StockKeywordAnalyzerGUI:
                     # 51-100%:上行趋势,可以做T
                     t_trading_var.set("上行趋势 可以做T")
                     t_trading_combo.config(state="disabled")
-                # 更新"仓位判断"下拉框和按钮状态 (按 情绪周期+连亏天数, 统一走 _can_open_new_position)
-                can_open, _reason = self._can_open_new_position()
-                new_position_var.set("可以开新仓" if can_open else "禁止开新仓")
-                new_position_combo.config(state="readonly")
-                if hasattr(self, '_btn_trend'):
-                    for btn in (self._btn_trend, self._btn_revert, self._btn_friend):
-                        btn.config(state="normal" if can_open else "disabled")
+                # 更新"开新仓"下拉框和按钮状态
+                # 判断情绪指数是否下行:total_score < 0 或 three_dimension_total下降
+                prev_three_dimension_total = getattr(update_position, 'prev_three_dimension_total', three_dimension_total)
+                is_sentiment_down = (total_score < 0) or (three_dimension_total < prev_three_dimension_total)
+                update_position.prev_three_dimension_total = three_dimension_total
+                if is_sentiment_down or position_percent < 30:
+                    # 情绪指数下行或低于30%:禁止开新仓
+                    new_position_var.set("禁止开新仓")
+                    new_position_combo.config(state="readonly")
+                    new_position_button.config(state="disabled")
+                    new_position_button2.config(state="disabled")
+                    new_position_button3.config(state="disabled")
+                    new_position_button4.config(state="disabled")
+                    new_position_button5.config(state="disabled")
+                else:
+                    # 情绪指数上行且大于等于30%:可以开新仓
+                    new_position_var.set("可以开新仓")
+                    new_position_combo.config(state="readonly")
+                    new_position_button.config(state="normal")
+                    new_position_button2.config(state="normal")
+                    new_position_button3.config(state="normal")
+                    new_position_button4.config(state="normal")
+                    new_position_button5.config(state="normal")
             except Exception as e:
                 print(f"更新仓位计算失败: {e}")
         # 绑定下拉框变化事件
@@ -4681,73 +4688,6 @@ class StockKeywordAnalyzerGUI:
         sentiment_combo.bind("<<ComboboxSelected>>", lambda e: update_position())
         # 初始化显示总分值
         update_position()
-    def _count_consecutive_loss_days(self):
-        """从 emo_history.json 判断最近连续亏损天数 (上证 pct < 0 为亏)"""
-        import json as _js, os as _os
-        path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
-        if not _os.path.exists(path):
-            return 0
-        try:
-            with open(path) as f:
-                hist = _js.load(f)
-            if not isinstance(hist, dict):
-                return 0
-            sorted_dates = sorted(hist.keys(), reverse=True)  # 最近的在前
-            count = 0
-            for d in sorted_dates:
-                pct = float(hist[d].get("pct", 0) or 0)
-                if pct < 0:
-                    count += 1
-                else:
-                    break
-            return count
-        except Exception:
-            return 0
-
-    def _can_open_new_position(self, emotion_stage=None):
-        """综合判断能否开新仓: 情绪周期 + 连续亏损天数
-        规则: 震荡/高潮 且 非连续亏损2天 → 可以
-        emotion_stage: 传 None 则自动从 snapshot 或 emo_history 推断
-        """
-        # 1. 情绪周期判断
-        if not emotion_stage:
-            # 优先读大盘 snapshot 里存的情绪周期
-            import os as _os
-            snap_path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_dapan_snapshot.json")
-            if _os.path.exists(snap_path):
-                import json as _js
-                try:
-                    snap = _js.load(open(snap_path))
-                    emo = snap.get("emo", {})
-                    emotion_stage = emo.get("stage") or emo.get("cycle")
-                except Exception:
-                    pass
-            # fallback: 从 emo_history 读最近一天的 stage
-            if not emotion_stage:
-                hist_path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
-                if _os.path.exists(hist_path):
-                    import json as _js
-                    try:
-                        hist = _js.load(open(hist_path))
-                        if isinstance(hist, dict) and hist:
-                            latest_date = sorted(hist.keys())[-1]
-                            emotion_stage = hist[latest_date].get("stage")
-                    except Exception:
-                        pass
-        # 兼容旧值: 上行→高潮, 下行→退潮, 震荡→震荡
-        stage_map = {"上行": "高潮", "震荡": "震荡", "下行": "退潮",
-                     "冰点": "冰点", "启动": "震荡", "发酵": "高潮",
-                     "高潮": "高潮", "分歧": "分歧", "退潮": "退潮"}
-        normalized = stage_map.get(emotion_stage, emotion_stage or "震荡")
-        # 只有 震荡 和 高潮 允许
-        if normalized not in ("震荡", "高潮"):
-            return False, f"情绪={normalized} 不允许开新仓 (仅 震荡/高潮 可开)"
-        # 2. 连续亏损天数
-        loss_days = self._count_consecutive_loss_days()
-        if loss_days >= 2:
-            return False, f"连续亏损 {loss_days} 天, 停止开新仓 (止损为上)"
-        return True, f"情绪={normalized} 连亏={loss_days}天 ✅ 可以开新仓"
-
         # ==================== 新增控件:情绪周期、主流板块、是否止损(同一行) ====================
         new_controls_frame = ttk.Frame(position_frame)
         new_controls_frame.pack(fill=tk.X, pady=(5, 0))
@@ -4764,29 +4704,42 @@ class StockKeywordAnalyzerGUI:
                                         highlightbackground="gray")
         emotion_light_canvas.pack(side=tk.LEFT, padx=(0, 10))
         def update_emotion_light(*args):
-            """更新情绪周期红绿灯,并控制开新仓按钮状态 (按 情绪周期+连亏天数 判断)"""
+            """更新情绪周期红绿灯,并控制开新仓按钮状态"""
             cycle = emotion_cycle_var.get()
             emotion_light_canvas.delete("all")
             if cycle == "上行":
                 emotion_light_canvas.create_oval(2, 2, 18, 18, fill="green", outline="black", width=1)
+                # 上行:可以开新仓
+                if hasattr(self, 'new_position_button'):
+                    self.new_position_button.config(state="normal")
+                    self.new_position_button2.config(state="normal")
+                    self.new_position_button3.config(state="normal")
+                    self.new_position_button4.config(state="normal")
+                    self.new_position_button5.config(state="normal")
             elif cycle == "震荡":
                 emotion_light_canvas.create_oval(2, 2, 18, 18, fill="yellow", outline="black", width=1)
+                # 震荡:可以开新仓
+                if hasattr(self, 'new_position_button'):
+                    self.new_position_button.config(state="normal")
+                    self.new_position_button2.config(state="normal")
+                    self.new_position_button3.config(state="normal")
+                    self.new_position_button4.config(state="normal")
+                    self.new_position_button5.config(state="normal")
             elif cycle == "下行":
                 emotion_light_canvas.create_oval(2, 2, 18, 18, fill="red", outline="black", width=1)
-                # 下行:弹出SOS预警,并启动定时器每5分钟重新打开
+                # 下行:禁止开新仓,按钮灰色不可按
+                if hasattr(self, 'new_position_button'):
+                    self.new_position_button.config(state="disabled")
+                    self.new_position_button2.config(state="disabled")
+                    self.new_position_button3.config(state="disabled")
+                    self.new_position_button4.config(state="disabled")
+                    self.new_position_button5.config(state="disabled")
+                # 弹出SOS预警,并启动定时器每5分钟重新打开
                 self._show_sos_alert()
                 self._start_sos_alert_timer()
-            # 上行或震荡:停止SOS预警定时器
             else:
+                # 上行或震荡:停止SOS预警定时器
                 self._stop_sos_alert_timer()
-            # 统一用 _can_open_new_position 判断 3 个按钮
-            can_open, reason = self._can_open_new_position(emotion_stage=cycle)
-            new_position_var.set("可以开新仓" if can_open else "禁止开新仓")
-            if hasattr(self, '_btn_trend'):
-                for btn in (self._btn_trend, self._btn_revert, self._btn_friend):
-                    btn.config(state="normal" if can_open else "disabled")
-            # 打印判断理由到日志
-            print(f"[仓位判断] {reason}", flush=True)
         # 初始化红绿灯:从历史记录获取最新涨跌个数
         try:
             history = self._get_sentiment_history(limit=1)
@@ -5547,17 +5500,7 @@ class StockKeywordAnalyzerGUI:
                                     if realtime_price > 0.01 and realtime_price < 10000:
                                         print(f"[tushare实时] {stock_code} 实时价格: {realtime_price}")
                             except:
-                                # 如果实时行情失败,尝试获取今日收盘价
-                                try:
-                                    today = datetime.now().strftime('%Y%m%d')
-                                    pro = ts.pro_api()
-                                    df = pro.daily(ts_code=ts_code, trade_date=today)
-                                    if df is not None and not df.empty and 'close' in df.columns:
-                                        realtime_price = float(df.iloc[0]['close'])
-                                        if realtime_price > 0.01 and realtime_price < 10000:
-                                            print(f"[tushare今日] {stock_code} 今日收盘价: {realtime_price}")
-                                except:
-                                    pass
+                                pass  # 跳过 daily fallback, 实时失败用历史收盘价(外层已兜底)
                         except Exception as e:
                             print(f"获取实时价格失败 {stock_code}: {e}")
                 except:
@@ -5690,17 +5633,7 @@ class StockKeywordAnalyzerGUI:
                                     if realtime_price > 0.01 and realtime_price < 10000:
                                         print(f"[tushare实时] {stock_code} 实时价格: {realtime_price}")
                             except:
-                                # 如果实时行情失败,尝试获取今日收盘价
-                                try:
-                                    today = datetime.now().strftime('%Y%m%d')
-                                    pro = ts.pro_api()
-                                    df = pro.daily(ts_code=ts_code, trade_date=today)
-                                    if df is not None and not df.empty and 'close' in df.columns:
-                                        realtime_price = float(df.iloc[0]['close'])
-                                        if realtime_price > 0.01 and realtime_price < 10000:
-                                            print(f"[tushare今日] {stock_code} 今日收盘价: {realtime_price}")
-                                except:
-                                    pass
+                                pass  # 跳过 daily fallback, 实时失败用历史收盘价(外层已兜底)
                         except Exception as e:
                             print(f"获取实时价格失败 {stock_code}: {e}")
                 except:
@@ -5813,17 +5746,7 @@ class StockKeywordAnalyzerGUI:
                                     if realtime_price > 0.01 and realtime_price < 10000:
                                         print(f"[tushare实时] {stock_code} 实时价格: {realtime_price}")
                             except:
-                                # 如果实时行情失败,尝试获取今日收盘价
-                                try:
-                                    today = datetime.now().strftime('%Y%m%d')
-                                    pro = ts.pro_api()
-                                    df = pro.daily(ts_code=ts_code, trade_date=today)
-                                    if df is not None and not df.empty and 'close' in df.columns:
-                                        realtime_price = float(df.iloc[0]['close'])
-                                        if realtime_price > 0.01 and realtime_price < 10000:
-                                            print(f"[tushare今日] {stock_code} 今日收盘价: {realtime_price}")
-                                except:
-                                    pass
+                                pass  # 跳过 daily fallback, 实时失败用历史收盘价(外层已兜底)
                         except Exception as e:
                             print(f"获取实时价格失败 {stock_code}: {e}")
                 except:
@@ -5970,17 +5893,7 @@ class StockKeywordAnalyzerGUI:
                                     if realtime_price > 0.01 and realtime_price < 10000:
                                         print(f"[tushare实时] {stock_code} 实时价格: {realtime_price}")
                             except:
-                                # 如果实时行情失败,尝试获取今日收盘价
-                                try:
-                                    today = datetime.now().strftime('%Y%m%d')
-                                    pro = ts.pro_api()
-                                    df = pro.daily(ts_code=ts_code, trade_date=today)
-                                    if df is not None and not df.empty and 'close' in df.columns:
-                                        realtime_price = float(df.iloc[0]['close'])
-                                        if realtime_price > 0.01 and realtime_price < 10000:
-                                            print(f"[tushare今日] {stock_code} 今日收盘价: {realtime_price}")
-                                except:
-                                    pass
+                                pass  # 跳过 daily fallback, 实时失败用历史收盘价(外层已兜底)
                         except Exception as e:
                             print(f"获取实时价格失败 {stock_code}: {e}")
                 except:
@@ -8283,7 +8196,7 @@ class StockKeywordAnalyzerGUI:
             except Exception as e:
                 print(f"初次从资讯刷新 Main 失败: {e}")
         try:
-            self.root.after(15000, _deferred_first_news_refresh)
+            self.root.after(15000, _deferred_first_news_refresh)  # 延后 15s 避免启动 GIL 竞争
         except Exception:
             try:
                 self._refresh_holding_tabs_from_news()
@@ -8327,7 +8240,6 @@ class StockKeywordAnalyzerGUI:
             ("🏦华尔街红绿灯", self._show_wall_street_traffic_light, False, "quick"),
             ("🇨🇳A股红绿灯", self._show_a_share_traffic_light, False, "quick"),
             ("⚠️盘中警告", self._show_intraday_alert_dialog, False, "quick"),
-            ("🧲盘中拉升", self._show_intraday_rally_dialog, False, "quick"),
             ("📊持股仪表盘", self._show_portfolio_dashboard, False, "quick"),
             ("🦅游资心法", self._show_hotmoney_check, False, "quick"),
             ("🏅贵金属", self._show_precious_metals_dialog, False, "quick"),
@@ -8367,7 +8279,6 @@ class StockKeywordAnalyzerGUI:
             # ---- 💼 持仓/预测 (tools) ----
             ("自持股监测", self._show_self_holding_monitor_popup, False, "tools"),
             ("🧬生命周期", self._show_lifecycle_popup, False, "tools"),
-            ("🎭情绪周期", self._show_emo_cycle_dialog, False, "tools"),
             ("🔮明日预测", self._show_tomorrow_predict_popup, False, "tools"),
             ("预测", self.show_news_prediction_analysis, False, "tools"),
         ]
@@ -8869,8 +8780,8 @@ class StockKeywordAnalyzerGUI:
         self.growth_text_widget.pack(fill=tk.BOTH, expand=True)
         self.growth_text_widget.config(state=tk.DISABLED)
         self.growth_candidate_list = []
-        # ⛔ 不再自动调问财选股 —— 用户点刷新按钮才触发 (之前每次启动白等 27s × 2)
-        # self._refresh_growth_candidates()
+        # 启动不自动刷新成长股候选:问财链路无 Cookie 时查询必失败且曾导致首窗 179s 出不来;
+        # 即便有 Cookie 同步查询也会卡主线程。需要时点击「刷新候选」按钮再查(已加挂起守卫,秒级返回)。
         # 配置文本颜色标签(6种颜色:红橙绿蓝紫黑)
         color_tags = [
             ("red", "red"), ("orange", "orange"), ("green", "green"),
@@ -9163,7 +9074,7 @@ class StockKeywordAnalyzerGUI:
         self.update_text_input_reference()
         # 同花顺情绪指数:启动后约 5 秒先弹一次,之后每半小时再提醒
         try:
-            self.root.after(25000, self._th_reminder_tick)
+            self.root.after(15000, self._th_reminder_tick)  # 延后 15s
         except Exception:
             pass
     def _popup_font_family(self):
@@ -10014,14 +9925,14 @@ class StockKeywordAnalyzerGUI:
                         self.jiuyangongshe_crawler = JiuYangGongSheCrawler()
                 except Exception as e:
                     print(f"爬虫延迟初始化失败: {e}")
-            self.root.after(20000, _deferred_crawler_init)
+            self.root.after(15000, _deferred_crawler_init)  # 延后 15s
             # Skill 定时调度器(全局每 20s 轮询),延后 6 秒等 UI 就绪
             def _deferred_skill_scheduler():
                 try:
                     self._start_skill_scheduler()
                 except Exception as e:
                     print(f"Skill 调度器启动失败: {e}")
-            self.root.after(30000, _deferred_skill_scheduler)
+            self.root.after(25000, _deferred_skill_scheduler)  # 延后 25s
         # 在界面显示后延迟执行耗时操作(500ms,让UI先渲染)
         self.root.after(500, delayed_init)
     def set_merged_as_default_config(self):
@@ -15180,6 +15091,22 @@ class StockKeywordAnalyzerGUI:
             progress_bar.start()
             progress_window.update()
             def crawl_thread():
+                _ck15 = (os.environ.get("IWENCAI_COOKIE") or os.environ.get("WENCAI_COOKIE") or "").strip()
+                if not _ck15:
+                    # 问财挂起: 未配置 Cookie 时问财必 403/空表,直接放弃本次爬取,避免 spawn node 重试白等
+                    try:
+                        progress_window.destroy()
+                    except Exception:
+                        pass
+                    messagebox.showwarning(
+                        "问财已挂起",
+                        "未设置 IWENCAI_COOKIE,问财爬取链路已挂起(避免无谓等待)。\n\n"
+                        "浏览器登录 https://www.iwencai.com 后,复制整段 Cookie 设置环境变量:\n"
+                        "  export IWENCAI_COOKIE='整段cookie'\n\n"
+                        "设置后重启程序即可恢复「爬取问财15Min」。",
+                        parent=self.root,
+                    )
+                    return
                 iwencai_diag = []  # 失败时在弹窗中展示(pywencai 常因未装 Node 而失败)
                 _diag_node_missing = False   # Node 缺失时为 True,用于裁剪下方通用排查提示
                 _diag_pywencai_missing = False  # pywencai 未安装时为 True
@@ -15760,9 +15687,10 @@ class StockKeywordAnalyzerGUI:
             return [], diag
         _ck = (os.environ.get("IWENCAI_COOKIE") or os.environ.get("WENCAI_COOKIE") or "").strip()
         if not _ck:
-            diag.append(
-                "• 提示:未设置 IWENCAI_COOKIE;若问财返回空表或频繁失败,请浏览器登录 iwcai.com 问财后复制 Cookie 到环境变量再启动。"
-            )
+            # 问财挂起: 未配置 Cookie 时 pywencai 必然 403/空表,不再走 retry 白等
+            diag.append("• 未设置 IWENCAI_COOKIE,问财链路已挂起(本次直接跳过问财拉候选)。")
+            diag.append("  浏览器登录 https://www.iwencai.com 后复制整段 Cookie,设置环境变量 IWENCAI_COOKIE 并重启程序即可恢复。")
+            return [], diag
         for qi, query in enumerate(queries):
             try:
                 _kw = {"query": query, "loop": True, "retry": 15, "sleep": 1}
@@ -17494,18 +17422,6 @@ class StockKeywordAnalyzerGUI:
         win.transient(self.root)
         top = ttk.Frame(win, padding=10)
         top.pack(fill=tk.BOTH, expand=True)
-        # 辅助:根据游资分返回 tag 名
-        def _hm_tag(sc):
-            try:
-                s = int(sc)
-            except (ValueError, TypeError):
-                return "tonghuashun"
-            if s >= 90: return "tonghuashun_hm_red90"
-            if s >= 85: return "tonghuashun_hm_red85"
-            if s >= 75: return "tonghuashun_hm_red75"
-            if s >= 65: return "tonghuashun_hm_high"
-            if s >= 45: return "tonghuashun_hm_mid"
-            return "tonghuashun"
         # 分离选股通板块数据和同花顺股票数据
         xuangu_sectors = [d for d in data_list if d.get('来源') == '选股通']
         ths_stocks = [d for d in data_list if d.get('来源') == '同花顺']
@@ -17517,12 +17433,6 @@ class StockKeywordAnalyzerGUI:
         # 为同花顺热股补充最近10个交易日的每日涨跌幅(近1日~近10日)及与10日均线的百分比距离
         day_headers = [f"近{i}日" for i in range(1, 11)]
         ma10_col = "距10日线%"
-        # 初始化游资心法字段
-        hm_score_col = "游资分"
-        hm_sch_col = "最佳流派"
-        for s in ths_stocks:
-            s[hm_score_col] = "-"
-            s[hm_sch_col] = "-"
         for s in ths_stocks:
             code = s.get('code', '')
             for k in range(1, 11):
@@ -17591,18 +17501,6 @@ class StockKeywordAnalyzerGUI:
             for s in ths_stocks:
                 code = (s.get('code') or '')[-6:].zfill(6) if s.get('code') else ''
                 s['大单净额'] = big_order_map.get(code) if code else None
-            # ====== 去重:按代码保留第一个 ======
-            _seen_codes = set()
-            _deduped = []
-            for s in ths_stocks:
-                _c = (s.get('code') or '').strip()[-6:]
-                if _c and _c not in _seen_codes:
-                    _seen_codes.add(_c)
-                    _deduped.append(s)
-            n_dup = len(ths_stocks) - len(_deduped)
-            if n_dup > 0:
-                print(f"[热门股非去重] 同花顺去重: {len(ths_stocks)} → {len(_deduped)} (去掉 {n_dup} 个重复)")
-                ths_stocks = _deduped
             def _fmt_flow_popup(v):
                 if v is None or (isinstance(v, float) and pd.isna(v)):
                     return "--"
@@ -17768,11 +17666,6 @@ class StockKeywordAnalyzerGUI:
         text_widget.tag_configure("xuangutong", foreground="black")
         text_widget.tag_configure("tonghuashun", foreground="red")
         text_widget.tag_configure("tonghuashun_near_ma10", foreground="blue")  # 距10日线%绝对值<3%时名称和距10日线%蓝色;10日涨跌幅中跌幅蓝色
-        text_widget.tag_configure("tonghuashun_hm_high", foreground="#C62828", font=("Consolas", 12, "bold"))  # 65-74 大红
-        text_widget.tag_configure("tonghuashun_hm_red75", foreground="#B71C1C", font=("Consolas", 12, "bold"))   # 75-84 深红
-        text_widget.tag_configure("tonghuashun_hm_red85", foreground="#880E4F", font=("Consolas", 13, "bold"))   # 85-89 暗红
-        text_widget.tag_configure("tonghuashun_hm_red90", foreground="#4A148C", font=("Consolas", 14, "bold"))   # 90+ 最深紫红
-        text_widget.tag_configure("tonghuashun_hm_mid", foreground="#E65100", font=("Consolas", 12, "bold"))   # 45-64 橙色
         text_widget.tag_configure("fish_body", foreground="#b71c1c", font=("Consolas", 12, "bold"))
         text_widget.tag_configure("fish_tail", foreground="#1b5e20", font=("Consolas", 12, "bold"))
         text_widget.tag_configure("golden_stock", foreground="#b8860b", font=("Consolas", 12, "bold"))
@@ -17794,7 +17687,7 @@ class StockKeywordAnalyzerGUI:
         if ths_stocks:
             text_widget.insert("end", "===== 同花顺热股+逻辑 =====\n", "header")
             header_row = (
-                "代码\t名称\t鱼身鱼尾\t游资分\t最佳流派\t黄金股\t★\t▲\t逻辑/概念标签\t"
+                "代码\t名称\t鱼身鱼尾\t黄金股\t★\t▲\t逻辑/概念标签\t"
                 + "\t".join(day_headers)
                 + "\t"
                 + ma10_col
@@ -17822,10 +17715,6 @@ class StockKeywordAnalyzerGUI:
                     text_widget.insert("end", f"{fish_txt}\t", "fish_tail")
                 else:
                     text_widget.insert("end", f"{fish_txt}\t", "tonghuashun")
-                # 游资分 + 最佳流派 (鱼身鱼尾旁边)
-                _hm_sc = s.get(hm_score_col, "-")
-                text_widget.insert("end", f"{_hm_sc}\t", _hm_tag(_hm_sc))
-                text_widget.insert("end", f"{s.get(hm_sch_col, '-') or '-'}\t", "tonghuashun")
                 gold_txt = (s.get(golden_col, '') or '').strip()
                 if gold_txt == '黄金股':
                     text_widget.insert("end", f"{gold_txt}\t", "golden_stock")
@@ -17857,65 +17746,6 @@ class StockKeywordAnalyzerGUI:
                 text_widget.insert("end", ths_stat_line2 + "\n", "header")
             if ths_stat_line3:
                 text_widget.insert("end", ths_stat_line3 + "\n", "header")
-            # ===== 异步算游资心法分 =====
-            print(f"[热门股游资心法] ⏳ 准备启动后台线程, ths_stocks={len(ths_stocks)}", flush=True)
-            import threading as _th_hm_hot
-            def _bg_hm_hot():
-                print(f"[热门股游资心法] 🧵 线程已启动, 开始遍历 {len(ths_stocks)} 只", flush=True)
-                for i, s in enumerate(ths_stocks):
-                    if not win.winfo_exists(): break
-                    try:
-                        code6 = (s.get('code') or '').strip()[-6:].zfill(6)
-                        if not code6 or not code6.isdigit(): continue
-                        print(f"[热门股游资心法] [{i+1}/{len(ths_stocks)}] 计算 {code6}...", flush=True)
-                        hm = self._hm_calc_for_stock(code6)
-                        sc = hm.get("avg_score")
-                        best = hm.get("best_sch", "-")
-                        sc_txt = "-" if sc is None else f"{int(sc)}"
-                        s[hm_score_col] = sc_txt
-                        s[hm_sch_col] = best or "-"
-                    except Exception as e:
-                        print(f"[热门股游资心法] {s.get('code','')} err: {e}")
-                    import time as _t; _t.sleep(0.3)
-                # ===== 全部算完后:按游资分降序排序 + 最终刷新 =====
-                def _hm_sort_key(s):
-                    try: return -int(s.get(hm_score_col, "-"))
-                    except: return 999
-                ths_stocks.sort(key=_hm_sort_key)
-                print(f"[热门股游资心法] ✅ 全部完成,已按游资分降序排序", flush=True)
-                def _final_refresh():
-                    if not win.winfo_exists(): return
-                    try:
-                        text_widget.config(state=tk.NORMAL)
-                        ths_start_idx = text_widget.search("同花顺热股", "1.0", stopindex="end")
-                        if ths_start_idx:
-                            line_start = ths_start_idx.split(".")[0] + ".0"
-                            ths_end_idx = text_widget.search("选股通板块数据", line_start, stopindex="end")
-                            end_line = str(int(ths_end_idx.split(".")[0]) - 1) + ".end" if ths_end_idx else "end"
-                            text_widget.delete(line_start, end_line)
-                            text_widget.insert(line_start, "===== 同花顺热股+逻辑 =====\n", "header")
-                            text_widget.insert(line_start + " lineend", header_row, "tonghuashun")
-                            for ss in ths_stocks:
-                                _hm_sc = ss.get(hm_score_col, "-")
-                                text_widget.insert("end", f"{ss.get('code', '')}\t{ss.get('name', '')}\t", "tonghuashun")
-                                text_widget.insert("end", f"{ss.get(fish_phase_col, '') or ''}\t", "tonghuashun")
-                                text_widget.insert("end", f"{_hm_sc}\t", _hm_tag(_hm_sc))
-                                text_widget.insert("end", f"{ss.get(hm_sch_col, '') or '-'}\t", "tonghuashun")
-                                text_widget.insert("end", f"{ss.get(golden_col, '') or ''}\t", "tonghuashun")
-                                text_widget.insert("end", f"{ss.get(star_col, '') or ''}\t", "tonghuashun")
-                                text_widget.insert("end", f"{ss.get(tri_col, '') or ''}\t", "tonghuashun")
-                                text_widget.insert("end", f"{ss.get('逻辑', '') or ''}\t", "tonghuashun")
-                                for k in range(1, 11):
-                                    text_widget.insert("end", f"{ss.get(f'近{k}日', '')}\t" if k < 10 else f"{ss.get(f'近{k}日', '')}", "tonghuashun")
-                                text_widget.insert("end", f"\t{ss.get(ma10_col, '')}\n", "tonghuashun")
-                            if ths_stat_line1: text_widget.insert("end", ths_stat_line1 + "\n", "header")
-                            if ths_stat_line2: text_widget.insert("end", ths_stat_line2 + "\n", "header")
-                            if ths_stat_line3: text_widget.insert("end", ths_stat_line3 + "\n", "header")
-                        text_widget.config(state=tk.DISABLED)
-                    except Exception as ex:
-                        print(f"[热门股游资心法] final refresh err: {ex}")
-                self.root.after(0, _final_refresh)
-            _th_hm_hot.Thread(target=_bg_hm_hot, daemon=True).start()
         def get_full_text():
             lines = []
             if xuangu_sectors:
@@ -17929,7 +17759,7 @@ class StockKeywordAnalyzerGUI:
             if ths_stocks:
                 lines.append("===== 同花顺热股+逻辑 =====")
                 lines.append(
-                    "代码\t名称\t鱼身鱼尾\t游资分\t最佳流派\t黄金股\t★\t▲\t逻辑/概念标签\t"
+                    "代码\t名称\t鱼身鱼尾\t黄金股\t★\t▲\t逻辑/概念标签\t"
                     + "\t".join(day_headers)
                     + "\t"
                     + ma10_col
@@ -17941,10 +17771,8 @@ class StockKeywordAnalyzerGUI:
                     gld = s.get(golden_col, '') or ''
                     st = s.get(star_col, '') or ''
                     tr = s.get(tri_col, '') or ''
-                    hm_sc = s.get(hm_score_col, '-') or '-'
-                    hm_sch = s.get(hm_sch_col, '-') or '-'
                     lines.append(
-                        f"{s.get('code', '')}\t{s.get('name', '')}\t{fp}\t{hm_sc}\t{hm_sch}\t{gld}\t{st}\t{tr}\t{s.get('逻辑', '')}\t{day_cols}\t{ma10_val}"
+                        f"{s.get('code', '')}\t{s.get('name', '')}\t{fp}\t{gld}\t{st}\t{tr}\t{s.get('逻辑', '')}\t{day_cols}\t{ma10_val}"
                     )
                 if ths_stat_line1:
                     lines.append(ths_stat_line1)
@@ -17959,27 +17787,7 @@ class StockKeywordAnalyzerGUI:
                 messagebox.showinfo("提示", "内容为空", parent=win)
                 return
             self.open_full_window_viewer_from_content(content, "热门股非去重")
-        def _on_double_click_ths(event):
-            """双击热门股行 → 打开该股票游资心法全解 + K线图"""
-            try:
-                # 从 Text 控件双击位置提取行
-                idx = text_widget.index(f"@{event.x},{event.y}")
-                row = int(idx.split(".")[0])
-                line_text = text_widget.get(f"{row}.0", f"{row}.end")
-                # 行格式: code\tname\t... 第一列就是代码
-                parts = line_text.split("\t")
-                code6 = (parts[0] if parts else "").strip()
-                # 跳过表头/空行
-                if not code6 or not code6.isdigit() or len(code6) != 6:
-                    open_full_view()  # 表头双击 → 打开全窗口
-                    return
-                name = parts[1].strip() if len(parts) > 1 else ""
-                print(f"[热门股双击] {name}({code6}) → 打开游资心法全解", flush=True)
-                self._open_hotmoney_single_dialog(auto_code=code6, auto_name=name)
-            except Exception as e:
-                print(f"[热门股双击] err: {e}")
-                open_full_view()
-        text_widget.bind("<Double-Button-1>", _on_double_click_ths)
+        text_widget.bind("<Double-Button-1>", lambda e: open_full_view())
         btn_frame = ttk.Frame(top)
         btn_frame.pack(fill=tk.X)
         def save_to_txt():
@@ -27517,10 +27325,13 @@ class StockKeywordAnalyzerGUI:
             return []
         _ck = (os.environ.get("IWENCAI_COOKIE") or os.environ.get("WENCAI_COOKIE") or "").strip()
         _node_ok = bool(shutil.which("node"))
+        # 问财挂起守卫: 未配置 IWENCAI_COOKIE 时 pywencai/旧版HTTP 几乎必失败(403/401/NoneType),
+        # 且每次都会 spawn node 重试十几轮拖慢界面。挂起后直接走 tushare 本地兜底,配置 Cookie 即自动恢复。
+        _wencai_ready = bool(_ck)
         _pywencai_ok = False
         _need_cookie = False
-        # 方法1: pywencai (需 Node + 可选 Cookie)
-        if _node_ok:
+        # 方法1: pywencai (需 Node + IWENCAI_COOKIE)
+        if _wencai_ready and _node_ok:
             try:
                 import pywencai
                 _pywencai_ok = True
@@ -27544,30 +27355,31 @@ class StockKeywordAnalyzerGUI:
                     print(f"[问财/pywencai] 探测: {_probe_msg}")
                 except Exception:
                     pass
-        # 方法2: 旧版 HTTP (已失效 401,仅作为历史残留)
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Referer': 'http://www.iwencai.com/',
-                'Accept': 'application/json, text/plain, */*',
-                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'Content-Type': 'application/json'
-            }
-            url = "http://www.iwencai.com/customized/chart/get-robot-data"
-            data = {"question": question, "perpage": 100, "page": 1, "secondary_intent": "stock"}
-            response = requests.post(url, json=data, headers=headers, timeout=15)
-            if response.status_code == 200:
-                result = response.json()
-                stocks = self._parse_iwencai_data(result)
-                if stocks:
-                    print(f"[问财/旧版HTTP] 选股成功,共 {len(stocks)} 只")
-                    return stocks
-            elif response.status_code == 401:
-                print("[问财/旧版HTTP] 401 Unauthorized(接口已废弃)")
-            else:
-                print(f"[问财/旧版HTTP] HTTP {response.status_code}")
-        except Exception as e:
-            print(f"[问财/旧版HTTP] 失败: {e}")
+        # 方法2: 旧版 HTTP (已失效 401,仅作为历史残留; 未配 Cookie 同样跳过)
+        if _wencai_ready:
+            try:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Referer': 'http://www.iwencai.com/',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                    'Content-Type': 'application/json'
+                }
+                url = "http://www.iwencai.com/customized/chart/get-robot-data"
+                data = {"question": question, "perpage": 100, "page": 1, "secondary_intent": "stock"}
+                response = requests.post(url, json=data, headers=headers, timeout=15)
+                if response.status_code == 200:
+                    result = response.json()
+                    stocks = self._parse_iwencai_data(result)
+                    if stocks:
+                        print(f"[问财/旧版HTTP] 选股成功,共 {len(stocks)} 只")
+                        return stocks
+                elif response.status_code == 401:
+                    print("[问财/旧版HTTP] 401 Unauthorized(接口已废弃)")
+                else:
+                    print(f"[问财/旧版HTTP] HTTP {response.status_code}")
+            except Exception as e:
+                print(f"[问财/旧版HTTP] 失败: {e}")
         # 方法3: tushare 本地兜底 (解析简单条件)
         try:
             stocks = self._tushare_local_filter(question)
@@ -40091,25 +39903,28 @@ class StockKeywordAnalyzerGUI:
                 import pywencai
                 load_iwencai_env_from_dotfiles()
                 _ck = (os.environ.get("IWENCAI_COOKIE") or os.environ.get("WENCAI_COOKIE") or "").strip()
-                _kw = {"query": q_news, "loop": True, "retry": 15, "sleep": 1}
-                if _ck:
+                if not _ck:
+                    # 问财挂起: 未配置 IWENCAI_COOKIE 时 pywencai 必 403,不再 retry 白等,直接降级后续数据源
+                    note_parts.append("pywencai: 未设置 IWENCAI_COOKIE,链路已挂起")
+                else:
+                    _kw = {"query": q_news, "loop": True, "retry": 15, "sleep": 1}
                     _kw["cookie"] = _ck
-                df = pywencai.get(**_kw)
-                stocks = self._pywencai_df_to_elevator_stocks(df)
-                for s in stocks[: max_n * 2]:
-                    code = s.get("code") or ""
-                    if len(str(code)) != 6:
-                        continue
-                    candidates.append(
-                        {
-                            "code": str(code).zfill(6),
-                            "name": str(s.get("name") or ""),
-                            "snippet": "",
-                            "raw": {},
-                        }
-                    )
-                if candidates:
-                    note_parts.append("股票来源:问财 pywencai")
+                    df = pywencai.get(**_kw)
+                    stocks = self._pywencai_df_to_elevator_stocks(df)
+                    for s in stocks[: max_n * 2]:
+                        code = s.get("code") or ""
+                        if len(str(code)) != 6:
+                            continue
+                        candidates.append(
+                            {
+                                "code": str(code).zfill(6),
+                                "name": str(s.get("name") or ""),
+                                "snippet": "",
+                                "raw": {},
+                            }
+                        )
+                    if candidates:
+                        note_parts.append("股票来源:问财 pywencai")
             except ImportError:
                 note_parts.append("pywencai 未安装")
             except Exception as e:
@@ -43542,225 +43357,7 @@ class StockKeywordAnalyzerGUI:
 
         return "\n".join(lines)
 
-    # ==================== 🧲 盘中拉升/变盘预测扫描 ====================
-    def _show_intraday_rally_dialog(self):
-        """🧲 盘中拉升预警 + 变盘预测: 批量跑 skill → 概率排序表"""
-        import tkinter as tk
-        from tkinter import ttk
-
-        top = tk.Toplevel(self.root)
-        top.title("🧲 盘中拉升 · 变盘预测扫描")
-        top.geometry("1100x720")
-        top.configure(bg="#FAFAFA")
-
-        # 顶部大标题
-        header = tk.Frame(top, bg="#6A1B9A")
-        header.pack(fill=tk.X)
-        tk.Label(header, text="🧲 盘中拉升 · 变盘预测扫描",
-                 bg="#6A1B9A", fg="white", font=("", 13, "bold")).pack(side=tk.LEFT, padx=10, pady=8)
-        ir_ts_var = tk.StringVar(value="")
-        tk.Label(header, textvariable=ir_ts_var,
-                 bg="#6A1B9A", fg="#CE93D8", font=("", 9)).pack(side=tk.RIGHT, padx=10)
-
-        # 控制栏
-        ctrl = tk.Frame(top, bg="#F3E5F5"); ctrl.pack(fill=tk.X, padx=8, pady=6)
-        ir_status_var = tk.StringVar(value="⏳ 点「🔍 扫描持仓」开始")
-        tk.Label(ctrl, textvariable=ir_status_var, bg="#F3E5F5", fg="#4A148C",
-                 font=("", 10)).pack(side=tk.LEFT, padx=8)
-
-        ir_run_btn = tk.Button(ctrl, text="🔍 扫描持仓", bg="#6A1B9A", fg="white",
-                               font=("", 10, "bold"), padx=12, relief=tk.FLAT,
-                               cursor="hand2")
-        ir_run_btn.pack(side=tk.RIGHT, padx=4)
-
-        # 使用说明
-        help_frame = tk.LabelFrame(top, text="📖 使用说明", bg="#FAFAFA", font=("", 9, "bold"),
-                                    fg="#6A1B9A")
-        help_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
-        help_txt = ("• 🕐 最佳使用时段: 盘中 9:30-14:30 — 实时分时/分钟K信号最准; 盘后跑只能看到全天静态数据，分时信号会失真\n"
-                    "• 🎯 拉升概率 ≥55% 且 分时MACD金叉 + 量能≥3倍 + 价在均价线上 → 高概率触发资金拉升, 可以重点盯盘\n"
-                    "• ⚠️ 变盘前兆: BOLL收口 + 日线底背离 — 方向即将选择, 提前做好预案\n"
-                    "• 🔄 建议盘中每 10-15 分钟点一次「重新扫描」, 信号会随分时更新\n"
-                    "• 💡 双击任意一行 → 查看该股所有信号的精确数值和原始 JSON")
-        tk.Label(help_frame, text=help_txt, bg="#FAFAFA", fg="#555", font=("", 9),
-                 justify=tk.LEFT, anchor="w", wraplength=1050).pack(padx=8, pady=6)
-
-        # 概览卡片
-        overview = tk.Frame(top, bg="#FAFAFA")
-        overview.pack(fill=tk.X, padx=8, pady=(0, 4))
-        ir_hot_var = tk.StringVar(value="🔥 高拉升概率: -")
-        tk.Label(overview, textvariable=ir_hot_var, bg="#FAFAFA", fg="#C62828",
-                 font=("", 11, "bold")).pack(side=tk.LEFT, padx=8)
-        ir_warn_var = tk.StringVar(value="⚠️ 变盘前兆: -")
-        tk.Label(overview, textvariable=ir_warn_var, bg="#FAFAFA", fg="#E65100",
-                 font=("", 11, "bold")).pack(side=tk.LEFT, padx=8)
-        ir_total_var = tk.StringVar(value="📊 总计 0 只")
-        tk.Label(overview, textvariable=ir_total_var, bg="#FAFAFA", fg="#4A148C",
-                 font=("", 10)).pack(side=tk.RIGHT, padx=8)
-
-        # 主结果表
-        result_frame = tk.LabelFrame(top, text="📈 拉升概率排序 (越高越可能被资金盯上)",
-                                      bg="#FAFAFA", font=("", 10, "bold"))
-        result_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-
-        cols = ("股票", "代码", "分组", "拉升概率", "score", "量能", "VWAP", "分时MACD",
-                "5m_MACD", "15m_MACD", "MA20", "BOLL", "变盘")
-        tree = ttk.Treeview(result_frame, columns=cols, show="headings", height=14)
-        widths = (100, 80, 70, 80, 55, 65, 60, 80, 80, 80, 60, 65, 80)
-        for c, w in zip(cols, widths):
-            tree.heading(c, text=c)
-            tree.column(c, width=w, anchor="center")
-        tree.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
-
-        # 加 tag 颜色
-        tree.tag_configure("hot", foreground="#C62828", font=("", 10, "bold"))
-        tree.tag_configure("warm", foreground="#E65100", font=("", 10, "bold"))
-        tree.tag_configure("cool", foreground="#2E7D32")
-        tree.tag_configure("default", foreground="#333")
-
-        # 详情区
-        detail_frame = tk.LabelFrame(top, text="🔬 选中股票信号详情 (双击行查看)",
-                                      bg="#FAFAFA", font=("", 10, "bold"))
-        detail_frame.pack(fill=tk.X, padx=8, pady=(4, 8))
-        detail_txt = tk.Text(detail_frame, height=5, wrap=tk.WORD, font=("Menlo", 10),
-                              bg="#FAFAFA", relief=tk.FLAT, padx=6, pady=6)
-        detail_txt.pack(fill=tk.X, padx=4, pady=4)
-
-        def _get_holdings():
-            """从 4 个核心持仓组拿股票"""
-            result = []
-            seen = set()
-            groups = [(1, "自持股"), (2, "龙头股"), (4, "Main"), (6, "同花顺")]
-            for gi, gname in groups:
-                attr = f"holding_stocks{'_'+str(gi) if gi > 1 else ''}"
-                hs = getattr(self, attr, [])
-                print(f"[盘中拉升] 组{gname} attr={attr} 数量={len([h for h in hs if h])}", flush=True)
-                for h in hs:
-                    if not h: continue
-                    try:
-                        name, code = h[0], str(h[1])
-                    except: continue
-                    if not name or not code: continue
-                    code6 = code.strip()[-6:]
-                    if code6 in seen: continue
-                    seen.add(code6)
-                    result.append((name.strip(), code6, gname))
-            print(f"[盘中拉升] _get_holdings() 返回 {len(result)} 只", flush=True)
-            return result
-
-        def _run_scan():
-            import subprocess as _sp
-            import json as _js
-            import os as _os
-            import threading as _th
-            from datetime import datetime as _dt
-
-            print(f"[盘中拉升] 🔘 按钮被点击, _run_scan 进入", flush=True)
-            holdings = _get_holdings()
-            if not holdings:
-                ir_status_var.set("❌ 4个核心持仓组都是空的")
-                return
-
-            ir_run_btn.config(state=tk.DISABLED, text="⏳ 扫描中...")
-            ir_status_var.set(f"⏳ 准备扫描 {len(holdings)} 只持仓...")
-            tree.delete("", tk.END)
-            detail_txt.delete("1.0", tk.END)
-
-            SKILL_SCRIPT = _os.path.expanduser(
-                "~/.qclaw/skills/stock-intraday-rally/scripts/intraday_rally_detector.py")
-            PY = "/Users/faronpan/Agent/stockyidong_project/venv/bin/python3"
-            results = []
-
-            def _scan():
-                print(f"[盘中拉升] 🚀 开始扫描 {len(holdings)} 只持仓 (skill={SKILL_SCRIPT})", flush=True)
-                for i, (name, code, gname) in enumerate(holdings):
-                    msg = f"⏳ [{i+1}/{len(holdings)}] {name}({code})..."
-                    top.after(0, lambda m=msg: ir_status_var.set(m))  # ⚠️ 必须主线程更新
-                    try:
-                        r = _sp.run([PY, SKILL_SCRIPT, code],
-                                    capture_output=True, text=True, timeout=45)
-                        out = r.stdout.strip()
-                        if r.returncode == 0 and out:
-                            data = _js.loads(out)
-                            data["name"] = name
-                            data["code6"] = code
-                            data["group"] = gname
-                            results.append(data)
-                            print(f"[盘中拉升] ✅ {name}({code}) prob={data.get('拉升概率%','-')}%", flush=True)
-                        else:
-                            print(f"[盘中拉升] ⚠️ {name}({code}) 无输出 rc={r.returncode}", flush=True)
-                    except Exception as e:
-                        print(f"[盘中拉升] ❌ {name}({code}) err: {e}", flush=True)
-                print(f"[盘中拉升] 🏁 扫描结束 {len(results)}/{len(holdings)}", flush=True)
-                # 全部完成后渲染
-                top.after(0, _render)
-
-            def _render():
-                # 按拉升概率排序
-                results.sort(key=lambda x: x.get("拉升概率%", 0), reverse=True)
-                tree.delete("", tk.END)
-                hot_list = []
-                warn_list = []
-                for d in results:
-                    sig = d.get("signals", {})
-                    score = d.get("score", 0)
-                    prob = d.get("拉升概率%", 0)
-                    vol = sig.get("量能突增(倍)", "-")
-                    vwap = "✅" if sig.get("价在均价线上") else "❌"
-                    macd_1 = "✅" if sig.get("分时MACD金叉") else ("⚠️柱" if sig.get("分时红柱放大") else "—")
-                    macd_5 = "✅" if sig.get("5m MACD金叉") else "—"
-                    macd_15 = "✅" if sig.get("15m MACD金叉") else "—"
-                    ma20 = "✅上" if sig.get("日线站上MA20") else "❌下"
-                    boll = "🎯收口" if sig.get("BOLL收口") else "—"
-                    bians = "❌底背离🔥" if sig.get("日线底背离") else ("⚠️收口待变盘" if sig.get("BOLL收口") else "—")
-                    tag = "hot" if prob >= 60 else ("warm" if prob >= 45 else ("cool" if prob >= 30 else "default"))
-                    tree.insert("", tk.END,
-                                values=(d["name"], d["code6"], d.get("group",""),
-                                        f"{prob}%", score, vol, vwap,
-                                        macd_1, macd_5, macd_15, ma20, boll, bians),
-                                tags=(tag,))
-                    if prob >= 55: hot_list.append(f"{d['name']}({d['code6']}) {prob}%")
-                    if sig.get("BOLL收口") or sig.get("日线底背离"):
-                        warn_list.append(f"{d['name']}({d['code6']})")
-
-                # 概览
-                ir_hot_var.set(f"🔥 高拉升概率({len(hot_list)}只): {', '.join(hot_list[:5])}")
-                ir_warn_var.set(f"⚠️ 变盘前兆({len(warn_list)}只): {', '.join(warn_list[:5])}")
-                ir_total_var.set(f"📊 总计 {len(results)} 只")
-                ir_status_var.set(f"✅ 扫描完成 ({len(results)}/{len(holdings)} 只, {len(holdings)-len(results)} 只失败)")
-                ir_ts_var.set(_dt.now().strftime("%Y-%m-%d %H:%M:%S"))
-                ir_run_btn.config(state=tk.NORMAL, text="🔍 重新扫描")
-
-            # 双击行 → 显示详情
-            def _on_double(e):
-                sel = tree.selection()
-                if not sel: return
-                row_vals = tree.item(sel[0], "values")
-                code = row_vals[1]
-                found = [d for d in results if d.get("code6") == code]
-                if not found: return
-                d = found[0]
-                sig = d.get("signals", {})
-                detail_txt.config(state=tk.NORMAL)
-                detail_txt.delete("1.0", tk.END)
-                lines = [f"📊 {d['name']}({code})  score={d['score']}  拉升概率={d.get('拉升概率%','-')}%",
-                         "━━━━━━━━━━━━━━━━━━━━━━━━━━"]
-                for k, v in sig.items():
-                    if isinstance(v, float):
-                        lines.append(f"  {k}: {v:.4f}")
-                    else:
-                        lines.append(f"  {k}: {v}")
-                detail_txt.insert(tk.END, "\n".join(lines))
-                detail_txt.config(state=tk.DISABLED)
-            tree.bind("<Double-1>", _on_double)
-
-            _th.Thread(target=_scan, daemon=True).start()
-
-        ir_run_btn.config(command=_run_scan)
-
-        # 自动扫一次
-        top.after(500, _run_scan)
-
+    # ==================== 🦅 游资心法单股打分 ====================
     def _hm_calc_for_stock(self, stock_code):
         """🦅 游资心法单股打分: 拉K线+指标 → 7大游资打分 → 返回dict
         Args:
@@ -44070,19 +43667,7 @@ class StockKeywordAnalyzerGUI:
         """大盘分析Tab后台加载: 红绿灯+四维度+情绪周期+板块
         ⚠️ 线程安全: 后台线程只放数据到 _dapan_pending, 主线程用 root.after 轮询"""
         import threading as _th
-        # 停止信号 + 进度回调
-        self._dapan_stop_event = _th.Event()
-        _stop = self._dapan_stop_event
-        def _step(name):
-            """每步开始前调, 更新状态 + 检查停止信号"""
-            if _stop.is_set():
-                print(f"[大盘] ⏹️ 用户停止 (在: {name})", flush=True)
-                return False
-            self.root.after(0, lambda n=name: setattr(
-                self, '_dapan_alert_var', None) or (  # 不直接设 StringVar, 用下面的
-                    self._dapan_alert_var.set(f"⏳ {n}...")) if hasattr(self, '_dapan_alert_var') else None)
-            return True
-        self._dapan_pending = None
+        self._dapan_pending = None  # 线程安全缓冲区
         if not hasattr(self, "_dapan_polling"):
             self._dapan_polling = True
             def _poll():
@@ -44091,9 +43676,7 @@ class StockKeywordAnalyzerGUI:
                     self._dapan_pending = None
                     self._dapan_update_ui(data)
                 self.root.after(300, _poll)
-            self.root.after(500, _poll)
-        # 启用 ⏹️ 停止按钮
-        self.root.after(0, lambda: self._dapan_stop_btn.config(state="normal", bg="#E53935"))
+            self.root.after(500, _poll)  # 启动轮询
         def _run():
             try:
                 import json as _js
@@ -44101,7 +43684,6 @@ class StockKeywordAnalyzerGUI:
                 import subprocess as _sp
                 import time as _t_dp
 
-                if not _step("初始化 tushare"): return
                 import akshare as ak
                 print("[大盘分析] ⏳ 开始加载...", flush=True)
                 dapan_data = {"dims": {}, "hld": {}, "emo": {}, "sectors": {}}
@@ -44132,13 +43714,15 @@ class StockKeywordAnalyzerGUI:
                     print(f"[大盘] tushare兜底初始化fail: {_e_init}")
                     _tb.print_exc()
 
-                # --- 1. 涨跌停广度 (核心! 1次尝试 + tushare兜底, 东财限流时不白等) ---
-                if not _step("拉涨跌停广度"): return
+                # --- 1. 涨跌停广度 (核心! 加重试 + tushare兜底) ---
                 spot = None
-                try:
-                    spot = ak.stock_zh_a_spot_em()
-                except Exception as e:
-                    print(f"[大盘] spot akshare fail → 直接兜底: {str(e)[:40]}")
+                for _try in range(3):
+                    try:
+                        spot = ak.stock_zh_a_spot_em()
+                        break
+                    except Exception as e:
+                        print(f"[大盘] spot try {_try+1} fail: {e}")
+                        _t_dp.sleep(1.5)
                 total = up = dn = flat = zt = dt = breadth_score = None
                 if spot is not None and len(spot) > 0:
                     total = len(spot)
@@ -44172,7 +43756,6 @@ class StockKeywordAnalyzerGUI:
                     dapan_data["hld"]["breadth_score"] = 50
 
                 # --- 2. 北向资金 (沪股通+深股通 + tushare兜底) ---
-                if not _step("拉北向资金"): return
                 north_ok = False
                 try:
                     import pandas as _pd_dp
@@ -44233,7 +43816,6 @@ class StockKeywordAnalyzerGUI:
                     dapan_data["hld"]["north_score"] = 50
 
                 # --- 3. 融资融券 (+ tushare兜底) ---
-                if not _step("拉融资融券"): return
                 margin_ok = False
                 try:
                     margin_sh = ak.macro_china_market_margin_sh()
@@ -44281,7 +43863,6 @@ class StockKeywordAnalyzerGUI:
                     dapan_data["hld"]["margin_score"] = 50
 
                 # --- 4. 换手率/成交额 (+ tushare兜底) ---
-                if not _step("拉换手率"): return
                 turn_ok = False
                 try:
                     sh2 = ak.stock_zh_index_daily_em(symbol="sh000001")
@@ -44324,36 +43905,16 @@ class StockKeywordAnalyzerGUI:
                 dapan_data["hld"]["col"] = hld_col
                 dapan_data["hld"]["lvl"] = hld_lvl
 
-                # --- 情绪引擎 (+ tushare 数据兜底校验) ---
-                if not _step("计算情绪引擎"): return
+                # --- 情绪引擎 ---
                 emo_stage = "震荡"
                 skill_py = _os.path.expanduser("~/.qclaw/workspace-ek2hwmmwwhxi3mz3/skills/情绪周期流/scripts/情绪周期流_engine.py")
-                emo_engine_data = None
                 if _os.path.exists(skill_py):
                     try:
-                        r = _sp.run(["/Library/Frameworks/Python.framework/Versions/3.11/bin/python3", skill_py, "--market", "--json"],
-                                    capture_output=True, text=True, timeout=15)
+                        r = _sp.run(["python3", skill_py, "--market", "--json"],
+                                    capture_output=True, text=True, timeout=8)
                         if r.returncode == 0 and r.stdout.strip():
-                            emo_engine_data = _js.loads(r.stdout.strip())
-                            emo_stage = emo_engine_data.get("emotion_stage", emo_engine_data.get("stage", "震荡"))
-                            # 校验: 引擎的新浪数据源可能挂了 → 用 tushare 算的真实数据覆盖
-                            _engine_zt = emo_engine_data.get("limit_up_count", 0)
-                            _engine_up_ratio = emo_engine_data.get("breadth_up_ratio", 0.5)
-                            _tushare_zt = zt if 'zt' in dir() and zt else 0
-                            _tushare_up = up if 'up' in dir() and up else 0
-                            _tushare_dn = dn if 'dn' in dir() and dn else 0
-                            # 如果引擎返回的涨停 < 10 但 tushare 有真实数据 → 引擎脏了, 用 tushare 重算
-                            if _engine_zt < 10 and _tushare_zt > 10:
-                                print(f"[大盘] ⚠️ 情绪引擎新浪数据源挂了 (engine_zt={_engine_zt}, tushare_zt={_tushare_zt}), 用 tushare 重算情绪")
-                                _total_t = (_tushare_up or 0) + (_tushare_dn or 0)
-                                _up_ratio = _tushare_up / _total_t if _total_t > 0 else 0.5
-                                if _tushare_zt >= 80 and _up_ratio >= 0.7: emo_stage = "高潮"
-                                elif _tushare_zt >= 40 and _up_ratio >= 0.55: emo_stage = "发酵"
-                                elif _tushare_zt >= 15 and _up_ratio >= 0.5: emo_stage = "启动"
-                                elif _tushare_zt < 10 and _up_ratio < 0.4: emo_stage = "冰点"
-                                elif _up_ratio < 0.45: emo_stage = "退潮"
-                                else: emo_stage = "震荡"
-                                print(f"[大盘] ✅ tushare 情绪重算 stage={emo_stage} zt={_tushare_zt} up_ratio={_up_ratio:.2f}")
+                            emo_data = _js.loads(r.stdout.strip())
+                            emo_stage = emo_data.get("emotion_stage", emo_data.get("stage", "震荡"))
                     except Exception as e:
                         print(f"[大盘] emo engine fail: {e}")
                 dapan_data["emo"]["stage"] = emo_stage
@@ -44363,37 +43924,36 @@ class StockKeywordAnalyzerGUI:
                 dapan_data["emo"]["dt"] = dt if 'dt' in dir() else 0
 
                 # --- 热门/冷门板块 (多源 fallback, 热门12+冷门9) ---
-                # 🔥 快速路径: 同花顺优先 (0.4s), 东财限流要 10s+ 超时
                 hot8 = cold8 = None
-                # 源1: 同花顺 行业板块
+                # 源1: 东方财富 概念板块
                 try:
-                    ind = ak.stock_board_industry_summary_ths()
-                    if ind is not None and len(ind) > 0 and "涨跌幅" in ind.columns:
-                        ind_sorted = ind.sort_values(by="涨跌幅", ascending=False)
-                        hot8 = []
-                        for _, row in ind_sorted.head(12).iterrows():
-                            hot8.append((str(row.get("板块", "")), row.get("涨跌幅", 0),
-                                         f"净流入{row.get('净流入',0)}亿 领涨{row.get('领涨股','')}"))
-                        cold8 = []
-                        for _, row in ind_sorted.tail(9).iterrows():
-                            cold8.append((str(row.get("板块", "")), row.get("涨跌幅", 0),
-                                          f"净流入{row.get('净流入',0)}亿 领涨{row.get('领涨股','')}"))
-                        print(f"[大盘] ✅ 板块源=同花顺行业 {len(ind)}行")
-                except Exception as ths_e:
-                    print(f"[大盘] 同花顺行业fail → 兜底东财: {str(ths_e)[:40]}")
-                # 源2 fallback: 东方财富 概念板块
+                    cons = ak.stock_board_concept_name_em()
+                    if cons is not None and len(cons) > 0 and "涨跌幅" in cons.columns:
+                        cs = cons.sort_values(by="涨跌幅", ascending=False)
+                        hot8 = [(str(row.get("板块名称", "")), row.get("涨跌幅", 0))
+                                for _, row in cs.head(12).iterrows()]
+                        cold8 = [(str(row.get("板块名称", "")), row.get("涨跌幅", 0))
+                                 for _, row in cs.tail(9).iterrows()]
+                        print("[大盘] ✅ 板块源=东财概念")
+                except Exception as e:
+                    print(f"[大盘] 东财概念板块fail: {e}")
+                # 源2 fallback: 同花顺 行业板块
                 if hot8 is None:
                     try:
-                        cons = ak.stock_board_concept_name_em()
-                        if cons is not None and len(cons) > 0 and "涨跌幅" in cons.columns:
-                            cs = cons.sort_values(by="涨跌幅", ascending=False)
-                            hot8 = [(str(row.get("板块名称", "")), row.get("涨跌幅", 0))
-                                    for _, row in cs.head(12).iterrows()]
-                            cold8 = [(str(row.get("板块名称", "")), row.get("涨跌幅", 0))
-                                     for _, row in cs.tail(9).iterrows()]
-                            print("[大盘] ✅ 板块源=东财概念")
+                        ind = ak.stock_board_industry_summary_ths()
+                        if ind is not None and len(ind) > 0 and "涨跌幅" in ind.columns:
+                            ind_sorted = ind.sort_values(by="涨跌幅", ascending=False)
+                            hot8 = []
+                            for _, row in ind_sorted.head(12).iterrows():
+                                hot8.append((str(row.get("板块", "")), row.get("涨跌幅", 0),
+                                             f"净流入{row.get('净流入',0)}亿 领涨{row.get('领涨股','')}"))
+                            cold8 = []
+                            for _, row in ind_sorted.tail(9).iterrows():
+                                cold8.append((str(row.get("板块", "")), row.get("涨跌幅", 0),
+                                              f"净流入{row.get('净流入',0)}亿 领涨{row.get('领涨股','')}"))
+                            print(f"[大盘] ✅ 板块源=同花顺行业 {len(ind)}行")
                     except Exception as e:
-                        print(f"[大盘] 东财概念fail (跳过): {str(e)[:40]}")
+                        print(f"[大盘] 同花顺行业板块fail: {e}")
                 # 源3 fallback: tushare 申万行业分类 + 指数日线
                 if hot8 is None:
                     try:
@@ -44433,162 +43993,66 @@ class StockKeywordAnalyzerGUI:
                     dapan_data["sectors"]["hot"] = hot8
                     dapan_data["sectors"]["cold"] = cold8
 
-                # ======== 5. 最近20日趋势 (上证涨跌幅 + 情绪分) ========
-                if not _step("拉20日趋势"): return
-                # 策略: tushare 拉最新20交易日做基础, JSON sentiment_score 能取到则覆盖
+                # ======== 5. 最近10日趋势 (上证涨跌幅 + 情绪分) ========
+                # 优先复用红绿灯弹窗的 market_sentiment_data.json (已含 sentiment_score)
                 trend10 = []
-                # Step 1: tushare 拉最新 20 交易日上证数据 (日期永远新鲜)
                 try:
-                    import tushare as _ts_trend2
-                    from datetime import date as _dt_date_t2
-                    _today_yyyymmdd = _dt_date_t2.today().strftime("%Y%m%d")
-                    _pro2 = _ts_trend2.pro_api()
-                    _cal2 = _pro2.trade_cal(exchange="SSE", start_date="20250101",
-                                            end_date=_today_yyyymmdd, is_open="1")
-                    _td_list2 = sorted(_cal2["cal_date"].tolist())[-22:] if _cal2 is not None else []
-                    _t10_2 = _td_list2[-20:] if len(_td_list2) >= 20 else _td_list2
-                    _tushare_map = {}
-                    for _td2 in _t10_2:
-                        try:
-                            _df2 = _pro2.index_daily(ts_code="000001.SH", trade_date=_td2)
-                            if _df2 is None or len(_df2) == 0: continue
-                            _r2 = _df2.iloc[0]
-                            _pct3 = float(_r2.get("pct_chg", 0) or 0)
-                            _vol3 = float(_r2.get("amount", 0) or 0) / 1e5
-                            _tr3 = float(_r2.get("turnover_rate", 0) or 0)
-                            _close3 = float(_r2.get("close", 0) or 0)
-                            # 自算 emo score (近似 market_sentiment_data.json 的算法)
-                            _base3 = 50
-                            if _pct3 > 1: _base3 += 20
-                            elif _pct3 > 0: _base3 += 8
-                            elif _pct3 < -1: _base3 -= 20
-                            elif _pct3 < 0: _base3 -= 8
-                            if _vol3 > 5000: _base3 += 10
-                            elif _vol3 < 3000: _base3 -= 5
-                            if _tr3 > 2: _base3 += 8
-                            elif _tr3 < 0.5: _base3 -= 5
-                            _emo_s3 = max(10, min(95, _base3))
-                            _full_k = _td2[:4]+"-"+_td2[4:6]+"-"+_td2[6:8]
-                            _tushare_map[_full_k] = {
-                                "full_date": _full_k,
-                                "date": _td2[4:6]+"/"+_td2[6:8],
-                                "pct": _pct3,
-                                "emo": _emo_s3,
-                                "zt": 0,
-                                "close": _close3,
-                            }
-                        except Exception: continue
-                    print(f"[大盘] tushare trend10 拉到: {len(_tushare_map)}天, 最新={max(_tushare_map.keys()) if _tushare_map else '无'}")
-                except Exception as _e_ts:
-                    print(f"[大盘] tushare trend10 fail: {_e_ts}")
-                    _tushare_map = {}
-
-                # Step 2: 读 market_sentiment_data.json (可能过时, 但 sentiment_score 更准)
-                _emo_json = _os.path.expanduser("~/.qclaw/workspace-agent-85985980/market_sentiment_data.json")
-                _json_map = {}
-                try:
+                    _emo_json = _os.path.expanduser("~/.qclaw/workspace-agent-85985980/market_sentiment_data.json")
                     if _os.path.exists(_emo_json):
                         with open(_emo_json) as _fj:
                             _sd = _js.load(_fj)
                         _dl = _sd.get("data", [])
-                        for _d in _dl:
+                        # 取最近10天
+                        for _d in _dl[-10:]:
                             _dt2 = str(_d.get("date", ""))
-                            if len(_dt2) == 8:
-                                _full2 = _dt2[:4]+"-"+_dt2[4:6]+"-"+_dt2[6:8]
-                            else:
-                                _full2 = _dt2
-                            _json_map[_full2] = float(_d.get("sentiment_score", 50) or 50)
-                        print(f"[大盘] JSON 有 sentiment_score: {len(_json_map)}天, 最新={max(_json_map.keys()) if _json_map else '无'}")
-                except Exception as _e_j:
-                    print(f"[大盘] JSON trend10 fail: {_e_j}")
-
-                # Step 3: 合并 — tushare 做底 (日期永远新鲜), JSON sentiment_score 覆盖
-                if _tushare_map:
-                    for _k, _rec in _tushare_map.items():
-                        if _k in _json_map:
-                            _rec["emo"] = _json_map[_k]  # JSON 情绪分更准则覆盖
-                        trend10.append(_rec)
-                    trend10.sort(key=lambda x: x["full_date"])
-                    print(f"[大盘] ✅ 10日趋势: {len(trend10)}天, 最新={trend10[-1]['full_date']}")
-                else:
-                    # tushare 也挂了 → 退回到纯 JSON (可能过时)
+                            _pct2 = float(_d.get("sh_chg", 0) or 0)
+                            _emo2 = float(_d.get("sentiment_score", 50) or 50)
+                            trend10.append({
+                                "date": _dt2[4:6]+"/"+_dt2[6:8],
+                                "pct": _pct2,
+                                "emo": _emo2,
+                                "zt": int(_d.get("zt_count", 0) or 0),
+                                "close": _d.get("index_close", 0),
+                            })
+                        print(f"[大盘] ✅ 10日趋势(读JSON): {len(trend10)}天")
+                except Exception as e:
+                    print(f"[大盘] trend10 JSON fail: {e}, fallback tushare")
+                    # Fallback: tushare 逐行拉 (慢但稳定)
                     try:
-                        if _os.path.exists(_emo_json):
-                            with open(_emo_json) as _fj:
-                                _sd = _js.load(_fj)
-                            _dl = _sd.get("data", [])
-                            for _d in _dl[-10:]:
-                                _dt2 = str(_d.get("date", ""))
-                                if len(_dt2) == 8:
-                                    _full2 = _dt2[:4]+"-"+_dt2[4:6]+"-"+_dt2[6:8]
-                                else:
-                                    _full2 = _dt2
-                                trend10.append({
-                                    "full_date": _full2,
-                                    "date": _dt2[4:6]+"/"+_dt2[6:8],
-                                    "pct": float(_d.get("sh_chg", 0) or 0),
-                                    "emo": float(_d.get("sentiment_score", 50) or 50),
-                                    "zt": int(_d.get("zt_count", 0) or 0),
-                                    "close": _d.get("index_close", 0),
-                                })
-                            print(f"[大盘] ⚠️ tushare挂了, 纯JSON fallback: {len(trend10)}天 (可能过时)")
-                    except Exception as _e_last:
-                        print(f"[大盘] ❌ trend10 全部数据源挂了: {_e_last}")
+                        import tushare as _ts_trend2
+                        _pro2 = _ts_trend2.pro_api()
+                        _cal2 = _pro2.trade_cal(exchange="SSE", start_date="20250701",
+                                                end_date=_tod2 or _dt_str, is_open="1")
+                        _td_list2 = sorted(_cal2["cal_date"].tolist())[-12:] if _cal2 is not None else []
+                        _t10_2 = _td_list2[-10:] if len(_td_list2) >= 10 else _td_list2
+                        for _td2 in _t10_2:
+                            try:
+                                _df2 = _pro2.index_daily(ts_code="000001.SH", trade_date=_td2)
+                                if _df2 is None or len(_df2) == 0: continue
+                                _r2 = _df2.iloc[0]
+                                _pct3 = float(_r2.get("pct_chg", 0) or 0)
+                                _vol3 = float(_r2.get("amount", 0) or 0) / 1e5
+                                _tr3 = float(_r2.get("turnover_rate", 0) or 0)
+                                _base3 = 50
+                                if _pct3 > 1: _base3 += 20
+                                elif _pct3 > 0: _base3 += 8
+                                elif _pct3 < -1: _base3 -= 20
+                                elif _pct3 < 0: _base3 -= 8
+                                if _vol3 > 5000: _base3 += 10
+                                elif _vol3 < 3000: _base3 -= 5
+                                if _tr3 > 2: _base3 += 8
+                                elif _tr3 < 0.5: _base3 -= 5
+                                _emo_s3 = max(10, min(95, _base3))
+                                trend10.append({"date": _td2[4:6]+"/"+_td2[6:8],
+                                                "pct": _pct3, "emo": _emo_s3})
+                            except Exception:
+                                continue
+                        print(f"[大盘] ✅ 10日趋势(tushare fallback): {len(trend10)}天")
+                    except Exception as e2:
+                        print(f"[大盘] trend10 tushare fallback fail: {e2}")
                 dapan_data["trend10"] = trend10
 
-                # 5.5 后台直接同步 trend10 → emo_hist (后台线程, 不依赖 UI)
-                try:
-                    import json as _js_as, os as _os_as
-                    _asp = _os_as.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
-                    if trend10:
-                        if _os_as.path.exists(_asp):
-                            with open(_asp) as _af: _hr = _js_as.load(_af)
-                            if isinstance(_hr, list):
-                                _h2 = {}
-                                for _x in _hr: _h2[_x.get("date","")] = _x
-                                _hr = _h2
-                        else:
-                            _hr = {}
-                        _achg = False
-                        for _d in trend10:
-                            _k = _d.get("full_date"); _es = float(_d.get("emo",50) or 50); _pc = float(_d.get("pct",0) or 0)
-                            if _es >= 70: _ast = "高潮"
-                            elif _es >= 60: _ast = "发酵"
-                            elif _es >= 50: _ast = "启动"
-                            elif _es >= 40: _ast = "震荡"
-                            elif _es >= 30: _ast = "分歧"
-                            else: _ast = "退潮"
-                            if _k in _hr:
-                                _r = _hr[_k]; _r["emo_score"] = _es; _r["pct"] = _pc
-                                if not _r.get("stage") or _r.get("stage","").strip() in ("震荡",""): _r["stage"] = _ast
-                                _achg = True
-                            else:
-                                _hr[_k] = {"date":_k,"pnl":"","ths":"","stage":_ast,
-                                           "emo_score":_es,"pct":_pc,"close":_d.get("close",0),"zt":_d.get("zt",0)}
-                                _achg = True
-                        if _achg:
-                            with open(_asp, "w") as _af: _js_as.dump(_hr, _af, ensure_ascii=False, indent=2)
-                            print(f"[大盘] ✅ emo_hist 已同步 {len(_hr)}天 → {_asp}", flush=True)
-                            # 后台线程: 自动 push 到 Gist
-                            try:
-                                import threading as _th_as2
-                                def _bg_gist():
-                                    try:
-                                        _cfg = self._get_emo_sync_config()
-                                        if _cfg.get("gist_token") and _cfg.get("gist_id"):
-                                            _r2 = self._emo_gist_push(_hr)
-                                            print(f"[大盘] ☁️ Gist push: {_r2.get('msg','')}", flush=True)
-                                    except Exception as _gx:
-                                        print(f"[大盘] Gist push skip: {_gx}")
-                                _th_as2.Thread(target=_bg_gist, daemon=True).start()
-                            except: pass
-                        else:
-                            print(f"[大盘] emo_hist 无变化 ({len(_hr)}天)", flush=True)
-                except Exception as _e_as:
-                    print(f"[大盘] emo_hist 后台同步fail: {_e_as}", flush=True)
-
                 # ======== 盘中警告数据 ========
-                if not _step("拉盘中警告"): return
                 try:
                     print("[大盘] ⏳ 盘中警告拉取...", flush=True)
                     alert = self._fetch_intraday_alert_data()
@@ -44606,18 +44070,10 @@ class StockKeywordAnalyzerGUI:
             except Exception as e:
                 import traceback; traceback.print_exc()
                 print(f"[大盘分析] ❌ 总体异常: {e}", flush=True)
-            finally:
-                # 禁用 ⏹️ 停止按钮, 不管成功/失败/停止
-                try:
-                    self.root.after(0, lambda: self._dapan_stop_btn.config(state="disabled", bg="#555"))
-                except Exception:
-                    pass
         _th.Thread(target=_run, daemon=True).start()
 
     def _dapan_update_ui(self, data):
         """主线程UI更新: 把后台线程拉到的数据渲染到控件上"""
-        # 缓存完整数据, Canvas <Configure> 事件触发重绘时用
-        self._dapan_full_data = data
         try:
             hld = data.get("hld", {})
             dims = data.get("dims", {})
@@ -44777,18 +44233,11 @@ class StockKeywordAnalyzerGUI:
             _render_grid(self._dapan_hot_inner, sec.get("hot", []), True, 3)
             _render_grid(self._dapan_cold_inner, sec.get("cold", []), False, 3)
 
-            # 6. 近 N 日趋势 Canvas
-            trend10 = data.get("trend10", [])
-            self._dapan_trend_data = trend10  # 缓存, Canvas resize 时自动重绘
+            # 6. 10日趋势 Canvas (涨跌幅柱状图 + 情绪分折线 + 热力图方块)
             try:
                 tc = self._dapan_trend_canvas
                 tc.delete("all")
-                cw = tc.winfo_width()
-                # 还没布局完 (winfo_width 返回 1), 先跳过, 等 <Configure> 事件重绘
-                if cw < 100 and trend10:
-                    tc.create_text(400, 80, text="⏳ 等待布局...", fill="#90A4AE", font=("", 10))
-                    return
-                cw = cw or 900
+                trend10 = data.get("trend10", [])
                 # 颜色映射: 情绪分→颜色
                 def _emo_col(s):
                     if s >= 70: return "#C62828"
@@ -44798,227 +44247,82 @@ class StockKeywordAnalyzerGUI:
                     if s >= 30: return "#9E9E9E"
                     return "#2E7D32"
                 if not trend10:
-                    tc.create_text(400, 80, text="⏳ 暂无10日趋势数据",
-                                   fill="#90A4AE", font=("", 10))
+                    tc.create_text(200, 36, text="⏳ 暂无10日趋势数据", fill="#90A4AE", font=("", 9))
                 else:
-                    # cw 已在外层算好
-                    ch = 160
-                    pad_l, pad_r, pad_t = 8, 8, 4
+                    cw = tc.winfo_width() or 900
+                    ch = 72
+                    pad_l, pad_r, pad_t, pad_b = 30, 10, 4, 18
                     plot_w = cw - pad_l - pad_r
+                    plot_h = ch - pad_t - pad_b - 14  # 留14给热力条
                     n = len(trend10)
-                    col_w = plot_w / n
-
-                    # ======== 第1行: 标题 + 图例 ========
-                    tc.create_text(cw/2, 8, text=f"📈 近{n}日上证涨跌 + 情绪分趋势",
-                                   fill="#1A237E", font=("", 9, "bold"))
-                    tc.create_text(pad_l+4, 18, text="●情绪分", fill="#FF6F00",
-                                   font=("", 8), anchor="w")
-                    tc.create_text(pad_l+60, 18, text="▌上证涨跌", fill="#C62828",
-                                   font=("", 8), anchor="w")
-
-                    # ======== 每天一列 ========
-                    col_x = [pad_l + i * col_w for i in range(n)]
+                    bar_w = plot_w / n * 0.6
+                    gap = plot_w / n
+                    # 标题
+                    tc.create_text(cw/2, 2, text="📈 近10日上证涨跌 + 情绪分趋势",
+                                   fill="#1A237E", font=("", 8, "bold"), anchor="n")
+                    # 画涨跌柱子 (左半边空间的下半部)
                     max_abs = max(abs(d["pct"]) for d in trend10) if trend10 else 1
                     if max_abs == 0: max_abs = 1
-
-                    # 各区域 Y 坐标
-                    Y_LABEL_TOP = 24    # 日期标签
-                    Y_LABEL_BTM = 40
-                    Y_HEAT_TOP  = 44    # 热力方块
-                    Y_HEAT_BTM  = 58
-                    Y_SCORE_TOP = 62    # 情绪分数字
-                    Y_SCORE_BTM = 74
-                    Y_CHART_TOP = 78    # 涨跌柱 + 折线区域
-                    Y_CHART_BTM = 140
-                    mid_y = (Y_CHART_TOP + Y_CHART_BTM) / 2
-
+                    mid_y = pad_t + plot_h/2
                     for i, d in enumerate(trend10):
-                        cx = col_x[i] + col_w / 2
-                        cx_l = col_x[i] + 2  # 列左边界
-                        cx_r = col_x[i] + col_w - 2  # 列右边界
+                        x1 = pad_l + i * gap + (gap - bar_w) / 2
+                        x2 = x1 + bar_w
                         chg = d["pct"]
-                        emo_s = d["emo"]
-                        date_str = d["date"]
-                        full_date = d.get("full_date", date_str)
-                        is_today = (i == n-1)
-
-                        # 背景卡片 (最后一天加金色边框)
-                        card_bg = "#FFF8E1" if is_today else "#FFFFFF"
-                        card_bd = "#FF6F00" if is_today else "#CFD8DC"
-                        tc.create_rectangle(cx_l, Y_LABEL_TOP - 2, cx_r, 152,
-                                            fill=card_bg, outline=card_bd, width=1 if is_today else 1)
-
-                        # ① 日期标签
-                        date_fg = "#B71C1C" if is_today else "#455A64"
-                        date_font = ("", 9, "bold") if is_today else ("", 8)
-                        tc.create_text(cx, (Y_LABEL_TOP+Y_LABEL_BTM)/2,
-                                       text=date_str, fill=date_fg, font=date_font)
-                        if is_today:
-                            tc.create_text(cx, Y_LABEL_TOP - 2, text="★",
-                                           fill="#FF6F00", font=("", 9, "bold"), anchor="s")
-
-                        # ② 热力方块
-                        heat_col = _emo_col(emo_s)
-                        tc.create_rectangle(cx_l + 6, Y_HEAT_TOP, cx_r - 6, Y_HEAT_BTM,
-                                            fill=heat_col, outline="white", width=1)
-
-                        # ③ 情绪分数字 (热力方块里面)
-                        tc.create_text(cx, (Y_HEAT_TOP+Y_HEAT_BTM)/2,
-                                       text=f"{emo_s:.0f}", fill="white",
-                                       font=("", 9, "bold"))
-
-                        # ④ 情绪分折线圆点 (在 CHART_TOP 线上方)
-                        emo_y = Y_CHART_TOP - 4 - (emo_s / 100 * 10)  # emo 越高越往上
-                        tc.create_oval(cx-3, emo_y-3, cx+3, emo_y+3,
-                                       fill=heat_col, outline="white", width=1)
-
-                        # ⑤ 涨跌幅柱子
-                        bh = int(abs(chg) / max_abs * ((Y_CHART_BTM - Y_CHART_TOP)/2 - 2))
+                        bh = int(abs(chg) / max_abs * (plot_h/2 - 2))
                         if chg >= 0:
-                            tc.create_rectangle(cx-5, mid_y - bh, cx+5, mid_y,
+                            # 红柱 (从中间向上)
+                            tc.create_rectangle(x1, mid_y - bh, x2, mid_y,
                                                 fill="#C62828", outline="#C62828")
                         else:
-                            tc.create_rectangle(cx-5, mid_y, cx+5, mid_y + bh,
+                            # 绿柱 (从中间向下)
+                            tc.create_rectangle(x1, mid_y, x2, mid_y + bh,
                                                 fill="#2E7D32", outline="#2E7D32")
-
-                        # ⑥ 涨跌%标注
+                        # 涨跌%标注 (最新一天标大)
+                        fsize = 8 if i == n-1 else 7
                         tcol = "#C62828" if chg >= 0 else "#2E7D32"
-                        tc.create_text(cx, mid_y - bh - 3 if chg >= 0 else mid_y + bh + 3,
-                                       text=f"{chg:+.1f}", fill=tcol,
-                                       font=("", 8, "bold"),
-                                       anchor="s" if chg >= 0 else "n")
-
-                        # 保存坐标给折线用
-                        d["_cx"] = cx
-                        d["_emo_y"] = emo_y
-
-                    # ======== 画情绪分折线 (连圆点) ========
-                    pts = [(d["_cx"], d["_emo_y"]) for d in trend10]
+                        tc.create_text((x1+x2)/2, mid_y - bh - 2 if chg >= 0 else mid_y + bh + 2,
+                                       text=f"{chg:+.1f}", fill=tcol, font=("", fsize), anchor="s" if chg>=0 else "n")
+                    # 中间零线
+                    tc.create_line(pad_l, mid_y, pad_l+plot_w, mid_y, fill="#B0BEC5", width=1)
+                    # 情绪分折线 (上半区)
+                    emo_top = pad_t + 2
+                    emo_btm = pad_t + plot_h/2 - 4
+                    pts = []
+                    for i, d in enumerate(trend10):
+                        ex = pad_l + i * gap + gap/2
+                        ey = emo_btm - (d["emo"] / 100 * (emo_btm - emo_top))
+                        pts.append((ex, ey))
                     if len(pts) >= 2:
                         flat = [coord for p in pts for coord in p]
                         tc.create_line(*flat, fill="#FF6F00", width=2, smooth=True)
-
-                    # ======== 中间零线 ========
-                    tc.create_line(pad_l, mid_y, pad_l + plot_w, mid_y,
-                                   fill="#B0BEC5", width=1, dash=(2, 2))
-
-                    # ======== 悬停 tooltip (鼠标 enter 显示完整信息) ========
-                    def _on_trend_enter(event, idx=None):
-                        # 简单 tooltip: 在 Canvas 顶部中央显示当天完整信息
-                        tc.delete("tooltip")
-                        mx = event.x
-                        if mx < pad_l or mx > pad_l + plot_w: return
-                        col = int((mx - pad_l) / col_w)
-                        if col < 0 or col >= n: return
-                        d = trend10[col]
-                        tip = (f"📅 {d.get('full_date', d['date'])}  "
-                               f"📊情绪={d['emo']:.0f}  "
-                               f"📈上证={d['pct']:+.2f}%  "
-                               f"ZT={d.get('zt','?')}")
-                        tc.create_text(cw/2, 158, text=tip, fill="#1A237E",
-                                       font=("", 9, "bold"), anchor="s", tags="tooltip")
-                    def _on_trend_leave(event):
-                        tc.delete("tooltip")
-                    tc.bind("<Motion>", _on_trend_enter)
-                    tc.bind("<Leave>", _on_trend_leave)
+                    # 情绪分圆点
+                    for i, (px, py) in enumerate(pts):
+                        col = _emo_col(trend10[i]["emo"])
+                        tc.create_oval(px-3, py-3, px+3, py+3, fill=col, outline="white", width=1)
+                    # 图例
+                    tc.create_text(pad_l+4, pad_t+2, text="●情绪分", fill="#FF6F00", font=("", 7), anchor="w")
+                    tc.create_text(pad_l+70, pad_t+2, text="▌上证涨跌", fill="#C62828", font=("", 7), anchor="w")
+                    # 底部热力条 (10个彩色方块)
+                    heat_y = pad_t + plot_h + 2
+                    sq_size = min(14, (cw - pad_l - pad_r - (n-1)*2) / n)
+                    for i, d in enumerate(trend10):
+                        sx = pad_l + i * (sq_size + 2)
+                        col = _emo_col(d["emo"])
+                        tc.create_rectangle(sx, heat_y, sx+sq_size, heat_y+sq_size,
+                                            fill=col, outline="white", width=1)
+                        # 日期标签
+                        tc.create_text(sx+sq_size/2, heat_y+sq_size+2, text=d["date"],
+                                       fill="#546E7A", font=("", 7), anchor="n")
+                        # 最新一天标星
+                        if i == n-1:
+                            tc.create_text(sx+sq_size/2, heat_y-4, text="★",
+                                           fill="#FF6F00", font=("", 8, "bold"))
             except Exception as e: print(f"[大盘] trend10 Canvas fail: {e}")
 
-            # 注意: emo_hist 同步已移到后台数据收集线程 (trend10 赋值后立即执行)
-            # 这里不再重复做, 避免 UI 更新时再跑一遍
-
-            # ✅ 保存大盘 snapshot 到本地 (启动时秒出旧数据)
-            try:
-                self._save_dapan_snapshot(data)
-            except Exception as _e_ss:
-                pass  # snapshot 保存失败不影响 UI
-
+            print("[大盘分析] ✅ UI更新完成", flush=True)
         except Exception as e:
             import traceback; traceback.print_exc()
             print(f"[大盘分析] ❌ UI更新异常: {e}", flush=True)
-
-    @staticmethod
-    def _dapan_snapshot_path():
-        return os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_dapan_snapshot.json")
-
-    def _save_dapan_snapshot(self, data):
-        """保存大盘数据 snapshot 到本地 JSON (供启动时秒出旧数据)"""
-        import json as _js
-        path = self._dapan_snapshot_path()
-        # 清理不能序列化的字段 (带 _ 前缀的临时字段)
-        clean = {}
-        for k, v in data.items():
-            if isinstance(k, str) and k.startswith("_"):
-                continue
-            clean[k] = v
-        clean["_saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open(path, "w") as f:
-            _js.dump(clean, f, ensure_ascii=False, indent=2, default=str)
-
-    def _try_load_dapan_snapshot(self):
-        """启动时尝试读大盘 snapshot 秒出旧数据, 失败则放弃"""
-        import json as _js
-        import os as _os
-        path = self._dapan_snapshot_path()
-        if not _os.path.exists(path):
-            print("[大盘] 📂 无 snapshot, 显示占位符", flush=True)
-            # 没有 snapshot 时, 至少从 emo_history 渲染 10 日趋势
-            self._render_trend_from_emo_history()
-            return False
-        try:
-            with open(path) as f:
-                data = _js.load(f)
-            saved_at = data.get("_saved_at", "?")
-            print(f"[大盘] 📂 读 snapshot 成功 (保存于 {saved_at}), 秒出", flush=True)
-            self._dapan_update_ui(data)
-            return True
-        except Exception as e:
-            print(f"[大盘] snapshot 读取失败: {e}, 尝试 emo_history", flush=True)
-            self._render_trend_from_emo_history()
-            return False
-
-    def _redraw_trend_if_width_ok(self):
-        """Canvas <Configure> 事件触发: 宽度够了就用缓存的完整数据重绘所有控件"""
-        tc = getattr(self, '_dapan_trend_canvas', None)
-        data = getattr(self, '_dapan_full_data', None)
-        if not tc or not data:
-            return
-        cw = tc.winfo_width()
-        if cw < 100:
-            return
-        try:
-            self._dapan_update_ui(data)
-        except Exception:
-            pass
-
-    def _render_trend_from_emo_history(self):
-        """从 emo_history.json 渲染全部天数趋势图"""
-        import json as _js, os as _os
-        path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
-        if not _os.path.exists(path):
-            return
-        try:
-            with open(path) as f:
-                hist = _js.load(f)
-            if not isinstance(hist, dict) or not hist:
-                return
-            # 取全部天数 (按日期排序)
-            sorted_dates = sorted(hist.keys())
-            trend10 = []
-            for d in sorted_dates:
-                v = hist[d]
-                trend10.append({
-                    "full_date": d,
-                    "date": d[5:10],
-                    "pct": float(v.get("pct", 0) or 0),
-                    "emo": float(v.get("emo_score", 50) or 50),
-                    "zt": int(v.get("zt", 0) or 0),
-                    "close": v.get("close", 0),
-                })
-            if trend10:
-                self._dapan_update_ui({"trend10": trend10})
-                print(f"[大盘] 📂 从 emo_history 渲染全部 {len(trend10)} 天趋势", flush=True)
-        except Exception as e:
-            print(f"[大盘] emo_history 渲染失败: {e}", flush=True)
 
     def _fetch_sector_cons(self, sector_name):
         """获取板块成分股列表 [多源 fallback], 返回 [(code, name, pct_chg), ...]"""
@@ -45642,8 +44946,6 @@ class StockKeywordAnalyzerGUI:
                     out = np.full(len(arr), np.nan)
                     for i in range(w-1, len(arr)): out[i] = np.mean(arr[i-w+1:i+1])
                     return out
-                ma5 = _ma_correct(cl, 5)
-                ma10 = _ma_correct(cl, 10)
                 ma20 = _ma_correct(cl, 20)
                 ma60 = _ma_correct(cl, 60)
 
@@ -45695,25 +44997,48 @@ class StockKeywordAnalyzerGUI:
                         if prev_neg:
                             pivot_indices.append(calc_start + k + 1)  # k 是 diff 下标, +1 对应 cost_arr 位置
                 if not pivot_indices:
-                    # 无筹码转折点 → fallback: 用当前价 P0 = close[-1]
-                    t_star = N - 1
-                    P0 = float(cl[-1])
-                    T_star_date = str(dates[-1]) if len(dates) > 0 else ""
-                else:
-                    t_star = pivot_indices[-1]  # 取最近一个
-                    P0 = float(cl[t_star])
-                    T_star_date = str(dates[t_star])
+                    skip_count["不满足过滤"] += 1
+                    continue
+                t_star = pivot_indices[-1]  # 取最近一个
+                P0 = float(cl[t_star])
+                T_star_date = str(dates[t_star])
 
-                # --- 形态特征需要的变量 (保留, 不再做硬过滤) ---
-                # MA20 斜率 (生命周期判定 + risk 评级要用)
+                # --- 过滤条件 ---
+                # 1. 站上 MA20 >= 3 日
+                last3 = cl[-3:]
+                ma20_last3 = ma20[-3:]
+                above_ma20 = all(last3 > ma20_last3) if not np.any(np.isnan(ma20_last3)) else False
+                if not above_ma20:
+                    skip_count["不满足过滤"] += 1
+                    continue
+
+                # 2. MA20 近 10 日斜率 ∈ [-3%, +10%] (放宽给游资/主力票的急拉形态)
                 ma20_10 = ma20[-10:]
                 if np.any(np.isnan(ma20_10)):
-                    ma20_slope_pct = 0.0
-                else:
-                    ma20_slope_pct = (ma20_10[-1] - ma20_10[0]) / (ma20_10[0] + 1e-9) * 100
+                    skip_count["不满足过滤"] += 1
+                    continue
+                ma20_slope_pct = (ma20_10[-1] - ma20_10[0]) / (ma20_10[0] + 1e-9) * 100
+                ma20_flat = -3.0 <= ma20_slope_pct <= 10.0
 
+                # 3. 距阶段低点 L 涨幅 < 50%
                 L_gain_pct = (cl[-1] - L_val) / L_val * 100 if L_val > 0 else 0
+                not_overheat = L_gain_pct < 50.0
+
+                # 4. T* 距今 <= 60 交易日
+                t_star_recency = (N - 1) - t_star <= 60
+
+                # 5. 距 P0 涨幅不过高 (已涨 > 50% 不推荐追)
                 p0_gain_pct = (cl[-1] - P0) / P0 * 100 if P0 > 0 else 0
+                not_chase = p0_gain_pct < 50.0
+
+                # 6. 日均成交额 > 3000万 (用 vol * close 代理)
+                daily_turnover = float(np.mean(vo[-60:]) * cl[-1]) if len(cl) > 60 else 0
+                liquid = daily_turnover > 3e7
+
+                # 汇总过滤
+                if not (ma20_flat and not_overheat and t_star_recency and not_chase and liquid):
+                    skip_count["不满足过滤"] += 1
+                    continue
 
                 # --- 形态特征 (用于打标) ---
                 circ_mv = 0.0
@@ -45822,82 +45147,6 @@ class StockKeywordAnalyzerGUI:
                 if best_label == "游资票": risk_stars += 1
                 risk_stars = min(5, risk_stars)
 
-                # ====== 🆕 生命周期三标签判定 ======
-                _cur_close = float(cl[-1])
-                _ma5_val = float(ma5[-1]) if not np.isnan(ma5[-1]) else _cur_close
-                _ma10_val = float(ma10[-1]) if not np.isnan(ma10[-1]) else _cur_close
-                _ma20_val = float(ma20[-1]) if not np.isnan(ma20[-1]) else _cur_close
-
-                # 多头排列? MA5 > MA10 > MA20
-                _bull_alignment = (_ma5_val > _ma10_val > _ma20_val)
-
-                # 近5日是否突破MA20? (从下向上穿越)
-                _break_above = False
-                for _bi in range(-5, 0):
-                    if _bi - 1 >= -len(cl):
-                        _prev_cl = float(cl[_bi - 1])
-                        _prev_ma20 = float(ma20[_bi - 1]) if not np.isnan(ma20[_bi - 1]) else _prev_cl
-                        _curr_cl = float(cl[_bi])
-                        _curr_ma20 = float(ma20[_bi]) if not np.isnan(ma20[_bi]) else _curr_cl
-                        if _prev_cl < _prev_ma20 and _curr_cl >= _curr_ma20:
-                            _break_above = True
-                            break
-
-                # MA20 趋势
-                _ma20_trend_up = ma20_slope_pct >= 0  # 走平也算向上侧
-
-                # 当前是否在 MA20 下方
-                _below_ma20 = _cur_close < _ma20_val
-
-                # 标签判定 (优先级: 旺盛 > 起始 > 结束)
-                if _bull_alignment:
-                    _lifecycle_tag = "life_strong"
-                    _lifecycle_label = "生命旺盛"
-                elif _break_above and _ma20_trend_up:
-                    _lifecycle_tag = "life_start"
-                    _lifecycle_label = "生命起始"
-                elif _below_ma20 or not _ma20_trend_up:
-                    _lifecycle_tag = "life_end"
-                    _lifecycle_label = "生命结束"
-                else:
-                    _lifecycle_tag = "life_start"
-                    _lifecycle_label = "生命起始"
-
-                # ====== 🆕 游资心法综合打分 ======
-                def _hm_composite(ca, ha, la, va, oa, m5a, m10a, m20a, _tr2, _cmv):
-                    if len(ca) < 20: return 50
-                    s = 50
-                    if m5a[-1] > m10a[-1] > m20a[-1]: s += 15
-                    elif m5a[-1] > m10a[-1]: s += 8
-                    else: s -= 10
-                    pos20 = (ca[-1] - m20a[-1]) / (m20a[-1] + 1e-9) * 100
-                    if 0 <= pos20 <= 15: s += 10
-                    elif pos20 > 30: s -= 5
-                    elif pos20 < -5: s -= 15
-                    v5 = float(np.mean(va[-5:])) if len(va) >= 5 else 1
-                    v20 = float(np.mean(va[-20:-5])) if len(va) >= 20 else v5
-                    vr = v5 / (v20 + 1e-9)
-                    if 1.2 <= vr <= 3.0: s += 10
-                    elif vr > 5: s -= 5
-                    elif vr < 0.7: s -= 5
-                    if len(ca) >= 5:
-                        r5 = (ca[-1] - ca[-5]) / (ca[-5] + 1e-9) * 100
-                        if 5 <= r5 <= 20: s += 10
-                        elif r5 > 30: s -= 5
-                        elif r5 < -10: s -= 15
-                    if _tr2 and _tr2 > 0:
-                        if 3 <= _tr2 <= 15: s += 8
-                        elif _tr2 > 20: s -= 3
-                    if _cmv > 100e4: s += 3
-                    elif _cmv < 10e4: s += 5
-                    return max(0, min(100, s))
-
-                _tr_val = 0.0
-                if _db is not None and len(_db) > 0 and "turnover_rate" in _db.columns:
-                    if pd.notna(_db["turnover_rate"].iloc[0]):
-                        _tr_val = float(_db["turnover_rate"].iloc[0])
-                _hm_score = _hm_composite(cl, hi, lo, vo, op, ma5, ma10, ma20, _tr_val, circ_mv)
-
                 # --- 组装结果 ---
                 results.append({
                     "code": code6,
@@ -45930,15 +45179,6 @@ class StockKeywordAnalyzerGUI:
                     # 形态特征
                     "zt_days_60": zt_days,
                     "vol_expansion": round(vol_expansion, 2),
-                    # 🆕 生命周期标签
-                    "lifecycle_tag": _lifecycle_tag,
-                    "lifecycle_label": _lifecycle_label,
-                    "lifecycle_score": _hm_score,
-                    "break_above_5d": _break_above,
-                    "bull_alignment": _bull_alignment,
-                    "ma5_val": round(_ma5_val, 2),
-                    "ma10_val": round(_ma10_val, 2),
-                    "ma20_val": round(_ma20_val, 2),
                 })
                 print(f"[生命周期] ✅ {s_name}({code6}) T*={T_star_date} P0={P0:.2f} {final_label} {conf} 目标={mult_low}~{mult_high}x")
 
@@ -45955,1149 +45195,6 @@ class StockKeywordAnalyzerGUI:
             "skip_count": skip_count,
             "error": None,
         }
-
-    @staticmethod
-    def _get_emo_sync_config():
-        """读 GitHub Gist 同步配置"""
-        import json as _jc, os as _jo
-        _cf = _jo.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_sync_config.json")
-        if _jo.path.exists(_cf):
-            try: return _jc.load(open(_cf))
-            except: return {}
-        return {}
-
-    @staticmethod
-    def _set_emo_sync_config(cfg):
-        import json as _jc, os as _jo
-        _cf = _jo.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_sync_config.json")
-        _jo.makedirs(_jo.path.dirname(_cf), exist_ok=True)
-        _jc.dump(cfg, open(_cf, "w"), ensure_ascii=False, indent=2)
-
-    @staticmethod
-    def _emo_gist_push(hist_dict):
-        """把 emo_hist 推送到 GitHub Gist"""
-        import json as _ji_cfg, os as _jo_cfg
-        _cf_cfg = _jo_cfg.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_sync_config.json")
-        _cfg = {}
-        if _jo_cfg.path.exists(_cf_cfg):
-            try: _cfg = _ji_cfg.load(open(_cf_cfg))
-            except: _cfg = {}
-        cfg = _cfg
-        token = cfg.get("gist_token", "")
-        gist_id = cfg.get("gist_id", "")
-        if not token or not gist_id:
-            return {"ok": False, "msg": "未配置 Token+GistID"}
-        try:
-            import requests as _rq, json as _jc
-            url = f"https://api.github.com/gists/{gist_id}"
-            headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
-            content = _jc.dumps(hist_dict, ensure_ascii=False, indent=2)
-            # GET 当前 gist，拿到 etag 做更新
-            r = _rq.get(url, headers=headers, timeout=8)
-            if r.status_code == 200:
-                old_files = r.json().get("files", {})
-                payload = {"files": {}}
-                for fname in old_files:
-                    payload["files"][fname] = {"content": content}
-                # 用 emo_hist.json 作为 filename
-                fn = "emo_hist.json"
-                payload = {"files": {fn: {"content": content}}}
-                resp = _rq.patch(url, headers=headers, json=payload, timeout=8)
-                if resp.status_code in (200, 204):
-                    return {"ok": True, "msg": f"✅ Gist已同步 ({len(hist_dict)}天)"}
-                else:
-                    return {"ok": False, "msg": f"push fail HTTP {resp.status_code}: {resp.text[:100]}"}
-            elif r.status_code == 404:
-                # 创建新 gist
-                payload = {"description": "stockyidong emo cycle history", "public": False,
-                           "files": {"emo_hist.json": {"content": content}}}
-                resp = _rq.post("https://api.github.com/gists", headers=headers, json=payload, timeout=8)
-                if resp.status_code == 201:
-                    new_id = resp.json().get("id","")
-                    cfg["gist_id"] = new_id
-                    import json as _ji_save, os as _jo_save
-                    _cf_save = _jo_save.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_sync_config.json")
-                    _jo_save.makedirs(_jo_save.path.dirname(_cf_save), exist_ok=True)
-                    _ji_save.dump(cfg, open(_cf_save, "w"), ensure_ascii=False, indent=2)
-                    return {"ok": True, "msg": f"✅ 新建Gist {new_id[:8]}..."}
-                else:
-                    return {"ok": False, "msg": f"create fail HTTP {resp.status_code}"}
-            else:
-                return {"ok": False, "msg": f"get gist fail HTTP {r.status_code}"}
-        except Exception as e:
-            return {"ok": False, "msg": f"push error: {e}"}
-
-    @staticmethod
-    def _emo_gist_pull(timeout=2):
-        """从 GitHub Gist 拉取 emo_hist, 返回 dict (失败返回 None)"""
-        import json as _ji_cfg, os as _jo_cfg
-        _cf_cfg = _jo_cfg.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_sync_config.json")
-        _cfg = {}
-        if _jo_cfg.path.exists(_cf_cfg):
-            try: _cfg = _ji_cfg.load(open(_cf_cfg))
-            except: _cfg = {}
-        cfg = _cfg
-        token = cfg.get("gist_token", "")
-        gist_id = cfg.get("gist_id", "")
-        if not token or not gist_id: return None
-        try:
-            import requests as _rq
-            url = f"https://api.github.com/gists/{gist_id}"
-            headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
-            r = _rq.get(url, headers=headers, timeout=timeout)
-            if r.status_code == 200:
-                files = r.json().get("files", {})
-                for fname, finfo in files.items():
-                    if "emo" in fname.lower() or "hist" in fname.lower() or fname.endswith(".json"):
-                        import json as _jc
-                        content = finfo.get("content", "")
-                        if content:
-                            data = _jc.loads(content)
-                            if isinstance(data, dict): return data
-                            if isinstance(data, list):
-                                nh = {}
-                                for h in data: nh[h.get("date","")] = h
-                                return nh
-            return None
-        except: return None
-
-    @staticmethod
-    def _merge_emo_hist(local, remote):
-        """本地和远端合并, 取每个 date 下 emo_score 更大的 (认为更新鲜)"""
-        merged = dict(local or {})
-        remote = remote or {}
-        for k, rv in remote.items():
-            lv = merged.get(k, {})
-            # 如果远端有 pnl/ths (更新的手填) 或者本地没有这个 key, 就用远端
-            if not lv or (rv.get("pnl") and not lv.get("pnl")):
-                merged[k] = rv
-            elif rv.get("emo_score", 0) > lv.get("emo_score", 0):
-                # emo_score 更高说明大盘刚同步了
-                lv = dict(lv); lv.update({kk: vv for kk, vv in rv.items() if vv is not None})
-                merged[k] = lv
-            else:
-                # 保留本地, 补充远端没有的字段
-                for kk, vv in rv.items():
-                    if vv is not None and not lv.get(kk):
-                        lv[kk] = vv
-                merged[k] = lv
-        return merged
-
-    def _build_emo_cycle_calendar(self, parent_frame, notebook=None):
-        """🎭 在容器 frame 里直接渲染情绪周期三维度日历 (不弹窗, 嵌入 Notebook tab)。"""
-        import json as _j, os as _os, datetime as _dt
-        from datetime import datetime as _dt2, timedelta as _td
-
-        EMO_HIST = _os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
-
-        # ---- 加载历史 ----
-        hist_dict = {}
-        if _os.path.exists(EMO_HIST):
-            try:
-                with open(EMO_HIST) as f:
-                    raw = _j.load(f)
-                if isinstance(raw, dict):
-                    hist_dict = raw
-                elif isinstance(raw, list):
-                    for h in raw: hist_dict[h.get("date", "")] = h
-            except: hist_dict = {}
-
-        def _reload_hist():
-            """从磁盘重新加载 + 后台异步 Gist pull (不阻塞 UI)"""
-            nonlocal hist_dict
-            if _os.path.exists(EMO_HIST):
-                try:
-                    with open(EMO_HIST) as f:
-                        raw = _j.load(f)
-                    if isinstance(raw, dict): hist_dict = raw
-                    elif isinstance(raw, list):
-                        nh = {}
-                        for h in raw: nh[h.get("date","")] = h
-                        hist_dict = nh
-                except: pass
-            # 后台异步 pull Gist, 不阻塞渲染
-            import threading as _th_pull2
-            def _bg_pull_sync():
-                _remote = self._emo_gist_pull(timeout=2)
-                if _remote:
-                    hist_dict = self._merge_emo_hist(hist_dict, _remote)
-                    print(f"[情绪周期] 📥 Gist pull {len(_remote)}天 → merge {len(hist_dict)}天", flush=True)
-                    try: self.root.after(0, _render_month)
-                    except: pass
-            try: _th_pull2.Thread(target=_bg_pull_sync, daemon=True).start()
-            except: pass
-
-        def _save_hist_dict():
-            with open(EMO_HIST, "w") as f:
-                _j.dump(hist_dict, f, ensure_ascii=False, indent=2)
-            # 自动 push 到 Gist
-            import threading as _th
-            def _bg_push():
-                r = self._emo_gist_push(hist_dict)
-                if r.get("ok"):
-                    print(f"[情绪周期] {r['msg']}")
-                else:
-                    print(f"[情绪周期] sync skip: {r.get('msg','')}")
-            try:
-                _th.Thread(target=_bg_push, daemon=True).start()
-            except: pass
-
-        def _calc_consec_loss():
-            cl = 0
-            for h in reversed(sorted(hist_dict.values(), key=lambda x: x.get("date",""))):
-                if h.get("pnl") == "亏钱": cl += 1
-                else: break
-            return cl
-
-        # ---- 状态变量 ----
-        # 默认月份
-        dates_with_data = [_dt2.strptime(d, "%Y-%m-%d") for d in hist_dict.keys()
-                           if isinstance(d, str) and len(d) == 10]
-        if dates_with_data:
-            dates_with_data.append(_dt2.now())
-            default_month = _dt2(min(dates_with_data).year, min(dates_with_data).month, 1)
-        else:
-            default_month = _dt2.now().replace(day=1)
-        view_month = [default_month]
-        is_rebuilding = [False]
-
-        def _shift_month(delta):
-            ym = view_month[0]
-            new_m = ym.month + delta
-            new_y = ym.year
-            while new_m < 1: new_m += 12; new_y -= 1
-            while new_m > 12: new_m -= 12; new_y += 1
-            view_month[0] = _dt2(new_y, new_m, 1)
-            _render_month()
-
-        # grid_outer (延迟 pack, 等工具栏创建完再 pack)
-        grid_outer = tk.Frame(parent_frame, bg="#1A1A2E")
-
-        # ---- 紧凑工具栏 (统计+导航+图例 三合一, 最大化日历空间) ----
-        cl = _calc_consec_loss()
-        _up = sum(1 for v in hist_dict.values() if v.get("pnl") == "赚钱")
-        _dn = sum(1 for v in hist_dict.values() if v.get("pnl") == "亏钱")
-        _bad_stage = sum(1 for v in hist_dict.values() if v.get("stage") in ("冰点", "退潮"))
-        stat_lbl_text = (f"📅{len(hist_dict)}天 💰{_up}📉{_dn} ⚠️{_bad_stage} 🔥{cl}天")
-
-        toolbar_f = tk.Frame(parent_frame, bg="#1A1A2E")
-        toolbar_f.pack(fill=tk.X, padx=4, pady=(2, 1))
-        # 左: 导航按钮
-        tk.Button(toolbar_f, text="◀", command=lambda: _shift_month(-1),
-                  bg="#37474F", fg="white", font=("", 9, "bold"), padx=6, pady=1).pack(side=tk.LEFT, padx=(0,2))
-        month_lbl = tk.Label(toolbar_f, text="", bg="#1A1A2E", fg="#FFD54F", font=("", 10, "bold"))
-        month_lbl.pack(side=tk.LEFT, padx=2)
-        tk.Button(toolbar_f, text="▶", command=lambda: _shift_month(1),
-                  bg="#37474F", fg="white", font=("", 9, "bold"), padx=6, pady=1).pack(side=tk.LEFT, padx=(2,4))
-        # 中: 统计
-        stat_lbl = tk.Label(toolbar_f, text=stat_lbl_text, bg="#1A1A2E", fg="#FFD54F", font=("", 9, "bold"))
-        stat_lbl.pack(side=tk.LEFT, padx=4)
-        # 图例 (紧凑色条)
-        tk.Label(toolbar_f, text="", bg="#B71C1C", width=2, height=1).pack(side=tk.LEFT, padx=(6,0))
-        tk.Label(toolbar_f, text="", bg="#1B5E20", width=2, height=1).pack(side=tk.LEFT, padx=1)
-        tk.Label(toolbar_f, text="", bg="#E65100", width=2, height=1).pack(side=tk.LEFT, padx=1)
-        # 右: 功能按钮
-        tk.Button(toolbar_f, text="🔄", command=lambda: (_reload_hist(), _render_month()),
-                  bg="#2E7D32", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
-        tk.Button(toolbar_f, text="今天", command=lambda: (_reload_hist(), view_month.__setitem__(0,_dt2.now().replace(day=1)), _render_month()),
-                  bg="#0D47A1", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
-        tk.Button(toolbar_f, text="☁️", command=lambda: _open_sync_dialog(),
-                  bg="#6A1B9A", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
-
-        def _open_sync_dialog():
-            """配置 GitHub Gist 同步的弹窗"""
-            dlg = tk.Toplevel(self.root); dlg.title("☁️ 跨设备同步 (GitHub Gist)")
-            dlg.geometry("480x400"); dlg.configure(bg="#263238"); dlg.transient(self.root)
-            cfg = self._get_emo_sync_config()
-
-            tk.Label(dlg, text="☁️ 跨设备同步情绪周期三维度数据", bg="#263238", fg="#FFD54F",
-                     font=("", 13, "bold")).pack(pady=(14, 2))
-            tk.Label(dlg, text="配置 GitHub Gist 后, 任何电脑保存自动 push, 打开自动 pull+合并",
-                     bg="#263238", fg="#90A4AE", font=("", 9), wraplength=440).pack(pady=(0, 8))
-
-            # 步骤说明
-            tip_f = tk.Frame(dlg, bg="#37474F"); tip_f.pack(fill=tk.X, padx=16, pady=(0,6))
-            tk.Label(tip_f,
-                     text="① github.com/settings/tokens → Generate new token\n② Note随便写, Expiration选 No expiration\n③ 勾选 gist (只需这一项!)\n④ 复制 token 粘贴到下方 Token 框\n⑤ 填 GistID (首次创建后自动填入)",
-                     bg="#37474F", fg="#B0BEC5", font=("", 8), justify="left", anchor="w").pack(padx=8, pady=6)
-
-            f1 = tk.LabelFrame(dlg, text="GitHub Token", bg="#263238", fg="#81D4FA", font=("", 10, "bold"), padx=8, pady=6)
-            f1.pack(fill=tk.X, padx=12, pady=4)
-            tk.Label(f1, text="ghp_xxxxxxxxxxxxxxxxxxxx", bg="#263238", fg="#B0BEC5", font=("", 8)).pack(anchor="w")
-            token_var = tk.StringVar(value=cfg.get("gist_token", ""))
-            tk.Entry(f1, textvariable=token_var, width=50, bg="#1A237E", fg="white",
-                     insertbackground="white", show="*").pack(fill=tk.X, pady=3)
-
-            f2 = tk.LabelFrame(dlg, text="Gist ID (留空→点击💾保存后自动创建)",
-                               bg="#263238", fg="#FFAB91", font=("", 10, "bold"), padx=8, pady=6)
-            f2.pack(fill=tk.X, padx=12, pady=4)
-            tk.Label(f2, text="形如 abc123def456 (gist URL 里的那串)", bg="#263238",
-                     fg="#B0BEC5", font=("", 8)).pack(anchor="w")
-            gist_var = tk.StringVar(value=cfg.get("gist_id", ""))
-            tk.Entry(f2, textvariable=gist_var, width=50, bg="#1A237E", fg="white",
-                     insertbackground="white").pack(fill=tk.X, pady=3)
-
-            status_lbl = tk.Label(dlg, text="", bg="#263238", fg="#FFD54F", font=("", 9))
-            status_lbl.pack(pady=4)
-
-            def _test_push():
-                status_lbl.config(text="⏳ 测试推送中...", fg="#FFD54F")
-                def _do():
-                    _tmp_cfg = {"gist_token": token_var.get().strip(), "gist_id": gist_var.get().strip()}
-                    if not _tmp_cfg["gist_token"]:
-                        self.root.after(0, lambda: status_lbl.config(text="❌ Token为空", fg="#C62828"))
-                        return
-                    self._set_emo_sync_config(_tmp_cfg)
-                    r = self._emo_gist_push(hist_dict)
-                    if r.get("ok") and not gist_var.get().strip():
-                        gist_var.set(self._get_emo_sync_config().get("gist_id",""))
-                    self.root.after(0, lambda: status_lbl.config(text=r.get("msg",""),
-                                                                  fg="#1B5E20" if r.get("ok") else "#C62828"))
-                import threading; threading.Thread(target=_do, daemon=True).start()
-
-            def _test_pull():
-                status_lbl.config(text="⏳ 测试拉取中...", fg="#FFD54F")
-                def _do():
-                    _tmp_cfg = {"gist_token": token_var.get().strip(), "gist_id": gist_var.get().strip()}
-                    self._set_emo_sync_config(_tmp_cfg)
-                    r = self._emo_gist_pull()
-                    if r is not None:
-                        self.root.after(0, lambda: status_lbl.config(text=f"✅ 拉到 {len(r)} 天数据", fg="#1B5E20"))
-                    else:
-                        self.root.after(0, lambda: status_lbl.config(text="❌ 拉取失败 (Token/ID错或网络)", fg="#C62828"))
-                import threading; threading.Thread(target=_do, daemon=True).start()
-
-            def _save_cfg():
-                cfg_new = {"gist_token": token_var.get().strip(), "gist_id": gist_var.get().strip()}
-                self._set_emo_sync_config(cfg_new)
-                _test_push()
-                if gist_var.get().strip(): _test_pull()
-                _render_month()
-                dlg.destroy()
-
-            bf = tk.Frame(dlg, bg="#263238"); bf.pack(pady=6)
-            tk.Button(bf, text="💾保存并测试", command=_save_cfg, bg="#2E7D32", fg="white",
-                      font=("", 10, "bold"), width=14).pack(side=tk.LEFT, padx=5)
-            tk.Button(bf, text="测试拉取", command=_test_pull, bg="#0D47A1", fg="white",
-                      font=("", 9), width=10).pack(side=tk.LEFT, padx=3)
-            tk.Button(bf, text="取消", command=dlg.destroy, bg="#546E7A", fg="white",
-                      font=("", 9), width=8).pack(side=tk.LEFT, padx=3)
-
-        # grid_outer 在工具栏之后 pack (expand=True 填满剩余空间)
-        grid_outer.pack(fill=tk.BOTH, expand=True, padx=4, pady=(1, 2))
-
-        # ⚠️ grid_outer 内部 pack 顺序很重要: 先星期标题, 后日期网格 (expand=True)
-        # 星期标题 (固定高度, 先 pack)
-        wd_f = tk.Frame(grid_outer, bg="#1A1A2E"); wd_f.pack(fill=tk.X)
-        for wi, wn in enumerate(["一","二","三","四","五","六","日"]):
-            tk.Label(wd_f, text=wn, bg="#1A1A2E", fg="#90A4AE", font=("", 9)).grid(row=0, column=wi, sticky="nsew")
-        for ci in range(7): wd_f.grid_columnconfigure(ci, weight=1)
-
-        # 日期网格 (Canvas+Scrollbar 保底: 空间不够时可滚动查看所有行)
-        _cal_canvas = tk.Canvas(grid_outer, bg="#1A1A2E", highlightthickness=0, bd=0)
-        _cal_vsb = tk.Scrollbar(grid_outer, orient="vertical", command=_cal_canvas.yview,
-                                bg="#37474F", troughcolor="#1A1A2E")
-        _cal_canvas.configure(yscrollcommand=_cal_vsb.set)
-        _cal_vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        _cal_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        grid_f = tk.Frame(_cal_canvas, bg="#1A1A2E")
-        _cal_window_id = _cal_canvas.create_window((0, 0), window=grid_f, anchor="nw")
-        # 让 grid_f 宽度跟随 canvas, 高度够了自动隐藏 scrollbar
-        def _on_gridf_config(e):
-            _cal_canvas.configure(scrollregion=_cal_canvas.bbox("all"))
-        grid_f.bind("<Configure>", _on_gridf_config)
-        def _on_canvas_config(e):
-            _cal_canvas.itemconfig(_cal_window_id, width=e.width)
-        _cal_canvas.bind("<Configure>", _on_canvas_config)
-        # 鼠标滚轮绑定 (只在鼠标进入日历区域时生效, 不干扰其他滚动控件)
-        def _on_mousewheel(e):
-            _cal_canvas.yview_scroll(int(-e.delta / 30), "units")
-        def _bind_mousewheel(e):
-            _cal_canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        def _unbind_mousewheel(e):
-            _cal_canvas.unbind_all("<MouseWheel>")
-        _cal_canvas.bind("<Enter>", _bind_mousewheel)
-        _cal_canvas.bind("<Leave>", _unbind_mousewheel)
-        for ci in range(7): grid_f.grid_columnconfigure(ci, weight=1)
-
-        # 底部预览
-        detail_lbl = tk.Label(parent_frame, text="点击格子补录/修改, 鼠标悬停看三维度详情",
-                              bg="#1A1A2E", fg="#90A4AE", font=("", 9), pady=4)
-        detail_lbl.pack(fill=tk.X, padx=6)
-
-        # ---- 编辑器弹窗 ----
-        def _open_day_editor(date_str):
-            edit_win = tk.Toplevel(self.root)
-            edit_win.title(f"📝 {date_str}")
-            edit_win.geometry("420x400")
-            edit_win.configure(bg="#263238")
-            edit_win.transient(self.root)
-
-            rec = hist_dict.get(date_str, {})
-            auto_text = getattr(self, "_dapan_emo_var", None)
-            auto_text = auto_text.get() if auto_text else ""
-
-            tk.Label(edit_win, text=f"📅 {date_str} 三维度记录", bg="#263238", fg="#FFD54F",
-                     font=("", 13, "bold")).pack(pady=(14, 4))
-
-            # 系统自动同步区
-            sys_parts = []
-            _e = rec.get("emo_score")
-            _p = rec.get("pct")
-            if _e is not None: sys_parts.append(f"📊情绪={_e:.0f}")
-            if _p is not None: sys_parts.append(f"📈上证={_p:+.2f}%")
-            if sys_parts:
-                sf = tk.Frame(edit_win, bg="#37474F"); sf.pack(fill=tk.X, padx=12, pady=(0,4))
-                tk.Label(sf, text="🔒 " + " | ".join(sys_parts), bg="#37474F", fg="#81D4FA",
-                         font=("", 9)).pack(fill=tk.X, padx=8, pady=4)
-
-            # 维度1: 阶段 — 清理掉可能的 emoji 前缀
-            _stage_val = rec.get("stage", auto_text)
-            # 去掉 emoji/图标前缀, 只留纯文字
-            import re as _re_stage
-            _stage_clean = _re_stage.sub(r'[^\u4e00-\u9fa5A-Za-z0-9 ]+', '', str(_stage_val or '')).strip()
-            if not _stage_clean: _stage_clean = auto_text
-            f1 = tk.LabelFrame(edit_win, text="①情绪阶段", bg="#263238", fg="#81D4FA",
-                               font=("", 10, "bold"), padx=10, pady=4)
-            f1.pack(fill=tk.X, padx=12, pady=3)
-            stage_var = tk.StringVar(value=_stage_clean)
-            tk.Entry(f1, textvariable=stage_var, width=40,
-                     bg="#1A237E", fg="white", insertbackground="white").pack(fill=tk.X, pady=2)
-
-            # 维度2: 同花顺
-            f2 = tk.LabelFrame(edit_win, text="②同花顺情绪指数", bg="#263238", fg="#FFAB91",
-                               font=("", 10, "bold"), padx=10, pady=4)
-            f2.pack(fill=tk.X, padx=12, pady=3)
-            ths_d = rec.get("ths", "向上")
-            ths_var = tk.StringVar(value=f"{ths_d} (yes)" if ths_d=="向上" else f"{ths_d} (no)")
-            tk.Radiobutton(f2, text="📈向上", variable=ths_var, value="向上 (yes)",
-                           bg="#263238", fg="#E0E0E0", selectcolor="#263238").pack(anchor="w")
-            tk.Radiobutton(f2, text="📉向下", variable=ths_var, value="向下 (no)",
-                           bg="#263238", fg="#E0E0E0", selectcolor="#263238").pack(anchor="w")
-
-            # 维度3: 盈亏
-            f3 = tk.LabelFrame(edit_win, text="③账户盈亏", bg="#263238", fg="#A5D6A7",
-                               font=("", 10, "bold"), padx=10, pady=4)
-            f3.pack(fill=tk.X, padx=12, pady=3)
-            pnl_d = rec.get("pnl", "赚钱")
-            pnl_var = tk.StringVar(value=f"{pnl_d} (yes)" if pnl_d=="赚钱" else f"{pnl_d} (no)")
-            tk.Radiobutton(f3, text="💰赚钱", variable=pnl_var, value="赚钱 (yes)",
-                           bg="#263238", fg="#E0E0E0", selectcolor="#263238").pack(anchor="w")
-            tk.Radiobutton(f3, text="💸亏钱", variable=pnl_var, value="亏钱 (no)",
-                           bg="#263238", fg="#E0E0E0", selectcolor="#263238").pack(anchor="w")
-
-            def _save():
-                ths_v = "向下" if "向下" in ths_var.get() else "向上"
-                pnl_v = "亏钱" if "亏钱" in pnl_var.get() else "赚钱"
-                _old = hist_dict.get(date_str, {})
-                hist_dict[date_str] = {
-                    "date": date_str, "pnl": pnl_v, "ths": ths_v,
-                    "stage": stage_var.get().strip(),
-                    "emo_score": _old.get("emo_score"),
-                    "pct": _old.get("pct"),
-                    "close": _old.get("close"), "zt": _old.get("zt"),
-                }
-                _save_hist_dict()
-                _refresh_stats()
-                _render_month()
-                edit_win.destroy()
-
-            def _delete():
-                if date_str in hist_dict:
-                    del hist_dict[date_str]
-                    _save_hist_dict()
-                    _refresh_stats()
-                    _render_month()
-                edit_win.destroy()
-
-            bf = tk.Frame(edit_win, bg="#263238"); bf.pack(pady=10)
-            tk.Button(bf, text="💾保存", command=_save, bg="#2E7D32", fg="white",
-                      font=("", 10, "bold"), width=10).pack(side=tk.LEFT, padx=5)
-            tk.Button(bf, text="🗑️删除", command=_delete, bg="#C62828", fg="white",
-                      font=("", 10, "bold"), width=10).pack(side=tk.LEFT, padx=5)
-            tk.Button(bf, text="取消", command=edit_win.destroy, bg="#546E7A", fg="white",
-                      font=("", 10), width=8).pack(side=tk.LEFT, padx=5)
-
-        def _refresh_stats():
-            cl = _calc_consec_loss()
-            _up = sum(1 for v in hist_dict.values() if v.get("pnl") == "赚钱")
-            _dn = sum(1 for v in hist_dict.values() if v.get("pnl") == "亏钱")
-            _bad = sum(1 for v in hist_dict.values() if v.get("stage") in ("冰点","退潮"))
-            stat_lbl.config(text=f"📅 {len(hist_dict)}天  |  💰{_up}  📉{_dn}  |  ⚠️冰点/退潮{_bad}  |  🔥连亏{cl}天")
-
-        # ---- 渲染日历 ----
-        def _render_month():
-            _reload_hist()
-            is_rebuilding[0] = True
-            for w in grid_f.winfo_children(): w.destroy()
-            ym = view_month[0]
-            month_lbl.config(text=f"{ym.year} 年 {ym.month} 月")
-            first = ym.replace(day=1)
-            first_wd = first.weekday()
-            if ym.month == 12:
-                nx = ym.replace(year=ym.year+1, month=1, day=1)
-            else:
-                nx = ym.replace(month=ym.month+1, day=1)
-            dim = (nx - _td(days=1)).day
-            today_str = _dt2.now().strftime("%Y-%m-%d")
-
-            row = 0; col = first_wd
-            for d in range(1, dim + 1):
-                ds = f"{ym.year:04d}-{ym.month:02d}-{d:02d}"
-                is_today = (ds == today_str)
-                rec = hist_dict.get(ds)
-
-                # 背景色 (A股)
-                if rec:
-                    pnl = rec.get("pnl","")
-                    ths = rec.get("ths","")
-                    pct_v = rec.get("pct")
-                    if pnl == "赚钱": bg = "#B71C1C"
-                    elif pnl == "亏钱": bg = "#1B5E20"
-                    elif pct_v is not None:
-                        bg = "#B71C1C" if pct_v > 0 else ("#1B5E20" if pct_v < 0 else "#455A64")
-                    else: bg = "#455A64"
-                    bd = "#E65100" if ths == "向下" else None
-                else:
-                    bg = "#37474F"; bd = None
-
-                cell = tk.Frame(grid_f, bg=bg, width=95, height=65,
-                                highlightbackground=bd or "#1A1A2E",
-                                highlightthickness=3 if bd else 1, cursor="hand2")
-                cell.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
-                cell.grid_propagate(False)
-
-                ths_v = rec.get("ths","") if rec else ""
-                ths_icon = "📈" if ths_v=="向上" else ("📉" if ths_v=="向下" else "·")
-                ths_fg = "#81D4FA" if ths_v else "#78909C"
-                pnl_v = rec.get("pnl","") if rec else ""
-                pnl_sym = "💰" if pnl_v=="赚钱" else ("💸" if pnl_v=="亏钱" else "·")
-                stage_v = rec.get("stage","") if rec else ""
-                stage_v = re.sub(r'[^\u4e00-\u9fa5A-Za-z0-9 ]+', '', str(stage_v or '')).strip()
-                stage_fg = "#FFD54F" if stage_v in ("冰点","退潮") else "#FFFFFF"
-                emo_s = rec.get("emo_score") if rec else None
-                pct_v2 = rec.get("pct") if rec else None
-
-                wl = []
-                # 行1: 日期(左) + 同花顺(右)
-                l1 = tk.Frame(cell, bg=bg); l1.pack(fill="x", pady=(2,0)); wl.append(l1)
-                fg = "#FFD54F" if is_today else "white"
-                n = tk.Label(l1, text=str(d), bg=bg, fg=fg,
-                            font=("", 11, "bold" if is_today else "normal")); n.pack(side="left", padx=3); wl.append(n)
-                t = tk.Label(l1, text=f"{ths_icon}", bg=bg, fg=ths_fg, font=("", 10)); t.pack(side="right", padx=3); wl.append(t)
-                # 行2: 盈亏emoji (居中大号)
-                p = tk.Label(cell, text=pnl_sym, bg=bg, fg="white", font=("", 14, "bold")); p.pack(pady=0); wl.append(p)
-                # 行3: stage阶段文字 (居中)
-                s = tk.Label(cell, text=stage_v or "·", bg=bg, fg=stage_fg, font=("", 10, "bold")); s.pack(pady=0); wl.append(s)
-                # 行4: emo分 + 涨跌幅 (居中)
-                info_txt = ""
-                if emo_s is not None: info_txt += f"emo{emo_s:.0f}"
-                if pct_v2 is not None: info_txt += f" {pct_v2:+.1f}%"
-                if not info_txt: info_txt = "·"
-                inf = tk.Label(cell, text=info_txt.strip(), bg=bg, fg="#B0BEC5", font=("", 9)); inf.pack(pady=0); wl.append(inf)
-                wl.append(cell)
-
-                def _bind_all(wlist, _ds=ds):
-                    def _click(e):
-                        if not is_rebuilding[0]: _open_day_editor(_ds)
-                    def _ent(e):
-                        _r = hist_dict.get(_ds, {})
-                        _t = (f"📅 {_ds}  ①{_r.get('stage','未填') or '未填'}  "
-                              f"②同花顺:{_r.get('ths','未填')}  ③盈亏:{_r.get('pnl','未填')}  "
-                              f"📊emo={_r.get('emo_score','--')}  📈上证={_r.get('pct','--')}")
-                        detail_lbl.config(text=_t, fg="#FFD54F")
-                    def _lv(e):
-                        detail_lbl.config(text="点击格子补录/修改, 鼠标悬停看三维度详情", fg="#90A4AE")
-                    for w in wlist:
-                        try:
-                            w.bind("<Button-1>", _click)
-                            w.bind("<Enter>", _ent)
-                            w.bind("<Leave>", _lv)
-                        except: pass
-                _bind_all(wl)
-
-                col += 1
-                if col > 6: col = 0; row += 1
-
-            for ci in range(7): grid_f.grid_columnconfigure(ci, weight=1)
-            is_rebuilding[0] = False
-            _refresh_stats()
-
-        _render_month()
-
-    def _show_emo_cycle_dialog(self):
-        """🎭 情绪周期三维度输入 → 自动风控警告（系统红灯+同花顺+自己账户盈亏）+ 日历补录"""
-        import json as _j_emo, os as _os_emo, datetime as _dt_emo
-        from datetime import datetime as _dt2, timedelta as _td_emo
-        EMO_HIST = _os_emo.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
-
-        # ---- 自动获取维度1: 红绿灯 + 情绪阶段 ----
-        auto_stage = getattr(self, "_dapan_emo_var", None)
-        auto_text = auto_stage.get() if auto_stage else "⏳ 请先点 🗺️大盘分析 → 🔄刷新"
-        BAD_STAGES = ("冰点", "退潮")
-        is_bad_stage = any(s in auto_text for s in BAD_STAGES)
-
-        # ---- 加载历史 (dict格式, 兼容旧list格式) ----
-        hist_dict = {}
-        if _os_emo.path.exists(EMO_HIST):
-            try:
-                with open(EMO_HIST) as f:
-                    raw = _j_emo.load(f)
-                if isinstance(raw, dict):
-                    hist_dict = raw
-                elif isinstance(raw, list):
-                    # 旧格式 list → 转 dict
-                    for h in raw:
-                        hist_dict[h.get("date", "")] = h
-            except: hist_dict = {}
-
-        def _save_hist_dict():
-            """持久化 hist_dict 到 JSON 文件 + 后台 push Gist"""
-            with open(EMO_HIST, "w") as f:
-                _j_emo.dump(hist_dict, f, ensure_ascii=False, indent=2)
-            import threading as _th_s
-            def _bg_push():
-                r = self._emo_gist_push(hist_dict)
-                if r.get("ok"): print(f"[情绪周期] {r['msg']}")
-                else: print(f"[情绪周期] sync skip: {r.get('msg','')}")
-            try: _th_s.Thread(target=_bg_push, daemon=True).start()
-            except: pass
-
-        def _sorted_list():
-            """dict → list 按日期升序"""
-            return sorted(hist_dict.values(), key=lambda x: x.get("date", ""))
-
-        def _calc_consec_loss():
-            """计算连续亏钱天数 (从最近日期往回数)"""
-            cl = 0
-            for h in reversed(_sorted_list()):
-                if h.get("pnl") == "亏钱": cl += 1
-                else: break
-            return cl
-
-        # ---- UI ----
-        win = tk.Toplevel(self.root)
-        win.title("🎭 情绪周期 · 三维度风控")
-        win.geometry("580x560")
-        win.configure(bg="#263238")
-
-        tk.Label(win, text="🎭 情绪周期 · 三维度风控", bg="#263238", fg="#FFD54F",
-                 font=("", 14, "bold")).pack(pady=(10, 2))
-        tk.Label(win, text="情绪指数占 60-70% 决策力 · 不好就空仓, 好才加仓",
-                 bg="#263238", fg="#90A4AE", font=("", 9)).pack(pady=(0, 6))
-
-        # ---------- 维度1: 系统红绿灯 (自动) ----------
-        f1 = tk.LabelFrame(win, text="① 系统红绿灯情绪 (自动获取)", bg="#263238", fg="#81D4FA",
-                          font=("", 10, "bold"), padx=10, pady=6)
-        f1.pack(fill=tk.X, padx=12, pady=3)
-        tk.Label(f1, text=f"情绪阶段: 【{auto_text}】", bg="#263238", fg="white",
-                 font=("", 11)).pack(anchor="w")
-        tag1 = "⚠️ 该回乡下去躲一躲！" if is_bad_stage else "✅ 情绪健康"
-        col1 = "#B71C1C" if is_bad_stage else "#1B5E20"
-        tk.Label(f1, text=tag1, bg="#263238", fg=col1, font=("", 11, "bold")).pack(anchor="w", pady=(2, 0))
-
-        # ---------- 维度2: 同花顺 (手工) ----------
-        f2 = tk.LabelFrame(win, text="② 同花顺情绪指数 (手工输入)", bg="#263238", fg="#FFAB91",
-                          font=("", 10, "bold"), padx=10, pady=6)
-        f2.pack(fill=tk.X, padx=12, pady=3)
-        tk.Label(f2, text="同花顺APP → 情绪指数 → 向上 or 向下?", bg="#263238",
-                 fg="#B0BEC5", font=("", 9)).pack(anchor="w")
-        ths_var = tk.StringVar(value="向上 (yes)")
-        tk.Radiobutton(f2, text="📈 向上 (yes)", variable=ths_var, value="向上 (yes)",
-                       bg="#263238", fg="#E0E0E0", selectcolor="#263238", activebackground="#263238").pack(anchor="w")
-        tk.Radiobutton(f2, text="📉 向下 (no)", variable=ths_var, value="向下 (no)",
-                       bg="#263238", fg="#E0E0E0", selectcolor="#263238", activebackground="#263238").pack(anchor="w")
-
-        # ---------- 维度3: 今日盈亏 (手工) ----------
-        f3 = tk.LabelFrame(win, text="③ 今天自己账户赚钱了吗? (连亏2天警告, 3天无条件清仓)",
-                          bg="#263238", fg="#A5D6A7", font=("", 10, "bold"), padx=10, pady=6)
-        f3.pack(fill=tk.X, padx=12, pady=3)
-        tk.Label(f3, text="今天账户整体盈亏?", bg="#263238", fg="#B0BEC5", font=("", 9)).pack(anchor="w")
-        pnl_var = tk.StringVar(value="赚钱 (yes)")
-        tk.Radiobutton(f3, text="💰 赚钱 (yes)", variable=pnl_var, value="赚钱 (yes)",
-                       bg="#263238", fg="#E0E0E0", selectcolor="#263238", activebackground="#263238").pack(anchor="w")
-        tk.Radiobutton(f3, text="📉 亏钱 (no)", variable=pnl_var, value="亏钱 (no)",
-                       bg="#263238", fg="#E0E0E0", selectcolor="#263238", activebackground="#263238").pack(anchor="w")
-
-        today = _dt2.now().strftime("%Y-%m-%d")
-
-        # 用 list 做可空 Holder, 解决闭包里 dir() 看不到外层变量的问题
-        hist_text_ref = [None]
-
-        def _refresh_stats():
-            """刷新 f3 下方的统计标签和 hist_text 历史区"""
-            nonlocal f3
-            # 先移除旧的统计 Label 后重建
-            for w in f3.winfo_children():
-                try:
-                    t = w.cget("text")
-                except:
-                    continue
-                if isinstance(t, str) and t.startswith("📊"):
-                    w.destroy()
-            cl = _calc_consec_loss()
-            tk.Label(f3, text=f"📊 历史记录 {len(hist_dict)} 天, 连续亏钱 {cl} 天",
-                     bg="#263238", fg="#FFD54F", font=("", 10, "bold")).pack(anchor="w", pady=(6, 0))
-            # 刷新最近7天历史
-            ht = hist_text_ref[0]
-            if ht is not None:
-                ht.config(state="normal")
-                ht.delete("1.0", "end")
-                ht.insert("end", "日期\t\t同花顺\t盈亏\t\t情绪阶段\n")
-                for h in _sorted_list()[-7:]:
-                    line = f"{h.get('date','')}\t{h.get('ths','')}\t{'📉亏钱' if h.get('pnl')=='亏钱' else '💰赚钱'}\t{h.get('stage','')}\n"
-                    ht.insert("end", line)
-                ht.config(state="disabled")
-
-        _refresh_stats()
-
-        # ---------- 分析结果区 ----------
-        result_lbl = tk.Label(win, text="", bg="#263238", justify="left",
-                              font=("", 11, "bold"), wraplength=540)
-        result_lbl.pack(fill=tk.X, padx=12, pady=6)
-
-        def _analyze():
-            ths_down = "向下" in ths_var.get()
-            lost_today = "亏钱" in pnl_var.get()
-            # 模拟今日若保存后的 hist_dict 来算连续亏
-            tmp = dict(hist_dict)
-            tmp[today] = {"date": today, "pnl": "亏钱" if lost_today else "赚钱",
-                          "ths": "向下" if ths_down else "向上", "stage": auto_text}
-            cl = 0
-            for h in reversed(sorted(tmp.values(), key=lambda x: x.get("date", ""))):
-                if h.get("pnl") == "亏钱": cl += 1
-                else: break
-
-            score = 0
-            reasons = []
-            if is_bad_stage:
-                score += 1; reasons.append("❌ 系统情绪在 冰点/退潮")
-            if ths_down:
-                score += 1; reasons.append("❌ 同花顺情绪指数向下")
-            if cl >= 2:
-                score += 1; reasons.append(f"❌ 连续亏钱 {cl} 天")
-
-            if score >= 3 or cl >= 3:
-                msg = ("\n🚨🚨🚨 无条件清仓预警 🚨🚨🚨\n"
-                       "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                       f"   三维度同时触发! 必须清仓!\n\n"
-                       f"   {chr(10).join(reasons)}\n\n"
-                       "   情绪指数不好的时候,\n"
-                       "   就干脆清仓空仓,\n"
-                       "   能避掉 70% 的坑。\n\n"
-                       "   —— 别再自己脑子有问题\n"
-                       "      一下子亏十几个点了")
-                result_lbl.config(text=msg, fg="#FF5252", bg="#B71C1C", padx=12, pady=12)
-            elif cl >= 2:
-                msg = ("\n⚠️⚠️ 亏损警告 ⚠️⚠️\n"
-                       "━━━━━━━━━━━━━━━━━━━━\n"
-                       f"   连续亏钱 {cl} 天!\n\n"
-                       f"   {chr(10).join(reasons) if reasons else '   同花顺/红绿灯尚正常'}\n\n"
-                       "   明天再亏一天 → 无条件清仓\n"
-                       "   建议今天先减仓 50%")
-                result_lbl.config(text=msg, fg="#FFD740", bg="#5D4037", padx=12, pady=12)
-            elif score >= 2:
-                msg = ("\n⚠️ 谨慎观望 ⚠️\n"
-                       "━━━━━━━━━━━━━━━━━━━━\n"
-                       f"   2个维度亮黄灯\n\n"
-                       f"   {chr(10).join(reasons)}\n\n"
-                       "   今天别开新仓\n"
-                       "   持仓控制在 30% 以内")
-                result_lbl.config(text=msg, fg="#FFB74D", bg="#4E342E", padx=12, pady=12)
-            else:
-                msg = ("\n✅ 情绪正常, 可以操作 ✅\n"
-                       "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                       f"   {reasons[0] if reasons else '三维度均健康'}\n"
-                       "   加仓看技术面, 不过度追高")
-                result_lbl.config(text=msg, fg="#69F0AE", bg="#1B5E20", padx=12, pady=12)
-
-        # ---------- 按钮区 ----------
-        btn_f = tk.Frame(win, bg="#263238"); btn_f.pack(pady=4)
-        tk.Button(btn_f, text="🔍 分析", command=_analyze,
-                  bg="#FF6F00", fg="white", font=("", 10, "bold"), padx=10, pady=2).pack(side=tk.LEFT, padx=3)
-
-        def _save_today():
-            ths_down = "向下" in ths_var.get()
-            lost_today = "亏钱" in pnl_var.get()
-            hist_dict[today] = {"date": today, "pnl": "亏钱" if lost_today else "赚钱",
-                                "ths": "向下" if ths_down else "向上", "stage": auto_text}
-            _save_hist_dict()
-            _refresh_stats()
-            _analyze()
-
-        tk.Button(btn_f, text="✅ 保存今日", command=_save_today,
-                  bg="#1B5E20", fg="white", font=("", 10, "bold"), padx=10, pady=2).pack(side=tk.LEFT, padx=3)
-
-        tk.Button(btn_f, text="📅 补录/修改历史", command=lambda: _open_calendar(),
-                  bg="#6A1B9A", fg="white", font=("", 10, "bold"), padx=10, pady=2).pack(side=tk.LEFT, padx=3)
-
-        # ---------- 最近7天历史 ----------
-        tk.Label(win, text="📋 最近7天历史 (点击📅补录9月爆亏日方便复盘)", bg="#263238", fg="#81D4FA",
-                 font=("", 9, "bold")).pack(anchor="w", padx=12, pady=(4, 0))
-        hist_text = tk.Text(win, height=5, bg="#1A237E", fg="white", font=("", 9),
-                            state="disabled", wrap="none")
-        hist_text.pack(fill=tk.X, padx=12, pady=(2, 6))
-        hist_text_ref[0] = hist_text  # 注册到 holder, 供 _refresh_stats 刷新
-        hist_text.config(state="normal")
-        hist_text.insert("end", "日期\t\t同花顺\t盈亏\t\t情绪阶段\n")
-        for h in _sorted_list()[-7:]:
-            line = f"{h.get('date','')}\t{h.get('ths','')}\t{'📉亏钱' if h.get('pnl')=='亏钱' else '💰赚钱'}\t{h.get('stage','')}\n"
-            hist_text.insert("end", line)
-        hist_text.config(state="disabled")
-
-        # ==================== 📅 日历补录弹窗 ====================
-        def _open_calendar():
-            """月度日历, 点击日期可补录/修改/删除三维度数据"""
-            cal_win = tk.Toplevel(self.root)
-            cal_win.title("📅 情绪周期日历 · 补录历史")
-            cal_win.geometry("800x620")
-            cal_win.configure(bg="#1A1A2E")
-            cal_win.transient(win)
-            cal_win.minsize(760, 580)
-
-            # 先算出数据范围, 确定默认展示月份
-            dates_with_data = [_dt2.strptime(d, "%Y-%m-%d") for d in hist_dict.keys()
-                               if isinstance(d, str) and len(d) == 10]
-            if dates_with_data:
-                dates_with_data.append(_dt2.now())
-                first_date = min(dates_with_data)
-                default_month = _dt2(first_date.year, first_date.month, 1)
-            else:
-                default_month = _dt2.now().replace(day=1)
-
-            view_month = [default_month]  # list 用于闭包修改
-            cells_ref = {}  # {(row,col): cell_frame}
-            # 避免程序化刷新触发回调
-            is_rebuilding = [False]
-
-            # ---------- 紧凑工具栏 (导航+月份+统计+图例 一行搞定) ----------
-            top_f = tk.Frame(cal_win, bg="#1A1A2E"); top_f.pack(fill=tk.X, pady=(8, 2), padx=10)
-            tk.Button(top_f, text="◀", command=lambda: _shift_month(-1),
-                      bg="#37474F", fg="white", font=("", 9, "bold"), padx=6, pady=1).pack(side=tk.LEFT, padx=(0,2))
-            month_lbl = tk.Label(top_f, text="", bg="#1A1A2E", fg="#FFD54F", font=("", 11, "bold"))
-            month_lbl.pack(side=tk.LEFT, padx=2)
-            tk.Button(top_f, text="▶", command=lambda: _shift_month(1),
-                      bg="#37474F", fg="white", font=("", 9, "bold"), padx=6, pady=1).pack(side=tk.LEFT, padx=(2,4))
-            # 统计 + 紧凑图例
-            _up = sum(1 for v in hist_dict.values() if v.get("pnl") == "赚钱")
-            _dn = sum(1 for v in hist_dict.values() if v.get("pnl") == "亏钱")
-            _bad = sum(1 for v in hist_dict.values() if v.get("stage") in ("冰点","退潮"))
-            tk.Label(top_f, text=f"📅{len(hist_dict)}天 💰{_up}📉{_dn} ⚠️{_bad}", bg="#1A1A2E",
-                     fg="#FFD54F", font=("", 9, "bold")).pack(side=tk.LEFT, padx=4)
-            tk.Label(top_f, text="", bg="#B71C1C", width=2, height=1).pack(side=tk.LEFT, padx=(6,0))
-            tk.Label(top_f, text="", bg="#2E7D32", width=2, height=1).pack(side=tk.LEFT, padx=1)
-            tk.Label(top_f, text="", bg="#E65100", width=2, height=1).pack(side=tk.LEFT, padx=1)
-            # 右侧功能按钮
-            tk.Button(top_f, text="🔄", command=lambda: (_reload_hist(), _render_month()),
-                      bg="#2E7D32", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
-            tk.Button(top_f, text="今天", command=lambda: _jump_today(),
-                      bg="#0D47A1", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
-
-            def _reload_hist():
-                """强制从磁盘重新加载 hist_dict + 后台异步 Gist pull"""
-                nonlocal hist_dict
-                if _os_emo.path.exists(EMO_HIST):
-                    try:
-                        with open(EMO_HIST) as f:
-                            raw = _j_emo.load(f)
-                        if isinstance(raw, dict):
-                            hist_dict = raw
-                        elif isinstance(raw, list):
-                            nh = {}
-                            for h in raw: nh[h.get("date","")] = h
-                            hist_dict = nh
-                    except: pass
-                # 后台异步 Gist pull (不阻塞 UI)
-                import threading as _th_diag
-                def _bg():
-                    try:
-                        _remote = self._emo_gist_pull(timeout=2)
-                        if _remote:
-                            hist_dict = self._merge_emo_hist(hist_dict, _remote)
-                            print(f"[日历] 📥 Gist pull {len(_remote)}天", flush=True)
-                    except Exception as _gx:
-                        print(f"[日历] Gist pull skip: {_gx}", flush=True)
-                try: _th_diag.Thread(target=_bg, daemon=True).start()
-                except: pass
-
-            # 星期表头
-            wdays_f = tk.Frame(cal_win, bg="#1A1A2E"); wdays_f.pack(fill=tk.X, padx=10)
-            for i, w in enumerate(["一", "二", "三", "四", "五", "六", "日"]):
-                tk.Label(wdays_f, text=w, bg="#263238", fg="#81D4FA", font=("", 10, "bold"),
-                         width=7, pady=3).grid(row=0, column=i, padx=1, pady=1)
-
-            # 紧凑详情提示条 (悬停/点击时更新)
-            detail_lbl = tk.Label(cal_win, text="点击日期格子补录/修改 · 鼠标悬停看详情",
-                                  bg="#1A1A2E", fg="#90A4AE", font=("", 9))
-            detail_lbl.pack(fill=tk.X, padx=10, pady=(0, 1))
-
-            # 日期网格容器 (Canvas+Scrollbar 保底, 空间不够时可滚动)
-            _cal_cv = tk.Canvas(cal_win, bg="#1A1A2E", highlightthickness=0, bd=0)
-            _cal_vsb2 = tk.Scrollbar(cal_win, orient="vertical", command=_cal_cv.yview,
-                                     bg="#37474F", troughcolor="#1A1A2E")
-            _cal_cv.configure(yscrollcommand=_cal_vsb2.set)
-            _cal_vsb2.pack(side=tk.RIGHT, fill=tk.Y)
-            _cal_cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10,0), pady=(0,6))
-            grid_f = tk.Frame(_cal_cv, bg="#1A1A2E")
-            _cal_wid2 = _cal_cv.create_window((0, 0), window=grid_f, anchor="nw")
-            grid_f.bind("<Configure>", lambda e: _cal_cv.configure(scrollregion=_cal_cv.bbox("all")))
-            _cal_cv.bind("<Configure>", lambda e: _cal_cv.itemconfig(_cal_wid2, width=e.width))
-            # 鼠标滚轮 (macOS)
-            def _mw(e): _cal_cv.yview_scroll(int(-e.delta/30), "units")
-            def _on(e): _cal_cv.bind_all("<MouseWheel>", _mw)
-            def _off(e): _cal_cv.unbind_all("<MouseWheel>")
-            _cal_cv.bind("<Enter>", _on); _cal_cv.bind("<Leave>", _off)
-
-            # ---------- 渲染月历 ----------
-            def _render_month():
-                # 每次渲染前先从磁盘 reload (大盘后台可能刚同步完新数据)
-                try:
-                    _reload_hist()
-                except Exception as _re_e:
-                    print(f"[日历] reload 警告: {_re_e}", flush=True)
-                is_rebuilding[0] = True
-                for w in grid_f.winfo_children(): w.destroy()
-                cells_ref.clear()
-
-                try:
-                    ym = view_month[0]
-                    month_lbl.config(text=f"{ym.year} 年 {ym.month} 月")
-                    first = ym.replace(day=1)
-                    first_wd = first.weekday()
-                    if ym.month == 12:
-                        next_month = ym.replace(year=ym.year + 1, month=1, day=1)
-                    else:
-                        next_month = ym.replace(month=ym.month + 1, day=1)
-                    days_in_month = (next_month - _td_emo(days=1)).day
-
-                    today_str = _dt2.now().strftime("%Y-%m-%d")
-
-                    row = 0; col = first_wd
-                    for d in range(1, days_in_month + 1):
-                        date_str = f"{ym.year:04d}-{ym.month:02d}-{d:02d}"
-                        is_today = (date_str == today_str)
-                        rec = hist_dict.get(date_str)
-
-                        if rec:
-                            pnl = rec.get("pnl", "")
-                            ths = rec.get("ths", "")
-                            pct_v = rec.get("pct")
-                            if pnl == "赚钱": bg = "#B71C1C"
-                            elif pnl == "亏钱": bg = "#2E7D32"
-                            elif pct_v is not None:
-                                if pct_v > 0: bg = "#B71C1C"
-                                elif pct_v < 0: bg = "#2E7D32"
-                                else: bg = "#455A64"
-                            else: bg = "#455A64"
-                            border_color = "#E65100" if ths == "向下" else None
-                        else:
-                            bg = "#37474F"; border_color = None
-
-                        cell = tk.Frame(grid_f, bg=bg, width=95, height=65,
-                                        highlightbackground=border_color or "#1A1A2E",
-                                        highlightthickness=3 if border_color else 1,
-                                        cursor="hand2")
-                        cell.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
-                        cell.grid_propagate(False)
-
-                        def _click_all(widget_list, ds):
-                            def _click(e):
-                                if not is_rebuilding[0]: _open_day_editor(ds)
-                            def _enter(e):
-                                _r = hist_dict.get(ds, {})
-                                _ths_t = {"向上":"📈向上","向下":"📉向下"}.get(_r.get("ths",""),"未填")
-                                _pnl_t = {"赚钱":"💰赚钱","亏钱":"💸亏钱"}.get(_r.get("pnl",""),"未填")
-                                _stage_t = _r.get("stage","未填") or "未填"
-                                _emo_t = f"{_r.get('emo_score','--')}" if _r.get("emo_score") is not None else "--"
-                                _pct_t = f"{_r.get('pct',0):+.2f}%" if _r.get("pct") is not None else "--"
-                                detail_lbl.config(text=(f"📅 {ds}  ①{_stage_t}  ②同花顺:{_ths_t}  "
-                                                        f"③盈亏:{_pnl_t}  📊emo={_emo_t}  📈上证={_pct_t}"),
-                                                  fg="#FFD54F")
-                            def _leave(e):
-                                detail_lbl.config(text="点击日历上的日期进行补录/修改", fg="#90A4AE")
-                            for w in widget_list:
-                                try:
-                                    w.bind("<Button-1>", _click)
-                                    w.bind("<Enter>", _enter)
-                                    w.bind("<Leave>", _leave)
-                                except Exception:
-                                    pass
-
-                        ths_v = rec.get("ths", "") if rec else ""
-                        ths_icon = "📈" if ths_v == "向上" else ("📉" if ths_v == "向下" else "·")
-                        ths_fg = "#81D4FA" if ths_v else "#78909C"
-                        pnl_v = rec.get("pnl", "") if rec else ""
-                        pnl_sym = "💰" if pnl_v == "赚钱" else ("💸" if pnl_v == "亏钱" else "·")
-                        stage_v = rec.get("stage", "") if rec else ""
-                        stage_v = re.sub(r'[^\u4e00-\u9fa5A-Za-z0-9 ]+', '', str(stage_v or '')).strip()
-                        stage_fg = "#FFD54F" if stage_v in ("冰点", "退潮") else "#FFFFFF"
-                        emo_s = rec.get("emo_score") if rec else None
-                        pct_v2 = rec.get("pct") if rec else None
-
-                        widget_list = []
-                        # 行1: 日期(左) + 同花顺(右)
-                        l1 = tk.Frame(cell, bg=bg); l1.pack(fill=tk.X, pady=(2,0))
-                        widget_list.append(l1)
-                        fg = "#FFD54F" if is_today else "white"
-                        nlbl = tk.Label(l1, text=str(d), bg=bg, fg=fg,
-                                        font=("", 11, "bold" if is_today else "normal"))
-                        nlbl.pack(side=tk.LEFT, padx=3)
-                        widget_list.append(nlbl)
-                        t = tk.Label(l1, text=f"{ths_icon}", bg=bg, fg=ths_fg, font=("", 10))
-                        t.pack(side=tk.RIGHT, padx=3)
-                        widget_list.append(t)
-                        # 行2: 盈亏emoji (居中大号)
-                        p = tk.Label(cell, text=pnl_sym, bg=bg, fg="white", font=("", 14, "bold"))
-                        p.pack(pady=0)
-                        widget_list.append(p)
-                        # 行3: stage阶段文字 (居中)
-                        s = tk.Label(cell, text=stage_v or "·", bg=bg, fg=stage_fg, font=("", 10, "bold"))
-                        s.pack(pady=0)
-                        widget_list.append(s)
-                        # 行4: emo分 + 涨跌幅 (居中)
-                        info_txt = ""
-                        if emo_s is not None: info_txt += f"emo{emo_s:.0f}"
-                        if pct_v2 is not None: info_txt += f" {pct_v2:+.1f}%"
-                        if not info_txt: info_txt = "·"
-                        inf = tk.Label(cell, text=info_txt.strip(), bg=bg, fg="#B0BEC5", font=("", 9))
-                        inf.pack(pady=0)
-                        widget_list.append(inf)
-                        widget_list.append(cell)
-                        _click_all(widget_list, date_str)
-                        cells_ref[(row, col)] = (cell, date_str)
-                        col += 1
-                        if col > 6: col = 0; row += 1
-
-                    for ci in range(7): grid_f.grid_columnconfigure(ci, weight=1)
-                    for ri in range(max(row + 1, 6)): grid_f.grid_rowconfigure(ri, weight=1)
-                except Exception as _rr_e:
-                    print(f"[日历] ❌ 渲染失败: {_rr_e}", flush=True)
-                    import traceback as _tb_r; _tb_r.print_exc()
-
-                is_rebuilding[0] = False
-                print(f"[日历] ✅ 渲染完成, {len(hist_dict)}天数据, cells={len(cells_ref)}", flush=True)
-
-            _render_month()
-
-            # ---------- 月份导航 ----------
-            def _shift_month(delta):
-                ym = view_month[0]
-                new_m = ym.month + delta
-                new_y = ym.year
-                while new_m < 1:
-                    new_m += 12; new_y -= 1
-                while new_m > 12:
-                    new_m -= 12; new_y += 1
-                view_month[0] = _dt2(new_y, new_m, 1)
-                _render_month()
-
-            def _jump_today():
-                view_month[0] = _dt2.now().replace(day=1)
-                _render_month()
-
-            # ---------- 单日编辑弹窗 ----------
-            def _open_day_editor(date_str):
-                edit_win = tk.Toplevel(cal_win)
-                edit_win.title(f"📝 补录 {date_str}")
-                edit_win.geometry("420x380")
-                edit_win.configure(bg="#263238")
-                edit_win.transient(cal_win)
-                edit_win.grab_set()
-
-                rec = hist_dict.get(date_str, {})
-
-                tk.Label(edit_win, text=f"📅 {date_str} 三维度记录", bg="#263238", fg="#FFD54F",
-                         font=("", 13, "bold")).pack(pady=(14, 4))
-
-                # ===== 只读系统数据区 (自动从大盘趋势同步) =====
-                sys_info_parts = []
-                _emo_s = rec.get("emo_score")
-                _pct_v = rec.get("pct")
-                _close_v = rec.get("close")
-                _zt_v = rec.get("zt")
-                if _emo_s is not None:
-                    sys_info_parts.append(f"📊情绪分={_emo_s:.0f}")
-                if _pct_v is not None:
-                    sys_info_parts.append(f"📈上证={_pct_v:+.2f}%")
-                if _zt_v is not None:
-                    sys_info_parts.append(f"🔥ZT={_zt_v}")
-                if _close_v:
-                    sys_info_parts.append(f"📉收={_close_v}")
-                if sys_info_parts:
-                    sys_info = "  |  ".join(sys_info_parts)
-                    sys_f = tk.Frame(edit_win, bg="#37474F")
-                    sys_f.pack(fill=tk.X, padx=12, pady=(0, 4))
-                    tk.Label(sys_f, text=f"🔒系统自动同步: {sys_info}",
-                             bg="#37474F", fg="#81D4FA", font=("", 9),
-                             padx=8, pady=4).pack(fill=tk.X)
-                else:
-                    tk.Label(edit_win, text="ℹ️ 该天暂无系统情绪数据 (加载大盘后自动补充)",
-                             bg="#263238", fg="#78909C", font=("", 8)).pack(pady=(0, 4))
-
-                # 维度1: 情绪阶段 (手填, 或用auto_text作为默认值)
-                f1e = tk.LabelFrame(edit_win, text="① 情绪阶段 (系统自动获取或手填)",
-                                    bg="#263238", fg="#81D4FA", font=("", 10, "bold"), padx=10, pady=4)
-                f1e.pack(fill=tk.X, padx=12, pady=3)
-                stage_var = tk.StringVar(value=rec.get("stage", auto_text))
-                tk.Entry(f1e, textvariable=stage_var, width=40,
-                         bg="#1A237E", fg="white", insertbackground="white").pack(fill=tk.X, pady=2)
-
-                # 维度2: 同花顺
-                f2e = tk.LabelFrame(edit_win, text="② 同花顺情绪指数",
-                                    bg="#263238", fg="#FFAB91", font=("", 10, "bold"), padx=10, pady=4)
-                f2e.pack(fill=tk.X, padx=12, pady=3)
-                ths_default = rec.get("ths", "向上")
-                ths_edit_var = tk.StringVar(value=f"{ths_default} (yes)" if ths_default == "向上" else f"{ths_default} (no)")
-                tk.Radiobutton(f2e, text="📈 向上 (yes)", variable=ths_edit_var, value="向上 (yes)",
-                               bg="#263238", fg="#E0E0E0", selectcolor="#263238", activebackground="#263238").pack(anchor="w")
-                tk.Radiobutton(f2e, text="📉 向下 (no)", variable=ths_edit_var, value="向下 (no)",
-                               bg="#263238", fg="#E0E0E0", selectcolor="#263238", activebackground="#263238").pack(anchor="w")
-
-                # 维度3: 盈亏
-                f3e = tk.LabelFrame(edit_win, text="③ 账户盈亏",
-                                    bg="#263238", fg="#A5D6A7", font=("", 10, "bold"), padx=10, pady=4)
-                f3e.pack(fill=tk.X, padx=12, pady=3)
-                pnl_default = rec.get("pnl", "赚钱")
-                pnl_edit_var = tk.StringVar(value=f"{pnl_default} (yes)" if pnl_default == "赚钱" else f"{pnl_default} (no)")
-                tk.Radiobutton(f3e, text="💰 赚钱 (yes)", variable=pnl_edit_var, value="赚钱 (yes)",
-                               bg="#263238", fg="#E0E0E0", selectcolor="#263238", activebackground="#263238").pack(anchor="w")
-                tk.Radiobutton(f3e, text="📉 亏钱 (no)", variable=pnl_edit_var, value="亏钱 (no)",
-                               bg="#263238", fg="#E0E0E0", selectcolor="#263238", activebackground="#263238").pack(anchor="w")
-
-                def _save_edit():
-                    ths_v = "向下" if "向下" in ths_edit_var.get() else "向上"
-                    pnl_v = "亏钱" if "亏钱" in pnl_edit_var.get() else "赚钱"
-                    # 保留自动同步的字段 (emo_score/pct/close/zt)
-                    _old = hist_dict.get(date_str, {})
-                    hist_dict[date_str] = {
-                        "date": date_str, "pnl": pnl_v, "ths": ths_v,
-                        "stage": stage_var.get().strip(),
-                        "emo_score": _old.get("emo_score"),  # 自动同步保留
-                        "pct": _old.get("pct"),
-                        "close": _old.get("close"),
-                        "zt": _old.get("zt"),
-                    }
-                    _save_hist_dict()
-                    _render_month()
-                    _refresh_stats()
-                    edit_win.destroy()
-
-                def _delete_rec():
-                    if date_str in hist_dict:
-                        del hist_dict[date_str]
-                        _save_hist_dict()
-                        _render_month()
-                        _refresh_stats()
-                    edit_win.destroy()
-
-                btn_f_edit = tk.Frame(edit_win, bg="#263238"); btn_f_edit.pack(pady=10)
-                tk.Button(btn_f_edit, text="💾 保存", command=_save_edit,
-                          bg="#1B5E20", fg="white", font=("", 10, "bold"), padx=14, pady=3).pack(side=tk.LEFT, padx=5)
-                if rec:
-                    tk.Button(btn_f_edit, text="🗑️ 删除该天记录", command=_delete_rec,
-                              bg="#B71C1C", fg="white", font=("", 10, "bold"), padx=10, pady=3).pack(side=tk.LEFT, padx=5)
-                tk.Button(btn_f_edit, text="取消", command=edit_win.destroy,
-                          bg="#546E7A", fg="white", font=("", 10), padx=10, pady=3).pack(side=tk.LEFT, padx=5)
 
     def _show_lifecycle_popup(self):
         """🧬 生命周期: 先弹选股弹窗让用户勾选持股标签页 → 再扫描带进度条 → 卡片网格结果"""
@@ -47198,8 +45295,9 @@ class StockKeywordAnalyzerGUI:
         # --- Step 1: 立即构建候选池并渲染灰色卡片 ---
         pool = self._build_lifecycle_candidate_pool(group_indices)
         if not pool:
-            messagebox.showwarning("🧬 生命周期", "所选标签页均为空股!")
-            return
+            # 兜底: 弹手动输入框
+            pool = self._lifecycle_manual_input()
+            if not pool: return
         print(f"[生命周期] 📊 候选池 {len(pool)} 只, 立即渲染卡片...")
 
         # 渲染弹窗 (全灰色 loading 卡) — 候选池模式
@@ -47302,13 +45400,20 @@ class StockKeywordAnalyzerGUI:
 
     def _lc_scan_finished(self, g_hash, holder):
         """全部扫描完毕 — 通知弹窗 + 缓存"""
+        _cache_hit_list = []
+        _cache_skipped = []
         try:
             for w in self.root.winfo_children():
                 if isinstance(w, tk.Toplevel) and hasattr(w, '_on_all_done'):
-                    w._on_all_done(); break
+                    w._on_all_done()
+                    _cache_hit_list = getattr(w, '_lc_hit_list', [])
+                    _cache_skipped = getattr(w, '_lc_skipped_list', [])
+                    break
         except Exception: pass
         self._lifecycle_cache = {"ts": time.time(), "groups": g_hash,
-            "data": {"trade_date": holder.get("trade_date",""), "stocks": [], "skip_count": holder.get("skip_count",{})}}
+            "data": {"trade_date": holder.get("trade_date",""), "stocks": _cache_hit_list,
+                     "_skipped_list": _cache_skipped,
+                     "skip_count": holder.get("skip_count",{})}}
 
     def _run_lifecycle_scan_on_groups(self, group_indices, progress_cb=None):
         """🧬 扫描指定 groups 的生命周期 (抽出候选池构建逻辑)"""
@@ -47344,6 +45449,71 @@ class StockKeywordAnalyzerGUI:
                 seen.add(cd)
                 monitor.append((nm or "", cd, gi))
         return monitor
+
+    def _lifecycle_manual_input(self):
+        """🧬 兜底: 手动输入股票代码构建候选池
+        支持格式:
+          每⾏一个, 逗号或空格分隔 名称,代码
+          或只要 6 位代码
+        Returns:
+            list[(name, code, 0)]  或 None (取消)
+        """
+        win = tk.Toplevel(self.root)
+        win.title("🧬 手动输入股票代码")
+        win.geometry("520x380")
+        win.configure(bg="#FCE4EC")
+        win.transient(self.root)
+        win.grab_set()
+        win.resizable(False, False)
+
+        tk.Label(win, text="📝 自持股池为空, 请手动输入股票", bg="#FCE4EC",
+                 font=("", 13, "bold"), fg="#AD1457").pack(pady=(16, 4))
+        tk.Label(win, text="每行一个: 名称,代码 或 只要6位代码 (如: 平安银行,000001 或 000001)",
+                 bg="#FCE4EC", font=("", 9), fg="#880E4F").pack(pady=(0, 10))
+
+        txt = tk.Text(win, height=12, width=55, font=("", 11))
+        txt.pack(padx=20, pady=6)
+        txt.insert("1.0", "000001\n600519\n002594\n300750")
+
+        result = {"pool": None}
+
+        def _on_ok():
+            raw = txt.get("1.0", tk.END).strip()
+            if not raw:
+                messagebox.showwarning("提示", "请输入股票代码!", parent=win)
+                return
+            pool = []; seen = set()
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"): continue
+                # 解析: 支持 "名称,代码" / "名称 代码" / 只要代码
+                parts = re.split(r"[,，\s]+", line)
+                parts = [p.strip() for p in parts if p.strip()]
+                if not parts: continue
+                # 找 6 位代码
+                code6 = None; name = ""
+                for p in parts:
+                    m = re.search(r"(\d{6})", p)
+                    if m:
+                        code6 = m.group(1)
+                    elif not code6:
+                        name = p
+                if not code6: continue
+                if code6 in seen: continue
+                seen.add(code6)
+                pool.append((name or code6, code6, 0))
+            if not pool:
+                messagebox.showwarning("提示", "未解析到有效股票代码!", parent=win)
+                return
+            result["pool"] = pool
+            win.destroy()
+
+        btns = tk.Frame(win, bg="#FCE4EC"); btns.pack(pady=10)
+        ttk.Button(btns, text="✅ 开始扫描", command=_on_ok, width=14).pack(side="left", padx=6)
+        ttk.Button(btns, text="❌ 取消", command=win.destroy, width=14).pack(side="left", padx=6)
+
+        self.root.wait_window(win)
+        return result["pool"]
 
     def _calc_lifecycle_for_stock(self, s_name, s_code, pro, trade_date, today,
                                    valid_tsc_set, _db_map, skip_count):
@@ -47403,8 +45573,6 @@ class StockKeywordAnalyzerGUI:
             out = _np_m.full(len(arr), _np_m.nan)
             for i in range(w-1, len(arr)): out[i] = _np_m.mean(arr[i-w+1:i+1])
             return out
-        ma5 = _ma_correct(cl, 5)
-        ma10 = _ma_correct(cl, 10)
         ma20 = _ma_correct(cl, 20)
         ma60 = _ma_correct(cl, 60)
 
@@ -47439,23 +45607,43 @@ class StockKeywordAnalyzerGUI:
                 if prev_neg:
                     pivot_indices.append(calc_start + k + 1)
         if not pivot_indices:
-            # 无筹码转折点 → fallback: 用当前价 P0 = close[-1]
-            t_star = N - 1
-            P0 = round(float(cl[-1]), 3)
-            T_star_date = str(dates[-1]) if len(dates) > 0 else ""
-        else:
-            t_star = pivot_indices[-1]
-            P0 = round(float(cl[t_star]), 3)
-            T_star_date = str(dates[t_star])
+            skip_count["无转折点"] = skip_count.get("无转折点", 0) + 1
+            return None, "无筹码转折点"
+        t_star = pivot_indices[-1]
+        P0 = round(float(cl[t_star]), 3)
+        T_star_date = str(dates[t_star])
 
-        # --- 形态特征需要的变量 (保留, 不再做硬过滤) ---
+        # --- 6 层过滤 ---
+        last3 = cl[-3:]
+        ma20_last3 = ma20[-3:]
+        above_ma20 = all(last3 > ma20_last3) if not _np_m.any(_np_m.isnan(ma20_last3)) else False
+        if not above_ma20:
+            skip_count["不满足过滤"] += 1
+            return None, "MA20未站稳3日"
+
         ma20_10 = ma20[-10:]
         if _np_m.any(_np_m.isnan(ma20_10)):
-            ma20_slope_pct = 0.0
-        else:
-            ma20_slope_pct = round((ma20_10[-1] - ma20_10[0]) / (ma20_10[0] + 1e-9) * 100, 2)
+            skip_count["不满足过滤"] += 1
+            return None, "MA20数据不足"
+        ma20_slope_pct = round((ma20_10[-1] - ma20_10[0]) / (ma20_10[0] + 1e-9) * 100, 2)
+        ma20_flat = -3.0 <= ma20_slope_pct <= 10.0
 
+        not_overheat = L_gain_pct < 50.0
+        t_star_recency = (N - 1) - t_star <= 60
         p0_gain_pct = round((cl[-1] - P0) / P0 * 100, 1) if P0 > 0 else 0
+        not_chase = p0_gain_pct < 50.0
+        daily_turnover = float(_np_m.mean(vo[-60:]) * cl[-1]) if len(cl) > 60 else 0
+        liquid = daily_turnover > 3e7
+
+        if not (ma20_flat and not_overheat and t_star_recency and not_chase and liquid):
+            reasons = []
+            if not ma20_flat: reasons.append(f"MA20斜率{ma20_slope_pct:+.1f}%")
+            if not not_overheat: reasons.append(f"距低点+{L_gain_pct:.0f}%")
+            if not t_star_recency: reasons.append(f"T*距今{(N-1)-t_star}日>60")
+            if not not_chase: reasons.append(f"距P0+{p0_gain_pct:.0f}%")
+            if not liquid: reasons.append("成交额不足3kw")
+            skip_count["不满足过滤"] += 1
+            return None, " | ".join(reasons)
 
         # --- 形态特征 ---
         circ_mv = 0.0
@@ -47529,71 +45717,6 @@ class StockKeywordAnalyzerGUI:
         if best_label == "游资票": risk_stars += 1
         risk_stars = min(5, risk_stars)
 
-        # ====== 🆕 生命周期三标签判定 ======
-        _cur_close = float(cl[-1])
-        _ma5_val = float(ma5[-1]) if not _np_m.isnan(ma5[-1]) else _cur_close
-        _ma10_val = float(ma10[-1]) if not _np_m.isnan(ma10[-1]) else _cur_close
-        _ma20_val = float(ma20[-1]) if not _np_m.isnan(ma20[-1]) else _cur_close
-        _bull_alignment = (_ma5_val > _ma10_val > _ma20_val)
-        _break_above = False
-        for _bi in range(-5, 0):
-            if _bi - 1 >= -len(cl):
-                _prev_cl = float(cl[_bi - 1])
-                _prev_ma20 = float(ma20[_bi - 1]) if not _np_m.isnan(ma20[_bi - 1]) else _prev_cl
-                _curr_cl = float(cl[_bi])
-                _curr_ma20 = float(ma20[_bi]) if not _np_m.isnan(ma20[_bi]) else _curr_cl
-                if _prev_cl < _prev_ma20 and _curr_cl >= _curr_ma20:
-                    _break_above = True
-                    break
-        _ma20_trend_up = ma20_slope_pct >= 0
-        _below_ma20 = _cur_close < _ma20_val
-        if _bull_alignment:
-            _lifecycle_tag = "life_strong"; _lifecycle_label = "生命旺盛"
-        elif _break_above and _ma20_trend_up:
-            _lifecycle_tag = "life_start"; _lifecycle_label = "生命起始"
-        elif _below_ma20 or not _ma20_trend_up:
-            _lifecycle_tag = "life_end"; _lifecycle_label = "生命结束"
-        else:
-            _lifecycle_tag = "life_start"; _lifecycle_label = "生命起始"
-
-        # ====== 🆕 游资心法综合打分 ======
-        def _hm_composite2(ca, oa, m5a, m10a, m20a, _tr2, _cmv):
-            if len(ca) < 20: return 50
-            s = 50
-            if m5a[-1] > m10a[-1] > m20a[-1]: s += 15
-            elif m5a[-1] > m10a[-1]: s += 8
-            else: s -= 10
-            pos20 = (ca[-1] - m20a[-1]) / (m20a[-1] + 1e-9) * 100
-            if 0 <= pos20 <= 15: s += 10
-            elif pos20 > 30: s -= 5
-            elif pos20 < -5: s -= 15
-            v5 = float(_np_m.mean(vo[-5:])) if len(vo) >= 5 else 1
-            v20 = float(_np_m.mean(vo[-20:-5])) if len(vo) >= 20 else v5
-            vr = v5 / (v20 + 1e-9)
-            if 1.2 <= vr <= 3.0: s += 10
-            elif vr > 5: s -= 5
-            elif vr < 0.7: s -= 5
-            if len(ca) >= 5:
-                r5 = (ca[-1] - ca[-5]) / (ca[-5] + 1e-9) * 100
-                if 5 <= r5 <= 20: s += 10
-                elif r5 > 30: s -= 5
-                elif r5 < -10: s -= 15
-            if _tr2 and _tr2 > 0:
-                if 3 <= _tr2 <= 15: s += 8
-                elif _tr2 > 20: s -= 3
-            if _cmv > 100e4: s += 3
-            elif _cmv < 10e4: s += 5
-            return max(0, min(100, s))
-
-        _tr_val2 = 0.0
-        if _db is not None and len(_db) > 0 and "turnover_rate" in _db.columns:
-            try:
-                if _pd_m.notna(_db["turnover_rate"].iloc[0]):
-                    _tr_val2 = float(_db["turnover_rate"].iloc[0])
-            except Exception:
-                pass
-        _hm_score2 = _hm_composite2(cl, vo, ma5, ma10, ma20, _tr_val2, circ_mv)
-
         result = {
             "code": code6,
             "name": s_name,
@@ -47616,15 +45739,6 @@ class StockKeywordAnalyzerGUI:
             "target_low": round(P0 * mult_low, 2),
             "target_high": round(P0 * mult_high, 2),
             "risk_stars": risk_stars,
-            # 🆕 生命周期 + 游资心法
-            "lifecycle_tag": _lifecycle_tag,
-            "lifecycle_label": _lifecycle_label,
-            "lifecycle_score": _hm_score2,
-            "break_above_5d": _break_above,
-            "bull_alignment": _bull_alignment,
-            "ma5_val": round(_ma5_val, 2),
-            "ma10_val": round(_ma10_val, 2),
-            "ma20_val": round(_ma20_val, 2),
         }
         return result, None
 
@@ -47651,14 +45765,11 @@ class StockKeywordAnalyzerGUI:
             stocks = data.get("stocks", [])
             trade_date = data.get("trade_date", "")
             skip_count = data.get("skip_count", {})
-            _hit_list = stocks; _skipped_list = []; _scan_done = {"flag": True}
-            if not stocks:
-                skip_msg = ""
-                if skip_count:
-                    skip_msg = (f"\n\n跳过: ST/上市不足={skip_count.get('ST/上市不足',0)}, "
-                                f"K线不足={skip_count.get('K线不足',0)}, 不满足过滤={skip_count.get('不满足过滤',0)}")
-                messagebox.showinfo("🧬 生命周期", f"交易日 {trade_date}\n未找到筹码转折点信号{skip_msg}")
-                return
+            # 兼容旧缓存: 没有 _skipped_list 数据 → 用 skip_count 里的数量生成占位 skip 卡
+            _skipped_list = data.get("_skipped_list", [])
+            if not _skipped_list and skip_count:
+                _skipped_list = [("_cache_skip_", "—", f"ST={skip_count.get('ST/上市不足',0)} K线={skip_count.get('K线不足',0)} 过滤={skip_count.get('不满足过滤',0)}")]
+            _hit_list = stocks; _scan_done = {"flag": True}
 
         win = tk.Toplevel(self.root)
         win.title("🧬 生命周期·筹码转折点扫描")
@@ -47686,17 +45797,9 @@ class StockKeywordAnalyzerGUI:
             "hybrid":  {"bg": "#E3F2FD", "fg": "#0D47A1", "accent": "#1976D2", "label": "合力票"},
             "loading": {"bg": "#F5F5F5", "fg": "#757575", "accent": "#BDBDBD", "label": "⏳扫描中"},
             "skip":    {"bg": "#ECEFF1", "fg": "#546E7A", "accent": "#90A4AE", "label": "未命中"},
-            # 🆕 生命周期三标签
-            "life_start":  {"bg": "#FFEBEE", "fg": "#B71C1C", "accent": "#D32F2F", "label": "🔴 生命起始", "bold": False},
-            "life_end":    {"bg": "#E8F5E9", "fg": "#1B5E20", "accent": "#388E3C", "label": "🟢 生命结束", "bold": False},
-            "life_strong": {"bg": "#C62828", "fg": "#FFFFFF", "name_fg": "#FFD700", "accent": "#8B0000", "label": "🟥 生命旺盛", "bold": True},
         }
 
-        def _theme_key(result):
-            lt = result.get("lifecycle_tag", "") if isinstance(result, dict) else ""
-            if lt in ("life_start", "life_end", "life_strong"):
-                return lt
-            label = result.get("label", "") if isinstance(result, dict) else result
+        def _theme_key(label):
             if "合力" in label: return "hybrid"
             if "机构" in label: return "inst"
             if "主力" in label: return "main"
@@ -47730,7 +45833,7 @@ class StockKeywordAnalyzerGUI:
 
             hdr = tk.Frame(card, bg=th["bg"])
             hdr.pack(fill="x", padx=8, pady=(6, 2))
-            refs["lbls"]["hdr_n"] = tk.Label(hdr, text=name, bg=th["bg"], fg=th.get("name_fg", th["fg"]), font=("",12,"bold"))
+            refs["lbls"]["hdr_n"] = tk.Label(hdr, text=name, bg=th["bg"], fg=th["fg"], font=("",12,"bold"))
             refs["lbls"]["hdr_n"].pack(side="left")
             refs["lbls"]["hdr_c"] = tk.Label(hdr, text=f"[{code}]", bg=th["bg"], fg="#555", font=("",9))
             refs["lbls"]["hdr_c"].pack(side="left", padx=(2,4))
@@ -47779,37 +45882,29 @@ class StockKeywordAnalyzerGUI:
             return refs
 
         def _paint_hit(refs, result):
-            tk_key = _theme_key(result)
+            tk_key = _theme_key(result["label"])
             th = _THEME[tk_key]
-            _bold = th.get("bold", False)
             card = refs["frame"]
             card.configure(bg=th["bg"], highlightbackground=th["accent"])
+            # 递归改背景色
             def _rec_bg(w):
                 try: w.configure(bg=th["bg"])
                 except Exception: pass
                 for c in w.winfo_children(): _rec_bg(c)
             _rec_bg(card)
-            _nf = ("", 13, "bold") if _bold else ("", 10, "bold")
-            _sf = ("", 11, "bold") if _bold else ("", 9)
-            refs["lbls"]["hdr_n"].configure(font=("", 14, "bold") if _bold else ("", 12, "bold"), fg=th.get("name_fg", th["fg"]))
-            refs["lbls"]["hdr_t"].configure(bg=th["accent"], fg="white", text=th["label"], font=_nf)
-            refs["lbls"]["m1"].configure(fg=th["fg"], text=f"现价 {result['price']:.2f}", font=("", 13, "bold") if _bold else ("", 11, "bold"))
-            refs["lbls"]["m2"].configure(fg=th["fg"], text=f"T*={result['T_star_date']}", font=_sf)
-            refs["lbls"]["r2l"].configure(fg=th["fg"], font=_sf, text=f"P0={result['P0']:.2f}")
-            refs["lbls"]["r2r"].configure(fg=th["fg"], font=_sf, text=f"距P0 {result['p0_gain_pct']}%")
-            _ma5v = result.get("ma5_val", 0)
-            _ma10v = result.get("ma10_val", 0)
-            _ma20v = result.get("ma20_val", 0)
-            _bull = result.get("bull_alignment", False)
-            _ma_line = f"MA5={_ma5v} MA10={_ma10v} MA20={_ma20v}"
-            if _bull: _ma_line += " 🔥多头"
-            refs["lbls"]["r3l"].configure(fg=th["fg"], font=_sf, text=_ma_line)
-            refs["lbls"]["r3r"].configure(fg=th["fg"], font=_sf, text=f"低点+{result['L_gain_pct']}%")
+            refs["lbls"]["hdr_t"].configure(bg=th["accent"], text=th["label"])
+            refs["lbls"]["m1"].configure(text=f"现价 {result['price']:.2f}")
+            refs["lbls"]["m2"].configure(text=f"T*={result['T_star_date']}")
+            refs["lbls"]["r2l"].configure(fg=th["fg"], text=f"P0={result['P0']:.2f}")
+            refs["lbls"]["r2r"].configure(fg=("#C62828" if result['p0_gain_pct']>=0 else "#2E7D32"),
+                text=f"距P0 {result['p0_gain_pct']}%")
+            refs["lbls"]["r3l"].configure(text=f"MA20 {result['ma20_state']}")
+            refs["lbls"]["r3r"].configure(text=f"距低点 +{result['L_gain_pct']}%")
             mult = f"{result['mult_low']}~{result['mult_high']}x"
-            refs["lbls"]["tgt"].configure(fg=th["fg"], font=_nf, text=f"🎯 目标 {result['target_low']:.2f}~{result['target_high']:.2f} ({mult})")
-            _hm_score = result.get('lifecycle_score', 0)
-            refs["lbls"]["risk"].configure(fg=th["fg"], font=_sf, text=f"🦅游资 {_hm_score}分  风险{'⭐'*result['risk_stars']}")
-            refs["lbls"]["conf"].configure(fg=th["accent"], font=_nf, text=f"{result.get('lifecycle_label','')}")
+            refs["lbls"]["tgt"].configure(fg=th["fg"],
+                text=f"🎯 目标 {result['target_low']:.2f}~{result['target_high']:.2f} ({mult})")
+            refs["lbls"]["risk"].configure(text=f"风险 {'⭐' * result['risk_stars']}")
+            refs["lbls"]["conf"].configure(fg=th["accent"], text=f"置信 {result['label_conf']}")
 
         def _paint_skip(refs, name, code, reason):
             th = _THEME["skip"]
@@ -47837,15 +45932,11 @@ class StockKeywordAnalyzerGUI:
             _main = sum(1 for s in _hit_list if "主力" in s["label"] and "合力" not in s["label"]) if _scan_done["flag"] else 0
             _hot = sum(1 for s in _hit_list if "游资" in s["label"] and "合力" not in s["label"]) if _scan_done["flag"] else 0
             _hy = sum(1 for s in _hit_list if "合力" in s["label"]) if _scan_done["flag"] else 0
-            _l_s = sum(1 for s in _hit_list if s.get("lifecycle_tag")=="life_start") if _scan_done["flag"] else 0
-            _l_e = sum(1 for s in _hit_list if s.get("lifecycle_tag")=="life_end") if _scan_done["flag"] else 0
-            _l_str = sum(1 for s in _hit_list if s.get("lifecycle_tag")=="life_strong") if _scan_done["flag"] else 0
             title_lbl.configure(
                 text=f"🧬 生命周期·筹码转折点扫描  |  {trade_date}  |  命中 {len(_hit_list)}  跳过 {len(_skipped_list)}  总 {len(_hit_list)+len(_skipped_list)}{_cache_tag}")
             if _scan_done["flag"]:
                 overview_lbl.configure(
                     text=f"📊 机构 {_inst}  主力 {_main}  游资 {_hot}  合力 {_hy}  |  "
-                         f"🔴起始 {_l_s}  🟢结束 {_l_e}  🟥旺盛 {_l_str}  |  "
                          f"ST={skip_count.get('ST/上市不足',0)} K线={skip_count.get('K线不足',0)} 过滤={skip_count.get('不满足过滤',0)}")
             else:
                 overview_lbl.configure(text=f"📊 扫描中... 已处理 {len(_hit_list)+len(_skipped_list)} 只  |  命中 {len(_hit_list)}  跳过 {len(_skipped_list)}")
@@ -47858,10 +45949,18 @@ class StockKeywordAnalyzerGUI:
             _update_overview()
         else:
             _sort_rank = {"机构票":0,"主力票":1,"合力票·机构票":2,"合力票·主力票":2,"合力票·游资票":2,"游资票":3}
-            for idx, s in enumerate(sorted(_hit_list, key=lambda x: _sort_rank.get(x["label"],4))):
-                refs = _make_card(idx, s["name"], s["code"], _theme_key(s))
+            idx = 0
+            for s in sorted(_hit_list, key=lambda x: _sort_rank.get(x["label"],4)):
+                refs = _make_card(idx, s["name"], s["code"], _theme_key(s["label"]))
                 _paint_hit(refs, s)
                 _card_refs[s["code"]] = refs
+                idx += 1
+            # 也渲染 skip 卡
+            for code, name, reason in _skipped_list:
+                refs = _make_card(idx, name, code, "skip")
+                _paint_skip(refs, name, code, reason or "")
+                _card_refs[code] = refs
+                idx += 1
             _update_overview()
 
         tk.Label(win, text="💡 双击命中卡片 → 打开该股票游资心法全解  |  机构票 4-6x  主力 2-3x  游资 1.5-2x",
@@ -47881,6 +45980,8 @@ class StockKeywordAnalyzerGUI:
 
         win._on_stock_done = _on_stock_done
         win._on_all_done = _on_all_done
+        win._lc_hit_list = _hit_list       # 给缓存用
+        win._lc_skipped_list = _skipped_list  # 给缓存用
 
     # ==================== 📈 量价齐升选股 ====================
     def _run_volume_price_scan(self):
@@ -52682,16 +50783,7 @@ class StockKeywordAnalyzerGUI:
                 except Exception:
                     pass
                 if realtime_price is None:
-                    try:
-                        today = datetime.now().strftime('%Y%m%d')
-                        pro = ts.pro_api()
-                        df = pro.daily(ts_code=ts_code, trade_date=today)
-                        if df is not None and not df.empty and 'close' in df.columns:
-                            realtime_price = float(df.iloc[0]['close'])
-                            if not (0.01 < realtime_price < 10000):
-                                realtime_price = None
-                    except Exception:
-                        pass
+                    pass  # 跳过 daily fallback, 实时失败用其他渠道
         except Exception:
             pass
         if realtime_price and realtime_price > 0:
@@ -64563,9 +62655,15 @@ class StockKeywordAnalyzerGUI:
                 if _hm_score is not None and isinstance(_hm_score, (int, float)):
                     display_text += f" 🦅{int(_hm_score)}"
                 elif _hm_key and _hm_key.isdigit() and len(_hm_key) == 6:
-                    # ⛔ 不再自动起线程算筹码成本 —— 持仓股多时会循环打爆 tushare 限频
-                    # 用户需要时手动点「筹码成本」按钮触发
-                    pass
+                    # cache miss → 后台线程算, 算完后刷新按钮
+                    import threading as _th_hm
+                    def _hm_bg(_code, _idx, _gi):
+                        try:
+                            self._hm_calc_for_stock(_code)
+                            self.root.after(0, lambda: self._update_holding_label(_idx, group_index=_gi, fetch_daily_change=False))
+                        except Exception:
+                            pass
+                    _th_hm.Thread(target=_hm_bg, args=(_hm_key, index, group_index), daemon=True).start()
                 # 当日涨跌幅:优先使用持仓检测传入的值,否则实时拉取
                 change_pct_text = ""
                 current_price = None
@@ -69754,13 +67852,52 @@ class StockKeywordAnalyzerGUI:
         except Exception:
             pass
     def _load_sector_index_list(self):
-        """加载板块指数列表 —— 只读缓存, 联网更新交给用户手动点"维护/刷新"按钮"""
+        """加载板块指数列表,并自动获取同花顺热门板块前30(每天自动更新)"""
         try:
             self.sector_index_list = self.ai_config_manager.config.get("sector_index_list", [])
             if not isinstance(self.sector_index_list, list):
                 self.sector_index_list = []
-            # ⛔ 不再自动后台联网更新 —— 每天浪费 0.4s+ (虽然有缓存, 但网络请求本身有开销)
-            # 用户需要更新时, 点板块指数下拉旁的「维护」按钮手动刷新
+            # 检查是否需要更新(每天自动更新一次)
+            last_update_date = self.ai_config_manager.config.get("sector_index_last_update", "")
+            today = datetime.now().strftime("%Y-%m-%d")
+            need_update = (last_update_date != today) or (len(self.sector_index_list) < 30)
+            # 每天自动获取热门板块前30:网络请求放到后台线程,避免阻塞主窗口首次显示
+            if need_update:
+                def _sector_fetch_worker():
+                    try:
+                        import akshare as ak
+                        concept_df = None
+                        source = ""
+                        new_list = []
+                        try:
+                            concept_df = ak.stock_board_concept_name_em()
+                            if concept_df is not None and not concept_df.empty and '涨跌幅' in concept_df.columns:
+                                hot_sectors = concept_df.sort_values('涨跌幅', ascending=False).head(30)
+                                new_list = hot_sectors['板块名称'].tolist()[:30]
+                                source = "东方财富"
+                        except Exception as em_e:
+                            print(f"东方财富接口获取板块列表失败: {em_e}")
+                        if not new_list or len(new_list) < 10:
+                            try:
+                                concept_df = ak.stock_board_concept_name_em()
+                                if concept_df is not None and not concept_df.empty and '涨跌幅' in concept_df.columns:
+                                    hot_sectors = concept_df.sort_values('涨跌幅', ascending=False).head(30)
+                                    new_list = hot_sectors['板块名称'].tolist()[:30]
+                                    source = "东方财富"
+                            except Exception as em_e:
+                                print(f"东方财富接口获取板块列表失败: {em_e}")
+                        if new_list and len(new_list) >= 10:
+                            self.sector_index_list = new_list
+                            self.ai_config_manager.config["sector_index_last_update"] = today
+                            self._save_sector_index_list()
+                            print(f"已自动更新强势板块列表({source},{today}): {len(self.sector_index_list)}个")
+                        try:
+                            self.root.after(0, self._sync_sector_index_combo_values)
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        print(f"自动获取热门板块失败: {e}")
+                threading.Thread(target=_sector_fetch_worker, daemon=True).start()
         except Exception:
             self.sector_index_list = []
     def _refresh_sector_index_list(self):
@@ -72155,17 +70292,7 @@ class StockKeywordAnalyzerGUI:
                                 if realtime_price > 0.01 and realtime_price < 10000:
                                     print(f"[持仓检测-实时] {stock_code} 实时价格: {realtime_price}")
                         except:
-                            # 如果实时行情失败,尝试获取今日收盘价
-                            try:
-                                today = datetime.now().strftime('%Y%m%d')
-                                pro = ts.pro_api()
-                                df = pro.daily(ts_code=ts_code, trade_date=today)
-                                if df is not None and not df.empty and 'close' in df.columns:
-                                    realtime_price = float(df.iloc[0]['close'])
-                                    if realtime_price > 0.01 and realtime_price < 10000:
-                                        print(f"[持仓检测-今日] {stock_code} 今日收盘价: {realtime_price}")
-                            except:
-                                pass
+                            pass  # 跳过 daily fallback
                     except Exception as e:
                         print(f"获取实时价格失败 {stock_code}: {e}")
             except:
@@ -72398,17 +70525,7 @@ class StockKeywordAnalyzerGUI:
                                 if realtime_price > 0.01 and realtime_price < 10000:
                                     print(f"[持仓条件检测-实时] {stock_code} 实时价格: {realtime_price}")
                         except:
-                            # 如果实时行情失败,尝试获取今日收盘价
-                            try:
-                                today = datetime.now().strftime('%Y%m%d')
-                                pro = ts.pro_api()
-                                df = pro.daily(ts_code=ts_code, trade_date=today)
-                                if df is not None and not df.empty and 'close' in df.columns:
-                                    realtime_price = float(df.iloc[0]['close'])
-                                    if realtime_price > 0.01 and realtime_price < 10000:
-                                        print(f"[持仓条件检测-今日] {stock_code} 今日收盘价: {realtime_price}")
-                            except:
-                                pass
+                            pass  # 跳过 daily fallback
                     except Exception as e:
                         print(f"获取实时价格失败 {stock_code}: {e}")
             except:
@@ -76523,11 +74640,11 @@ class StockKeywordAnalyzerGUI:
                 continue
         return None
     def _build_sentiment_zone_tabs(self, parent):
-        """右上区域:情绪区间标签页(情绪周期日历 第1个tab, 情绪总览 第2个)。"""
+        """右上区域:情绪区间标签页(所有指标集中在第1页,数据来源问财)。"""
         try:
             top_bar = ttk.Frame(parent)
             top_bar.pack(fill=tk.X, padx=4, pady=(2, 4))
-            ttk.Label(top_bar, text="情绪周期 (三维度风控日历 + 情绪区间指标)", font=("TkDefaultFont", 10), foreground="#666666").pack(
+            ttk.Label(top_bar, text="情绪区间指标(全部来自问财)", font=("TkDefaultFont", 10), foreground="#666666").pack(
                 side=tk.LEFT, padx=(2, 8)
             )
             ttk.Button(top_bar, text="刷新", command=self._refresh_sentiment_zone_tabs_async, width=8).pack(side=tk.RIGHT)
@@ -76538,17 +74655,6 @@ class StockKeywordAnalyzerGUI:
             notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
             self.sentiment_zone_notebook = notebook
             self.sentiment_zone_text_widgets = {}
-
-            # ═════════════════════════════════════════════════
-            # TAB 1: 🎭 情绪周期日历 (默认选中, 第一个)
-            # ═════════════════════════════════════════════════
-            emo_tab = ttk.Frame(notebook)
-            notebook.add(emo_tab, text="🎭 情绪周期")
-            self._build_emo_cycle_calendar(emo_tab, notebook)  # 直接嵌入 Notebook tab
-
-            # ═════════════════════════════════════════════════
-            # TAB 2: 情绪总览 (原来的问财指标)
-            # ═════════════════════════════════════════════════
             tab = ttk.Frame(notebook)
             notebook.add(tab, text="情绪总览")
             txt = scrolledtext.ScrolledText(tab, wrap=tk.WORD, font=("Consolas", 11))
@@ -76558,222 +74664,16 @@ class StockKeywordAnalyzerGUI:
             txt.insert("1.0", "加载中...\n")
             txt.config(state=tk.DISABLED)
             self.sentiment_zone_text_widgets["overview"] = txt
-
-            # ═════════════════════════════════════════════════
-            # TAB 3: 🔥 热点板块 (热门/冷门 + 每个板块前3龙头)
-            # ═════════════════════════════════════════════════
-            print("[情绪区间] 准备加 tab3 热点板块...", flush=True)
-            hot_tab = ttk.Frame(notebook)
-            notebook.add(hot_tab, text="🔥热点板块")
-            try:
-                self._build_hot_sector_tab(hot_tab)
-                print("[情绪区间] ✅ tab3 热点板块构建成功", flush=True)
-            except Exception as _e_hs:
-                import traceback as _tb_hs; _tb_hs.print_exc()
-                print(f"[情绪区间] ❌ tab3 构建失败: {_e_hs}", flush=True)
             self._refresh_sentiment_zone_tabs_async()
         except Exception as e:
             ttk.Label(parent, text=f"情绪区间标签页创建失败: {e}", foreground="red").pack(expand=True)
-
-    def _build_hot_sector_tab(self, parent_frame):
-        """🔥 热点板块 tab: 热门/冷门板块卡片 + 每个板块前3龙头股"""
-        import threading
-        print("[热点板块] 🏗️ 开始构建 tab...", flush=True)
-
-        # 顶部工具栏
-        tool_f = tk.Frame(parent_frame, bg="#1A1A2E")
-        tool_f.pack(fill=tk.X, padx=4, pady=(4, 2))
-        tk.Label(tool_f, text="🔥热点板块 · 东财概念 · 每板块前3龙头", bg="#1A1A2E", fg="#FFD54F",
-                 font=("", 10, "bold")).pack(side=tk.LEFT, padx=4)
-        self._hot_sector_status = tk.StringVar(value="⏳ 加载中...")
-        tk.Label(tool_f, textvariable=self._hot_sector_status, bg="#1A1A2E", fg="#90A4AE",
-                 font=("", 9)).pack(side=tk.LEFT, padx=6)
-        tk.Button(tool_f, text="🔄 刷新", command=lambda: self._bg_load_hot_sectors(),
-                  bg="#2E7D32", fg="white", font=("", 8, "bold"), padx=6, pady=1).pack(side=tk.RIGHT, padx=2)
-
-        # 左右分栏: 热门 vs 冷门
-        split_f = tk.Frame(parent_frame, bg="#1A1A2E")
-        split_f.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
-        split_f.columnconfigure(0, weight=1, uniform="hscol")
-        split_f.columnconfigure(1, weight=1, uniform="hscol")
-        split_f.rowconfigure(0, weight=1)
-
-        # 热门板块列
-        hot_col = tk.Frame(split_f, bg="#1A1A2E"); hot_col.grid(row=0, column=0, sticky="nsew", padx=(0, 2))
-        tk.Label(hot_col, text="🔥 热门板块 TOP 9", bg="#1A1A2E", fg="#FF5252",
-                 font=("", 10, "bold")).pack(anchor="w", pady=(0, 2))
-        hot_canvas = tk.Canvas(hot_col, bg="#1A1A2E", highlightthickness=0)
-        hot_vsb = tk.Scrollbar(hot_col, orient="vertical", command=hot_canvas.yview,
-                               bg="#37474F", troughcolor="#1A1A2E")
-        hot_canvas.configure(yscrollcommand=hot_vsb.set)
-        hot_vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        hot_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._hot_sector_inner = tk.Frame(hot_canvas, bg="#1A1A2E")
-        _hot_wid = hot_canvas.create_window((0, 0), window=self._hot_sector_inner, anchor="nw")
-        self._hot_sector_inner.bind("<Configure>", lambda e: hot_canvas.configure(scrollregion=hot_canvas.bbox("all")))
-        hot_canvas.bind("<Configure>", lambda e: hot_canvas.itemconfig(_hot_wid, width=e.width))
-
-        # 冷门板块列
-        cold_col = tk.Frame(split_f, bg="#1A1A2E"); cold_col.grid(row=0, column=1, sticky="nsew", padx=(2, 0))
-        tk.Label(cold_col, text="❄️ 冷门板块 BOTTOM 9", bg="#1A1A2E", fg="#4CAF50",
-                 font=("", 10, "bold")).pack(anchor="w", pady=(0, 2))
-        cold_canvas = tk.Canvas(cold_col, bg="#1A1A2E", highlightthickness=0)
-        cold_vsb = tk.Scrollbar(cold_col, orient="vertical", command=cold_canvas.yview,
-                                bg="#37474F", troughcolor="#1A1A2E")
-        cold_canvas.configure(yscrollcommand=cold_vsb.set)
-        cold_vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        cold_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._cold_sector_inner = tk.Frame(cold_canvas, bg="#1A1A2E")
-        _cold_wid = cold_canvas.create_window((0, 0), window=self._cold_sector_inner, anchor="nw")
-        self._cold_sector_inner.bind("<Configure>", lambda e: cold_canvas.configure(scrollregion=cold_canvas.bbox("all")))
-        cold_canvas.bind("<Configure>", lambda e: cold_canvas.itemconfig(_cold_wid, width=e.width))
-
-        # ⛔ 不再自动联网加载热点板块 —— 用户手动点🔄刷新按钮才触发
-        # ✅ 启动时读本地 snapshot 秒出旧数据
-        try:
-            self._try_load_hot_sectors_snapshot()
-        except Exception as _e_hot:
-            print(f"[热点板块] snapshot 加载异常: {_e_hot}", flush=True)
-
-    def _bg_load_hot_sectors(self):
-        """后台加载热点板块: 只拉板块涨跌幅 (龙头股懒加载 → 双击时调 _open_sector_detail)"""
-        import threading as _th_hs
-        import akshare as ak   # 主线程先 import 避免线程 import 锁阻塞
-        def _run():
-            hot_data, cold_data = [], []
-            # 等大盘分析的 akshare 先跑完 → 避免两个线程同时调同花顺接口卡死
-            import time as _t; _t.sleep(8)
-            try:
-                # 只用同花顺行业 (0.4s 出, 东财被限流要 5s+)
-                cons = None
-                try:
-                    cons = ak.stock_board_industry_summary_ths()
-                except Exception as e:
-                    print(f"[热点板块] 同花顺行业fail: {e}", flush=True)
-                if cons is None or len(cons) == 0 or "涨跌幅" not in cons.columns:
-                    return
-
-                # 排序取热门9 + 冷门9
-                name_col = "板块名称" if "板块名称" in cons.columns else "板块"
-                cs = cons.sort_values(by="涨跌幅", ascending=False)
-                raw_hot = [(str(r.get(name_col, "")), float(r.get("涨跌幅", 0)))
-                           for _, r in cs.head(9).iterrows() if str(r.get(name_col, "")).strip()]
-                raw_cold = [(str(r.get(name_col, "")), float(r.get("涨跌幅", 0)))
-                            for _, r in cs.tail(9).iterrows() if str(r.get(name_col, "")).strip()]
-                hot_data = [(n, p, None) for n, p in raw_hot]   # 龙头=None = 懒加载
-                cold_data = [(n, p, None) for n, p in raw_cold]
-                print(f"[热点板块] ✅ hot={len(hot_data)} cold={len(cold_data)} (双击板块看龙头)", flush=True)
-            except Exception as e:
-                import traceback; traceback.print_exc()
-                print(f"[热点板块] ❌ 加载失败: {e}", flush=True)
-                return
-            # 主线程渲染 (after 只是扔任务到队列就返回, 不卡)
-            self.root.after(0, lambda: self._render_hot_sectors(hot_data, cold_data))
-
-        try:
-            _th_hs.Thread(target=_run, daemon=True).start()
-        except Exception as e:
-            import traceback; traceback.print_exc()
-            print(f"[热点板块] 启动线程失败: {e}", flush=True)
-
-    def _render_hot_sectors(self, hot_data, cold_data):
-        """渲染热点板块卡片 (主线程)"""
-        def _clear(parent):
-            for w in parent.winfo_children(): w.destroy()
-
-        def _make_card(parent, idx, name, pct, top3, is_hot):
-            """创建一个板块卡片 (龙头懒加载: top3=None 时显示双击提示)"""
-            bg_head = "#B71C1C" if is_hot else "#2E7D32"
-            card = tk.Frame(parent, bg="#1A1A2E", highlightbackground=bg_head,
-                            highlightthickness=1, padx=6, pady=4, cursor="hand2")
-            card.pack(fill=tk.X, pady=2, padx=2)
-            # 标题行: 序号 + 板块名 + 涨跌幅
-            head = tk.Frame(card, bg="#1A1A2E"); head.pack(fill=tk.X)
-            tk.Label(head, text=f"{idx+1}.", bg="#1A1A2E", fg="#78909C",
-                     font=("", 9, "bold")).pack(side=tk.LEFT)
-            tk.Label(head, text=name, bg="#1A1A2E", fg="white",
-                     font=("", 10, "bold")).pack(side=tk.LEFT, padx=4)
-            pct_str = f"{pct:+.2f}%"
-            tk.Label(head, text=pct_str, bg="#1A1A2E", fg=bg_head,
-                     font=("", 10, "bold")).pack(side=tk.RIGHT)
-            # 龙头区: 有龙头显示龙头, 否则提示双击
-            if top3:
-                for ci, (code, lname, lpct) in enumerate(top3):
-                    lfg = "#FF5252" if lpct >= 0 else "#4CAF50"
-                    sign = "+" if lpct >= 0 else ""
-                    tk.Label(card, text=f"  {ci+1}. {code} {lname}  {sign}{lpct:.1f}%",
-                             bg="#1A1A2E", fg=lfg, font=("", 9)).pack(anchor="w")
-            else:
-                tk.Label(card, text="  👆 双击查看龙头股 · 换手率 · 量化", bg="#1A1A2E",
-                         fg="#64B5F6", font=("", 9)).pack(anchor="w")
-            # 双击打开板块详情 (已有的 _open_sector_detail 含龙头+换手+量化)
-            def _dbl(e, n=name):
-                try: self._open_sector_detail(n)
-                except Exception: pass
-            for w in [card, head] + head.winfo_children() + card.winfo_children():
-                try:
-                    w.bind("<Double-Button-1>", _dbl)
-                    w.bind("<Enter>", lambda e: card.config(bg="#263238"))
-                    w.bind("<Leave>", lambda e: card.config(bg="#1A1A2E"))
-                except Exception: pass
-
-        # 渲染热门
-        _clear(self._hot_sector_inner)
-        if not hot_data:
-            tk.Label(self._hot_sector_inner, text="❌ 暂无热门板块数据",
-                     bg="#1A1A2E", fg="#78909C", font=("", 10)).pack(pady=20)
-        else:
-            for i, (nm, pt, t3) in enumerate(hot_data):
-                _make_card(self._hot_sector_inner, i, nm, pt, t3, True)
-
-        # 渲染冷门
-        _clear(self._cold_sector_inner)
-        if not cold_data:
-            tk.Label(self._cold_sector_inner, text="❌ 暂无冷门板块数据",
-                     bg="#1A1A2E", fg="#78909C", font=("", 10)).pack(pady=20)
-        else:
-            for i, (nm, pt, t3) in enumerate(cold_data):
-                _make_card(self._cold_sector_inner, i, nm, pt, t3, False)
-
-        self._hot_sector_status.set(f"✅ 已加载 {len(hot_data)}热/{len(cold_data)}冷  {datetime.now().strftime('%H:%M:%S')}")
-
-        # ✅ 保存热点板块 snapshot (下次启动秒出)
-        try:
-            import json as _js, os as _os
-            path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_hot_sectors.json")
-            _clean_hot = {"hot": hot_data, "cold": cold_data,
-                          "_saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-            with open(path, "w") as f:
-                _js.dump(_clean_hot, f, ensure_ascii=False, indent=2, default=str)
-        except Exception:
-            pass
-
-    def _try_load_hot_sectors_snapshot(self):
-        """启动时读热点板块 snapshot 秒出旧数据"""
-        import json as _js, os as _os
-        path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_hot_sectors.json")
-        if not _os.path.exists(path):
-            print("[热点板块] 📂 无 snapshot, 显示占位符", flush=True)
-            return False
-        try:
-            with open(path) as f:
-                data = _js.load(f)
-            hot = data.get("hot", [])
-            cold = data.get("cold", [])
-            saved_at = data.get("_saved_at", "?")
-            print(f"[热点板块] 📂 读 snapshot 成功 (保存于 {saved_at}), 秒出", flush=True)
-            # JSON 把 tuple 存成了 list, 需要转换回来
-            hot_t = [tuple(x) for x in hot]
-            cold_t = [tuple(x) for x in cold]
-            self._render_hot_sectors(hot_t, cold_t)
-            return True
-        except Exception as e:
-            print(f"[热点板块] snapshot 读取失败: {e}", flush=True)
-            return False
-
     def _fetch_iwencai_metric(self, query, value_hints=None):
         """问财查询:返回命中条数与首个可解析数值(如涨跌幅/家数)。"""
         try:
+            _ck_metric = (os.environ.get("IWENCAI_COOKIE") or os.environ.get("WENCAI_COOKIE") or "").strip()
+            if not _ck_metric:
+                # 问财挂起: 未配置 Cookie → 快速返回空,由上层 tushare 指标补缺逻辑接管
+                return {"count": None, "value": None, "msg": "问财未配置(IWENCAI_COOKIE),链路已挂起", "stocks": []}
             import inspect
             if not shutil.which("node"):
                 return {"count": None, "value": None, "msg": "未检测到 Node.js(pywencai 依赖 node 生成请求头)"}
@@ -82587,22 +80487,10 @@ except Exception as e:
         def _build_add_position_prompt(stock_code, stock_name, df, tech_snap, cost, current_pos):
             """按 SKILL.md 框架构建 AI prompt"""
             import json
-            # 最近K线摘要 - Timestamp → str, 否则 json.dumps 炸
-            tail_df = df.tail(10)[["日期", "开盘", "最高", "最低", "收盘", "成交量"]].copy()
-            for col in tail_df.columns:
-                if tail_df[col].dtype == "datetime64[ns]" or str(tail_df[col].dtype).startswith("datetime"):
-                    tail_df[col] = tail_df[col].astype(str)
-            tail = tail_df.to_dict("records")
-            # 兜底: 递归把 Timestamp 转 str
-            import datetime as _dt_safe
-            def _json_default(o):
-                if isinstance(o, (pd.Timestamp, _dt_safe.datetime, _dt_safe.date)):
-                    return str(o)
-                if isinstance(o, _dt_safe.Timedelta):
-                    return str(o)
-                return str(o)
-            kline_json = json.dumps(tail, ensure_ascii=False, indent=2, default=_json_default)
-            tech_json = json.dumps(tech_snap, ensure_ascii=False, indent=2, default=_json_default)
+            # 最近K线摘要
+            tail = df.tail(10)[["日期", "开盘", "最高", "最低", "收盘", "成交量"]].to_dict("records")
+            kline_json = json.dumps(tail, ensure_ascii=False, indent=2)
+            tech_json = json.dumps(tech_snap, ensure_ascii=False, indent=2)
             return f"""你是专业的A股加仓分析顾问。请严格按照以下 SKILL.md 框架输出分析报告。
 ## 股票
 名称: {stock_name}
@@ -84145,29 +82033,13 @@ except Exception as e:
                 canvas_bar.create_text(pb_l+186, 6, text="<35冷", fill="#2E7D32", font=("", 7), anchor="w")
 
                 # ===== 快照 =====
+                snap = sent_data.get("latest_snapshot", {})
+                up = snap.get("up", 0); dn = snap.get("down", 0)
+                ft = snap.get("flat", 0); snap.get("total", up+dn+ft)
                 last = dl[-1]
-                snap = sent_data.get("latest_snapshot") or {}
-                if not snap:
-                    # ✅ fallback: 脚本 akshare spot 挂了时, 从最后一天数据估算
-                    gt5 = last.get("gt5_count", 0) or 0
-                    zt = last.get("zt_count", 0) or 0
-                    dt2 = last.get("dt_count", 0) or 0
-                    sc = last.get("sentiment_score", 50)
-                    # 估算: score>50 涨多跌少, score<50 跌多涨少
-                    import math as _mth
-                    ratio = max(0.2, min(0.85, sc / 100))
-                    up = int(2200 * ratio)
-                    dn = int(2200 * (1 - ratio))
-                    ft = 5500 - up - dn
-                    snap = {"total": 5500, "up": up, "down": dn, "flat": ft,
-                            "_estimated": True}
-                else:
-                    up = snap.get("up", 0); dn = snap.get("down", 0)
-                    ft = snap.get("flat", 0)
                 snap_txt = (f"📅 {last.get('date','')}\n"
                            f"上证 {last.get('index_close','')}\n"
-                           f"📈涨{up} 📉跌{dn} ➖平{ft}"
-                           f"{' (估算)' if snap.get('_estimated') else ''}\n"
+                           f"📈涨{up} 📉跌{dn} ➖平{ft}\n"
                            f"🎯情绪 {last.get('sentiment_score','')}\n"
                            f"涨停{last.get('zt_count','')} 跌停{last.get('dt_count','')}")
                 snap_lbl.config(text=snap_txt)
@@ -84179,29 +82051,29 @@ except Exception as e:
                                          fill="#C62828", font=("", 10))
 
         def _bg_load_emo():
-            """后台加载情绪数据 (手动更新 = 强制跑脚本刷新)"""
-            win.after(0, lambda: emo_status.set("⏳ 运行 market_sentiment.py 刷新数据..."))
+            """后台加载情绪数据"""
+            emo_status.set("⏳ 运行 market_sentiment.py ...")
             def _run():
                 try:
-                    print("[情绪地图] ⏳ 手动更新: 运行 market_sentiment.py ...", flush=True)
-                    win.after(0, lambda: emo_status.set("⏳ 运行 market_sentiment.py ..."))
-                    result = _sp_sent.run(["/Library/Frameworks/Python.framework/Versions/3.11/bin/python3", EMOTION_PY], capture_output=True, text=True, timeout=180)
-                    if result.returncode != 0:
-                        print(f"[情绪地图] ❌ 脚本 stderr: {result.stderr[-500:]}", flush=True)
                     if _os_sent.path.exists(EMOTION_JSON):
                         with open(EMOTION_JSON) as f:
                             sd = _js_sent.load(f)
                         win.after(0, lambda: _draw_emo(sd))
                         meta = sd.get("meta", {})
                         win.after(0, lambda: emo_status.set(
-                            f"✅ 刷新 {meta.get('start_date','')}~{meta.get('end_date','')} {len(sd.get('data',[]))}天"))
-                        print(f"[情绪地图] ✅ 刷新完成 {len(sd.get('data',[]))}天", flush=True)
+                            f"✅ {meta.get('start_date','')}~{meta.get('end_date','')} {len(sd.get('data',[]))}天"))
                     else:
-                        win.after(0, lambda: emo_status.set("❌ 脚本未生成 JSON"))
-                        print("[情绪地图] ❌ JSON 未生成", flush=True)
+                        emo_status.set("❌ 无缓存, 运行 skill ...")
+                        try:
+                            _sp_sent.run(["python3", EMOTION_PY], capture_output=True, text=True, timeout=60)
+                            if _os_sent.path.exists(EMOTION_JSON):
+                                with open(EMOTION_JSON) as f:
+                                    sd = _js_sent.load(f)
+                                win.after(0, lambda: _draw_emo(sd))
+                        except Exception as e2:
+                            emo_status.set(f"❌ 运行失败: {str(e2)[:30]}")
                 except Exception as e:
-                    win.after(0, lambda e=e: emo_status.set(f"❌ 运行失败: {str(e)[:40]}"))
-                    import traceback; traceback.print_exc()
+                    emo_status.set(f"❌ 加载失败: {str(e)[:30]}")
             _th_sent.Thread(target=_run, daemon=True).start()
         # 自动加载缓存
         def _auto_emo():
@@ -87433,25 +85305,34 @@ except Exception as e:
                     except Exception:
                         pass
 
-                # ✅ 统一: 调 _hm_calc_for_stock 拿分数 (不再用内嵌副本, 避免分数不一致)
-                prog.after(0, lambda: prog_status.set("⏳ 调 _hm_calc_for_stock 统一算分..."))
-                hm_result = self._hm_calc_for_stock(stock_code)
-                if hm_result.get("avg_score") is None:
-                    prog.after(0, lambda: prog_status.set(f"❌ 打分失败: {hm_result.get('error', '未知')}"))
-                    import tkinter.messagebox as _mb2
-                    prog.after(200, prog.destroy)
-                    _mb2.showwarning("提示", f"打分失败: {hm_result.get('error', '未知')}", parent=self.root)
-                    return
-
-                scores = hm_result["scores"]
-                avg_score = hm_result["avg_score"]
-                best_sch = hm_result.get("best_sch", "-")
-                emo_stage = hm_result.get("emo_stage", "震荡")
-                tra_to_school = hm_result.get("tra_to_school", tra_to_school)
-                # dims_map: 从 scores 构造
+                # 计算 7 位游资评分
+                prog.after(0, lambda: prog_status.set(f"⏳ 算 7 位游资评分 (情绪【{emo_stage}】)..."))
+                scores = {}
                 dims_map = {}
-                for nm, info in scores.items():
-                    dims_map[nm] = (info.get("dims", []), info.get("phi", ""))
+                for nm, fn, _desc, _ in hm_list:
+                    sc, dims, phi = fn(cl, hi, lo, vo, op, vr, dma, pct3, m5, m10, m20, tr, pe, mv)
+                    # 情绪修正
+                    if emo_stage != "震荡":
+                        sch = tra_to_school.get(nm, "")
+                        if sch in ("情绪周期流", "龙头战法流", "低吸反包流"):
+                            if emo_stage in ("冰点", "退潮"):
+                                    sc = max(0, sc - 15); dims.append((f"情绪{emo_stage}", "🔴", "-15"))
+                            elif emo_stage in ("发酵", "高潮"):
+                                    sc = min(100, sc + 12); dims.append((f"情绪{emo_stage}", "🟢", "+12"))
+                            elif emo_stage == "启动":
+                                    sc = min(100, sc + 5); dims.append(("情绪启动", "🟡", "+5"))
+                    # ⚠️ 嵌套 dict 格式, 与正常扫描路径 _show_hotmoney_check 保持一致
+                    scores[nm] = {"score": sc, "dims": dims, "phi": phi, "desc": _desc}
+                    dims_map[nm] = (dims, phi)
+
+                # 聚合流派
+                sch_agg = {}
+                for nm, d in scores.items():
+                    sc = d["score"]  # 嵌套格式 → 取 .score
+                    sch = tra_to_school.get(nm, "")
+                    if sch: sch_agg.setdefault(sch, []).append(sc)
+                    best_sch = max(sch_agg.items(), key=lambda x: sum(x[1])/len(x[1]))[0] if sch_agg else "-"
+                avg_score = sum(d["score"] for d in scores.values()) / len(scores) if scores else 0
 
                 # 关闭进度窗 → 开快速爬取的完整游资心法弹窗
                 prog.after(0, prog.destroy)
@@ -87921,7 +85802,7 @@ except Exception as e:
                 _w(tag_text + " ", sc_tag)
                 tree.insert(tk.END, "\n", (bg,))
                 line_count += 1
-            tree.config(state=tk.DISABLED)
+                tree.config(state=tk.DISABLED)
         # 扫描按钮 (最右)
         scan_btn = tk.Button(ctrl, text="🔍 拉取数据 + 计算红绿灯", font=("", 11, "bold"),
                              bg="#4A148C", fg="white", padx=14, relief=tk.FLAT,
@@ -88171,188 +86052,194 @@ except Exception as e:
                 n = len(all_holdings)
                 _log(f"  📈 DEBUG: 开始计算, n={n}, all_ts_codes={len(all_ts_codes)}")
                 for i, ts_code in enumerate(all_ts_codes):
-                    h = code_mapping[ts_code]
-                    code = h["code"]
-                    df_k = hist_map.get(ts_code)
-                    row_t = today_map.get(ts_code)
-                    row_b = basic_map.get(ts_code)
-                    if i < 3 or df_k is None:
-                        _log(f"  📈 DEBUG[{i}]: {ts_code} h={h['name']} df_k={'有' if df_k is not None and len(df_k) else '空'} row_t={'有' if row_t is not None else '无'}")
-                    price_now = p5 = p10 = p20 = p3m_high = "-"
-                    pct_3m = vr = dma = supp = resi = "N/A"
-                    score = 50; light = "⚫"
-                    if df_k is not None and len(df_k) > 0:
-                        df_k = df_k.sort_values("trade_date")
-                        closes = df_k["close"].astype(float).tolist()
-                        vols = df_k["vol"].astype(float).tolist()
-                        price_now = round(closes[-1], 2)
-                        # 用历史 daily 的 trade_date 列直接找, 不用再 sub
-                        dates_list = df_k["trade_date"].tolist()
-                        def _fp_fast(td):
-                            for k in range(len(dates_list)-1, -1, -1):
-                                    if dates_list[k] <= td:
-                                        return round(closes[k], 2)
-                            return None
-                        p5 = _fp_fast(td_5); p10 = _fp_fast(td_10); p20 = _fp_fast(td_20)
-                        p3m_high = round(max(closes[-60:]), 2) if len(closes) >= 60 else round(max(closes), 2)
-                        if p3m_high:
-                            pct_3m = f"{(price_now - p3m_high) / p3m_high * 100:+.2f}%"
-                        vol_t = vols[-1]
-                        vol_a = sum(vols[-20:]) / 20 if len(vols) >= 20 else vol_t
-                        vr = round(vol_t / vol_a, 2) if vol_a > 0 else 1
-                        ma5 = sum(closes[-5:])/5 if len(closes)>=5 else price_now
-                        ma10 = sum(closes[-10:])/10 if len(closes)>=10 else price_now
-                        ma20 = sum(closes[-20:])/20 if len(closes)>=20 else price_now
-                        dma = round((price_now - ma20) / ma20 * 100, 2)
-                        last20 = closes[-20:] if len(closes) >= 20 else closes
-                        supp = round(min(last20), 2); resi = round(max(last20), 2)
-                        # 6维打分
-                        score = 50
-                        if vr > 2: score -= 8
-                        elif 0.6 <= vr <= 1.3: score += 6
-                        if abs(dma) < 3: score += 6
-                        elif abs(dma) > 12: score -= 8
-                        dd = (price_now - p3m_high) / p3m_high * 100 if p3m_high else 0
-                        if dd > -5: score += 4
-                        elif dd < -15: score -= 8
-                        if ma5 > ma10 > ma20: score += 12
-                        elif ma5 < ma10 < ma20: score -= 16
-                        if row_b is not None:
-                            try:
-                                    pe_v = float(row_b.get("pe_ttm") or 0)
-                                    if 0 < pe_v < 40: score += 6
-                                    elif pe_v > 100: score -= 8
-                            except: pass
-                        score = max(0, min(100, score))
-                        light = "🟢" if score >= 65 else ("🟡" if score >= 40 else "🔴")
-                        # ===== 瑞鹤仙心法打分 =====
-                        # 核心: 只做强势 + 均线多头 + 量能活跃 + 不追高
-                        rhx = 50
-                        if ma5 > ma10 > ma20: rhx += 25        # 均线多头 +25 (只做强势)
-                        elif ma5 < ma10 < ma20: rhx -= 25     # 均线空头 -25 (回避)
-                        if 1.0 <= vr <= 2.0: rhx += 15         # 量能活跃 +15
-                        elif vr < 0.6: rhx -= 10               # 缩量 -10 (不活跃)
-                        elif vr > 3.0: rhx -= 15               # 天量 -15 (滞涨风险)
-                        if dma > 10: rhx -= 20                 # 偏离MA20>10% -20 (追高)
-                        elif dma > 5: rhx -= 8                 # 偏离>5% -8 (偏高)
-                        elif -3 <= dma <= 3: rhx += 8           # 合理位置 +8
-                        if dd > -5: rhx += 10                  # 接近新高 +10 (强势)
-                        elif dd < -20: rhx -= 15               # 深套 -15 (回避)
-                        if dd > 5: rhx -= 15                   # 暴涨后 -15 (不追涨)
-                        rhx = max(0, min(100, rhx))
-                        # 瑞鹤仙标签
-                        if rhx >= 70: rhx_tag = "✅强势可做"
-                        elif rhx >= 50: rhx_tag = "⚠️观察等待"
-                        else: rhx_tag = "❌坚决回避"
-                        # ===== 利弗莫尔四支柱 =====
-                        # 支柱1: 最小阻力线 (classify_trend 内联)
-                        _n = len(closes)
-                        if _n >= 20:
-                            _net20 = closes[-1] / closes[-20] - 1
-                            _x = list(range(20))
-                            _slope = np.polyfit(_x, closes[-20:], 1)[0]
-                            _slope_pct = _slope / closes[-1] * 20
-                            _ma20_lm = sum(closes[-20:]) / 20
-                            _abs_net = abs(_net20)
-                            if _abs_net < 0.05 and vr > 0:
-                                    _trend_label = "横盘"
-                            elif _net20 > 0.08 and closes[-1] > _ma20_lm and _slope_pct > 0:
-                                    _trend_label = "强上升趋势"
-                            elif _net20 < -0.08 and closes[-1] < _ma20_lm and _slope_pct < 0:
-                                    _trend_label = "强下降趋势"
-                            elif _net20 > 0:
-                                    _trend_label = "震荡偏多"
+                    try:
+                        h = code_mapping[ts_code]
+                        code = h["code"]
+                        df_k = hist_map.get(ts_code)
+                        row_t = today_map.get(ts_code)
+                        row_b = basic_map.get(ts_code)
+                        if i < 3 or df_k is None:
+                            _log(f"  📈 DEBUG[{i}]: {ts_code} h={h['name']} df_k={'有' if df_k is not None and len(df_k) else '空'} row_t={'有' if row_t is not None else '无'}")
+                        price_now = p5 = p10 = p20 = p3m_high = "-"
+                        pct_3m = vr = dma = supp = resi = "N/A"
+                        score = 50; light = "⚫"
+                        if df_k is not None and len(df_k) > 0:
+                            df_k = df_k.sort_values("trade_date")
+                            closes = df_k["close"].astype(float).tolist()
+                            vols = df_k["vol"].astype(float).tolist()
+                            price_now = round(closes[-1], 2)
+                            # 用历史 daily 的 trade_date 列直接找, 不用再 sub
+                            dates_list = df_k["trade_date"].tolist()
+                            def _fp_fast(td):
+                                for k in range(len(dates_list)-1, -1, -1):
+                                        if dates_list[k] <= td:
+                                            return round(closes[k], 2)
+                                return None
+                            p5 = _fp_fast(td_5); p10 = _fp_fast(td_10); p20 = _fp_fast(td_20)
+                            p3m_high = round(max(closes[-60:]), 2) if len(closes) >= 60 else round(max(closes), 2)
+                            if p3m_high:
+                                pct_3m = f"{(price_now - p3m_high) / p3m_high * 100:+.2f}%"
+                            vol_t = vols[-1]
+                            vol_a = sum(vols[-20:]) / 20 if len(vols) >= 20 else vol_t
+                            vr = round(vol_t / vol_a, 2) if vol_a > 0 else 1
+                            ma5 = sum(closes[-5:])/5 if len(closes)>=5 else price_now
+                            ma10 = sum(closes[-10:])/10 if len(closes)>=10 else price_now
+                            ma20 = sum(closes[-20:])/20 if len(closes)>=20 else price_now
+                            dma = round((price_now - ma20) / ma20 * 100, 2)
+                            last20 = closes[-20:] if len(closes) >= 20 else closes
+                            supp = round(min(last20), 2); resi = round(max(last20), 2)
+                            # 6维打分
+                            score = 50
+                            if vr > 2: score -= 8
+                            elif 0.6 <= vr <= 1.3: score += 6
+                            if abs(dma) < 3: score += 6
+                            elif abs(dma) > 12: score -= 8
+                            dd = (price_now - p3m_high) / p3m_high * 100 if p3m_high else 0
+                            if dd > -5: score += 4
+                            elif dd < -15: score -= 8
+                            if ma5 > ma10 > ma20: score += 12
+                            elif ma5 < ma10 < ma20: score -= 16
+                            if row_b is not None:
+                                try:
+                                        pe_v = float(row_b.get("pe_ttm") or 0)
+                                        if 0 < pe_v < 40: score += 6
+                                        elif pe_v > 100: score -= 8
+                                except: pass
+                            score = max(0, min(100, score))
+                            light = "🟢" if score >= 65 else ("🟡" if score >= 40 else "🔴")
+                            # ===== 瑞鹤仙心法打分 =====
+                            # 核心: 只做强势 + 均线多头 + 量能活跃 + 不追高
+                            rhx = 50
+                            if ma5 > ma10 > ma20: rhx += 25        # 均线多头 +25 (只做强势)
+                            elif ma5 < ma10 < ma20: rhx -= 25     # 均线空头 -25 (回避)
+                            if 1.0 <= vr <= 2.0: rhx += 15         # 量能活跃 +15
+                            elif vr < 0.6: rhx -= 10               # 缩量 -10 (不活跃)
+                            elif vr > 3.0: rhx -= 15               # 天量 -15 (滞涨风险)
+                            if dma > 10: rhx -= 20                 # 偏离MA20>10% -20 (追高)
+                            elif dma > 5: rhx -= 8                 # 偏离>5% -8 (偏高)
+                            elif -3 <= dma <= 3: rhx += 8           # 合理位置 +8
+                            if dd > -5: rhx += 10                  # 接近新高 +10 (强势)
+                            elif dd < -20: rhx -= 15               # 深套 -15 (回避)
+                            if dd > 5: rhx -= 15                   # 暴涨后 -15 (不追涨)
+                            rhx = max(0, min(100, rhx))
+                            # 瑞鹤仙标签
+                            if rhx >= 70: rhx_tag = "✅强势可做"
+                            elif rhx >= 50: rhx_tag = "⚠️观察等待"
+                            else: rhx_tag = "❌坚决回避"
+                            # ===== 利弗莫尔四支柱 =====
+                            # 支柱1: 最小阻力线 (classify_trend 内联)
+                            _n = len(closes)
+                            if _n >= 20:
+                                _net20 = closes[-1] / closes[-20] - 1
+                                _x = list(range(20))
+                                _slope = np.polyfit(_x, closes[-20:], 1)[0]
+                                _slope_pct = _slope / closes[-1] * 20
+                                _ma20_lm = sum(closes[-20:]) / 20
+                                _abs_net = abs(_net20)
+                                if _abs_net < 0.05 and vr > 0:
+                                        _trend_label = "横盘"
+                                elif _net20 > 0.08 and closes[-1] > _ma20_lm and _slope_pct > 0:
+                                        _trend_label = "强上升趋势"
+                                elif _net20 < -0.08 and closes[-1] < _ma20_lm and _slope_pct < 0:
+                                        _trend_label = "强下降趋势"
+                                elif _net20 > 0:
+                                        _trend_label = "震荡偏多"
+                                else:
+                                        _trend_label = "震荡偏空"
                             else:
-                                    _trend_label = "震荡偏空"
-                        else:
-                            _trend_label = "数据不足"
-                        _TREND_DIR_LM = {"强上升趋势":"上升","震荡偏多":"上升","横盘":"震荡","震荡偏空":"下降","强下降趋势":"下降"}
-                        _trend_dir = _TREND_DIR_LM.get(_trend_label, "震荡")
-                        # 支柱2: 关键点识别
-                        _last_vol = vols[-1]
-                        _vol_avg5 = sum(vols[-6:-1]) / 5 if len(vols) >= 6 else (_last_vol if _last_vol > 0 else 1)
-                        _vol_exp = (_last_vol / _vol_avg5 > 1.2) if _vol_avg5 > 0 else False
-                        _ma10_lm = sum(closes[-10:]) / 10 if len(closes) >= 10 else closes[-1]
-                        _win30 = closes[-30:] if len(closes) >= 30 else closes
-                        if df_k is not None and len(df_k) >= 30 and "high" in df_k.columns:
-                            _hi30 = float(df_k["high"].iloc[-30:].max()) if len(df_k) >= 30 else float(df_k["high"].max())
-                            _lo30 = float(df_k["low"].iloc[-30:].min()) if len(df_k) >= 30 else float(df_k["low"].min())
-                        else:
-                            _hi30 = max(_win30); _lo30 = min(_win30)
-                        _rng30 = (_hi30 - _lo30) / _lo30 if _lo30 else 0
-                        _consolidated = _rng30 < 0.15
-                        # 简单 pivot high: 近5个高点的最大值
-                        if df_k is not None and len(df_k) >= 10 and "high" in df_k.columns:
-                            _ph5 = float(df_k["high"].iloc[-10:].max())
-                            _pl5 = float(df_k["low"].iloc[-10:].min())
-                        else:
-                            _ph5 = _hi30; _pl5 = _lo30
-                        _reversal_kp = _consolidated and closes[-1] >= _hi30 and _vol_exp
-                        _pullback_ma10 = min(closes[-7:-1]) <= _ma10_lm if len(closes) >= 7 else False
-                        _continuation_kp = (_trend_dir == "上升") and _pullback_ma10 and closes[-1] > _ma10_lm and _vol_exp
-                        _breakout_now = closes[-1] > _ph5 and _vol_exp
-                        _prev_broke = (len(closes) >= 2) and (closes[-2] > _ph5)
-                        _danger = _prev_broke and (closes[-1] < _ph5)
-                        # 支柱3+4: 综合判定 + 输出
-                        if _trend_dir == "下降":
-                            _lm_tag = "🔻下降通道 无买点"
-                            _lm_color = "rn"
-                        elif _trend_dir == "震荡":
-                            if _consolidated and closes[-1] >= _hi30 and _vol_exp:
-                                    _lm_tag = "⏳盘整+放量待突破"
-                                    _lm_color = "yn"
+                                _trend_label = "数据不足"
+                            _TREND_DIR_LM = {"强上升趋势":"上升","震荡偏多":"上升","横盘":"震荡","震荡偏空":"下降","强下降趋势":"下降"}
+                            _trend_dir = _TREND_DIR_LM.get(_trend_label, "震荡")
+                            # 支柱2: 关键点识别
+                            _last_vol = vols[-1]
+                            _vol_avg5 = sum(vols[-6:-1]) / 5 if len(vols) >= 6 else (_last_vol if _last_vol > 0 else 1)
+                            _vol_exp = (_last_vol / _vol_avg5 > 1.2) if _vol_avg5 > 0 else False
+                            _ma10_lm = sum(closes[-10:]) / 10 if len(closes) >= 10 else closes[-1]
+                            _win30 = closes[-30:] if len(closes) >= 30 else closes
+                            if df_k is not None and len(df_k) >= 30 and "high" in df_k.columns:
+                                _hi30 = float(df_k["high"].iloc[-30:].max()) if len(df_k) >= 30 else float(df_k["high"].max())
+                                _lo30 = float(df_k["low"].iloc[-30:].min()) if len(df_k) >= 30 else float(df_k["low"].min())
                             else:
-                                    _lm_tag = "➡️震荡观望"
-                                    _lm_color = "yn"
-                        elif _danger:
-                            _lm_tag = "🚫假突破 撤买点"
-                            _lm_color = "rn"
-                        elif _reversal_kp:
-                            _lm_tag = "✅反转关键点"
-                            _lm_color = "gn"
-                        elif _continuation_kp:
-                            _lm_tag = "✅持续关键点"
-                            _lm_color = "gn"
-                        elif _breakout_now:
-                            _lm_tag = "⏳突破中 等回踩"
-                            _lm_color = "yn"
-                        elif _trend_dir == "上升":
-                            _lm_tag = "🔺上升 等关键点"
-                            _lm_color = "gn"
+                                _hi30 = max(_win30); _lo30 = min(_win30)
+                            _rng30 = (_hi30 - _lo30) / _lo30 if _lo30 else 0
+                            _consolidated = _rng30 < 0.15
+                            # 简单 pivot high: 近5个高点的最大值
+                            if df_k is not None and len(df_k) >= 10 and "high" in df_k.columns:
+                                _ph5 = float(df_k["high"].iloc[-10:].max())
+                                _pl5 = float(df_k["low"].iloc[-10:].min())
+                            else:
+                                _ph5 = _hi30; _pl5 = _lo30
+                            _reversal_kp = _consolidated and closes[-1] >= _hi30 and _vol_exp
+                            _pullback_ma10 = min(closes[-7:-1]) <= _ma10_lm if len(closes) >= 7 else False
+                            _continuation_kp = (_trend_dir == "上升") and _pullback_ma10 and closes[-1] > _ma10_lm and _vol_exp
+                            _breakout_now = closes[-1] > _ph5 and _vol_exp
+                            _prev_broke = (len(closes) >= 2) and (closes[-2] > _ph5)
+                            _danger = _prev_broke and (closes[-1] < _ph5)
+                            # 支柱3+4: 综合判定 + 输出
+                            if _trend_dir == "下降":
+                                _lm_tag = "🔻下降通道 无买点"
+                                _lm_color = "rn"
+                            elif _trend_dir == "震荡":
+                                if _consolidated and closes[-1] >= _hi30 and _vol_exp:
+                                        _lm_tag = "⏳盘整+放量待突破"
+                                        _lm_color = "yn"
+                                else:
+                                        _lm_tag = "➡️震荡观望"
+                                        _lm_color = "yn"
+                            elif _danger:
+                                _lm_tag = "🚫假突破 撤买点"
+                                _lm_color = "rn"
+                            elif _reversal_kp:
+                                _lm_tag = "✅反转关键点"
+                                _lm_color = "gn"
+                            elif _continuation_kp:
+                                _lm_tag = "✅持续关键点"
+                                _lm_color = "gn"
+                            elif _breakout_now:
+                                _lm_tag = "⏳突破中 等回踩"
+                                _lm_color = "yn"
+                            elif _trend_dir == "上升":
+                                _lm_tag = "🔺上升 等关键点"
+                                _lm_color = "gn"
+                            else:
+                                _lm_tag = "⏸️数据不足"
+                                _lm_color = "bn"
+                            # 利弗莫尔止损位 + 最大风险%
+                            _hard_sl = closes[-1] * 0.90
+                            _struct_sl = _pl5 * 0.985
+                            _eff_sl = max(_hard_sl, _struct_sl)  # 取更紧者
+                            _lm_sl_pct = round((closes[-1] - _eff_sl) / closes[-1] * 100, 1)
+                            _lm_sl_str = f"止损{_eff_sl:.2f}({_lm_sl_pct}%)"
                         else:
-                            _lm_tag = "⏸️数据不足"
-                            _lm_color = "bn"
-                        # 利弗莫尔止损位 + 最大风险%
-                        _hard_sl = closes[-1] * 0.90
-                        _struct_sl = _pl5 * 0.985
-                        _eff_sl = max(_hard_sl, _struct_sl)  # 取更紧者
-                        _lm_sl_pct = round((closes[-1] - _eff_sl) / closes[-1] * 100, 1)
-                        _lm_sl_str = f"止损{_eff_sl:.2f}({_lm_sl_pct}%)"
-                    else:
-                        rhx = 50; rhx_tag = "⏸️无数据"; ma5 = ma10 = ma20 = 0
-                        _eff_sl = 0
-                        _trend_dir = "震荡"; _lm_tag = "⏸️无数据"; _lm_color = "bn"; _lm_sl_str = ""
-                    if score >= 65: tag = "green_bg"; gc += 1
-                    elif score >= 40: tag = "yellow_bg"; yc += 1
-                    else: tag = "red_bg"; rc += 1
-                    results.append({
-                        "values": (light, h["name"], code, h["group"],
-                                   f"{price_now}", f"{p5}", f"{p10}", f"{p20}",
-                                   f"{p3m_high}", f"{pct_3m}",
-                                   f"{vr}", f"{dma:+.2f}%" if dma != "N/A" else "N/A",
-                                   f"{supp}", f"{resi}", f"{score}",
-                                   f"{rhx_tag}", f"{_lm_tag}"),
-                        "tag": tag,
-                        "data": {"name": h["name"], "code": code, "ts_code": ts_code,
-                                 "price": price_now, "score": score, "supp": supp, "resi": resi,
-                                 "vol_ratio": vr, "dev_ma20": dma,
-                                 "ma5": ma5 if df_k is not None and len(df_k) else 0,
-                                 "ma10": ma10 if df_k is not None and len(df_k) else 0,
-                                 "ma20": ma20 if df_k is not None and len(df_k) else 0,
-                                 "rhx_score": rhx, "rhx_tag": rhx_tag,
-                                 "lm_trend_dir": _trend_dir, "lm_tag": _lm_tag,
-                                 "lm_sl_str": _lm_sl_str, "lm_eff_sl": _eff_sl if df_k is not None and len(df_k) else 0}
+                            rhx = 50; rhx_tag = "⏸️无数据"; ma5 = ma10 = ma20 = 0
+                            _eff_sl = 0
+                            _trend_dir = "震荡"; _lm_tag = "⏸️无数据"; _lm_color = "bn"; _lm_sl_str = ""
+                        if score >= 65: tag = "green_bg"; gc += 1
+                        elif score >= 40: tag = "yellow_bg"; yc += 1
+                        else: tag = "red_bg"; rc += 1
+                        results.append({
+                            "values": (light, h["name"], code, h["group"],
+                                       f"{price_now}", f"{p5}", f"{p10}", f"{p20}",
+                                       f"{p3m_high}", f"{pct_3m}",
+                                       f"{vr}", f"{dma:+.2f}%" if dma != "N/A" else "N/A",
+                                       f"{supp}", f"{resi}", f"{score}",
+                                       f"{rhx_tag}", f"{_lm_tag}"),
+                            "tag": tag,
+                            "data": {"name": h["name"], "code": code, "ts_code": ts_code,
+                                     "price": price_now, "score": score, "supp": supp, "resi": resi,
+                                     "vol_ratio": vr, "dev_ma20": dma,
+                                     "ma5": ma5 if df_k is not None and len(df_k) else 0,
+                                     "ma10": ma10 if df_k is not None and len(df_k) else 0,
+                                     "ma20": ma20 if df_k is not None and len(df_k) else 0,
+                                     "rhx_score": rhx, "rhx_tag": rhx_tag,
+                                     "lm_trend_dir": _trend_dir, "lm_tag": _lm_tag,
+                                     "lm_sl_str": _lm_sl_str, "lm_eff_sl": _eff_sl if df_k is not None and len(df_k) else 0}
                     })
+                    except Exception as _e2:
+                        import traceback as _tb_inner
+                        _log(f"  ⚠️ [{i}] {ts_code} 计算异常: {_e2}")
+                        _tb_inner.print_exc()
+                        continue
                 _log(f"📈 results: len={len(results)} rc={rc} yc={yc} gc={gc}, df_k有数据={sum(1 for r in results if r['data'].get('price') != '-')}")
                 # 一次性写 ScrolledText (最可靠)
                 def _render_text():
@@ -88414,7 +86301,7 @@ except Exception as e:
                             _w(f"{lm_v:>12}", lm_col)
                             tree.insert(tk.END, "\n", (bg,))
                             line_count += 1
-                        tree.config(state=tk.DISABLED)
+                            tree.config(state=tk.DISABLED)
                         _log(f"🖥️ 文本渲染成功: {line_count} 行")
                     except Exception as e:
                         _log(f"🖥️ 文本渲染失败: {e}")
@@ -93667,7 +91554,7 @@ def main():
             except Exception:
                 pass
         root.report_callback_exception = _tk_err_hook
-        # 窗口基本属性
+        # 立即显示窗口框架,让用户看到程序正在启动
         root.title(APP_CONFIG.get("window_title", DEFAULT_APP_CONFIG["window_title"]))
         root.geometry("1580x940")
         try:
@@ -93681,7 +91568,7 @@ def main():
             except Exception as e:
                 print(f"后台预加载股票名称列表失败: {e}")
         root.after(3000, lambda: threading.Thread(target=_preload_stock_names, daemon=True).start())
-        # 创建应用实例 (直接构建, 不用 Loading 占位)
+        # 创建应用实例(在创建过程中会逐步显示界面)
         try:
             app = StockKeywordAnalyzerGUI(root)
         except Exception as e:
@@ -93699,21 +91586,24 @@ def main():
             except:
                 pass
             return
-        # 窗口置前
+        # 再次确保窗口可见并置于最前
         try:
             root.deiconify()
             root.lift()
             root.focus_force()
-        except Exception:
-            pass
-        # 自动打开数据表 (如果有标记文件)
-        try:
-            marker_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".open_ths_data_table")
-            if os.path.exists(marker_file):
-                os.remove(marker_file)
-                root.after(500, lambda: app.show_unified_db_display(default_tab="ths"))
         except Exception as e:
-            print(f"自动打开数据表窗口失败: {e}")
+            print(f"Warning: Failed to show window: {e}")
+        # 检查是否有打开数据表的标记文件
+        marker_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".open_ths_data_table")
+        if os.path.exists(marker_file):
+            try:
+                # 删除标记文件
+                os.remove(marker_file)
+                # 延迟打开数据表窗口,确保主窗口已完全初始化
+                root.after(500, lambda: app.show_unified_db_display(default_tab="ths"))
+            except Exception as e:
+                print(f"自动打开数据表窗口失败: {e}")
+        print(f"🚀 about to enter mainloop at {__import__('time').time()}", flush=True)
         root.mainloop()
     except Exception as e:
         import traceback
