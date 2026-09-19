@@ -75,18 +75,6 @@ from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 from wordcloud import WordCloud
 
-# ==================== Phase 2 模块化导入 ====================
-from utils.suppress import *  # L97-109, 110-124, 126-136, 137-151, 153-161
-from logic.crawlers import *  # L492-757, 759-820, 822-1006
-from logic.stock_names import *  # L1007-1024, 1025-1029, 1030-1235, 1236-1361, 1362-1382, 1383-1392, 1393-1438, 1439-1490
-from data.snapshot import *  # L347-425, 426-490
-from logic.dapan_fetcher import *  # L1493-1533, 1534-1546, 1547-1559, 1562-1576, 1578-1592, 1593-1625, 1626-1646, 1647-1666, 1668-1713, 2016-2034, 2036-2038, 2039-2041, 2042-2044, 2045-2104, 2683-2776
-from logic.indicators import *  # L1714-1732, 1733-1759, 1760-1774, 1775-1788, 1789-1831
-from logic.spot import *  # L1833-1835, 1837-1837, 1839-1839, 1840-1842, 1843-1854, 1855-1861, 1862-1869, 1870-1885, 1886-1901, 1902-1948, 1949-1971, 1972-2015
-from logic.wordcloud import *  # L2105-2181, 2182-2277, 2278-2423, 2424-2682
-from utils.text_extract import *  # L2777-2780, 2781-2787, 2788-2817, 2819-2857, 2858-2887, 2888-2908, 2910-2949, 2950-2984, 2985-3009
-
-
 # ==================== 模块化拆分:utils.data ====================
 from utils.config import *          # 路径常量 + 配置 + DB_PATH (替代原 L219-L384)
 from utils.network import safe_call, safe_ak, safe_requests  # 网络安全封装
@@ -106,8 +94,71 @@ except ImportError:
     TOMORROW_PREDICT_AVAILABLE = False
     print("⚠️ tomorrow_predict 未找到,明日涨跌预测功能不可用")
 # ==================== 错误抑制工具 ====================
+@contextlib.contextmanager
+def suppress_stderr():
+    """临时抑制stderr输出的上下文管理器"""
+    old_stderr = sys.stderr
+    try:
+        # 创建一个空的StringIO对象来捕获所有stderr输出
+        sys.stderr = io.StringIO()
+        yield
+    except Exception:
+        # 即使发生异常也要恢复stderr
+        pass
+    finally:
+        sys.stderr = old_stderr
+@contextlib.contextmanager
+def suppress_all_output():
+    """临时抑制stdout和stderr输出的上下文管理器"""
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    try:
+        # 同时抑制stdout和stderr
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
+        yield
+    except Exception:
+        pass
+    finally:
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
 # 创建一个静默的输出流类,用于完全抑制输出
+class SilentIO(io.StringIO):
+    """静默的IO类,完全抑制所有输出"""
+    def write(self, *args, **kwargs):
+        # 完全忽略所有写入操作
+        pass
+    def flush(self, *args, **kwargs):
+        # 忽略刷新操作
+        pass
+    def getvalue(self):
+        # 返回空字符串
+        return ""
+@contextlib.contextmanager
+def suppress_tkinterweb_errors():
+    """专门用于抑制TkinterWeb错误的上下文管理器"""
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    try:
+        # 使用静默IO完全抑制输出
+        sys.stdout = SilentIO()
+        sys.stderr = SilentIO()
+        yield
+    except Exception:
+        pass
+    finally:
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
 # 全局错误抑制装饰器,用于包装可能产生错误的函数
+def suppress_all_errors(func):
+    """装饰器:抑制函数执行过程中的所有stderr输出"""
+    def wrapper(*args, **kwargs):
+        with suppress_stderr():
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                return None
+    return wrapper
 try:
     import tushare as ts
     TS_AVAILABLE = True
@@ -119,7 +170,48 @@ except ImportError:
 import time as _ts_time
 import threading as _ts_threading
 
+_TS_PATCHED_IDS = set()  # 用 id() 跟踪, 避免 DataApi.__getattr__ 拦截
+_TS_CALL_LOCK = _ts_threading.Lock()  # 并发安全: 所有线程串行化 sleep + API 调用
 
+def _ts_patch_pro_api(_orig_pro_api):
+    """包装 ts.pro_api(), 让返回的 client 方法自动 sleep + 限频重试"""
+    _TS_MIN_WAIT = 0.35
+    _TS_MAX_RETRY = 3
+
+    def _patch_client(pro):
+        """包装 DataApi.query (所有 API 通过 __getattr__ → partial(query, name) 调用)"""
+        pid = id(pro)
+        if pid in _TS_PATCHED_IDS:
+            return pro
+        try:
+            orig_query = pro.query
+            def _wrapped_query(*args, **kwargs):
+                last_e = None
+                for attempt in range(_TS_MAX_RETRY):
+                    try:
+                        with _TS_CALL_LOCK:
+                            _ts_time.sleep(_TS_MIN_WAIT)
+                            return orig_query(*args, **kwargs)
+                    except Exception as e:
+                        last_e = e
+                        msg = str(e)
+                        if any(k in msg for k in ['超限', '频率', 'rate limit', '每分钟']):
+                            wait = 30 * (attempt + 1)
+                            print(f"  ⚠️ Tushare 限频, 等{wait}s 重试({attempt+1}/{_TS_MAX_RETRY})")
+                            _ts_time.sleep(wait)
+                        else:
+                            raise
+                raise last_e
+            pro.query = _wrapped_query
+            _TS_PATCHED_IDS.add(pid)
+        except Exception as _e_wrap:
+            print(f"  ⚠️ Patch client 失败: {_e_wrap}")
+        return pro
+
+    def _patched_pro_api(*args, **kwargs):
+        pro = _orig_pro_api(*args, **kwargs)
+        return _patch_client(pro)
+    return _patched_pro_api
 
 try:
     import tushare as _ts_mod_safe
@@ -130,6 +222,18 @@ except Exception as _e_patch:
     print(f"⚠️ Tushare patch 失败: {_e_patch}")
     print(f"⚠️ Tushare patch 失败: {_e_patch}")
 
+def _akshare_fund_flow_market(code6: str) -> str:
+    """ak.stock_individual_fund_flow(stock, market) 的 market:sh / sz / bj"""
+    c = (code6 or "").strip()
+    if len(c) >= 6:
+        c = c[:6]
+    if not c.isdigit():
+        return "sh"
+    if c.startswith(("5", "6", "9")):
+        return "sh"
+    if c.startswith(("4", "8")):
+        return "bj"
+    return "sz"
 EXCEL_FILES_CONFIG_FILE = os.path.join(D_DATA_DIR, "excel_files_config.json")
 DEFAULT_MARKET_NAV_CONFIG = {
     "indices": [
@@ -239,47 +343,2734 @@ STOCK_NAME_TO_CODE = None
 ETF_CACHE_REFRESHED = False
 # 并发调用 load_stock_names() 时串行化,避免重复联网与全局字典竞态
 STOCK_NAMES_LOAD_LOCK = threading.Lock()
-
-# ==================== Phase 2: 全局变量注入到子模块 ====================
-import logic.stock_names as _mod_stock_names
-import data.snapshot as _mod_snapshot
-import logic.dapan_fetcher as _mod_dapan
-import logic.spot as _mod_spot
-import logic.wordcloud as _mod_wordcloud
-try:
-    _mod_stock_names.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _mod_dapan.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _mod_spot.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-except NameError:
-    pass
-try:
-    _mod_spot.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except NameError:
-    pass
-# 延迟注入 STOCK_CODES_DICT (主类 __init__ 里才真正初始化)
-_mod_stock_names.STOCK_CODES_DICT = STOCK_CODES_DICT
-_mod_stock_names.STOCK_NAMES_SET = STOCK_NAMES_SET
-_mod_stock_names.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-_mod_stock_names.ETF_CACHE_REFRESHED = ETF_CACHE_REFRESHED
-_mod_stock_names.STOCK_NAMES_LOAD_LOCK = STOCK_NAMES_LOAD_LOCK
-_mod_snapshot.STOCK_CODES_DICT = STOCK_CODES_DICT
-
 # ==================== 数据库管理 ====================
+def get_news_stocks_by_date_and_frequency(ndays=8, meta=None):
+    """从 news_info 按日期分组,每日期合并 content 提取股票并按出现频次降序,返回最近 ndays 天的数据。
+    返回: [{"date_ymd": "YYYY-MM-DD", "date_mmdd": "MMDD", "stocks": [(name, code), ...]}, ...],最多 ndays 项。
+    若 meta 传入 dict,会写入诊断字段(reason、error、news_row_count 等),便于界面提示。"""
+    global STOCK_CODES_DICT
+    if meta is not None:
+        meta.clear()
+        meta["ndays"] = ndays
+    try:
+        load_stock_names()
+    except Exception:
+        pass
+    if STOCK_CODES_DICT is None:
+        if meta is not None:
+            meta["reason"] = "no_stock_dict"
+        return []
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, tab_name, content, created_at FROM news_info ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"从资讯表读取失败: {e}")
+        print(f"  数据库: {DB_PATH}")
+        print(
+            "  若含 disk full:请保证 D: 上数据目录有足够空间;本程序启动时已尽量将 SQLITE_TMPDIR/TEMP 指到 <数据目录>\\temp。"
+            " 若仍报错请彻底退出后重开,或手动设置 SQLITE_TMPDIR 后再启动。"
+        )
+        if meta is not None:
+            meta["reason"] = "db_error"
+            meta["error"] = str(e)
+        return []
+    if meta is not None:
+        meta["news_row_count"] = len(rows)
+    if not rows:
+        if meta is not None:
+            meta["reason"] = "no_rows"
+        return []
+    # 按日期分组 (created_at 格式 "YYYY-MM-DD HH:MM:SS")
+    by_date = {}
+    for row in rows:
+        _rid, _tab_name, content, created_at = row
+        if not created_at:
+            continue
+        date_ymd = created_at[:10] if len(created_at) >= 10 else created_at
+        if date_ymd not in by_date:
+            by_date[date_ymd] = []
+        if content:
+            by_date[date_ymd].append(content)
+    # 取最近 ndays 个日期(按日期降序)
+    sorted_dates = sorted(by_date.keys(), reverse=True)[:ndays]
+    if not sorted_dates:
+        if meta is not None:
+            meta["reason"] = "no_valid_dates"
+            meta["hint"] = "news_info 有记录但 created_at 为空或格式异常,无法按日归类。"
+        return []
+    result = []
+    total_parsed_codes = 0
+    for date_ymd in sorted_dates:
+        merged = " ".join(by_date[date_ymd])
+        codes = re.findall(r'\d{6}', merged)
+        valid = [c for c in codes if c in STOCK_CODES_DICT]
+        counter = Counter(valid)
+        most_common = counter.most_common(80)
+        stocks = [(STOCK_CODES_DICT[code], code) for code, _ in most_common]
+        total_parsed_codes += len(stocks)
+        date_mmdd = date_ymd[5:7] + date_ymd[8:10]  # MMDD
+        result.append({"date_ymd": date_ymd, "date_mmdd": date_mmdd, "stocks": stocks})
+    if meta is not None:
+        meta["days_with_news"] = len(result)
+        meta["total_stock_slots"] = total_parsed_codes
+        if total_parsed_codes == 0:
+            meta["reason"] = "no_codes_in_news"
+            meta["hint"] = (
+                "资讯正文里没有出现可识别的 A 股六位代码(或代码不在本地股票字典中)。"
+                "请先确认已加载股票列表,且资讯内容含 600519 这类代码。"
+            )
+    return result
+def get_news_stocks_merged_recent_days(ndays=5, meta=None):
+    """从 news_info 取最近 ndays 个「有资讯的日期」,合并这些日期的全部正文,按六位代码出现频次降序,返回 [(name, code), ...] 最多 80 条。"""
+    global STOCK_CODES_DICT
+    if meta is not None:
+        meta.clear()
+        meta["ndays"] = ndays
+    try:
+        load_stock_names()
+    except Exception:
+        pass
+    if STOCK_CODES_DICT is None:
+        if meta is not None:
+            meta["reason"] = "no_stock_dict"
+        return []
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, tab_name, content, created_at FROM news_info ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"从资讯表读取失败: {e}")
+        if meta is not None:
+            meta["reason"] = "db_error"
+            meta["error"] = str(e)
+        return []
+    if meta is not None:
+        meta["news_row_count"] = len(rows)
+    if not rows:
+        if meta is not None:
+            meta["reason"] = "no_rows"
+        return []
+    by_date = {}
+    for row in rows:
+        _rid, _tab_name, content, created_at = row
+        if not created_at:
+            continue
+        date_ymd = created_at[:10] if len(created_at) >= 10 else created_at
+        if date_ymd not in by_date:
+            by_date[date_ymd] = []
+        if content:
+            by_date[date_ymd].append(content)
+    sorted_dates = sorted(by_date.keys(), reverse=True)[:ndays]
+    if not sorted_dates:
+        if meta is not None:
+            meta["reason"] = "no_valid_dates"
+            meta["hint"] = "news_info 有记录但 created_at 为空或格式异常,无法按日归类。"
+        return []
+    merged = " ".join(piece for d in sorted_dates for piece in by_date[d])
+    codes = re.findall(r"\d{6}", merged)
+    valid = [c for c in codes if c in STOCK_CODES_DICT]
+    counter = Counter(valid)
+    most_common = counter.most_common(80)
+    stocks = [(STOCK_CODES_DICT[code], code) for code, _ in most_common]
+    if meta is not None:
+        meta["days_merged"] = len(sorted_dates)
+        meta["merged_dates_ymd"] = sorted_dates
+        meta["total_stock_slots"] = len(stocks)
+        if not stocks:
+            meta["reason"] = "no_codes_in_news"
+            meta["hint"] = (
+                "资讯正文里没有出现可识别的 A 股六位代码(或代码不在本地股票字典中)。"
+                "请先确认已加载股票列表,且资讯内容含 600519 这类代码。"
+            )
+    return stocks
 # ==================== 淘股吧爬虫 ====================
+class TaogubaCrawler:
+    """淘股吧爬虫类"""
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Referer': 'https://www.tgb.cn/',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Cache-Control': 'max-age=0'
+        }
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
+        # 设置连接池大小和重试
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET", "POST"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=10)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+    def _get_with_retry(self, url, max_retries=3, timeout=30):
+        """带重试的GET请求,确保UTF-8编码"""
+        for attempt in range(max_retries):
+            try:
+                # 确保使用UTF-8编码
+                response = self.session.get(url, timeout=timeout, allow_redirects=True)
+                # 手动设置编码为UTF-8
+                if response.encoding is None or response.encoding.lower() in ['iso-8859-1', 'windows-1252']:
+                    response.encoding = 'utf-8'
+                elif response.encoding.lower() not in ['utf-8', 'utf8']:
+                    # 如果响应头指定了其他编码,尝试从内容检测
+                    try:
+                        import chardet
+                        detected = chardet.detect(response.content)
+                        if detected and detected.get('encoding'):
+                            response.encoding = detected['encoding']
+                        else:
+                            response.encoding = 'utf-8'
+                    except:
+                        response.encoding = 'utf-8'
+                if response.status_code == 200:
+                    return response
+                elif response.status_code in [429, 500, 502, 503, 504]:
+                    # 服务器错误,等待后重试
+                    wait_time = (attempt + 1) * 2
+                    print(f"服务器返回 {response.status_code},等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"HTTP状态码: {response.status_code}")
+                    return response
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                    requests.exceptions.RequestException) as e:
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 2
+                    print(f"连接失败 (尝试 {attempt + 1}/{max_retries}),等待 {wait_time} 秒后重试: {e}")
+                    time.sleep(wait_time)
+                else:
+                    print(f"连接失败,已重试 {max_retries} 次: {e}")
+                    raise
+        return None
+    def crawl_realtime_articles(self, max_pages=3):
+        """爬取淘股吧实时文章"""
+        articles = []
+        base_url = "https://www.tgb.cn/jinghua/"
+        for page in range(1, max_pages + 1):
+            try:
+                if page == 1:
+                    url = base_url
+                else:
+                    url = f"{base_url}?page={page}"
+                print(f"正在爬取第{page}页: {url}")
+                # 使用带重试的请求
+                response = self._get_with_retry(url, max_retries=3, timeout=30)
+                if response and response.status_code == 200:
+                    page_articles = self._parse_articles(response.text, page)
+                    articles.extend(page_articles)
+                    print(f"第{page}页成功获取 {len(page_articles)} 篇文章")
+                else:
+                    print(f"第{page}页获取失败: HTTP {response.status_code if response else '无响应'}")
+                # 增加延迟,避免请求过快
+                if page < max_pages:
+                    delay = random.uniform(2, 4)
+                    print(f"等待 {delay:.1f} 秒后继续...")
+                    time.sleep(delay)
+            except Exception as e:
+                print(f"第{page}页获取失败: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+        return articles
+    def _parse_articles(self, html_content, page):
+        """解析文章列表,确保UTF-8编码"""
+        articles = []
+        today = datetime.now().date()
+        try:
+            # 确保html_content是字符串类型,如果是字节类型则解码
+            if isinstance(html_content, bytes):
+                try:
+                    html_content = html_content.decode('utf-8', errors='replace')
+                except:
+                    # 如果UTF-8解码失败,尝试使用chardet检测编码
+                    try:
+                        import chardet
+                        detected = chardet.detect(html_content)
+                        if detected and detected.get('encoding'):
+                            html_content = html_content.decode(detected['encoding'], errors='replace')
+                        else:
+                            html_content = html_content.decode('utf-8', errors='replace')
+                    except:
+                        html_content = html_content.decode('utf-8', errors='replace')
+            # 使用BeautifulSoup解析,明确指定编码
+            soup = BeautifulSoup(html_content, 'html.parser', from_encoding='utf-8')
+            # 多种方式查找文章链接
+            article_links = []
+            # 方法1: 查找当前淘股吧的 base64 风格 /a/xxx 链接(2025-2026 版)
+            links_a = soup.find_all('a', href=re.compile(r'/a/[A-Za-z0-9]+'))
+            article_links.extend(links_a)
+            # 方法2: 查找旧版 /article/ /post/ /数字.html 链接
+            links_old = soup.find_all('a', href=re.compile(r'/article/|/post/|/Article/|/Post/'))
+            article_links.extend(links_old)
+            # 方法3: 查找数字ID的文章链接
+            links_num = soup.find_all('a', href=re.compile(r'/\d+\.html|/\d+$|articleId=\d+'))
+            article_links.extend(links_num)
+            # 方法4: 兜底 — 标题较长的带 href 的链接,排除导航/菜单
+            links4 = soup.find_all('a', href=True)
+            for link in links4:
+                title = link.get_text(strip=True)
+                href = link.get('href', '')
+                if title and len(title) > 12 and href and not href.startswith('#') and not href.startswith('javascript:'):
+                    if any(kw in href.lower() for kw in ['article', 'post', 'thread', 'topic', 'detail', '/a/', '/blog']):
+                        article_links.append(link)
+            # 去重
+            seen_urls = set()
+            unique_links = []
+            for link in article_links:
+                href = link.get('href', '')
+                if href and href not in seen_urls:
+                    seen_urls.add(href)
+                    unique_links.append(link)
+            # 处理链接
+            for link in unique_links[:30]:  # 限制每页最多30篇
+                try:
+                    title = link.get_text(strip=True)
+                    href = link.get('href', '')
+                    if title and len(title) > 5:
+                        # 构建完整URL
+                        if href.startswith('http'):
+                            full_url = href
+                        elif href.startswith('/'):
+                            full_url = urljoin("https://www.tgb.cn", href)
+                        else:
+                            full_url = urljoin("https://www.tgb.cn/jinghua/", href)
+                        # 提取作者和时间信息(如果存在)
+                        author = '未知'
+                        publish_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        publish_dt = None
+                        last_reply_time = None
+                        # 尝试从父元素获取作者和时间
+                        parent = link.parent
+                        if parent:
+                            # 查找作者
+                            author_elem = parent.find(text=re.compile(r'作者|发布|发帖'))
+                            if not author_elem:
+                                author_elem = parent.find('span', class_=re.compile(r'author|user|name'))
+                            if author_elem:
+                                if isinstance(author_elem, str):
+                                    author = author_elem.strip()
+                                else:
+                                    author = author_elem.get_text(strip=True)
+                            # 查找时间
+                            time_elem = parent.find(text=re.compile(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}'))
+                            if not time_elem:
+                                time_elem = parent.find('span', class_=re.compile(r'time|date'))
+                            if time_elem:
+                                if isinstance(time_elem, str):
+                                    publish_time = time_elem.strip()
+                                else:
+                                    publish_time = time_elem.get_text(strip=True)
+                            # 回帖时间(列表页通常展示回帖日期,如 12-09 16:36)
+                            reply_elem = parent.find(text=re.compile(r'\d{1,2}[-/]\d{1,2}(\s+\d{1,2}:\d{1,2})?'))
+                            if reply_elem:
+                                if isinstance(reply_elem, str):
+                                    last_reply_time = reply_elem.strip()
+                                else:
+                                    last_reply_time = reply_elem.get_text(strip=True)
+                        # 解析时间,过滤太老的文章(放宽到近 7 天,避免晚间/周末发的文章被过滤)
+                        publish_dt = self._parse_datetime_str(publish_time)
+                        reply_dt = self._parse_datetime_str(last_reply_time) if last_reply_time else None
+                        sort_dt = reply_dt or publish_dt or datetime.now()
+                        publish_date = (reply_dt or publish_dt or datetime.now()).date()
+                        # 放宽:只要是近 7 天的都保留;如果解析不出时间,也保留(用默认)
+                        try:
+                            age_days = (today - publish_date).days
+                            if age_days > 7:
+                                continue
+                        except Exception:
+                            pass
+                        articles.append({
+                            'title': title,
+                            'url': full_url,
+                            'author': author,
+                            'publish_time': publish_time,
+                            'last_reply_time': last_reply_time or '',
+                            'sort_dt': sort_dt,
+                            'content': '',
+                            'views': 0,
+                            'likes': 0,
+                            'replies': 0
+                        })
+                except Exception as e:
+                    print(f"  解析单个文章链接失败: {e}")
+                    continue
+        except Exception as e:
+            print(f"解析文章失败: {e}")
+            import traceback
+            traceback.print_exc()
+        # 按最新回复/发帖时间倒序
+        articles.sort(key=lambda x: x.get('sort_dt') or datetime.min, reverse=True)
+        return articles
+    def _parse_datetime_str(self, text):
+        """解析日期时间字符串,返回datetime或None"""
+        if not text:
+            return None
+        s = str(text).strip()
+        # 将中文格式替换为标准
+        s = s.replace('年', '-').replace('月', '-').replace('日', ' ')
+        s = re.sub(r'\s+', ' ', s)
+        patterns = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d %H:%M",
+            "%Y-%m-%d",
+            "%Y/%m/%d",
+        ]
+        for fmt in patterns:
+            try:
+                return datetime.strptime(s, fmt)
+            except Exception:
+                continue
+        # 处理仅月日的情况,补全年份
+        md = re.match(r"(\d{1,2})[-/](\d{1,2})(\s+\d{1,2}:\d{1,2})?", s)
+        if md:
+            y = datetime.now().year
+            m = int(md.group(1))
+            d = int(md.group(2))
+            t = md.group(3).strip() if md.group(3) else "00:00"
+            try:
+                return datetime.strptime(f"{y}-{m:02d}-{d:02d} {t}", "%Y-%m-%d %H:%M")
+            except Exception:
+                try:
+                    return datetime(y, m, d)
+                except Exception:
+                    return None
+        return None
 # ==================== 韭研公社爬虫 ====================
+class JiuYangGongSheCrawler:
+    """韭研公社爬虫类"""
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Connection': 'keep-alive'
+        }
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
+    def crawl_articles(self, max_pages=3):
+        """爬取韭研公社文章"""
+        articles = []
+        base_url = "https://www.jiuyangongshe.com/"
+        for page in range(1, max_pages + 1):
+            try:
+                if page == 1:
+                    url = base_url
+                else:
+                    url = f"{base_url}?page={page}"
+                response = self.session.get(url, timeout=15)
+                if response.status_code == 200:
+                    page_articles = self._parse_articles(response.text, page)
+                    articles.extend(page_articles)
+                    time.sleep(random.uniform(1, 2))
+            except Exception as e:
+                print(f"爬取第{page}页失败: {e}")
+                continue
+        return articles
+    def _parse_articles(self, html_content, page):
+        """解析文章列表"""
+        articles = []
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            # 查找文章链接(韭研公社也是 /a/xxx 模式)
+            article_links = soup.find_all('a', href=True)
+            for link in article_links[:30]:  # 限制每页最多30篇
+                try:
+                    title = link.get_text(strip=True)
+                    href = link.get('href', '')
+                    # 匹配韭研的 /a/xxx 文章链接 + 旧版 /article/ /post/
+                    is_article = ('/a/' in href
+                                  or '/article/' in href.lower()
+                                  or '/post/' in href.lower())
+                    if title and len(title) > 5 and is_article:
+                        full_url = urljoin("https://www.jiuyangongshe.com/", href)
+                        articles.append({
+                            'title': title,
+                            'url': full_url,
+                            'author': '未知',
+                            'publish_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'content': '',
+                            'views': 0,
+                            'likes': 0,
+                            'replies': 0
+                        })
+                except:
+                    continue
+        except Exception as e:
+            print(f"解析韭研文章失败: {e}")
+        return articles
 # ==================== AI配置管理 ====================
+class AIConfigManager:
+    """AI配置管理器"""
+    def __init__(self, config_file=None):
+        self.config_file = config_file or os.path.join(_APP_CONFIG_DIR, "ai_config.json")
+        self.config = self.load_config()
+    def load_config(self):
+        """加载AI配置"""
+        default_config = {
+            "active_provider": "deepseek",
+            "provider": "deepseek",
+            "providers": {
+                "deepseek": {
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": "",
+                    "model": "deepseek-chat",
+                    "mode": "chat",
+                    "temperature": 0.3,
+                    "timeout": 60
+                },
+                "doubao": {
+                    "base_url": "https://ark.cn-beijing.volces.com",
+                    "endpoint": "/api/v3/chat/completions",
+                    "api_key": "",
+                    "model": "doubao-seedance-1-0-pro-250528",
+                    "mode": "chat",
+                    "temperature": 0.3,
+                    "timeout": 60
+                },
+                "ollama": {
+                    "base_url": "http://localhost:11434",
+                    "endpoint": "/v1/chat/completions",
+                    "model": "qwen2.5:7b",
+                    "mode": "chat",
+                    "temperature": 0.3,
+                    "timeout": 60
+                }
+            },
+            "tushare": {
+                "account": "",
+                "token": ""
+            }
+        }
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    loaded_config = json.load(f)
+                    default_config.update(loaded_config)
+            except Exception as e:
+                print(f"加载AI配置失败: {e}")
+        return default_config
+    def save_config(self):
+        """保存AI配置"""
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            print(f"保存AI配置失败: {e}")
+            return False
+    def get_active_provider_config(self):
+        """获取当前激活的AI提供商配置"""
+        provider = self.config.get("active_provider", "deepseek")
+        return self.config.get("providers", {}).get(provider, {})
+    def get_tushare_config(self):
+        """获取Tushare配置"""
+        return self.config.get("tushare", {"account": "", "token": ""})
+    def set_tushare_config(self, account=None, token=None):
+        """设置Tushare配置"""
+        if "tushare" not in self.config:
+            self.config["tushare"] = {}
+        if account is not None:
+            self.config["tushare"]["account"] = account
+        if token is not None:
+            self.config["tushare"]["token"] = token
+        self.save_config()
+    def call_ai(self, prompt, provider=None):
+        """调用AI接口"""
+        if provider is None:
+            provider = self.config.get("active_provider", "deepseek")
+        provider_config = self.config.get("providers", {}).get(provider, {})
+        if not provider_config:
+            return None
+        try:
+            api_key = provider_config.get("api_key", "")
+            if not api_key:
+                return "错误: 未配置API密钥"
+            base_url = provider_config.get("base_url", "")
+            model = provider_config.get("model", "")
+            endpoint = provider_config.get("endpoint", "/chat/completions")
+            if provider == "deepseek":
+                url = f"{base_url}/chat/completions"
+            else:
+                url = f"{base_url}{endpoint}"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}"
+            }
+            data = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": provider_config.get("temperature", 0.3)
+            }
+            response = requests.post(url, json=data, headers=headers,
+                                  timeout=provider_config.get("timeout", 60))
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            else:
+                return f"API调用失败: {response.status_code} - {response.text}"
+        except Exception as e:
+            return f"AI调用错误: {e!s}"
+    def _copy_tree_selection(self, tree_widget, columns):
+        """复制Treeview选中行到剪贴板"""
+        selections = tree_widget.selection()
+        if not selections:
+            messagebox.showwarning("提示", "请先选择需要复制的行")
+            return
+        lines = []
+        header_line = "\t".join(columns)
+        lines.append(header_line)
+        for item in selections:
+            values = tree_widget.item(item, "values")
+            formatted = []
+            for idx, col in enumerate(columns):
+                if idx < len(values):
+                    formatted.append(str(values[idx]))
+                else:
+                    formatted.append("")
+            lines.append("\t".join(formatted))
+        text = "\n".join(lines)
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            messagebox.showinfo("成功", "已复制选中数据到剪贴板")
+        except Exception as e:
+            messagebox.showerror("错误", f"复制失败: {e}")
+    def _attach_window_controls(self, win, button_container=None):
+        """给窗口添加常用控制按钮(最小化/最大化/关闭)"""
+        frame = button_container or ttk.Frame(win)
+        if not button_container:
+            frame.pack(fill=tk.X, padx=5, pady=(0, 5))
+        win._is_maximized = False
+        win._last_geometry = win.geometry()
+        def minimize():
+            try:
+                # 确保窗口可以最小化
+                win.state('normal')  # 先确保窗口是正常状态
+                win.iconify()  # 最小化窗口
+            except Exception as e:
+                print(f"最小化窗口失败: {e}")
+                # 如果iconify失败,尝试使用withdraw
+                try:
+                    win.withdraw()
+                except Exception as e2:
+                    print(f"withdraw也失败: {e2}")
+        def toggle_maximize():
+            try:
+                if win._is_maximized:
+                    win.state("normal")
+                    if win._last_geometry:
+                        win.geometry(win._last_geometry)
+                    win._is_maximized = False
+                    max_btn.config(text="最大化")
+                else:
+                    win._last_geometry = win.geometry()
+                    win.state("zoomed")
+                    win._is_maximized = True
+                    max_btn.config(text="还原")
+            except Exception:
+                if win._is_maximized:
+                    if win._last_geometry:
+                        win.geometry(win._last_geometry)
+                    win._is_maximized = False
+                    max_btn.config(text="最大化")
+                else:
+                    win._last_geometry = win.geometry()
+                    screen_width = win.winfo_screenwidth()
+                    screen_height = win.winfo_screenheight()
+                    win.geometry(f"{screen_width}x{screen_height}+0+0")
+                    win._is_maximized = True
+                    max_btn.config(text="还原")
+        ttk.Button(frame, text="最小化", width=10, command=minimize).pack(side=tk.RIGHT, padx=3)
+        max_btn = ttk.Button(frame, text="最大化", width=10, command=toggle_maximize)
+        max_btn.pack(side=tk.RIGHT, padx=3)
+        ttk.Button(frame, text="关闭", width=10, command=win.destroy).pack(side=tk.RIGHT, padx=3)
+def _register_stock_entry(code, name):
+    """将股票代码与名称写入全局缓存"""
+    global STOCK_NAMES_SET, STOCK_CODES_DICT, STOCK_NAME_TO_CODE
+    if STOCK_NAMES_SET is None:
+        STOCK_NAMES_SET = set()
+    if STOCK_CODES_DICT is None:
+        STOCK_CODES_DICT = {}
+    if STOCK_NAME_TO_CODE is None:
+        STOCK_NAME_TO_CODE = {}
+    if code is None or name is None:
+        return
+    code_str = str(code).strip()
+    name_str = str(name).strip()
+    if not code_str or not name_str:
+        return
+    STOCK_NAMES_SET.add(name_str)
+    STOCK_CODES_DICT[code_str] = name_str
+    STOCK_NAME_TO_CODE[name_str] = code_str
+def load_stock_names():
+    """延迟加载A股股票名称集合和代码字典,包括科创板、ETF,支持本地缓存"""
+    global STOCK_NAMES_SET, STOCK_CODES_DICT, STOCK_NAME_TO_CODE, ETF_CACHE_REFRESHED
+    with STOCK_NAMES_LOAD_LOCK:
+        return _load_stock_names_impl()
+def _load_stock_names_impl():
+    """load_stock_names 的实际逻辑(在锁内调用)"""
+    global STOCK_NAMES_SET, STOCK_CODES_DICT, STOCK_NAME_TO_CODE, ETF_CACHE_REFRESHED
+    if STOCK_NAMES_SET is None or STOCK_CODES_DICT is None or STOCK_NAME_TO_CODE is None:
+        # 缓存文件路径
+        cache_file = os.path.join(D_DATA_DIR, "stock_names_cache.json")
+        # 首先尝试从缓存文件加载
+        if os.path.exists(cache_file):
+            try:
+                print("正在从本地缓存加载股票名称数据...")
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                    STOCK_NAMES_SET = set(cache_data.get('stock_names', []))
+                    STOCK_CODES_DICT = cache_data.get('stock_codes_dict', {})
+                    STOCK_NAME_TO_CODE = cache_data.get('stock_name_to_code', {})
+                    cache_count = len(STOCK_NAMES_SET)
+                    # 检查缓存数据是否完整(A股市场应该有4000+只股票)
+                    MIN_STOCK_COUNT = 4000
+                    if cache_count > 0 and cache_count < MIN_STOCK_COUNT:
+                        print(f"⚠️ 警告: 缓存中只有 {cache_count} 个股票名称,数据可能不完整")
+                        print(f"   正常应该有 {MIN_STOCK_COUNT}+ 个股票,将重新从网络加载完整数据...")
+                        # 清空缓存数据,强制从网络重新加载
+                        STOCK_NAMES_SET = None
+                        STOCK_CODES_DICT = None
+                        STOCK_NAME_TO_CODE = None
+                    elif STOCK_NAMES_SET and STOCK_CODES_DICT:
+                        print(f"✓ 从缓存成功加载 {cache_count} 个股票名称")
+                        # 将所有股票名称添加到jieba自定义词典,提高识别率
+                        try:
+                            for stock_name in STOCK_NAMES_SET:
+                                jieba.add_word(stock_name, freq=1000, tag='n')
+                            print(f"✓ 已将 {cache_count} 个股票名称添加到jieba自定义词典")
+                        except Exception as e:
+                            print(f"添加到jieba自定义词典失败: {e}")
+                        return STOCK_NAMES_SET, STOCK_CODES_DICT, STOCK_NAME_TO_CODE
+            except Exception as e:
+                print(f"从缓存加载失败: {e},将尝试从网络获取")
+        # 如果缓存不存在或加载失败,尝试从网络获取
+        if not AKSHARE_AVAILABLE:
+            print("错误: akshare库不可用,无法加载股票数据")
+            print("提示: 请确保已安装akshare库,并且网络连接正常")
+            STOCK_NAMES_SET = set()
+            STOCK_CODES_DICT = {}
+            STOCK_NAME_TO_CODE = {}
+            ETF_CACHE_REFRESHED = False
+            return STOCK_NAMES_SET, STOCK_CODES_DICT, STOCK_NAME_TO_CODE
+        print("正在从网络加载A股股票名称列表(包括主板、中小板、创业板、科创板、ETF),请稍候...")
+        print("说明:A股市场约有5000+只股票,首次加载需要一些时间,这是正常现象。")
+        print("提示:如果网络连接失败,程序将尝试使用缓存数据")
+        try:
+            STOCK_NAMES_SET = set()
+            STOCK_CODES_DICT = {}
+            STOCK_NAME_TO_CODE = {}
+            # 加载主板、中小板、创业板股票
+            main_count = 0
+            try:
+                print("正在加载主板、中小板、创业板股票...")
+                stock_info = ak.stock_info_a_code_name()
+                if stock_info is not None and not stock_info.empty:
+                    for _, row in stock_info.iterrows():
+                        code = row.get('code')
+                        name = row.get('name')
+                        if code and name:
+                            _register_stock_entry(code, name)
+                            main_count += 1
+                    print(f"✓ 成功加载主板/中小板/创业板股票 {main_count} 个")
+                else:
+                    print("⚠️ 主板/中小板/创业板股票数据为空")
+            except Exception as e:
+                _log(f"❌ 加载主板/中小板/创业板股票失败: {e}")
+            # 加载科创板股票
+            kcb_count = 0
+            try:
+                print("正在加载科创板股票...")
+                kcb_stock_info = ak.stock_info_kcb_name_code()
+                if kcb_stock_info is not None and not kcb_stock_info.empty:
+                    for _, row in kcb_stock_info.iterrows():
+                        code = row.get('SECURITY_CODE_A')
+                        name = row.get('SECURITY_NAME_A')
+                        if code and name:
+                            _register_stock_entry(code, name)
+                        kcb_count += 1
+                    print(f"✓ 成功加载科创板股票 {kcb_count} 个")
+                else:
+                    print("⚠️ 科创板股票数据为空")
+            except Exception as e:
+                _log(f"❌ 加载科创板股票失败: {e}")
+            # 加载ETF(可选,如果不需要可以跳过)
+            etf_count = 0
+            try:
+                print("正在加载ETF基金...")
+                etf_info = ak.fund_etf_spot_em()
+                if etf_info is not None and not etf_info.empty:
+                    for _, row in etf_info.iterrows():
+                        code = row.get('代码')
+                        name = row.get('名称')
+                        if code and name:
+                            _register_stock_entry(code, name)
+                        etf_count += 1
+                    ETF_CACHE_REFRESHED = True
+                    print(f"✓ 成功加载ETF {etf_count} 个")
+                else:
+                    print("⚠️ ETF基金数据为空")
+                    ETF_CACHE_REFRESHED = False
+            except Exception as e:
+                _log(f"❌ 加载ETF失败: {e}")
+                ETF_CACHE_REFRESHED = False
+            total_count = len(STOCK_NAMES_SET)
+            if total_count > 0:
+                # 检查数据完整性
+                MIN_EXPECTED_COUNT = 4000
+                if total_count < MIN_EXPECTED_COUNT:
+                    print(f"⚠️ 警告: 只加载了 {total_count} 个股票名称,可能数据不完整")
+                    print(f"   正常应该有 {MIN_EXPECTED_COUNT}+ 个股票")
+                    print("   建议检查网络连接,或手动删除缓存文件后重新加载")
+                else:
+                    print(f"✓ 成功加载 {total_count} 个A股股票名称(包括科创板、ETF)")
+                    print("  说明:这是A股市场的正常数量,包括主板、中小板、创业板、科创板股票和ETF基金")
+                # 将所有股票名称添加到jieba自定义词典,提高识别率
+                try:
+                    for stock_name in STOCK_NAMES_SET:
+                        jieba.add_word(stock_name, freq=1000, tag='n')
+                    print(f"✓ 已将 {total_count} 个股票名称添加到jieba自定义词典")
+                except Exception as e:
+                    print(f"添加到jieba自定义词典失败: {e}")
+                # 保存到缓存文件
+                try:
+                    cache_data = {
+                        'stock_names': list(STOCK_NAMES_SET),
+                        'stock_codes_dict': STOCK_CODES_DICT,
+                        'stock_name_to_code': STOCK_NAME_TO_CODE,
+                        'cache_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        'total_count': total_count
+                    }
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(cache_data, f, ensure_ascii=False, indent=2)
+                    print(f"✓ 股票数据已保存到缓存文件: {cache_file}")
+                except Exception as e:
+                    print(f"保存缓存文件失败: {e}")
+            else:
+                print("警告: 未能加载任何股票数据")
+                # 如果网络加载失败,再次尝试从缓存加载
+                if os.path.exists(cache_file):
+                    try:
+                        print("网络加载失败,尝试从缓存加载...")
+                        with open(cache_file, 'r', encoding='utf-8') as f:
+                            cache_data = json.load(f)
+                            STOCK_NAMES_SET = set(cache_data.get('stock_names', []))
+                            STOCK_CODES_DICT = cache_data.get('stock_codes_dict', {})
+                            STOCK_NAME_TO_CODE = cache_data.get('stock_name_to_code', {})
+                            cache_count = len(STOCK_NAMES_SET)
+                            if STOCK_NAMES_SET and STOCK_CODES_DICT:
+                                if cache_count < 4000:
+                                    print(f"⚠️ 从缓存加载了 {cache_count} 个股票名称,但数据可能不完整(正常应该有4000+个)")
+                                else:
+                                    print(f"✓ 从缓存成功加载 {cache_count} 个股票名称")
+                                # 将所有股票名称添加到jieba自定义词典,提高识别率
+                                try:
+                                    for stock_name in STOCK_NAMES_SET:
+                                        jieba.add_word(stock_name, freq=1000, tag='n')
+                                    print(f"✓ 已将 {cache_count} 个股票名称添加到jieba自定义词典")
+                                except Exception as e:
+                                    print(f"添加到jieba自定义词典失败: {e}")
+                    except Exception as e:
+                        print(f"从缓存加载也失败: {e}")
+        except Exception as e:
+            print(f"加载股票名称失败: {e}")
+            print("提示: 可能是网络连接问题,程序将尝试使用缓存数据")
+            # 最后尝试从缓存加载
+            if os.path.exists(cache_file):
+                try:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
+                        cache_data = json.load(f)
+                        STOCK_NAMES_SET = set(cache_data.get('stock_names', []))
+                        STOCK_CODES_DICT = cache_data.get('stock_codes_dict', {})
+                        STOCK_NAME_TO_CODE = cache_data.get('stock_name_to_code', {})
+                        cache_count = len(STOCK_NAMES_SET)
+                        if STOCK_NAMES_SET and STOCK_CODES_DICT:
+                            if cache_count < 4000:
+                                print(f"⚠️ 从缓存加载了 {cache_count} 个股票名称,但数据可能不完整(正常应该有4000+个)")
+                            else:
+                                print(f"✓ 从缓存成功加载 {cache_count} 个股票名称")
+                            # 将所有股票名称添加到jieba自定义词典,提高识别率
+                            try:
+                                for stock_name in STOCK_NAMES_SET:
+                                    jieba.add_word(stock_name, freq=1000, tag='n')
+                                print(f"✓ 已将 {cache_count} 个股票名称添加到jieba自定义词典")
+                            except Exception as e:
+                                print(f"添加到jieba自定义词典失败: {e}")
+                        else:
+                            STOCK_NAMES_SET = set()
+                            STOCK_CODES_DICT = {}
+                            STOCK_NAME_TO_CODE = {}
+                            ETF_CACHE_REFRESHED = False
+                except Exception as e2:
+                    print(f"从缓存加载失败: {e2}")
+                    STOCK_NAMES_SET = set()
+                    STOCK_CODES_DICT = {}
+                    STOCK_NAME_TO_CODE = {}
+                    ETF_CACHE_REFRESHED = False
+            else:
+                STOCK_NAMES_SET = set()
+                STOCK_CODES_DICT = {}
+                STOCK_NAME_TO_CODE = {}
+                ETF_CACHE_REFRESHED = False
+    return STOCK_NAMES_SET, STOCK_CODES_DICT, STOCK_NAME_TO_CODE
+def extract_stock_names(text):
+    """从文本中提取股票名称和代码"""
+    global STOCK_NAMES_SET, STOCK_CODES_DICT
+    # 检查输入文本是否为空
+    if not text or not text.strip():
+        return [], []
+    # 确保股票数据已加载
+    if STOCK_NAMES_SET is None or STOCK_CODES_DICT is None:
+        try:
+            STOCK_NAMES_SET, STOCK_CODES_DICT, _ = load_stock_names()
+        except Exception as e:
+            print(f"加载股票名称数据失败: {e}")
+            return [], []
+    # 检查数据是否加载成功
+    if not STOCK_NAMES_SET or not STOCK_CODES_DICT:
+        error_msg = "警告: 股票名称数据为空,无法提取股票信息\n"
+        error_msg += "可能原因:\n"
+        error_msg += "1. 网络连接失败,无法从akshare获取数据\n"
+        error_msg += "2. akshare库未正确安装或配置\n"
+        error_msg += "3. 缓存文件不存在或已损坏\n"
+        error_msg += "建议:\n"
+        error_msg += "1. 检查网络连接\n"
+        error_msg += "2. 确保程序有网络访问权限\n"
+        error_msg += "3. 重新运行程序,让程序从网络获取并缓存数据\n"
+        print(error_msg)
+        return [], []
+    # 过滤股票名称和代码
+    stock_names = []
+    stock_codes_found = []
+    stock_code_positions = []  # 记录股票代码在文本中的位置
+    found_positions = set()  # 记录已找到的位置,避免重复匹配
+    # 1. 用正则表达式直接查找6位数字(股票代码)
+    # 这样可以避免jieba分词把股票代码分割的问题
+    stock_code_pattern = r'(\d{6})'
+    stock_codes_in_text = re.findall(stock_code_pattern, text)
+    for code in stock_codes_in_text:
+        if code in STOCK_CODES_DICT:
+            stock_name = STOCK_CODES_DICT[code]
+            stock_codes_found.append(f"{code}({stock_name})")
+            # 同时添加到股票名称列表(如果还没有的话)
+            if stock_name not in stock_names:
+                stock_names.append(stock_name)
+            # 记录股票代码在文本中的位置
+            start_pos = text.find(code)
+            if start_pos != -1:
+                stock_code_positions.append({
+                    'code': code,
+                    'name': stock_name,
+                    'start': start_pos,
+                    'end': start_pos + 6
+                })
+                # 标记这段位置已被占用
+                found_positions.add((start_pos, start_pos + 6))
+    # 2. 直接在文本中搜索股票名称(按长度从长到短排序,优先匹配长名称)
+    # 这样可以避免短名称误匹配长名称的一部分
+    sorted_stock_names = sorted(STOCK_NAMES_SET, key=len, reverse=True)
+    for stock_name in sorted_stock_names:
+        # 跳过已经在股票代码中找到的股票名称
+        if stock_name in stock_names:
+            continue
+        # 在文本中搜索股票名称
+        start_pos = 0
+        while True:
+            pos = text.find(stock_name, start_pos)
+            if pos == -1:
+                break
+            # 检查这个位置是否已被其他匹配占用
+            is_overlap = False
+            for found_start, found_end in found_positions:
+                if not (pos + len(stock_name) <= found_start or pos >= found_end):
+                    is_overlap = True
+                    break
+            if not is_overlap:
+                # 检查股票名称前后是否是有效的边界(避免部分匹配)
+                before_char = text[pos - 1] if pos > 0 else ''
+                after_char = text[pos + len(stock_name)] if pos + len(stock_name) < len(text) else ''
+                # 判断是否是中文字符
+                def is_chinese_char(char):
+                    """判断是否是中文字符"""
+                    if not char:
+                        return False
+                    return '\u4e00' <= char <= '\u9fff'
+                # 判断是否是有效的边界字符(标点、空格等)
+                def is_valid_boundary_char(char):
+                    """判断是否是有效的边界字符(标点、空格等)"""
+                    if not char:
+                        return True
+                    # 允许的边界:标点符号、空格、换行、制表符等
+                    boundary_chars = ' \n\t\r,。!?;:、""''()【】《》〈〉「」『』〔〕...-·'
+                    return char in boundary_chars or not (char.isalnum() or is_chinese_char(char))
+                # 检查前边界:文本开头、边界字符、或前后字符类型不同
+                valid_before = (pos == 0 or
+                               is_valid_boundary_char(before_char) or
+                               (is_chinese_char(stock_name[0]) and not is_chinese_char(before_char)) or
+                               (not is_chinese_char(stock_name[0]) and not before_char.isalnum()))
+                # 检查后边界:文本结尾、边界字符、或前后字符类型不同
+                valid_after = (pos + len(stock_name) == len(text) or
+                              is_valid_boundary_char(after_char) or
+                              (is_chinese_char(stock_name[-1]) and not is_chinese_char(after_char)) or
+                              (not is_chinese_char(stock_name[-1]) and not after_char.isalnum()))
+                if valid_before and valid_after:
+                    stock_names.append(stock_name)
+                    found_positions.add((pos, pos + len(stock_name)))
+                    break  # 每个股票名称只匹配一次,避免重复
+            start_pos = pos + 1
+    # 3. 使用jieba分词作为补充(处理jieba能正确识别的情况)
+    try:
+        words = jieba.lcut(text)
+        for word in words:
+            if word in STOCK_NAMES_SET and word not in stock_names:
+                # 检查是否与已找到的位置重叠
+                word_pos = text.find(word)
+                if word_pos != -1:
+                    is_overlap = False
+                    for found_start, found_end in found_positions:
+                        if not (word_pos + len(word) <= found_start or word_pos >= found_end):
+                            is_overlap = True
+                            break
+                    if not is_overlap:
+                        stock_names.append(word)
+                        found_positions.add((word_pos, word_pos + len(word)))
+    except Exception as e:
+        print(f"分词失败: {e}")
+    # 合并结果
+    all_stocks = stock_names + stock_codes_found
+    return list(set(all_stocks)), stock_code_positions
+def get_stock_sector(stock_name):
+    """获取股票所属板块"""
+    try:
+        # 先获取股票代码
+        stock_info = ak.stock_info_a_code_name()
+        stock_code = None
+        for _, row in stock_info.iterrows():
+            if row['name'] == stock_name:
+                stock_code = row['code']
+                break
+        if stock_code:
+            # 使用股票代码获取详细信息
+            individual_info = ak.stock_individual_info_em(symbol=stock_code)
+            if not individual_info.empty:
+                for _, row in individual_info.iterrows():
+                    if row['item'] == '所处行业':
+                        return row['value']
+        return "未知板块"
+    except Exception as e:
+        print(f"获取 {stock_name} 板块信息失败: {e}")
+        return "未知板块"
+def get_stock_theme(stock_name):
+    """获取股票相关题材"""
+    try:
+        concept_info = ak.stock_board_concept_cons_ths(symbol=stock_name)
+        if not concept_info.empty:
+            concepts = concept_info['概念名称'].head(5).tolist()
+            return ", ".join(concepts)
+        return "未知题材"
+    except Exception:
+        return "未知题材"
+def get_stock_code_by_name(stock_name):
+    """根据股票名称获取股票代码,包括ETF"""
+    global STOCK_NAMES_SET, STOCK_CODES_DICT, STOCK_NAME_TO_CODE, ETF_CACHE_REFRESHED
+    if not stock_name:
+        return None
+    try:
+        if STOCK_NAMES_SET is None or STOCK_CODES_DICT is None or STOCK_NAME_TO_CODE is None:
+            load_stock_names()
+        # 处理格式:允许传入"代码(名称)"或直接代码
+        clean_stock_name = str(stock_name).strip()
+        if not clean_stock_name:
+            return None
+        if '(' in clean_stock_name and ')' in clean_stock_name:
+            clean_stock_name = clean_stock_name.split('(')[0].strip() or clean_stock_name.split('(')[1].rstrip(')')
+        if re.fullmatch(r"\d{6}", clean_stock_name):
+            return clean_stock_name
+        # 先使用缓存做精确匹配
+        cached_code = STOCK_NAME_TO_CODE.get(clean_stock_name)
+        if cached_code:
+            return cached_code
+        # 其次尝试模糊匹配
+        for name, code in STOCK_NAME_TO_CODE.items():
+            if clean_stock_name in name or name in clean_stock_name:
+                return code
+        # 如果仍未找到,尝试补充ETF缓存(仅重试一次,避免频繁请求)
+        if not ETF_CACHE_REFRESHED:
+            try:
+                etf_info = ak.fund_etf_spot_em()
+                if etf_info is not None and not etf_info.empty:
+                    for _, row in etf_info.iterrows():
+                        _register_stock_entry(row.get('代码'), row.get('名称'))
+                ETF_CACHE_REFRESHED = True
+            except Exception as e:
+                ETF_CACHE_REFRESHED = True
+                print(f"从ETF中查找 {stock_name} 失败: {e}")
+            # 重试匹配
+            cached_code = STOCK_NAME_TO_CODE.get(clean_stock_name)
+            if cached_code:
+                return cached_code
+            for name, code in STOCK_NAME_TO_CODE.items():
+                if clean_stock_name in name or name in clean_stock_name:
+                    return code
+        return None
+    except Exception as e:
+        print(f"获取 {stock_name} 股票代码失败: {e}")
+        return None
+def get_stock_name_by_code(stock_code):
+    """根据股票代码获取股票名称"""
+    global STOCK_CODES_DICT, STOCK_NAME_TO_CODE
+    if not stock_code:
+        return None
+    try:
+        if STOCK_CODES_DICT is None or STOCK_NAME_TO_CODE is None:
+            load_stock_names()
+        # 先尝试从STOCK_CODES_DICT获取
+        if STOCK_CODES_DICT and stock_code in STOCK_CODES_DICT:
+            return STOCK_CODES_DICT[stock_code]
+        # 从STOCK_NAME_TO_CODE反向查找
+        if STOCK_NAME_TO_CODE:
+            for name, code in STOCK_NAME_TO_CODE.items():
+                if code == stock_code:
+                    return name
+        # 如果还没找到,尝试从akshare获取
+        if AKSHARE_AVAILABLE:
+            try:
+                # 方法1: 从stock_info_a_code_name获取
+                stock_info = ak.stock_info_a_code_name()
+                if not stock_info.empty:
+                    matched = stock_info[stock_info['code'] == stock_code]
+                    if not matched.empty:
+                        stock_name = matched.iloc[0]['name']
+                        if stock_name:
+                            # 缓存结果
+                            if STOCK_CODES_DICT is None:
+                                STOCK_CODES_DICT = {}
+                            STOCK_CODES_DICT[stock_code] = stock_name
+                            return stock_name
+            except:
+                pass
+            try:
+                # 方法2: 从stock_individual_info_em获取
+                stock_info = ak.stock_individual_info_em(symbol=stock_code)
+                if not stock_info.empty:
+                    name_row = stock_info[stock_info['item'] == '股票简称']
+                    if not name_row.empty:
+                        stock_name = name_row.iloc[0]['value']
+                        if stock_name:
+                            # 缓存结果
+                            if STOCK_CODES_DICT is None:
+                                STOCK_CODES_DICT = {}
+                            STOCK_CODES_DICT[stock_code] = stock_name
+                            return stock_name
+            except:
+                pass
+        return None
+    except Exception as e:
+        print(f"获取 {stock_code} 股票名称失败: {e}")
+        return None
 # ETF数据获取功能已移除
 # ETF热门数据获取功能已移除
+def get_hot_stocks(limit=50):
+    """获取最热门的股票"""
+    try:
+        # 定义热门股票代码和名称(备用数据)
+        hot_stocks_backup = [
+            {'代码': '000001', '名称': '平安银行', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '000002', '名称': '万科A', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '000858', '名称': '五粮液', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '000876', '名称': '新希望', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '002415', '名称': '海康威视', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '002594', '名称': '比亚迪', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '300059', '名称': '东方财富', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '300750', '名称': '宁德时代', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '600036', '名称': '招商银行', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '600519', '名称': '贵州茅台', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '600887', '名称': '伊利股份', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '601318', '名称': '中国平安', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '601398', '名称': '工商银行', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '601939', '名称': '建设银行', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '601988', '名称': '中国银行', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '000166', '名称': '申万宏源', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '000725', '名称': '京东方A', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '002304', '名称': '洋河股份', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '002456', '名称': '欧菲光', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+            {'代码': '300015', '名称': '爱尔眼科', '最新价': 0, '涨跌幅': 0, '成交量': 0},
+        ]
+        # 尝试获取实时股票数据
+        try:
+            stock_data = ak.stock_zh_a_spot_em()
+            if not stock_data.empty:
+                # 按成交量降序排列,取前limit个
+                hot_stocks = stock_data.nlargest(limit, '成交量')
+                return hot_stocks[['代码', '名称', '最新价', '涨跌幅', '成交量']].to_dict('records')
+        except Exception as e:
+            print(f"获取实时股票数据失败: {e}")
+        # 如果实时数据获取失败,返回备用数据
+        print("使用备用热门股票数据")
+        return hot_stocks_backup[:limit]
+    except Exception as e:
+        print(f"获取热门股票失败: {e}")
+        return []
+def get_stock_20day_change(stock_code):
+    """获取股票20日涨跌幅"""
+    try:
+        hist_data = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
+        if not hist_data.empty and len(hist_data) >= 20:
+            current_price = hist_data.iloc[-1]['收盘']
+            twenty_days_ago_price = hist_data.iloc[-20]['收盘']
+            twenty_day_change = ((current_price - twenty_days_ago_price) / twenty_days_ago_price) * 100
+            return round(float(twenty_day_change), 2)
+        return 0.0
+    except Exception as e:
+        print(f"获取 {stock_code} 20日涨跌幅失败: {e}")
+        return 0.0
+def get_stock_60day_change(stock_code):
+    """获取股票60日涨跌幅"""
+    try:
+        hist_data = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
+        if not hist_data.empty and len(hist_data) >= 60:
+            current_price = hist_data.iloc[-1]['收盘']
+            sixty_days_ago_price = hist_data.iloc[-60]['收盘']
+            sixty_day_change = ((current_price - sixty_days_ago_price) / sixty_days_ago_price) * 100
+            return round(float(sixty_day_change), 2)
+        return 0.0
+    except Exception as e:
+        print(f"获取 {stock_code} 60日涨跌幅失败: {e}")
+        return 0.0
 # 龙虎榜相关功能已完全移除
 # ETF相关功能已完全移除
+def get_stock_weekly_change(stock_name):
+    """获取股票周涨跌幅"""
+    try:
+        stock_code = get_stock_code_by_name(stock_name)
+        if stock_code:
+            hist_data = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
+            if not hist_data.empty and len(hist_data) >= 5:
+                current_price = hist_data.iloc[-1]['收盘']
+                week_ago_price = hist_data.iloc[-5]['收盘']
+                weekly_change = ((current_price - week_ago_price) / week_ago_price) * 100
+                return float(weekly_change)
+        return 0.0
+    except Exception as e:
+        print(f"获取 {stock_name} 周涨跌幅失败: {e}")
+        return 0.0
 # 股票5日分析功能已移除
+def get_stock_10day_change(stock_name):
+    """获取股票10日涨跌幅"""
+    try:
+        stock_code = get_stock_code_by_name(stock_name)
+        if stock_code:
+            hist_data = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
+            if not hist_data.empty and len(hist_data) >= 10:
+                current_price = hist_data.iloc[-1]['收盘']
+                ten_days_ago_price = hist_data.iloc[-10]['收盘']
+                ten_day_change = ((current_price - ten_days_ago_price) / ten_days_ago_price) * 100
+                return round(float(ten_day_change), 2)
+        return 0.0
+    except Exception as e:
+        print(f"获取 {stock_name} 10日涨跌幅失败: {e}")
+        return 0.0
+def get_stock_recent_10day_daily_changes(stock_code):
+    """获取股票最近10个交易日的每日涨跌幅,以及当前价与10日均线的百分比距离。
+    返回 (daily_changes, ma10_distance_pct):
+    - daily_changes: 长度为10的列表(近1日~近10日),失败为 None
+    - ma10_distance_pct: (当前价-10日均线)/10日均线*100,保留2位小数,失败为 None"""
+    if not AKSHARE_AVAILABLE or not stock_code:
+        return None, None
+    try:
+        hist_data = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
+        if hist_data.empty or len(hist_data) < 11:
+            return None, None
+        hist_data = hist_data.tail(11)
+        closes = hist_data['收盘'].astype(float).tolist()
+        daily_changes = []
+        for i in range(1, len(closes)):
+            if closes[i - 1] and closes[i - 1] != 0:
+                pct = round((closes[i] - closes[i - 1]) / closes[i - 1] * 100, 2)
+                daily_changes.append(pct)
+            else:
+                daily_changes.append(0.0)
+        # 取最近10个交易日的日涨跌幅
+        changes_10 = daily_changes[-10:] if len(daily_changes) >= 10 else None
+        # 10日均线 = 最近10日收盘价均值,当前价 = 最后一根收盘价;距离% = (当前价 - MA10) / MA10 * 100
+        ma10_dist_pct = None
+        if len(closes) >= 10:
+            last_close = closes[-1]
+            ma10 = sum(closes[-10:]) / 10
+            if ma10 and ma10 != 0:
+                ma10_dist_pct = round((last_close - ma10) / ma10 * 100, 2)
+        return changes_10, ma10_dist_pct
+    except Exception as e:
+        print(f"获取 {stock_code} 最近10日涨跌幅/距10日线失败: {e}")
+        return None, None
+def get_stock_logic(text, stock_name):
+    """提取股票相关的投资逻辑"""
+    logic_keywords = [
+        '涨停', '跌停', '突破', '回调', '反弹', '利好', '利空', '业绩', '重组',
+        '并购', '分红', '增持', '减持', '解禁', '停牌', '复牌', '上涨', '下跌',
+        '买入', '卖出', '推荐', '看好', '看空', '机会', '风险', '概念', '热点',
+        '龙头', '跟风', '补涨', '补跌', '强势', '弱势', '放量', '缩量', '换手',
+        '主力', '资金', '流入', '流出', '拉升', '打压', '洗盘', '出货'
+    ]
+    # 查找包含股票名称和逻辑关键词的句子
+    sentences = re.split(r'[。!?\n]', text)
+    logic_sentences = []
+    for sentence in sentences:
+        if stock_name in sentence:
+            for keyword in logic_keywords:
+                if keyword in sentence:
+                    logic_sentences.append(sentence.strip())
+                    break
+    if logic_sentences:
+        return " | ".join(logic_sentences[:3])
+    return "未找到明确逻辑"
+def extract_stock_context(text, stock_names):
+    """提取股票相关的文本内容"""
+    context_dict = {}
+    for stock_name in stock_names:
+        pattern = f".{{0,150}}{re.escape(stock_name)}.{{0,150}}"
+        matches = re.findall(pattern, text)
+        if matches:
+            clean_contexts = []
+            for match in matches:
+                clean_match = re.sub(r'<[^>]+>', '', match)
+                clean_match = re.sub(r'\s+', ' ', clean_match.strip())
+                if len(clean_match) > 20:
+                    clean_contexts.append(clean_match)
+            if clean_contexts:
+                context_dict[stock_name] = clean_contexts[:3]
+            else:
+                context_dict[stock_name] = ["未找到相关内容"]
+        else:
+            context_dict[stock_name] = ["未找到相关内容"]
+    return context_dict
 # 均线位置分析功能已移除
+def get_stock_technical_indicators(stock_name):
+    """获取股票技术指标"""
+    try:
+        # 获取股票代码
+        stock_info = ak.stock_info_a_code_name()
+        stock_code = None
+        for _, row in stock_info.iterrows():
+            if row['name'] == stock_name:
+                stock_code = row['code']
+                break
+        if not stock_code:
+            return None
+        # 获取历史数据
+        hist_data = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
+        if hist_data.empty or len(hist_data) < 30:
+            return None
+        # 计算技术指标
+        close_prices = hist_data['收盘'].values
+        high_prices = hist_data['最高'].values
+        low_prices = hist_data['最低'].values
+        # 计算涨跌幅
+        if len(close_prices) >= 2:
+            daily_change = ((close_prices[-1] - close_prices[-2]) / close_prices[-2]) * 100
+        else:
+            daily_change = 0
+        # 计算MACD
+        macd_value, macd_signal, macd_hist = calculate_macd(close_prices)
+        # 计算KDJ
+        k_value, d_value, j_value = calculate_kdj(high_prices, low_prices, close_prices)
+        # 计算WR
+        wr_value = calculate_wr(high_prices, low_prices, close_prices)
+        # 计算BIAS
+        bias_value = calculate_bias(close_prices)
+        return {
+            'daily_change': daily_change,
+            'macd': macd_value,
+            'macd_signal': macd_signal,
+            'macd_hist': macd_hist,
+            'kdj_k': k_value,
+            'kdj_d': d_value,
+            'kdj_j': j_value,
+            'wr': wr_value,
+            'bias': bias_value
+        }
+    except Exception:
+        return None
+def calculate_macd(prices, fast=12, slow=26, signal=9):
+    """计算MACD指标"""
+    try:
+        # 计算EMA
+        def ema(data, period):
+            alpha = 2.0 / (period + 1)
+            ema_values = np.zeros_like(data)
+            ema_values[0] = data[0]
+            for i in range(1, len(data)):
+                ema_values[i] = alpha * data[i] + (1 - alpha) * ema_values[i-1]
+            return ema_values
+        ema_fast = ema(prices, fast)
+        ema_slow = ema(prices, slow)
+        macd_line = ema_fast - ema_slow
+        signal_line = ema(macd_line, signal)
+        histogram = macd_line - signal_line
+        return macd_line[-1], signal_line[-1], histogram[-1]
+    except Exception:
+        return 0, 0, 0
+def calculate_kdj(high_prices, low_prices, close_prices, n=9):
+    """计算KDJ指标"""
+    try:
+        if len(high_prices) < n:
+            return 50, 50, 50
+        # 计算RSV
+        rsv_values = []
+        for i in range(n-1, len(high_prices)):
+            high_n = max(high_prices[i-n+1:i+1])
+            low_n = min(low_prices[i-n+1:i+1])
+            if high_n == low_n:
+                rsv = 50
+            else:
+                rsv = ((close_prices[i] - low_n) / (high_n - low_n)) * 100
+            rsv_values.append(rsv)
+        if not rsv_values:
+            return 50, 50, 50
+        # 计算K、D、J值
+        k = 50
+        d = 50
+        for rsv in rsv_values:
+            k = (2/3) * k + (1/3) * rsv
+            d = (2/3) * d + (1/3) * k
+        j = 3 * k - 2 * d
+        return k, d, j
+    except Exception:
+        return 50, 50, 50
+def calculate_wr(high_prices, low_prices, close_prices, n=14):
+    """计算WR指标"""
+    try:
+        if len(high_prices) < n:
+            return 50
+        high_n = max(high_prices[-n:])
+        low_n = min(low_prices[-n:])
+        close_current = close_prices[-1]
+        if high_n == low_n:
+            wr = 50
+        else:
+            wr = ((high_n - close_current) / (high_n - low_n)) * 100
+        return wr
+    except Exception:
+        return 50
+def calculate_bias(prices, n=6):
+    """计算BIAS指标"""
+    try:
+        if len(prices) < n:
+            return 0
+        ma_n = np.mean(prices[-n:])
+        close_current = prices[-1]
+        if ma_n == 0:
+            bias = 0
+        else:
+            bias = ((close_current - ma_n) / ma_n) * 100
+        return bias
+    except Exception:
+        return 0
+def analyze_technical_position(indicators):
+    """分析技术指标位置"""
+    analysis = []
+    # MACD分析
+    if indicators['macd'] > indicators['macd_signal']:
+        if indicators['macd_hist'] > 0:
+            analysis.append("MACD: 金叉向上,多头趋势")
+        else:
+            analysis.append("MACD: 金叉向下,可能转弱")
+    else:
+        if indicators['macd_hist'] < 0:
+            analysis.append("MACD: 死叉向下,空头趋势")
+        else:
+            analysis.append("MACD: 死叉向上,可能转强")
+    # KDJ分析
+    k, d, j = indicators['kdj_k'], indicators['kdj_d'], indicators['kdj_j']
+    if k > 80 and d > 80:
+        analysis.append("KDJ: 超买区域,注意回调风险")
+    elif k < 20 and d < 20:
+        analysis.append("KDJ: 超卖区域,可能反弹机会")
+    elif k > d and j > k:
+        analysis.append("KDJ: 金叉向上,短期看涨")
+    elif k < d and j < k:
+        analysis.append("KDJ: 死叉向下,短期看跌")
+    else:
+        analysis.append("KDJ: 中性区域,震荡整理")
+    # WR分析
+    wr = indicators['wr']
+    if wr > 80:
+        analysis.append("WR: 超卖区域,可能反弹")
+    elif wr < 20:
+        analysis.append("WR: 超买区域,注意回调")
+    else:
+        analysis.append("WR: 中性区域,正常波动")
+    # BIAS分析
+    bias = indicators['bias']
+    if bias > 5:
+        analysis.append("BIAS: 正乖离较大,注意回调")
+    elif bias < -5:
+        analysis.append("BIAS: 负乖离较大,可能反弹")
+    else:
+        analysis.append("BIAS: 乖离正常,趋势稳定")
+    return analysis
 # 添加全局缓存
+_stock_data_cache = {}
+_cache_timestamp = {}
+_spot_snapshot_cache = {'timestamp': 0, 'data': None}
 # 东财分市场接口缓存:避免 stock_zh_a_spot_em 仅返回约一两百条时大部分代码匹配不到
+_spot_market_cache = {}
 # 一旦检测到 AKShare 数据链路失败,后续默认不再走 AKShare(优先稳定走 Tushare)
+_AKSHARE_LOCK_TO_TUSHARE = False
+def _should_skip_akshare():
+    """当 AKShare 已失败且 Tushare 可用时,后续跳过 AKShare。"""
+    return bool(_AKSHARE_LOCK_TO_TUSHARE and TS_AVAILABLE and (TS_DEFAULT_TOKEN or "").strip())
+def _mark_akshare_failed(reason=""):
+    """记录 AKShare 部分接口失败,后续相关路径优先锁定为 Tushare 兜底。
+    注意: 不全局禁用 AKSHARE_AVAILABLE —— 实时新闻/红绿灯等仍需 akshare。"""
+    global _AKSHARE_LOCK_TO_TUSHARE
+    if _AKSHARE_LOCK_TO_TUSHARE:
+        return
+    if TS_AVAILABLE and (TS_DEFAULT_TOKEN or "").strip():
+        _AKSHARE_LOCK_TO_TUSHARE = True
+        if reason:
+            print(f"AKShare部分接口失败,后续相关路径切换为Tushare兜底: {reason}")
+        else:
+            print("AKShare部分接口失败,后续相关路径切换为Tushare兜底")
+def _normalize_a_share_code6(stock_code):
+    if stock_code is None:
+        return ""
+    digits = re.sub(r'\D', '', str(stock_code))
+    if not digits:
+        return ""
+    return digits[-6:].zfill(6)
+def _format_ts_code_for_spot(code6):
+    """A 股代码 -> Tushare ts_code(与 StockKeywordAnalyzerGUI._format_ts_code 一致)"""
+    if not code6:
+        return ""
+    c = code6.zfill(6)
+    if c.startswith(("5", "6", "9")):
+        return f"{c}.SH"
+    return f"{c}.SZ"
+def _spot_market_key_and_fetcher(code6):
+    """返回 (cache_key, 无参可调用接口)。按所沪深/科创/创业板/北交所拉全量,单行查询更可靠。"""
+    if not AKSHARE_AVAILABLE or _should_skip_akshare():
+        return "em", None
+    c = (code6 or "").zfill(6)
+    if c.startswith("68"):
+        return "kc", ak.stock_kc_a_spot_em
+    if c.startswith("30"):
+        return "cy", ak.stock_cy_a_spot_em
+    if c.startswith(("43", "83", "87", "92")):
+        return "bj", ak.stock_bj_a_spot_em
+    if c.startswith("6"):
+        return "sh", ak.stock_sh_a_spot_em
+    if c.startswith(("0", "3")):
+        return "sz", ak.stock_sz_a_spot_em
+    return "em", ak.stock_zh_a_spot_em
+def _row_from_ak_spot_df(spot_df, code6):
+    if spot_df is None or getattr(spot_df, "empty", True):
+        return None
+    code_col = None
+    for cand in ("代码", "code", "股票代码"):
+        if cand in spot_df.columns:
+            code_col = cand
+            break
+    if not code_col:
+        return None
+    want = (code6 or "").zfill(6)
+    ser = spot_df[code_col].astype(str).str.replace(r"\D", "", regex=True).str[-6:].str.zfill(6)
+    row = spot_df[ser == want]
+    if row.empty:
+        return None
+    return row.iloc[0]
+def _spot_row_from_tushare(code6):
+    """Tushare:实时价(若有)+ 最近日线收盘价算涨跌幅,不依赖东财全表。"""
+    if not TS_AVAILABLE:
+        return None
+    tok = (TS_DEFAULT_TOKEN or "").strip()
+    if not tok:
+        return None
+    c6 = (code6 or "").zfill(6)
+    ts_code = _format_ts_code_for_spot(c6)
+    if not ts_code:
+        return None
+    try:
+        import os
+
+        import tushare as ts
+        os.environ["TUSHARE_TOKEN"] = tok
+        pro = ts.pro_api()
+        price = None
+        try:
+            dfq = ts.realtime_quote(ts_code=ts_code, src="dc")
+            if dfq is not None and not dfq.empty and "price" in dfq.columns:
+                pv = dfq.iloc[0]["price"]
+                if pd.notna(pv):
+                    price = float(pv)
+        except Exception:
+            pass
+        dfd = pro.daily(ts_code=ts_code, limit=5)
+        if dfd is None or dfd.empty:
+            return None
+        dfd = dfd.sort_values("trade_date", ascending=True)
+        last_close = float(dfd.iloc[-1]["close"])
+        prev_close = float(dfd.iloc[-2]["close"]) if len(dfd) > 1 else last_close
+        use_px = price if price and 0.01 < price < 50000 else last_close
+        pct = (use_px - prev_close) / prev_close * 100 if prev_close else 0.0
+        return pd.Series(
+            {
+                "代码": c6,
+                "最新价": use_px,
+                "昨收": prev_close,
+                "涨跌幅": round(pct, 2),
+                "最高": use_px,
+                "最低": use_px,
+            }
+        )
+    except Exception as e_v:
+        print(f"Tushare 取涨跌幅/行情失败 {c6}: {e_v}")
+        return None
+def _spot_row_from_akshare_market(code6, cache_duration):
+    import time
+    global _spot_market_cache
+    if not AKSHARE_AVAILABLE or _should_skip_akshare():
+        return None
+    mkey, fetcher = _spot_market_key_and_fetcher(code6)
+    if fetcher is None:
+        return None
+    now = time.time()
+    ent = _spot_market_cache.get(mkey) or {}
+    last_ts = ent.get("timestamp", 0)
+    df = ent.get("data")
+    if last_ts == 0 or (now - last_ts) > cache_duration:
+        try:
+            df = fetcher()
+        except Exception as e_m:
+            print(f"AKShare {mkey} 行情接口失败: {e_m}")
+            _mark_akshare_failed(str(e_m))
+            df = None
+        _spot_market_cache[mkey] = {"timestamp": now, "data": df}
+    if df is None:
+        return None
+    return _row_from_ak_spot_df(df, code6)
+def get_realtime_spot_row(stock_code, cache_duration=120):
+    """获取实时行情一行(Series):优先 Tushare(日线+实时价),再东财分市场,最后东财全表快照。
+    说明:stock_zh_a_spot_em() 在部分版本/时段只返回少量股票,仅用该表会导致多数代码「拿不到涨跌幅」。
+    """
+    import time
+    code6 = _normalize_a_share_code6(stock_code)
+    if not code6:
+        return None
+    try:
+        tr = _spot_row_from_tushare(code6)
+        if tr is not None:
+            return tr
+    except Exception as e_t:
+        print(f"Tushare 行情链路异常 {code6}: {e_t}")
+    try:
+        mr = _spot_row_from_akshare_market(code6, cache_duration)
+        if mr is not None:
+            return mr
+    except Exception as e_m:
+        print(f"AKShare 分市场行情异常 {code6}: {e_m}")
+    if _should_skip_akshare():
+        return None
+    try:
+        global _spot_snapshot_cache
+        now = time.time()
+        last_ts = _spot_snapshot_cache.get("timestamp", 0)
+        spot_df = _spot_snapshot_cache.get("data")
+        if last_ts == 0 or (now - last_ts) > cache_duration:
+            spot_df = ak.stock_zh_a_spot_em()
+            _spot_snapshot_cache["data"] = spot_df
+            _spot_snapshot_cache["timestamp"] = now
+        if spot_df is None or spot_df.empty:
+            return None
+        row = _row_from_ak_spot_df(spot_df, code6)
+        return row
+    except Exception as e:
+        _mark_akshare_failed(str(e))
+        try:
+            _spot_snapshot_cache["data"] = None
+            _spot_snapshot_cache["timestamp"] = time.time()
+        except Exception:
+            pass
+        print(f"获取实时行情失败: {e}")
+        return None
+def get_cached_stock_data(stock_name, data_type, fetch_func, cache_duration=300):
+    """获取缓存的股票数据,避免重复网络请求"""
+    import time
+    cache_key = f"{stock_name}_{data_type}"
+    current_time = time.time()
+    # 检查缓存是否有效
+    if (cache_key in _stock_data_cache and
+        cache_key in _cache_timestamp and
+        current_time - _cache_timestamp[cache_key] < cache_duration):
+        return _stock_data_cache[cache_key]
+    # 获取新数据
+    try:
+        data = fetch_func(stock_name)
+        _stock_data_cache[cache_key] = data
+        _cache_timestamp[cache_key] = current_time
+        return data
+    except Exception as e:
+        print(f"获取 {stock_name} {data_type} 数据失败: {e}")
+        return None
 # 5日缓存函数已移除
+def get_stock_10day_change_cached(stock_name):
+    """获取缓存的10日涨跌幅"""
+    return get_cached_stock_data(stock_name, "10day", get_stock_10day_change)
+def get_stock_20day_change_cached(stock_name):
+    """获取缓存的20日涨跌幅"""
+    return get_cached_stock_data(stock_name, "20day", get_stock_20day_change)
+def get_stock_weekly_change_cached(stock_name):
+    """获取缓存的周涨跌幅"""
+    return get_cached_stock_data(stock_name, "weekly", get_stock_weekly_change)
+def get_stock_30day_data_and_calculate_changes(stock_name):
+    """下载股票30日数据并计算各种涨跌幅 - 高效版本"""
+    import time
+    cache_key = f"{stock_name}_30day_calculated"
+    current_time = time.time()
+    # 检查缓存是否有效(5分钟)
+    if (cache_key in _stock_data_cache and
+        cache_key in _cache_timestamp and
+        current_time - _cache_timestamp[cache_key] < 300):
+        return _stock_data_cache[cache_key]
+    try:
+        # 获取股票代码
+        stock_code = get_stock_code_by_name(stock_name)
+        if not stock_code:
+            return None
+        # 获取30日历史数据
+        import akshare as ak
+        hist_data = ak.stock_zh_a_hist(symbol=stock_code, period="daily",
+                                      start_date="", end_date="", adjust="qfq")
+        if hist_data.empty or len(hist_data) < 30:
+            return None
+        # 取最近30日数据
+        recent_30days = hist_data.tail(30)
+        # 计算各种涨跌幅
+        daily_changes = []
+        for i in range(len(recent_30days)):
+            if i == 0:
+                # 第一天没有前一日数据,设为0
+                daily_changes.append(0.0)
+            else:
+                prev_close = recent_30days.iloc[i-1]['收盘']
+                curr_close = recent_30days.iloc[i]['收盘']
+                change_pct = ((curr_close - prev_close) / prev_close) * 100
+                daily_changes.append(round(change_pct, 2))
+        # 计算各种总计涨跌幅
+        last_5_days = daily_changes[-5:] if len(daily_changes) >= 5 else daily_changes
+        last_10_days = daily_changes[-10:] if len(daily_changes) >= 10 else daily_changes
+        last_20_days = daily_changes[-20:] if len(daily_changes) >= 20 else daily_changes
+        five_day_total = round(sum(last_5_days), 2)
+        ten_day_total = round(sum(last_10_days), 2)
+        twenty_day_total = round(sum(last_20_days), 2)
+        # 周涨跌幅(最近5个交易日)
+        weekly_change = five_day_total
+        result = {
+            'daily_changes_5days': last_5_days,
+            'five_day_total': five_day_total,
+            'ten_day_total': ten_day_total,
+            'twenty_day_total': twenty_day_total,
+            'weekly_change': weekly_change,
+            'all_daily_changes': daily_changes,
+            'stock_code': stock_code
+        }
+        # 缓存结果
+        _stock_data_cache[cache_key] = result
+        _cache_timestamp[cache_key] = current_time
+        print(f"✅ {stock_name} 30日数据下载完成,计算涨跌幅成功")
+        return result
+    except Exception as e:
+        _log(f"❌ {stock_name} 30日数据下载失败: {e}")
+        return None
+def analyze_text_dimensions(text):
+    """多维度文本分析 - 情绪、市场焦点、风险识别等"""
+    try:
+        # 情绪分析关键词
+        positive_words = ['上涨', '涨停', '突破', '利好', '买入', '推荐', '看好', '机会',
+                         '强势', '拉升', '反弹', '上涨', '增长', '盈利', '收益', '成功']
+        negative_words = ['下跌', '跌停', '回调', '利空', '卖出', '看空', '风险', '亏损',
+                         '弱势', '打压', '洗盘', '出货', '下跌', '下降', '失败', '亏损']
+        neutral_words = ['震荡', '整理', '横盘', '观望', '中性', '平衡']
+        # 市场焦点关键词
+        market_focus_keywords = ['热点', '概念', '题材', '板块', '龙头', '跟风', '补涨',
+                                '补跌', '轮动', '切换', '主线', '支线']
+        # 风险识别关键词
+        risk_keywords = ['风险', '警告', '谨慎', '注意', '警惕', '危险', '不利', '负面',
+                        '利空', '减持', '解禁', '停牌', '退市', 'ST', '退市风险']
+        # 热门主题关键词
+        theme_keywords = ['人工智能', 'AI', '芯片', '半导体', '新能源', '光伏', '风电',
+                         '储能', '锂电池', '新能源汽车', '5G', '云计算', '大数据',
+                         '区块链', '元宇宙', 'VR', 'AR', '消费', '医药', '军工']
+        # 市场状况关键词
+        market_status_keywords = {
+            '恐慌': ['恐慌', '恐慌性', '恐慌情绪', '恐慌抛售', '恐慌性下跌'],
+            '乐观': ['乐观', '乐观情绪', '乐观预期', '乐观态度', '乐观展望'],
+            '谨慎': ['谨慎', '谨慎态度', '谨慎观望', '谨慎操作', '谨慎乐观'],
+            '狂热': ['狂热', '狂热情绪', '狂热追捧', '狂热买入', '狂热上涨']
+        }
+        # 统计关键词出现次数
+        text_lower = text.lower()
+        positive_count = sum(1 for word in positive_words if word in text_lower)
+        negative_count = sum(1 for word in negative_words if word in text_lower)
+        neutral_count = sum(1 for word in neutral_words if word in text_lower)
+        market_focus_count = sum(1 for word in market_focus_keywords if word in text_lower)
+        risk_count = sum(1 for word in risk_keywords if word in text_lower)
+        theme_counts = {theme: text_lower.count(theme.lower()) for theme in theme_keywords}
+        theme_counts = {k: v for k, v in theme_counts.items() if v > 0}
+        # 判断情绪倾向
+        total_sentiment = positive_count + negative_count + neutral_count
+        if total_sentiment > 0:
+            positive_ratio = positive_count / total_sentiment
+            negative_ratio = negative_count / total_sentiment
+            if positive_ratio > 0.6:
+                sentiment = "积极"
+            elif negative_ratio > 0.6:
+                sentiment = "消极"
+            elif positive_ratio > negative_ratio:
+                sentiment = "偏积极"
+            elif negative_ratio > positive_ratio:
+                sentiment = "偏消极"
+            else:
+                sentiment = "中性"
+        else:
+            sentiment = "中性"
+        # 判断市场状况
+        market_status = "正常"
+        for status, keywords in market_status_keywords.items():
+            if any(kw in text_lower for kw in keywords):
+                market_status = status
+                break
+        # 构建分析结果
+        analysis_result = {
+            'sentiment': sentiment,
+            'sentiment_details': {
+                'positive': positive_count,
+                'negative': negative_count,
+                'neutral': neutral_count
+            },
+            'market_focus': market_focus_count > 0,
+            'market_focus_count': market_focus_count,
+            'risk_level': 'high' if risk_count > 5 else 'medium' if risk_count > 2 else 'low',
+            'risk_count': risk_count,
+            'hot_themes': sorted(theme_counts.items(), key=lambda x: x[1], reverse=True)[:5],
+            'market_status': market_status
+        }
+        return analysis_result
+    except Exception as e:
+        print(f"多维度文本分析失败: {e}")
+        return None
+def analyze_stock_keywords_local(text):
+    """本地分析股票关键词 - 优化版本(移除外部API调用,加快速度)"""
+    try:
+        # 提取股票名称
+        stock_names, _ = extract_stock_names(text)
+        # 多维度文本分析
+        dimension_analysis = analyze_text_dimensions(text)
+        # 在分析结果开头添加所有识别出的股票名称列表
+        analysis_results = []
+        # 添加分析说明
+        quick_analysis_note = "⚡ **快速股票分析模式** - 纯本地分析,无外部API调用\n"
+        quick_analysis_note += "📊 分析内容:股票识别 + 多维度文本分析(情绪、市场焦点、风险识别等)\n"
+        quick_analysis_note += "🚀 分析速度:快速(无网络请求)\n"
+        quick_analysis_note += f"{'='*50}\n\n"
+        analysis_results.append(quick_analysis_note)
+        # 添加多维度文本分析结果
+        if dimension_analysis:
+            dimension_summary = "📊 **多维度文本分析结果**\n"
+            dimension_summary += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            dimension_summary += f"😊 情绪倾向:{dimension_analysis['sentiment']}\n"
+            dimension_summary += f"   - 积极词汇:{dimension_analysis['sentiment_details']['positive']} 个\n"
+            dimension_summary += f"   - 消极词汇:{dimension_analysis['sentiment_details']['negative']} 个\n"
+            dimension_summary += f"   - 中性词汇:{dimension_analysis['sentiment_details']['neutral']} 个\n"
+            dimension_summary += f"\n🎯 市场焦点:{'是' if dimension_analysis['market_focus'] else '否'} (关键词出现 {dimension_analysis['market_focus_count']} 次)\n"
+            dimension_summary += f"⚠️ 风险等级:{dimension_analysis['risk_level']} (风险关键词出现 {dimension_analysis['risk_count']} 次)\n"
+            dimension_summary += f"📈 市场状况:{dimension_analysis['market_status']}\n"
+            if dimension_analysis['hot_themes']:
+                dimension_summary += "\n🔥 热门主题:\n"
+                for theme, count in dimension_analysis['hot_themes']:
+                    dimension_summary += f"   - {theme}: {count} 次\n"
+            dimension_summary += f"\n{'='*50}\n\n"
+            analysis_results.append(dimension_summary)
+        if not stock_names:
+            # 即使没有股票名称,也返回多维度分析结果
+            if dimension_analysis:
+                return "".join(analysis_results) + "\n未找到股票名称,但已完成多维度文本分析"
+            return "未找到股票名称"
+        print(f"🔍 识别出 {len(stock_names)} 只股票,开始快速分析...")
+        # 只进行本地文本分析,不调用外部API
+        _log(f"📊 开始本地文本分析,识别出 {len(stock_names)} 只股票...")
+        # 添加股票名称汇总
+        stock_summary = "🔍 **识别出的股票名称汇总**\n"
+        stock_summary += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        stock_summary += f"📋 共识别出 {len(stock_names)} 只股票:\n\n"
+        # 分类显示股票名称
+        stock_codes_with_names = []
+        stock_names_only = []
+        for stock in stock_names:
+            if '(' in stock and ')' in stock:  # 股票代码(名称)格式
+                stock_codes_with_names.append(stock)
+            else:  # 纯股票名称
+                stock_names_only.append(stock)
+        if stock_codes_with_names:
+            stock_summary += f"📊 **股票代码及名称 ({len(stock_codes_with_names)} 只):**\n"
+            for i, stock in enumerate(stock_codes_with_names, 1):
+                stock_summary += f"   {i:2d}. {stock}\n"
+            stock_summary += "\n"
+        if stock_names_only:
+            stock_summary += f"📈 **纯股票名称 ({len(stock_names_only)} 只):**\n"
+            for i, stock in enumerate(stock_names_only, 1):
+                stock_summary += f"   {i:2d}. {stock}\n"
+            stock_summary += "\n"
+        stock_summary += f"{'='*50}\n\n"
+        analysis_results.append(stock_summary)
+        # 分析所有识别出的股票(仅本地文本分析,不调用外部API)
+        print(f"🚀 开始分析 {len(stock_names)} 只股票(本地文本分析)...")
+        for i, stock_name in enumerate(stock_names, 1):
+            try:
+                # 仅进行本地文本分析
+                logic = get_stock_logic(text, stock_name)
+                context = extract_stock_context(text, [stock_name])
+                # 获取股票代码(本地查找,不调用API)
+                stock_code = get_stock_code_by_name(stock_name)
+                code_display = f"({stock_code})" if stock_code else ""
+                # 构建分析结果
+                result = f"📊 **{stock_name}{code_display}** 分析报告(本地文本分析)\n"
+                result += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                if logic and logic != "未找到明确逻辑":
+                    result += f"💡 投资逻辑:{logic}\n"
+                contexts = context.get(stock_name, [])
+                if contexts and contexts[0] != "未找到相关内容":
+                    result += "📝 相关讨论:\n"
+                    for j, ctx in enumerate(contexts[:2], 1):  # 只显示前2个相关内容
+                        result += f"   {j}. {ctx}\n"
+                result += f"\n{'='*50}\n\n"
+                analysis_results.append(result)
+                # 每10只股票显示一次进度
+                if i % 10 == 0:
+                    print(f"   已分析 {i}/{len(stock_names)} 只股票...")
+            except Exception as e:
+                error_result = f"❌ **{stock_name}** 分析失败:{e!s}\n"
+                error_result += f"{'='*50}\n\n"
+                analysis_results.append(error_result)
+        return "".join(analysis_results)
+    except Exception as e:
+        return f"分析过程中发生错误:{e!s}"
+def generate_wordcloud(text, callback, tab_name=None, time_str=None):
+    """生成词云(基于情绪分析着色)
+    Args:
+        text: 输入文本
+        callback: 回调函数
+        tab_name: 标签页名称
+        time_str: 时间字符串(如果标签页名称已包含时间,则不需要)
+    """
+    try:
+        # 提取股票名称
+        stock_names, _ = extract_stock_names(text)
+        # 多维度文本分析(用于情绪着色)
+        dimension_analysis = analyze_text_dimensions(text)
+        # 构建词频字典
+        word_freq = {}
+        # 如果有股票名称,优先使用股票名称
+        if stock_names:
+            for stock_name in stock_names:
+                # 基础权重
+                word_freq[stock_name] = 10
+        else:
+            # 如果没有股票名称,基于文本关键词生成词云
+            try:
+                import jieba.analyse
+                # 使用TF-IDF提取关键词(最多50个)
+                keywords = jieba.analyse.extract_tags(text, topK=50, withWeight=True)
+                for keyword, weight in keywords:
+                    # 权重转换为整数(放大1000倍)
+                    word_freq[keyword] = int(weight * 1000)
+            except Exception as e:
+                print(f"关键词提取失败,使用分词结果: {e}")
+                # 如果TF-IDF失败,使用简单的分词和词频统计
+                try:
+                    words = jieba.lcut(text)
+                    # 过滤掉停用词和单字词
+                    from collections import Counter
+                    filtered_words = [w for w in words if len(w) > 1 and w.strip()]
+                    word_counter = Counter(filtered_words)
+                    # 取前50个高频词
+                    for word, count in word_counter.most_common(50):
+                        word_freq[word] = count * 5  # 基础权重
+                except Exception as e2:
+                    print(f"分词失败: {e2}")
+                    callback("文本处理失败,无法生成词云")
+                    return
+        if not word_freq:
+            callback("没有有效的股票数据生成词云")
+            return
+        # 自定义颜色函数(基于情绪分析)
+        def color_func(word, font_size, position, orientation, random_state=None, **kwargs):
+            try:
+                # 基于多维度分析结果确定颜色
+                if dimension_analysis:
+                    sentiment = dimension_analysis.get('sentiment', '中性')
+                    if sentiment in ['积极', '偏积极']:
+                        return "red"  # 积极用红色
+                    elif sentiment in ['消极', '偏消极']:
+                        return "green"  # 消极用绿色
+                    else:
+                        return "blue"  # 中性用蓝色
+                else:
+                    # 如果没有分析结果,使用默认颜色
+                    return "gray"
+            except:
+                return "gray"
+        # 生成词云
+        wordcloud = WordCloud(
+            width=480, height=360,  # 缩小到60% (800*0.6=480, 600*0.6=360)
+            background_color='white',
+            font_path='C:/Windows/Fonts/simhei.ttf',
+            max_words=100,
+            min_font_size=20,
+            max_font_size=80,
+            margin=15,
+            scale=1.2,
+            color_func=color_func
+        ).generate_from_frequencies(word_freq)
+        # 保存词云图片
+        wordcloud_path = os.path.join(D_OUTPUT_DIR, "wordcloud.png")
+        wordcloud.to_file(wordcloud_path)
+        # 在词云图片上添加标签页名称和时间
+        try:
+            img = Image.open(wordcloud_path)
+            # 确保图片是RGB格式
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            # 尝试加载中文字体
+            try:
+                font_path = 'C:/Windows/Fonts/simhei.ttf'
+                font = ImageFont.truetype(font_path, 20)
+            except:
+                try:
+                    font = ImageFont.truetype('C:/Windows/Fonts/msyh.ttc', 20)
+                except:
+                    try:
+                        font = ImageFont.truetype('C:/Windows/Fonts/simsun.ttc', 20)
+                    except:
+                        font = ImageFont.load_default()
+            # 准备要显示的文本
+            display_text = ""
+            if tab_name:
+                display_text = tab_name
+                # 检查标签页名称是否包含时间(格式:YYYY-MM-DD 或 YYYY/MM/DD 或 HH:MM:SS)
+                has_date = re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', tab_name) or re.search(r'\d{1,2}:\d{1,2}:\d{1,2}', tab_name)
+                if not has_date and time_str:
+                    display_text += f"  {time_str}"
+            elif time_str:
+                display_text = time_str
+            # 在左上角绘制文本(带背景)
+            if display_text:
+                # 转换为RGBA以便添加半透明背景
+                img_rgba = img.convert('RGBA')
+                overlay = Image.new('RGBA', img_rgba.size, (255, 255, 255, 0))
+                overlay_draw = ImageDraw.Draw(overlay)
+                # 计算文本尺寸
+                try:
+                    bbox = overlay_draw.textbbox((0, 0), display_text, font=font)
+                    text_width = bbox[2] - bbox[0]
+                    text_height = bbox[3] - bbox[1]
+                except:
+                    # 如果textbbox不可用,使用textsize(旧版本PIL)
+                    try:
+                        text_width, text_height = overlay_draw.textsize(display_text, font=font)
+                    except:
+                        text_width, text_height = 200, 20
+                # 绘制半透明背景
+                padding = 5
+                bg_box = [10, 10, 10 + text_width + padding * 2, 10 + text_height + padding * 2]
+                overlay_draw.rectangle(bg_box, fill=(255, 255, 255, 200))
+                # 合并overlay和原图
+                img_rgba = Image.alpha_composite(img_rgba, overlay)
+                img = img_rgba.convert('RGB')
+                draw = ImageDraw.Draw(img)
+                # 绘制文本
+                draw.text((10 + padding, 10 + padding), display_text, fill='black', font=font)
+            # 保存修改后的图片
+            img.save(wordcloud_path)
+        except Exception as e:
+            print(f"添加标签页名称和时间到词云失败: {e}")
+            import traceback
+            traceback.print_exc()
+        # 生成交互式HTML词云(支持鼠标浮窗)
+        generate_interactive_wordcloud(word_freq, callback, text)
+        callback("词云生成完成")
+    except Exception as e:
+        callback(f"词云生成失败: {e!s}")
+def generate_interactive_wordcloud(word_freq, callback, text=None):
+    """生成交互式HTML词云,支持鼠标浮窗显示股票详细信息
+    Args:
+        word_freq: 词频字典
+        callback: 回调函数
+        text: 原始文本,用于提取股票逻辑
+    """
+    try:
+        from datetime import datetime
+        # 从文本中提取股票逻辑
+        stock_logics = {}
+        if text:
+            for stock_name in word_freq:
+                try:
+                    logic = get_stock_logic(text, stock_name)
+                    if logic and logic != "未找到明确逻辑":
+                        stock_logics[stock_name] = logic[:500]  # 限制长度
+                    else:
+                        # 尝试从上下文中提取
+                        context = extract_stock_context(text, [stock_name])
+                        contexts = context.get(stock_name, [])
+                        if contexts and contexts[0] != "未找到相关内容":
+                            stock_logics[stock_name] = contexts[0][:500]
+                        else:
+                            stock_logics[stock_name] = "无详细逻辑"
+                except Exception as e:
+                    print(f"提取股票 {stock_name} 逻辑失败: {e}")
+                    stock_logics[stock_name] = "无详细逻辑"
+        # 获取股票详细信息
+        stock_details = {}
+        for stock_name in word_freq:
+            try:
+                # 获取股票基本信息
+                stock_info = get_stock_basic_info(stock_name)
+                if stock_info:
+                    stock_details[stock_name] = stock_info
+            except Exception as e:
+                print(f"获取股票 {stock_name} 信息失败: {e}")
+                continue
+        # 生成HTML内容
+        html_content = f"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票词云 - 交互式</title>
+    <style>
+        body {{
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }}
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }}
+        .header {{
+            background: linear-gradient(45deg, #2196F3, #21CBF3);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 28px;
+            font-weight: 300;
+        }}
+        .wordcloud-container {{
+            padding: 40px;
+            text-align: center;
+            min-height: 600px;
+            position: relative;
+        }}
+        .word {{
+            display: inline-block;
+            margin: 5px;
+            padding: 8px 15px;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            font-weight: bold;
+            text-decoration: none;
+            color: inherit;
+        }}
+        .word:hover {{
+            transform: scale(1.05);
+            box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+        }}
+        .positive {{
+            color: #4CAF50;
+        }}
+        .negative {{
+            color: #F44336;
+        }}
+        .neutral {{
+            color: #FF9800;
+        }}
+        .footer {{
+            background: #f5f5f5;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+        }}
+        .stats {{
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }}
+        .stat-item {{
+            text-align: center;
+            margin: 10px;
+        }}
+        .stat-number {{
+            font-size: 24px;
+            font-weight: bold;
+            color: #2196F3;
+        }}
+        .stat-label {{
+            color: #666;
+            font-size: 14px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 股票词云分析 - 交互式</h1>
+            <p>鼠标悬停查看股票详细信息</p>
+        </div>
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-number">{len(word_freq)}</div>
+                <div class="stat-label">识别股票数</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">{len(stock_details)}</div>
+                <div class="stat-label">获取详情数</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">{datetime.now().strftime('%Y-%m-%d')}</div>
+                <div class="stat-label">生成日期</div>
+            </div>
+        </div>
+        <div class="wordcloud-container">
+"""
+        # 添加股票词汇
+        for i, (stock_name, frequency) in enumerate(word_freq.items()):
+            # 获取股票详细信息
+            stock_info = stock_details.get(stock_name, {})
+            # 确定颜色
+            weekly_change = stock_info.get('weekly_change', 0)
+            if weekly_change > 5:
+                color = "#F44336"  # 红色
+            elif weekly_change > 0:
+                color = "#FF9800"  # 橙色
+            elif weekly_change > -5:
+                color = "#2196F3"  # 蓝色
+            else:
+                color = "#4CAF50"  # 绿色
+            # 计算字体大小
+            font_size = max(16, min(48, 20 + frequency * 2))
+            # 获取股票逻辑
+            stock_logic = stock_logics.get(stock_name, "无详细逻辑")
+            # 转义HTML特殊字符
+            stock_logic_escaped = stock_logic.replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;').replace('&', '&amp;')
+            html_content += f"""
+            <span class="word"
+                  style="font-size: {font_size}px; color: {color};"
+                  data-stock="{stock_name}"
+                  data-logic="{stock_logic_escaped}"
+                  data-index="{i}"
+                  title="{stock_logic_escaped[:100]}">
+                {stock_name}
+            </span>
+"""
+        # 添加JavaScript和工具提示
+        html_content += """
+        </div>
+        <div class="footer">
+            <p>📊 股票词云展示 - 鼠标悬停查看股票逻辑</p>
+            <p>📈 包含:股票名称、涨跌幅颜色标识</p>
+        </div>
+    </div>
+    <script>
+        // 添加鼠标悬停显示股票逻辑的功能
+        document.addEventListener('DOMContentLoaded', function() {
+            const words = document.querySelectorAll('.word');
+            words.forEach(function(word) {
+                const stockName = word.getAttribute('data-stock');
+                const logic = word.getAttribute('data-logic');
+                // 创建tooltip元素
+                const tooltip = document.createElement('div');
+                tooltip.className = 'tooltip';
+                tooltip.style.cssText = `
+                    position: absolute;
+                    background: rgba(0, 0, 0, 0.9);
+                    color: white;
+                    padding: 10px;
+                    border-radius: 5px;
+                    max-width: 400px;
+                    z-index: 1000;
+                    display: none;
+                    font-size: 12px;
+                    line-height: 1.5;
+                    pointer-events: none;
+                    word-wrap: break-word;
+                `;
+                tooltip.innerHTML = `<strong>${stockName}</strong><br><br>${logic}`;
+                document.body.appendChild(tooltip);
+                // 鼠标悬停事件
+                word.addEventListener('mouseenter', function(e) {
+                    tooltip.style.display = 'block';
+                    updateTooltipPosition(e, tooltip);
+                });
+                word.addEventListener('mousemove', function(e) {
+                    updateTooltipPosition(e, tooltip);
+                });
+                word.addEventListener('mouseleave', function() {
+                    tooltip.style.display = 'none';
+                });
+            });
+            function updateTooltipPosition(e, tooltip) {
+                const x = e.clientX + 10;
+                const y = e.clientY + 10;
+                tooltip.style.left = x + 'px';
+                tooltip.style.top = y + 'px';
+                // 确保tooltip不超出屏幕
+                const rect = tooltip.getBoundingClientRect();
+                if (rect.right > window.innerWidth) {
+                    tooltip.style.left = (window.innerWidth - rect.width - 10) + 'px';
+                }
+                if (rect.bottom > window.innerHeight) {
+                    tooltip.style.top = (window.innerHeight - rect.height - 10) + 'px';
+                }
+            }
+            console.log('股票词云已加载,共显示 ' + words.length + ' 个股票');
+        });
+    </script>
+</body>
+</html>
+"""
+        # 保存HTML文件
+        html_file = "wordcloud_interactive.html"
+        with open(html_file, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        callback(f"交互式词云已生成: {html_file}")
+    except Exception as e:
+        callback(f"生成交互式词云失败: {e!s}")
+        import traceback
+        traceback.print_exc()
+def get_stock_basic_info(stock_name):
+    """获取股票基本信息,包括财务、价格及筹码成本"""
+    try:
+        stock_code = get_stock_code_by_name(stock_name)
+        if not stock_code:
+            return None
+        info = {'stock_code': stock_code}
+        def safe_float(value):
+            if value is None or value == '':
+                return None
+            try:
+                return float(str(value).replace(',', ''))
+            except Exception:
+                return None
+        spot_row = get_realtime_spot_row(stock_code)
+        if spot_row is not None:
+            info['current_price'] = safe_float(spot_row.get('最新价'))
+            info['change_pct'] = safe_float(spot_row.get('涨跌幅'))
+            info['turnover_rate'] = safe_float(spot_row.get('换手率'))
+            info['pe'] = safe_float(spot_row.get('市盈率-动态') or spot_row.get('市盈率'))
+            info['pb'] = safe_float(spot_row.get('市净率'))
+            info['market_cap'] = safe_float(spot_row.get('总市值') or spot_row.get('市值'))
+        hist = None
+        try:
+            hist = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
+        except Exception as err:
+            print(f"获取 {stock_name} 历史数据失败: {err}")
+            hist = None
+        if hist is not None and not hist.empty:
+            closes = pd.to_numeric(hist['收盘'], errors='coerce').dropna()
+            opens = pd.to_numeric(hist['开盘'], errors='coerce').dropna()
+            highs = pd.to_numeric(hist['最高'], errors='coerce').dropna()
+            lows = pd.to_numeric(hist['最低'], errors='coerce').dropna()
+            volumes = pd.to_numeric(hist['成交量'], errors='coerce').dropna()
+            dates = hist['日期'].tolist() if '日期' in hist.columns else []
+            if not closes.empty:
+                info.setdefault('current_price', float(closes.iloc[-1]))
+                if info.get('change_pct') is None and len(closes) >= 2:
+                    prev_price = closes.iloc[-2]
+                    if prev_price:
+                        info['change_pct'] = round((closes.iloc[-1] - prev_price) / prev_price * 100, 2)
+                # 最近5天的涨跌幅
+                if len(closes) >= 5:
+                    recent_5_days = []
+                    for i in range(min(5, len(closes))):
+                        idx = len(closes) - 1 - i
+                        if idx > 0:
+                            prev_close = closes.iloc[idx - 1]
+                            curr_close = closes.iloc[idx]
+                            if prev_close and curr_close:
+                                change_pct = round((curr_close - prev_close) / prev_close * 100, 2)
+                                date_str = dates[idx] if idx < len(dates) else f"第{i+1}天前"
+                                recent_5_days.append({
+                                    'date': date_str,
+                                    'close': round(float(curr_close), 2),
+                                    'change_pct': change_pct
+                                })
+                    info['recent_5_days'] = list(reversed(recent_5_days))  # 按时间正序
+                    # 5日前涨跌幅
+                    week_close = closes.iloc[-5]
+                    if week_close:
+                        info['weekly_change'] = round((closes.iloc[-1] - week_close) / week_close * 100, 2)
+                # 筹码成本均价(20日均价)
+                if len(closes) >= 20:
+                    info['chip_cost'] = round(float(closes.tail(20).mean()), 2)
+                elif len(closes) >= 5:
+                    info['chip_cost'] = round(float(closes.tail(5).mean()), 2)
+                # 日K线数据(最近30天)
+                if len(closes) >= 1:
+                    kline_data = []
+                    for i in range(min(30, len(closes))):
+                        idx = len(closes) - 1 - i
+                        kline_item = {
+                            'date': dates[idx] if idx < len(dates) else f"第{i+1}天前",
+                            'open': round(float(opens.iloc[idx]), 2) if idx < len(opens) else None,
+                            'high': round(float(highs.iloc[idx]), 2) if idx < len(highs) else None,
+                            'low': round(float(lows.iloc[idx]), 2) if idx < len(lows) else None,
+                            'close': round(float(closes.iloc[idx]), 2),
+                            'volume': round(float(volumes.iloc[idx]), 0) if idx < len(volumes) else None
+                        }
+                        kline_data.append(kline_item)
+                    info['kline_data'] = list(reversed(kline_data))  # 按时间正序
+        if 'weekly_change' not in info or info.get('weekly_change') is None:
+            try:
+                info['weekly_change'] = round(get_stock_weekly_change_cached(stock_name) or 0, 2)
+            except Exception:
+                info['weekly_change'] = None
+        if info.get('chip_cost') is None and info.get('current_price') is not None:
+            info['chip_cost'] = info['current_price']
+        info['update_time'] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        return info
+    except Exception as e:
+        print(f"获取股票 {stock_name} 基本信息失败: {e}")
+        return None
+def clean_html(html_content):
+    """清理HTML标签"""
+    clean = re.compile('<.*?>')
+    return re.sub(clean, '', html_content)
+def extract_text_from_html(html_content):
+    """从HTML中提取文本"""
+    # 清理HTML标签
+    text = clean_html(html_content)
+    # 清理多余的空白字符
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+def is_valid_text(text):
+    """检查文本是否有效,过滤乱码"""
+    try:
+        if not text or len(text.strip()) < 2:
+            return False
+        # 检查是否包含有效字符
+        valid_chars = 0
+        total_chars = len(text)
+        for char in text:
+            if (char.isalnum() or
+                '\u4e00' <= char <= '\u9fff' or  # 中文字符
+                char in '.,!?;:()[]{}"\'+-*/=<>%$#@& '):  # 常用标点符号
+                valid_chars += 1
+        # 如果有效字符比例超过70%,认为文本有效
+        if total_chars > 0 and valid_chars / total_chars > 0.7:
+            return True
+        # 检查是否包含明显的乱码模式
+        garbled_patterns = [
+            r'[aeiou]{3,}',  # 连续元音
+            r'[bcdfghjklmnpqrstvwxyz]{4,}',  # 连续辅音
+            r'[A-Z]{5,}',  # 连续大写字母
+            r'[a-z]{5,}',  # 连续小写字母
+        ]
+        for pattern in garbled_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return False
+        return False
+    except Exception as e:
+        print(f"文本验证失败: {e}")
+        return False
 # OCR相关函数已完全移除
+def extract_text_from_docx(docx_path):
+    """从Word文档中提取文字,支持中文路径"""
+    try:
+        if not DOCX_AVAILABLE:
+            return "Word文档读取功能不可用,请安装python-docx库"
+        # 检查文件是否存在
+        if not os.path.exists(docx_path):
+            return f"Word文档文件不存在: {docx_path}"
+        # 使用临时文件处理中文路径问题
+        import shutil
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as temp_file:
+            shutil.copy2(docx_path, temp_file.name)
+            temp_path = temp_file.name
+        try:
+            # 读取Word文档
+            doc = Document(temp_path)
+            text_content = []
+            for paragraph in doc.paragraphs:
+                if paragraph.text.strip():
+                    text_content.append(paragraph.text.strip())
+            # 读取表格内容
+            for table in doc.tables:
+                for row in table.rows:
+                    row_text = []
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            row_text.append(cell.text.strip())
+                    if row_text:
+                        text_content.append('\t'.join(row_text))
+            return '\n'.join(text_content)
+        finally:
+            # 清理临时文件
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+    except Exception as e:
+        return f"Word文档读取失败: {e!s}\n\n可能的原因:\n1. 文件损坏或格式不支持\n2. 文件被其他程序占用\n3. 权限不足"
+def extract_text_from_excel(excel_path):
+    """从Excel文件中提取文字,支持中文路径"""
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(excel_path):
+            return f"Excel文件不存在: {excel_path}"
+        # 使用临时文件处理中文路径问题
+        import shutil
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as temp_file:
+            shutil.copy2(excel_path, temp_file.name)
+            temp_path = temp_file.name
+        try:
+            # 读取Excel文件
+            df = pd.read_excel(temp_path, sheet_name=None)  # 读取所有工作表
+            text_content = []
+            for sheet_name, sheet_df in df.items():
+                if not sheet_df.empty:
+                    # 将DataFrame转换为文本
+                    sheet_text = sheet_df.to_string(index=False)
+                    text_content.append(f"工作表: {sheet_name}\n{sheet_text}")
+            return '\n\n'.join(text_content)
+        finally:
+            # 清理临时文件
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+    except Exception as e:
+        return f"Excel文件读取失败: {e!s}\n\n可能的原因:\n1. 文件损坏或格式不支持\n2. 文件被其他程序占用\n3. 权限不足"
+def extract_text_from_txt(txt_path):
+    """从TXT文件中提取文字,支持中文路径和多种编码"""
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(txt_path):
+            return f"TXT文件不存在: {txt_path}"
+        # 尝试多种编码读取文件
+        encodings = ['utf-8', 'gbk', 'gb2312', 'utf-16', 'latin-1']
+        content = None
+        for encoding in encodings:
+            try:
+                with open(txt_path, 'r', encoding=encoding) as f:
+                    content = f.read()
+                break
+            except UnicodeDecodeError:
+                continue
+        if content is None:
+            return "无法读取TXT文件,请检查文件编码"
+        return content.strip() if content.strip() else "TXT文件为空"
+    except Exception as e:
+        return f"TXT文件读取失败: {e!s}\n\n可能的原因:\n1. 文件损坏或格式不支持\n2. 文件被其他程序占用\n3. 权限不足"
 # 重复的OCR函数已移除
+def extract_text_from_docx(docx_path):
+    """从Word文档中提取文字,支持中文路径"""
+    try:
+        if not DOCX_AVAILABLE:
+            return "Word文档读取功能不可用,请安装python-docx库"
+        # 检查文件是否存在
+        if not os.path.exists(docx_path):
+            return f"Word文档文件不存在: {docx_path}"
+        # 使用临时文件处理中文路径问题
+        import shutil
+        import tempfile
+        temp_dir = tempfile.mkdtemp()
+        temp_docx_path = os.path.join(temp_dir, "temp_doc.docx")
+        try:
+            # 复制文件到临时目录
+            shutil.copy2(docx_path, temp_docx_path)
+            doc = Document(temp_docx_path)
+            text_content = []
+            # 提取段落文字
+            for paragraph in doc.paragraphs:
+                if paragraph.text.strip():
+                    text_content.append(paragraph.text.strip())
+            # 提取表格文字
+            for table in doc.tables:
+                for row in table.rows:
+                    row_text = []
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            row_text.append(cell.text.strip())
+                    if row_text:
+                        text_content.append(" | ".join(row_text))
+            return "\n".join(text_content) if text_content else "Word文档中没有找到文字内容"
+        finally:
+            # 清理临时文件
+            try:
+                shutil.rmtree(temp_dir)
+            except:
+                pass
+    except Exception as e:
+        return f"Word文档读取失败: {e!s}\n\n可能的原因:\n1. 文件损坏或格式不支持\n2. 文件被其他程序占用\n3. 权限不足"
+def extract_text_from_excel(excel_path):
+    """从Excel文件中提取文字,支持中文路径"""
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(excel_path):
+            return f"Excel文件不存在: {excel_path}"
+        # 使用临时文件处理中文路径问题
+        import shutil
+        import tempfile
+        temp_dir = tempfile.mkdtemp()
+        temp_excel_path = os.path.join(temp_dir, "temp_excel.xlsx")
+        try:
+            # 复制文件到临时目录
+            shutil.copy2(excel_path, temp_excel_path)
+            # 读取Excel文件
+            df = pd.read_excel(temp_excel_path)
+            text_content = []
+            # 提取所有文本内容
+            for col in df.columns:
+                if df[col].dtype == 'object':  # 文本类型列
+                    col_text = df[col].astype(str).str.cat(sep='\n')
+                    if col_text.strip():
+                        text_content.append(f"【{col}】\n{col_text}")
+            # 如果没有找到文本列,使用整个DataFrame
+            if not text_content:
+                text_content.append(df.to_string(index=False))
+            return "\n\n".join(text_content) if text_content else "Excel文件中没有找到文字内容"
+        finally:
+            # 清理临时文件
+            try:
+                shutil.rmtree(temp_dir)
+            except:
+                pass
+    except Exception as e:
+        return f"Excel文件读取失败: {e!s}\n\n可能的原因:\n1. 文件损坏或格式不支持\n2. 文件被其他程序占用\n3. 权限不足"
+def extract_text_from_txt(txt_path):
+    """从TXT文件中提取文字,支持中文路径和多种编码"""
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(txt_path):
+            return f"TXT文件不存在: {txt_path}"
+        # 尝试多种编码读取文件
+        encodings = ['utf-8', 'gbk', 'gb2312', 'utf-16', 'latin-1']
+        content = None
+        for encoding in encodings:
+            try:
+                with open(txt_path, 'r', encoding=encoding) as f:
+                    content = f.read()
+                print(f"成功使用 {encoding} 编码读取TXT文件")
+                break
+            except UnicodeDecodeError:
+                continue
+            except Exception as e:
+                print(f"使用 {encoding} 编码读取失败: {e}")
+                continue
+        if content is None:
+            return "TXT文件读取失败:无法识别文件编码\n\n支持的编码:UTF-8, GBK, GB2312, UTF-16, Latin-1"
+        return content.strip() if content.strip() else "TXT文件为空"
+    except Exception as e:
+        return f"TXT文件读取失败: {e!s}\n\n可能的原因:\n1. 文件损坏或格式不支持\n2. 文件被其他程序占用\n3. 权限不足"
+def load_iwencai_env_from_dotfiles():
+    """从 ~/.zshrc 等读取 export 的 IWENCAI_*。GUI 从访达/Cursor 启动时不会加载 shell,导致问财 Skill 无密钥。"""
+    need_key = not (os.environ.get("IWENCAI_API_KEY") or "").strip()
+    need_base = not (os.environ.get("IWENCAI_BASE_URL") or "").strip()
+    if not need_key and not need_base:
+        return
+    home = os.path.expanduser("~")
+    for fname in (".zshrc", ".bash_profile", ".bashrc", ".profile"):
+        path = os.path.join(home, fname)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s.startswith("export "):
+                        continue
+                    s = s[7:].strip()
+                    for key in ("IWENCAI_API_KEY", "IWENCAI_BASE_URL"):
+                        if not s.startswith(key + "="):
+                            continue
+                        val = s[len(key) + 1 :].strip()
+                        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+                            val = val[1:-1]
+                        if not val:
+                            continue
+                        if key == "IWENCAI_API_KEY" and need_key:
+                            os.environ["IWENCAI_API_KEY"] = val
+                            need_key = False
+                        elif key == "IWENCAI_BASE_URL" and need_base:
+                            os.environ["IWENCAI_BASE_URL"] = val
+                            need_base = False
+        except Exception:
+            continue
+        if not need_key and not need_base:
+            return
+def parse_skill_md_for_usage(skill_md_path: str, max_body_chars: int = 8000):
+    """读取技能包 SKILL.md:YAML 中的 description + 正文摘要,供界面「使用说明」展示。"""
+    from pathlib import Path
+    out = {"description": "", "usage_body": ""}
+    if not skill_md_path:
+        return out
+    p = Path(skill_md_path)
+    if not p.is_file():
+        return out
+    try:
+        text = p.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return out
+    body = text
+    if text.lstrip().startswith("---"):
+        end = text.find("---", 3)
+        if end > 0:
+            fm = text[3:end]
+            body = text[end + 3 :].lstrip()
+            for line in fm.splitlines():
+                ls = line.strip()
+                if ls.startswith("description:"):
+                    out["description"] = line.split(":", 1)[1].strip().strip('"').strip("'")
+    ub = body.strip()
+    if len(ub) > max_body_chars:
+        ub = ub[:max_body_chars].rstrip() + "\n\n...(正文已截断,完整内容见技能目录下 SKILL.md)"
+    out["usage_body"] = ub
+    return out
 class StockKeywordAnalyzerGUI:
     def __init__(self, root):
         self.root = root
