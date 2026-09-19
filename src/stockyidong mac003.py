@@ -4111,36 +4111,6 @@ class StockKeywordAnalyzerGUI:
             self._dapan_emo_strip_canvas.create_text((_x1+_x2)/2, 13, text=_sn, fill="white", font=("", 8, "bold"))
 
         # ============ 主区: 左四维度 + 右板块 ============
-        main_row = tk.Frame(dapan_tab, bg="#FAFAFA"); main_row.pack(fill=tk.BOTH, expand=True)
-        main_row.columnconfigure(0, weight=1, uniform="mcol")
-        main_row.columnconfigure(1, weight=4, uniform="mcol")
-        main_row.rowconfigure(0, weight=1)
-
-        # ==== 左侧: 四维度打分 (紧凑) ====
-        left_col = tk.Frame(main_row, bg="#FAFAFA"); left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 3))
-        tk.Label(left_col, text="📊 大盘风险四维度", bg="#FAFAFA", fg="#1A237E",
-                 font=("", 9, "bold")).pack(anchor="w", pady=(2, 2))
-        self._dapan_dims = {}
-        DIM_KEYS = [("融资融券", "margin", "杠杆"),
-                    ("北向资金", "north", "外资"),
-                    ("涨跌停广度", "breadth", "涨跌家数"),
-                    ("换手率", "turnover", "活跃度")]
-        for title, key, desc in DIM_KEYS:
-            r = tk.Frame(left_col, bg="#FAFAFA", highlightbackground="#E0E0E0", highlightthickness=1)
-            r.pack(fill=tk.X, pady=2)
-            lc = tk.Canvas(r, width=14, height=14, bg="#FAFAFA", highlightthickness=0)
-            lc.pack(side=tk.LEFT, padx=3, pady=3)
-            lc.create_oval(1, 1, 13, 13, fill="#BDBDBD", outline="#757575", width=1)
-            tk.Label(r, text=title, bg="#FAFAFA", fg="#333", font=("", 9, "bold")).pack(side=tk.LEFT, padx=2)
-            tk.Label(r, text=f"({desc})", bg="#FAFAFA", fg="#999", font=("", 7)).pack(side=tk.LEFT)
-            sv = tk.StringVar(value="--")
-            tk.Label(r, textvariable=sv, bg="#FAFAFA", fg="#1A237E",
-                     font=("", 9, "bold")).pack(side=tk.RIGHT, padx=3)
-            self._dapan_dims[key] = {"lc": lc, "sv": sv}
-
-        # ==== 右侧: 热门板块(3×3) + 冷门板块(3×3) 网格 ====
-        # ==== 热门/冷门板块已移除 (2026-09-19, 接口不出来) ====
-
         # 自动触发首次加载 — 已禁用, 避免后台线程抢 GIL 卡死 UI
         # 用户切到大盘页点右上角"刷新"按钮手动触发
         # try:
@@ -44245,17 +44215,18 @@ class StockKeywordAnalyzerGUI:
                 self._dapan_term_pct_var.set(f"{rec_pct}%")
             except Exception as e: print(f"[大盘] term fail: {e}")
 
-            # 3. 四维度
-            for key, (lv, txt) in dims.items():
-                d = self._dapan_dims.get(key)
-                if not d: continue
-                try:
-                    d["lc"].delete("all")
-                    d["lc"].create_oval(1, 1, 13, 13,
-                        fill=self._dapan_hld_col.get(lv, "#BDBDBD"),
-                        outline="#424242", width=1)
-                    d["sv"].set(txt)
-                except Exception: pass
+            # 3. 四维度 (UI 已移除, 跳过)
+            if hasattr(self, '_dapan_dims') and self._dapan_dims:
+                for key, (lv, txt) in dims.items():
+                    d = self._dapan_dims.get(key)
+                    if not d: continue
+                    try:
+                        d["lc"].delete("all")
+                        d["lc"].create_oval(1, 1, 13, 13,
+                            fill=self._dapan_hld_col.get(lv, "#BDBDBD"),
+                            outline="#424242", width=1)
+                        d["sv"].set(txt)
+                    except Exception: pass
 
             # 4. 情绪周期大字明确显示 + 情绪条高亮
             emo_stage = emo.get("stage", "震荡")
