@@ -44474,7 +44474,115 @@ class StockKeywordAnalyzerGUI:
                     tc.create_line(pad_l, mid_y, pad_l + plot_w, mid_y,
                                    fill="#B0BEC5", width=1, dash=(2, 2))
 
-                    # (tooltip 已移除 - 精要数据直接显示在情绪周期日历格子里)
+                    # ======== Canvas 原生 tooltip (不用 Toplevel, 最轻量) ========
+                    import json as _j2_tip, os as _o2_tip
+                    _hist_path_tip = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
+                    _local_hist_tip = {}
+                    try:
+                        if _o2_tip.path.exists(_hist_path_tip):
+                            with open(_hist_path_tip) as _fh_tip: _local_hist_tip = _j2_tip.load(_fh_tip)
+                    except Exception: pass
+
+                    _tip_state = {"col": -1, "after": None, "items": None}
+
+                    def _build_tip_items(d):
+                        """返回 [(文本,颜色), ...]"""
+                        full_d = _local_hist_tip.get(d.get("full_date",""), {})
+                        _up = d.get("up") if d.get("up") is not None else full_d.get("up")
+                        _dn = d.get("dn") if d.get("dn") is not None else full_d.get("dn")
+                        _zt = d.get("zt") or full_d.get("zt", "")
+                        _dt = d.get("dt") if d.get("dt") is not None else full_d.get("dt")
+                        _pnl = full_d.get("pnl", "")
+                        _ths = full_d.get("ths", "")
+                        _stage = full_d.get("stage", "")
+                        _emo_map = {"冰点":"❄️","启动":"🌱","发酵":"🔥","高潮":"💥","分歧":"⚡","退潮":"📉"}
+                        _emo_ico = _emo_map.get(_stage, "📊")
+                        _pnl_col = "#FFCDD2" if _pnl == "赚钱" else ("#C8E6C9" if _pnl == "亏钱" else "#E0E0E0")
+                        _ths_col = "#FFCDD2" if _ths == "向上" else ("#C8E6C9" if _ths == "向下" else "#E0E0E0")
+                        _pct_col = "#FFCDD2" if d["pct"] >= 0 else "#C8E6C9"
+                        items = [
+                            (f"📅 {d.get('full_date', d['date'])}", "#FFD54F"),
+                            (f"{_emo_ico} {_stage or '-'}", "#FF8A65"),
+                            (f"📊 emo={d['emo']:.0f}", "#FFB74D"),
+                            (f"📈 {d['pct']:+.2f}%", _pct_col),
+                            (f"💰 {_pnl or '-'}", _pnl_col),
+                            (f"🧠 {_ths or '-'}", _ths_col),
+                        ]
+                        if _up is not None and _dn is not None:
+                            _bc = "#FFCDD2" if _up > _dn else ("#C8E6C9" if _up < _dn else "#FFECB3")
+                            _bs = f"↑{_up} ↓{_dn}"
+                            if _zt: _bs += f" 🔥{_zt}"
+                            if _dt: _bs += f" ⚠️{_dt}"
+                            items.append((_bs, _bc))
+                        elif _zt:
+                            items.append((f"🔥{_zt}", "#FF8A65"))
+                        return items
+
+                    def _draw_tip(col_idx):
+                        """在 Canvas 上画 tooltip (用 tag 管理, 下次 draw 直接 delete)"""
+                        d = trend10[col_idx]
+                        items = _build_tip_items(d)
+                        _tip_state["items"] = items
+                        # 背景 + 文字坐标 (从 col 中心往上)
+                        cx = col_x[col_idx] + col_w / 2
+                        tip_x1 = cx - 52
+                        tip_x2 = cx + 52
+                        tip_y2 = Y_CHART_TOP - 6
+                        tip_h = 14 * len(items) + 8
+                        tip_y1 = tip_y2 - tip_h
+                        # 边界保护
+                        if tip_x1 < pad_l:
+                            tip_x2 = tip_x1 + 104
+                            tip_x1 = pad_l
+                        if tip_x2 > pad_l + plot_w:
+                            tip_x1 = pad_l + plot_w - 104
+                            tip_x2 = pad_l + plot_w
+                        if tip_y1 < pad_t + 22:
+                            tip_y1 = pad_t + 22
+                            tip_y2 = tip_y1 + tip_h
+                        # 清除旧的
+                        tc.delete("tip_box")
+                        tc.delete("tip_text")
+                        # 画背景
+                        tc.create_rectangle(tip_x1, tip_y1, tip_x2, tip_y2,
+                                             fill="#263238", outline="#FF6F00", width=1, tags="tip_box")
+                        # 高亮当前列
+                        tc.create_rectangle(col_x[col_idx], Y_LABEL_TOP-2, col_x[col_idx]+col_w, 152,
+                                             fill="#FFF9C4", outline="#FF6F00", width=1, tags="tip_box")
+                        # 画文字 (居中, 每行 14px)
+                        for ti, (tt, tc_) in enumerate(items):
+                            tc.create_text(cx, tip_y1 + 6 + ti * 14 + 6,
+                                           text=tt, fill=tc_, font=("", 9, "bold"),
+                                           anchor="center", tags="tip_text")
+                        _tip_state["col"] = col_idx
+
+                    def _on_motion_tip(event):
+                        mx = event.x; my = event.y
+                        if mx < pad_l or mx > pad_l + plot_w:
+                            _clear_tip(); return
+                        col = int((mx - pad_l) / col_w)
+                        if col < 0 or col >= n:
+                            _clear_tip(); return
+                        # 同列不重建 — 跳过
+                        if col == _tip_state["col"]:
+                            return
+                        # 取消旧延迟, 新建 150ms debounce
+                        if _tip_state["after"]:
+                            try: tc.after_cancel(_tip_state["after"])
+                            except Exception: pass
+                        _tip_state["after"] = tc.after(150, lambda c=col: _draw_tip(c))
+
+                    def _clear_tip(event=None):
+                        if _tip_state["after"]:
+                            try: tc.after_cancel(_tip_state["after"])
+                            except Exception: pass
+                            _tip_state["after"] = None
+                        tc.delete("tip_box")
+                        tc.delete("tip_text")
+                        _tip_state["col"] = -1
+
+                    tc.bind("<Motion>", _on_motion_tip)
+                    tc.bind("<Leave>", _clear_tip)
             except Exception as e: print(f"[大盘] trend10 Canvas fail: {e}")
 
             # 注意: emo_hist 同步已移到后台数据收集线程 (trend10 赋值后立即执行)
