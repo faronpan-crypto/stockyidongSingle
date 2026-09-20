@@ -143,7 +143,7 @@ class NewsMixin:
                 ("华尔街日报中文", "https://cn.wsj.com/"),
                 ("Investing.com", "https://www.investing.com/"),
             ]
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("📊 市场行情 - 市场与媒体/大V导航")
             # 窗口大小设置为屏幕70%,并居中
             try:
@@ -649,7 +649,7 @@ class NewsMixin:
             import re
             from tkinter import messagebox
             # 显示进度提示
-            progress_window = self._toplevel(self.root)
+            progress_window = self._safe_toplevel(self.root)
             progress_window.title("爬取韭研计划")
             progress_window.geometry("400x150")
             progress_window.transient(self.root)
@@ -1170,7 +1170,7 @@ class NewsMixin:
 
     def show_news_data_dialog(self):
         """显示资讯数据表窗口,支持多选和按日期筛选,导出到左边内容标签页"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("资讯数据表")
         win.geometry("1400x800")
         # 查询条件框架
@@ -1419,7 +1419,7 @@ class NewsMixin:
     def show_news_prediction_analysis(self):
         """资讯AI预测:对最近资讯表出现的股票预测下一交易日涨跌,重点关注热门股非去重中的股票。"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("资讯股票AI预测")
             win.geometry("1200x800")
             win.transient(self.root)
@@ -1992,7 +1992,7 @@ class NewsMixin:
         import threading
         import urllib.parse
         import webbrowser
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("突发新闻 · 3分钟异动")
         win.geometry("980x560")
         win.transient(self.root)
@@ -2509,7 +2509,7 @@ class NewsMixin:
         import threading
         import urllib.parse
         import webbrowser
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("实时新闻 · 隔夜外围与美股")
         win.geometry("960x720")
         win.transient(self.root)

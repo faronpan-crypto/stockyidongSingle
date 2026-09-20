@@ -421,7 +421,7 @@ class AnalysisMixin:
                 messagebox.showwarning("警告", "未找到股票信息")
                 return
             # 显示保存对话框
-            save_window = self._toplevel(self.root)
+            save_window = self._safe_toplevel(self.root)
             save_window.title("保存分析股票")
             save_window.geometry("700x500")
             # 创建表格显示要保存的数据
@@ -644,7 +644,7 @@ class AnalysisMixin:
                 messagebox.showerror("错误", error_msg)
                 return
             # 创建咨询分析窗口
-            consultation_window = self._toplevel(self.root)
+            consultation_window = self._safe_toplevel(self.root)
             consultation_window.transient(self.root)  # 设置为父窗口的临时窗口
             # 创建咨询分析应用实例(传入Toplevel窗口和主界面的AI功能)
             # ConsultingAnalysisApp会在__init__中设置title和geometry
@@ -675,7 +675,7 @@ class AnalysisMixin:
     def show_investment_analysis(self):
         """打开投资分析界面"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("投资分析工作台")
             win.geometry("1200x720")
             win.transient(self.root)
@@ -708,7 +708,7 @@ class AnalysisMixin:
     def show_gambling_analysis(self):
         """打开赌博/概率分析界面"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("概率与仓位分析工作台")
             win.geometry("1200x720")
             win.transient(self.root)
@@ -741,7 +741,7 @@ class AnalysisMixin:
     def show_delivery_analysis(self):
         """打开图文分析界面(支持文本和图片)"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("图文分析")
             win.geometry("1400x800")
             win.transient(self.root)
@@ -1352,7 +1352,7 @@ class AnalysisMixin:
 
     def show_fundamental_analysis(self):
         """基本面分析弹窗:输入股票名,生成财务分析模型与行业对比(杜邦、财务比率、DCF、行业对比、事件驱动)。"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("基本面分析")
         win.geometry("1000x750")
         win.transient(self.root)
@@ -1510,7 +1510,7 @@ class AnalysisMixin:
                 batch_analyzer_module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(batch_analyzer_module)
                 # 创建新窗口
-                win = self._toplevel(self.root)
+                win = self._safe_toplevel(self.root)
                 win.title(f"批量股票分析器 - 最新{n}条数据")
                 win.transient(self.root)
                 # 实例化批量股票分析器
@@ -1748,7 +1748,7 @@ class AnalysisMixin:
                 batch_analyzer_module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(batch_analyzer_module)
                 # 创建新窗口
-                win = self._toplevel(self.root)
+                win = self._safe_toplevel(self.root)
                 win.title("批量股票分析器")
                 win.transient(self.root)
                 # 实例化批量股票分析器
@@ -1966,7 +1966,7 @@ class AnalysisMixin:
     def show_safety_analysis(self):
         """打开安全分析界面"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("安全分析工作台")
             win.geometry("1200x720")
             win.transient(self.root)
@@ -1999,7 +1999,7 @@ class AnalysisMixin:
     def show_liquidity_analysis(self):
         """打开流动性分析界面"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("流动性分析工作台")
             win.geometry("1200x720")
             win.transient(self.root)
@@ -2032,7 +2032,7 @@ class AnalysisMixin:
     def show_profit_analysis(self):
         """打开利润分析界面"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("利润分析工作台")
             win.geometry("1200x720")
             win.transient(self.root)
@@ -2111,7 +2111,7 @@ class AnalysisMixin:
         """资讯表AI分析:读取资讯数据表的内容,使用AI进行综合分析"""
         try:
             # 创建分析窗口
-            analysis_window = self._toplevel(self.root)
+            analysis_window = self._safe_toplevel(self.root)
             analysis_window.title("资讯表数据AI分析")
             analysis_window.geometry("1400x900")
             analysis_window.transient(self.root)
@@ -3385,7 +3385,7 @@ class AnalysisMixin:
     def _show_stock_analysis_dialog(self, stock_code, stock_name):
         """显示股票分析弹窗(带K线和逻辑)"""
         # 创建分析窗口
-        analysis_window = self._toplevel(self.root)
+        analysis_window = self._safe_toplevel(self.root)
         analysis_window.title(f"股票分析 - {stock_name}({stock_code})")
         analysis_window.geometry("1400x800")
         analysis_window.transient(self.root)
@@ -3578,7 +3578,7 @@ class AnalysisMixin:
     def show_safety_liquidity_profit_analysis(self):
         """打开安全流动利润综合分析界面,整合三个分析界面的所有按钮"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("安全流动利润综合分析工作台")
             win.geometry("1400x800")
             win.transient(self.root)
@@ -4060,7 +4060,7 @@ class AnalysisMixin:
 
     def _show_opportunity_analysis(self):
         """机会分析:资讯表+股票表+选股通+同花顺前100,20日涨跌幅与三类技术提示,AI 简要分类列出关注股票。"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("机会分析 - AI 股评")
         win.geometry("1100x800")
         win.transient(self.root)
@@ -5644,7 +5644,7 @@ class AnalysisMixin:
 
     def show_stock_analysis_engine_dialog(self):
         """T4: 股票分析引擎对话框(统一入口)"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("股票分析引擎 · 统一分析入口")
         win.geometry("900x700")
         win.transient(self.root)

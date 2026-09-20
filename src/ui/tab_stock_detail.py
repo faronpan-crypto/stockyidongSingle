@@ -652,7 +652,7 @@ class StockDetailMixin:
         """双击日K线:最大化窗口 + 可选 2~4 个副图指标。"""
         try:
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title(f"{stock_name} - 日K线(放大)")
             try:
                 win.state("zoomed")

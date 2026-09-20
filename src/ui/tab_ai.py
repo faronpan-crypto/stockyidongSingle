@@ -32,7 +32,7 @@ class AiMixin:
 
     def show_ai_config(self):
         """显示AI配置界面(支持更多配置项)"""
-        config_window = self._toplevel(self.root)
+        config_window = self._safe_toplevel(self.root)
         config_window.title("AI大模型配置")
         config_window.geometry("700x600")
         # 创建滚动框架
@@ -211,7 +211,7 @@ class AiMixin:
 
     def show_ai_question(self):
         """显示AI提问对话框"""
-        question_window = self._toplevel(self.root)
+        question_window = self._safe_toplevel(self.root)
         question_window.title("AI提问")
         question_window.geometry("600x500")
         # 提示标签

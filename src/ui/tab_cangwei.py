@@ -65,7 +65,7 @@ class CangweiMixin:
                 if ma10_dist is not None:
                     s[ma10_col] = ma10_dist
             stocks.append(s)
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("自持股监测 - Main持仓股 🦅心法评分")
         win.geometry("1100x620")
         win.transient(self.root)
@@ -936,7 +936,7 @@ class CangweiMixin:
             max_count: 最大持仓数量(默认20,持仓历史股弹出框为80)
             popup_window: 弹出窗口引用(用于更新显示)
         """
-        import_window = self._toplevel(self.root)
+        import_window = self._safe_toplevel(self.root)
         import_window.title("导入持仓股")
         import_window.geometry("600x550")
         # 持仓位置选择(在窗口顶部)
@@ -1264,7 +1264,7 @@ class CangweiMixin:
         """持仓股管理(编辑当前持仓股)"""
         # 获取对应组的数据结构
         holding_stocks, _holding_labels, _holding_kelly_results, _holding_low_diff_results = self._get_holding_group_data(group_index)
-        manage_window = self._toplevel(self.root)
+        manage_window = self._safe_toplevel(self.root)
         manage_window.title(f"持仓股管理(持仓组{group_index})")
         manage_window.geometry("600x600")
         # 说明标签
@@ -2016,7 +2016,7 @@ class CangweiMixin:
             }
             window_title = title_map.get(group_index, f"持仓{group_index}管理(80个股票)")
             # 创建弹出窗口
-            popup_window = self._toplevel(self.root)
+            popup_window = self._safe_toplevel(self.root)
             popup_window.title(window_title)
             popup_window.geometry("1600x900")
             # 主框架
@@ -2431,7 +2431,7 @@ class CangweiMixin:
                     old.destroy()
             except Exception:
                 pass
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         self._signal_all_holdings_win = win
         win.title("信号 - 全标签页持仓检测")
         win.geometry("1180x620")
@@ -3208,7 +3208,7 @@ class CangweiMixin:
         import threading
         import tkinter as tk
         from tkinter import scrolledtext
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("💼 是否持有 · 智能分析器")
         win.geometry("1400x880")
         win.transient(self.root)
@@ -4000,7 +4000,7 @@ class CangweiMixin:
 
     def _display_chip_cost_window(self, rows):
         """在主线程中显示股价与10日线、20日线距离弹窗,按距离%红到绿渐显。"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("筹码成本 - 股价与10日线、20日线距离%")
         win.geometry("1000x600")
         win.transient(self.root)
@@ -4190,7 +4190,7 @@ class CangweiMixin:
                 # 窗口已销毁,重新创建
                 self.holding_stock_monitor_window = None
         # 创建新窗口
-        monitor_window = self._toplevel(self.root)
+        monitor_window = self._safe_toplevel(self.root)
         monitor_window.title("持仓股日K线监测 - 龙头股/Main/持仓历史股/同花顺/标签1-8")
         monitor_window.geometry("1600x1000")
         self.holding_stock_monitor_window = monitor_window
@@ -4962,7 +4962,7 @@ class CangweiMixin:
             messagebox.showwarning("警告", f"无法获取股票代码: {stock_name}", parent=self.root)
             return
         # 创建弹出窗口
-        detail_window = self._toplevel(self.root)
+        detail_window = self._safe_toplevel(self.root)
         detail_window.title(f"持仓详情 - {stock_name} ({stock_code})")
         detail_window.geometry("1000x900")
         # 获取股票数据表的逻辑(在最初位置显示)
@@ -6443,7 +6443,7 @@ class CangweiMixin:
         except Exception as e:
             messagebox.showerror("错误", f"matplotlib 导入失败: {e}", parent=self.root)
             return
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("💰 是否加仓 · 分析器")
         win.geometry("1400x920")
         win.transient(self.root)

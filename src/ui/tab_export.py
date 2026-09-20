@@ -53,7 +53,7 @@ class ExportMixin:
             )
             if filepath:
                 # 显示导出进度
-                progress_window = self._toplevel(self.root)
+                progress_window = self._safe_toplevel(self.root)
                 progress_window.title("导出中...")
                 progress_window.geometry("300x100")
                 progress_window.resizable(False, False)

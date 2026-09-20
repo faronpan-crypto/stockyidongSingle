@@ -275,7 +275,7 @@ class PipelineMixin:
     def show_one_click_thinking(self):
         """打开一键思考界面"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("一键思考工作台")
             win.geometry("1400x800")
             win.transient(self.root)

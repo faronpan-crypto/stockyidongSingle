@@ -16,7 +16,7 @@ class KellyMixin:
         """打开凯利公式计算器"""
         try:
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("凯利公式计算器")
             win.geometry("900x650")
             win.resizable(True, True)
@@ -586,7 +586,7 @@ class KellyMixin:
         """显示凯利公式设定对话框"""
         print("凯利设定按钮被点击")
         try:
-            config_window = self._toplevel(self.root)
+            config_window = self._safe_toplevel(self.root)
             config_window.title("凯利公式设定")
             config_window.geometry("800x600")
             config_window.transient(self.root)  # 设置为模态窗口

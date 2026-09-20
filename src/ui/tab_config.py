@@ -256,7 +256,7 @@ class ConfigMixin:
         from tkinter import messagebox, ttk
 
         from PIL import Image, ImageTk
-        popup = self._toplevel(self.root)
+        popup = self._safe_toplevel(self.root)
         popup.title(f"🖼️ {title} · 预览 & 保存长图")
         popup.geometry("1100x800")
         popup.minsize(900, 600)

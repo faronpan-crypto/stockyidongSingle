@@ -41,7 +41,7 @@ class CrawlerMixin:
             if not folder_path:
                 return
             # 创建读取窗口
-            read_window = self._toplevel(self.root)
+            read_window = self._safe_toplevel(self.root)
             read_window.title("蜘蛛读取 - 文件内容提取")
             read_window.geometry("1400x800")
             read_window.transient(self.root)
@@ -528,7 +528,7 @@ class CrawlerMixin:
         try:
             from tkinter import messagebox
             # 显示进度提示
-            progress_window = self._toplevel(self.root)
+            progress_window = self._safe_toplevel(self.root)
             progress_window.title("爬取选股通主题库")
             progress_window.geometry("400x150")
             progress_window.transient(self.root)

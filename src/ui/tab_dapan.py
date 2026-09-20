@@ -91,7 +91,7 @@ class DapanMixin:
 
 
     def _show_ths_sentiment_reminder_dialog(self):
-        top = self._toplevel(self.root)
+        top = self._safe_toplevel(self.root)
         top.title("同花顺情绪指数")
         try:
             top.transient(self.root)
@@ -187,7 +187,7 @@ class DapanMixin:
         """启动ETF全面监控"""
         try:
             # 创建ETF监控窗口
-            etf_window = self._toplevel(self.root)
+            etf_window = self._safe_toplevel(self.root)
             etf_window.title("🚀 ETF全面监控")
             etf_window.geometry("1200x800")
             etf_window.configure(bg='white')
@@ -312,7 +312,7 @@ class DapanMixin:
                 print("没有ETF数据可分析")
                 return
             # 创建统计窗口
-            stats_window = self._toplevel(self.root)
+            stats_window = self._safe_toplevel(self.root)
             stats_window.title("📊 ETF统计分析")
             stats_window.geometry("800x600")
             # 统计计算
@@ -5752,7 +5752,7 @@ class DapanMixin:
     def show_market_breadth_stats_dialog(self):
         """A股:全市场(约 5000+)涨跌家数 + 涨跌停;横向汇总;可最大化/最小化;导出 Word/Excel/Txt。"""
         import datetime as _dt
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("行情统计 · A股涨跌与涨跌停")
         win.geometry("1100x640")
         win.minsize(640, 440)
@@ -6738,7 +6738,7 @@ class DapanMixin:
 
     def show_market_sentiment_dialog(self):
         """市场情绪:拉取资金/估值/债息/指数等多维指标,可选 AI 解读。"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("市场情绪 · 指标快照")
         win.geometry("1360x920")
         win.transient(self.root)
@@ -7227,7 +7227,7 @@ class DapanMixin:
 
 
     def _emotion_lock_open_unlock_dialog(self):
-        dlg = self._toplevel(self.root)
+        dlg = self._safe_toplevel(self.root)
         dlg.title('解除情绪下行锁屏')
         dlg.geometry('440x260')
         dlg.transient(self.root)
@@ -7361,7 +7361,7 @@ class DapanMixin:
                 # 窗口已销毁,重新创建
                 self.sector_sentiment_window = None
         # 创建新窗口
-        monitor_window = self._toplevel(self.root)
+        monitor_window = self._safe_toplevel(self.root)
         monitor_window.title("持仓情绪监测 - 同花顺板块15分钟K线")
         monitor_window.geometry("1600x1000")
         self.sector_sentiment_window = monitor_window
@@ -8515,7 +8515,7 @@ class DapanMixin:
     def _show_sentiment_history_dialog(self):
         """打开情绪历史记录对话框。"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("情绪历史记录")
             win.geometry("800x600")
             win.transient(self.root)

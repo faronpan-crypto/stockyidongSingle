@@ -923,7 +923,7 @@ class WarningMixin:
                     pass
                 self.sos_alert_window = None
             # 创建SOS预警弹窗
-            sos_window = self._toplevel(self.root)
+            sos_window = self._safe_toplevel(self.root)
             sos_window.title("⚠️ SOS 预警 ⚠️")
             sos_window.geometry("800x500")  # 增大窗口尺寸,确保文字完整显示
             sos_window.transient(self.root)
@@ -1072,7 +1072,7 @@ class WarningMixin:
             window_width = min(base_width + (alert_count - 1) * 50, max_width)
             window_height = min(base_height + (alert_count - 1) * 80, max_height)
             # 创建自定义弹窗
-            alert_window = self._toplevel(self.root)
+            alert_window = self._safe_toplevel(self.root)
             alert_window.title("⚠️ 破均线预警 ⚠️")
             alert_window.geometry(f"{window_width}x{window_height}")
             alert_window.transient(self.root)
@@ -1604,7 +1604,7 @@ class WarningMixin:
         """
         def show_alert():
             # 创建自定义弹窗,支持彩色文本,2列布局
-            alert_window = self._toplevel(self.root)
+            alert_window = self._safe_toplevel(self.root)
             alert_window.title("持仓股均线预警")
             alert_window.geometry("1400x800")  # 加宽窗口
             alert_window.transient(self.root)
@@ -1838,7 +1838,7 @@ class WarningMixin:
         """
         def show_alert():
             # 创建自定义弹窗,支持显示市场数据,2列布局
-            alert_window = self._toplevel(self.root)
+            alert_window = self._safe_toplevel(self.root)
             alert_window.title("持仓股振幅报警")
             alert_window.geometry("1400x800")  # 加宽窗口
             alert_window.transient(self.root)

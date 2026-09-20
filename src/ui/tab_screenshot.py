@@ -232,7 +232,7 @@ class ScreenshotMixin:
                     auth_ready = threading.Event()
                     def show_auth_dialog():
                         nonlocal wait_dialog
-                        wait_dialog = self._toplevel(self.root)
+                        wait_dialog = self._safe_toplevel(self.root)
                         wait_dialog.title("等待认证")
                         wait_dialog.geometry("450x200")
                         wait_dialog.transient(self.root)

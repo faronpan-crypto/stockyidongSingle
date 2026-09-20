@@ -513,7 +513,7 @@ class HotMixin:
             self.save_market_nav_config()
         all_data = portals + hot_sources
         # 创建临时配置用于编辑
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("热点导航排序")
         win.geometry("600x500")
         # 创建列表和排序控件
@@ -645,7 +645,7 @@ class HotMixin:
 
     def _crawl_hot_stocks_combined(self):
         """爬取热门股:依次执行龙头股(选股通)和同花顺热榜爬取,合并去重后在弹窗显示,可保存到txt或股票数据表。"""
-        progress_window = self._toplevel(self.root)
+        progress_window = self._safe_toplevel(self.root)
         progress_window.title("爬取热门股")
         progress_window.geometry("420x160")
         progress_window.transient(self.root)
@@ -688,7 +688,7 @@ class HotMixin:
 
     def _crawl_hot_stocks_full_no_dedup(self):
         """爬取选股通题材库+同花顺热门题材股全部,不去重,弹窗显示;可保存为 txt/excel/股票资讯表,可双击全窗口浏览。"""
-        progress_window = self._toplevel(self.root)
+        progress_window = self._safe_toplevel(self.root)
         progress_window.title("热门股非去重")
         progress_window.geometry("420x160")
         progress_window.transient(self.root)
@@ -725,7 +725,7 @@ class HotMixin:
         if not stocks:
             messagebox.showinfo("提示", "未爬取到任何股票", parent=self.root)
             return
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("爬取热门股 - 结果")
         win.geometry("780x520")
         win.transient(self.root)
@@ -838,7 +838,7 @@ class HotMixin:
         if not data_list:
             messagebox.showinfo("提示", "未爬取到任何数据", parent=self.root)
             return
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("热门股非去重 - 结果")
         win.geometry("900x580")
         win.transient(self.root)
@@ -1429,7 +1429,7 @@ class HotMixin:
     def show_hotlists_overview(self):
         """热点一览:当天保存的股票数据生成词云图"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("热点一览 - 股票词云图")
             win.geometry("1400x900")
             # 通用数据获取函数(支持日期范围)
@@ -2768,7 +2768,7 @@ class HotMixin:
 
     def _manage_sector_index_list(self):
         """维护板块指数列表"""
-        manage_window = self._toplevel(self.root)
+        manage_window = self._safe_toplevel(self.root)
         manage_window.title("板块指数维护(最多30个)")
         manage_window.geometry("500x400")
         main_frame = ttk.Frame(manage_window, padding=10)
@@ -2987,7 +2987,7 @@ class HotMixin:
                 # 窗口已销毁,重新创建
                 self.hot_stock_15min_monitor_window = None
         # 创建新窗口
-        monitor_window = self._toplevel(self.root)
+        monitor_window = self._safe_toplevel(self.root)
         monitor_window.title("日K热门股监测 - K线图(Tushare)")
         monitor_window.geometry("1600x1000")
         self.hot_stock_15min_monitor_window = monitor_window
@@ -3196,7 +3196,7 @@ class HotMixin:
     def _show_sector_detail_popup(self, sector_name, sector_type="概念"):
         """显示板块详情弹窗(K线图和10个龙头股)"""
         # 创建新窗口
-        detail_window = self._toplevel(self.root)
+        detail_window = self._safe_toplevel(self.root)
         detail_window.title(f"{sector_name} - 板块详情")
         detail_window.geometry("1200x700")
         # 主框架

@@ -98,7 +98,7 @@ class TradeMixin:
             return
         try:
             # 创建回测结果窗口
-            backtest_result_window = self._toplevel(self.root)
+            backtest_result_window = self._safe_toplevel(self.root)
             buy_date_str = buy_date.strftime('%Y-%m-%d')
             sell_date_str = sell_date.strftime('%Y-%m-%d') if sell_date else "至今"
             backtest_result_window.title(f"批量股票回测分析结果 - 买入日: {buy_date_str} 卖出日: {sell_date_str}")

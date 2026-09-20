@@ -402,7 +402,7 @@ class BuildersMixin:
 
     def show_os1_trading_rules_dialog(self):
         """操作系统1:风控/仓位/择时/选股 + 工具箱联动 Skill/量化/AI。"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("操作系统1 · 交易规则要点")
         win.geometry("1180x820")
         win.transient(self.root)
@@ -1357,7 +1357,7 @@ class BuildersMixin:
         # 批量预测
         results = batch_predict(stocks_input)
         # 弹窗显示
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title(f"🔮 明日涨跌预测 - Main持仓股 {len(results)} 只")
         win.geometry("1100x620")
         top = ttk.Frame(win, padding=10)
@@ -1572,7 +1572,7 @@ class BuildersMixin:
         """显示实时统计窗口(通用函数,供持仓实时和粘贴实时共用)"""
         try:
             # 创建实时统计窗口
-            stats_window = self._toplevel(self.root)
+            stats_window = self._safe_toplevel(self.root)
             stats_window.title(f"{window_title_prefix} - 共{len(all_holdings)}只股票")
             stats_window.geometry("1600x900")
             stats_window.transient(self.root)
@@ -2091,7 +2091,7 @@ class BuildersMixin:
     def _create_simple_stock_filter_ui(self):
         """创建简化的条件选股界面"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("条件选股(坐电梯)")
             win.geometry("1650x950")
             win.transient(self.root)
@@ -2691,7 +2691,7 @@ class BuildersMixin:
         # 按出现次数从大到小排序
         sorted_items = sorted(code_to_info.items(), key=lambda x: (-x[1]["count"], x[0]))
         # 弹窗显示,后台仅获取逻辑/板块
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("五星跟随 - 统计结果")
         win.geometry("900x580")
         win.transient(self.root)
@@ -3188,7 +3188,7 @@ class BuildersMixin:
     def show_backtest_dialog(self):
         """显示回测分析对话框"""
         # 创建自定义回测窗口
-        custom_window = self._toplevel(self.root)
+        custom_window = self._safe_toplevel(self.root)
         custom_window.title("批量股票回测分析")
         custom_window.geometry("700x600")
         custom_window.transient(self.root)
@@ -3267,7 +3267,7 @@ class BuildersMixin:
             existing.deiconify()
             existing.lift()
             return
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("龙虎榜实时监控")
         win.geometry("1180x680")
         win.transient(self.root)
@@ -3364,7 +3364,7 @@ class BuildersMixin:
             existing.deiconify()
             existing.lift()
             return
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("融资融券交易汇总")
         win.geometry("1200x700")
         win.transient(self.root)
@@ -3465,7 +3465,7 @@ class BuildersMixin:
             existing.deiconify()
             existing.lift()
             return
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("融资融券交易明细")
         win.geometry("1400x750")
         win.transient(self.root)
@@ -4049,7 +4049,7 @@ class BuildersMixin:
                 self._stock_mgmt_window.lift()
                 return
             self._stock_mgmt_window = None
-        dialog = self._toplevel(self.root)
+        dialog = self._safe_toplevel(self.root)
         dialog.title("自选股管理")
         dialog.geometry("1400x720")
         dialog.transient(self.root)
@@ -4068,7 +4068,7 @@ class BuildersMixin:
 
     def show_tushare_skills_dialog(self):
         """Tushare 技能查询与调用(对话框):查询基础接口名 -> 调用并展示前几行结果。"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("Tushare 技能查询与调用")
         win.geometry("1000x700")
         win.transient(self.root)
@@ -4588,7 +4588,7 @@ class BuildersMixin:
 
     def show_system_judgment_dialog(self):
         """系统研判:汇总左侧三池、情绪指标、实时新闻、波动与能量、重点指数与 THS 情绪,并可一键 AI 总评。"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("系统研判")
         win.geometry("1100x820")
         win.transient(self.root)
@@ -4706,7 +4706,7 @@ class BuildersMixin:
         """AI员工:股票分析师 / 交易员 / 风控员 三分栏,分别调用 AI 与程序内行情数据。"""
         import re
         import threading
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("AI员工 · 分析师 / 交易员 / 风控员")
         win.geometry("1120x840")
         win.transient(self.root)
@@ -5233,7 +5233,7 @@ class BuildersMixin:
 
     def show_quant_strategy_dialog(self):
         """左侧:量化 Skill + 说明;右侧:大盘情绪一律网络实时拉取(见文首数据源),5:5 分栏。"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("A股量化策略 · Skill(左)| 大盘情绪·网络(右)")
         win.geometry("1280x720")
         win.transient(self.root)
@@ -6145,7 +6145,7 @@ class BuildersMixin:
             ("深证成指", "399001"),
             ("创业板指", "399006"),
         ]
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("📈 分时背离检测(做T辅助)")
         win.geometry("1500x900")
         win.transient(self.root)
@@ -6435,7 +6435,7 @@ class BuildersMixin:
         except Exception as e:
             messagebox.showerror("错误", f"matplotlib 导入失败: {e}", parent=self.root)
             return
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("🩸 血腥筹码 · 全市场扫描")
         win.geometry("1500x920")
         win.transient(self.root)
@@ -6774,7 +6774,7 @@ except Exception as e:
         except Exception as e:
             messagebox.showerror("错误", f"matplotlib 导入失败: {e}", parent=self.root)
             return
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("🔥 主线雷达 · 最强板块扫描")
         win.geometry("1600x950")
         win.transient(self.root)
@@ -7313,7 +7313,7 @@ except Exception as e:
         except Exception as e:
             messagebox.showerror("错误", f"requests/bs4 未安装: {e}", parent=self.root)
             return
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("🌱 淘韭雷达 · 淘股吧+韭研热点扫描")
         win.geometry("1400x880")
         win.transient(self.root)
@@ -7910,7 +7910,7 @@ except Exception as e:
         tree.bind("<ButtonRelease-1>", _open_detail_on_single)
         def _show_taojiu_detail_popup(name, code, vals, row_dict):
             """6维详细分析弹窗:做T/持仓/胜率/基本面/技术面支撑阻力/资金情绪/主线归属"""
-            dwin = self._toplevel(self.root)
+            dwin = self._safe_toplevel(self.root)
             dwin.title(f"🔍 {name}({code}) · 6维深度分析")
             dwin.geometry("980x820")
             dwin.transient(win)
@@ -8225,7 +8225,7 @@ except Exception as e:
         import threading
         import tkinter as tk
         from tkinter import scrolledtext
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("✍️ AI 写手 · 多维风格创作")
         win.geometry("1000x820")
         win.minsize(900, 700)
@@ -8504,7 +8504,7 @@ except Exception as e:
         import queue as _queue_cap
         import tkinter as tk
         from tkinter import scrolledtext, ttk
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("📈 资金选择方向 · 月度大势跟踪")
         win.geometry("1250x850")
         win.transient(self.root)
@@ -8980,7 +8980,7 @@ except Exception as e:
         import sqlite3 as _sqlite3
         import tkinter as tk
         from tkinter import scrolledtext, ttk
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("🏅 贵金属 / 有色 趋势研判")
         win.geometry("1550x920")
         win.transient(self.root)
@@ -9304,7 +9304,7 @@ except Exception as e:
         import threading
         import tkinter as tk
         from tkinter import scrolledtext
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("🎬 短剧写手 · 竖屏短剧剧本生成器")
         win.geometry("1080x860")
         win.minsize(960, 760)
@@ -9591,7 +9591,7 @@ except Exception as e:
         import threading
         import tkinter as tk
         from tkinter import scrolledtext
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("📊 舆情助手 · 新闻爬取 + 多维度舆情分析")
         win.geometry("1100x880")
         win.minsize(960, 760)

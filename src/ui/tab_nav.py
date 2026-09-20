@@ -87,7 +87,7 @@ class NavMixin:
                 data_list = default_data
                 self.market_nav_config[key] = data_list
                 self.save_market_nav_config()
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title(title)
         win.geometry("600x500")
         # 创建列表和排序控件
@@ -456,7 +456,7 @@ class NavMixin:
                 return
         except Exception:
             self._nav_editor_window = None
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("编辑市场指数与热点导航")
         win.geometry("780x560")
         win.transient(self.root)

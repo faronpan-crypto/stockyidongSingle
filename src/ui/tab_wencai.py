@@ -231,7 +231,7 @@ class WencaiMixin:
             import re
             from tkinter import messagebox
             # 显示进度提示
-            progress_window = self._toplevel(self.root)
+            progress_window = self._safe_toplevel(self.root)
             progress_window.title("爬取同花顺热榜")
             progress_window.geometry("400x150")
             progress_window.transient(self.root)
@@ -387,7 +387,7 @@ class WencaiMixin:
             from tkinter import messagebox
             from urllib.parse import quote
             # 显示进度提示
-            progress_window = self._toplevel(self.root)
+            progress_window = self._safe_toplevel(self.root)
             progress_window.title("爬取问财15分钟策略")
             progress_window.geometry("400x150")
             progress_window.transient(self.root)
@@ -874,7 +874,7 @@ class WencaiMixin:
         """龙头股:问财拉取候选,本地校验 5/10/20 多头+量;按同花顺热榜人气近似情绪排序;导入 group_index=2(最多 80)。"""
         try:
             from tkinter import messagebox
-            progress_window = self._toplevel(self.root)
+            progress_window = self._safe_toplevel(self.root)
             progress_window.title("问财+均线筛选龙头股")
             progress_window.geometry("460x170")
             progress_window.transient(self.root)
@@ -1007,7 +1007,7 @@ class WencaiMixin:
         query = (query or "").strip()
         if not query:
             return
-        pw = self._toplevel(self.root)
+        pw = self._safe_toplevel(self.root)
         pw.title("问财查询")
         pw.geometry("440x130")
         pw.transient(self.root)
@@ -1050,7 +1050,7 @@ class WencaiMixin:
         """弹窗展示该问财指标返回的股票列表(列与条件选股一致)。"""
         from tkinter import messagebox
         from urllib.parse import quote
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title(f"问财指标 · 结果({len(stocks or [])} 只)")
         win.geometry("1000x640")
         win.transient(self.root)
@@ -1309,7 +1309,7 @@ class WencaiMixin:
         """显示保存结果对话框,包含打开数据表按钮"""
         def show_dialog():
             # 创建自定义对话框
-            dialog = self._toplevel(self.root)
+            dialog = self._safe_toplevel(self.root)
             dialog.title(title)
             dialog.geometry("500x200")
             dialog.transient(self.root)
@@ -1936,7 +1936,7 @@ class WencaiMixin:
         """同花顺 Aime SkillHub:左侧选技能,右上输入问题,右下展示运行结果。"""
         import webbrowser
         load_iwencai_env_from_dotfiles()
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("问财技能(SkillHub)")
         win.geometry("1180x780")
         win.transient(self.root)

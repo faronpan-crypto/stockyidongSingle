@@ -139,7 +139,7 @@ class RestMixin:
                 messagebox.showerror("错误", f"图片文件不存在: {full_path}")
                 return
             # 打开图片查看窗口
-            image_window = self._toplevel(self.root)
+            image_window = self._safe_toplevel(self.root)
             image_window.title(f"查看图片 - {os.path.basename(full_path)}")
             image_window.geometry("800x600")
             # 加载并显示图片
@@ -276,7 +276,7 @@ class RestMixin:
             title = tab_info['title']
             content = text_widget.get("1.0", tk.END)
             # 创建全窗口
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title(f"全窗口浏览 - {title}")
             win.geometry("1200x800")
             win.transient(self.root)
@@ -1660,7 +1660,7 @@ class RestMixin:
                 messagebox.showwarning("警告", "内容为空,无法打开全窗口浏览", parent=self.root)
                 return
             # 创建全窗口
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title(f"全窗口浏览 - {title}")
             # 获取屏幕尺寸并设置默认最大化
             screen_width = win.winfo_screenwidth()
@@ -2379,7 +2379,7 @@ class RestMixin:
         recent_files = self._get_recent_excel_files()
         if recent_files:
             # 创建选择窗口
-            select_window = self._toplevel(self.root)
+            select_window = self._safe_toplevel(self.root)
             select_window.title("选择Excel文件")
             select_window.geometry("600x400")
             select_window.transient(self.root)
@@ -3088,7 +3088,7 @@ class RestMixin:
             )
             if filepath:
                 # 显示导出进度
-                progress_window = self._toplevel(self.root)
+                progress_window = self._safe_toplevel(self.root)
                 progress_window.title("导出中...")
                 progress_window.geometry("300x100")
                 progress_window.resizable(False, False)
@@ -3545,7 +3545,7 @@ class RestMixin:
         """显示大盘一览界面"""
         try:
             # 创建新窗口
-            market_window = self._toplevel(self.root)
+            market_window = self._safe_toplevel(self.root)
             market_window.title("📊 大盘一览 - A股市场分析")
             market_window.geometry("1200x800")
             market_window.configure(bg='#f0f0f0')
@@ -3997,7 +3997,7 @@ class RestMixin:
     def show_reference_overview(self):
         """参考一览:可新增/删除/修改 名称和链接,支持爬取"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("参考一览")
             win.geometry("1200x700")
             win.resizable(True, True)
@@ -4581,7 +4581,7 @@ class RestMixin:
     def show_investment_system(self):
         """打开投资系统界面"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("投资系统工作台")
             win.geometry("1200x720")
             win.transient(self.root)
@@ -4803,7 +4803,7 @@ class RestMixin:
     def show_trading_system(self):
         """打开交易体系界面"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("交易体系管理")
             win.geometry("1600x900")
             win.transient(self.root)
@@ -7114,7 +7114,7 @@ class RestMixin:
                 return
         except Exception:
             self._crawler_editor_window = None
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("编辑爬取按钮")
         win.geometry("800x600")
         win.transient(self.root)
@@ -7958,7 +7958,7 @@ class RestMixin:
 
     def _open_growth_multi_selector(self, title, options, selected_values, summary_var):
         """多选弹窗:用于指数范围和股票类型。"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title(title)
         win.geometry("320x420")
         win.transient(self.root)
@@ -8078,7 +8078,7 @@ class RestMixin:
                 self._market_detection_window.lift()
                 return
             self._market_detection_window = None
-        dialog = self._toplevel(self.root)
+        dialog = self._safe_toplevel(self.root)
         dialog.title("全市场数据检测 - ETF持仓股均线检测")
         dialog.geometry("1600x900")
         dialog.transient(self.root)
@@ -8454,7 +8454,7 @@ class RestMixin:
         """全市场情况:获取当天A股市场情况"""
         try:
             # 创建全市场情况窗口
-            market_window = self._toplevel(self.root)
+            market_window = self._safe_toplevel(self.root)
             market_window.title("全市场情况")
             market_window.geometry("1200x800")
             market_window.transient(self.root)
@@ -10222,7 +10222,7 @@ class RestMixin:
                 messagebox.showwarning("警告", "未提取到股票数据")
                 return
             # 显示保存对话框
-            save_window = self._toplevel(self.root)
+            save_window = self._safe_toplevel(self.root)
             save_window.title("保存股票数据到数据库")
             save_window.geometry("700x500")
             # 创建表格显示要保存的数据
@@ -10932,7 +10932,7 @@ class RestMixin:
 
     def _display_cb_arbitrage_window(self, rows):
         """在主线程中显示可转债套利弹窗"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("A股活跃可转债 - 价格、溢价、强赎与套利提示")
         win.geometry("1400x750")
         win.transient(self.root)
@@ -12515,7 +12515,7 @@ class RestMixin:
         import subprocess as _sp
         import tkinter as tk
         from tkinter import scrolledtext, ttk
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("🚦 大盘风险仪表盘 · 逃顶/抄底")
         win.geometry("1200x820")
         win.transient(self.root)
@@ -12800,7 +12800,7 @@ class RestMixin:
         DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
         os.makedirs(DATA_DIR, exist_ok=True)
         CACHE_FILE = os.path.join(DATA_DIR, "wall_street_cache.json")
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("🏦 华尔街红绿灯 · 市场情绪量化判定")
         win.geometry("1280x920")
         win.minsize(1100, 780)
@@ -13202,7 +13202,7 @@ class RestMixin:
         DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
         os.makedirs(DATA_DIR, exist_ok=True)
         CACHE_FILE = os.path.join(DATA_DIR, "a_share_traffic_cache.json")
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("🇨🇳 A股红绿灯 · 市场情绪量化判定")
         win.geometry("1280x920")
         win.minsize(1100, 780)
@@ -13455,7 +13455,7 @@ class RestMixin:
                 canvas_bar.create_text(pb_l+186, 6, text="<35冷", fill="#2E7D32", font=("", 7), anchor="w")
 
                 # ===== 快照 =====
-                snap = sent_data.get("latest_snapshot", {})
+                snap = sent_data.get("latest_snapshot") or {}
                 up = snap.get("up", 0); dn = snap.get("down", 0)
                 ft = snap.get("flat", 0); snap.get("total", up+dn+ft)
                 last = dl[-1]
@@ -13576,8 +13576,8 @@ class RestMixin:
             data = {'signals': []}
             # 1️⃣ 融资融券 (沪深合计)
             try:
-                sh = ak.macro_china_market_margin_sh
-                sz = ak.macro_china_market_margin_sz
+                sh = ak.macro_china_market_margin_sh()
+                sz = ak.macro_china_market_margin_sz()
                 sh_col = [c for c in sh.columns if '融资' in c or '余额' in c][-1]
                 sz_col = [c for c in sz.columns if '融资' in c or '余额' in c][-1]
                 sh_cur = float(sh[sh_col].iloc[-1])
@@ -14025,7 +14025,7 @@ class RestMixin:
         import threading
         import tkinter as tk
         from tkinter import messagebox, scrolledtext, ttk
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("📈 背离做T · 大盘阶段分析 + AI建议")
         win.geometry("1200x920")
         win.minsize(1000, 780)
@@ -14686,7 +14686,7 @@ class RestMixin:
 
         import akshare as _ak
         today = _dt.datetime.now().strftime("%m月%d日")
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title(f"📊 盘面诊断 - {today} 做T还是持股")
         win.geometry("920x780")
         win.transient(self.root)
@@ -15586,7 +15586,7 @@ class RestMixin:
 
     def _show_qclaw_skills_browser(self):
         """显示 QClaw Skill 浏览器对话框"""
-        win = self._toplevel(self.root)
+        win = self._safe_toplevel(self.root)
         win.title("QClaw Skill 浏览器")
         win.geometry("1200x800")
         win.transient(self.root)

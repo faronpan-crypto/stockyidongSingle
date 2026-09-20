@@ -226,7 +226,7 @@ class WordcloudMixin:
             button_height = 50  # 为关闭按钮预留空间
             window_width = new_width
             window_height = new_height + button_height
-            large_window = self._toplevel(self.root)
+            large_window = self._safe_toplevel(self.root)
             large_window.title("词云大图")
             large_window.geometry(f"{window_width}x{window_height}")
             # 创建画布用于显示图片(使用画布可以更好地控制显示)

@@ -97,7 +97,7 @@ class RealtimeMixin:
         """显示粘贴股票的实时统计"""
         try:
             # 创建输入窗口
-            input_window = self._toplevel(self.root)
+            input_window = self._safe_toplevel(self.root)
             input_window.title("粘贴股票列表")
             input_window.geometry("600x500")
             input_window.transient(self.root)

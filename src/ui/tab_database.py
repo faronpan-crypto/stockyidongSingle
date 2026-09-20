@@ -29,7 +29,7 @@ class DatabaseMixin:
             on_stock_double_click: 双击股票时的回调函数,接收股票名称作为参数
         """
         try:
-            db_window = self._toplevel(self.root)
+            db_window = self._safe_toplevel(self.root)
             db_window.title("数据库管理")
             db_window.geometry("1400x900")
             db_window.resizable(True, True)
@@ -7518,7 +7518,7 @@ class DatabaseMixin:
         return
         # 以下是原来的代码,保留作为备份
         try:
-            db_window = self._toplevel(self.root)
+            db_window = self._safe_toplevel(self.root)
             db_window.title("股票逻辑数据库管理")
             db_window.geometry("1200x800")
             # 创建主框架
@@ -8097,7 +8097,7 @@ class DatabaseMixin:
         return
         # 以下是原来的代码,保留作为备份
         try:
-            db_window = self._toplevel(self.root)
+            db_window = self._safe_toplevel(self.root)
             db_window.title("资讯数据库管理")
             db_window.geometry("1200x800")
             # 创建主框架

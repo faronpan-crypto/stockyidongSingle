@@ -73,7 +73,7 @@ class WebMixin:
     def show_web_crawler(self):
         """打开网站爬虫程序"""
         try:
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("网站爬虫程序")
             win.geometry("1200x800")
             win.transient(self.root)

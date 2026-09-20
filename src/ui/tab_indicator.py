@@ -208,7 +208,7 @@ class IndicatorMixin:
                 "formula": "+DI(N) = +DM / TR × 100\n-DI(N) = -DM / TR × 100\nADX = 100 × |+DI - -DI| / (+DI + -DI)"
             }
         }
-        dialog = self._toplevel(self.root)
+        dialog = self._safe_toplevel(self.root)
         dialog.title("技术指标分析")
         dialog.geometry("900x600")
         main_frame = ttk.Frame(dialog, padding=10)
