@@ -18,6 +18,7 @@ except ImportError:
     pd = None
 
 from utils.network import safe_call
+from utils.config import *  # 路径/配置/Token
 try:
     import akshare as ak
 except ImportError:

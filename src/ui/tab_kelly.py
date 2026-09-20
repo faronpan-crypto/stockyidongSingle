@@ -2,6 +2,7 @@
 import os, sys, json
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
+from utils.config import *  # 路径/配置/Token
 
 class KellyMixin:
     """KellyMixin"""

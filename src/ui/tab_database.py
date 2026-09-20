@@ -3,6 +3,7 @@ import os, sys, sqlite3
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog, scrolledtext
 from data.db import save_stock_to_db, save_article_to_db, save_news_info_to_db, get_stock_logic_from_db, delete_stock_logic_from_db, update_stock_logic_in_db
+from utils.config import *  # 路径/配置/Token
 
 class DatabaseMixin:
     """DatabaseMixin"""

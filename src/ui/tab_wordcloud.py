@@ -2,6 +2,7 @@
 import os, sys, re, json, base64, threading, io
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+from utils.config import *  # 路径/配置/Token
 
 class WordcloudMixin:
     """WordcloudMixin"""

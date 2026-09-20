@@ -1,0 +1,33 @@
+"""DB 搜索/过滤/查询"""
+import os, sys, re, json, time, threading, traceback, hashlib, urllib.parse
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, simpledialog, scrolledtext
+try:
+    import numpy as np
+except ImportError: np = None
+try:
+    import pandas as pd
+except ImportError: pd = None
+try:
+    import akshare as ak
+except ImportError: ak = None
+try:
+    import tushare as ts
+except ImportError: ts = None
+try:
+    import requests
+except ImportError: requests = None
+try:
+    import matplotlib
+    matplotlib.use('TkAgg')
+    import matplotlib.pyplot as plt
+except ImportError: plt = None
+from utils.network import safe_call
+from utils.config import *  # 路径/配置/Token
+
+
+class DbSearchMixin:
+    """DB 搜索/过滤/查询"""
+
+
+__all__ = ["DbSearchMixin"]
