@@ -6152,11 +6152,11 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
         self.wordcloud_stocks_data = []  # 保存词云中的股票数据(股票名称、逻辑、时间、来源)
         # 更新text_input指向当前活动标签页
         self.update_text_input_reference()
-        # 同花顺情绪指数:启动后约 5 秒先弹一次,之后每半小时再提醒
-        try:
-            self.root.after(15000, self._th_reminder_tick)  # 延后 15s
-        except Exception:
-            pass
+        # 同花顺情绪指数弹窗: 已禁用自动弹出 (用户可手动触发), 但保留 _th_reminder_tick 每 30 分钟的定时逻辑
+        # try:
+        #     self.root.after(15000, self._th_reminder_tick)  # 延后 15s
+        # except Exception:
+        #     pass
 def get_hot_indices_data():
     """获取30个热门指数数据 - 包含涨跌幅统计"""
     try:

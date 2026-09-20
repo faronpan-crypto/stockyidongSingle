@@ -13591,6 +13591,8 @@ class RestMixin:
                     'avg_chg': (sh_chg + sz_chg) / 2
                 }
             except Exception as e:
+                import traceback as _tb
+                _tb.print_exc()
                 data['margin'] = {'error': str(e)[:60]}
             # 2️⃣ 北向资金 (tushare)
             try:
@@ -13617,25 +13619,40 @@ class RestMixin:
                     }
             except Exception as e:
                 data['north'] = {'error': str(e)[:60]}
-            # 3️⃣ 涨跌停广度
+            # 3️⃣ 涨跌停广度 (legu 上游页面挂了, 改用东方财富涨停/跌停池 + tushare daily)
             try:
-                df = ak.stock_market_activity_legu()
-                if df is not None and len(df) > 0:
-                    items = dict(zip(df['item'], df['value']))
-                    up = float(items.get('上涨', 0))
-                    down = float(items.get('下跌', 0))
-                    limit_up = float(items.get('涨停', 0))
-                    real_limit_up = float(items.get('真实涨停', limit_up))
-                    limit_down = float(items.get('跌停', 0))
-                    real_limit_down = float(items.get('真实跌停', limit_down))
-                    flat = float(items.get('平盘', 0))
-                    active = str(items.get('活跃度', '0%'))
-                    breadth = up / (up + down + flat) * 100 if (up + down + flat) > 0 else 50
-                    data['breadth'] = {
-                        'up': up, 'down': down, 'flat': flat,
-                        'limit_up': real_limit_up, 'limit_down': real_limit_down,
-                        'breadth_pct': breadth, 'active': active
-                    }
+                limit_up = limit_down = up = down = flat = 0
+                # 3a. 涨停/跌停池 (akshare 东方财富源)
+                try:
+                    zt_df = ak.stock_zt_pool_em(date=now.strftime('%Y%m%d'))
+                    limit_up = len(zt_df) if zt_df is not None else 0
+                except Exception:
+                    limit_up = 0
+                try:
+                    dt_df = ak.stock_zt_pool_dtgc_em(date=now.strftime('%Y%m%d'))
+                    limit_down = len(dt_df) if dt_df is not None else 0
+                except Exception:
+                    limit_down = 0
+                # 3b. 上涨/下跌/平盘 (tushare daily)
+                try:
+                    import tushare as _tsb
+                    with open(os.path.expanduser("~/.tushare/token")) as _tf2:
+                        _tk2 = _tf2.read().strip()
+                    _pro2 = _tsb.pro_api(_tk2)
+                    _d_end = now.strftime('%Y%m%d')
+                    daily_df = _pro2.daily(trade_date=_d_end, fields='ts_code,pct_chg')
+                    if daily_df is not None and len(daily_df) > 0:
+                        up = int((daily_df['pct_chg'] > 0).sum())
+                        down = int((daily_df['pct_chg'] < 0).sum())
+                        flat = int((daily_df['pct_chg'] == 0).sum())
+                except Exception:
+                    up = down = flat = 0
+                breadth = up / (up + down + flat) * 100 if (up + down + flat) > 0 else 50
+                data['breadth'] = {
+                    'up': up, 'down': down, 'flat': flat,
+                    'limit_up': limit_up, 'limit_down': limit_down,
+                    'breadth_pct': breadth, 'active': f"{up}/{down}"
+                }
             except Exception as e:
                 data['breadth'] = {'error': str(e)[:60]}
             # 4️⃣ A股指数 MA 趋势 (双数据源: akshare → tushare 备用)

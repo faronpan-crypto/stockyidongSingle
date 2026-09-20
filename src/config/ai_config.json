@@ -2039,18 +2039,18 @@
     },
     {
       "index": 52,
-      "stock_name": "寒武纪",
-      "stock_code": "688256"
-    },
-    {
-      "index": 53,
       "stock_name": "中国巨石",
       "stock_code": "600176"
     },
     {
-      "index": 54,
+      "index": 53,
       "stock_name": "启明信息",
       "stock_code": "002232"
+    },
+    {
+      "index": 54,
+      "stock_name": "寒武纪",
+      "stock_code": "688256"
     },
     {
       "index": 55,
@@ -2069,78 +2069,78 @@
     },
     {
       "index": 58,
-      "stock_name": "贵州茅台",
-      "stock_code": "600519"
-    },
-    {
-      "index": 59,
-      "stock_name": "长飞光纤",
-      "stock_code": "601869"
-    },
-    {
-      "index": 60,
-      "stock_name": "天通股份",
-      "stock_code": "600330"
-    },
-    {
-      "index": 61,
       "stock_name": "招商蛇口",
       "stock_code": "001979"
     },
     {
-      "index": 62,
+      "index": 59,
       "stock_name": "上大股份",
       "stock_code": "301522"
     },
     {
-      "index": 63,
+      "index": 60,
       "stock_name": "衢州发展",
       "stock_code": "600208"
     },
     {
-      "index": 64,
+      "index": 61,
       "stock_name": "影石创新",
       "stock_code": "688775"
     },
     {
-      "index": 65,
+      "index": 62,
       "stock_name": "中国铀业",
       "stock_code": "001280"
     },
     {
-      "index": 66,
+      "index": 63,
       "stock_name": "美年健康",
       "stock_code": "002044"
     },
     {
-      "index": 67,
+      "index": 64,
       "stock_name": "张江高科",
       "stock_code": "600895"
     },
     {
-      "index": 68,
+      "index": 65,
       "stock_name": "艾迪精密",
       "stock_code": "603638"
     },
     {
-      "index": 69,
+      "index": 66,
       "stock_name": "新城控股",
       "stock_code": "601155"
     },
     {
-      "index": 70,
+      "index": 67,
       "stock_name": "高德红外",
       "stock_code": "002414"
     },
     {
-      "index": 71,
+      "index": 68,
       "stock_name": "思特威",
       "stock_code": "688213"
     },
     {
-      "index": 72,
+      "index": 69,
       "stock_name": "东华软件",
       "stock_code": "002065"
+    },
+    {
+      "index": 70,
+      "stock_name": "贵州茅台",
+      "stock_code": "600519"
+    },
+    {
+      "index": 71,
+      "stock_name": "长飞光纤",
+      "stock_code": "601869"
+    },
+    {
+      "index": 72,
+      "stock_name": "天通股份",
+      "stock_code": "600330"
     },
     {
       "index": 73,

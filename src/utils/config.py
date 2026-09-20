@@ -236,7 +236,7 @@ _TS_CALL_LOCK = _ts_threading.Lock()
 def _ts_patch_pro_api(_orig_pro_api):
     """包装 ts.pro_api(), 让返回的 client 方法自动 sleep + 限频重试"""
     _TS_MIN_WAIT = 0.35
-    _TS_MAX_RETRY = 3
+    _TS_MAX_RETRY = 1  # 限频只等一次 3s，不阻塞用户界面
 
     def _patch_client(pro):
         pid = id(pro)
@@ -255,7 +255,7 @@ def _ts_patch_pro_api(_orig_pro_api):
                         last_e = e
                         msg = str(e)
                         if any(k in msg for k in ['超限', '频率', 'rate limit', '每分钟']):
-                            wait = 30 * (attempt + 1)
+                            wait = 3  # 固定 3s，不再 30/60/90s 指数退避
                             print(f"  ⚠️ Tushare 限频, 等{wait}s 重试({attempt+1}/{_TS_MAX_RETRY})")
                             _ts_time.sleep(wait)
                         else:
