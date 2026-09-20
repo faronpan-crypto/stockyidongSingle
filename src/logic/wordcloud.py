@@ -1,4 +1,11 @@
 # 迁移自 stockyidong mac003.py ranges=[(2105, 2181), (2182, 2277), (2278, 2423), (2424, 2682)]
+#
+# 懒加载策略: 重型模块(jieba/matplotlib/numpy/pandas/wordcloud/PIL)
+# 在 wordcloud.py 被 import 时不触发，仅在使用时才加载。
+#
+# 原因: wordcloud 库本身 import 仅 4ms，但 jieba init 375ms + matplotlib 156ms + numpy 250ms
+# 全部在模块顶部加载导致启动时额外耗时 ~780ms。
+
 import os
 import sys
 import re
@@ -7,32 +14,77 @@ import base64
 import threading
 import warnings
 from collections import Counter
-try:
-    import jieba
-except ImportError:
-    jieba = None
-try:
-    import matplotlib
-    matplotlib.use('TkAgg')
-    import matplotlib.pyplot as plt
-except ImportError:
-    plt = None
-try:
-    import numpy as np
-except ImportError:
-    np = None
-try:
-    import pandas as pd
-except ImportError:
-    pd = None
-try:
-    from wordcloud import WordCloud
-except ImportError:
-    WordCloud = None
-try:
-    from PIL import Image, ImageDraw, ImageFont
-except ImportError:
-    Image = None
+
+# 占位符 - 实际模块在函数内懒加载
+jieba = None
+plt = None
+np = None
+pd = None
+WordCloud = None
+Image = ImageDraw = ImageFont = None
+
+def _lazy(name, getter):
+    """惰性属性: 首次访问时执行 getter，之后直接返回缓存。"""
+    class _Lazy:
+        def __repr__(self): return repr(getter())
+        def __getattr__(self, k): return getattr(getter(), k)
+        def __call__(self, *a, **kw): return getter()(*a, **kw)
+    return _Lazy()
+
+def _load_jieba():
+    global jieba
+    if jieba is None:
+        import jieba as _j
+        jieba = _j
+        # 预热 jieba cache，避免首次分词时还要等 300ms
+        try:
+            import threading
+            def _init_async():
+                _j.initialize()
+                _j.dt = {}  # 清除测试残留
+            t = threading.Thread(target=_init_async, daemon=True)
+            t.start()
+        except Exception:
+            _j.initialize()
+    return jieba
+
+def _load_matplotlib():
+    global plt
+    if plt is None:
+        import matplotlib
+        matplotlib.use('TkAgg')
+        import matplotlib.pyplot as _plt
+        plt = _plt
+    return plt
+
+def _load_numpy():
+    global np
+    if np is None:
+        import numpy as _n
+        np = _n
+    return np
+
+def _load_pandas():
+    global pd
+    if pd is None:
+        import pandas as _p
+        pd = _p
+    return pd
+
+def _load_wordcloud():
+    global WordCloud
+    if WordCloud is None:
+        from wordcloud import WordCloud as _wc
+        WordCloud = _wc
+    return WordCloud
+
+def _load_pil():
+    global Image, ImageDraw, ImageFont
+    if Image is None:
+        from PIL import Image as _img, ImageDraw as _id, ImageFont as _if
+        Image = _img; ImageDraw = _id; ImageFont = _if
+    return Image, ImageDraw, ImageFont
+
 
 def analyze_text_dimensions(text):
     """多维度文本分析 - 情绪、市场焦点、风险识别等"""
@@ -217,6 +269,7 @@ def generate_wordcloud(text, callback, tab_name=None, time_str=None):
         tab_name: 标签页名称
         time_str: 时间字符串(如果标签页名称已包含时间,则不需要)
     """
+    _load_jieba()
     try:
         # 提取股票名称
         stock_names, _ = extract_stock_names(text)
@@ -363,6 +416,8 @@ def generate_interactive_wordcloud(word_freq, callback, text=None):
         callback: 回调函数
         text: 原始文本,用于提取股票逻辑
     """
+    _load_matplotlib()
+    _load_pil()
     try:
         from datetime import datetime
         # 从文本中提取股票逻辑

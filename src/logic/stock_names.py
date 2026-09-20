@@ -10,7 +10,7 @@ import json
 import time
 import sqlite3
 from collections import Counter
-from utils.config import D_DATA_DIR, STOCK_NAMES_SET, STOCK_CODES_DICT, STOCK_NAME_TO_CODE, ETF_CACHE_REFRESHED, STOCK_NAMES_LOAD_LOCK, AKSHARE_AVAILABLE
+from utils.config import D_DATA_DIR, STOCK_NAMES_SET, STOCK_CODES_DICT, STOCK_NAME_TO_CODE, ETF_CACHE_REFRESHED, STOCK_NAMES_LOAD_LOCK
 
 def _register_stock_entry(code, name):
     """将股票代码与名称写入全局缓存"""
@@ -75,7 +75,7 @@ def _load_stock_names_impl():
             except Exception as e:
                 print(f"从缓存加载失败: {e},将尝试从网络获取")
         # 如果缓存不存在或加载失败,尝试从网络获取
-        if not AKSHARE_AVAILABLE:
+        if not utils.config.AKSHARE_AVAILABLE:
             print("错误: akshare库不可用,无法加载股票数据")
             print("提示: 请确保已安装akshare库,并且网络连接正常")
             STOCK_NAMES_SET = set()
@@ -468,7 +468,7 @@ def get_stock_name_by_code(stock_code):
                 if code == stock_code:
                     return name
         # 如果还没找到,尝试从akshare获取
-        if AKSHARE_AVAILABLE:
+        if utils.config.AKSHARE_AVAILABLE:
             try:
                 # 方法1: 从stock_info_a_code_name获取
                 stock_info = ak.stock_info_a_code_name()

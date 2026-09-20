@@ -15,34 +15,48 @@ import threading as _ts_threading
 from urllib.parse import urljoin
 
 # ==================== 第三方库 availability 标志 ====================
-try:
-    import tushare as ts
-    TS_AVAILABLE = True
-except ImportError:
-    ts = None
-    TS_AVAILABLE = False
+# tushare(667ms) akshare(134ms) 改为延迟导入，启动时不阻塞
+_ts_mod = _ak_mod = _np_mod = _pd_mod = _rs_mod = None
 
-try:
-    import akshare as ak
-    AKSHARE_AVAILABLE = True
-except ImportError:
-    ak = None
-    AKSHARE_AVAILABLE = False
-
-try:
-    import numpy as np
-except ImportError:
-    np = None
-
-try:
-    import pandas as pd
-except ImportError:
-    pd = None
-
-try:
-    import requests
-except ImportError:
-    requests = None
+def __getattr__(name):
+    global _ts_mod, _ak_mod, _np_mod, _pd_mod, _rs_mod
+    if name in ('ts', 'TUSHARE'):
+        if _ts_mod is None:
+            try: import tushare as _m; _ts_mod = _m
+            except: _ts_mod = None
+        return _ts_mod
+    if name in ('ak', 'AKSHARE'):
+        if _ak_mod is None:
+            try: import akshare as _m; _ak_mod = _m
+            except: _ak_mod = None
+        return _ak_mod
+    if name == 'np':
+        if _np_mod is None:
+            try: import numpy as _m; _np_mod = _m
+            except: _np_mod = None
+        return _np_mod
+    if name == 'pd':
+        if _pd_mod is None:
+            try: import pandas as _m; _pd_mod = _m
+            except: _pd_mod = None
+        return _pd_mod
+    if name == 'requests':
+        if _rs_mod is None:
+            try: import requests as _m; _rs_mod = _m
+            except: _rs_mod = None
+        return _rs_mod
+    # availability flags - 首次访问时按需检测并缓存
+    if name == 'TS_AVAILABLE':
+        if _ts_mod is None:
+            try: import tushare; globals()['_ts_mod'] = tushare
+            except: globals()['_ts_mod'] = None
+        return _ts_mod is not None
+    if name == 'AKSHARE_AVAILABLE':
+        if _ak_mod is None:
+            try: import akshare; globals()['_ak_mod'] = akshare
+            except: globals()['_ak_mod'] = None
+        return _ak_mod is not None
+    raise AttributeError(f"module 'utils.config' has no attribute '{name}'")
 
 # ==================== 跨模块全局变量 (统一在此定义) ====================
 import threading as _threading
@@ -310,3 +324,5 @@ __all__ = [
     "_ts_patch_pro_api", "_akshare_fund_flow_market",
     "load_iwencai_env_from_dotfiles", "parse_skill_md_for_usage",
 ]
+
+

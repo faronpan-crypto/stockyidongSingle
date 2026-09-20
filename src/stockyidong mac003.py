@@ -4,6 +4,11 @@ from typing import Optional, Union
 import os
 import sys
 
+# --- sys.path 修复: 确保 src/ 在 sys.path 最前 (trae sandbox / venv 启动时不自动加入) ---
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
 # --- PATH 修复: Trae 启动 macOS 子进程时 PATH 缺 /opt/homebrew/bin,导致 shutil.which("node") 找不到 ---
 _homebrew_paths = ["/opt/homebrew/bin", "/usr/local/bin"]
 _sep = ":"
@@ -1425,7 +1430,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
                 return []
         def show_warning_popup(content, title):
             """显示警世通言弹出框,并在预警内容下方显示股票逻辑"""
-            popup = self._toplevel(self.root)
+            popup = self._safe_toplevel(self.root)
             popup.title(title)
             popup.geometry("800x700")
             # 创建文本框显示内容
@@ -1546,7 +1551,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
         # 定义浏览资讯记录的函数
         def browse_news_records(filter_type):
             """浏览资讯记录(警示或开新仓记录),支持左右切换"""
-            browse_window = self._toplevel(self.root)
+            browse_window = self._safe_toplevel(self.root)
             if filter_type == "警示":
                 browse_window.title("浏览警示记录")
                 filter_pattern = "警示%"
@@ -1849,7 +1854,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
         main_sector_combo.pack(side=tk.LEFT, padx=(0, 5))
         def show_main_sector_settings():
             """显示主流板块设置对话框"""
-            settings_window = self._toplevel(self.root)
+            settings_window = self._safe_toplevel(self.root)
             settings_window.title("主流板块设置")
             settings_window.geometry("400x500")
             settings_window.transient(self.root)
@@ -2099,7 +2104,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
         # 开新仓流程弹出界面
         def show_new_position_dialog(position_type="绩优股"):
             """显示开新仓流程对话框"""
-            dialog = self._toplevel(self.root)
+            dialog = self._safe_toplevel(self.root)
             dialog.title(f"开{position_type}新仓流程")
             dialog.geometry("1000x800")
             dialog.resizable(True, True)
@@ -3125,7 +3130,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
                     if net_flow_5days is None:
                         try:
                             # 获取最近10天的历史数据(确保能取到至少5个交易日)
-                            hist_data = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
+                            hist_data = safe_call(ak.stock_zh_a_hist, symbol=stock_code, period="daily", adjust="qfq", fallback=None)
                             if hist_data is not None and not hist_data.empty and len(hist_data) >= 5:
                                 # 确保数据按日期排序
                                 if "日期" in hist_data.columns:
@@ -5588,7 +5593,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
                 scroll_text_frame.config(highlightbackground="#cc6666", bg="#e0e0e0")
                 self.emotion_red_scroll_label.config(bg="#e0e0e0", fg="gray")
         def _open_emotion_red_scroll_manage():
-            win = self._toplevel(self.root)
+            win = self._safe_toplevel(self.root)
             win.title("情绪红灯滚动文字 - 管理")
             win.geometry("400x280")
             win.transient(self.root)
@@ -6275,7 +6280,7 @@ def get_market_overview_data():
         # 1. 获取主要指数数据
         try:
             # 上证指数
-            sh_index = ak.stock_zh_index_daily(symbol="sh000001")
+            sh_index = safe_call(ak.stock_zh_index_daily, symbol="sh000001", fallback=pd.DataFrame())
             if not sh_index.empty:
                 latest_sh = sh_index.iloc[-1]
                 # 计算涨跌幅和涨跌额
@@ -6293,7 +6298,7 @@ def get_market_overview_data():
             print(f"获取上证指数失败: {e}")
         try:
             # 深证成指
-            sz_index = ak.stock_zh_index_daily(symbol="sz399001")
+            sz_index = safe_call(ak.stock_zh_index_daily, symbol="sz399001", fallback=pd.DataFrame())
             if not sz_index.empty:
                 latest_sz = sz_index.iloc[-1]
                 # 计算涨跌幅和涨跌额
@@ -6311,7 +6316,7 @@ def get_market_overview_data():
             print(f"获取深证成指失败: {e}")
         try:
             # 创业板指
-            cyb_index = ak.stock_zh_index_daily(symbol="sz399006")
+            cyb_index = safe_call(ak.stock_zh_index_daily, symbol="sz399006", fallback=pd.DataFrame())
             if not cyb_index.empty:
                 latest_cyb = cyb_index.iloc[-1]
                 # 计算涨跌幅和涨跌额
