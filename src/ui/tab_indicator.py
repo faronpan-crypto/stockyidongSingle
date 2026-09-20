@@ -24,7 +24,13 @@ try:
 except ImportError: plt = None
 from utils.network import safe_call
 from utils.config import *  # 路径/配置/Token
+from data.snapshot import *  # get_news_stocks_* 函数
 
+import re
+import threading
+import traceback
+import hashlib
+from urllib.parse import urljoin
 
 class IndicatorMixin:
     """技术指标/均线/MACD/KDJ/RSI"""

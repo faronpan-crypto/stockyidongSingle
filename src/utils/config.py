@@ -14,6 +14,44 @@ import time as _ts_time
 import threading as _ts_threading
 from urllib.parse import urljoin
 
+# ==================== 第三方库 availability 标志 ====================
+try:
+    import tushare as ts
+    TS_AVAILABLE = True
+except ImportError:
+    ts = None
+    TS_AVAILABLE = False
+
+try:
+    import akshare as ak
+    AKSHARE_AVAILABLE = True
+except ImportError:
+    ak = None
+    AKSHARE_AVAILABLE = False
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+
+try:
+    import requests
+except ImportError:
+    requests = None
+
+# ==================== 跨模块全局变量 (统一在此定义) ====================
+import threading as _threading
+STOCK_NAMES_SET = None
+STOCK_CODES_DICT = None
+STOCK_NAME_TO_CODE = None
+ETF_CACHE_REFRESHED = False
+STOCK_NAMES_LOAD_LOCK = _threading.Lock()
+
 # ==================== Phase 1: 路径常量 ====================
 D_DATA_DIR = (os.environ.get("STOCK_ANALYZER_DATA_DIR") or r"D:\StockAnalyzer").strip() or r"D:\StockAnalyzer"
 D_DB_DIR = os.path.join(D_DATA_DIR, "Database")
@@ -249,6 +287,13 @@ def parse_skill_md_for_usage(skill_md_path: str, max_body_chars: int = 8000):
 
 # ==================== __all__ (Phase 1 + Phase 2 合并) ====================
 __all__ = [
+    # 第三方库 availability + 模块
+    "TS_AVAILABLE", "ts",
+    "AKSHARE_AVAILABLE", "ak",
+    "np", "pd", "requests",
+    # 跨模块全局变量
+    "STOCK_NAMES_SET", "STOCK_CODES_DICT", "STOCK_NAME_TO_CODE",
+    "ETF_CACHE_REFRESHED", "STOCK_NAMES_LOAD_LOCK",
     # Phase 1 路径常量
     "D_DATA_DIR", "D_DB_DIR", "D_OUTPUT_DIR", "D_EXPORT_DIR", "D_IMAGES_DIR",
     "D_SQLITE_TMP", "MANAGED_STOCKS_FILE",

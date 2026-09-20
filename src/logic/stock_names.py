@@ -6,7 +6,7 @@ import json
 import time
 import sqlite3
 from collections import Counter
-# STOCK_CODES_DICT 来自主文件全局变量
+from utils.config import D_DATA_DIR, STOCK_NAMES_SET, STOCK_CODES_DICT, STOCK_NAME_TO_CODE, ETF_CACHE_REFRESHED, STOCK_NAMES_LOAD_LOCK, AKSHARE_AVAILABLE
 
 def _register_stock_entry(code, name):
     """将股票代码与名称写入全局缓存"""

@@ -16,7 +16,18 @@ try:
 except ImportError: ts = None
 from utils.network import safe_call
 from utils.config import *  # 路径/配置/Token
+from data.snapshot import *  # get_news_stocks_* 函数
+from logic.crawlers import *  # TaogubaCrawler
+from logic.stock_names import *  # get_stock_name_by_code 等
 
+from datetime import datetime, timedelta
+import re
+import json
+import os
+import time
+import threading
+import traceback
+import sqlite3
 
 class HotMixin:
     """热门板块/选股/北向资金/hotmoney"""

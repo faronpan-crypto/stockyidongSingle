@@ -268,6 +268,440 @@ _mod_stock_names.ETF_CACHE_REFRESHED = ETF_CACHE_REFRESHED
 _mod_stock_names.STOCK_NAMES_LOAD_LOCK = STOCK_NAMES_LOAD_LOCK
 _mod_snapshot.STOCK_CODES_DICT = STOCK_CODES_DICT
 
+# Mixin 全局变量注入 (Phase 3+)
+try:
+    import ui.tab_dapan as _m_dapan
+    _m_dapan.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m_dapan.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m_dapan.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m_dapan.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m_dapan.TS_AVAILABLE = TS_AVAILABLE
+    _m_dapan.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_ai as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_analysis as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_breadcrumb as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_builders as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_buttons as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_cangwei as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_checks as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_config as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_crawler as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_dapan as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_database as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_db_search as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_default_config as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_emo_deep as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_export as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_file_io as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_finance as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_format as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_getters as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_holdings as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_hot as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_indicator as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_inner_class as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_jiaoyi as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_kelly as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_leader as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_math as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_money_flow as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_nav as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_nav2 as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_news as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_pipeline as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_realtime as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_render as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_rest as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_schedule as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_screenshot as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_spider_reader as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_stock_detail as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_thread as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_token as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_toplevel as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_trade as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_warning as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_web as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_wencai as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+try:
+    import ui.tab_wordcloud as _m
+    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
+    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
+    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    _m.TS_AVAILABLE = TS_AVAILABLE
+    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+except Exception: pass
+
 # ==================== 数据库管理 ====================
 # ==================== 淘股吧爬虫 ====================
 # ==================== 韭研公社爬虫 ====================
@@ -5976,6 +6410,27 @@ def main():
         def _preload_stock_names():
             try:
                 load_stock_names()
+                # load_stock_names 填充的是 logic.stock_names 模块的 global,
+                # 拷回主文件并重新注入所有子模块, 避免 NameError
+                global STOCK_CODES_DICT, STOCK_NAMES_SET, STOCK_NAME_TO_CODE
+                import logic.stock_names as _sn
+                STOCK_CODES_DICT = _sn.STOCK_CODES_DICT
+                STOCK_NAMES_SET = _sn.STOCK_NAMES_SET
+                STOCK_NAME_TO_CODE = _sn.STOCK_NAME_TO_CODE
+                # 重新注入 Phase 2 子模块
+                import data.snapshot as _sp
+                _sn.STOCK_CODES_DICT = STOCK_CODES_DICT
+                _sp.STOCK_CODES_DICT = STOCK_CODES_DICT
+                # 重新注入所有 Mixin 模块
+                for _mod_name in [_m for _k, _m in list(globals().items())
+                                   if _k.startswith('_m_') and hasattr(_m, 'STOCK_CODES_DICT')]:
+                    try:
+                        _mod_name.STOCK_CODES_DICT = STOCK_CODES_DICT
+                        _mod_name.STOCK_NAMES_SET = STOCK_NAMES_SET
+                        _mod_name.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+                    except Exception:
+                        pass
+                print(f"✓ 股票代码表已同步到所有子模块 ({len(STOCK_CODES_DICT or {})} 只)")
             except Exception as e:
                 print(f"后台预加载股票名称列表失败: {e}")
         root.after(3000, lambda: threading.Thread(target=_preload_stock_names, daemon=True).start())

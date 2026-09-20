@@ -19,7 +19,12 @@ try:
 except ImportError: requests = None
 from utils.network import safe_call
 from utils.config import *  # 路径/配置/Token
+from data.snapshot import *  # get_news_stocks_* 函数
 
+import threading
+import traceback
+import hashlib
+from urllib.parse import urljoin
 
 class SpiderReaderMixin:
     """爬虫阅读器/数据导入"""

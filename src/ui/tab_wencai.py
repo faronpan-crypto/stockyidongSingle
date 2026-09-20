@@ -17,6 +17,8 @@ except ImportError: pd = None
 
 from utils.network import safe_call
 from utils.config import *  # 路径/配置/Token
+from data.snapshot import *  # get_news_stocks_* 函数
+from logic.stock_names import *  # get_stock_name_by_code 等
 try:
     import akshare as ak
 except ImportError: ak = None
@@ -24,6 +26,16 @@ try:
     from pywencai import get as _pywencai_get
 except ImportError: _pywencai_get = None
 
+from datetime import datetime, timedelta
+import re
+import json
+import os
+import sys
+import time
+import threading
+import traceback
+from urllib.parse import urljoin
+import sqlite3
 
 class WencaiMixin:
     """问财/同花顺选股相关方法"""

@@ -4,9 +4,11 @@
 迁移自 stockyidong mac003.py: 81 方法 / ~8697 行
 涵盖: 大盘 Tab 刷新/快照/趋势, 情绪周期三维度, 涨跌停广度, 同花顺情绪, 生命周期扫描
 """
-import os, sys, re, json, time, sqlite3, threading, traceback, base64, io
+import os, sys, re, json, time, sqlite3, threading, traceback, base64, io, hashlib
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog, scrolledtext
+from datetime import datetime, timedelta
+from urllib.parse import urljoin
 
 try:
     import numpy as np
@@ -17,18 +19,6 @@ try:
 except ImportError:
     pd = None
 try:
-    import matplotlib
-    matplotlib.use('TkAgg')
-    import matplotlib.pyplot as plt
-except ImportError:
-    plt = None
-
-from utils.config import (DB_PATH, _APP_CONFIG_DIR, TS_DEFAULT_TOKEN, 
-                           _resolve_market_nav_config_path, _ts_patch_pro_api)
-from utils.network import safe_call
-from data.db import (init_database, save_judgment_cache_snapshot, load_fresh_judgment_cache,
-                      save_stock_to_db, save_kelly_record_to_db)
-try:
     import akshare as ak
 except ImportError:
     ak = None
@@ -36,7 +26,24 @@ try:
     import tushare as ts
 except ImportError:
     ts = None
+try:
+    import requests
+except ImportError:
+    requests = None
+try:
+    import matplotlib
+    matplotlib.use('TkAgg')
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
 
+from utils.config import *
+from utils.network import safe_call
+from data.db import init_database, save_judgment_cache_snapshot, load_fresh_judgment_cache, save_stock_to_db, save_kelly_record_to_db
+from data.snapshot import *
+from logic.crawlers import *
+from logic.spot import *  # _should_skip_akshare
+from logic.dapan_fetcher import *
 
 class DapanMixin:
     """大盘分析 + 情绪周期相关方法"""

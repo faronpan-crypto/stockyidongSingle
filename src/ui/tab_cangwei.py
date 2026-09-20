@@ -17,7 +17,10 @@ except ImportError: pd = None
 
 from utils.config import DB_PATH, _APP_CONFIG_DIR
 from utils.network import safe_call
+from data.snapshot import *
+from logic.crawlers import *  # TaogubaCrawler
 from data.db import init_database, save_kelly_record_to_db
+from logic.stock_names import *  # get_stock_name_by_code 等
 try:
     import akshare as ak
 except ImportError: ak = None
@@ -25,6 +28,15 @@ try:
     import tushare as ts
 except ImportError: ts = None
 
+from datetime import datetime, timedelta
+import re
+import json
+import os
+import sys
+import time
+import threading
+import traceback
+import sqlite3
 
 class CangweiMixin:
     """仓位管理 + 持仓监控相关方法"""

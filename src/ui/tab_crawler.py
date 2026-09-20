@@ -19,7 +19,16 @@ try:
 except ImportError: requests = None
 from utils.network import safe_call
 from utils.config import *  # 路径/配置/Token
+from data.snapshot import *  # get_news_stocks_* 函数
 
+from datetime import datetime, timedelta
+import re
+import os
+import time
+import threading
+import traceback
+import hashlib
+from urllib.parse import urljoin
 
 class CrawlerMixin:
     """爬虫/蜘蛛/抓取"""

@@ -19,7 +19,13 @@ try:
 except ImportError: requests = None
 from utils.network import safe_call
 from utils.config import *  # 路径/配置/Token
+from data.snapshot import *  # get_news_stocks_* 函数
+from logic.stock_names import *  # get_stock_name_by_code 等
 
+import threading
+import traceback
+import hashlib
+from urllib.parse import urljoin
 
 class LeaderMixin:
     """龙头股"""
