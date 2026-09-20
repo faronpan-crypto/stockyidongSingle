@@ -48,13 +48,13 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 
 import jieba
-import requests
+# import jieba  # 懒加载 (见下方 __getattr__)
 
-try:
-    import akshare as ak
-    AKSHARE_AVAILABLE = True
-except ImportError:
-    AKSHARE_AVAILABLE = False
+# try:
+#     import akshare as ak  # 懒加载
+#     AKSHARE_AVAILABLE = True  # 懒加载
+# except ImportError:
+#     AKSHARE_AVAILABLE = False
 import base64
 import contextlib
 import copy
@@ -74,11 +74,54 @@ from urllib.parse import urljoin
 
 import matplotlib
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from bs4 import BeautifulSoup
-from PIL import Image, ImageDraw, ImageFont, ImageTk
-from wordcloud import WordCloud
+# import matplotlib.pyplot as plt  # 懒加载
+# import numpy as np  # 懒加载
+# import pandas as pd  # 懒加载
+# from bs4 import BeautifulSoup  # 懒加载
+# from PIL import Image, ImageDraw, ImageFont, ImageTk  # 懒加载
+# from wordcloud import WordCloud  # 懒加载
+
+# ==================== 重型模块懒加载 ====================
+_jieba_m = _np_m = _pd_m = _ak_m = _bs4_m = _pil_m = _wc_m = _plt_m = None
+
+def __getattr__(name):
+    global _jieba_m, _np_m, _pd_m, _ak_m, _bs4_m, _pil_m, _wc_m, _plt_m
+    if name == 'jieba':
+        if _jieba_m is None: import jieba as _m; globals()['_jieba_m'] = _m
+        return _jieba_m
+    if name == 'np':
+        if _np_m is None: import numpy as _m; globals()['_np_m'] = _m
+        return _np_m
+    if name == 'pd':
+        if _pd_m is None: import pandas as _m; globals()['_pd_m'] = _m
+        return _pd_m
+    if name == 'plt':
+        if _plt_m is None: import matplotlib.pyplot as _m; globals()['_plt_m'] = _m
+        return _plt_m
+    if name in ('ak', 'akshare'):
+        if _ak_m is None:
+            try: import akshare as _m; globals()['_ak_m'] = _m
+            except: globals()['_ak_m'] = None
+        return _ak_m
+    if name == 'AKSHARE_AVAILABLE':
+        if _ak_m is None:
+            try: import akshare; globals()['_ak_m'] = akshare
+            except: globals()['_ak_m'] = None
+        return _ak_m is not None
+    if name == 'BeautifulSoup':
+        if _bs4_m is None: from bs4 import BeautifulSoup; globals()['_bs4_m'] = BeautifulSoup
+        return _bs4_m
+    if name == 'WordCloud':
+        if _wc_m is None: from wordcloud import WordCloud; globals()['_wc_m'] = WordCloud
+        return _wc_m
+    if name in ('Image', 'ImageDraw', 'ImageFont', 'ImageTk'):
+        if _pil_m is None:
+            from PIL import Image as _i, ImageDraw as _id, ImageFont as _if, ImageTk as _it
+            globals()['_pil_m'] = (_i, _id, _if, _it)
+        idx = {'Image':0,'ImageDraw':1,'ImageFont':2,'ImageTk':3}[name]
+        return _pil_m[idx]
+    raise AttributeError(f"module has no attribute '{name}'")
+
 
 # ==================== Phase 2 模块化导入 ====================
 from utils.suppress import *  # L97-109, 110-124, 126-136, 137-151, 153-161
