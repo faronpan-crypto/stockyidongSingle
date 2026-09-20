@@ -46066,6 +46066,15 @@ class StockKeywordAnalyzerGUI:
 
                 for ci in range(7): grid_f.grid_columnconfigure(ci, weight=1)
                 is_rebuilding[0] = False
+                # 强制布局刷新 (确保 Canvas + grid_f 正确显示)
+                try:
+                    grid_f.update_idletasks()
+                    _cal_canvas.configure(scrollregion=_cal_canvas.bbox("all"))
+                    if _cal_canvas.winfo_width() > 1:
+                        _cal_canvas.itemconfig(_cal_window_id, width=_cal_canvas.winfo_width())
+                    print(f"[情绪周期] 📐 canvas={_cal_canvas.winfo_width()}x{_cal_canvas.winfo_height()}, grid_f={grid_f.winfo_width()}x{grid_f.winfo_height()}, children={len(grid_f.winfo_children())}", flush=True)
+                except Exception as _lyt:
+                    print(f"[情绪周期] layout refresh warn: {_lyt}", flush=True)
                 _refresh_stats()
                 print(f"[情绪周期] ✅ Notebook 渲染完成, cells={row*7+col if col else row*7}", flush=True)
             except Exception as _e:
@@ -46402,6 +46411,7 @@ class StockKeywordAnalyzerGUI:
 
             # ---------- 渲染月历 ----------
             def _render_month():
+                print(f"[日历] 🎨 _render_month 开始, hist={len(hist_dict)}天", flush=True)
                 # 每次渲染前先从磁盘 reload (大盘后台可能刚同步完新数据)
                 try:
                     _reload_hist()
@@ -46522,6 +46532,15 @@ class StockKeywordAnalyzerGUI:
 
                     for ci in range(7): grid_f.grid_columnconfigure(ci, weight=1)
                     for ri in range(max(row + 1, 6)): grid_f.grid_rowconfigure(ri, weight=1)
+                    # 强制布局刷新
+                    try:
+                        grid_f.update_idletasks()
+                        _cal_cv.configure(scrollregion=_cal_cv.bbox("all"))
+                        if _cal_cv.winfo_width() > 1:
+                            _cal_cv.itemconfig(_cal_wid2, width=_cal_cv.winfo_width())
+                        print(f"[日历] 📐 canvas={_cal_cv.winfo_width()}x{_cal_cv.winfo_height()}, grid_f={grid_f.winfo_width()}x{grid_f.winfo_height()}, children={len(grid_f.winfo_children())}", flush=True)
+                    except Exception as _lyt2:
+                        print(f"[日历] layout refresh warn: {_lyt2}", flush=True)
                 except Exception as _rr_e:
                     print(f"[日历] ❌ 渲染失败: {_rr_e}", flush=True)
                     import traceback as _tb_r; _tb_r.print_exc()
