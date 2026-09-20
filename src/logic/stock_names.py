@@ -1,3 +1,7 @@
+try:
+    import jieba
+except ImportError:
+    jieba = None
 # 迁移自 stockyidong mac003.py ranges=[(1007, 1024), (1025, 1029), (1030, 1235), (1236, 1361), (1362, 1382), (1383, 1392), (1393, 1438), (1439, 1490)]
 import os
 import sys

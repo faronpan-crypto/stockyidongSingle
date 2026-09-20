@@ -19,6 +19,7 @@ try:
 except ImportError: requests = None
 from utils.network import safe_call
 from logic.crawlers import *  # TaogubaCrawler
+from logic.spot import *
 from logic.stock_names import *  # get_stock_name_by_code 等
 
 from datetime import datetime, timedelta
@@ -6616,6 +6617,11 @@ except Exception as e:
                 f.write(runner_code)
             env = os.environ.copy()
             env["PYTHONHTTPSVERIFY"] = "0"
+            # 关键: 让子进程能找到 utils/, logic/, data/ 模块
+            _src_dir = os.path.dirname(os.path.abspath(__file__))
+            _src_parent = os.path.dirname(_src_dir)  # src/ 目录
+            existing_pp = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = f"{_src_parent}{os.pathsep}{existing_pp}" if existing_pp else _src_parent
             cmd = ["/Library/Frameworks/Python.framework/Versions/3.11/bin/python3", runner_path]
             def work():
                 try:

@@ -1,3 +1,7 @@
+try:
+    import jieba
+except ImportError:
+    jieba = None
 """剩余所有方法"""
 import os, sys, re, json, time, threading, traceback, hashlib, urllib.parse
 import tkinter as tk
@@ -13572,8 +13576,8 @@ class RestMixin:
             data = {'signals': []}
             # 1️⃣ 融资融券 (沪深合计)
             try:
-                sh = safe_call(ak.macro_china_market_margin_sh, fallback=[], label="ak.macro_china_market_margin_sh")
-                sz = safe_call(ak.macro_china_market_margin_sz, fallback=[], label="ak.macro_china_market_margin_sz")
+                sh = ak.macro_china_market_margin_sh
+                sz = ak.macro_china_market_margin_sz
                 sh_col = [c for c in sh.columns if '融资' in c or '余额' in c][-1]
                 sz_col = [c for c in sz.columns if '融资' in c or '余额' in c][-1]
                 sh_cur = float(sh[sh_col].iloc[-1])
@@ -13615,7 +13619,7 @@ class RestMixin:
                 data['north'] = {'error': str(e)[:60]}
             # 3️⃣ 涨跌停广度
             try:
-                df = safe_call(ak.stock_market_activity_legu, fallback=[], label="ak.stock_market_activity_legu")
+                df = ak.stock_market_activity_legu()
                 if df is not None and len(df) > 0:
                     items = dict(zip(df['item'], df['value']))
                     up = float(items.get('上涨', 0))

@@ -6,6 +6,7 @@ from data.db import save_stock_to_db, save_article_to_db, save_news_info_to_db, 
 from utils.config import *  # 路径/配置/Token
 from data.snapshot import *  # get_news_stocks_* 函数
 from logic.crawlers import *  # TaogubaCrawler
+from logic.spot import *
 from logic.stock_names import *  # get_stock_name_by_code 等
 
 from datetime import datetime, timedelta

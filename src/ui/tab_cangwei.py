@@ -19,6 +19,7 @@ from utils.config import DB_PATH, _APP_CONFIG_DIR
 from utils.network import safe_call
 from data.snapshot import *
 from logic.crawlers import *  # TaogubaCrawler
+from logic.spot import *
 from data.db import init_database, save_kelly_record_to_db
 from logic.stock_names import *  # get_stock_name_by_code 等
 try:

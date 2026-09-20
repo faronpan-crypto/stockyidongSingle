@@ -769,9 +769,45 @@ from ui.tab_ai import AiMixin
 from ui.tab_inner_class import InnerClassMixin
 from ui.tab_rest import RestMixin
 
+import traceback as _tb
+_ERROR_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime_errors.log")
+_orig_excepthook = sys.excepthook
+def _global_exception_handler(exc_type, exc_val, exc_tb):
+    try:
+        with open(_ERROR_LOG, "a") as _f:
+            _f.write("="*60 + "\n")
+            _f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
+            _tb.print_exception(exc_type, exc_val, exc_tb, file=_f)
+            _f.write("\n")
+    except Exception: pass
+    _orig_excepthook(exc_type, exc_val, exc_tb)
+sys.excepthook = _global_exception_handler
+import threading as _th
+_orig_threading_exc = getattr(_th, 'excepthook', None)
+def _thread_exception_handler(args):
+    try:
+        with open(_ERROR_LOG, "a") as _f:
+            _f.write("="*60 + "\n[THREAD] " + str(args.thread) + "\n")
+            _tb.print_exception(args.exc_type, args.exc_value, args.exc_traceback, file=_f)
+            _f.write("\n")
+    except Exception: pass
+_th.excepthook = _thread_exception_handler
+
 class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMixin, WarningMixin, CangweiMixin, WencaiMixin, HotMixin, NewsMixin, IndicatorMixin, ConfigMixin, AnalysisMixin, DbSearchMixin, StockDetailMixin, ScreenshotMixin, CrawlerMixin, FileIoMixin, ThreadMixin, FormatMixin, HoldingsMixin, BuildersMixin, NavMixin, SpiderReaderMixin, RealtimeMixin, ChecksMixin, MathMixin, GettersMixin, TradeMixin, EmoDeepMixin, TokenMixin, ScheduleMixin, ButtonsMixin, PipelineMixin, WebMixin, ToplevelMixin, DefaultConfigMixin, Nav2Mixin, LeaderMixin, AiMixin, InnerClassMixin, RestMixin):
     def __init__(self, root):
         self.root = root
+        # Tkinter 按钮回调异常钩子 (Tkinter 会吞掉按钮异常, 必须单独 hook)
+        def _tk_callback_exception(exc_type, exc_val, exc_tb):
+            try:
+                with open(_ERROR_LOG, "a") as _f:
+                    _f.write("="*60 + "\n[TK_CALLBACK] " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
+                    _tb.print_exception(exc_type, exc_val, exc_tb, file=_f)
+                    _f.write("\n")
+                print(f"⚠️ Tkinter callback error: {exc_val}")
+            except Exception: pass
+        try:
+            self.root.report_callback_exception = _tk_callback_exception
+        except Exception: pass
         # 安全更新窗口方法 - macOS上直接跳过
         def _safe_update():
             try:
@@ -1883,6 +1919,11 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
         emotion_blink_state = {"blinking": False, "visible": True, "timer_id": None}
         def update_emotion_light_large(*args):
             """更新情绪周期红绿灯(大号+三个2倍大灯在爬取按钮右侧,带闪烁)"""
+            try:
+                if not emotion_light_canvas_large.winfo_exists():
+                    return
+            except Exception:
+                return
             cycle = emotion_cycle_var.get()
             emotion_light_canvas_large.delete("all")
             for c in getattr(self, 'emotion_light_2x_canvases', []):
@@ -1924,7 +1965,15 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
             """闪烁动画"""
             if emotion_blink_state["blinking"]:
                 emotion_blink_state["visible"] = not emotion_blink_state["visible"]
-                update_emotion_light_large()
+                try:
+                    if emotion_light_canvas_large.winfo_exists():
+                        update_emotion_light_large()
+                    else:
+                        emotion_blink_state["blinking"] = False
+                        return
+                except Exception:
+                    emotion_blink_state["blinking"] = False
+                    return
                 # 每500ms切换一次
                 emotion_blink_state["timer_id"] = self.root.after(500, blink_emotion_light)
         # 绑定情绪周期变化;保存更新函数供爬取按钮右侧三灯刷新用
@@ -6417,23 +6466,45 @@ def main():
                 STOCK_CODES_DICT = _sn.STOCK_CODES_DICT
                 STOCK_NAMES_SET = _sn.STOCK_NAMES_SET
                 STOCK_NAME_TO_CODE = _sn.STOCK_NAME_TO_CODE
-                # 重新注入 Phase 2 子模块
+                # 注入 Phase 2 子模块
                 import data.snapshot as _sp
                 _sn.STOCK_CODES_DICT = STOCK_CODES_DICT
+                _sn.STOCK_NAMES_SET = STOCK_NAMES_SET
+                _sn.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
                 _sp.STOCK_CODES_DICT = STOCK_CODES_DICT
-                # 重新注入所有 Mixin 模块
-                for _mod_name in [_m for _k, _m in list(globals().items())
-                                   if _k.startswith('_m_') and hasattr(_m, 'STOCK_CODES_DICT')]:
-                    try:
-                        _mod_name.STOCK_CODES_DICT = STOCK_CODES_DICT
-                        _mod_name.STOCK_NAMES_SET = STOCK_NAMES_SET
-                        _mod_name.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-                    except Exception:
-                        pass
-                print(f"✓ 股票代码表已同步到所有子模块 ({len(STOCK_CODES_DICT or {})} 只)")
+                # 暴力遍历 sys.modules, 给所有 tab_* 模块注入
+                import sys as _sys
+                count = 0
+                for _mod in list(_sys.modules.values()):
+                    if not _mod: continue
+                    _name = getattr(_mod, '__name__', '')
+                    if ('tab_' in _name or _name.startswith('ui.') or
+                        _name.startswith('logic.') or _name.startswith('data.') or
+                        _name.startswith('utils.')):
+                        if hasattr(_mod, 'STOCK_CODES_DICT'):
+                            try:
+                                _mod.STOCK_CODES_DICT = STOCK_CODES_DICT
+                                _mod.STOCK_NAMES_SET = STOCK_NAMES_SET
+                                _mod.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
+                                count += 1
+                            except Exception:
+                                pass
+                print(f"✓ 股票代码表已同步到 {count} 个子模块 ({len(STOCK_CODES_DICT or {})} 只)")
             except Exception as e:
                 print(f"后台预加载股票名称列表失败: {e}")
         root.after(3000, lambda: threading.Thread(target=_preload_stock_names, daemon=True).start())
+        # 启动后 20s 自动后台更新 market_sentiment_data.json (30s 跑完, 不阻塞 UI)
+        def _bg_update_sentiment():
+            try:
+                import subprocess as _sp_sent
+                _emo_py_sent = os.path.expanduser("~/.qclaw/workspace-agent-85985980/market_sentiment.py")
+                if os.path.exists(_emo_py_sent):
+                    print("[启动] 📊 后台更新情绪数据 (market_sentiment.py)...")
+                    _sp_sent.run([sys.executable, _emo_py_sent], capture_output=True, text=True, timeout=60)
+                    print("[启动] ✅ 情绪数据已更新")
+            except Exception as _e_sent:
+                print(f"[启动] 情绪数据后台更新失败: {_e_sent}")
+        root.after(20000, lambda: threading.Thread(target=_bg_update_sentiment, daemon=True).start())
         # 创建应用实例(在创建过程中会逐步显示界面)
         try:
             app = StockKeywordAnalyzerGUI(root)
