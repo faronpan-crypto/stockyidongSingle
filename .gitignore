@@ -50,3 +50,6 @@ tushare_local.json
 .venv/
 src/data/tk.csv
 src/data/tushare_token.json
+
+# 模块化源码下的运行时缓存 (只 track .py)
+src/data/*.json
