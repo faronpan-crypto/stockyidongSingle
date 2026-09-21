@@ -209,48 +209,33 @@ class MathMixin:
 
         # ===== 主逻辑 =====
         try:
-            # 补全 ts_code
             pure = str(stock_code).strip()
-            if pure.startswith(("43", "83", "87", "92")):
-                ts_code = pure + ".BJ"
-            elif pure.startswith(("6", "5", "9")):
-                ts_code = pure + ".SH"
-            else:
-                ts_code = pure + ".SZ"
 
-            # 日期范围: 最近 180 天确保能取到 80 根
-            end_date = _dt_now.now().strftime("%Y%m%d")
-            start_date = (_dt_now.now() - _td(days=180)).strftime("%Y%m%d")
+            # ===== 用 akshare 拉K线 (新浪 + 直连兜底) =====
+            from ui._akshare_fetcher import fetch_daily_kline, fetch_realtime_basic
 
-            # 初始化 tushare
-            _token = _os_env.environ.get("TUSHARE_TOKEN", "")
-            if not _token:
-                return {"scores": {}, "avg_score": None, "error": "TUSHARE_TOKEN 环境变量未设置"}
-            _ts_pro.set_token(_token)
-            pro = _ts_pro.pro_api()
-
-            # 拉日K
-            daily = pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+            daily = fetch_daily_kline(pure, days=250)
             if daily is None or len(daily) < 60:
                 return {"scores": {}, "avg_score": None, "error": f"K线不足60根, 只有{len(daily) if daily is not None else 0}"}
-            daily = daily.sort_values("trade_date").tail(80)
+            daily = daily.tail(80).reset_index(drop=True)
+            stock_name = pure
 
-            # 拉 daily_basic
-            db = pro.daily_basic(ts_code=ts_code, start_date=start_date, end_date=end_date,
-                                fields="ts_code,trade_date,turnover_rate,pe,total_mv")
-            stock_name = ""
-            try:
-                sb = pro.stock_basic(ts_code=ts_code, fields="ts_code,name")
-                if sb is not None and len(sb) > 0:
-                    stock_name = str(sb.iloc[0]["name"])
-            except Exception:
-                stock_name = pure
+            # 新浪有 turnover (小数) → 换算成百分比
+            tr = None; pe = None; mv = None
+            if "turnover" in daily.columns:
+                _tr_val = daily.iloc[-1].get("turnover")
+                if _tr_val is not None and str(_tr_val) not in ("nan", "NaN", ""):
+                    try: tr = float(_tr_val) * 100
+                    except: pass
+            # PE/市值尝试从实时行情拿 (东财 spot_em, 网络封就 None)
+            _rt = fetch_realtime_basic(pure)
+            pe = _rt.get("pe"); mv = _rt.get("mv")
 
             # 提取数组
             cl = daily["close"].tolist()
             hi = daily["high"].tolist()
             lo = daily["low"].tolist()
-            vo = daily["vol"].tolist()
+            vo = daily["volume"].tolist()
             op = daily["open"].tolist()
 
             # 计算 MA
@@ -275,24 +260,6 @@ class MathMixin:
             else:
                 h60 = max(hi)
             pct3 = (cl[-1] - h60) / h60 * 100 if h60 else 0.0
-
-            # daily_basic 指标 (取最近一行)
-            tr = None; pe = None; mv = None
-            if db is not None and len(db) > 0:
-                db = db.sort_values("trade_date")
-                last = db.iloc[-1]
-                _trv = last.get("turnover_rate")
-                if _trv is not None and str(_trv) != "nan":
-                    try: tr = float(_trv)
-                    except: pass
-                _pev = last.get("pe")
-                if _pev is not None and str(_pev) != "nan":
-                    try: pe = float(_pev)
-                    except: pass
-                _mvv = last.get("total_mv")
-                if _mvv is not None and str(_mvv) != "nan":
-                    try: mv = float(_mvv)
-                    except: pass
 
             # ===== 调用 7 个打分函数 =====
             scorers = [

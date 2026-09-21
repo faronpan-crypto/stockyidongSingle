@@ -43481,48 +43481,75 @@ class StockKeywordAnalyzerGUI:
 
         # ===== 主逻辑 =====
         try:
-            # 补全 ts_code
+            pure = str(stock_code).strip()
+            # ===== 新浪 akshare stock_zh_a_daily (单文件版, 不依赖 ui._akshare_fetcher) =====
+            import akshare as _ak
+            import pandas as _pd
             pure = str(stock_code).strip()
             if pure.startswith(("43", "83", "87", "92")):
-                ts_code = pure + ".BJ"
+                _sina_sym = "bj" + pure
             elif pure.startswith(("6", "5", "9")):
-                ts_code = pure + ".SH"
+                _sina_sym = "sh" + pure
             else:
-                ts_code = pure + ".SZ"
+                _sina_sym = "sz" + pure
+            daily = None
+            stock_name = pure
+            try:
+                daily = _ak.stock_zh_a_daily(symbol=_sina_sym, adjust="qfq")
+            except Exception as _e1:
+                print(f"[游资心法] 新浪 akshare 挂: {_e1}, 尝试新浪直连JSON")
+                try:
+                    import requests as _req; import json as _json
+                    _url = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
+                    _params = {"symbol": _sina_sym, "scale": "240", "ma": "no", "datalen": "250"}
+                    _resp = _req.get(_url, params=_params, timeout=10,
+                                     headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"})
+                    if _resp.status_code == 200 and _resp.text.startswith("["):
+                        _data = _json.loads(_resp.text)
+                        daily = _pd.DataFrame(_data).rename(columns={"day": "date"})
+                except Exception as _e2:
+                    print(f"[游资心法] 直连也挂: {_e2}, 尝试同花顺")
+                    try:
+                        _ths_prefix = "hs" if _sina_sym.startswith("sh") else ("sz" if _sina_sym.startswith("sz") else "bj")
+                        _ths_url = f"https://d.10jqka.com.cn/v6/line/{_ths_prefix}{pure}/01/last250.js"
+                        _r2 = _req.get(_ths_url, timeout=10,
+                                       headers={"User-Agent": "Mozilla/5.0", "Referer": "https://stockpage.10jqka.com.cn/"})
+                        if _r2.status_code == 200:
+                            _p = _r2.text.index("(") + 1
+                            _td2 = _json.loads(_r2.text[_p:_r2.text.rindex(")")])
+                            if "data" in _td2 and _td2["data"]:
+                                _rows = []
+                                for _ln in _td2["data"].strip().split(";"):
+                                    _ps = _ln.split(",")
+                                    if len(_ps) >= 7:
+                                        _rows.append({"date": _ps[0], "open": float(_ps[1]),
+                                                       "high": float(_ps[2]), "low": float(_ps[3]),
+                                                       "close": float(_ps[4]), "volume": float(_ps[5])})
+                                if _rows:
+                                    daily = _pd.DataFrame(_rows)
+                                    daily["date"] = _pd.to_datetime(daily["date"])
+                                    print(f"[游资心法] 同花顺兜底成功 {len(daily)} 根")
+                    except Exception as _e3:
+                        print(f"[游资心法] 同花顺也挂: {_e3}")
+                    if daily is None:
+                        return {"scores": {}, "avg_score": None, "error": f"K线获取失败: 新浪{_e1} / 直连{_e2}"}
+            if daily is None or daily.empty:
+                return {"scores": {}, "avg_score": None, "error": "K线获取失败: 新浪+直连都返回空"}
+            for _c in ["open", "high", "low", "close", "volume"]:
+                daily[_c] = _pd.to_numeric(daily[_c], errors="coerce")
+            daily = daily.sort_values("date").tail(80).reset_index(drop=True)
 
-            # 日期范围: 最近 180 天确保能取到 80 根
-            end_date = _dt_now.now().strftime("%Y%m%d")
-            start_date = (_dt_now.now() - _td(days=180)).strftime("%Y%m%d")
-
-            # 初始化 tushare
-            _token = _os_env.environ.get("TUSHARE_TOKEN", "")
-            if not _token:
-                return {"scores": {}, "avg_score": None, "error": "TUSHARE_TOKEN 环境变量未设置"}
-            _ts_pro.set_token(_token)
-            pro = _ts_pro.pro_api()
-
-            # 拉日K
-            daily = pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
             if daily is None or len(daily) < 60:
                 return {"scores": {}, "avg_score": None, "error": f"K线不足60根, 只有{len(daily) if daily is not None else 0}"}
-            daily = daily.sort_values("trade_date").tail(80)
 
-            # 拉 daily_basic
-            db = pro.daily_basic(ts_code=ts_code, start_date=start_date, end_date=end_date,
-                                fields="ts_code,trade_date,turnover_rate,pe,total_mv")
-            stock_name = ""
-            try:
-                sb = pro.stock_basic(ts_code=ts_code, fields="ts_code,name")
-                if sb is not None and len(sb) > 0:
-                    stock_name = str(sb.iloc[0]["name"])
-            except Exception:
-                stock_name = pure
+            # 腾讯K线没有换手率/PE/市值 → 设 None (打分函数已兼容)
+            tr = None; pe = None; mv = None
 
             # 提取数组
             cl = daily["close"].tolist()
             hi = daily["high"].tolist()
             lo = daily["low"].tolist()
-            vo = daily["vol"].tolist()
+            vo = daily["volume"].tolist()
             op = daily["open"].tolist()
 
             # 计算 MA
@@ -43547,24 +43574,6 @@ class StockKeywordAnalyzerGUI:
             else:
                 h60 = max(hi)
             pct3 = (cl[-1] - h60) / h60 * 100 if h60 else 0.0
-
-            # daily_basic 指标 (取最近一行)
-            tr = None; pe = None; mv = None
-            if db is not None and len(db) > 0:
-                db = db.sort_values("trade_date")
-                last = db.iloc[-1]
-                _trv = last.get("turnover_rate")
-                if _trv is not None and str(_trv) != "nan":
-                    try: tr = float(_trv)
-                    except: pass
-                _pev = last.get("pe")
-                if _pev is not None and str(_pev) != "nan":
-                    try: pe = float(_pev)
-                    except: pass
-                _mvv = last.get("total_mv")
-                if _mvv is not None and str(_mvv) != "nan":
-                    try: mv = float(_mvv)
-                    except: pass
 
             # ===== 调用 7 个打分函数 =====
             scorers = [
@@ -72613,31 +72622,63 @@ class StockKeywordAnalyzerGUI:
             return None
 
     def _get_daily_kline_data_akshare(self, stock_code, days=60):
-        """akshare 兜底获取日K线(当 Tushare daily 被限频/熔断/积分不足时)
-        优先 新浪(stock_zh_a_daily), 失败则 腾讯(stock_zh_a_hist_tx) 双通道
-        """
+        """akshare 获取日K线: 新浪 stock_zh_a_daily 优先, 直连JSON兜底 (不依赖子模块)"""
         try:
             import akshare as ak
-            # 根据首字符判断市场: 6开头=沪(sh), 0/3开头=深(sz)
             code = str(stock_code).zfill(6)
-            prefix = 'sh' if code.startswith('6') else 'sz'
-            symbol = f"{prefix}{code}"
-            # 优先新浪(数据全), 失败则腾讯
+            if code.startswith(("43", "83", "87", "92")):
+                _sym = "bj" + code
+            elif code.startswith(("6", "5", "9")):
+                _sym = "sh" + code
+            else:
+                _sym = "sz" + code
             df = None
             try:
-                df = ak.stock_zh_a_daily(symbol=symbol, adjust="qfq")
-            except Exception:
+                df = ak.stock_zh_a_daily(symbol=_sym, adjust="qfq")
+            except Exception as _e1:
+                print(f"  [akshare] {code} 新浪接口挂({_e1}), 尝试直连JSON")
                 try:
-                    df = ak.stock_zh_a_hist_tx(
-                        symbol=symbol,
-                        start_date=(datetime.now() - timedelta(days=days + 30)).strftime('%Y%m%d'),
-                        end_date=datetime.now().strftime('%Y%m%d'),
-                        adjust="qfq",
-                    )
+                    import requests as _req; import json as _json
+                    _url = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
+                    _params = {"symbol": _sym, "scale": "240", "ma": "no", "datalen": str(days + 30)}
+                    _resp = _req.get(_url, params=_params, timeout=10,
+                                     headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"})
+                    if _resp.status_code == 200 and _resp.text.startswith("["):
+                        df = pd.DataFrame(_json.loads(_resp.text)).rename(columns={"day": "date"})
                 except Exception:
                     df = None
+            # 终极兜底: 同花顺直连 (新浪/腾讯/东财全被封时的最后选择)
             if df is None or df.empty:
-                print(f"  [akshare] {code} 新浪+腾讯 均无数据")
+                try:
+                    import requests as _req; import json as _json
+                    import pandas as _pd
+                    _ths_prefix = "hs" if _sym.startswith("sh") else ("sz" if _sym.startswith("sz") else "bj")
+                    _ths_code = _ths_prefix + code
+                    _ths_url = f"https://d.10jqka.com.cn/v6/line/{_ths_code}/01/last{days + 30}.js"
+                    _r = _req.get(_ths_url, timeout=10,
+                                  headers={"User-Agent": "Mozilla/5.0",
+                                           "Referer": "https://stockpage.10jqka.com.cn/"})
+                    if _r.status_code == 200:
+                        _p = _r.text.index("(") + 1
+                        _data = _json.loads(_r.text[_p:_r.text.rindex(")")])
+                        if "data" in _data and _data["data"]:
+                            _rows = []
+                            for _line in _data["data"].strip().split(";"):
+                                _parts = _line.split(",")
+                                if len(_parts) >= 7:
+                                    _rows.append({
+                                        "date": _parts[0], "open": float(_parts[1]),
+                                        "high": float(_parts[2]), "low": float(_parts[3]),
+                                        "close": float(_parts[4]), "volume": float(_parts[5]),
+                                    })
+                            if _rows:
+                                df = _pd.DataFrame(_rows)
+                                df["date"] = _pd.to_datetime(df["date"])
+                                print(f"  [同花顺] {code} 兜底成功 {len(df)} 根")
+                except Exception as _e3:
+                    print(f"  [同花顺] {code} 也失败: {_e3}")
+            if df is None or df.empty:
+                print(f"  [akshare] {code} 新浪+直连+同花顺 均无数据")
                 return None
             # 统一转为中文列名
             rename_map = {
@@ -72699,11 +72740,16 @@ class StockKeywordAnalyzerGUI:
             return None
 
     def _get_daily_kline_data_tushare(self, stock_code, days=60):
-        """从Tushare获取日K线数据(用于持仓详情日K线图),失败自动回退 akshare"""
+        """获取日K线数据: akshare 优先, Tushare 兜底 (Tushare daily 被熔断/积分不足)"""
+        # ===== 方案1: akshare (新浪, 稳定) =====
+        try:
+            return self._get_daily_kline_data_akshare(stock_code, days)
+        except Exception as _e:
+            print(f"  [K线] akshare 也异常: {_e}, 尝试 Tushare 兜底")
+        # ===== 方案2: Tushare =====
         try:
             if not TS_AVAILABLE or not (getattr(self, 'ts_token', None) or TS_DEFAULT_TOKEN):
-                print(f"  [Tushare] 不可用,回退 akshare")
-                return self._get_daily_kline_data_akshare(stock_code, days)
+                return None
             self._ensure_tushare_client(self.ts_token or TS_DEFAULT_TOKEN)
             ts_code = self._format_ts_code(str(stock_code).zfill(6))
             end_date = datetime.now().strftime('%Y%m%d')

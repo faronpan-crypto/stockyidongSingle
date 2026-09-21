@@ -7794,10 +7794,29 @@ class CangweiMixin:
                     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
                     from matplotlib.figure import Figure
                     from matplotlib.patches import Rectangle
-                    df_k = _ts.pro_api().daily(ts_code=ts_c, start_date="20250901",
-                                              end_date=_dt.now().strftime("%Y%m%d"))
+                    df_k = None
+                    # === tushare 优先 ===
+                    try:
+                        import tushare as _ts
+                        from datetime import datetime as _dt
+                        df_k = _ts.pro_api().daily(ts_code=ts_c, start_date="20250901",
+                                                  end_date=_dt.now().strftime("%Y%m%d"))
+                    except Exception:
+                        pass
+                    # === akshare 兜底 ===
                     if df_k is None or len(df_k) == 0:
-                        kw.after(0, lambda: loading.config(text="❌ 无K线数据"))
+                        try:
+                            from ui._akshare_fetcher import fetch_daily_kline
+                            code6 = ts_c.split(".")[0] if "." in ts_c else str(code).zfill(6)
+                            df_ak = fetch_daily_kline(code6, days=120)
+                            if df_ak is not None and len(df_ak) >= 30:
+                                df_k = df_ak.rename(columns={"date": "trade_date"})
+                                df_k["trade_date"] = pd.to_datetime(df_k["trade_date"]).dt.strftime("%Y%m%d")
+                                df_k["vol"] = df_k["volume"]
+                        except Exception:
+                            pass
+                    if df_k is None or len(df_k) == 0:
+                        kw.after(0, lambda: loading.config(text="❌ 无K线数据 (已尝试 tushare + akshare)"))
                         return
                     df_k = df_k.sort_values("trade_date").reset_index(drop=True)
                     # 最近 120 天 (约 6 个月)

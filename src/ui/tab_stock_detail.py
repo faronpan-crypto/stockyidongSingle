@@ -207,231 +207,87 @@ class StockDetailMixin:
             return None
 
     def _get_daily_kline_data_tushare(self, stock_code, days=60):
-        """从Tushare获取日K线数据(用于持仓详情日K线图),失败自动回退 akshare"""
+        """获取日K线数据, akshare 优先, Tushare 兜底 (daily 被熔断/积分不足时)"""
+        # ===== 方案1: akshare (新浪 + 直连兜底) =====
         try:
-            if not TS_AVAILABLE or not (getattr(self, 'ts_token', None) or TS_DEFAULT_TOKEN):
-                print(f"  [Tushare] 不可用,回退 akshare")
-                return self._get_daily_kline_data_akshare(stock_code, days)
-            self._ensure_tushare_client(self.ts_token or TS_DEFAULT_TOKEN)
-            ts_code = self._format_ts_code(str(stock_code).zfill(6))
-            end_date = datetime.now().strftime('%Y%m%d')
-            start_date = (datetime.now() - timedelta(days=days + 30)).strftime('%Y%m%d')
-            df = self.ts_client.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
-            if df is None or df.empty:
-                print(f"  [Tushare] 返回空数据,回退 akshare")
-                return self._get_daily_kline_data_akshare(stock_code, days)
-            df = df.sort_values('trade_date').tail(days).reset_index(drop=True)
-            # 转为与 _draw 兼容的列名(成交量:Tushare daily 的 vol 单位为手)
-            _vol = df['vol'].astype(float) if 'vol' in df.columns else pd.Series(np.zeros(len(df)))
-            data = pd.DataFrame({
-                '开盘': df['open'].astype(float),
-                '收盘': df['close'].astype(float),
-                '最高': df['high'].astype(float),
-                '最低': df['low'].astype(float),
-                '成交量': _vol,
-            })
-            close_prices = data['收盘'].values
-            opens = data['开盘'].values
-            highs = data['最高'].values
-            lows = data['最低'].values
-            len(close_prices)
-            periods = {
-                'ma1': min(1, len(close_prices)),
-                'ma5': min(5, len(close_prices)),
-                'ma10': min(10, len(close_prices)),
-                'ma20': min(20, len(close_prices))
-            }
-            ma_values = {}
-            for ma_name, period in periods.items():
-                if len(close_prices) >= period:
-                    ma_values[ma_name] = []
-                    for i in range(period - 1, len(close_prices)):
-                        ma_value = float(sum(close_prices[i - period + 1:i + 1]) / period)
-                        ma_values[ma_name].append(ma_value)
-                else:
-                    ma_values[ma_name] = []
-            # 主力成本线(VWAP):累计成交额 / 累计成交量,通达信算法
-            # 成交均价 = (开盘 + 最高 + 最低 + 收盘) / 4
-            vwap_values = []
-            if len(close_prices) >= 2:
-                cum_amount = 0.0
-                cum_vol = 0.0
-                for i in range(len(close_prices)):
-                    typical_price = (opens[i] + highs[i] + lows[i] + close_prices[i]) / 4.0
-                    amount = typical_price * float(data['成交量'].iloc[i])
-                    cum_amount += amount
-                    cum_vol += float(data['成交量'].iloc[i])
-                    if cum_vol > 0:
-                        vwap_values.append(float(cum_amount / cum_vol))
-                    else:
-                        vwap_values.append(float(typical_price))
-            ma_values['vwap'] = vwap_values
-            return {
-                'data': data,
-                'ma_values': ma_values,
-                'dates': list(df['trade_date'].astype(str)),
-                'trade_dates': list(df['trade_date'].astype(str))
-            }
+            return self._get_daily_kline_data_akshare(stock_code, days)
+        except Exception:
+            pass
+        # ===== 方案2: Tushare =====
+        try:
+            if TS_AVAILABLE and (getattr(self, 'ts_token', None) or TS_DEFAULT_TOKEN):
+                self._ensure_tushare_client(self.ts_token or TS_DEFAULT_TOKEN)
+                ts_code = self._format_ts_code(str(stock_code).zfill(6))
+                end_date = datetime.now().strftime('%Y%m%d')
+                start_date = (datetime.now() - timedelta(days=days + 30)).strftime('%Y%m%d')
+                df = self.ts_client.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+                if df is not None and not df.empty:
+                    df = df.sort_values('trade_date').tail(days).reset_index(drop=True)
+                    _vol = df['vol'].astype(float) if 'vol' in df.columns else pd.Series(np.zeros(len(df)))
+                    data = pd.DataFrame({
+                        '开盘': df['open'].astype(float), '收盘': df['close'].astype(float),
+                        '最高': df['high'].astype(float), '最低': df['low'].astype(float),
+                        '成交量': _vol,
+                    })
+                    close_prices = data['收盘'].values; opens = data['开盘'].values
+                    highs = data['最高'].values; lows = data['最低'].values
+                    periods = {'ma1': 1, 'ma5': 5, 'ma10': 10, 'ma20': 20}
+                    ma_values = {}
+                    for ma_name, period in periods.items():
+                        if len(close_prices) >= period:
+                            ma_values[ma_name] = [float(sum(close_prices[i - period + 1:i + 1]) / period)
+                                                  for i in range(period - 1, len(close_prices))]
+                        else:
+                            ma_values[ma_name] = []
+                    vwap_values = []
+                    if len(close_prices) >= 2:
+                        cum_amount = 0.0; cum_vol = 0.0
+                        for i in range(len(close_prices)):
+                            typ = (opens[i] + highs[i] + lows[i] + close_prices[i]) / 4.0
+                            cum_amount += typ * float(data['成交量'].iloc[i]); cum_vol += float(data['成交量'].iloc[i])
+                            vwap_values.append(float(cum_amount / cum_vol) if cum_vol > 0 else float(typ))
+                    ma_values['vwap'] = vwap_values
+                    dates_list = list(df['trade_date'].astype(str))
+                    return {'data': data, 'ma_values': ma_values, 'dates': dates_list, 'trade_dates': dates_list}
         except Exception as e:
-            print(f"获取日K线数据(Tushare)失败 {stock_code}: {e}")
-            # === Tushare 限频/积分不足 自动回退 akshare ===
-            return self._get_daily_kline_data_akshare(str(stock_code).zfill(6), days)
+            print(f"  [K线] Tushare 兜底也失败: {e}")
+        return None
 
     def _get_daily_kline_data_akshare(self, stock_code, days=60):
-        """akshare 兜底获取日K线(当 Tushare daily 被限频/积分不足时)
-        东财接口被封 → 改用新浪(stock_zh_a_daily) / 腾讯(stock_zh_a_hist_tx) 双通道
-        """
-        try:
-            import akshare as ak
-            # 根据首字符判断市场: 6开头=沪(sh), 0/3开头=深(sz)
-            code = str(stock_code).zfill(6)
-            prefix = 'sh' if code.startswith('6') else 'sz'
-            symbol = f"{prefix}{code}"
-            # 优先新浪(数据全), 失败则腾讯
-            df = None
-            try:
-                df = ak.stock_zh_a_daily(symbol=symbol, adjust="qfq")
-            except Exception:
-                try:
-                    df = ak.stock_zh_a_hist_tx(
-                        symbol=symbol,
-                        start_date=(datetime.now() - timedelta(days=days + 30)).strftime('%Y%m%d'),
-                        end_date=datetime.now().strftime('%Y%m%d'),
-                        adjust="qfq",
-                    )
-                except Exception:
-                    df = None
-            if df is None or df.empty:
-                print(f"  [akshare] {code} 新浪+腾讯 均无数据")
-                return None
-            # === 新浪列名: date, open, high, low, close, volume, amount ===
-            # === 腾讯列名: 日期, 开盘, 收盘, 最高, 最低, 成交量, 成交额, 振幅, 涨跌幅, 涨跌额, 换手率 ===
-            # 统一转为中文列名
-            rename_map = {
-                'date': '日期', 'open': '开盘', 'high': '最高',
-                'low': '最低', 'close': '收盘', 'volume': '成交量',
-            }
-            df = df.rename(columns=rename_map)
-            # 日期处理: 新浪返回 datetime, 腾讯返回 YYYY-MM-DD 字符串
-            if not np.issubdtype(df['日期'].dtype, np.datetime64):
-                df['日期'] = pd.to_datetime(df['日期'])
-            df = df.sort_values('日期').tail(days).reset_index(drop=True)
-            data = pd.DataFrame({
-                '开盘': df['开盘'].astype(float),
-                '收盘': df['收盘'].astype(float),
-                '最高': df['最高'].astype(float),
-                '最低': df['最低'].astype(float),
-                '成交量': df['成交量'].astype(float),  # akshare 单位: 手
-            })
-            close_prices = data['收盘'].values
-            opens = data['开盘'].values
-            highs = data['最高'].values
-            lows = data['最低'].values
-            periods = {'ma1': 1, 'ma5': 5, 'ma10': 10, 'ma20': 20}
-            ma_values = {}
-            for ma_name, period in periods.items():
-                if len(close_prices) >= period:
-                    ma_values[ma_name] = []
-                    for i in range(period - 1, len(close_prices)):
-                        ma_values[ma_name].append(
-                            float(sum(close_prices[i - period + 1:i + 1]) / period))
-                else:
-                    ma_values[ma_name] = []
-            vwap_values = []
-            if len(close_prices) >= 2:
-                cum_amount = 0.0
-                cum_vol = 0.0
-                for i in range(len(close_prices)):
-                    typical_price = (opens[i] + highs[i] + lows[i] + close_prices[i]) / 4.0
-                    amount = typical_price * float(data['成交量'].iloc[i])
-                    cum_amount += amount
-                    cum_vol += float(data['成交量'].iloc[i])
-                    if cum_vol > 0:
-                        vwap_values.append(float(cum_amount / cum_vol))
-                    else:
-                        vwap_values.append(float(typical_price))
-            ma_values['vwap'] = vwap_values
-            dates_list = df['日期'].dt.strftime('%Y%m%d').tolist()
-            return {
-                'data': data,
-                'ma_values': ma_values,
-                'dates': dates_list,
-                'trade_dates': dates_list,
-                '_source': 'akshare',
-            }
-        except Exception as e2:
-            print(f"获取日K线数据(akshare 兜底)也失败 {stock_code}: {e2}")
-            import traceback; traceback.print_exc()
+        """akshare 获取日K线 (新浪 stock_zh_a_daily + 直连兜底)"""
+        from ui._akshare_fetcher import fetch_daily_kline
+        code = str(stock_code).zfill(6)
+        df = fetch_daily_kline(code, days=days + 30)
+        if df is None or len(df) < 30:
             return None
-
-    def _plot_kline_zoom_subpanel(self, ax, key, dates, opens, closes, highs, lows, vol):
-        """放大窗副图:VOL / MACD / WR2 / KDJ / BOLL。"""
-        x = dates
-        n = len(closes)
-        o = np.asarray(opens, dtype=float)
-        c = np.asarray(closes, dtype=float)
-        indicator_descriptions = {
-            "VOL": "成交量:反映市场交易活跃度,红色为上涨日,绿色为下跌日",
-            "MACD": "MACD:指数平滑异同移动平均线,DIF上穿DEA为金叉,下穿为死叉",
-            "WR2": "WR:威廉指标,超买超卖指标,低于-80为超卖,高于-20为超买",
-            "KDJ": "KDJ:随机指标,K上穿D为金叉买入信号,80以上超买,20以下超卖",
-            "BOLL": "BOLL:布林带,价格突破上轨超买,跌破下轨超卖,中轨为趋势线"
-        }
-        if key == "VOL":
-            v = np.asarray(vol, dtype=float) if vol is not None else np.zeros(n)
-            if n < 1 or float(np.nanmax(np.abs(v))) < 1e-9:
-                ax.text(0.5, 0.5, "无成交量数据(需 Tushare daily 含 vol)", transform=ax.transAxes, ha="center", fontsize=9)
-                ax.set_ylabel("VOL")
-                return
-            colors = ["#d32f2f" if c[i] >= o[i] else "#388e3c" for i in range(n)]
-            ax.bar(x, v, color=colors, alpha=0.75, width=0.65)
-            if n >= 5:
-                vma = pd.Series(v).rolling(5, min_periods=1).mean()
-                ax.plot(x, vma.values, color="#f57c00", linewidth=1.0, label="VOL MA5")
-            ax.set_ylabel("成交量(手)")
-            ax.legend(loc="upper left", fontsize=7)
-            ax.set_title(indicator_descriptions[key], fontsize=7, loc="left", color="#666666", pad=2)
-        elif key == "MACD":
-            ema12 = self._ema_np(c, 12)
-            ema26 = self._ema_np(c, 26)
-            dif = ema12 - ema26
-            dea = self._ema_np(dif, 9)
-            macdh = 2.0 * (dif - dea)
-            ax.plot(x, dif, label="DIF", linewidth=1.0, color="#1565c0")
-            ax.plot(x, dea, label="DEA", linewidth=1.0, color="#c62828")
-            bar_colors = ["#d32f2f" if v >= 0 else "#388e3c" for v in macdh]
-            ax.bar(x, macdh, color=bar_colors, alpha=0.45, width=0.55)
-            ax.axhline(0, color="gray", linewidth=0.6)
-            ax.set_ylabel("MACD")
-            ax.legend(loc="upper left", fontsize=7)
-            ax.set_title(indicator_descriptions[key], fontsize=7, loc="left", color="#666666", pad=2)
-        elif key == "WR2":
-            wr = self._williams_r_n(highs, lows, closes, 2)
-            ax.plot(x, wr, label="WR(2日)", linewidth=1.0, color="#6a1b9a")
-            ax.axhline(-20, color="gray", linestyle="--", linewidth=0.6)
-            ax.axhline(-80, color="gray", linestyle="--", linewidth=0.6)
-            ax.set_ylabel("WR")
-            ax.legend(loc="upper left", fontsize=7)
-            ax.set_title(indicator_descriptions[key], fontsize=7, loc="left", color="#666666", pad=2)
-        elif key == "KDJ":
-            kv, dv, jv = self._kdj_series(highs, lows, closes, 9)
-            ax.plot(x, kv, label="K", linewidth=1.0, color="#c62828")
-            ax.plot(x, dv, label="D", linewidth=1.0, color="#1565c0")
-            ax.plot(x, jv, label="J", linewidth=0.9, color="#6a1b9a", alpha=0.9)
-            ax.axhline(80, color="gray", linestyle=":", linewidth=0.5)
-            ax.axhline(20, color="gray", linestyle=":", linewidth=0.5)
-            ax.set_ylabel("KDJ")
-            ax.legend(loc="upper left", fontsize=7)
-            ax.set_title(indicator_descriptions[key], fontsize=7, loc="left", color="#666666", pad=2)
-        elif key == "BOLL":
-            up, mid, lo = self._boll_np(closes, 20, 2.0)
-            ax.plot(x, mid, label="MID(20)", color="black", linewidth=1.0)
-            ax.plot(x, up, label="UP", color="#d32f2f", linewidth=0.95, alpha=0.9)
-            ax.plot(x, lo, label="LOW", color="#2e7d32", linewidth=0.95, alpha=0.9)
-            ax.set_ylabel("BOLL")
-            ax.legend(loc="upper left", fontsize=7)
-            ax.set_title(indicator_descriptions[key], fontsize=7, loc="left", color="#666666", pad=2)
-        ax.grid(True, alpha=0.3)
+        df = df.sort_values('date').tail(days).reset_index(drop=True)
+        data = pd.DataFrame({
+            '开盘': df['open'].astype(float),
+            '收盘': df['close'].astype(float),
+            '最高': df['high'].astype(float),
+            '最低': df['low'].astype(float),
+            '成交量': df['volume'].astype(float),
+        })
+        close_prices = data['收盘'].values; opens = data['开盘'].values
+        highs = data['最高'].values; lows = data['最低'].values
+        periods = {'ma1': 1, 'ma5': 5, 'ma10': 10, 'ma20': 20}
+        ma_values = {}
+        for ma_name, period in periods.items():
+            if len(close_prices) >= period:
+                ma_values[ma_name] = [float(sum(close_prices[i - period + 1:i + 1]) / period)
+                                      for i in range(period - 1, len(close_prices))]
+            else:
+                ma_values[ma_name] = []
+        vwap_values = []
+        if len(close_prices) >= 2:
+            cum_amount = 0.0; cum_vol = 0.0
+            for i in range(len(close_prices)):
+                typ = (opens[i] + highs[i] + lows[i] + close_prices[i]) / 4.0
+                cum_amount += typ * float(data['成交量'].iloc[i]); cum_vol += float(data['成交量'].iloc[i])
+                vwap_values.append(float(cum_amount / cum_vol) if cum_vol > 0 else float(typ))
+        ma_values['vwap'] = vwap_values
+        dates_list = pd.to_datetime(df['date']).dt.strftime('%Y%m%d').tolist()
+        return {'data': data, 'ma_values': ma_values, 'dates': dates_list, 'trade_dates': dates_list}
 
     def _apply_daily_kline_ax(self, ax1, kline_data, stock_name, show_zoom_hint=True, hide_x_labels=False, show_support_resistance=True, buy_points=None):
         """在给定 Axes 上绘制主图 K 线 + 均线 + 支撑/压力线。"""
