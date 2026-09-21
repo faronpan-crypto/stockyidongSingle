@@ -328,7 +328,22 @@ from ui.tab_token import TokenMixin
 from ui.tab_schedule import ScheduleMixin
 from ui.tab_buttons import ButtonsMixin
 
-class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMixin, WarningMixin, CangweiMixin, WencaiMixin, HotMixin, NewsMixin, IndicatorMixin, ConfigMixin, AnalysisMixin, DbSearchMixin, StockDetailMixin, ScreenshotMixin, CrawlerMixin, FileIoMixin, ThreadMixin, FormatMixin, HoldingsMixin, BuildersMixin, NavMixin, SpiderReaderMixin, RealtimeMixin, ChecksMixin, MathMixin, GettersMixin, TradeMixin, EmoDeepMixin, TokenMixin, ScheduleMixin, ButtonsMixin):
+from ui.tab_ai import AiMixin
+from ui.tab_breadcrumb import BreadcrumbMixin
+from ui.tab_default_config import DefaultConfigMixin
+from ui.tab_export import ExportMixin
+from ui.tab_finance import FinanceMixin
+from ui.tab_inner_class import InnerClassMixin
+from ui.tab_leader import LeaderMixin
+from ui.tab_money_flow import MoneyFlowMixin
+from ui.tab_nav2 import Nav2Mixin
+from ui.tab_pipeline import PipelineMixin
+from ui.tab_render import RenderMixin
+from ui.tab_rest import RestMixin
+from ui.tab_toplevel import ToplevelMixin
+from ui.tab_web import WebMixin
+
+class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CangweiMixin, ChecksMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, ExportMixin, FileIoMixin, FinanceMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IndicatorMixin, InnerClassMixin, KellyMixin, LeaderMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, WarningMixin, WebMixin, WencaiMixin, WordcloudMixin):
 
     def __init__(self, root):
         self.root = root
@@ -5664,5 +5679,102 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
         except Exception:
             pass
 
+def main():
+    try:
+        # conda 下用绝对路径启动 python 时,未 activate 则 PATH 不含 env 的 bin,同目录的 node 无法被 pywencai 找到
+        try:
+            _bd = os.path.dirname(os.path.abspath(sys.executable))
+            _node = os.path.join(_bd, "node")
+            if os.path.isfile(_node) and os.access(_node, os.X_OK):
+                os.environ["PATH"] = _bd + os.pathsep + os.environ.get("PATH", "")
+        except Exception:
+            pass
+        # macOS 特定设置
+        if sys.platform == "darwin":
+            os.environ.setdefault("TK_SILENCE_DEPRECATION", "1")
+        # 检查是否有图形显示环境
+        display_env = os.environ.get('DISPLAY', '')
+        if sys.platform == "darwin":
+            # macOS 使用不同的显示系统
+            pass
+        elif not display_env:
+            print("错误: 未检测到图形显示环境 (DISPLAY 环境变量为空)")
+            print("请在图形界面环境中运行此程序,或设置正确的 DISPLAY 环境变量")
+            print("在 macOS 上,请确保使用支持图形界面的终端或使用 pythonw 运行")
+            return
+        # 创建主窗口
+        root = tk.Tk()
+        # 🔧 Tk 回调异常钩子（把 silent crash 打到文件）
+        import traceback as _tb_global
+        def _tk_err_hook(exc_type, exc_val, exc_tb):
+            try:
+                _log = os.path.expanduser("~/Desktop/tk_traceback.log")
+                with open(_log, "a") as _f:
+                    _f.write("\n" + "="*60 + "\n")
+                    _tb_global.print_exception(exc_type, exc_val, exc_tb, file=_f)
+            except Exception:
+                pass
+        root.report_callback_exception = _tk_err_hook
+        # 立即显示窗口框架,让用户看到程序正在启动
+        root.title(APP_CONFIG.get("window_title", DEFAULT_APP_CONFIG["window_title"]))
+        root.geometry("1580x940")
+        try:
+            root.minsize(1280, 820)
+        except Exception:
+            pass
+        # 无本地缓存时会联网拉取全市场股票名(可能 10s+),延后到 GUI 创建后再启动
+        def _preload_stock_names():
+            try:
+                load_stock_names()
+            except Exception as e:
+                print(f"后台预加载股票名称列表失败: {e}")
+        root.after(3000, lambda: threading.Thread(target=_preload_stock_names, daemon=True).start())
+        # 创建应用实例(在创建过程中会逐步显示界面)
+        try:
+            app = StockKeywordAnalyzerGUI(root)
+        except Exception as e:
+            import traceback
+            error_msg = f"初始化应用失败: {e!s}\n{traceback.format_exc()}"
+            print(error_msg)
+            try:
+                from tkinter import messagebox
+                messagebox.showerror("初始化错误", error_msg, parent=root)
+            except:
+                pass
+            try:
+                if root.winfo_exists():
+                    root.destroy()
+            except:
+                pass
+            return
+        # 再次确保窗口可见并置于最前
+        try:
+            root.deiconify()
+            root.lift()
+            root.focus_force()
+        except Exception as e:
+            print(f"Warning: Failed to show window: {e}")
+        # 检查是否有打开数据表的标记文件
+        marker_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".open_ths_data_table")
+        if os.path.exists(marker_file):
+            try:
+                # 删除标记文件
+                os.remove(marker_file)
+                # 延迟打开数据表窗口,确保主窗口已完全初始化
+                root.after(500, lambda: app.show_unified_db_display(default_tab="ths"))
+            except Exception as e:
+                print(f"自动打开数据表窗口失败: {e}")
+        print(f"🚀 about to enter mainloop at {__import__('time').time()}", flush=True)
+        root.mainloop()
+    except Exception as e:
+        import traceback
+        error_msg = f"程序启动失败: {e!s}\n{traceback.format_exc()}"
+        print(error_msg)
+        try:
+            from tkinter import messagebox
+            messagebox.showerror("启动错误", error_msg)
+        except:
+            print("无法显示错误对话框,错误信息已打印到控制台")
+            input("按回车键退出...")
 if __name__ == "__main__":
     main()

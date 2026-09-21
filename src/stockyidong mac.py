@@ -63219,6 +63219,7 @@ class StockKeywordAnalyzerGUI:
             except Exception:
                 pass
     def _create_holding_tab(self, notebook, tab_name, group_index):
+        print(f"[DEBUG] _create_holding_tab 被调用 tab={tab_name} gidx={group_index} ← 已加载含双击逻辑的新版本")
         """创建持仓标签页的辅助函数
         Args:
             notebook: 要添加标签页的Notebook控件
@@ -63378,49 +63379,47 @@ class StockKeywordAnalyzerGUI:
                                padx=4, pady=2,
                                cursor="hand2")
                 label.pack(fill=tk.X, expand=False)
-                # 单击/双击防抖: 单击延迟 300ms 执行, 若 300ms 内收到双击则取消单击
-                _after_id = [None]  # 用列表包装以便闭包修改
-                def _do_single_click(idx=i, gidx=group_index):
-                    self._show_holding_detail(idx, gidx)
-                def _do_double_click(idx=i, gidx=group_index):
-                    # 双击 → 直接打开日K线放大图
-                    hstocks, _, _, _ = self._get_holding_group_data(gidx)
-                    if idx >= len(hstocks) or not hstocks[idx]:
-                        return
-                    sname, scode = hstocks[idx]
-                    if not scode:
-                        scode = get_stock_code_by_name(sname)
-                    if not scode:
-                        return
-                    def _kwork():
-                        try:
-                            kd = self._get_daily_kline_data_tushare(str(scode).zfill(6), days=120)
-                        except Exception:
-                            kd = None
-                        if kd:
-                            self.root.after(0, lambda: self._show_daily_kline_zoom(kd, sname))
-                        else:
-                            self.root.after(0, lambda: messagebox.showwarning("提示",
-                                f"无法获取 {sname}({scode}) 的K线数据\n请检查 Tushare 连接或稍后再试", parent=self.root))
-                    threading.Thread(target=_kwork, daemon=True).start()
-                def make_click_handler(idx=i, gidx=group_index):
-                    def on_click(event):
-                        # 取消上一次待执行的单击
-                        if _after_id[0] is not None:
-                            self.root.after_cancel(_after_id[0])
-                            _after_id[0] = None
-                        _after_id[0] = self.root.after(300, lambda: _do_single_click(idx, gidx))
-                    return on_click
-                def make_double_click_handler(idx=i, gidx=group_index):
-                    def on_double(event):
-                        # 取消待执行的单击
-                        if _after_id[0] is not None:
-                            self.root.after_cancel(_after_id[0])
-                            _after_id[0] = None
-                        _do_double_click(idx, gidx)
-                    return on_double
-                label.bind("<Button-1>", make_click_handler())
-                label.bind("<Double-1>", make_double_click_handler())
+                # === macOS 兼容的单击/双击判定: 只用 <Button-1>, 用 event.time 时间戳 ===
+                _click_state = {'last_time': 0, 'after_id': None}
+                def _open_daily_kline(idx, gidx):
+                    """打开日K线放大图"""
+                    try:
+                        hstocks, _, _, _ = self._get_holding_group_data(gidx)
+                        if idx >= len(hstocks) or not hstocks[idx]:
+                            return
+                        sname, scode = hstocks[idx]
+                        if not scode:
+                            scode = get_stock_code_by_name(sname)
+                        if not scode:
+                            return
+                        def _kwork():
+                            try:
+                                kd = self._get_daily_kline_data_tushare(str(scode).zfill(6), days=120)
+                            except Exception:
+                                kd = None
+                            if kd:
+                                self.root.after(0, lambda: self._show_daily_kline_zoom(kd, sname))
+                            else:
+                                self.root.after(0, lambda: messagebox.showwarning("提示",
+                                    f"无法获取 {sname}({scode}) 的K线数据\n请检查 Tushare 连接或稍后再试", parent=self.root))
+                        threading.Thread(target=_kwork, daemon=True).start()
+                    except Exception:
+                        import traceback; traceback.print_exc()
+                def _handle_click(event, idx=i, gidx=group_index):
+                    now = event.time  # Tk 事件自带时间戳, 单位 ms
+                    elapsed = now - _click_state['last_time']
+                    _click_state['last_time'] = now
+                    # 如果距上次点击 < 350ms, 视为双击
+                    if elapsed < 350 and _click_state['after_id'] is not None:
+                        self.root.after_cancel(_click_state['after_id'])
+                        _click_state['after_id'] = None
+                        _open_daily_kline(idx, gidx)
+                        return "break"
+                    # 否则: 延迟 350ms 执行单击
+                    if _click_state['after_id'] is not None:
+                        self.root.after_cancel(_click_state['after_id'])
+                    _click_state['after_id'] = self.root.after(350, lambda: self._show_holding_detail(idx, gidx))
+                label.bind("<Button-1>", _handle_click)
                 holding_labels.append(label)
         # 仅持仓1-8(group_index 7-14)在股票列表最下方显示"各导入的2个板块"名(点击交易-查看时更新)
         if 7 <= group_index <= 14:
