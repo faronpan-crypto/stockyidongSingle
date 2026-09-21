@@ -450,6 +450,11 @@
   ],
   "history_holdings": [
     {
+      "stock_name": "光迅科技",
+      "stock_code": "002281",
+      "replaced_date": "2026-09-21 10:31:27"
+    },
+    {
       "stock_name": "南网科技",
       "stock_code": "688248",
       "replaced_date": "2026-09-21 09:52:22"
@@ -942,11 +947,6 @@
     {
       "stock_name": "双星新材",
       "stock_code": "002585",
-      "replaced_date": "2026-09-17 21:43:22"
-    },
-    {
-      "stock_name": "贵州茅台",
-      "stock_code": "600519",
       "replaced_date": "2026-09-17 21:43:22"
     }
   ],
@@ -1864,13 +1864,13 @@
     },
     {
       "index": 17,
-      "stock_name": "众生药业",
-      "stock_code": "002317"
+      "stock_name": "光迅科技",
+      "stock_code": "002281"
     },
     {
       "index": 18,
-      "stock_name": "光迅科技",
-      "stock_code": "002281"
+      "stock_name": "众生药业",
+      "stock_code": "002317"
     },
     {
       "index": 19,

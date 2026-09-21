@@ -272,8 +272,94 @@ class StockDetailMixin:
             }
         except Exception as e:
             print(f"获取日K线数据(Tushare)失败 {stock_code}: {e}")
-            import traceback
-            traceback.print_exc()
+            # === Tushare 限频/积分不足 自动回退 akshare ===
+            return self._get_daily_kline_data_akshare(str(stock_code).zfill(6), days)
+
+    def _get_daily_kline_data_akshare(self, stock_code, days=60):
+        """akshare 兜底获取日K线(当 Tushare daily 被限频/积分不足时)
+        东财接口被封 → 改用新浪(stock_zh_a_daily) / 腾讯(stock_zh_a_hist_tx) 双通道
+        """
+        try:
+            import akshare as ak
+            # 根据首字符判断市场: 6开头=沪(sh), 0/3开头=深(sz)
+            code = str(stock_code).zfill(6)
+            prefix = 'sh' if code.startswith('6') else 'sz'
+            symbol = f"{prefix}{code}"
+            # 优先新浪(数据全), 失败则腾讯
+            df = None
+            try:
+                df = ak.stock_zh_a_daily(symbol=symbol, adjust="qfq")
+            except Exception:
+                try:
+                    df = ak.stock_zh_a_hist_tx(
+                        symbol=symbol,
+                        start_date=(datetime.now() - timedelta(days=days + 30)).strftime('%Y%m%d'),
+                        end_date=datetime.now().strftime('%Y%m%d'),
+                        adjust="qfq",
+                    )
+                except Exception:
+                    df = None
+            if df is None or df.empty:
+                print(f"  [akshare] {code} 新浪+腾讯 均无数据")
+                return None
+            # === 新浪列名: date, open, high, low, close, volume, amount ===
+            # === 腾讯列名: 日期, 开盘, 收盘, 最高, 最低, 成交量, 成交额, 振幅, 涨跌幅, 涨跌额, 换手率 ===
+            # 统一转为中文列名
+            rename_map = {
+                'date': '日期', 'open': '开盘', 'high': '最高',
+                'low': '最低', 'close': '收盘', 'volume': '成交量',
+            }
+            df = df.rename(columns=rename_map)
+            # 日期处理: 新浪返回 datetime, 腾讯返回 YYYY-MM-DD 字符串
+            if not np.issubdtype(df['日期'].dtype, np.datetime64):
+                df['日期'] = pd.to_datetime(df['日期'])
+            df = df.sort_values('日期').tail(days).reset_index(drop=True)
+            data = pd.DataFrame({
+                '开盘': df['开盘'].astype(float),
+                '收盘': df['收盘'].astype(float),
+                '最高': df['最高'].astype(float),
+                '最低': df['最低'].astype(float),
+                '成交量': df['成交量'].astype(float),  # akshare 单位: 手
+            })
+            close_prices = data['收盘'].values
+            opens = data['开盘'].values
+            highs = data['最高'].values
+            lows = data['最低'].values
+            periods = {'ma1': 1, 'ma5': 5, 'ma10': 10, 'ma20': 20}
+            ma_values = {}
+            for ma_name, period in periods.items():
+                if len(close_prices) >= period:
+                    ma_values[ma_name] = []
+                    for i in range(period - 1, len(close_prices)):
+                        ma_values[ma_name].append(
+                            float(sum(close_prices[i - period + 1:i + 1]) / period))
+                else:
+                    ma_values[ma_name] = []
+            vwap_values = []
+            if len(close_prices) >= 2:
+                cum_amount = 0.0
+                cum_vol = 0.0
+                for i in range(len(close_prices)):
+                    typical_price = (opens[i] + highs[i] + lows[i] + close_prices[i]) / 4.0
+                    amount = typical_price * float(data['成交量'].iloc[i])
+                    cum_amount += amount
+                    cum_vol += float(data['成交量'].iloc[i])
+                    if cum_vol > 0:
+                        vwap_values.append(float(cum_amount / cum_vol))
+                    else:
+                        vwap_values.append(float(typical_price))
+            ma_values['vwap'] = vwap_values
+            dates_list = df['日期'].dt.strftime('%Y%m%d').tolist()
+            return {
+                'data': data,
+                'ma_values': ma_values,
+                'dates': dates_list,
+                'trade_dates': dates_list,
+                '_source': 'akshare',
+            }
+        except Exception as e2:
+            print(f"获取日K线数据(akshare 兜底)也失败 {stock_code}: {e2}")
+            import traceback; traceback.print_exc()
             return None
 
     def _plot_kline_zoom_subpanel(self, ax, key, dates, opens, closes, highs, lows, vol):
