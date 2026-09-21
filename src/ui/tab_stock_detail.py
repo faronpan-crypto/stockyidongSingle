@@ -207,17 +207,19 @@ class StockDetailMixin:
             return None
 
     def _get_daily_kline_data_tushare(self, stock_code, days=60):
-        """从Tushare获取日K线数据(用于持仓详情日K线图)"""
+        """从Tushare获取日K线数据(用于持仓详情日K线图),失败自动回退 akshare"""
         try:
             if not TS_AVAILABLE or not (getattr(self, 'ts_token', None) or TS_DEFAULT_TOKEN):
-                return None
+                print(f"  [Tushare] 不可用,回退 akshare")
+                return self._get_daily_kline_data_akshare(stock_code, days)
             self._ensure_tushare_client(self.ts_token or TS_DEFAULT_TOKEN)
             ts_code = self._format_ts_code(str(stock_code).zfill(6))
             end_date = datetime.now().strftime('%Y%m%d')
             start_date = (datetime.now() - timedelta(days=days + 30)).strftime('%Y%m%d')
             df = self.ts_client.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
             if df is None or df.empty:
-                return None
+                print(f"  [Tushare] 返回空数据,回退 akshare")
+                return self._get_daily_kline_data_akshare(stock_code, days)
             df = df.sort_values('trade_date').tail(days).reset_index(drop=True)
             # 转为与 _draw 兼容的列名(成交量:Tushare daily 的 vol 单位为手)
             _vol = df['vol'].astype(float) if 'vol' in df.columns else pd.Series(np.zeros(len(df)))
