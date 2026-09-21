@@ -1869,18 +1869,18 @@
     },
     {
       "index": 18,
-      "stock_name": "众生药业",
-      "stock_code": "002317"
-    },
-    {
-      "index": 19,
       "stock_name": "太极实业",
       "stock_code": "600667"
     },
     {
-      "index": 20,
+      "index": 19,
       "stock_name": "有研新材",
       "stock_code": "600206"
+    },
+    {
+      "index": 20,
+      "stock_name": "众生药业",
+      "stock_code": "002317"
     },
     {
       "index": 21,
