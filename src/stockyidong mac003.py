@@ -129,8 +129,7 @@ _TS_CB_COOLDOWN = 600  # 秒
 def _ts_patch_pro_api(_orig_pro_api):
     """包装 ts.pro_api(), 让返回的 client 方法自动 sleep + 限频重试 + 熔断短路"""
     _TS_MIN_WAIT = 0.35
-    _TS_MAX_RETRY = 3
-    # 积分不够 / 永久限频关键词
+    _TS_MAX_RETRY = 2
     _PERM_DENY_KEYS = ['频率超限', '积分不足', '无权限', 'level', 'frequency', '每天']
 
     def _is_perm_deny(msg):
@@ -143,36 +142,35 @@ def _ts_patch_pro_api(_orig_pro_api):
         try:
             orig_query = pro.query
             def _wrapped_query(*args, **kwargs):
-                # === 从 call 名推断接口名 (args[0] 是 method 名) ===
                 _api_name = args[0] if args else kwargs.get('api_name', '')
-                # === 熔断检查 ===
-                now = _ts_time.time()
-                with _TS_CIRCUIT_LOCK:
-                    _cb_until = _TS_CIRCUIT_BREAKER.get(_api_name, 0)
-                if _cb_until > now:
-                    # 熔断中: 直接抛异常让上层走 akshare 兜底, 不要空等
-                    raise RuntimeError(f"[熔断] tushare.{_api_name} 暂不可用, {int(_cb_until - now)}s 后重试")
-                # === 正常调用 + 重试 ===
                 last_e = None
                 for attempt in range(_TS_MAX_RETRY):
-                    try:
-                        with _TS_CALL_LOCK:
+                    # === 熔断 + 串行化检查都在同一把锁里, 防止并发击穿 ===
+                    with _TS_CALL_LOCK:
+                        now = _ts_time.time()
+                        with _TS_CIRCUIT_LOCK:
+                            _cb_until = _TS_CIRCUIT_BREAKER.get(_api_name, 0)
+                        if _cb_until > now:
+                            raise RuntimeError(
+                                f"[熔断] tushare.{_api_name} 暂不可用, {int(_cb_until - now)}s 后重试")
+                        try:
                             _ts_time.sleep(_TS_MIN_WAIT)
                             return orig_query(*args, **kwargs)
-                    except Exception as e:
-                        last_e = e
-                        msg = str(e)
-                        if _is_perm_deny(msg):
-                            # === 永久限频/积分不足: 立即熔断 10 分钟 ===
-                            with _TS_CIRCUIT_LOCK:
-                                _TS_CIRCUIT_BREAKER[_api_name] = now + _TS_CB_COOLDOWN
-                            print(f"  🔴 Tushare {_api_name} 被限频/无权限, 熔断 {_TS_CB_COOLDOWN}s ({msg[:50]})")
-                            raise
-                        if any(k in msg for k in ['超限', '频率', 'rate limit', '每分钟']):
-                            wait = 10 * (attempt + 1)  # 普通限频短等
-                            print(f"  ⚠️ Tushare {_api_name} 限频, 等{wait}s 重试({attempt+1}/{_TS_MAX_RETRY})")
-                            _ts_time.sleep(wait)
-                        else:
+                        except Exception as e:
+                            last_e = e
+                            msg = str(e)
+                            if _is_perm_deny(msg):
+                                # 永久限频/积分不足: 立即熔断
+                                with _TS_CIRCUIT_LOCK:
+                                    _TS_CIRCUIT_BREAKER[_api_name] = now + _TS_CB_COOLDOWN
+                                print(f"  🔴 Tushare {_api_name} 被限频/无权限 → 熔断 {_TS_CB_COOLDOWN}s ({msg[:60]})")
+                                raise
+                            # 普通限频: 短等
+                            if any(k in msg for k in ['超限', '频率', 'rate limit', '每分钟']):
+                                wait = 5 * (attempt + 1)
+                                print(f"  ⚠️ Tushare {_api_name} 限频, 等{wait}s 重试({attempt+1}/{_TS_MAX_RETRY})")
+                                _ts_time.sleep(wait)
+                                continue
                             raise
                 raise last_e
             pro.query = _wrapped_query
