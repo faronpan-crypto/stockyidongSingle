@@ -5626,13 +5626,109 @@ class HotMixin:
                 else: tsc += ".SZ"
 
                 prog.after(0, lambda: prog_status.set("⏳ 拉取历史K线..."))
-                df = _pro.daily(ts_code=tsc, start_date="20240601", end_date=latest)
+                _hm_src = "tushare"
+                try:
+                    df = _pro.daily(ts_code=tsc, start_date="20240601", end_date=latest)
+                except Exception as _e_ts:
+                    print(f"[游资心法] tushare daily 失败: {_e_ts}, 切 akshare")
+                    df = None
+
+                if df is None or len(df) < 30:
+                    # akshare 三级降级 (复用 tab_cangwei.py 的方案)
+                    df = None
+                    _end_date = latest
+                    _start_date = "20240601"
+                    try:
+                        import akshare as _ak_hm
+                        # === 通道1: 东方财富 ===
+                        try:
+                            hist = _ak_hm.stock_zh_a_hist(
+                                symbol=stock_code, period="daily",
+                                start_date=_start_date, end_date=_end_date, adjust="qfq")
+                            if hist is not None and len(hist) >= 30:
+                                df = hist; _hm_src = "akshare-em"
+                        except Exception as _e1:
+                            print(f"[游资心法] akshare-em 失败: {_e1}")
+
+                        # === 通道2: 腾讯 ===
+                        if df is None:
+                            try:
+                                _prefix = "sh" if stock_code.startswith("6") else "sz"
+                                for _sym in [_prefix + stock_code, stock_code]:
+                                    try:
+                                        hist = _ak_hm.stock_zh_a_hist_tx(
+                                            symbol=_sym, start_date=_start_date,
+                                            end_date=_end_date, adjust="qfq")
+                                        if hist is not None and len(hist) >= 30:
+                                            # 腾讯列: date/open/close/high/low/amount
+                                            hist = hist.rename(columns={
+                                                "date": "trade_date", "open": "open",
+                                                "close": "close", "high": "high",
+                                                "low": "low"})
+                                            # 腾讯缺成交量 → 用 amount/close 近似
+                                            if "vol" not in hist.columns:
+                                                hist["vol"] = hist["amount"] / hist["close"]
+                                            hist["trade_date"] = hist["trade_date"].astype(str).str.replace("-", "")
+                                            df = hist; _hm_src = "akshare-tx"; break
+                                    except Exception:
+                                        continue
+                            except Exception as _e2:
+                                print(f"[游资心法] akshare-tx 失败: {_e2}")
+
+                        # === 通道3: 新浪 ===
+                        if df is None:
+                            try:
+                                _prefix = "sh" if stock_code.startswith("6") else "sz"
+                                for _sym in [_prefix + stock_code, stock_code]:
+                                    try:
+                                        hist = _ak_hm.stock_zh_a_daily(
+                                            symbol=_sym, start_date=_start_date,
+                                            end_date=_end_date, adjust="qfq")
+                                        if hist is not None and len(hist) >= 30:
+                                            hist = hist.rename(columns={
+                                                "date": "trade_date", "open": "open",
+                                                "close": "close", "high": "high",
+                                                "low": "low", "volume": "vol"})
+                                            hist["trade_date"] = hist["trade_date"].astype(str).str.replace("-", "")
+                                            df = hist; _hm_src = "akshare-sina"; break
+                                    except Exception:
+                                        continue
+                            except Exception as _e3:
+                                print(f"[游资心法] akshare-sina 失败: {_e3}")
+                    except Exception:
+                        pass
+
                 if df is None or len(df) < 30:
                     prog.after(0, lambda: prog_status.set("❌ K线数据不足"))
                     import tkinter.messagebox as _mb
                     prog.after(200, prog.destroy)
-                    _mb.showwarning("提示", f"{stock_name} K线数据不足30天", parent=self.root)
+                    _mb.showwarning("提示", f"{stock_name} K线数据不足30天\n(已尝试 tushare + akshare 三通道)", parent=self.root)
                     return
+
+                # 统一列名: 确保 trade_date/open/high/low/close/vol 都存在
+                _need = {"trade_date", "open", "high", "low", "close", "vol"}
+                _rename_map = {}
+                for _c in df.columns:
+                    _cl = str(_c).lower()
+                    if _c in _need: continue
+                    if _cl == "日期" or _cl == "date": _rename_map[_c] = "trade_date"
+                    elif _cl == "开盘" or _cl == "open": _rename_map[_c] = "open"
+                    elif _cl == "最高" or _cl == "high": _rename_map[_c] = "high"
+                    elif _cl == "最低" or _cl == "low": _rename_map[_c] = "low"
+                    elif _cl == "收盘" or _cl == "close": _rename_map[_c] = "close"
+                    elif "成交量" in str(_c) or _cl == "volume" or _cl == "vol": _rename_map[_c] = "vol"
+                if _rename_map:
+                    df = df.rename(columns=_rename_map)
+                df["trade_date"] = df["trade_date"].astype(str).str.replace("-", "")
+                # 确保 vol 存在且是 float
+                if "vol" not in df.columns:
+                    if "amount" in df.columns and "close" in df.columns:
+                        df["vol"] = df["amount"].astype(float) / df["close"].astype(float)
+                    else:
+                        df["vol"] = 1.0
+                df["vol"] = df["vol"].astype(float)
+
+                prog.after(0, lambda: prog_status.set(f"✅ K线来自 {_hm_src} ({len(df)}天)"))
 
                 df = df.sort_values("trade_date")
                 cl = df["close"].astype(float).tolist()
@@ -5652,7 +5748,7 @@ class HotMixin:
                 dma = (price - m20)/m20*100
                 pct3 = (price - max(cl[-60:]))/max(cl[-60:])*100 if len(cl)>=60 else 0
 
-                # daily_basic
+                # daily_basic (换手率/PE/市值) — tushare + akshare spot_em 兜底
                 tr = pe = mv = None
                 try:
                     df_b = _pro.daily_basic(ts_code=tsc, trade_date=latest,
@@ -5663,6 +5759,24 @@ class HotMixin:
                         mv = float(df_b.iloc[0]["total_mv"]) if df_b.iloc[0].get("total_mv") else None
                 except Exception:
                     pass
+
+                # tushare 限频时 akshare spot_em 补 (只有缺才补, 不浪费请求)
+                if tr is None or pe is None or mv is None:
+                    try:
+                        import akshare as _ak_basic
+                        spot = _ak_basic.stock_zh_a_spot_em()
+                        if spot is not None and len(spot) > 0:
+                            row = spot[spot["代码"] == stock_code]
+                            if len(row) > 0:
+                                row = row.iloc[0]
+                                if tr is None and "换手率" in row.index and row["换手率"] not in ("", "-", None):
+                                    tr = float(row["换手率"])
+                                if pe is None and "市盈率-动态" in row.index and row["市盈率-动态"] not in ("", "-", None):
+                                    pe = float(row["市盈率-动态"])
+                                if mv is None and "总市值" in row.index and row["总市值"] not in ("", "-", None):
+                                    mv = float(row["总市值"]) / 1e4  # spot_em 单位元 → tushare 万元
+                    except Exception as _e_basic:
+                        print(f"[游资心法] akshare spot_em daily_basic 失败: {_e_basic}")
 
                 # 情绪引擎
                 prog.after(0, lambda: prog_status.set("⏳ 调用情绪周期流引擎..."))
