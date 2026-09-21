@@ -115,9 +115,76 @@ except ImportError:
     ts = None
     TS_AVAILABLE = False
 
-# ===== Tushare API 频率保护: 全局 sleep + 自动重试 (线程安全) =====
+# ===== Tushare API 频率保护 + 熔断 (线程安全) =====
 import time as _ts_time
 import threading as _ts_threading
+
+_TS_PATCHED_IDS = set()
+_TS_CALL_LOCK = _ts_threading.Lock()
+# 熔断表: 接口名 → 下次允许时间戳 (熔断 600s = 10分钟)
+_TS_CIRCUIT_BREAKER = {}
+_TS_CIRCUIT_LOCK = _ts_threading.Lock()
+_TS_CB_COOLDOWN = 600  # 秒
+
+def _ts_patch_pro_api(_orig_pro_api):
+    """包装 ts.pro_api(), 让返回的 client 方法自动 sleep + 限频重试 + 熔断短路"""
+    _TS_MIN_WAIT = 0.35
+    _TS_MAX_RETRY = 3
+    # 积分不够 / 永久限频关键词
+    _PERM_DENY_KEYS = ['频率超限', '积分不足', '无权限', 'level', 'frequency', '每天']
+
+    def _is_perm_deny(msg):
+        return any(k in msg.lower() for k in _PERM_DENY_KEYS)
+
+    def _patch_client(pro):
+        pid = id(pro)
+        if pid in _TS_PATCHED_IDS:
+            return pro
+        try:
+            orig_query = pro.query
+            def _wrapped_query(*args, **kwargs):
+                # === 从 call 名推断接口名 (args[0] 是 method 名) ===
+                _api_name = args[0] if args else kwargs.get('api_name', '')
+                # === 熔断检查 ===
+                now = _ts_time.time()
+                with _TS_CIRCUIT_LOCK:
+                    _cb_until = _TS_CIRCUIT_BREAKER.get(_api_name, 0)
+                if _cb_until > now:
+                    # 熔断中: 直接抛异常让上层走 akshare 兜底, 不要空等
+                    raise RuntimeError(f"[熔断] tushare.{_api_name} 暂不可用, {int(_cb_until - now)}s 后重试")
+                # === 正常调用 + 重试 ===
+                last_e = None
+                for attempt in range(_TS_MAX_RETRY):
+                    try:
+                        with _TS_CALL_LOCK:
+                            _ts_time.sleep(_TS_MIN_WAIT)
+                            return orig_query(*args, **kwargs)
+                    except Exception as e:
+                        last_e = e
+                        msg = str(e)
+                        if _is_perm_deny(msg):
+                            # === 永久限频/积分不足: 立即熔断 10 分钟 ===
+                            with _TS_CIRCUIT_LOCK:
+                                _TS_CIRCUIT_BREAKER[_api_name] = now + _TS_CB_COOLDOWN
+                            print(f"  🔴 Tushare {_api_name} 被限频/无权限, 熔断 {_TS_CB_COOLDOWN}s ({msg[:50]})")
+                            raise
+                        if any(k in msg for k in ['超限', '频率', 'rate limit', '每分钟']):
+                            wait = 10 * (attempt + 1)  # 普通限频短等
+                            print(f"  ⚠️ Tushare {_api_name} 限频, 等{wait}s 重试({attempt+1}/{_TS_MAX_RETRY})")
+                            _ts_time.sleep(wait)
+                        else:
+                            raise
+                raise last_e
+            pro.query = _wrapped_query
+            _TS_PATCHED_IDS.add(pid)
+        except Exception as _e_wrap:
+            print(f"  ⚠️ Patch client 失败: {_e_wrap}")
+        return pro
+
+    def _patched_pro_api(*args, **kwargs):
+        pro = _orig_pro_api(*args, **kwargs)
+        return _patch_client(pro)
+    return _patched_pro_api
 
 
 
@@ -264,6 +331,17 @@ try:
     _mod_dapan_mixin.D_DATA_DIR = D_DATA_DIR
 except NameError:
     pass
+# === 批量注入给所有用到 TS_AVAILABLE / AKSHARE_AVAILABLE 的 mixin ===
+for _mod_name in ("ui.tab_cangwei", "ui.tab_stock_detail", "ui.tab_getters",
+                  "ui.tab_rest", "ui.tab_builders", "ui.tab_hot"):
+    try:
+        import importlib as _il
+        _m = _il.import_module(_mod_name)
+        _m.TS_AVAILABLE = TS_AVAILABLE
+        _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
+        _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
+    except Exception:
+        pass
 # 延迟注入 STOCK_CODES_DICT (主类 __init__ 里才真正初始化)
 _mod_stock_names.STOCK_CODES_DICT = STOCK_CODES_DICT
 _mod_stock_names.STOCK_NAMES_SET = STOCK_NAMES_SET
@@ -5717,7 +5795,8 @@ def main():
         root.report_callback_exception = _tk_err_hook
         # 立即显示窗口框架,让用户看到程序正在启动
         _script_name = os.path.basename(sys.argv[0] or __file__)
-        root.title(f"{APP_CONFIG.get('window_title', DEFAULT_APP_CONFIG['window_title'])}  [{_script_name}]")
+        _script_stem = os.path.splitext(_script_name)[0]
+        root.title(f"{APP_CONFIG.get('window_title', DEFAULT_APP_CONFIG['window_title'])} — {_script_stem}")
         root.geometry("1580x940")
         try:
             root.minsize(1280, 820)
