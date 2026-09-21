@@ -14,7 +14,7 @@ auto_backups/
 .trae/
 .DS_Store
 *.log
-data/
+/data/
 report/
 reports/
 *.xlsx
