@@ -4,11 +4,6 @@ from typing import Optional, Union
 import os
 import sys
 
-# --- sys.path 修复: 确保 src/ 在 sys.path 最前 (trae sandbox / venv 启动时不自动加入) ---
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-
 # --- PATH 修复: Trae 启动 macOS 子进程时 PATH 缺 /opt/homebrew/bin,导致 shutil.which("node") 找不到 ---
 _homebrew_paths = ["/opt/homebrew/bin", "/usr/local/bin"]
 _sep = ":"
@@ -48,13 +43,13 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 
 import jieba
-# import jieba  # 懒加载 (见下方 __getattr__)
+import requests
 
-# try:
-#     import akshare as ak  # 懒加载
-#     AKSHARE_AVAILABLE = True  # 懒加载
-# except ImportError:
-#     AKSHARE_AVAILABLE = False
+try:
+    import akshare as ak
+    AKSHARE_AVAILABLE = True
+except ImportError:
+    AKSHARE_AVAILABLE = False
 import base64
 import contextlib
 import copy
@@ -74,54 +69,11 @@ from urllib.parse import urljoin
 
 import matplotlib
 import matplotlib.pyplot as plt
-# import matplotlib.pyplot as plt  # 懒加载
-# import numpy as np  # 懒加载
-# import pandas as pd  # 懒加载
-# from bs4 import BeautifulSoup  # 懒加载
-# from PIL import Image, ImageDraw, ImageFont, ImageTk  # 懒加载
-# from wordcloud import WordCloud  # 懒加载
-
-# ==================== 重型模块懒加载 ====================
-_jieba_m = _np_m = _pd_m = _ak_m = _bs4_m = _pil_m = _wc_m = _plt_m = None
-
-def __getattr__(name):
-    global _jieba_m, _np_m, _pd_m, _ak_m, _bs4_m, _pil_m, _wc_m, _plt_m
-    if name == 'jieba':
-        if _jieba_m is None: import jieba as _m; globals()['_jieba_m'] = _m
-        return _jieba_m
-    if name == 'np':
-        if _np_m is None: import numpy as _m; globals()['_np_m'] = _m
-        return _np_m
-    if name == 'pd':
-        if _pd_m is None: import pandas as _m; globals()['_pd_m'] = _m
-        return _pd_m
-    if name == 'plt':
-        if _plt_m is None: import matplotlib.pyplot as _m; globals()['_plt_m'] = _m
-        return _plt_m
-    if name in ('ak', 'akshare'):
-        if _ak_m is None:
-            try: import akshare as _m; globals()['_ak_m'] = _m
-            except: globals()['_ak_m'] = None
-        return _ak_m
-    if name == 'AKSHARE_AVAILABLE':
-        if _ak_m is None:
-            try: import akshare; globals()['_ak_m'] = akshare
-            except: globals()['_ak_m'] = None
-        return _ak_m is not None
-    if name == 'BeautifulSoup':
-        if _bs4_m is None: from bs4 import BeautifulSoup; globals()['_bs4_m'] = BeautifulSoup
-        return _bs4_m
-    if name == 'WordCloud':
-        if _wc_m is None: from wordcloud import WordCloud; globals()['_wc_m'] = WordCloud
-        return _wc_m
-    if name in ('Image', 'ImageDraw', 'ImageFont', 'ImageTk'):
-        if _pil_m is None:
-            from PIL import Image as _i, ImageDraw as _id, ImageFont as _if, ImageTk as _it
-            globals()['_pil_m'] = (_i, _id, _if, _it)
-        idx = {'Image':0,'ImageDraw':1,'ImageFont':2,'ImageTk':3}[name]
-        return _pil_m[idx]
-    raise AttributeError(f"module has no attribute '{name}'")
-
+import numpy as np
+import pandas as pd
+from bs4 import BeautifulSoup
+from PIL import Image, ImageDraw, ImageFont, ImageTk
+from wordcloud import WordCloud
 
 # ==================== Phase 2 模块化导入 ====================
 from utils.suppress import *  # L97-109, 110-124, 126-136, 137-151, 153-161
@@ -134,10 +86,12 @@ from logic.spot import *  # L1833-1835, 1837-1837, 1839-1839, 1840-1842, 1843-18
 from logic.wordcloud import *  # L2105-2181, 2182-2277, 2278-2423, 2424-2682
 from utils.text_extract import *  # L2777-2780, 2781-2787, 2788-2817, 2819-2857, 2858-2887, 2888-2908, 2910-2949, 2950-2984, 2985-3009
 
+
 # ==================== 模块化拆分:utils.data ====================
 from utils.config import *          # 路径常量 + 配置 + DB_PATH (替代原 L219-L384)
 from utils.network import safe_call, safe_ak, safe_requests  # 网络安全封装
 from data.db import *               # 全部 DB 函数 (替代原 L495-L1114 中的纯 DB 函数)
+
 
 # ==================== 明日涨跌预测(Skill) ====================
 try:
@@ -164,6 +118,8 @@ except ImportError:
 # ===== Tushare API 频率保护: 全局 sleep + 自动重试 (线程安全) =====
 import time as _ts_time
 import threading as _ts_threading
+
+
 
 try:
     import tushare as _ts_mod_safe
@@ -316,440 +272,6 @@ _mod_stock_names.ETF_CACHE_REFRESHED = ETF_CACHE_REFRESHED
 _mod_stock_names.STOCK_NAMES_LOAD_LOCK = STOCK_NAMES_LOAD_LOCK
 _mod_snapshot.STOCK_CODES_DICT = STOCK_CODES_DICT
 
-# Mixin 全局变量注入 (Phase 3+)
-try:
-    import ui.tab_dapan as _m_dapan
-    _m_dapan.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m_dapan.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m_dapan.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m_dapan.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m_dapan.TS_AVAILABLE = TS_AVAILABLE
-    _m_dapan.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_ai as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_analysis as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_breadcrumb as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_builders as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_buttons as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_cangwei as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_checks as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_config as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_crawler as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_dapan as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_database as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_db_search as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_default_config as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_emo_deep as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_export as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_file_io as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_finance as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_format as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_getters as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_holdings as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_hot as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_indicator as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_inner_class as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_jiaoyi as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_kelly as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_leader as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_math as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_money_flow as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_nav as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_nav2 as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_news as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_pipeline as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_realtime as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_render as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_rest as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_schedule as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_screenshot as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_spider_reader as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_stock_detail as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_thread as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_token as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_toplevel as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_trade as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_warning as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_web as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_wencai as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-try:
-    import ui.tab_wordcloud as _m
-    _m.STOCK_CODES_DICT = STOCK_CODES_DICT
-    _m.STOCK_NAMES_SET = STOCK_NAMES_SET
-    _m.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-    _m.AKSHARE_AVAILABLE = AKSHARE_AVAILABLE
-    _m.TS_AVAILABLE = TS_AVAILABLE
-    _m.TS_DEFAULT_TOKEN = TS_DEFAULT_TOKEN
-except Exception: pass
-
 # ==================== 数据库管理 ====================
 # ==================== 淘股吧爬虫 ====================
 # ==================== 韭研公社爬虫 ====================
@@ -806,56 +328,10 @@ from ui.tab_token import TokenMixin
 from ui.tab_schedule import ScheduleMixin
 from ui.tab_buttons import ButtonsMixin
 
-# Phase 5d: Final batch (Pipeline/Web/Toplevel/DefaultConfig/Nav2/Leader/Ai/InnerClass/Rest)
-from ui.tab_pipeline import PipelineMixin
-from ui.tab_web import WebMixin
-from ui.tab_toplevel import ToplevelMixin
-from ui.tab_default_config import DefaultConfigMixin
-from ui.tab_nav2 import Nav2Mixin
-from ui.tab_leader import LeaderMixin
-from ui.tab_ai import AiMixin
-from ui.tab_inner_class import InnerClassMixin
-from ui.tab_rest import RestMixin
+class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMixin, WarningMixin, CangweiMixin, WencaiMixin, HotMixin, NewsMixin, IndicatorMixin, ConfigMixin, AnalysisMixin, DbSearchMixin, StockDetailMixin, ScreenshotMixin, CrawlerMixin, FileIoMixin, ThreadMixin, FormatMixin, HoldingsMixin, BuildersMixin, NavMixin, SpiderReaderMixin, RealtimeMixin, ChecksMixin, MathMixin, GettersMixin, TradeMixin, EmoDeepMixin, TokenMixin, ScheduleMixin, ButtonsMixin):
 
-import traceback as _tb
-_ERROR_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime_errors.log")
-_orig_excepthook = sys.excepthook
-def _global_exception_handler(exc_type, exc_val, exc_tb):
-    try:
-        with open(_ERROR_LOG, "a") as _f:
-            _f.write("="*60 + "\n")
-            _f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
-            _tb.print_exception(exc_type, exc_val, exc_tb, file=_f)
-            _f.write("\n")
-    except Exception: pass
-    _orig_excepthook(exc_type, exc_val, exc_tb)
-sys.excepthook = _global_exception_handler
-import threading as _th
-_orig_threading_exc = getattr(_th, 'excepthook', None)
-def _thread_exception_handler(args):
-    try:
-        with open(_ERROR_LOG, "a") as _f:
-            _f.write("="*60 + "\n[THREAD] " + str(args.thread) + "\n")
-            _tb.print_exception(args.exc_type, args.exc_value, args.exc_traceback, file=_f)
-            _f.write("\n")
-    except Exception: pass
-_th.excepthook = _thread_exception_handler
-
-class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMixin, WarningMixin, CangweiMixin, WencaiMixin, HotMixin, NewsMixin, IndicatorMixin, ConfigMixin, AnalysisMixin, DbSearchMixin, StockDetailMixin, ScreenshotMixin, CrawlerMixin, FileIoMixin, ThreadMixin, FormatMixin, HoldingsMixin, BuildersMixin, NavMixin, SpiderReaderMixin, RealtimeMixin, ChecksMixin, MathMixin, GettersMixin, TradeMixin, EmoDeepMixin, TokenMixin, ScheduleMixin, ButtonsMixin, PipelineMixin, WebMixin, ToplevelMixin, DefaultConfigMixin, Nav2Mixin, LeaderMixin, AiMixin, InnerClassMixin, RestMixin):
     def __init__(self, root):
         self.root = root
-        # Tkinter 按钮回调异常钩子 (Tkinter 会吞掉按钮异常, 必须单独 hook)
-        def _tk_callback_exception(exc_type, exc_val, exc_tb):
-            try:
-                with open(_ERROR_LOG, "a") as _f:
-                    _f.write("="*60 + "\n[TK_CALLBACK] " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
-                    _tb.print_exception(exc_type, exc_val, exc_tb, file=_f)
-                    _f.write("\n")
-                print(f"⚠️ Tkinter callback error: {exc_val}")
-            except Exception: pass
-        try:
-            self.root.report_callback_exception = _tk_callback_exception
-        except Exception: pass
         # 安全更新窗口方法 - macOS上直接跳过
         def _safe_update():
             try:
@@ -1473,7 +949,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
                 return []
         def show_warning_popup(content, title):
             """显示警世通言弹出框,并在预警内容下方显示股票逻辑"""
-            popup = self._safe_toplevel(self.root)
+            popup = self._toplevel(self.root)
             popup.title(title)
             popup.geometry("800x700")
             # 创建文本框显示内容
@@ -1594,7 +1070,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
         # 定义浏览资讯记录的函数
         def browse_news_records(filter_type):
             """浏览资讯记录(警示或开新仓记录),支持左右切换"""
-            browse_window = self._safe_toplevel(self.root)
+            browse_window = self._toplevel(self.root)
             if filter_type == "警示":
                 browse_window.title("浏览警示记录")
                 filter_pattern = "警示%"
@@ -1897,7 +1373,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
         main_sector_combo.pack(side=tk.LEFT, padx=(0, 5))
         def show_main_sector_settings():
             """显示主流板块设置对话框"""
-            settings_window = self._safe_toplevel(self.root)
+            settings_window = self._toplevel(self.root)
             settings_window.title("主流板块设置")
             settings_window.geometry("400x500")
             settings_window.transient(self.root)
@@ -1967,11 +1443,6 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
         emotion_blink_state = {"blinking": False, "visible": True, "timer_id": None}
         def update_emotion_light_large(*args):
             """更新情绪周期红绿灯(大号+三个2倍大灯在爬取按钮右侧,带闪烁)"""
-            try:
-                if not emotion_light_canvas_large.winfo_exists():
-                    return
-            except Exception:
-                return
             cycle = emotion_cycle_var.get()
             emotion_light_canvas_large.delete("all")
             for c in getattr(self, 'emotion_light_2x_canvases', []):
@@ -2013,15 +1484,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
             """闪烁动画"""
             if emotion_blink_state["blinking"]:
                 emotion_blink_state["visible"] = not emotion_blink_state["visible"]
-                try:
-                    if emotion_light_canvas_large.winfo_exists():
-                        update_emotion_light_large()
-                    else:
-                        emotion_blink_state["blinking"] = False
-                        return
-                except Exception:
-                    emotion_blink_state["blinking"] = False
-                    return
+                update_emotion_light_large()
                 # 每500ms切换一次
                 emotion_blink_state["timer_id"] = self.root.after(500, blink_emotion_light)
         # 绑定情绪周期变化;保存更新函数供爬取按钮右侧三灯刷新用
@@ -2147,7 +1610,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
         # 开新仓流程弹出界面
         def show_new_position_dialog(position_type="绩优股"):
             """显示开新仓流程对话框"""
-            dialog = self._safe_toplevel(self.root)
+            dialog = self._toplevel(self.root)
             dialog.title(f"开{position_type}新仓流程")
             dialog.geometry("1000x800")
             dialog.resizable(True, True)
@@ -3173,7 +2636,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
                     if net_flow_5days is None:
                         try:
                             # 获取最近10天的历史数据(确保能取到至少5个交易日)
-                            hist_data = safe_call(ak.stock_zh_a_hist, symbol=stock_code, period="daily", adjust="qfq", fallback=None)
+                            hist_data = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq")
                             if hist_data is not None and not hist_data.empty and len(hist_data) >= 5:
                                 # 确保数据按日期排序
                                 if "日期" in hist_data.columns:
@@ -5636,7 +5099,7 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
                 scroll_text_frame.config(highlightbackground="#cc6666", bg="#e0e0e0")
                 self.emotion_red_scroll_label.config(bg="#e0e0e0", fg="gray")
         def _open_emotion_red_scroll_manage():
-            win = self._safe_toplevel(self.root)
+            win = self._toplevel(self.root)
             win.title("情绪红灯滚动文字 - 管理")
             win.geometry("400x280")
             win.transient(self.root)
@@ -6195,410 +5658,11 @@ class StockKeywordAnalyzerGUI(DatabaseMixin, KellyMixin, WordcloudMixin, DapanMi
         self.wordcloud_stocks_data = []  # 保存词云中的股票数据(股票名称、逻辑、时间、来源)
         # 更新text_input指向当前活动标签页
         self.update_text_input_reference()
-        # 同花顺情绪指数弹窗: 已禁用自动弹出 (用户可手动触发), 但保留 _th_reminder_tick 每 30 分钟的定时逻辑
-        # try:
-        #     self.root.after(15000, self._th_reminder_tick)  # 延后 15s
-        # except Exception:
-        #     pass
-def get_hot_indices_data():
-    """获取30个热门指数数据 - 包含涨跌幅统计"""
-    try:
-        import random
-        # 定义30个热门指数
-        hot_indices_list = [
-            # 主要指数
-            {"name": "中证50", "code": "sh000016", "type": "指数", "description": "中证50指数"},
-            {"name": "科创50", "code": "sh000688", "type": "指数", "description": "科创板50指数"},
-            {"name": "中证500", "code": "sh000905", "type": "指数", "description": "中证500指数"},
-            {"name": "中证1000", "code": "sh000852", "type": "指数", "description": "中证1000指数"},
-            {"name": "沪深300", "code": "sh000300", "type": "指数", "description": "沪深300指数"},
-            {"name": "中证100", "code": "sh000903", "type": "指数", "description": "中证100指数"},
-            # 科技类ETF
-            {"name": "芯片ETF", "code": "512760", "type": "ETF", "description": "国泰CES半导体芯片ETF"},
-            {"name": "半导体ETF", "code": "512480", "type": "ETF", "description": "国联安中证半导体ETF"},
-            {"name": "5G ETF", "code": "515050", "type": "ETF", "description": "华夏中证5G通信主题ETF"},
-            {"name": "AI ETF", "code": "515980", "type": "ETF", "description": "华夏中证人工智能主题ETF"},
-            {"name": "算力ETF", "code": "159658", "type": "ETF", "description": "华夏中证云计算与大数据主题ETF"},
-            {"name": "人工智能ETF", "code": "515980", "type": "ETF", "description": "华夏中证人工智能主题ETF"},
-            {"name": "云计算ETF", "code": "516510", "type": "ETF", "description": "易方达中证云计算与大数据主题ETF"},
-            {"name": "大数据ETF", "code": "515400", "type": "ETF", "description": "南方中证大数据产业ETF"},
-            # 新能源类ETF
-            {"name": "新能源ETF", "code": "516160", "type": "ETF", "description": "南方中证新能源ETF"},
-            {"name": "光伏ETF", "code": "515790", "type": "ETF", "description": "华泰柏瑞中证光伏产业ETF"},
-            {"name": "锂电池ETF", "code": "159840", "type": "ETF", "description": "嘉实中证电池主题ETF"},
-            {"name": "储能ETF", "code": "159566", "type": "ETF", "description": "华夏中证储能产业ETF"},
-            {"name": "风电ETF", "code": "516850", "type": "ETF", "description": "华泰柏瑞中证风电产业ETF"},
-            # 消费类ETF
-            {"name": "消费ETF", "code": "159928", "type": "ETF", "description": "汇添富中证主要消费ETF"},
-            {"name": "白酒ETF", "code": "512690", "type": "ETF", "description": "鹏华中证酒ETF"},
-            {"name": "食品饮料ETF", "code": "515170", "type": "ETF", "description": "华安中证细分食品饮料产业主题ETF"},
-            # 金融类ETF
-            {"name": "金融ETF", "code": "510230", "type": "ETF", "description": "国泰上证180金融ETF"},
-            {"name": "银行ETF", "code": "512800", "type": "ETF", "description": "华宝中证银行ETF"},
-            {"name": "证券ETF", "code": "512880", "type": "ETF", "description": "国泰中证全指证券公司ETF"},
-            {"name": "保险ETF", "code": "512070", "type": "ETF", "description": "易方达沪深300非银金融ETF"},
-            # 军工类ETF
-            {"name": "军工ETF", "code": "512660", "type": "ETF", "description": "国泰中证军工ETF"},
-            {"name": "国防ETF", "code": "512670", "type": "ETF", "description": "鹏华中证国防ETF"},
-            # 医药类ETF
-            {"name": "医药ETF", "code": "512010", "type": "ETF", "description": "易方达沪深300医药卫生ETF"},
-            {"name": "生物医药ETF", "code": "512290", "type": "ETF", "description": "南方中证500医药卫生ETF"},
-        ]
-        # 获取涨跌幅数据
-        indices_with_data = []
-        for index_info in hot_indices_list:
-            try:
-                # 生成模拟的涨跌幅数据(因为实际API可能不稳定)
-                base_change = random.uniform(-5, 5)  # 基础涨跌幅
-                # 计算统计涨跌幅
-                ten_day_change = round(base_change + random.uniform(-3, 3), 2)
-                twenty_day_change = round(base_change + random.uniform(-5, 5), 2)
-                index_data = {
-                    **index_info,
-                    '最新价': round(random.uniform(1000, 5000), 2),
-                    '涨跌幅': round(base_change, 2),
-                    # 5日数据已移除
-                    '10日总计涨跌幅': ten_day_change,
-                    '20日总计涨跌幅': twenty_day_change,
-                    '成交量': random.randint(1000000, 10000000),
-                    '成交额': random.randint(100000000, 1000000000)
-                }
-                indices_with_data.append(index_data)
-            except Exception as e:
-                print(f"获取 {index_info['name']} 数据失败: {e}")
-                # 添加基础数据
-                index_data = {
-                    **index_info,
-                    '最新价': 0,
-                    '涨跌幅': 0,
-                    # 5日数据已移除
-                    '10日总计涨跌幅': 0,
-                    '20日总计涨跌幅': 0,
-                    '成交量': 0,
-                    '成交额': 0
-                }
-                indices_with_data.append(index_data)
-        return indices_with_data
-    except Exception as e:
-        print(f"获取热门指数数据失败: {e}")
-        return []
-# ETF数据获取功能已移除
-def _removed_get_all_etf_data():
-    """获取所有ETF的实时数据"""
-    try:
-        import akshare as ak
-        # 获取ETF列表
-        etf_list = safe_call(ak.fund_etf_spot_em, fallback=pd.DataFrame(), label="ak.fund_etf_spot_em")
-        if etf_list.empty:
-            return []
-        # 取前100个ETF进行监控
-        top_etfs = etf_list.head(100)
-        etf_data = []
-        for _, row in top_etfs.iterrows():
-            try:
-                etf_data.append({
-                    '代码': row.get('代码', ''),
-                    '名称': row.get('名称', ''),
-                    '最新价': round(row.get('最新价', 0), 2),
-                    '涨跌幅': round(row.get('涨跌幅', 0), 2),
-                    '涨跌额': round(row.get('涨跌额', 0), 2),
-                    '成交量': row.get('成交量', 0),
-                    '成交额': row.get('成交额', 0),
-                    '换手率': round(row.get('换手率', 0), 2),
-                    '市盈率': round(row.get('市盈率-动态', 0), 2) if row.get('市盈率-动态', 0) != '-' else 0
-                })
-            except Exception as e:
-                print(f"处理ETF数据失败: {e}")
-                continue
-        return etf_data
-    except Exception as e:
-        print(f"获取ETF数据失败: {e}")
-        return []
-def get_market_overview_data():
-    """获取大盘一览数据"""
-    try:
+        # 同花顺情绪指数:启动后约 5 秒先弹一次,之后每半小时再提醒
+        try:
+            self.root.after(15000, self._th_reminder_tick)  # 延后 15s
+        except Exception:
+            pass
 
-        import akshare as ak
-        market_data = {}
-        # 1. 获取主要指数数据
-        try:
-            # 上证指数
-            sh_index = safe_call(ak.stock_zh_index_daily, symbol="sh000001", fallback=pd.DataFrame())
-            if not sh_index.empty:
-                latest_sh = sh_index.iloc[-1]
-                # 计算涨跌幅和涨跌额
-                prev_close = latest_sh.get('preclose', latest_sh['close'])
-                change_pct = ((latest_sh['close'] - prev_close) / prev_close * 100) if prev_close != 0 else 0
-                change_amt = latest_sh['close'] - prev_close
-                market_data['上证指数'] = {
-                    '最新价': latest_sh['close'],
-                    '涨跌幅': round(change_pct, 2),
-                    '涨跌额': round(change_amt, 2),
-                    '成交量': latest_sh.get('volume', 0),
-                    '成交额': latest_sh.get('amount', 0)
-                }
-        except Exception as e:
-            print(f"获取上证指数失败: {e}")
-        try:
-            # 深证成指
-            sz_index = safe_call(ak.stock_zh_index_daily, symbol="sz399001", fallback=pd.DataFrame())
-            if not sz_index.empty:
-                latest_sz = sz_index.iloc[-1]
-                # 计算涨跌幅和涨跌额
-                prev_close = latest_sz.get('preclose', latest_sz['close'])
-                change_pct = ((latest_sz['close'] - prev_close) / prev_close * 100) if prev_close != 0 else 0
-                change_amt = latest_sz['close'] - prev_close
-                market_data['深证成指'] = {
-                    '最新价': latest_sz['close'],
-                    '涨跌幅': round(change_pct, 2),
-                    '涨跌额': round(change_amt, 2),
-                    '成交量': latest_sz.get('volume', 0),
-                    '成交额': latest_sz.get('amount', 0)
-                }
-        except Exception as e:
-            print(f"获取深证成指失败: {e}")
-        try:
-            # 创业板指
-            cyb_index = safe_call(ak.stock_zh_index_daily, symbol="sz399006", fallback=pd.DataFrame())
-            if not cyb_index.empty:
-                latest_cyb = cyb_index.iloc[-1]
-                # 计算涨跌幅和涨跌额
-                prev_close = latest_cyb.get('preclose', latest_cyb['close'])
-                change_pct = ((latest_cyb['close'] - prev_close) / prev_close * 100) if prev_close != 0 else 0
-                change_amt = latest_cyb['close'] - prev_close
-                market_data['创业板指'] = {
-                    '最新价': latest_cyb['close'],
-                    '涨跌幅': round(change_pct, 2),
-                    '涨跌额': round(change_amt, 2),
-                    '成交量': latest_cyb.get('volume', 0),
-                    '成交额': latest_cyb.get('amount', 0)
-                }
-        except Exception as e:
-            print(f"获取创业板指失败: {e}")
-        # 2. 获取市场PE数据
-        try:
-            # 使用替代API获取市场估值数据
-            pe_data = safe_call(ak.stock_market_pe_lg, fallback=[], label="ak.stock_market_pe_lg")
-            if not pe_data.empty:
-                latest_pe = pe_data.iloc[-1]
-                market_data['市场PE'] = {
-                    '整体PE': round(latest_pe.get('pe', 0), 2),
-                    '整体PB': round(latest_pe.get('pb', 0), 2),
-                    '日期': latest_pe.get('date', '')
-                }
-        except Exception as e:
-            print(f"获取市场PE数据失败: {e}")
-        # 3. 获取债券市场数据
-        try:
-            # 使用替代API获取债券数据
-            bond_data = safe_call(ak.bond_zh_us_rate, fallback=[], label="ak.bond_zh_us_rate")
-            if not bond_data.empty:
-                latest_bond = bond_data.iloc[-1]
-                market_data['债券市场'] = {
-                    '10年期国债收益率': round(latest_bond.get('中国国债收益率10年', 0), 2),
-                    '日期': latest_bond.get('日期', '')
-                }
-        except Exception as e:
-            print(f"获取债券数据失败: {e}")
-        # 4. 获取市场情绪数据
-        try:
-            # 获取融资融券数据
-            margin_data = safe_call(ak.stock_margin_underlying_info_szse, fallback=pd.DataFrame(), label="ak.stock_margin_underlying_info_szse")
-            if not margin_data.empty:
-                latest_margin = margin_data.iloc[-1]
-                market_data['融资融券'] = {
-                    '融资余额': latest_margin.get('融资余额', 0),
-                    '融券余额': latest_margin.get('融券余额', 0),
-                    '融资买入额': latest_margin.get('融资买入额', 0)
-                }
-        except Exception as e:
-            print(f"获取融资融券数据失败: {e}")
-        # 5. 获取北向资金数据
-        try:
-            # 使用替代API获取北向资金数据
-            northbound_data = safe_call(ak.stock_connect_northbound_summary_em, fallback=[], label="ak.stock_connect_northbound_summary_em")
-            if not northbound_data.empty:
-                latest_north = northbound_data.iloc[-1]
-                market_data['北向资金'] = {
-                    '净买入额': latest_north.get('净买入额', 0),
-                    '买入额': latest_north.get('买入额', 0),
-                    '卖出额': latest_north.get('卖出额', 0),
-                    '日期': latest_north.get('日期', '')
-                }
-        except Exception as e:
-            print(f"获取北向资金数据失败: {e}")
-        # 6. 获取热门指数数据
-        try:
-            hot_indices = get_hot_indices_data()
-            if hot_indices:
-                market_data['热门指数'] = hot_indices
-        except Exception as e:
-            print(f"获取热门指数数据失败: {e}")
-        # 7. 获取行业板块数据
-        try:
-            # 使用替代API获取行业板块数据
-            industry_data = safe_call(ak.stock_board_industry_name_em, fallback=pd.DataFrame(), label="ak.stock_board_industry_name_em")
-            if not industry_data.empty:
-                # 取前10个行业
-                top_industries = industry_data.head(10)
-                market_data['行业板块'] = []
-                for _, row in top_industries.iterrows():
-                    market_data['行业板块'].append({
-                        '板块名称': row.get('板块名称', ''),
-                        '涨跌幅': round(row.get('涨跌幅', 0), 2),
-                        '涨跌额': round(row.get('涨跌额', 0), 2),
-                        '成交额': row.get('成交额', 0)
-                    })
-        except Exception as e:
-            print(f"获取行业板块数据失败: {e}")
-        return market_data
-    except Exception as e:
-        print(f"获取大盘数据失败: {e}")
-        return {}
-def main():
-    try:
-        # conda 下用绝对路径启动 python 时,未 activate 则 PATH 不含 env 的 bin,同目录的 node 无法被 pywencai 找到
-        try:
-            _bd = os.path.dirname(os.path.abspath(sys.executable))
-            _node = os.path.join(_bd, "node")
-            if os.path.isfile(_node) and os.access(_node, os.X_OK):
-                os.environ["PATH"] = _bd + os.pathsep + os.environ.get("PATH", "")
-        except Exception:
-            pass
-        # macOS 特定设置
-        if sys.platform == "darwin":
-            os.environ.setdefault("TK_SILENCE_DEPRECATION", "1")
-        # 检查是否有图形显示环境
-        display_env = os.environ.get('DISPLAY', '')
-        if sys.platform == "darwin":
-            # macOS 使用不同的显示系统
-            pass
-        elif not display_env:
-            print("错误: 未检测到图形显示环境 (DISPLAY 环境变量为空)")
-            print("请在图形界面环境中运行此程序,或设置正确的 DISPLAY 环境变量")
-            print("在 macOS 上,请确保使用支持图形界面的终端或使用 pythonw 运行")
-            return
-        # 创建主窗口
-        root = tk.Tk()
-        # 🔧 Tk 回调异常钩子（把 silent crash 打到文件）
-        import traceback as _tb_global
-        def _tk_err_hook(exc_type, exc_val, exc_tb):
-            try:
-                _log = os.path.expanduser("~/Desktop/tk_traceback.log")
-                with open(_log, "a") as _f:
-                    _f.write("\n" + "="*60 + "\n")
-                    _tb_global.print_exception(exc_type, exc_val, exc_tb, file=_f)
-            except Exception:
-                pass
-        root.report_callback_exception = _tk_err_hook
-        # 立即显示窗口框架,让用户看到程序正在启动
-        # 优先取脚本文件名作为窗口标题, 回退到 config 配置
-        try:
-            _script_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
-            root.title(_script_name)
-        except Exception:
-            root.title(APP_CONFIG.get("window_title", DEFAULT_APP_CONFIG["window_title"]))
-        root.geometry("1580x940")
-        try:
-            root.minsize(1280, 820)
-        except Exception:
-            pass
-        # 无本地缓存时会联网拉取全市场股票名(可能 10s+),延后到 GUI 创建后再启动
-        def _preload_stock_names():
-            try:
-                load_stock_names()
-                # load_stock_names 填充的是 logic.stock_names 模块的 global,
-                # 拷回主文件并重新注入所有子模块, 避免 NameError
-                global STOCK_CODES_DICT, STOCK_NAMES_SET, STOCK_NAME_TO_CODE
-                import logic.stock_names as _sn
-                STOCK_CODES_DICT = _sn.STOCK_CODES_DICT
-                STOCK_NAMES_SET = _sn.STOCK_NAMES_SET
-                STOCK_NAME_TO_CODE = _sn.STOCK_NAME_TO_CODE
-                # 注入 Phase 2 子模块
-                import data.snapshot as _sp
-                _sn.STOCK_CODES_DICT = STOCK_CODES_DICT
-                _sn.STOCK_NAMES_SET = STOCK_NAMES_SET
-                _sn.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-                _sp.STOCK_CODES_DICT = STOCK_CODES_DICT
-                # 暴力遍历 sys.modules, 给所有 tab_* 模块注入
-                import sys as _sys
-                count = 0
-                for _mod in list(_sys.modules.values()):
-                    if not _mod: continue
-                    _name = getattr(_mod, '__name__', '')
-                    if ('tab_' in _name or _name.startswith('ui.') or
-                        _name.startswith('logic.') or _name.startswith('data.') or
-                        _name.startswith('utils.')):
-                        if hasattr(_mod, 'STOCK_CODES_DICT'):
-                            try:
-                                _mod.STOCK_CODES_DICT = STOCK_CODES_DICT
-                                _mod.STOCK_NAMES_SET = STOCK_NAMES_SET
-                                _mod.STOCK_NAME_TO_CODE = STOCK_NAME_TO_CODE
-                                count += 1
-                            except Exception:
-                                pass
-                print(f"✓ 股票代码表已同步到 {count} 个子模块 ({len(STOCK_CODES_DICT or {})} 只)")
-            except Exception as e:
-                print(f"后台预加载股票名称列表失败: {e}")
-        root.after(3000, lambda: threading.Thread(target=_preload_stock_names, daemon=True).start())
-        # 启动后 20s 自动后台更新 market_sentiment_data.json (30s 跑完, 不阻塞 UI)
-        def _bg_update_sentiment():
-            try:
-                import subprocess as _sp_sent
-                _emo_py_sent = os.path.expanduser("~/.qclaw/workspace-agent-85985980/market_sentiment.py")
-                if os.path.exists(_emo_py_sent):
-                    print("[启动] 📊 后台更新情绪数据 (market_sentiment.py)...")
-                    _sp_sent.run([sys.executable, _emo_py_sent], capture_output=True, text=True, timeout=60)
-                    print("[启动] ✅ 情绪数据已更新")
-            except Exception as _e_sent:
-                print(f"[启动] 情绪数据后台更新失败: {_e_sent}")
-        root.after(20000, lambda: threading.Thread(target=_bg_update_sentiment, daemon=True).start())
-        # 创建应用实例(在创建过程中会逐步显示界面)
-        try:
-            app = StockKeywordAnalyzerGUI(root)
-        except Exception as e:
-            import traceback
-            error_msg = f"初始化应用失败: {e!s}\n{traceback.format_exc()}"
-            print(error_msg)
-            try:
-                from tkinter import messagebox
-                messagebox.showerror("初始化错误", error_msg, parent=root)
-            except:
-                pass
-            try:
-                if root.winfo_exists():
-                    root.destroy()
-            except:
-                pass
-            return
-        # 再次确保窗口可见并置于最前
-        try:
-            root.deiconify()
-            root.lift()
-            root.focus_force()
-        except Exception as e:
-            print(f"Warning: Failed to show window: {e}")
-        # 检查是否有打开数据表的标记文件
-        marker_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".open_ths_data_table")
-        if os.path.exists(marker_file):
-            try:
-                # 删除标记文件
-                os.remove(marker_file)
-                # 延迟打开数据表窗口,确保主窗口已完全初始化
-                root.after(500, lambda: app.show_unified_db_display(default_tab="ths"))
-            except Exception as e:
-                print(f"自动打开数据表窗口失败: {e}")
-        print(f"🚀 about to enter mainloop at {__import__('time').time()}", flush=True)
-        root.mainloop()
-    except Exception as e:
-        import traceback
-        error_msg = f"程序启动失败: {e!s}\n{traceback.format_exc()}"
-        print(error_msg)
-        try:
-            from tkinter import messagebox
-            messagebox.showerror("启动错误", error_msg)
-        except:
-            print("无法显示错误对话框,错误信息已打印到控制台")
-            input("按回车键退出...")
 if __name__ == "__main__":
     main()

@@ -450,6 +450,16 @@
   ],
   "history_holdings": [
     {
+      "stock_name": "南网科技",
+      "stock_code": "688248",
+      "replaced_date": "2026-09-21 09:52:22"
+    },
+    {
+      "stock_name": "长安汽车",
+      "stock_code": "000625",
+      "replaced_date": "2026-09-21 09:52:22"
+    },
+    {
       "stock_name": "众生药业",
       "stock_code": "002317",
       "replaced_date": "2026-09-20 22:09:02"
@@ -937,16 +947,6 @@
     {
       "stock_name": "贵州茅台",
       "stock_code": "600519",
-      "replaced_date": "2026-09-17 21:43:22"
-    },
-    {
-      "stock_name": "生益科技",
-      "stock_code": "600183",
-      "replaced_date": "2026-09-17 21:43:22"
-    },
-    {
-      "stock_name": "远东股份",
-      "stock_code": "600869",
       "replaced_date": "2026-09-17 21:43:22"
     }
   ],
@@ -1844,8 +1844,8 @@
     },
     {
       "index": 13,
-      "stock_name": "通鼎互联",
-      "stock_code": "002491"
+      "stock_name": "永鼎股份",
+      "stock_code": "600105"
     },
     {
       "index": 14,
@@ -1854,18 +1854,18 @@
     },
     {
       "index": 15,
-      "stock_name": "永鼎股份",
-      "stock_code": "600105"
+      "stock_name": "通鼎互联",
+      "stock_code": "002491"
     },
     {
       "index": 16,
-      "stock_name": "大金重工",
-      "stock_code": "002487"
+      "stock_name": "平潭发展",
+      "stock_code": "000592"
     },
     {
       "index": 17,
-      "stock_name": "双星新材",
-      "stock_code": "002585"
+      "stock_name": "众生药业",
+      "stock_code": "002317"
     },
     {
       "index": 18,
@@ -1874,268 +1874,268 @@
     },
     {
       "index": 19,
-      "stock_name": "平潭发展",
-      "stock_code": "000592"
-    },
-    {
-      "index": 20,
-      "stock_name": "众生药业",
-      "stock_code": "002317"
-    },
-    {
-      "index": 21,
       "stock_name": "太极实业",
       "stock_code": "600667"
     },
     {
-      "index": 22,
+      "index": 20,
       "stock_name": "有研新材",
       "stock_code": "600206"
     },
     {
-      "index": 23,
-      "stock_name": "新易盛",
-      "stock_code": "300502"
-    },
-    {
-      "index": 24,
-      "stock_name": "宏昌电子",
-      "stock_code": "603002"
-    },
-    {
-      "index": 25,
-      "stock_name": "北方华创",
-      "stock_code": "002371"
-    },
-    {
-      "index": 26,
-      "stock_name": "福瑞医科",
-      "stock_code": "300049"
-    },
-    {
-      "index": 27,
-      "stock_name": "山子高科",
-      "stock_code": "000981"
-    },
-    {
-      "index": 28,
+      "index": 21,
       "stock_name": "三花智控",
       "stock_code": "002050"
     },
     {
-      "index": 29,
-      "stock_name": "中钨高新",
-      "stock_code": "000657"
+      "index": 22,
+      "stock_name": "新易盛",
+      "stock_code": "300502"
     },
     {
-      "index": 30,
-      "stock_name": "黑猫股份",
-      "stock_code": "002068"
+      "index": 23,
+      "stock_name": "宏昌电子",
+      "stock_code": "603002"
     },
     {
-      "index": 31,
-      "stock_name": "万邦医药",
-      "stock_code": "301520"
+      "index": 24,
+      "stock_name": "北方华创",
+      "stock_code": "002371"
     },
     {
-      "index": 32,
-      "stock_name": "兆易创新",
-      "stock_code": "603986"
-    },
-    {
-      "index": 33,
-      "stock_name": "众泰汽车",
-      "stock_code": "000980"
-    },
-    {
-      "index": 34,
-      "stock_name": "亨通光电",
-      "stock_code": "600487"
-    },
-    {
-      "index": 35,
-      "stock_name": "东山精密",
-      "stock_code": "002384"
-    },
-    {
-      "index": 36,
+      "index": 25,
       "stock_name": "彤程新材",
       "stock_code": "603650"
     },
     {
-      "index": 37,
-      "stock_name": "哈药股份",
-      "stock_code": "600664"
+      "index": 26,
+      "stock_name": "亨通光电",
+      "stock_code": "600487"
     },
     {
-      "index": 38,
+      "index": 27,
+      "stock_name": "大金重工",
+      "stock_code": "002487"
+    },
+    {
+      "index": 28,
+      "stock_name": "山子高科",
+      "stock_code": "000981"
+    },
+    {
+      "index": 29,
       "stock_name": "华胜天成",
       "stock_code": "600410"
     },
     {
-      "index": 39,
+      "index": 30,
       "stock_name": "海马汽车",
       "stock_code": "000572"
     },
     {
-      "index": 40,
+      "index": 31,
+      "stock_name": "黑猫股份",
+      "stock_code": "002068"
+    },
+    {
+      "index": 32,
       "stock_name": "国瓷材料",
       "stock_code": "300285"
     },
     {
-      "index": 41,
+      "index": 33,
       "stock_name": "中天科技",
       "stock_code": "600522"
     },
     {
-      "index": 42,
+      "index": 34,
+      "stock_name": "万邦医药",
+      "stock_code": "301520"
+    },
+    {
+      "index": 35,
+      "stock_name": "兆易创新",
+      "stock_code": "603986"
+    },
+    {
+      "index": 36,
       "stock_name": "环旭电子",
       "stock_code": "601231"
     },
     {
-      "index": 43,
+      "index": 37,
+      "stock_name": "东山精密",
+      "stock_code": "002384"
+    },
+    {
+      "index": 38,
       "stock_name": "瑞泰新材",
       "stock_code": "301238"
     },
     {
-      "index": 44,
+      "index": 39,
       "stock_name": "京东方Ａ",
       "stock_code": "000725"
     },
     {
-      "index": 45,
+      "index": 40,
       "stock_name": "南网科技",
       "stock_code": "688248"
     },
     {
-      "index": 46,
+      "index": 41,
       "stock_name": "兴森科技",
       "stock_code": "002436"
     },
     {
-      "index": 47,
+      "index": 42,
+      "stock_name": "福瑞医科",
+      "stock_code": "300049"
+    },
+    {
+      "index": 43,
+      "stock_name": "众泰汽车",
+      "stock_code": "000980"
+    },
+    {
+      "index": 44,
       "stock_name": "津药药业",
       "stock_code": "600488"
     },
     {
-      "index": 48,
+      "index": 45,
       "stock_name": "华之杰",
       "stock_code": "603400"
     },
     {
-      "index": 49,
+      "index": 46,
       "stock_name": "深中华A",
       "stock_code": "000017"
     },
     {
-      "index": 50,
+      "index": 47,
+      "stock_name": "中钨高新",
+      "stock_code": "000657"
+    },
+    {
+      "index": 48,
       "stock_name": "我爱我家",
       "stock_code": "000560"
     },
     {
-      "index": 51,
+      "index": 49,
       "stock_name": "东方明珠",
       "stock_code": "600637"
     },
     {
-      "index": 52,
-      "stock_name": "中国巨石",
-      "stock_code": "600176"
+      "index": 50,
+      "stock_name": "哈药股份",
+      "stock_code": "600664"
     },
     {
-      "index": 53,
-      "stock_name": "启明信息",
-      "stock_code": "002232"
-    },
-    {
-      "index": 54,
+      "index": 51,
       "stock_name": "寒武纪",
       "stock_code": "688256"
     },
     {
-      "index": 55,
-      "stock_name": "闽东电力",
-      "stock_code": "000993"
-    },
-    {
-      "index": 56,
-      "stock_name": "长安汽车",
-      "stock_code": "000625"
-    },
-    {
-      "index": 57,
-      "stock_name": "翔丰华",
-      "stock_code": "300890"
-    },
-    {
-      "index": 58,
+      "index": 52,
       "stock_name": "招商蛇口",
       "stock_code": "001979"
     },
     {
-      "index": 59,
+      "index": 53,
       "stock_name": "上大股份",
       "stock_code": "301522"
     },
     {
-      "index": 60,
+      "index": 54,
       "stock_name": "衢州发展",
       "stock_code": "600208"
     },
     {
-      "index": 61,
+      "index": 55,
       "stock_name": "影石创新",
       "stock_code": "688775"
     },
     {
-      "index": 62,
+      "index": 56,
       "stock_name": "中国铀业",
       "stock_code": "001280"
     },
     {
-      "index": 63,
+      "index": 57,
       "stock_name": "美年健康",
       "stock_code": "002044"
     },
     {
-      "index": 64,
+      "index": 58,
       "stock_name": "张江高科",
       "stock_code": "600895"
     },
     {
-      "index": 65,
+      "index": 59,
       "stock_name": "艾迪精密",
       "stock_code": "603638"
     },
     {
-      "index": 66,
+      "index": 60,
       "stock_name": "新城控股",
       "stock_code": "601155"
     },
     {
-      "index": 67,
+      "index": 61,
       "stock_name": "高德红外",
       "stock_code": "002414"
     },
     {
-      "index": 68,
+      "index": 62,
       "stock_name": "思特威",
       "stock_code": "688213"
     },
     {
-      "index": 69,
+      "index": 63,
       "stock_name": "东华软件",
       "stock_code": "002065"
     },
     {
+      "index": 64,
+      "stock_name": "双星新材",
+      "stock_code": "002585"
+    },
+    {
+      "index": 65,
+      "stock_name": "中国巨石",
+      "stock_code": "600176"
+    },
+    {
+      "index": 66,
+      "stock_name": "长安汽车",
+      "stock_code": "000625"
+    },
+    {
+      "index": 67,
+      "stock_name": "翔丰华",
+      "stock_code": "300890"
+    },
+    {
+      "index": 68,
+      "stock_name": "亚盛集团",
+      "stock_code": "600108"
+    },
+    {
+      "index": 69,
+      "stock_name": "长飞光纤",
+      "stock_code": "601869"
+    },
+    {
       "index": 70,
-      "stock_name": "贵州茅台",
-      "stock_code": "600519"
+      "stock_name": "启明信息",
+      "stock_code": "002232"
     },
     {
       "index": 71,
-      "stock_name": "长飞光纤",
-      "stock_code": "601869"
+      "stock_name": "康达新材",
+      "stock_code": "002669"
     },
     {
       "index": 72,
@@ -2144,38 +2144,38 @@
     },
     {
       "index": 73,
-      "stock_name": "亚盛集团",
-      "stock_code": "600108"
-    },
-    {
-      "index": 74,
-      "stock_name": "康达新材",
-      "stock_code": "002669"
-    },
-    {
-      "index": 75,
       "stock_name": "宝鼎科技",
       "stock_code": "002552"
     },
     {
-      "index": 76,
+      "index": 74,
       "stock_name": "恒盛能源",
       "stock_code": "605580"
     },
     {
-      "index": 77,
+      "index": 75,
       "stock_name": "浙江东日",
       "stock_code": "600113"
     },
     {
-      "index": 78,
+      "index": 76,
       "stock_name": "风华高科",
       "stock_code": "000636"
     },
     {
+      "index": 77,
+      "stock_name": "龙版传媒",
+      "stock_code": "605577"
+    },
+    {
+      "index": 78,
+      "stock_name": "中视传媒",
+      "stock_code": "600088"
+    },
+    {
       "index": 79,
-      "stock_name": "超声电子",
-      "stock_code": "000823"
+      "stock_name": "青山纸业",
+      "stock_code": "600103"
     }
   ],
   "holding_stocks_5": [
@@ -3019,36 +3019,36 @@
   ],
   "photo_wall_count": 30,
   "sector_index_list": [
-    "半导体",
-    "其他电子",
-    "光伏设备",
-    "其他电源设备",
-    "专用设备",
-    "电子化学品",
-    "生物制品",
-    "医疗服务",
-    "家居用品",
-    "通信设备",
-    "金属新材料",
-    "房地产",
-    "环保设备",
-    "美容护理",
-    "自动化设备",
-    "通用设备",
-    "军工电子",
-    "软件开发",
-    "互联网电商",
-    "医药商业",
-    "消费电子",
-    "电网设备",
-    "厨卫电器",
-    "电池",
-    "IT服务",
-    "塑料制品",
-    "其他社会服务",
-    "光学光电子",
-    "多元金融",
-    "零售"
+    "昨日连板",
+    "昨日连板_含一字",
+    "昨日打二板以上表现",
+    "MLCC",
+    "重组蛋白",
+    "单抗概念",
+    "创新药",
+    "CRO",
+    "AI制药（医疗）",
+    "减肥药",
+    "肝炎概念",
+    "培育钻石",
+    "被动元件概念",
+    "托育服务",
+    "题材股",
+    "辅助生殖",
+    "阿兹海默",
+    "免疫治疗",
+    "CAR-T细胞疗法",
+    "东方财富热股",
+    "昨日涨停_含一字",
+    "基因测序",
+    "精准医疗",
+    "昨日涨停",
+    "3D玻璃",
+    "病原体防治",
+    "精准诊断",
+    "肝素概念",
+    "流感",
+    "幽门螺杆菌概念"
   ],
   "holding_stocks_9": [
     {
@@ -7875,14 +7875,14 @@
     }
   ],
   "holding_tab_names": {
-    "7": "0920",
-    "8": "0919",
-    "9": "0918",
-    "10": "0917",
-    "11": "0916",
-    "12": "0915",
-    "13": "0914",
-    "14": "0913"
+    "7": "0921",
+    "8": "0920",
+    "9": "0919",
+    "10": "0918",
+    "11": "0917",
+    "12": "0916",
+    "13": "0915",
+    "14": "0914"
   },
   "holding_stocks_6": [
     {
@@ -8286,7 +8286,7 @@
       "stock_code": "600522"
     }
   ],
-  "sector_index_last_update": "2026-09-19",
+  "sector_index_last_update": "2026-09-21",
   "emotion_red_scroll_text": "情绪下行，谨慎操作！禁止开新仓！减仓观望\n11月你亏过人民同泰\n12月你亏过实达集团，福蓉科技\n1月你亏过航天发展，雷科防务\n2月你亏过黄金股票，晓程科技吃大面\n黄金股票高位吃大面\n高位左侧不能做\n开仓有没有开仓单\n双良走坏继续T，不割肉，连续两个跌停，跌停一个走，入其他是不是好一点？协鑫集成什么都是亏，买什么亏什么，有大资金支持么？乖离那么高。高乖离，没有人气，趋势逆向，怎么做\n第二天45分钟没有收到均线以上是不是走人。通知你好几次，不走，你二天大亏。双良转债加仓，-12到-16.百川转债加仓-8到-16.情绪指标不好的时候，不能开仓，还开。没有执行程序。\n亏转债，亏双良，破10日线。亏百川，亏四方精创，网宿科技，金浦钛业。都是破十日线，鱼尾，赚钱变亏损，做反弹。王力，三角，转债，都亏钱。三角为站上1日线想想新力金融，法尔胜不及时止损，电梯都下行了，还加仓",
   "emotion_down_lock_password": "123456",
   "ths_sentiment_trend": "震荡",
