@@ -35,3 +35,18 @@ web_data/
 *.working
 *.revert_backup*
 src copy/
+
+# --- GitHub push 清理 (mac003 专用) ---
+snapshots/
+data/*.db
+data/*.sqlite
+data/*.json
+data/cache/
+config.local.json
+tk.csv
+tushare_local.json
+*.tar.gz
+*.zip
+.venv/
+src/data/tk.csv
+src/data/tushare_token.json

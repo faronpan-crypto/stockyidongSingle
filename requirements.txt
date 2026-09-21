@@ -1,26 +1,19 @@
-# External dependencies
-PyOpenGL==3.1.7
-PyOpenGL-accelerate==3.1.7
-PyQt5==5.15.9 
-requests==2.31.0
-pandas==2.0.3
-beautifulsoup4==4.12.2
-prettytable==3.8.0
-python-docx==1.1.0
-
-# 脉搏信号滤波器依赖项
-numpy>=1.21.0
-matplotlib>=3.5.0
-scipy>=1.7.0
-openpyxl>=3.0.0
-
-# 水墨画转换器依赖项
-opencv-python>=4.8.0
-pillow>=10.0.0
-
-# 中文分词功能
+# === 核心依赖 (股票异动监控 mac003) ===
+tushare>=1.4.29
+akshare>=1.18.0
+matplotlib>=3.8
 jieba>=0.42.1
-
-# 股票数据获取
-akshare>=1.12.0
-tushare>=1.2.0
+requests>=2.31
+PyYAML>=6.0
+beautifulsoup4>=4.12
+lxml>=4.9
+openpyxl>=3.1
+xlsxwriter>=3.0
+wordcloud>=1.9
+baostock>=0.9
+pywencai>=0.13
+fake-useragent>=1.5
+loguru>=0.7
+# === 可选 (增强功能) ===
+# transformers>=4.30
+# torch>=2.0
