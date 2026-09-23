@@ -199,6 +199,28 @@ def fetch_realtime_basic(code6: str) -> dict:
     return result
 
 
+def fetch_index_daily(symbol: str = "sh000001", days: int = 30) -> pd.DataFrame | None:
+    """
+    拉指数日线 (上证指数/深证成指等)
+    symbol: "sh000001" (上证), "sz399001" (深证成指), "sz399006" (创业板)
+    返回 DataFrame 列: date, open, high, low, close, volume, pct_chg
+    当前机器: akshare stock_zh_index_daily 稳定可用 (5/5 成功)
+    """
+    try:
+        import akshare as ak
+        df = ak.stock_zh_index_daily(symbol=symbol)
+        if df is None or len(df) == 0:
+            return None
+        df = df.copy()
+        # date 可能是 datetime.date, 统一转 datetime 再格式化
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date").tail(days).reset_index(drop=True)
+        df["pct_chg"] = df["close"].pct_change() * 100
+        return df[["date", "open", "high", "low", "close", "volume", "pct_chg"]]
+    except Exception:
+        return None
+
+
 def fetch_daily_full_via_akshare(code6: str, start_date: str, end_date: str) -> pd.DataFrame | None:
     """
     模拟 tushare pro.daily() 接口签名, 供熔断后偷偷替换使用

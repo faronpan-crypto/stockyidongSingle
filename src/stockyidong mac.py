@@ -44016,53 +44016,88 @@ class StockKeywordAnalyzerGUI:
 
                 # ======== 5. 最近20日趋势 (上证涨跌幅 + 情绪分) ========
                 if not _step("拉20日趋势"): return
-                # 策略: tushare 拉最新20交易日做基础, JSON sentiment_score 能取到则覆盖
+                # 策略: akshare 新浪指数优先 (稳定), tushare 兜底 (可能被熔断 hang 住)
                 trend10 = []
-                # Step 1: tushare 拉最新 20 交易日上证数据 (日期永远新鲜)
+                _tushare_map = {}
+                # Step 1: akshare 拉上证日线 (当前机器最稳, 系统 Python/venv 都能用)
                 try:
-                    import tushare as _ts_trend2
-                    from datetime import date as _dt_date_t2
-                    _today_yyyymmdd = _dt_date_t2.today().strftime("%Y%m%d")
-                    _pro2 = _ts_trend2.pro_api()
-                    _cal2 = _pro2.trade_cal(exchange="SSE", start_date="20250101",
-                                            end_date=_today_yyyymmdd, is_open="1")
-                    _td_list2 = sorted(_cal2["cal_date"].tolist())[-22:] if _cal2 is not None else []
-                    _t10_2 = _td_list2[-20:] if len(_td_list2) >= 20 else _td_list2
-                    _tushare_map = {}
-                    for _td2 in _t10_2:
-                        try:
-                            _df2 = _pro2.index_daily(ts_code="000001.SH", trade_date=_td2)
-                            if _df2 is None or len(_df2) == 0: continue
-                            _r2 = _df2.iloc[0]
-                            _pct3 = float(_r2.get("pct_chg", 0) or 0)
-                            _vol3 = float(_r2.get("amount", 0) or 0) / 1e5
-                            _tr3 = float(_r2.get("turnover_rate", 0) or 0)
-                            _close3 = float(_r2.get("close", 0) or 0)
-                            # 自算 emo score (近似 market_sentiment_data.json 的算法)
+                    import akshare as _ak_idx_pri
+                    import pandas as _pd_pri
+                    _idx_df_pri = _ak_idx_pri.stock_zh_index_daily(symbol="sh000001")
+                    if _idx_df_pri is not None and len(_idx_df_pri) > 0:
+                        _idx_df_pri = _idx_df_pri.copy()
+                        _idx_df_pri["date"] = _pd_pri.to_datetime(_idx_df_pri["date"])
+                        _idx_df_pri = _idx_df_pri.sort_values("date").tail(25).reset_index(drop=True)
+                        _idx_df_pri["pct_chg"] = _idx_df_pri["close"].pct_change() * 100
+                        for _ir in _idx_df_pri.itertuples(index=False):
+                            _pct3 = float(getattr(_ir, "pct_chg", 0) or 0)
+                            _close3 = float(_ir.close)
+                            _vol3 = 0; _tr3 = 0
                             _base3 = 50
                             if _pct3 > 1: _base3 += 20
                             elif _pct3 > 0: _base3 += 8
                             elif _pct3 < -1: _base3 -= 20
                             elif _pct3 < 0: _base3 -= 8
-                            if _vol3 > 5000: _base3 += 10
-                            elif _vol3 < 3000: _base3 -= 5
-                            if _tr3 > 2: _base3 += 8
-                            elif _tr3 < 0.5: _base3 -= 5
                             _emo_s3 = max(10, min(95, _base3))
-                            _full_k = _td2[:4]+"-"+_td2[4:6]+"-"+_td2[6:8]
+                            if hasattr(_ir.date, "strftime"):
+                                _full_k = _ir.date.strftime("%Y-%m-%d")
+                            else:
+                                _full_k = str(_ir.date)[:10]
                             _tushare_map[_full_k] = {
                                 "full_date": _full_k,
-                                "date": _td2[4:6]+"/"+_td2[6:8],
+                                "date": _full_k[5:7]+"/"+_full_k[8:10],
                                 "pct": _pct3,
                                 "emo": _emo_s3,
                                 "zt": 0,
                                 "close": _close3,
                             }
-                        except Exception: continue
-                    print(f"[大盘] tushare trend10 拉到: {len(_tushare_map)}天, 最新={max(_tushare_map.keys()) if _tushare_map else '无'}")
-                except Exception as _e_ts:
-                    print(f"[大盘] tushare trend10 fail: {_e_ts}")
-                    _tushare_map = {}
+                        print(f"[大盘] ✅ akshare trend10 拉到: {len(_tushare_map)}天, 最新={max(_tushare_map.keys())}")
+                except Exception as _e_ak_pri:
+                    print(f"[大盘] akshare trend10 fail: {_e_ak_pri}, 尝试 tushare...")
+
+                # Step 2: tushare 兜底 (仅 akshare 失败时尝试, 有 hang 风险)
+                if not _tushare_map:
+                    try:
+                        import tushare as _ts_trend2
+                        from datetime import date as _dt_date_t2
+                        _today_yyyymmdd = _dt_date_t2.today().strftime("%Y%m%d")
+                        _pro2 = _ts_trend2.pro_api()
+                        _cal2 = _pro2.trade_cal(exchange="SSE", start_date="20250101",
+                                                end_date=_today_yyyymmdd, is_open="1")
+                        _td_list2 = sorted(_cal2["cal_date"].tolist())[-22:] if _cal2 is not None else []
+                        _t10_2 = _td_list2[-20:] if len(_td_list2) >= 20 else _td_list2
+                        for _td2 in _t10_2:
+                            try:
+                                _df2 = _pro2.index_daily(ts_code="000001.SH", trade_date=_td2)
+                                if _df2 is None or len(_df2) == 0: continue
+                                _r2 = _df2.iloc[0]
+                                _pct3 = float(_r2.get("pct_chg", 0) or 0)
+                                _vol3 = float(_r2.get("amount", 0) or 0) / 1e5
+                                _tr3 = float(_r2.get("turnover_rate", 0) or 0)
+                                _close3 = float(_r2.get("close", 0) or 0)
+                                _base3 = 50
+                                if _pct3 > 1: _base3 += 20
+                                elif _pct3 > 0: _base3 += 8
+                                elif _pct3 < -1: _base3 -= 20
+                                elif _pct3 < 0: _base3 -= 8
+                                if _vol3 > 5000: _base3 += 10
+                                elif _vol3 < 3000: _base3 -= 5
+                                if _tr3 > 2: _base3 += 8
+                                elif _tr3 < 0.5: _base3 -= 5
+                                _emo_s3 = max(10, min(95, _base3))
+                                _full_k = _td2[:4]+"-"+_td2[4:6]+"-"+_td2[6:8]
+                                _tushare_map[_full_k] = {
+                                    "full_date": _full_k,
+                                    "date": _td2[4:6]+"/"+_td2[6:8],
+                                    "pct": _pct3,
+                                    "emo": _emo_s3,
+                                    "zt": 0,
+                                    "close": _close3,
+                                }
+                            except Exception: continue
+                        print(f"[大盘] tushare trend10 拉到: {len(_tushare_map)}天, 最新={max(_tushare_map.keys()) if _tushare_map else '无'}")
+                    except Exception as _e_ts:
+                        print(f"[大盘] tushare trend10 fail: {_e_ts}")
 
                 # Step 2: 读 market_sentiment_data.json (可能过时, 但 sentiment_score 更准)
                 _emo_json = _os.path.expanduser("~/.qclaw/workspace-agent-85985980/market_sentiment_data.json")
@@ -93570,6 +93605,13 @@ def main():
             except Exception as e:
                 print(f"自动打开数据表窗口失败: {e}")
         print(f"🚀 about to enter mainloop at {__import__('time').time()}", flush=True)
+        # 主窗口显示后 2 秒, 自动后台加载大盘最新数据 (不阻塞 mainloop)
+        try:
+            root.after(2000, lambda: (
+                print("[大盘] 🔔 启动后自动触发后台加载...", flush=True),
+                app._bg_load_dapan() if hasattr(app, "_bg_load_dapan") else None
+            ))
+        except Exception: pass
         root.mainloop()
     except Exception as e:
         import traceback

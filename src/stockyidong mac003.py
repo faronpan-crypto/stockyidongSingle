@@ -5843,6 +5843,13 @@ def main():
             except Exception as e:
                 print(f"自动打开数据表窗口失败: {e}")
         print(f"🚀 about to enter mainloop at {__import__('time').time()}", flush=True)
+        # 主窗口显示后 2 秒, 自动后台加载大盘最新数据 (不阻塞 mainloop)
+        try:
+            root.after(2000, lambda: (
+                print("[大盘] 🔔 启动后自动触发后台加载...", flush=True),
+                app._bg_load_dapan() if hasattr(app, "_bg_load_dapan") else None
+            ))
+        except Exception: pass
         root.mainloop()
     except Exception as e:
         import traceback
