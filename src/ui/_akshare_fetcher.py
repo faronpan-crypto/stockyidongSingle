@@ -216,6 +216,8 @@ def fetch_index_daily(symbol: str = "sh000001", days: int = 30) -> pd.DataFrame 
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").tail(days).reset_index(drop=True)
         df["pct_chg"] = df["close"].pct_change() * 100
+        # 去掉 pct_change() 第一行 NaN, 避免下游 Canvas 崩
+        df = df.dropna(subset=["pct_chg"]).reset_index(drop=True)
         return df[["date", "open", "high", "low", "close", "volume", "pct_chg"]]
     except Exception:
         return None

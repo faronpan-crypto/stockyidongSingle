@@ -476,6 +476,7 @@ class WarningMixin:
         else:
             result["composite"]["signal"] = "❌"
             result["composite"]["level"] = "danger"
+            result["composite"]["level_cn"] = "无数据"
             result["composite"]["details"].append("无可用数据 (akshare+tushare 均失败)")
 
         print(f"[盘中警告] ⏱{result['timestamp']} 交易={'是' if result['is_trading'] else '否'} "

@@ -2913,8 +2913,9 @@ class DapanMixin:
                     print("[大盘] ⏳ 盘中警告拉取...", flush=True)
                     alert = self._fetch_intraday_alert_data()
                     dapan_data["alert"] = alert
-                    print(f"[大盘] ✅ 盘中警告 score={alert['composite']['score']} "
-                          f"level={alert['composite']['level_cn']}", flush=True)
+                    _cs = alert.get("composite", {}) if isinstance(alert, dict) else {}
+                    print(f"[大盘] ✅ 盘中警告 score={_cs.get('score','?')} "
+                          f"level={_cs.get('level_cn','?')}", flush=True)
                 except Exception as ea:
                     print(f"[大盘] ❌ 盘中警告fail: {ea}", flush=True)
                     dapan_data["alert"] = None
@@ -2958,6 +2959,9 @@ class DapanMixin:
             try:
                 # 评分 → 仓位%
                 score = hld.get("avg", 50)
+                if score is None or (isinstance(score, float) and (score != score)):  # NaN check
+                    score = 50
+                score = float(score) if not isinstance(score, (int, float)) else score
                 # 情绪修正
                 emo_s = emo.get("stage", "震荡")
                 emo_pos = {"冰点": 0, "启动": 15, "发酵": 30, "高潮": 50,
@@ -3023,11 +3027,13 @@ class DapanMixin:
                 br = alert.get("breadth", {})
                 br_str = f"涨{br.get('up',0)}/跌{br.get('down',0)}"
                 text = f"{signal}{level_cn} {score}分  {idx_str}  {br_str}"
-                self._dapan_alert_var.set(text)
+                if getattr(self, "_dapan_alert_var", None) is not None:
+                    self._dapan_alert_var.set(text)
                 # 根据等级变色
                 fg_map = {"excellent": "#4CAF50", "good": "#42A5F5",
                           "warning": "#FFD54F", "danger": "#EF5350"}
-                self._dapan_alert_lbl.config(fg=fg_map.get(level, "#E0E0E0"))
+                if getattr(self, "_dapan_alert_lbl", None) is not None:
+                    self._dapan_alert_lbl.config(fg=fg_map.get(level, "#E0E0E0"))
             else:
                 if getattr(self, "_dapan_alert_var", None) is not None:
                     self._dapan_alert_var.set("⏳ 非交易时段或拉取失败")
@@ -3144,7 +3150,9 @@ class DapanMixin:
 
                     # ======== 每天一列 ========
                     col_x = [pad_l + i * col_w for i in range(n)]
-                    max_abs = max(abs(d["pct"]) for d in trend10) if trend10 else 1
+                    # 过滤 NaN pct 值
+                    _valid_pcts = [d["pct"] for d in trend10 if d.get("pct") is not None and d["pct"] == d["pct"]]
+                    max_abs = max(abs(p) for p in _valid_pcts) if _valid_pcts else 1
                     if max_abs == 0: max_abs = 1
 
                     # 各区域 Y 坐标
@@ -3163,7 +3171,12 @@ class DapanMixin:
                         cx_l = col_x[i] + 2  # 列左边界
                         cx_r = col_x[i] + col_w - 2  # 列右边界
                         chg = d["pct"]
+                        # NaN 防护: 跳过无效数据
+                        if chg is None or (isinstance(chg, float) and chg != chg):
+                            chg = 0.0
                         emo_s = d["emo"]
+                        if emo_s is None or (isinstance(emo_s, float) and emo_s != emo_s):
+                            emo_s = 50.0
                         date_str = d["date"]
                         full_date = d.get("full_date", date_str)
                         is_today = (i == n-1)
@@ -3198,12 +3211,15 @@ class DapanMixin:
                         tc.create_oval(cx-3, emo_y-3, cx+3, emo_y+3,
                                        fill=heat_col, outline="white", width=1)
 
-                        # ⑤ 涨跌幅柱子
-                        bh = int(abs(chg) / max_abs * ((Y_CHART_BTM - Y_CHART_TOP)/2 - 2))
+                        # ⑤ 涨跌幅柱子 (NaN 已在上面兜底为 0.0)
+                        try:
+                            bh = int(abs(chg) / max_abs * ((Y_CHART_BTM - Y_CHART_TOP)/2 - 2))
+                        except (ValueError, ZeroDivisionError):
+                            bh = 0
                         if chg >= 0:
                             tc.create_rectangle(cx-5, mid_y - bh, cx+5, mid_y,
                                                 fill="#C62828", outline="#C62828")
-                        else:
+                        elif chg < 0:
                             tc.create_rectangle(cx-5, mid_y, cx+5, mid_y + bh,
                                                 fill="#2E7D32", outline="#2E7D32")
 
