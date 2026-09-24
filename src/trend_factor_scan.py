@@ -49,7 +49,10 @@ def collect_pool():
     if os.path.exists(CONFIG):
         with open(CONFIG, encoding="utf-8") as f:
             cfg = json.load(f)
-        for key in ["holding_stocks_2", "holding_stocks_3", "holding_stocks_6"]:
+        # 自适应：持仓/龙头配置键历史上为 holding_stocks_2/3/6，现为 holding_stocks_4，
+        # 故遍历所有 holding_stocks* 前缀键，避免配置迁移后股池变空。
+        hold_keys = [k for k in cfg if re.fullmatch(r"holding_stocks(_\d+)?", k)]
+        for key in hold_keys:
             for s in cfg.get(key, []):
                 if isinstance(s, dict):
                     code = str(s.get("stock_code", s.get("code", ""))).strip()
