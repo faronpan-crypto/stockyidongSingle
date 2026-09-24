@@ -177,23 +177,23 @@
     },
     {
       "index": 22,
+      "stock_name": "国瓷材料",
+      "stock_code": "300285"
+    },
+    {
+      "index": 23,
       "stock_name": "峰岹科技",
       "stock_code": "688279"
     },
     {
-      "index": 23,
+      "index": 24,
       "stock_name": "影石创新",
       "stock_code": "688775"
     },
     {
-      "index": 24,
+      "index": 25,
       "stock_name": "奥普特",
       "stock_code": "688686"
-    },
-    {
-      "index": 25,
-      "stock_name": "国瓷材料",
-      "stock_code": "300285"
     },
     {
       "index": 26,
@@ -222,18 +222,18 @@
     },
     {
       "index": 31,
+      "stock_name": "平潭发展",
+      "stock_code": "000592"
+    },
+    {
+      "index": 32,
       "stock_name": "京东方Ａ",
       "stock_code": "000725"
     },
     {
-      "index": 32,
+      "index": 33,
       "stock_name": "亨通光电",
       "stock_code": "600487"
-    },
-    {
-      "index": 33,
-      "stock_name": "平潭发展",
-      "stock_code": "000592"
     },
     {
       "index": 34,
@@ -307,68 +307,68 @@
     },
     {
       "index": 48,
+      "stock_name": "大金重工",
+      "stock_code": "002487"
+    },
+    {
+      "index": 49,
       "stock_name": "华胜天成",
       "stock_code": "600410"
     },
     {
-      "index": 49,
+      "index": 50,
       "stock_name": "黑猫股份",
       "stock_code": "002068"
     },
     {
-      "index": 50,
+      "index": 51,
       "stock_name": "中天科技",
       "stock_code": "600522"
     },
     {
-      "index": 51,
+      "index": 52,
       "stock_name": "津药药业",
       "stock_code": "600488"
     },
     {
-      "index": 52,
+      "index": 53,
       "stock_name": "兴森科技",
       "stock_code": "002436"
     },
     {
-      "index": 53,
+      "index": 54,
       "stock_name": "北方华创",
       "stock_code": "002371"
     },
     {
-      "index": 54,
+      "index": 55,
       "stock_name": "东山精密",
       "stock_code": "002384"
     },
     {
-      "index": 55,
+      "index": 56,
       "stock_name": "青山纸业",
       "stock_code": "600103"
     },
     {
-      "index": 56,
+      "index": 57,
       "stock_name": "金正大",
       "stock_code": "002470"
     },
     {
-      "index": 57,
+      "index": 58,
       "stock_name": "法尔胜",
       "stock_code": "000890"
     },
     {
-      "index": 58,
+      "index": 59,
       "stock_name": "深中华A",
       "stock_code": "000017"
     },
     {
-      "index": 59,
+      "index": 60,
       "stock_name": "华电辽能",
       "stock_code": "600396"
-    },
-    {
-      "index": 60,
-      "stock_name": "大金重工",
-      "stock_code": "002487"
     },
     {
       "index": 61,
@@ -467,6 +467,21 @@
     }
   ],
   "history_holdings": [
+    {
+      "stock_name": "峰岹科技",
+      "stock_code": "688279",
+      "replaced_date": "2026-09-24 22:13:32"
+    },
+    {
+      "stock_name": "影石创新",
+      "stock_code": "688775",
+      "replaced_date": "2026-09-24 22:13:32"
+    },
+    {
+      "stock_name": "奥普特",
+      "stock_code": "688686",
+      "replaced_date": "2026-09-24 22:13:32"
+    },
     {
       "stock_name": "启明星辰",
       "stock_code": "002439",

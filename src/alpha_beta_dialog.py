@@ -786,11 +786,14 @@ class AlphaBetaDialog:
         return wrapper
 
     def _safe_run(self, fn):
+        # ⚠️ PEP 3110: Python 3.1+ 的 except 块退出后异常变量 e 会被自动删除
+        # 必须把 str(e) 提前存成普通字符串，让闭包捕获字符串而非 e
         try:
             fn()
         except Exception as e:
-            def _show():
-                _mb.showerror("❌ 数据拉取失败", str(e))
+            err_msg = f"{type(e).__name__}: {e}"
+            def _show(_m=err_msg):
+                _mb.showerror("❌ 数据拉取失败", _m)
             self.root.after(0, _show)
 
     # ------------------------------------------------------------------

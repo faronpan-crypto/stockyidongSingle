@@ -1,6 +1,11 @@
 {
   "excel_files": [
     {
+      "path": "/Users/faronpan/Agent/stockyidong_project/src/jiuyang_gongshe_20260924_222313.xlsx",
+      "source": "韭研公社",
+      "timestamp": "2026-09-24 22:23:13"
+    },
+    {
       "path": "/Users/faronpan/Agent/stockyidong_project/src/jiuyang_gongshe_20260924_071929.xlsx",
       "source": "韭研公社",
       "timestamp": "2026-09-24 07:19:29"
@@ -244,11 +249,6 @@
       "path": "/Users/faronpan/Agent/stockyidong_project/src/jiuyang_gongshe_20260810_093316.xlsx",
       "source": "韭研公社",
       "timestamp": "2026-08-10 09:33:16"
-    },
-    {
-      "path": "/tmp/jiuyan_test.xlsx",
-      "source": "韭研公社",
-      "timestamp": "2026-08-09 21:54:55"
     }
   ]
 }
