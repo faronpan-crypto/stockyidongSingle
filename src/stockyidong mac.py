@@ -3789,6 +3789,12 @@ class StockKeywordAnalyzerGUI:
         settings_menu = tk.Menu(self.menubar, tearoff=False)
         self.menubar.add_cascade(label="设置", menu=settings_menu)
         settings_menu.add_command(label="修改窗口标题", command=self._edit_window_title)
+        # 📅 工具菜单 (暴涨暴跌日历 + 独立启动入口)
+        tools_menu = tk.Menu(self.menubar, tearoff=False)
+        self.menubar.add_cascade(label="📅 工具", menu=tools_menu)
+        tools_menu.add_command(label="🗓️ 暴涨暴跌日历", command=self._open_crash_rally_calendar)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="💡 游资心法速查", command=lambda: None)
         # 应用菜单栏
         try:
             self.root.config(menu=self.menubar)
@@ -4099,6 +4105,10 @@ class StockKeywordAnalyzerGUI:
         tk.Button(top_bar, text="🔄", bg="#C62828", fg="white", font=("", 9, "bold"),
                   padx=6, pady=0, cursor="hand2",
                   command=lambda: self._bg_load_dapan()).pack(side=tk.RIGHT, padx=6)
+        # 大跌大涨日历按钮
+        tk.Button(top_bar, text="🗓️ 暴涨暴跌", bg="#6A1B9A", fg="white", font=("", 9, "bold"),
+                  padx=8, pady=0, cursor="hand2",
+                  command=self._open_crash_rally_calendar).pack(side=tk.RIGHT, padx=6)
 
         # ============ 10日情绪分 + 涨跌幅趋势条 (紧凑 Canvas) ============
         trend_bar = tk.Frame(dapan_tab, bg="#ECEFF1", height=160)
@@ -8216,6 +8226,7 @@ class StockKeywordAnalyzerGUI:
             ("📊持股仪表盘", self._show_portfolio_dashboard, False, "quick"),
             ("🦅游资心法", self._show_hotmoney_check, False, "quick"),
             ("🏅贵金属", self._show_precious_metals_dialog, False, "quick"),
+            ("🗓️暴涨暴跌", self._open_crash_rally_calendar, False, "quick"),
             # ---- 💰 资金/持仓 (quick) ----
             ("📈资金方向", self._show_capital_direction_dialog, False, "quick"),
             ("💰是否加仓", self._show_add_position_dialog, False, "quick"),
@@ -43646,6 +43657,26 @@ class StockKeywordAnalyzerGUI:
 
         except Exception as e:
             return {"scores": {}, "avg_score": None, "error": str(e)}
+
+
+    def _open_crash_rally_calendar(self):
+        """🗓️ 暴涨暴跌日历 — 调出 crash_rally_calendar.py"""
+        try:
+            import sys as _sys_cr2, os as _os_cr2
+            # 确保 src 在 path 里
+            _this_dir = _os_cr2.path.dirname(_os_cr2.path.abspath(__file__)) if "__file__" in dir() else ""
+            if _this_dir and _this_dir not in _sys_cr2.path:
+                _sys_cr2.path.insert(0, _this_dir)
+            from crash_rally_calendar import open_crash_rally_calendar
+            open_crash_rally_calendar(getattr(self, "root", None))
+        except Exception as _e_cr2:
+            print(f"[大盘] 🗓️ 暴涨暴跌日历启动失败: {_e_cr2}", flush=True)
+            try:
+                import tkinter.messagebox as _mb
+                _mb.showerror("🗓️ 暴涨暴跌日历启动失败",
+                              f"{_e_cr2}\n\n请确认 crash_rally_calendar.py 在 src/ 目录下")
+            except Exception:
+                pass
 
 
     def _bg_load_dapan(self):

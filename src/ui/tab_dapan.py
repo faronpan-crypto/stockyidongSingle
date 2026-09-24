@@ -2281,6 +2281,30 @@ class DapanMixin:
         return "\n".join(lines), charts
 
 
+    def _open_crash_rally_calendar(self):
+        """🗓️ 暴涨暴跌日历 — 调出 crash_rally_calendar.py"""
+        try:
+            import sys as _sys_cr
+            # 确保 src 在 path 里 (mac003 从 src/ 跑, mac.py 也在 src/)
+            _src_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in dir() else ""
+            if _src_dir and _src_dir not in _sys_cr.path:
+                _sys_cr.path.insert(0, _src_dir)
+            # 也加上父目录 (crash_rally_calendar.py 和 ui/ 同级, 在 src/)
+            _parent = os.path.dirname(_src_dir) if _src_dir else ""
+            if _parent and _parent not in _sys_cr.path:
+                _sys_cr.path.insert(0, _parent)
+            from crash_rally_calendar import open_crash_rally_calendar
+            open_crash_rally_calendar(getattr(self, "root", None))
+        except Exception as _e_cr:
+            print(f"[大盘] 🗓️ 暴涨暴跌日历启动失败: {_e_cr}", flush=True)
+            try:
+                import tkinter.messagebox as _mb
+                _mb.showerror("🗓️ 暴涨暴跌日历启动失败",
+                              f"{_e_cr}\n\n请确认 crash_rally_calendar.py 在 src/ 目录下")
+            except Exception:
+                pass
+
+
     def _bg_load_dapan(self):
         """大盘分析Tab后台加载: 红绿灯+四维度+情绪周期+板块
         ⚠️ 线程安全: 后台线程只放数据到 _dapan_pending, 主线程用 root.after 轮询"""
