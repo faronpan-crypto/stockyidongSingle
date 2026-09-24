@@ -44017,21 +44017,83 @@ class StockKeywordAnalyzerGUI:
 
                 # ======== 5. 最近20日趋势 (上证涨跌幅 + 情绪分) ========
                 if not _step("拉20日趋势"): return
-                # 策略: akshare 新浪指数优先 (稳定), tushare 兜底 (可能被熔断 hang 住)
+                # 策略: akshare + 腾讯 同时拉, 选最新日期更靠后的那个 (akshare 偶发反爬停更)
                 trend10 = []
                 _tushare_map = {}
-                # Step 1: akshare 拉上证日线 (当前机器最稳, 系统 Python/venv 都能用)
+
+                # ---- 5a. 同时拉 akshare + 腾讯 ----
+                _ak_df_pri = None
+                _tc_rows_pri = None
+                # akshare
                 try:
-                    import akshare as _ak_idx_pri
-                    import pandas as _pd_pri
-                    _idx_df_pri = _ak_idx_pri.stock_zh_index_daily(symbol="sh000001")
-                    if _idx_df_pri is not None and len(_idx_df_pri) > 0:
-                        _idx_df_pri = _idx_df_pri.copy()
-                        _idx_df_pri["date"] = _pd_pri.to_datetime(_idx_df_pri["date"])
-                        _idx_df_pri = _idx_df_pri.sort_values("date").tail(25).reset_index(drop=True)
-                        _idx_df_pri["pct_chg"] = _idx_df_pri["close"].pct_change() * 100
-                        for _ir in _idx_df_pri.itertuples(index=False):
+                    import akshare as _ak_idx_pri2
+                    import pandas as _pd_pri2
+                    _raw_ak = _ak_idx_pri2.stock_zh_index_daily(symbol="sh000001")
+                    if _raw_ak is not None and len(_raw_ak) > 0:
+                        _raw_ak = _raw_ak.copy()
+                        _raw_ak["date"] = _pd_pri2.to_datetime(_raw_ak["date"])
+                        _ak_df_pri = _raw_ak
+                except Exception:
+                    pass
+                # 腾讯 (web.ifzq.gtimg.cn)
+                try:
+                    import requests as _req_tc2
+                    _url_tc2 = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000001,day,,,30,qfq"
+                    _r_tc2 = _req_tc2.get(_url_tc2, headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
+                    if _r_tc2.status_code == 200:
+                        _j_tc2 = _r_tc2.json()
+                        _arr_tc2 = _j_tc2["data"]["sh000001"].get("day") or _j_tc2["data"]["sh000001"].get("qfqday")
+                        if _arr_tc2:
+                            _tc_rows_pri = _arr_tc2
+                except Exception:
+                    pass
+
+                # ---- 5b. 比谁的最新日期更靠后 ----
+                def _latest_dt_ak(_df):
+                    if _df is None or len(_df) == 0: return None
+                    return _df["date"].max()
+                def _latest_dt_tc(_rows):
+                    if not _rows: return None
+                    try: return _pd_pri2.to_datetime(_rows[-1][0])
+                    except: return None
+                _ak_latest = _latest_dt_ak(_ak_df_pri)
+                _tc_latest = _latest_dt_tc(_tc_rows_pri)
+
+                _use_df_pri = None
+                _use_source_pri = ""
+                if _tc_rows_pri is not None and (_tc_latest is None or _ak_latest is None or _tc_latest >= _ak_latest):
+                    # 腾讯更新 或 腾讯可用而 akshare 空
+                    try:
+                        import pandas as _pd_pri3
+                        _rows_list = []
+                        for _row in _tc_rows_pri:
+                            _rows_list.append({
+                                "date": _row[0], "open": float(_row[1]), "close": float(_row[2]),
+                                "high": float(_row[3]), "low": float(_row[4]),
+                                "volume": float(_row[5]) if len(_row) > 5 else 0,
+                            })
+                        _tc_df = _pd_pri3.DataFrame(_rows_list)
+                        _tc_df["date"] = _pd_pri3.to_datetime(_tc_df["date"])
+                        _use_df_pri = _tc_df
+                        _use_source_pri = "腾讯"
+                    except Exception:
+                        if _ak_df_pri is not None: _use_df_pri = _ak_df_pri; _use_source_pri = "akshare"
+                elif _ak_df_pri is not None:
+                    _use_df_pri = _ak_df_pri; _use_source_pri = "akshare"
+
+                print(f"[大盘] trend10 akshare最新={_ak_latest.date() if _ak_latest is not None else '无'}, "
+                      f"腾讯最新={_tc_latest.date() if _tc_latest is not None else '无'}, 选={_use_source_pri}", flush=True)
+
+                # ---- 5c. 用选中的数据源构建 _tushare_map ----
+                if _use_df_pri is not None and len(_use_df_pri) > 0:
+                    try:
+                        import pandas as _pd_pri4
+                        _df = _use_df_pri.copy()
+                        _df = _df.sort_values("date").tail(25).reset_index(drop=True)
+                        _df["pct_chg"] = _df["close"].pct_change() * 100
+                        for _ir in _df.itertuples(index=False):
                             _pct3 = float(getattr(_ir, "pct_chg", 0) or 0)
+                            if _pct3 != _pct3: _pct3 = 0.0  # NaN 防护
                             _close3 = float(_ir.close)
                             _vol3 = 0; _tr3 = 0
                             _base3 = 50
@@ -44052,9 +44114,11 @@ class StockKeywordAnalyzerGUI:
                                 "zt": 0,
                                 "close": _close3,
                             }
-                        print(f"[大盘] ✅ akshare trend10 拉到: {len(_tushare_map)}天, 最新={max(_tushare_map.keys())}")
-                except Exception as _e_ak_pri:
-                    print(f"[大盘] akshare trend10 fail: {_e_ak_pri}, 尝试 tushare...")
+                        print(f"[大盘] ✅ {_use_source_pri} trend10 拉到: {len(_tushare_map)}天, 最新={max(_tushare_map.keys())}")
+                    except Exception as _e_pri:
+                        print(f"[大盘] trend10 处理fail: {_e_pri}")
+                else:
+                    print(f"[大盘] akshare+腾讯 trend10 都空, 尝试 tushare...")
 
                 # Step 2: tushare 兜底 (仅 akshare 失败时尝试, 有 hang 风险)
                 if not _tushare_map:
