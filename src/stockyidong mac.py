@@ -3793,6 +3793,7 @@ class StockKeywordAnalyzerGUI:
         tools_menu = tk.Menu(self.menubar, tearoff=False)
         self.menubar.add_cascade(label="📅 工具", menu=tools_menu)
         tools_menu.add_command(label="🗓️ 暴涨暴跌日历", command=self._open_crash_rally_calendar)
+        tools_menu.add_command(label="📐 α/β 阿尔法贝塔", command=self._open_alpha_beta_dialog)
         tools_menu.add_separator()
         tools_menu.add_command(label="💡 游资心法速查", command=lambda: None)
         # 应用菜单栏
@@ -4109,6 +4110,10 @@ class StockKeywordAnalyzerGUI:
         tk.Button(top_bar, text="🗓️ 暴涨暴跌", bg="#6A1B9A", fg="white", font=("", 9, "bold"),
                   padx=8, pady=0, cursor="hand2",
                   command=self._open_crash_rally_calendar).pack(side=tk.RIGHT, padx=6)
+        # α/β 阿尔法贝塔按钮
+        tk.Button(top_bar, text="📐 α/β", bg="#1565C0", fg="white", font=("", 9, "bold"),
+                  padx=8, pady=0, cursor="hand2",
+                  command=self._open_alpha_beta_dialog).pack(side=tk.RIGHT, padx=6)
 
         # ============ 10日情绪分 + 涨跌幅趋势条 (紧凑 Canvas) ============
         trend_bar = tk.Frame(dapan_tab, bg="#ECEFF1", height=160)
@@ -8227,6 +8232,7 @@ class StockKeywordAnalyzerGUI:
             ("🦅游资心法", self._show_hotmoney_check, False, "quick"),
             ("🏅贵金属", self._show_precious_metals_dialog, False, "quick"),
             ("🗓️暴涨暴跌", self._open_crash_rally_calendar, False, "quick"),
+            ("📐α/β配置", self._open_alpha_beta_dialog, False, "quick"),
             # ---- 💰 资金/持仓 (quick) ----
             ("📈资金方向", self._show_capital_direction_dialog, False, "quick"),
             ("💰是否加仓", self._show_add_position_dialog, False, "quick"),
@@ -43675,6 +43681,25 @@ class StockKeywordAnalyzerGUI:
                 import tkinter.messagebox as _mb
                 _mb.showerror("🗓️ 暴涨暴跌日历启动失败",
                               f"{_e_cr2}\n\n请确认 crash_rally_calendar.py 在 src/ 目录下")
+            except Exception:
+                pass
+
+
+    def _open_alpha_beta_dialog(self):
+        """📐 α/β 阿尔法贝塔 — 调出 alpha_beta_dialog.py"""
+        try:
+            import sys as _sys_ab, os as _os_ab
+            _this_dir = _os_ab.path.dirname(_os_ab.path.abspath(__file__)) if "__file__" in dir() else ""
+            if _this_dir and _this_dir not in _sys_ab.path:
+                _sys_ab.path.insert(0, _this_dir)
+            from alpha_beta_dialog import open_alpha_beta_dialog
+            open_alpha_beta_dialog(getattr(self, "root", None))
+        except Exception as _e_ab:
+            print(f"[大盘] 📐 α/β 阿尔法贝塔启动失败: {_e_ab}", flush=True)
+            try:
+                import tkinter.messagebox as _mb
+                _mb.showerror("📐 α/β 阿尔法贝塔启动失败",
+                              f"{_e_ab}\n\n请确认 alpha_beta_dialog.py 在 src/ 目录下")
             except Exception:
                 pass
 
