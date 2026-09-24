@@ -197,13 +197,13 @@
     },
     {
       "index": 26,
-      "stock_name": "中际旭创",
-      "stock_code": "300308"
+      "stock_name": "国瓷材料",
+      "stock_code": "300285"
     },
     {
       "index": 27,
-      "stock_name": "国瓷材料",
-      "stock_code": "300285"
+      "stock_name": "中际旭创",
+      "stock_code": "300308"
     },
     {
       "index": 28,
@@ -452,21 +452,31 @@
     },
     {
       "index": 77,
+      "stock_name": "深南电路",
+      "stock_code": "002916"
+    },
+    {
+      "index": 78,
       "stock_name": "荣昌生物",
       "stock_code": "688331"
     },
     {
-      "index": 78,
+      "index": 79,
       "stock_name": "众生药业",
       "stock_code": "002317"
-    },
-    {
-      "index": 79,
-      "stock_name": "深南电路",
-      "stock_code": "002916"
     }
   ],
   "history_holdings": [
+    {
+      "stock_name": "众生药业",
+      "stock_code": "002317",
+      "replaced_date": "2026-09-24 10:15:47"
+    },
+    {
+      "stock_name": "深南电路",
+      "stock_code": "002916",
+      "replaced_date": "2026-09-24 10:15:47"
+    },
     {
       "stock_name": "彤程新材",
       "stock_code": "603650",
