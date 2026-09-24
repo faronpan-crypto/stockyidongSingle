@@ -428,6 +428,129 @@ _INDEX_CODES = {
     "科创50": "sh000688",
 }
 
+# 情绪阶段 → emoji + 颜色映射
+EMO_STAGE_EMOJI = {
+    "冰点":  ("🧊", "#80DEEA"),
+    "启动":  ("🚀", "#A5D6A7"),
+    "发酵":  ("🌱", "#66BB6A"),
+    "高潮":  ("🔥", "#EF5350"),
+    "分歧":  ("⚡", "#FFA726"),
+    "退潮":  ("🌧️", "#78909C"),
+    "震荡":  ("〰️", "#B0BEC5"),
+    "📊暴跌": ("🩸", "#C62828"),
+}
+
+EMO_HIST_PATH = os.path.join(os.path.expanduser("~"),
+                             ".qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
+
+
+def load_emo_history():
+    """加载情绪周期历史 (幂等)"""
+    try:
+        if os.path.exists(EMO_HIST_PATH):
+            with open(EMO_HIST_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def save_emo_history(data):
+    """保存情绪周期历史"""
+    try:
+        os.makedirs(os.path.dirname(EMO_HIST_PATH), exist_ok=True)
+        with open(EMO_HIST_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[情绪周期] 保存失败: {e}")
+
+
+def auto_fill_emo_for_date(date_str, progress_cb=None):
+    """
+    用 akshare 实时涨跌家数 + 上证日K 自动生成某天情绪周期数据并写回 JSON。
+    返回 emo dict (stage, emo_score, pct, up, dn, zt, ths, pnl)
+    """
+    def _log(m):
+        if progress_cb: progress_cb(m)
+    try:
+        import akshare as ak
+    except Exception:
+        _log("⚠️ akshare 不可用, 跳过情绪补全")
+        return None
+
+    try:
+        target = date_str[:10]
+        # 1. 拉当天涨跌家数 + 涨停
+        up = dn = zt = dt = None
+        try:
+            df = ak.stock_zh_a_spot_em()
+            if df is not None and len(df) > 0:
+                # 简单统计: 涨跌停数 (limit_up / limit_down / 涨跌幅>0 / <0)
+                df_pct = df["涨跌幅"].astype(float)
+                up = int((df_pct > 0).sum())
+                dn = int((df_pct < 0).sum())
+                zt = int((df_pct >= 9.5).sum())
+                dt = int((df_pct <= -9.5).sum())
+                _log(f"  ✅ 涨跌家数: up={up} dn={dn} zt={zt} dt={dt}")
+        except Exception as e:
+            _log(f"  ⚠️ 实时涨跌家数失败: {type(e).__name__}: {e}")
+
+        # 2. 拉上证日K 算涨跌幅
+        pct = 0.0
+        try:
+            idx_df = ak.stock_zh_index_daily(symbol="sh000001")
+            day_row = idx_df[idx_df["date"].astype(str).str[:10] == target]
+            if len(day_row) > 0:
+                idx = idx_df.index[day_row.index[0]]
+                prev_close = idx_df.iloc[idx - 1]["close"] if idx > 0 else day_row.iloc[0]["open"]
+                close_val = day_row.iloc[0]["close"]
+                pct = round((close_val - prev_close) / prev_close * 100, 2)
+                _log(f"  ✅ 上证涨跌幅: {pct:+.2f}%")
+        except Exception as e:
+            _log(f"  ⚠️ 日K涨跌幅失败: {type(e).__name__}: {e}")
+
+        # 3. 算情绪阶段 + emo_score (复用 tab_dapan.py 逻辑)
+        emo_score = 50.0
+        stage = "震荡"
+        ths = "?"
+
+        if up is not None and dn is not None:
+            total = up + dn
+            up_ratio = up / total if total > 0 else 0.5
+            # 同花顺方向
+            if pct > 0.5: ths = "向上"
+            elif pct < -0.5: ths = "向下"
+            else: ths = "震荡"
+            # emo_score 简化公式
+            zt_norm = min(zt or 0, 80) / 80
+            emo_score = round(up_ratio * 70 + zt_norm * 30 + (pct / 5) * 10, 1)
+            emo_score = max(5.0, min(95.0, emo_score))
+            # 阶段判断
+            if pct <= -3: stage = "📊暴跌"
+            elif pct >= 5 and up_ratio >= 0.7: stage = "高潮"
+            elif (zt or 0) >= 40 and up_ratio >= 0.55: stage = "发酵"
+            elif (zt or 0) >= 15 and up_ratio >= 0.5: stage = "启动"
+            elif (zt or 0) < 10 and up_ratio < 0.4: stage = "冰点"
+            elif up_ratio < 0.45: stage = "退潮"
+            else: stage = "震荡"
+        _log(f"  ✅ 情绪阶段: {stage} score={emo_score:.1f}")
+
+        # 4. 组合返回
+        emo = {
+            "date": target,
+            "stage": stage,
+            "emo_score": emo_score,
+            "pct": pct,
+            "up": up, "dn": dn, "zt": zt, "dt": dt,
+            "ths": ths,
+            "pnl": "亏钱" if pct < 0 else ("赚钱" if pct > 0 else ""),
+            "source": "auto_fill",
+        }
+        return emo
+    except Exception as e:
+        _log(f"  ❌ 情绪自动补全失败: {type(e).__name__}: {e}")
+        return None
+
 
 class HistoryScanner:
     """自动扫描历史暴涨暴跌 + 规则归因 + 新闻抓取"""
@@ -1495,8 +1618,8 @@ class CrashRallyCalendarApp:
         # 日历网格
         self.cal_frame_b = tk.Frame(parent, bg=COLOR_BG)
         self.cal_frame_b.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
-        # 详情面板
-        self.detail_b = tk.Text(parent, height=6, font=FONT_MAIN, wrap=tk.WORD, bg="#0D0D1F", fg=COLOR_FG)
+        # 详情面板 (高度 14 = 约2.3倍 原 6)
+        self.detail_b = tk.Text(parent, height=14, font=FONT_MAIN, wrap=tk.WORD, bg="#0D0D1F", fg=COLOR_FG)
         self.detail_b.pack(fill=tk.X, padx=6, pady=4)
         self._view_month_b = _dt2.now().replace(day=1)
         self._render_calendar_b()
@@ -1523,10 +1646,10 @@ class CrashRallyCalendarApp:
                 w.destroy()
             ym = self._view_month_b
             self.lbl_month_b.config(text=f"{ym.year}年{ym.month}月")
-            # 表头
+            # 表头 (加一列情绪)
             for i, d in enumerate(["日", "一", "二", "三", "四", "五", "六"]):
                 tk.Label(self.cal_frame_b, text=d, font=FONT_SMALL, bg=COLOR_BG, fg="#9E9E9E",
-                         width=16, height=1).grid(row=0, column=i, padx=2, pady=2)
+                         width=18, height=1).grid(row=0, column=i, padx=2, pady=2)
             # 查询当月事件 (一个日期可能多条, 按日期分组)
             month_str = f"{ym.year:04d}-{ym.month:02d}"
             conn = sqlite3.connect(DB_PATH)
@@ -1547,23 +1670,56 @@ class CrashRallyCalendarApp:
                 if r[1] == "crash": n_crash += 1
                 elif r[1] == "rally": n_rally += 1
             conn.close()
-            self.lbl_stats_b.config(text=f"🟢暴跌{n_crash}次  🔴暴涨{n_rally}次")
 
-            # 渲染日期格子
+            # 加载情绪周期 JSON, 找出当月缺失日期
+            emo_data = load_emo_history()
+            missing_dates = []
             cal = _dt2(ym.year, ym.month, 1)
-            start_wd = cal.weekday() + 1  # 周日=0
-            if start_wd == 7: start_wd = 0
             days_in_month = (cal.replace(month=ym.month % 12 + 1, day=1) - _dt.timedelta(days=1)).day if ym.month != 12 else 31
             today = _dt2.now().date()
+            # 先查哪些天缺失 → 后台补全, 渲染时已有数据的先显示
             for d in range(1, days_in_month + 1):
-                r = (d + start_wd) // 7 + 1
-                c = (d + start_wd) % 7
+                date_str = f"{ym.year:04d}-{ym.month:02d}-{d:02d}"
+                # 未来日期/或 akshare 还没出数据的跳过补全
+                try:
+                    d_obj = _dt2(ym.year, ym.month, d).date()
+                    if d_obj > today:
+                        continue  # 未来天不可能有数据
+                except Exception:
+                    pass
+                if date_str not in emo_data:
+                    missing_dates.append(date_str)
+            # 如果有缺失日期 → 后台线程补全 (不阻塞渲染)
+            if missing_dates and not getattr(self, "_emo_fill_running", False):
+                self._emo_fill_running = True
+                threading.Thread(target=self._emo_fill_worker,
+                                 args=(missing_dates,), daemon=True).start()
+
+            # 渲染日期格子
+            start_wd = cal.weekday() + 1  # 周日=0
+            if start_wd == 7: start_wd = 0
+            for d in range(1, days_in_month + 1):
+                r = (d + start_wd - 1) // 7 + 1
+                c = (d + start_wd - 1) % 7
                 day_events = events_by_day.get(d, [])
+                date_str = f"{ym.year:04d}-{ym.month:02d}-{d:02d}"
+                emo = emo_data.get(date_str, {})
                 bg = COLOR_BG
                 lines = [str(d)]
 
+                # ---- 情绪周期行 (最顶部) ----
+                if emo:
+                    stage = emo.get("stage", "?")
+                    score = emo.get("emo_score", 0)
+                    emoji, emo_fg = EMO_STAGE_EMOJI.get(stage, ("❓", "#9E9E9E"))
+                    emo_text = f"{emoji}{stage}{score:.0f}"
+                else:
+                    emo_text = "⏳待补"
+                    emo_fg = "#616161"
+                lines.append(emo_text)
+
+                # ---- 事件行 ----
                 if day_events:
-                    # 取最极端一条决定背景色
                     worst = max(day_events, key=lambda e: abs(e[3] or 0))
                     et = worst[1]
                     pct = worst[3] or 0
@@ -1571,38 +1727,90 @@ class CrashRallyCalendarApp:
                         bg = "#1A3A1A" if pct > -3 else "#0A2A0A"  # 绿 (A股: 跌绿)
                     elif et == "rally":
                         bg = "#4A1A1A" if pct < 3 else "#2A0A0A"  # 红 (A股: 涨红)
-                    # 最多显示 3 条 (🔴/🟢 + 幅度%), 超过则显示数字
-                    shown = day_events[:3]
+                    shown = day_events[:2]
                     for ev in shown:
                         icon = "🟢" if ev[1] == "crash" else "🔴"  # A股: 跌绿涨红
                         idx_short = (ev[2] or "")[:2]
                         lines.append(f"{icon}{idx_short}{ev[3]:+.1f}%")
-                    if len(day_events) > 3:
-                        lines.append(f"... +{len(day_events)-3}")
+                    if len(day_events) > 2:
+                        lines.append(f"...+{len(day_events)-2}")
                 elif _dt2(ym.year, ym.month, d).date() == today:
                     bg = "#1A237E"
 
                 txt = "\n".join(lines)
+                height = 2 + min(2, len(day_events))  # 动态高度
                 cell = tk.Label(self.cal_frame_b, text=txt, font=FONT_SMALL, bg=bg, fg=COLOR_FG,
-                                width=16, height=3, justify=tk.LEFT, anchor="nw")
+                                width=18, height=max(3, height), justify=tk.LEFT, anchor="nw")
+                # 情绪行文字单独着色 (用 Canvas 更好, 简化起见只用 Emoji)
                 cell.grid(row=r, column=c, padx=2, pady=2, sticky="nsew")
-                if day_events:
-                    cell.bind("<Button-1>", lambda e, des=day_events: self._show_detail_b(des))
-                    # hover tooltip: 第一条事件的 trigger
-                    try:
-                        root = self.root
+                # 点击: 同时传事件列表 + 情绪数据
+                click_data = {"events": day_events, "emo": emo}
+                cell.bind("<Button-1>", lambda e, data=click_data: self._show_detail_b(data))
+                # hover: 触发原因 + 情绪阶段
+                try:
+                    root = self.root
+                    tooltip_parts = []
+                    if day_events:
                         first_trig = day_events[0][5] or ""
                         if first_trig and "(待补)" not in first_trig:
-                            cell.bind("<Enter>", lambda e, t=first_trig: self._show_hover_tip(root, t))
-                            cell.bind("<Leave>", lambda e: self._hide_hover_tip())
-                    except Exception:
-                        pass
+                            tooltip_parts.append(first_trig)
+                    if emo:
+                        s = emo.get("stage", "")
+                        sc = emo.get("emo_score", "")
+                        if s: tooltip_parts.append(f"情绪: {s}({sc})")
+                    if tooltip_parts:
+                        cell.bind("<Enter>", lambda e, t=" | ".join(tooltip_parts): self._show_hover_tip(root, t))
+                        cell.bind("<Leave>", lambda e: self._hide_hover_tip())
+                except Exception:
+                    pass
 
+            # 顶部统计
+            self.lbl_stats_b.config(text=f"🟢暴跌{n_crash}次  🔴暴涨{n_rally}次  |  📅共 {days_in_month} 天")
             # 详情清空
             self.detail_b.delete("1.0", tk.END)
         except Exception as e:
             print(f"[大跌大涨] 日历渲染失败(跳过): {e}")
             traceback.print_exc()
+
+    def _emo_fill_worker(self, missing_dates):
+        """后台线程补全缺失的情绪数据"""
+        try:
+            self.root.after(0, lambda: self._append_emo_log(f"🔄 后台补全 {len(missing_dates)} 个日期情绪数据..."))
+            existing = load_emo_history()
+            filled_count = 0
+            for ds in missing_dates:
+                # 只补当天 (akshare 实时接口只有当天数据)
+                try:
+                    target_dt = _dt2.fromisoformat(ds)
+                    today_dt = _dt2.now().date()
+                    if target_dt.date() != today_dt:
+                        continue  # 不是今天的跳过 (历史日期没实时涨跌家数)
+                except Exception:
+                    continue
+                if ds in existing:
+                    continue
+                emo = auto_fill_emo_for_date(ds, progress_cb=lambda m: self.root.after(0, lambda: self._append_emo_log(m)))
+                if emo:
+                    existing[ds] = emo
+                    filled_count += 1
+            if filled_count > 0:
+                save_emo_history(existing)
+                self.root.after(0, lambda: self._append_emo_log(f"✅ 补全 {filled_count} 条, 刷新日历..."))
+                self.root.after(0, self._render_calendar_b)
+            else:
+                self.root.after(0, lambda: self._append_emo_log("⏭️ 无可用日期需要补全 (仅当天 akshare 有实时数据)"))
+        except Exception as e:
+            print(f"[情绪补全] 后台线程异常: {e}")
+        finally:
+            self._emo_fill_running = False
+
+    def _append_emo_log(self, msg):
+        """在详情区追加一行补全日志 (限长)"""
+        try:
+            self.detail_b.insert(tk.END, f"[自动补全] {msg}\n")
+            self.detail_b.see(tk.END)
+        except Exception:
+            pass
 
     def _show_hover_tip(self, root, text):
         """显示悬浮提示 (trigger 简述)"""
@@ -1625,15 +1833,74 @@ class CrashRallyCalendarApp:
         except Exception:
             pass
 
-    def _show_detail_b(self, day_events):
-        """显示某一天所有事件的详情 (trigger + trigger_detail + 指数 + 幅度)"""
+    def _show_detail_b(self, click_data):
+        """显示某一天的详情: 情绪周期 + 涨跌个数 + 领涨领跌板块(仅当天) + 暴涨暴跌事件"""
         try:
             self.detail_b.delete("1.0", tk.END)
-            if isinstance(day_events, tuple):
-                day_events = [day_events]
+            # 兼容两种格式: 老的 list[tuple] 和新的 dict
+            if isinstance(click_data, dict):
+                day_events = click_data.get("events", [])
+                emo = click_data.get("emo", {})
+            else:
+                day_events = list(click_data) if isinstance(click_data, (list, tuple)) else [click_data]
+                emo = {}
             day_date = day_events[0][0] if day_events else "?"
-            header = f"📅 {day_date}  共 {len(day_events)} 条事件\n{'='*52}\n"
-            self.detail_b.insert(tk.END, header)
+            # 存起来给后台线程回调用
+            self._detail_last_date = day_date
+
+            # ============ 情绪周期区块 ============
+            if emo:
+                stage = emo.get("stage", "?")
+                score = emo.get("emo_score", 0)
+                emoji, _ = EMO_STAGE_EMOJI.get(stage, ("❓", "#9E9E9E"))
+                up_count = emo.get("up")
+                dn_count = emo.get("dn")
+                zt_count = emo.get("zt")
+                dt_count = emo.get("dt")
+                # 涨跌比例
+                if up_count is not None and dn_count is not None:
+                    total = up_count + dn_count
+                    up_pct = up_count / total * 100 if total else 0
+                    dn_pct = dn_count / total * 100 if total else 0
+                    breadth = f"🔴 {up_count:>4d} ({up_pct:.0f}%)  🟢 {dn_count:>4d} ({dn_pct:.0f}%)  📊比 {up_pct:.0f}:{dn_pct:.0f}"
+                else:
+                    breadth = f"🔴 {up_count}  🟢 {dn_count}  (无比例)"
+                emo_block = (
+                    f"{'━'*52}\n"
+                    f"💭 情绪周期  {emoji}{stage}  score={score:.0f}\n"
+                    f"{'━'*52}\n"
+                    f"  📈 上证涨跌:   {emo.get('pct', 0):+.2f}%  (同花顺方向: {emo.get('ths','?')})\n"
+                    f"  💰 盈亏体感:   {emo.get('pnl','?')}\n"
+                    f"  📊 涨跌家数:   {breadth}\n"
+                    f"  🔥 涨停: {zt_count}  ❄️ 跌停: {dt_count}  📂 来源: {emo.get('source','手动')}\n\n"
+                )
+            else:
+                emo_block = (
+                    f"{'━'*52}\n"
+                    f"💭 情绪周期  ⚠️ 无数据 (JSON 中缺失, 下次渲染自动补全)\n"
+                    f"{'━'*52}\n\n"
+                )
+
+            # ============ 领涨领跌板块区块 (仅当天实时拉取) ============
+            sector_block = ""
+            try:
+                today_str = _dt2.now().strftime("%Y-%m-%d")
+                if day_date[:10] == today_str:
+                    sector_block = "\n⏳ 正在加载实时板块数据 (后台拉取同花顺)...\n"
+                    # 后台线程异步拉
+                    threading.Thread(target=self._fetch_sector_worker, args=(day_date,), daemon=True).start()
+                else:
+                    sector_block = (
+                        f"\n📋 领涨领跌板块: 📅 历史日期({day_date[:10]})无法实时回溯板块数据\n"
+                        f"                 (akshare 实时接口只返回当天数据)\n"
+                    )
+            except Exception:
+                pass
+
+            # ============ 暴涨暴跌事件区块 ============
+            events_block = f"\n📅 {day_date}  共 {len(day_events)} 条暴涨暴跌事件\n{'='*52}\n"
+            if not day_events:
+                events_block += "  (无暴涨暴跌事件)\n"
             for i, r in enumerate(day_events, 1):
                 et = r[1]
                 icon = "🟢" if et == "crash" else "🔴"  # A股: 跌绿涨红
@@ -1643,16 +1910,85 @@ class CrashRallyCalendarApp:
                 trig = r[5] or "(未归因)"
                 detail = r[6] or "(无详情)"
                 notes = r[8] or ""
-                block = (
+                events_block += (
                     f"\n{i}. {icon} {idx}  {pct:+.2f}%  [{mag}]\n"
                     f"   🎯 原因: {trig}\n"
                     f"   📝 详情: {detail}\n"
                 )
                 if notes:
-                    block += f"   📌 备注: {notes}\n"
-                self.detail_b.insert(tk.END, block)
+                    events_block += f"   📌 备注: {notes}\n"
+
+            # 组合输出
+            self.detail_b.insert(tk.END, emo_block)
+            self.detail_b.insert(tk.END, sector_block)
+            self.detail_b.insert(tk.END, events_block)
         except Exception as e:
             print(f"[大跌大涨] 详情显示失败(跳过): {e}")
+            traceback.print_exc()
+
+    def _fetch_sector_worker(self, day_date):
+        """后台线程拉同花顺行业板块实时数据, 完成后追加到详情面板"""
+        import time as _time
+        try:
+            import akshare as ak
+            self.root.after(0, lambda: self._append_detail_line(f"\n🔄 拉取同花顺行业板块..."))
+            df = ak.stock_board_industry_summary_ths()
+            if df is None or len(df) == 0:
+                self.root.after(0, lambda: self._append_detail_line("⚠️ 同花顺板块接口返回空\n"))
+                return
+            # 排序
+            top_rise = df.sort_values("涨跌幅", ascending=False).head(5)
+            top_fall = df.sort_values("涨跌幅", ascending=True).head(5)
+
+            lines = [f"\n{'━'*52}", f"📋 领涨领跌板块  (同花顺行业板块)", f"{'━'*52}"]
+            lines.append("🟢 领涨 TOP5:")
+            for _, r in top_rise.iterrows():
+                sector = str(r.get("板块", ""))
+                pct = float(r.get("涨跌幅", 0))
+                lead = str(r.get("领涨股", ""))
+                lead_pct = float(r.get("领涨股-涨跌幅", 0)) if r.get("领涨股-涨跌幅") is not None else 0
+                lines.append(f"  🟢 {sector:10s} {pct:+.2f}%  领涨:{lead}({lead_pct:+.2f}%)")
+            lines.append("🔴 领跌 TOP5:")
+            for _, r in top_fall.iterrows():
+                sector = str(r.get("板块", ""))
+                pct = float(r.get("涨跌幅", 0))
+                lead = str(r.get("领涨股", ""))
+                lead_pct = float(r.get("领涨股-涨跌幅", 0)) if r.get("领涨股-涨跌幅") is not None else 0
+                lines.append(f"  🔴 {sector:10s} {pct:+.2f}%  领跌:{lead}({lead_pct:+.2f}%)")
+            lines.append(f"{'━'*52}\n")
+            output = "\n".join(lines)
+            # 检查用户没切换到别的日期 (详情被覆盖了)
+            current_date = getattr(self, "_detail_last_date", "")
+            if current_date != day_date:
+                return  # 已经切到别的日期了, 不追加
+            self.root.after(0, lambda: self._replace_sector_section(output))
+        except Exception as e:
+            self.root.after(0, lambda: self._append_detail_line(f"⚠️ 板块拉取失败: {type(e).__name__}: {e}\n"))
+
+    def _replace_sector_section(self, new_text):
+        """替换详情中占位的 sector 区域 (先删后插)"""
+        try:
+            content = self.detail_b.get("1.0", tk.END)
+            # 找到占位并替换
+            if "⏳ 正在加载实时板块数据" in content:
+                # 按分隔线定位, 从 "⏳" 到下一个 \n\n 结束
+                start = content.find("⏳ 正在加载实时板块数据")
+                end = content.find("\n\n", start)
+                if end == -1:
+                    end = len(content)
+                new_content = content[:start] + new_text + content[end:]
+                self.detail_b.delete("1.0", tk.END)
+                self.detail_b.insert("1.0", new_content)
+                self.detail_b.see(tk.END)
+        except Exception as e:
+            print(f"[大跌大涨] 板块替换失败(跳过): {e}")
+
+    def _append_detail_line(self, text):
+        try:
+            self.detail_b.insert(tk.END, text)
+            self.detail_b.see(tk.END)
+        except Exception:
+            pass
 
     def _export_month_md_b(self):
         """导出当月事件 Markdown 报告"""
