@@ -4033,9 +4033,15 @@ class StockKeywordAnalyzerGUI:
         left_frame = ttk.Frame(main_frame)
         left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         # 仓位/交易标签页控件框(共用一块位置,可以切换,调整高度)
-        self.position_trading_notebook = ttk.Notebook(left_frame)
-        # 垂直方向也要参与分配,否则「龙头股」等标签页里多行股票格子在部分系统上高度为 0,中间一片空白
-        self.position_trading_notebook.pack(fill=tk.BOTH, expand=False, pady=(0, 1))
+        # ⚠️ 必须用普通 tk.Frame 包裹 ttk.Notebook 并 pack_propagate(False) 强制锁死高度!
+        # 否则 ttk 主题会让 Notebook 根据内部 tab 内容的最小高度自动撑破 configure(height),
+        # 把下面的 toolbar_frame 和 crawler_control_notebook (左下角快速爬取) 挤没!
+        _pos_holder = tk.Frame(left_frame, height=262)
+        _pos_holder.pack_propagate(False)  # ⛔ 锁死高度,绝不被内部内容撑大
+        _pos_holder.pack(fill=tk.BOTH, expand=False, pady=(0, 1))
+        self.position_trading_notebook = ttk.Notebook(_pos_holder)
+        # Notebook 在 holder 内部 fill=BOTH expand=True, 占满 holder 的固定 262px
+        self.position_trading_notebook.pack(fill=tk.BOTH, expand=True)
         # 高度与持仓内容匹配为主,腾出左侧下方工具条/快速爬取/导航可视区
         self.position_trading_notebook.configure(height=262)
         # ============ 🗺️ 大盘分析标签页 (重写版: 水温计+情绪地图+板块) ============
