@@ -4326,6 +4326,7 @@ class DapanMixin:
 
                 def _bind_all(wlist, _ds=ds):
                     def _click(e):
+                        print(f"[情绪日历] 👆 点击格子 ds={_ds}  hist_dict有={_ds in hist_dict}", flush=True)
                         if not is_rebuilding[0]: _open_day_editor(_ds)
                     def _ent(e):
                         _r = hist_dict.get(_ds, {})
@@ -4728,17 +4729,18 @@ class DapanMixin:
                         cell.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
                         cell.grid_propagate(False)
 
-                        def _click_all(widget_list, ds):
+                        def _click_all(widget_list, _ds=date_str):
                             def _click(e):
-                                if not is_rebuilding[0]: _open_day_editor(ds)
+                                print(f"[情绪日历-独立] 👆 点击格子 ds={_ds}", flush=True)
+                                if not is_rebuilding[0]: _open_day_editor(_ds)
                             def _enter(e):
-                                _r = hist_dict.get(ds, {})
+                                _r = hist_dict.get(_ds, {})
                                 _ths_t = {"向上":"📈向上","向下":"📉向下"}.get(_r.get("ths",""),"未填")
                                 _pnl_t = {"赚钱":"💰赚钱","亏钱":"💸亏钱"}.get(_r.get("pnl",""),"未填")
                                 _stage_t = _r.get("stage","未填") or "未填"
                                 _emo_t = f"{_r.get('emo_score','--')}" if _r.get("emo_score") is not None else "--"
                                 _pct_t = f"{_r.get('pct',0):+.2f}%" if _r.get("pct") is not None else "--"
-                                detail_lbl.config(text=(f"📅 {ds}  ①{_stage_t}  ②同花顺:{_ths_t}  "
+                                detail_lbl.config(text=(f"📅 {_ds}  ①{_stage_t}  ②同花顺:{_ths_t}  "
                                                         f"③盈亏:{_pnl_t}  📊emo={_emo_t}  📈上证={_pct_t}"),
                                                   fg="#FFD54F")
                             def _leave(e):
