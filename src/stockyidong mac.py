@@ -8831,56 +8831,6 @@ class StockKeywordAnalyzerGUI:
         self._w_rationale_text.pack(fill=tk.X, pady=4)
         self._w_rationale_text.config(state=tk.DISABLED)
 
-        # —— 下半: 快捷开新仓 (保留原有 4 种等待类型) ——
-        self.waiting_reason_map = {}
-        self.waiting_combo_widgets = []
-        self.waiting_section_vars = {}
-        self.waiting_source_widgets = []
-        position_types = ["绩优股", "朋友", "强势股", "妖股", "均值回归"]
-        data_sources = ["数据表", "自选表", "龙虎榜表"]
-        waiting_sections = [
-            ("趋势等回调", "trend_pullback"),
-            ("震荡等低点", "range_low"),
-            ("突破等回调", "breakout_pullback"),
-            ("反转等放量", "reversal_volume"),
-        ]
-        # 横向两列布局
-        w_grid = ttk.Frame(w_inner)
-        w_grid.pack(fill=tk.X, pady=(6, 2))
-        w_grid.columnconfigure(0, weight=1)
-        w_grid.columnconfigure(1, weight=1)
-
-        for idx, (title, key) in enumerate(waiting_sections):
-            row, col = divmod(idx, 2)
-            section_frame = ttk.LabelFrame(w_grid, padding=8)
-            section_frame.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
-            title_label = tk.Label(section_frame, text=title,
-                                   font=("Microsoft YaHei", 13, "bold"), fg="#1565C0")
-            title_label.pack(anchor=tk.W)
-            self.waiting_reason_map[key] = title
-            input_row = ttk.Frame(section_frame)
-            input_row.pack(fill=tk.X, pady=2)
-            ttk.Label(input_row, text="数据源:").pack(side=tk.LEFT)
-            source_var = tk.StringVar(value=data_sources[0])
-            source_combo = ttk.Combobox(input_row, textvariable=source_var, values=data_sources,
-                                        state="readonly", width=8)
-            source_combo.pack(side=tk.LEFT, padx=4)
-            self.waiting_source_widgets.append(source_combo)
-            ttk.Label(input_row, text="类型:").pack(side=tk.LEFT, padx=(6, 0))
-            type_var = tk.StringVar(value=position_types[0])
-            ttk.Combobox(input_row, textvariable=type_var,
-                         values=position_types, state="readonly", width=8).pack(side=tk.LEFT, padx=4)
-            btn_row = ttk.Frame(section_frame)
-            btn_row.pack(fill=tk.X, pady=4)
-            ttk.Button(btn_row, text="开新仓",
-                       command=lambda k=key: self._open_waiting_new_position(k)).pack(side=tk.LEFT)
-            notes_entry = ttk.Entry(section_frame)
-            notes_entry.pack(fill=tk.X, pady=(2, 0))
-            self.waiting_section_vars[key] = {
-                "type_var": type_var, "notes_entry": notes_entry,
-            }
-        self._update_waiting_combo_values()
-
         # 首次刷新仪表盘 (after 确保窗口已显示 + bind 自适应重绘)
         self.root.after(200, self._refresh_waiting_dashboard)
         # Canvas 宽度变化时自动重绘 (解决截图里"狂热"段被裁的问题)
