@@ -8673,77 +8673,225 @@ class StockKeywordAnalyzerGUI:
         # 暴跌标签页(放在等待前)
         crash_tab = ttk.Frame(crawler_control_notebook, padding=10)
         crawler_control_notebook.add(crash_tab, text="暴跌")
+
+        # —— 上半: 实时暴跌状态快照 ——
         crash_top = ttk.Frame(crash_tab)
-        crash_top.pack(fill=tk.X, pady=(0, 8))
+        crash_top.pack(fill=tk.X, pady=(0, 6))
         ttk.Button(crash_top, text="刷新暴跌状态", command=self._refresh_crash_alert_display).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(crash_top, text="记录到资讯表", command=self._save_crash_alert_snapshot_to_news).pack(side=tk.LEFT)
-        self.crash_alert_text_widget = scrolledtext.ScrolledText(crash_tab, height=12, wrap=tk.WORD)
+
+        # ⬇ 新下半: 历史暴涨暴跌事件库 (和 🗓️暴涨暴跌弹窗共用同一 SQLite 表)
+        crash_split = ttk.PanedWindow(crash_tab, orient=tk.VERTICAL)
+        crash_split.pack(fill=tk.BOTH, expand=True)
+
+        # 上: 实时快照
+        top_panel = ttk.Frame(crash_split)
+        crash_split.add(top_panel, weight=1)
+        self.crash_alert_text_widget = scrolledtext.ScrolledText(top_panel, height=10, wrap=tk.WORD)
         self.crash_alert_text_widget.pack(fill=tk.BOTH, expand=True)
         self.crash_alert_text_widget.config(state=tk.DISABLED)
-        self._refresh_crash_alert_display()
-        # 等待观察标签页
-        waiting_tab = ttk.Frame(crawler_control_notebook, padding=10)
+
+        # 下: 历史事件库 Treeview
+        bot_panel = ttk.Frame(crash_split)
+        crash_split.add(bot_panel, weight=2)
+
+        bot_top = ttk.Frame(bot_panel)
+        bot_top.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(bot_top, text="🗓️ 历史暴涨暴跌事件库 (与 🗓️暴涨暴跌按钮 弹窗同步)",
+                  font=("", 10, "bold")).pack(side=tk.LEFT)
+        ttk.Button(bot_top, text="🔄同步事件库", width=10,
+                   command=self._load_crash_rally_events).pack(side=tk.RIGHT, padx=2)
+        self._crash_events_count_label = ttk.Label(bot_top, text="")
+        self._crash_events_count_label.pack(side=tk.RIGHT, padx=8)
+
+        # 6 列 Treeview (和 crash_rally_calendar.py 的 Tab A 完全一致)
+        crash_cols = ("date", "type", "index", "pct", "magnitude", "trigger")
+        self._crash_events_tree = ttk.Treeview(bot_panel, columns=crash_cols, show="headings", height=12)
+        for c, t, w in [("date", "日期", 90), ("type", "类型", 60), ("index", "指数", 100),
+                        ("pct", "涨跌幅%", 80), ("magnitude", "幅度", 60), ("trigger", "触发信号", 200)]:
+            self._crash_events_tree.heading(c, text=t)
+            self._crash_events_tree.column(c, width=w, anchor="center")
+        # 涨跌颜色 tag
+        self._crash_events_tree.tag_configure("crash", foreground="#2E7D32")   # 绿 = 暴跌
+        self._crash_events_tree.tag_configure("rally", foreground="#C62828")   # 红 = 暴涨
+        self._crash_events_tree.pack(fill=tk.BOTH, expand=True, pady=2)
+        # 双击行 → 打开详情（复用 open_full_window_viewer_from_content）
+        def _on_dbl_ev(event):
+            sel = self._crash_events_tree.selection()
+            if not sel:
+                return
+            eid = sel[0]
+            try:
+                self._open_crash_event_detail(eid)
+            except Exception as ex:
+                print(f"[暴跌Tab] 双击打开详情失败: {ex}")
+        self._crash_events_tree.bind("<Double-1>", _on_dbl_ev)
+
+        self._refresh_crash_alert_display()  # 同时刷新实时快照 + 事件库
+        # ══════════════════════════════════════════════════════════
+        # 等待 Tab —— 图形化决策仪表盘 (重构版, 可滚动)
+        # ══════════════════════════════════════════════════════════
+        waiting_tab = ttk.Frame(crawler_control_notebook, padding=8)
         crawler_control_notebook.add(waiting_tab, text="等待")
+
+        # —— 滚动容器 (解决窗口不够高时底部控件被挤没的问题) ——
+        w_canvas = tk.Canvas(waiting_tab, highlightthickness=0, borderwidth=0)
+        w_scroll = ttk.Scrollbar(waiting_tab, orient=tk.VERTICAL, command=w_canvas.yview)
+        w_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        w_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        w_canvas.configure(yscrollcommand=w_scroll.set)
+        # 内部可滚动 Frame
+        w_inner = ttk.Frame(w_canvas)
+        w_win = w_canvas.create_window((0, 0), window=w_inner, anchor="nw")
+        # Frame 宽 = Canvas 宽
+        def _on_w_configure(e):
+            w_canvas.itemconfigure(w_win, width=e.width)
+            w_canvas.configure(scrollregion=w_canvas.bbox("all"))
+        w_canvas.bind("<Configure>", _on_w_configure)
+        w_inner.bind("<Configure>",
+                     lambda e: w_canvas.configure(scrollregion=w_canvas.bbox("all")))
+        # 鼠标滚轮
+        def _on_wheel(e):
+            w_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        w_canvas.bind_all("<MouseWheel>", _on_wheel)
+
+        # 顶部刷新条
+        w_top = ttk.Frame(w_inner)
+        w_top.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(w_top, text="⏳ 等待还是入场？ — 情绪周期 × 暴涨暴跌 × α/β 机会",
+                  font=("", 12, "bold")).pack(side=tk.LEFT)
+        ttk.Button(w_top, text="🔄刷新仪表盘", width=12,
+                   command=self._refresh_waiting_dashboard).pack(side=tk.RIGHT, padx=4)
+        self._w_dash_date_label = ttk.Label(w_top, text="", foreground="#78909C")
+        self._w_dash_date_label.pack(side=tk.RIGHT, padx=8)
+
+        # 三列布局 (Canvas 图形化 —— 固定高度, 不吃决策面板空间)
+        w_main = ttk.Frame(w_inner)
+        w_main.pack(fill=tk.X, pady=4)
+        w_main.columnconfigure(0, weight=1, uniform="w")
+        w_main.columnconfigure(1, weight=1, uniform="w")
+        w_main.columnconfigure(2, weight=1, uniform="w")
+
+        # —— 左: 情绪周期进度条 (横条) ——
+        w_left = ttk.LabelFrame(w_main, text="📈 情绪周期位置", padding=4)
+        w_left.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        self._w_mood_canvas = tk.Canvas(w_left, height=80, bg="#F5F5F5",
+                                        highlightthickness=0)
+        self._w_mood_canvas.pack(fill=tk.X, pady=2)
+        self._w_mood_detail = ttk.Label(w_left, text="", wraplength=300, justify=tk.LEFT)
+        self._w_mood_detail.pack(fill=tk.X, pady=2)
+
+        # —— 中: 暴涨暴跌温度计 ——
+        w_mid = ttk.LabelFrame(w_main, text="🌡️ 暴涨暴跌温度计", padding=4)
+        w_mid.grid(row=0, column=1, sticky="nsew", padx=4)
+        self._w_thermo_canvas = tk.Canvas(w_mid, height=110, bg="#F5F5F5",
+                                          highlightthickness=0)
+        self._w_thermo_canvas.pack(fill=tk.X, pady=2)
+        self._w_crash_detail = ttk.Label(w_mid, text="", wraplength=300, justify=tk.LEFT)
+        self._w_crash_detail.pack(fill=tk.X, pady=2)
+
+        # —— 右: α/β 反弹机会圆环 ——
+        w_right = ttk.LabelFrame(w_main, text="🎯 α/β 反弹机会雷达", padding=4)
+        w_right.grid(row=0, column=2, sticky="nsew", padx=(4, 0))
+        self._w_alpha_canvas = tk.Canvas(w_right, height=110, bg="#F5F5F5",
+                                         highlightthickness=0)
+        self._w_alpha_canvas.pack(fill=tk.X, pady=2)
+        self._w_alpha_detail = ttk.Label(w_right, text="", wraplength=300, justify=tk.LEFT)
+        self._w_alpha_detail.pack(fill=tk.X, pady=2)
+
+        # —— 决策建议大圆盘 (跨三列) ——
+        w_action = ttk.LabelFrame(w_inner, text="🎬 量化决策：等待 VS 入场", padding=8)
+        w_action.pack(fill=tk.X, pady=(8, 4))
+
+        action_row = ttk.Frame(w_action)
+        action_row.pack(fill=tk.X, pady=2)
+
+        # 左侧: 建议文字
+        self._w_verdict_label = tk.Label(action_row, text="分析中...",
+                                         font=("Microsoft YaHei", 18, "bold"),
+                                         fg="#333")
+        self._w_verdict_label.pack(side=tk.LEFT, padx=8)
+        self._w_verdict_sub = ttk.Label(action_row, text="", foreground="#666")
+        self._w_verdict_sub.pack(side=tk.LEFT, padx=10)
+
+        # 中间: 等待/入场进度条
+        bar_frame = ttk.Frame(w_action)
+        bar_frame.pack(fill=tk.X, pady=4)
+        ttk.Label(bar_frame, text="适合等待").pack(side=tk.LEFT)
+        self._w_action_bar = ttk.Progressbar(bar_frame, maximum=100, value=0, length=400)
+        self._w_action_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
+        ttk.Label(bar_frame, text="可以入场").pack(side=tk.LEFT)
+        self._w_action_pct_label = ttk.Label(bar_frame, text="")
+        self._w_action_pct_label.pack(side=tk.LEFT, padx=6)
+
+        # 建议依据
+        self._w_rationale_text = scrolledtext.ScrolledText(w_action, height=4, wrap=tk.WORD,
+                                                          font=("", 10),
+                                                          background="#FAFAFA")
+        self._w_rationale_text.pack(fill=tk.X, pady=4)
+        self._w_rationale_text.config(state=tk.DISABLED)
+
+        # —— 下半: 快捷开新仓 (保留原有 4 种等待类型) ——
+        self.waiting_reason_map = {}
+        self.waiting_combo_widgets = []
+        self.waiting_section_vars = {}
+        self.waiting_source_widgets = []
+        position_types = ["绩优股", "朋友", "强势股", "妖股", "均值回归"]
+        data_sources = ["数据表", "自选表", "龙虎榜表"]
         waiting_sections = [
             ("趋势等回调", "trend_pullback"),
             ("震荡等低点", "range_low"),
             ("突破等回调", "breakout_pullback"),
             ("反转等放量", "reversal_volume"),
         ]
-        self.waiting_reason_map = {}
-        self.waiting_combo_widgets = []
-        self.waiting_section_vars = {}
-        self.waiting_source_widgets = []  # 存储数据源下拉框
-        position_types = ["绩优股", "朋友", "强势股", "妖股", "均值回归"]
-        data_sources = ["数据表", "自选表", "龙虎榜表"]
-        for title, key in waiting_sections:
-            section_frame = ttk.LabelFrame(waiting_tab, padding=10)
-            section_frame.pack(fill=tk.X, pady=6)
-            title_label = tk.Label(
-                section_frame,
-                text=title,
-                font=("Microsoft YaHei", 16, "bold"),
-                fg="#f7c646"
-            )
-            title_label.pack(anchor=tk.W, pady=(0, 6))
+        # 横向两列布局
+        w_grid = ttk.Frame(w_inner)
+        w_grid.pack(fill=tk.X, pady=(6, 2))
+        w_grid.columnconfigure(0, weight=1)
+        w_grid.columnconfigure(1, weight=1)
+
+        for idx, (title, key) in enumerate(waiting_sections):
+            row, col = divmod(idx, 2)
+            section_frame = ttk.LabelFrame(w_grid, padding=8)
+            section_frame.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
+            title_label = tk.Label(section_frame, text=title,
+                                   font=("Microsoft YaHei", 13, "bold"), fg="#1565C0")
+            title_label.pack(anchor=tk.W)
             self.waiting_reason_map[key] = title
             input_row = ttk.Frame(section_frame)
             input_row.pack(fill=tk.X, pady=2)
             ttk.Label(input_row, text="数据源:").pack(side=tk.LEFT)
             source_var = tk.StringVar(value=data_sources[0])
-            source_combo = ttk.Combobox(input_row, textvariable=source_var, values=data_sources, state="readonly", width=10)
-            source_combo.pack(side=tk.LEFT, padx=5)
+            source_combo = ttk.Combobox(input_row, textvariable=source_var, values=data_sources,
+                                        state="readonly", width=8)
+            source_combo.pack(side=tk.LEFT, padx=4)
             self.waiting_source_widgets.append(source_combo)
-            ttk.Label(input_row, text="自选股:").pack(side=tk.LEFT, padx=(10, 0))
-            stock_var = tk.StringVar()
-            stock_combo = ttk.Combobox(input_row, textvariable=stock_var, state="readonly", width=25)
-            stock_combo.pack(side=tk.LEFT, padx=5)
-            self.waiting_combo_widgets.append(stock_combo)
-            # 绑定数据源变化事件
-            source_combo.bind("<<ComboboxSelected>>", lambda e, combo=stock_combo, src=source_var: self._update_waiting_stock_combo(combo, src.get()))
-            ttk.Label(input_row, text="类型:").pack(side=tk.LEFT, padx=(10, 0))
+            ttk.Label(input_row, text="类型:").pack(side=tk.LEFT, padx=(6, 0))
             type_var = tk.StringVar(value=position_types[0])
-            type_combo = ttk.Combobox(
-                input_row, textvariable=type_var,
-                values=position_types, state="readonly", width=10
-            )
-            type_combo.pack(side=tk.LEFT, padx=5)
+            ttk.Combobox(input_row, textvariable=type_var,
+                         values=position_types, state="readonly", width=8).pack(side=tk.LEFT, padx=4)
             btn_row = ttk.Frame(section_frame)
-            btn_row.pack(fill=tk.X, pady=6)
-            ttk.Button(
-                btn_row,
-                text="开新仓",
-                command=lambda k=key: self._open_waiting_new_position(k)
-            ).pack(side=tk.LEFT)
+            btn_row.pack(fill=tk.X, pady=4)
+            ttk.Button(btn_row, text="开新仓",
+                       command=lambda k=key: self._open_waiting_new_position(k)).pack(side=tk.LEFT)
             notes_entry = ttk.Entry(section_frame)
-            notes_entry.pack(fill=tk.X, pady=(4, 0))
+            notes_entry.pack(fill=tk.X, pady=(2, 0))
             self.waiting_section_vars[key] = {
-                "stock_var": stock_var,
-                "type_var": type_var,
-                "stock_combo": stock_combo,
-                "notes_entry": notes_entry,
+                "type_var": type_var, "notes_entry": notes_entry,
             }
         self._update_waiting_combo_values()
+
+        # 首次刷新仪表盘 (after 确保窗口已显示 + bind 自适应重绘)
+        self.root.after(200, self._refresh_waiting_dashboard)
+        # Canvas 宽度变化时自动重绘 (解决截图里"狂热"段被裁的问题)
+        def _bind_canvas_resize():
+            for cv in (getattr(self, "_w_mood_canvas", None),
+                       getattr(self, "_w_thermo_canvas", None),
+                       getattr(self, "_w_alpha_canvas", None)):
+                if cv is not None:
+                    cv.bind("<Configure>",
+                            lambda _e: self._refresh_waiting_dashboard())
+        self.root.after(300, _bind_canvas_resize)
         # 成长标签页(放在等待后)
         growth_tab = ttk.Frame(crawler_control_notebook, padding=10)
         crawler_control_notebook.add(growth_tab, text="成长")
@@ -19720,168 +19868,480 @@ class StockKeywordAnalyzerGUI:
     # 引用/引用行
     _QUOTE_PREFIXES = [">", ">>", ">>>", "| ", "│ ", "┃ ", "引用：", "原帖：", "原文："]
 
+    # ------------------------------------------------------------------
+    # 文章词频分析 + 关键字高亮（不依赖 jieba，简单 2-4 字 n-gram）
+    # ------------------------------------------------------------------
+    # 中文停用词表（股票/财经场景已扩展）
+    _CN_STOPWORDS = set("""
+    的了和是在也就都与及或等而但因因为所以如果虽然可是但是
+    不没有这个那个这些那些我们你们他们它们自己什么怎么怎样哪里哪个
+    一一个一些一样一起一种一点一下一般一面一边一直一起一起
+    上上下前后里面外面中间里面外面旁边附近
+    这那这里那里这儿那儿这些那些
+    来去过到出回进离走向
+    把被让使给叫对跟比从向往由以于按照通过
+    会能要得地
+    今天昨天明天现在之前之后以前以后目前开始结束
+    月日年时分秒周星期
+    一二三三四五六七八九十百千万亿两
+    大中小多少高低快慢远近新旧好坏涨跌红绿
+    个只条块片辆台套种次场
+    说看听想问回答作做发现出现
+    可以可能应该需要必须能够
+    还有以及或者包括比如例如而且虽然
+    大家各位
+    公司企业集团股份银行基金
+    市场板块行业概念指数大盘
+    股票股价市值市盈率市净率涨停跌停
+    交易买卖委托成交持仓仓位
+    量额手股元万元亿元
+    分析研究报告数据信息
+    公告新闻消息通知
+    风险收益机会价值
+    """.split())
+
+    def _analyze_word_frequency(self, content):
+        """简易中文 2-4 字 n-gram 词频分析，返回 [(word, count), ...]
+        不依赖 jieba，能处理中英文混合"""
+        import re as _re
+        from collections import Counter
+
+        if not content:
+            return []
+
+        # 先清理：去掉 URL、纯英文、纯数字、HTML 标签
+        clean = _re.sub(r'https?://\S+', ' ', content)
+        clean = _re.sub(r'www\.\S+', ' ', clean)
+        clean = _re.sub(r'<[^>]+>', ' ', clean)
+        clean = _re.sub(r'[0-9]+', ' ', clean)
+        clean = _re.sub(r'[A-Za-z]{3,}', ' ', clean)
+        # 保留中文字符、标点、# （#xxx# 保留做 hashtag）
+        # 提取连续的中文字段
+        chinese_chunks = _re.findall(r'[\u4e00-\u9fff]{2,}', clean)
+
+        counter = Counter()
+        for chunk in chinese_chunks:
+            L = len(chunk)
+            # 2-gram
+            for i in range(L - 1):
+                w = chunk[i:i+2]
+                if w not in self._CN_STOPWORDS:
+                    counter[w] += 1
+            # 3-gram
+            if L >= 3:
+                for i in range(L - 2):
+                    w = chunk[i:i+3]
+                    if w not in self._CN_STOPWORDS:
+                        counter[w] += 1
+            # 4-gram
+            if L >= 4:
+                for i in range(L - 3):
+                    w = chunk[i:i+4]
+                    if w not in self._CN_STOPWORDS:
+                        counter[w] += 1
+
+        # 过滤: 只留出现 ≥ 2 次的词（噪声过滤）
+        # 同频率的 → 长词优先保留
+        filtered = [(w, c) for w, c in counter.most_common(200) if c >= 2]
+        filtered.sort(key=lambda x: (-x[1], -len(x[0])))
+
+        # 去重: 核心逻辑
+        # - 如果当前词包含已存在结果中的某个词 → 用当前长词替换那个短词
+        # - 如果已存在的长词包含当前短词且频率 ≥ 当前词 → 跳过当前
+        result = []  # list of [word, count] — 用 list 方便修改
+        for w, c in filtered:
+            # 检查: 当前词是否应替换结果中的短词
+            replaced = False
+            for i, (rw, rc) in enumerate(result):
+                if rw in w:
+                    # 当前词更长且包含已存词 → 替换（频率取大的那个）
+                    result[i] = [w, max(c, rc)]
+                    replaced = True
+                    break
+                if w in rw and rc >= c:
+                    # 已存词更长且频率不低于当前 → 跳过当前
+                    replaced = True
+                    break
+            if not replaced:
+                result.append([w, c])
+            if len(result) >= 25:
+                break
+
+        return [(w, c) for w, c in result]
+
+    def _apply_keyword_highlight(self, text_widget, content):
+        """对高频词在 Text widget 中加 color+bold tag
+        只在 'content' tag 范围内生效，不覆盖 author/time/essence 等"""
+        freq_list = self._analyze_word_frequency(content)
+        if not freq_list:
+            return
+
+        total = len(freq_list)
+        high_cutoff = max(3, total // 5)   # Top 20% → freq_high
+        mid_cutoff  = max(8, total * 2 // 5)  # 20%-40% → freq_mid
+
+        def _tag_for_rank(rank):
+            if rank < high_cutoff:
+                return "freq_high"
+            if rank < mid_cutoff:
+                return "freq_mid"
+            return "freq_low"
+
+        # 用 search 定位 + 判断周围的 tag 集合
+        # 策略: 找到所有出现位置 → 逐一判断是否在 content/tag 范围内 → 是就加 tag
+        for rank, (word, count) in enumerate(freq_list):
+            target_tag = _tag_for_rank(rank)
+            start = "1.0"
+            while True:
+                pos = text_widget.search(word, start, tk.END)
+                if not pos:
+                    break
+                end = f"{pos}+{len(word)}c"
+                # 获取这个位置的 tag 列表
+                tags_at = text_widget.tag_names(pos)
+                # 只在 content tag 范围内加，不覆盖其他结构 tag
+                structural_tags = {"author", "author_star", "time", "title", "essence",
+                                   "header_footer", "divider", "url", "hashtag", "quote"}
+                if tags_at and any(t in structural_tags for t in tags_at):
+                    # 跳过已被结构 tag 覆盖的位置
+                    pass
+                else:
+                    text_widget.tag_add(target_tag, pos, end)
+                start = end
+
     def _smart_render_article(self, text_widget, content):
-        """按行特征给资讯内容上不同颜色和字号的 tag"""
+        """按行特征给资讯内容上不同颜色和字号的 tag + 自动表格化"""
         import re as _re
         if not content:
             text_widget.insert(tk.END, "(空内容)", "content")
             return
 
         lines = content.split("\n")
-        first_content_idx = None  # 第一个非空行（可能是标题）
+
+        # ===== 先把表格段落切出来（不进常规渲染）=====
+        # 检测规则：连续 ≥3 行，每行都含至少 2 个 | 分隔符 或 ≥3 个 tab
+        _TABLE_MIN_ROWS = 3
+        _TABLE_MIN_SEP = 2  # | 或 tab 的数量阈值
+
+        def _is_table_line(s):
+            # 去掉 markdown 代码块标记等干扰
+            if s.strip().startswith("```") or s.strip().startswith("'''"):
+                return False
+            bars = s.count("|")
+            tabs = s.count("\t")
+            return bars >= _TABLE_MIN_SEP or tabs >= 3
+
+        segments = []  # [(type, text_or_lines), ...]  type="text" or "table"
+        buf = []       # 文本行缓冲区
+        table_buf = [] # 表格行缓冲区
+
+        for line in lines:
+            if _is_table_line(line):
+                if buf:
+                    segments.append(("text", buf))
+                    buf = []
+                table_buf.append(line)
+            else:
+                if len(table_buf) >= _TABLE_MIN_ROWS:
+                    segments.append(("table", table_buf))
+                table_buf = []
+                buf.append(line)
+        # 收尾
+        if len(table_buf) >= _TABLE_MIN_ROWS:
+            segments.append(("table", table_buf))
+        elif table_buf:
+            # 不够长的表格行，还是当普通文本
+            buf.extend(table_buf)
+        if buf:
+            segments.append(("text", buf))
+
+        # ===== 逐段渲染 =====
+        first_content_idx = None
         for i, line in enumerate(lines):
             if line.strip():
                 first_content_idx = i
                 break
 
-        url_re = _re.compile(r'https?://[^\s\u4e00-\u9fff]+|www\.[^\s]+')
-        star_list = self._STAR_AUTHORS
-        hf_kws = self._HEADER_FOOTER_KWS
-        div_kws = self._DIVIDER_KWS
-        quote_prefixes = self._QUOTE_PREFIXES
-
-        def _contains_hf_keyword(line_stripped):
-            low = line_stripped.lower()
-            return any(kw in low or kw in line_stripped for kw in hf_kws)
-
-        def _is_divider(line_stripped):
-            s = line_stripped.replace(" ", "")
-            if len(s) < 3:
-                return False
-            # 全是相同的分隔符
-            return all(c in "-=*~—｜" for c in s)
-
-        def _is_time_line(line_stripped):
-            return bool(_re.search(r'\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?', line_stripped) or
-                        _re.search(r'\d{1,2}:\d{2}(:\d{2})?', line_stripped))
-
-        def _is_author_line(line_stripped):
-            # 作者：xxx / 作者 xxx / 楼主：xxx / 楼主 xxx
-            return bool(_re.match(r'^.{0,8}(作者|楼主|博主|发布者|投稿者|来自)[：: ]+', line_stripped)) or \
-                   bool(_re.match(r'^.{0,4}(楼主|作者)\s*[:：]', line_stripped))
-
-        def _contains_essence(line_stripped):
-            return any(kw in line_stripped for kw in ["精华", "加精", "推荐", "置顶", "热门", "头条"])
-
-        def _is_title(line_stripped, is_first_line):
-            if not is_first_line or len(line_stripped) < 4:
-                return False
-            # 第一行且较长，可能是标题
-            if len(line_stripped) < 40:
-                return True
-            # 或者含精华标识
-            return self._contains_essence(line_stripped)
-
-        for idx, line in enumerate(lines):
-            stripped = line.strip()
-            if not stripped:
-                text_widget.insert(tk.END, "\n")
+        for seg_type, seg_data in segments:
+            if seg_type == "table":
+                self._render_as_table(text_widget, seg_data)
                 continue
 
-            # ===== 按优先级判断类型 =====
-            # 1. 页头页脚（重复的导航/版权/分享等）
-            if _contains_hf_keyword(stripped) and len(stripped) < 80:
-                text_widget.insert(tk.END, line + "\n", "header_footer")
-                continue
+            # --- 以下是常规文本渲染（和原来逻辑一致，只是对 seg_data 的行遍历）---
+            url_re = _re.compile(r'https?://[^\s\u4e00-\u9fff]+|www\.[^\s]+')
+            star_list = self._STAR_AUTHORS
+            hf_kws = self._HEADER_FOOTER_KWS
+            quote_prefixes = self._QUOTE_PREFIXES
 
-            # 2. 分隔线
-            if _is_divider(stripped):
-                text_widget.insert(tk.END, line + "\n", "divider")
-                continue
+            def _contains_hf_keyword(line_stripped):
+                low = line_stripped.lower()
+                return any(kw in low or kw in line_stripped for kw in hf_kws)
 
-            # 3. 精华/推荐标识行（通常是标题行）
-            if _contains_essence(stripped) and len(stripped) < 80:
-                # 里面可能含 URL
+            def _is_divider(line_stripped):
+                s = line_stripped.replace(" ", "")
+                if len(s) < 3:
+                    return False
+                return all(c in "-=*~—｜" for c in s)
+
+            def _is_time_line(line_stripped):
+                return bool(_re.search(r'\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?', line_stripped) or
+                            _re.search(r'\d{1,2}:\d{2}(:\d{2})?', line_stripped))
+
+            def _is_author_line(line_stripped):
+                return bool(_re.match(r'^.{0,8}(作者|楼主|博主|发布者|投稿者|来自)[：: ]+', line_stripped)) or \
+                       bool(_re.match(r'^.{0,4}(楼主|作者)\s*[:：]', line_stripped))
+
+            def _contains_essence(line_stripped):
+                return any(kw in line_stripped for kw in ["精华", "加精", "推荐", "置顶", "热门", "头条"])
+
+            def _is_title(line_stripped, is_first_line):
+                if not is_first_line or len(line_stripped) < 4:
+                    return False
+                if len(line_stripped) < 40:
+                    return True
+                return self._contains_essence(line_stripped)
+
+            for idx, line in enumerate(seg_data):
+                stripped = line.strip()
+                if not stripped:
+                    text_widget.insert(tk.END, "\n")
+                    continue
+
+                # 1. 页头页脚
+                if _contains_hf_keyword(stripped) and len(stripped) < 80:
+                    text_widget.insert(tk.END, line + "\n", "header_footer")
+                    continue
+                # 2. 分隔线
+                if _is_divider(stripped):
+                    text_widget.insert(tk.END, line + "\n", "divider")
+                    continue
+                # 3. 精华
+                if _contains_essence(stripped) and len(stripped) < 80:
+                    parts = url_re.split(line)
+                    for p in parts:
+                        if not p:
+                            continue
+                        if url_re.fullmatch(p.strip()):
+                            text_widget.insert(tk.END, p, ("url",))
+                            text_widget.tag_bind("url", "<Button-1>",
+                                                 lambda _e, u=p.strip(): self._open_url(u))
+                        else:
+                            text_widget.insert(tk.END, p, "essence")
+                    text_widget.insert(tk.END, "\n")
+                    continue
+                # 4. 第一行/标题
+                cur_global_idx = lines.index(line) if line in lines else -1
+                if cur_global_idx == first_content_idx and _is_title(stripped, True):
+                    text_widget.insert(tk.END, line + "\n",
+                                       "essence" if _contains_essence(stripped) else "title")
+                    continue
+                # 5. 作者
+                if _is_author_line(stripped):
+                    m = _re.match(r'^(.+?)[：:]\s*(.+)$', stripped)
+                    if m:
+                        prefix = m.group(1) + "："
+                        author_name = m.group(2).strip()
+                        text_widget.insert(tk.END, prefix, "time")
+                        star = any(s in author_name for s in star_list) or len(author_name) <= 4
+                        author_tag = "author_star" if star else "author"
+                        text_widget.insert(tk.END, author_name, author_tag)
+                    else:
+                        text_widget.insert(tk.END, line, "author")
+                    text_widget.insert(tk.END, "\n")
+                    continue
+                # 6. 时间
+                if _is_time_line(stripped) and len(stripped) < 50:
+                    text_widget.insert(tk.END, line + "\n", "time")
+                    continue
+                # 7. 引用
+                if any(stripped.startswith(p) for p in quote_prefixes):
+                    text_widget.insert(tk.END, line + "\n", "quote")
+                    continue
+                # 8. 正文
                 parts = url_re.split(line)
                 for p in parts:
                     if not p:
                         continue
                     if url_re.fullmatch(p.strip()):
-                        text_widget.insert(tk.END, p, ("url",))
+                        url_text = p.strip()
+                        text_widget.insert(tk.END, url_text, ("url",))
                         text_widget.tag_bind("url", "<Button-1>",
-                                             lambda _e, u=p.strip(): self._open_url(u))
+                                             lambda _e, u=url_text: self._open_url(u))
+                        text_widget.tag_bind("url", "<Enter>",
+                                             lambda _e: text_widget.config(cursor="hand2"))
+                        text_widget.tag_bind("url", "<Leave>",
+                                             lambda _e: text_widget.config(cursor=""))
+                    elif "#" in p:
+                        hashtag_re = _re.compile(r'#[^#\s]+#?')
+                        hp = hashtag_re.split(p)
+                        for h in hp:
+                            if not h:
+                                continue
+                            if h.startswith("#"):
+                                text_widget.insert(tk.END, h, "hashtag")
+                            else:
+                                text_widget.insert(tk.END, h, "content")
                     else:
-                        text_widget.insert(tk.END, p, "essence")
+                        text_widget.insert(tk.END, p, "content")
                 text_widget.insert(tk.END, "\n")
-                continue
 
-            # 4. 第一行/标题
-            if idx == first_content_idx and _is_title(stripped, True):
-                text_widget.insert(tk.END, line + "\n",
-                                   "essence" if _contains_essence(stripped) else "title")
-                continue
+    def _render_as_table(self, text_widget, table_lines):
+        """把多行 | 或 Tab 分隔的文本渲染成真正的 ttk.Treeview 表格
+        通过 text_widget.window_create() 嵌入到 Text 里"""
+        import re as _re
+        # 统一分隔符：tab → | ，然后按 | split
+        def split_row(line):
+            s = line.replace("\t", "|").strip()
+            # 去掉首尾的 | 分隔符
+            s = s.strip("|").strip()
+            cells = [c.strip() for c in s.split("|")]
+            # 过滤全空列（连续 || 产生的 ""）
+            # 但保留 "" 以维持列数 — 用 None 标记全空
+            return cells
 
-            # 5. 作者行
-            if _is_author_line(stripped):
-                # 先写"作者："部分
-                m = _re.match(r'^(.+?)[：:]\s*(.+)$', stripped)
-                if m:
-                    prefix = m.group(1) + "："
-                    author_name = m.group(2).strip()
-                    text_widget.insert(tk.END, prefix, "time")
-                    # 判断是否大V
-                    star = any(s in author_name for s in star_list) or len(author_name) <= 4
-                    author_tag = "author_star" if star else "author"
-                    text_widget.insert(tk.END, author_name, author_tag)
-                else:
-                    text_widget.insert(tk.END, line, "author")
-                text_widget.insert(tk.END, "\n")
+        rows = []
+        for line in table_lines:
+            stripped = line.strip()
+            if not stripped:
                 continue
+            rows.append(split_row(stripped))
 
-            # 6. 时间行
-            if _is_time_line(stripped) and len(stripped) < 50:
-                text_widget.insert(tk.END, line + "\n", "time")
-                continue
+        if not rows:
+            return
 
-            # 7. 引用行
-            if any(stripped.startswith(p) for p in quote_prefixes):
-                text_widget.insert(tk.END, line + "\n", "quote")
-                continue
+        # 找出最大列数
+        max_cols = max(len(r) for r in rows) if rows else 0
+        if max_cols < 2:
+            # 只有 1 列，不值得做表格
+            for line in table_lines:
+                text_widget.insert(tk.END, line + "\n", "content")
+            return
 
-            # 8. 正文（含 URL 拆分 + hashtag）
-            parts = url_re.split(line)
-            for p in parts:
-                if not p:
-                    continue
-                if url_re.fullmatch(p.strip()):
-                    url_text = p.strip()
-                    text_widget.insert(tk.END, url_text, ("url",))
-                    text_widget.tag_bind("url", "<Button-1>",
-                                         lambda _e, u=url_text: self._open_url(u))
-                    text_widget.tag_bind("url", "<Enter>",
-                                         lambda _e: text_widget.config(cursor="hand2"))
-                    text_widget.tag_bind("url", "<Leave>",
-                                         lambda _e: text_widget.config(cursor=""))
-                elif "#" in p:
-                    # hashtag 高亮 (#xxx# 或 #xxx)
-                    hashtag_re = _re.compile(r'#[^#\s]+#?')
-                    hp = hashtag_re.split(p)
-                    for h in hp:
-                        if not h:
-                            continue
-                        if h.startswith("#"):
-                            text_widget.insert(tk.END, h, "hashtag")
-                        else:
-                            text_widget.insert(tk.END, h, "content")
-                else:
-                    text_widget.insert(tk.END, p, "content")
-            text_widget.insert(tk.END, "\n")
+        # 规范化所有行长度
+        for r in rows:
+            while len(r) < max_cols:
+                r.append("")
+
+        # 第一行是表头（如果不含数字/百分号/明显数据特征）
+        header_row = rows[0]
+        data_rows = rows[1:]
+
+        # 构建列名（去重 + ttk.Treeview 列名不能重复）
+        seen_names = set()
+        def _unique_name(raw, i):
+            n = raw.strip() or f"col{i+1}"
+            if n in seen_names:
+                n = f"{n}_{i}"
+            seen_names.add(n)
+            return n
+        col_names = [_unique_name(h, i) for i, h in enumerate(header_row)]
+
+        # 给 Text widget 先插入分隔
+        text_widget.insert(tk.END, "\n")
+
+        # 创建 Treeview 容器 Frame (作为 Text 的 window)
+        table_holder = tk.Frame(text_widget.master, bg="#F5F5F5",
+                                highlightbackground="#CFD8DC",
+                                highlightthickness=1)
+
+        # ttk 样式
+        import ttk as _ttk
+        style = _ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure("ArtTable.Treeview",
+                        background="#FAFAFA",
+                        foreground="#212121",
+                        fieldbackground="#FAFAFA",
+                        rowheight=26,
+                        font=("Microsoft YaHei", 12),
+                        borderwidth=0)
+        style.configure("ArtTable.Treeview.Heading",
+                        background="#1565C0",
+                        foreground="white",
+                        font=("Microsoft YaHei", 12, "bold"))
+        style.map("ArtTable.Treeview",
+                  background=[("selected", "#BBDEFB")],
+                  foreground=[("selected", "#0D47A1")])
+
+        tv = _ttk.Treeview(table_holder, columns=col_names, show="headings",
+                           height=min(15, len(data_rows)),
+                           style="ArtTable.Treeview")
+        tv.pack(fill=tk.X, padx=3, pady=3)
+
+        # 配置列（表头 + 宽度）
+        for i, cn in enumerate(col_names):
+            tv.heading(cn, text=header_row[i] or cn)
+            # 估算列宽：按中文/英文字符数 × 14/7 px
+            sample_vals = [r[i] if i < len(r) else "" for r in data_rows[:20]]
+            sample_vals.append(header_row[i])
+            max_len = max((sum(2 if ord(c) > 127 else 1 for c in v) for v in sample_vals), default=4)
+            width = max(50, min(200, max_len * 12))
+            tv.column(cn, width=width, anchor="center")
+
+        # 填数据行 + 涨跌染色
+        def _tag_for(cell):
+            """识别涨跌颜色"""
+            s = str(cell).strip()
+            if not s:
+                return "na"
+            if s.startswith("+"):
+                return "up"
+            if s.startswith("-"):
+                return "down"
+            # 纯数字且含 %
+            if s.endswith("%"):
+                try:
+                    v = float(s.rstrip("%"))
+                    if v > 0:
+                        return "up"
+                    if v < 0:
+                        return "down"
+                except Exception:
+                    pass
+            return ""
+
+        tv.tag_configure("up", foreground="#C62828")
+        tv.tag_configure("down", foreground="#2E7D32")
+
+        for r in data_rows:
+            vals = [r[i] if i < len(r) else "" for i in range(max_cols)]
+            # 选最重的 tag（有 up 就 up，否则 down）
+            tag_set = set()
+            for v in vals:
+                t = _tag_for(v)
+                if t:
+                    tag_set.add(t)
+            tag = tuple(sorted(tag_set)) if tag_set else ()
+            tv.insert("", tk.END, values=vals, tags=tag)
+
+        # 嵌入 Text
+        text_widget.window_create(tk.END, window=table_holder, padx=4, pady=4)
+        text_widget.insert(tk.END, "\n\n")
+
+        # 下方留一个"收起表格"式的分隔行
+        text_widget.insert(tk.END, "─" * 60 + "\n", "divider")
 
     @staticmethod
     def _open_url(url):
-        """跨平台打开 URL"""
+        """跨平台打开 URL（带 URL 清理 + 错误日志）"""
         import subprocess
         import platform
         try:
+            u = str(url).strip().rstrip("。，.;；,")
+            if not u:
+                return
             system = platform.system()
             if system == "Darwin":
-                subprocess.Popen(["open", url])
+                subprocess.Popen(["open", u])
             elif system == "Windows":
-                subprocess.Popen(["cmd", "/c", "start", url])
+                subprocess.Popen(["cmd", "/c", "start", u])
             else:
-                subprocess.Popen(["xdg-open", url])
-        except Exception:
-            pass
+                subprocess.Popen(["xdg-open", u])
+        except Exception as e:
+            print(f"[_open_url] 失败: {e}, url={url}")
 
     def open_full_window_viewer_from_content(self, content, title="资讯内容"):
         """根据内容和标题打开全窗口浏览界面(用于资讯数据表等场景)"""
@@ -19964,33 +20424,138 @@ class StockKeywordAnalyzerGUI:
             # 标题标签
             title_label = ttk.Label(control_frame, text=title, font=("TkDefaultFont", 12, "bold"))
             title_label.pack(side=tk.LEFT, padx=10)
-            # 字体控制工具栏
+            # 字体控制工具栏 (增强版: +/-快捷 + 背景色)
             font_toolbar = ttk.Frame(win)
             font_toolbar.pack(fill=tk.X, padx=5, pady=(0, 5))
-            font_frame = ttk.LabelFrame(font_toolbar, text="字体", padding=5)
-            font_frame.pack(side=tk.LEFT, padx=5)
-            ttk.Label(font_frame, text="大小:").pack(side=tk.LEFT, padx=2)
+
+            # —— 字号快捷 +/- ——
+            size_frame = ttk.LabelFrame(font_toolbar, text="字号", padding=5)
+            size_frame.pack(side=tk.LEFT, padx=5)
             font_size_var = tk.StringVar(value="14")
-            font_size_combo = ttk.Combobox(font_frame, textvariable=font_size_var,
-                                          values=["10", "12", "14", "16", "18", "20", "24"],
-                                          width=5, state="readonly")
-            font_size_combo.pack(side=tk.LEFT, padx=2)
-            ttk.Label(font_frame, text="字体:").pack(side=tk.LEFT, padx=(10, 2))
-            font_family_var = tk.StringVar(value="TkDefaultFont")
-            font_family_combo = ttk.Combobox(font_frame, textvariable=font_family_var,
-                                            values=["TkDefaultFont", "Microsoft YaHei", "SimHei", "SimSun", "Arial", "Courier"],
-                                            width=15, state="readonly")
+            font_scale_var = tk.DoubleVar(value=1.0)
+
+            def _refresh_all_tags(text_w, base_size, font_fam):
+                """重新配置所有 tag 的字体大小（带 scale）"""
+                s = font_scale_var.get()
+                text_w.tag_configure("title",
+                    font=(font_fam, max(10, int(20*s)), "bold"), foreground="#C62828")
+                text_w.tag_configure("essence",
+                    font=(font_fam, max(10, int(22*s)), "bold"), foreground="#C62828",
+                    background="#FFEBEE")
+                text_w.tag_configure("author",
+                    font=(font_fam, max(10, int(16*s)), "bold"), foreground="#1565C0")
+                text_w.tag_configure("author_star",
+                    font=(font_fam, max(10, int(17*s)), "bold"), foreground="#B71C1C",
+                    background="#FFF9C4")
+                text_w.tag_configure("time",
+                    font=(font_fam, max(9, int(11*s))), foreground="#78909C")
+                text_w.tag_configure("content",
+                    font=(font_fam, max(10, int(15*s))), foreground="#212121",
+                    spacing1=4, spacing3=4)
+                text_w.tag_configure("header_footer",
+                    font=(font_fam, max(8, int(10*s))), foreground="#90A4AE")
+                text_w.tag_configure("divider",
+                    font=(font_fam, max(8, int(10*s))), foreground="#CFD8DC")
+                text_w.tag_configure("url",
+                    font=(font_fam, max(10, int(14*s))), foreground="#1E88E5", underline=1)
+                text_w.tag_configure("hashtag",
+                    font=(font_fam, max(10, int(14*s)), "bold"), foreground="#6A1B9A")
+                text_w.tag_configure("quote",
+                    font=(font_fam, max(9, int(13*s))), foreground="#546E7A",
+                    background="#F5F5F5")
+                # 词频高亮 tag
+                text_w.tag_configure("freq_high",
+                    font=(font_fam, max(11, int(15*s+2)), "bold"), foreground="#FF6F00")
+                text_w.tag_configure("freq_mid",
+                    font=(font_fam, max(10, int(15*s+1))), foreground="#7B1FA2")
+                text_w.tag_configure("freq_low",
+                    font=(font_fam, max(10, int(15*s))), foreground="#558B2F")
+
+            def _re_render():
+                """清空 Text → 重配 tag → 智能渲染 → 词频高亮"""
+                if not hasattr(viewer_text, '_article_content'):
+                    return
+                fam = font_family_var.get()
+                # 保存光标位置（近似）
+                viewer_text.config(state=tk.NORMAL)
+                viewer_text.delete("1.0", tk.END)
+                # 清除所有 window（表格）
+                for w in viewer_text.winfo_children():
+                    w.destroy()
+                _refresh_all_tags(viewer_text, int(font_size_var.get()), fam)
+                # 重渲染
+                self._smart_render_article(viewer_text, viewer_text._article_content)
+                # 词频高亮
+                self._apply_keyword_highlight(viewer_text, viewer_text._article_content)
+                # 重绑 URL
+                # (_smart_render_article 已重绑过，这里不用重复)
+
+            ttk.Button(size_frame, text="➖ A-", width=6,
+                       command=lambda: (
+                           font_scale_var.set(round(max(0.5, font_scale_var.get()-0.1), 2)),
+                           _re_render()
+                       )).pack(side=tk.LEFT, padx=2)
+            ttk.Button(size_frame, text="➕ 重置", width=6,
+                       command=lambda: (
+                           font_scale_var.set(1.0),
+                           font_size_var.set("14"),
+                           _re_render()
+                       )).pack(side=tk.LEFT, padx=2)
+            ttk.Button(size_frame, text="➕ A+", width=6,
+                       command=lambda: (
+                           font_scale_var.set(round(min(2.5, font_scale_var.get()+0.1), 2)),
+                           _re_render()
+                       )).pack(side=tk.LEFT, padx=2)
+            ttk.Label(size_frame, textvariable=font_scale_var, width=5).pack(side=tk.LEFT, padx=2)
+
+            ttk.Label(size_frame, text=" 字体:").pack(side=tk.LEFT, padx=(5, 2))
+            font_family_var = tk.StringVar(value="Microsoft YaHei")
+            font_family_combo = ttk.Combobox(size_frame, textvariable=font_family_var,
+                                            values=["Microsoft YaHei", "SimHei", "SimSun",
+                                                    "TkDefaultFont", "Arial", "Courier"],
+                                            width=14, state="readonly")
             font_family_combo.pack(side=tk.LEFT, padx=2)
-            # 字体变化处理
-            def change_font(*args):
-                try:
-                    font_size = int(font_size_var.get())
-                    font_family = font_family_var.get()
-                    viewer_text.configure(font=(font_family, font_size))
-                except:
-                    pass
-            font_size_var.trace('w', change_font)
-            font_family_var.trace('w', change_font)
+
+            def _on_fam_change(*_):
+                _re_render()
+            font_family_var.trace('w', _on_fam_change)
+
+            # —— 背景色选择 ——
+            color_frame = ttk.LabelFrame(font_toolbar, text="背景", padding=5)
+            color_frame.pack(side=tk.LEFT, padx=5)
+            bg_options = {
+                "淡绿 (护眼)":  "#E8F5E9",
+                "淡蓝":         "#E3F2FD",
+                "纯白":         "#FFFFFF",
+                "米黄":         "#FFFDE7",
+                "护眼深绿":     "#C8E6C9",
+                "暖橙":         "#FFF3E0",
+                "浅灰":         "#F5F5F5",
+                "极淡紫":       "#F3E5F5",
+            }
+            bg_names = list(bg_options.keys())
+            bg_name_var = tk.StringVar(value="淡绿 (护眼)")
+
+            ttk.Label(color_frame, text="底色:").pack(side=tk.LEFT, padx=2)
+            bg_combo = ttk.Combobox(color_frame, textvariable=bg_name_var,
+                                    values=bg_names, width=12, state="readonly")
+            bg_combo.pack(side=tk.LEFT, padx=2)
+
+            def _on_bg_change(*_):
+                name = bg_name_var.get()
+                hex_color = bg_options.get(name, "#E8F5E9")
+                # 更新 Text widget 背景
+                viewer_text.config(bg=hex_color)
+                # 更新表格容器背景（所有嵌入的 Frame）
+                for w in viewer_text.winfo_children():
+                    try:
+                        w.config(bg=hex_color)
+                        for sub in w.winfo_children():
+                            sub.config(bg=hex_color)
+                    except Exception:
+                        pass
+            bg_name_var.trace('w', _on_bg_change)
+
             # 查找功能
             search_frame = ttk.LabelFrame(font_toolbar, text="查找", padding=5)
             search_frame.pack(side=tk.LEFT, padx=5)
@@ -20060,32 +20625,20 @@ class StockKeywordAnalyzerGUI:
             text_panel.grid(row=0, column=0, sticky="nsew")
             text_panel.columnconfigure(0, weight=1)
             text_panel.rowconfigure(0, weight=1)
-            # 根据情绪周期确定背景颜色
-            if hasattr(self, 'get_emotion_bg_color'):
-                viewer_bg_color = self.get_emotion_bg_color()
-            else:
-                viewer_bg_color = "white"
+            # 根据用户默认偏好设置背景颜色（淡绿护眼）
+            viewer_bg_color = "#E8F5E9"  # 淡绿 (护眼) — 用户默认
             viewer_text = scrolledtext.ScrolledText(text_panel, wrap=tk.WORD,
-                                                   font=("TkDefaultFont", 14), undo=True, bg=viewer_bg_color)
+                                                   font=("Microsoft YaHei", 15), undo=True,
+                                                   bg=viewer_bg_color)
             viewer_text.pack(fill=tk.BOTH, expand=True)
-            # 配置多种样式 tag (用于智能渲染)
-            viewer_text.tag_configure("title",      font=("Microsoft YaHei", 20, "bold"), foreground="#C62828")
-            viewer_text.tag_configure("essence",    font=("Microsoft YaHei", 22, "bold"), foreground="#C62828",
-                                       background="#FFEBEE")
-            viewer_text.tag_configure("author",     font=("Microsoft YaHei", 16, "bold"), foreground="#1565C0")
-            viewer_text.tag_configure("author_star", font=("Microsoft YaHei", 17, "bold"), foreground="#B71C1C",
-                                       background="#FFF9C4")
-            viewer_text.tag_configure("time",       font=("Microsoft YaHei", 11), foreground="#78909C")
-            viewer_text.tag_configure("content",    font=("Microsoft YaHei", 15), foreground="#212121",
-                                       spacing1=4, spacing3=4)
-            viewer_text.tag_configure("header_footer", font=("Microsoft YaHei", 10), foreground="#90A4AE")
-            viewer_text.tag_configure("divider",    font=("Microsoft YaHei", 10), foreground="#CFD8DC")
-            viewer_text.tag_configure("url",        font=("Microsoft YaHei", 14), foreground="#1E88E5", underline=1)
-            viewer_text.tag_configure("hashtag",     font=("Microsoft YaHei", 14, "bold"), foreground="#6A1B9A")
-            viewer_text.tag_configure("quote",       font=("Microsoft YaHei", 13), foreground="#546E7A",
-                                       background="#F5F5F5")
+            # 保存原始内容（用于字号变化时重渲染）
+            viewer_text._article_content = content
+            # 初始配置所有 tag
+            _refresh_all_tags(viewer_text, 14, font_family_var.get())
             # 智能渲染: 按行特征自动选择样式
             self._smart_render_article(viewer_text, content)
+            # 词频高亮: 出现多的关键词加大字号 + 不同颜色
+            self._apply_keyword_highlight(viewer_text, content)
             viewer_text.config(state=tk.NORMAL)
             self._enable_text_copy_menu(viewer_text, readonly=True)
             # 保存引用以便后续更新背景颜色
@@ -36494,37 +37047,587 @@ class StockKeywordAnalyzerGUI:
             out["avg_drop_pct"] = avg
             out["is_crash"] = avg <= -15.0
         return out
+    def _load_crash_rally_events(self):
+        """从 crash_rally_events 表读历史暴涨暴跌事件，填充暴跌 Tab 的下半 Treeview
+        与 crash_rally_calendar.py 共用同一 SQLite 表，保证内容完全一致"""
+        tree = getattr(self, "_crash_events_tree", None)
+        if tree is None:
+            return
+        # 清空现有行
+        for item in tree.get_children():
+            tree.delete(item)
+        label = getattr(self, "_crash_events_count_label", None)
+        try:
+            import sqlite3
+            # 找 DB 路径: 优先 crash_rally_calendar.py 用的 ~/.qclaw/stock_analysis.db
+            import os as _os
+            qclaw_db = _os.path.join(_os.path.expanduser("~"), ".qclaw", "stock_analysis.db")
+            db_path = qclaw_db
+            # 如果 qclaw_db 不存在，尝试主程序自己的 db
+            if not _os.path.exists(qclaw_db):
+                alt_db = getattr(self, "db_path", None) or getattr(self, "DB_PATH", None)
+                if alt_db and _os.path.exists(alt_db):
+                    db_path = alt_db
+                else:
+                    if label:
+                        label.config(text="⚠ 未找到事件库 DB")
+                    return
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            # 先确保表存在（幂等建表，同 crash_rally_calendar.py）
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS crash_rally_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_date TEXT, event_type TEXT, index_name TEXT,
+                    index_pct REAL, magnitude TEXT, trigger TEXT,
+                    trigger_detail TEXT, leading_signals TEXT,
+                    signal_days_before INTEGER, recovery_days INTEGER,
+                    max_recover_pct REAL, notes TEXT, source_urls TEXT,
+                    related_stocks TEXT
+                )
+            """)
+            cur.execute('CREATE INDEX IF NOT EXISTS idx_cr_date ON crash_rally_events(event_date)')
+            cur.execute('CREATE INDEX IF NOT EXISTS idx_cr_type ON crash_rally_events(event_type)')
+            # 读取
+            cur.execute(
+                "SELECT id,event_date,event_type,index_name,index_pct,magnitude,trigger "
+                "FROM crash_rally_events ORDER BY event_date DESC")
+            rows = cur.fetchall()
+            conn.close()
+            for r in rows:
+                eid, date, etype, idx_name, pct, mag, trigger = r
+                # 格式化涨跌幅
+                pct_str = f"{pct:+.2f}%" if pct is not None else ""
+                etype_cn = "暴跌" if etype == "crash" else ("暴涨" if etype == "rally" else str(etype or ""))
+                tag = "crash" if etype == "crash" else ("rally" if etype == "rally" else "")
+                # id 用字符串存，Treeview selection 返回字符串
+                tree.insert("", tk.END, iid=str(eid),
+                            values=(date or "", etype_cn, idx_name or "",
+                                    pct_str, mag or "", trigger or ""),
+                            tags=(tag,) if tag else ())
+            if label:
+                label.config(text=f"共 {len(rows)} 条 | 源: {db_path}")
+        except Exception as e:
+            if label:
+                label.config(text=f"⚠ 读取事件库失败: {e}")
+            print(f"[暴跌Tab] 加载事件库失败: {e}")
+
+    def _open_crash_event_detail(self, event_id_str):
+        """双击 Treeview 行 → 打开该暴涨暴跌事件的完整详情"""
+        import sqlite3, os as _os
+        try:
+            eid = int(event_id_str)
+        except (ValueError, TypeError):
+            return
+        qclaw_db = _os.path.join(_os.path.expanduser("~"), ".qclaw", "stock_analysis.db")
+        db_path = qclaw_db
+        if not _os.path.exists(qclaw_db):
+            alt = getattr(self, "db_path", None) or getattr(self, "DB_PATH", None)
+            if alt and _os.path.exists(alt):
+                db_path = alt
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT * FROM crash_rally_events WHERE id=?", (eid,))
+            row = cur.fetchone()
+            cols = [d[0] for d in cur.description]
+            conn.close()
+            if not row:
+                return
+            info = dict(zip(cols, row))
+            # 格式化显示文本
+            lines = []
+            lines.append("【暴涨暴跌事件详情】")
+            lines.append("=" * 40)
+            etype = info.get("event_type", "")
+            etype_cn = "暴跌 🟢" if etype == "crash" else ("暴涨 🔴" if etype == "rally" else str(etype))
+            lines.append(f"日期:   {info.get('event_date','')}")
+            lines.append(f"类型:   {etype_cn}")
+            lines.append(f"指数:   {info.get('index_name','')}")
+            pct = info.get("index_pct")
+            lines.append(f"涨跌幅: {pct:+.2f}%" if pct is not None else "涨跌幅: -")
+            lines.append(f"幅度:   {info.get('magnitude','')}")
+            lines.append(f"触发:   {info.get('trigger','')}")
+            if info.get("trigger_detail"):
+                lines.append(f"触发详情:\n  {info['trigger_detail']}")
+            if info.get("leading_signals"):
+                lines.append(f"提前信号: {info['leading_signals']}")
+            sigdays = info.get("signal_days_before")
+            if sigdays is not None and sigdays > 0:
+                lines.append(f"信号提前: {sigdays} 天")
+            recover = info.get("recovery_days")
+            if recover is not None:
+                if recover < 0:
+                    lines.append("收复天数: 未收复")
+                else:
+                    lines.append(f"收复天数: {recover} 天")
+            mr = info.get("max_recover_pct")
+            if mr is not None:
+                lines.append(f"最大反弹/续跌: {mr:+.2f}%")
+            if info.get("notes"):
+                lines.append(f"备注: {info['notes']}")
+            if info.get("related_stocks"):
+                lines.append(f"关联股票: {info['related_stocks']}")
+            if info.get("source_urls"):
+                urls = str(info["source_urls"]).split("|")
+                lines.append("参考来源:")
+                for u in urls:
+                    u = u.strip()
+                    if u:
+                        lines.append(f"  {u}")
+            content = "\n".join(lines)
+            title = f"{etype_cn} {info.get('event_date','')} {info.get('index_name','')}"
+            # 复用资讯详情弹窗的智能渲染
+            self.open_full_window_viewer_from_content(content, title=title)
+        except Exception as e:
+            print(f"[暴跌Tab] 打开事件详情失败: {e}")
+
     def _refresh_crash_alert_display(self):
-        """刷新暴跌标签页显示。"""
+        """刷新暴跌标签页显示 (实时快照 + 历史事件库)"""
         info = self._get_crash_alert_snapshot()
         txt = getattr(self, "crash_alert_text_widget", None)
-        if txt is None:
-            return
-        try:
-            txt.config(state=tk.NORMAL)
-            txt.delete("1.0", tk.END)
-            txt.insert(tk.END, "【暴跌判定规则】最近20交易日,上证300/中证500/科创30(科创50近似)平均跌幅 <= -15%\n\n")
-            for k, v in info.get("indices", {}).items():
-                txt.insert(tk.END, f"{k}: {v:+.2f}%\n")
-            extra = info.get("extra_indices", {})
-            if extra:
-                txt.insert(tk.END, "\n【附加指数20天涨跌幅】\n")
-                for k, v in extra.items():
+        if txt is not None:
+            try:
+                txt.config(state=tk.NORMAL)
+                txt.delete("1.0", tk.END)
+                txt.insert(tk.END, "【暴跌判定规则】最近20交易日,上证300/中证500/科创30(科创50近似)平均跌幅 <= -15%\n\n")
+                for k, v in info.get("indices", {}).items():
                     txt.insert(tk.END, f"{k}: {v:+.2f}%\n")
-            avg = info.get("avg_drop_pct")
-            if avg is None:
-                txt.insert(tk.END, "\n平均跌幅: 未获取(请检查数据源/网络)\n")
-                txt.insert(tk.END, f"数据源: {info.get('source', '未获取')}\n")
-            else:
-                txt.insert(tk.END, f"\n平均跌幅: {avg:+.2f}%\n")
-                txt.insert(tk.END, f"数据源: {info.get('source', '未获取')}\n")
-                if info.get("is_crash"):
-                    txt.insert(tk.END, "状态: 触发暴跌提示(记录暴跌转折时刻)\n")
+                extra = info.get("extra_indices", {})
+                if extra:
+                    txt.insert(tk.END, "\n【附加指数20天涨跌幅】\n")
+                    for k, v in extra.items():
+                        txt.insert(tk.END, f"{k}: {v:+.2f}%\n")
+                avg = info.get("avg_drop_pct")
+                if avg is None:
+                    txt.insert(tk.END, "\n平均跌幅: 未获取(请检查数据源/网络)\n")
+                    txt.insert(tk.END, f"数据源: {info.get('source', '未获取')}\n")
                 else:
-                    txt.insert(tk.END, "状态: 未触发暴跌提示\n")
-            txt.config(state=tk.DISABLED)
+                    txt.insert(tk.END, f"\n平均跌幅: {avg:+.2f}%\n")
+                    txt.insert(tk.END, f"数据源: {info.get('source', '未获取')}\n")
+                    if info.get("is_crash"):
+                        txt.insert(tk.END, "状态: 触发暴跌提示(记录暴跌转折时刻)\n")
+                    else:
+                        txt.insert(tk.END, "状态: 未触发暴跌提示\n")
+                txt.config(state=tk.DISABLED)
+            except Exception as e:
+                print(f"[暴跌提示] 刷新快照失败: {e}")
+        # 同时刷新下半部分历史事件库
+        try:
+            self._load_crash_rally_events()
         except Exception as e:
-            print(f"[暴跌提示] 刷新显示失败: {e}")
+            print(f"[暴跌提示] 刷新事件库失败: {e}")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # 等待 Tab —— 图形化决策仪表盘 (核心方法)
+    # ════════════════════════════════════════════════════════════════════════
+    # 情绪周期 5 阶段定义
+    _MOOD_STAGES = [
+        (0.00, "恐慌", "#2E7D32"),    # 绿色
+        (0.20, "绝望", "#1565C0"),    # 深蓝
+        (0.40, "复苏", "#F9A825"),    # 黄
+        (0.60, "乐观", "#FB8C00"),    # 橙
+        (0.80, "狂热", "#C62828"),    # 红
+    ]
+
+    def _refresh_waiting_dashboard(self):
+        """刷新等待 Tab 全部图形化组件（3 个 Canvas + 决策条）"""
+        try:
+            info = self._get_crash_alert_snapshot()
+            self._w_dash_date_label.config(
+                text=f"更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+            # --- 1) 情绪周期位置 ---
+            mood_score, mood_name = self._calc_mood_stage(info)
+            self._w_last_mood_score = mood_score
+            self._w_last_mood_name = mood_name
+            self._draw_mood_canvas(mood_score, mood_name)
+            self._w_mood_detail.config(
+                text=f"当前情绪: {mood_name}\n"
+                     f"三指数20日均跌: {info.get('avg_drop_pct', 0):+.2f}%\n"
+                     f"数据源: {info.get('source', '-')}")
+
+            # --- 2) 暴涨暴跌温度计 ---
+            avg_drop = info.get('avg_drop_pct', 0) or 0
+            self._w_last_avg_drop = avg_drop
+            self._draw_thermo_canvas(avg_drop)
+            idx_lines = " | ".join(
+                f"{k}: {v:+.2f}%" for k, v in info.get('indices', {}).items()
+            )
+            self._w_crash_detail.config(
+                text=f"20日三指数平均: {avg_drop:+.2f}%\n"
+                     f"阈值线: -15% 触发暴跌提示\n"
+                     f"{idx_lines}")
+
+            # --- 3) α/β 反弹机会雷达 ---
+            alpha_score, alpha_msg = self._calc_alpha_beta_opportunity()
+            self._w_last_alpha_score = alpha_score
+            self._draw_alpha_canvas(alpha_score, alpha_msg)
+            self._w_alpha_detail.config(text=alpha_msg)
+
+            # --- 4) 综合决策 ---
+            verdict, sub, pct, rationale = self._calc_decision(
+                mood_score, avg_drop, alpha_score, info)
+            self._w_verdict_label.config(text=verdict)
+            self._w_verdict_label.config(
+                fg="#C62828" if verdict.startswith("🔥") else
+                   "#2E7D32" if verdict.startswith("❄") else
+                   "#1565C0" if verdict.startswith("🎯") else "#F57F17")
+            self._w_verdict_sub.config(text=sub)
+            self._w_action_bar["value"] = pct
+            self._w_action_pct_label.config(text=f"{pct}%")
+            self._w_rationale_text.config(state=tk.NORMAL)
+            self._w_rationale_text.delete("1.0", tk.END)
+            self._w_rationale_text.insert("1.0", rationale)
+            self._w_rationale_text.config(state=tk.DISABLED)
+
+        except Exception as e:
+            print(f"[等待仪表盘] 刷新失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _calc_mood_stage(self, info):
+        """计算当前情绪阶段 [0.0~1.0]"""
+        avg_drop = info.get('avg_drop_pct')
+        if avg_drop is None:
+            # 无数据 → 默认中间 (复苏)
+            return 0.45, "复苏(数据不足)"
+        # 映射: -20% → 0.0 (恐慌), 0% → 0.5 (乐观起点), +10% → 1.0 (狂热)
+        # 但暴跌后反弹规律: -15% 以下是买入区, -10% 开始复苏
+        if avg_drop <= -20:
+            return 0.05, "恐慌"
+        elif avg_drop <= -15:
+            return 0.15, "恐慌末期 (抄底区)"
+        elif avg_drop <= -10:
+            return 0.30, "绝望 → 复苏 (左侧机会)"
+        elif avg_drop <= -5:
+            return 0.45, "复苏"
+        elif avg_drop <= 0:
+            return 0.55, "乐观初期"
+        elif avg_drop <= 5:
+            return 0.70, "乐观"
+        elif avg_drop <= 10:
+            return 0.85, "狂热边缘"
+        else:
+            return 0.95, "狂热 (警惕)"
+
+    def _canvas_size(self, canvas, w_min=200, h_min=80):
+        """从 Canvas 取实际宽高, 未布局完成时用 min 值"""
+        try:
+            w = max(w_min, canvas.winfo_width())
+            h = max(h_min, canvas.winfo_height())
+        except Exception:
+            w, h = w_min, h_min
+        return w, h
+
+    def _draw_mood_canvas(self, score, stage_name):
+        """在 Canvas 上绘制情绪周期 5 段色带 + 指针 (自适应宽度)"""
+        c = self._w_mood_canvas
+        c.delete("all")
+        W, H = self._canvas_size(c, w_min=200, h_min=80)
+
+        # 色带区域 (居中, 上下留空间给标题和底部说明)
+        pad_top = 30
+        pad_bot = 25
+        band_y0 = pad_top
+        band_y1 = H - pad_bot
+
+        segments = self._MOOD_STAGES
+        seg_w = W / len(segments)
+        for i, (_, name, color) in enumerate(segments):
+            x0 = i * seg_w
+            x1 = (i + 1) * seg_w
+            c.create_rectangle(x0 + 2, band_y0, x1 - 2, band_y1,
+                              fill=color, outline="", width=2)
+            # 文字标签 (自动选字号)
+            font_size = max(8, int(min(12, seg_w / 12)))
+            c.create_text((x0 + x1) / 2, (band_y0 + band_y1) / 2, text=name,
+                         fill="white", font=("Microsoft YaHei", font_size, "bold"))
+
+        # 指针 (三角形, 指向当前分数)
+        ptr_x = max(10, min(W - 10, score * W))
+        ptr_h = 10
+        c.create_polygon(ptr_x - 6, band_y0 - ptr_h + 2,
+                        ptr_x + 6, band_y0 - ptr_h + 2,
+                        ptr_x, band_y0,
+                        fill="#333", outline="")
+        # 当前百分比 (指针上方)
+        c.create_text(ptr_x, band_y0 - ptr_h - 8, text=f"{score:.0%}",
+                     font=("Microsoft YaHei", 10, "bold"), fill="#333")
+        # 底部标题
+        c.create_text(W / 2, H - 8,
+                     text=f"当前位置: {stage_name}",
+                     font=("Microsoft YaHei", 10), fill="#555")
+
+    def _draw_thermo_canvas(self, avg_drop):
+        """温度计: -25% 到 +10% (自适应宽度)"""
+        c = self._w_thermo_canvas
+        c.delete("all")
+        W, H = self._canvas_size(c, w_min=150, h_min=100)
+
+        # 让温度计居中 (竖在中央)
+        mid_x = W / 2
+
+        # 标尺参数
+        min_v, max_v = -25, 10
+        bar_w = max(24, min(44, W / 5))
+        bar_x0 = mid_x - bar_w / 2
+        bar_x1 = mid_x + bar_w / 2
+        bar_top = 8
+        bar_bot = H - 30
+        bar_h = bar_bot - bar_top
+
+        # 外壳
+        c.create_rectangle(bar_x0 - 3, bar_top - 8, bar_x1 + 3, bar_bot + 8,
+                          fill="#ECEFF1", outline="#90A4AE")
+
+        # 分色区 (从顶到底: 暴涨红 → 正常黄 → 暴跌绿 → 极端暴跌深绿)
+        zero_y = bar_bot - (0 - min_v) / (max_v - min_v) * bar_h
+        crash_y = bar_bot - (-15 - min_v) / (max_v - min_v) * bar_h
+        ext_crash_y = bar_bot - (-20 - min_v) / (max_v - min_v) * bar_h
+        normal_y = bar_bot - (-5 - min_v) / (max_v - min_v) * bar_h
+
+        # 自上而下: 暴涨区 (红) → 正常偏热 (浅红) → 正常 (黄) → 轻微跌 (浅黄) → 暴跌 (绿) → 极端 (深绿)
+        c.create_rectangle(bar_x0, bar_top, bar_x1, zero_y,
+                          fill="#EF5350", outline="")        # 0~+10% 红
+        c.create_rectangle(bar_x0, normal_y, bar_x1, zero_y,
+                          fill="#FFC107", outline="")        # -5~0% 黄
+        c.create_rectangle(bar_x0, crash_y, bar_x1, normal_y,
+                          fill="#FFD54F", outline="")        # -15~-5% 浅黄
+        c.create_rectangle(bar_x0, ext_crash_y, bar_x1, crash_y,
+                          fill="#66BB6A", outline="")        # -20~-15% 浅绿
+        c.create_rectangle(bar_x0, bar_bot, bar_x1, ext_crash_y,
+                          fill="#2E7D32", outline="")        # <-20% 深绿
+
+        # 当前值标记 (红柱覆盖)
+        val_clamp = max(min_v, min(max_v, avg_drop))
+        val_y = bar_bot - (val_clamp - min_v) / (max_v - min_v) * bar_h
+        if avg_drop <= 0:
+            c.create_rectangle(bar_x0, val_y, bar_x1, zero_y,
+                              fill="#C62828", outline="")
+        else:
+            c.create_rectangle(bar_x0, zero_y, bar_x1, val_y,
+                              fill="#C62828", outline="")
+
+        # 横线指针 + 数值标签 (左侧)
+        marker_y = (val_y + bar_top) / 2
+        # 从温度计左侧伸出一条线 + 数值
+        left_label_x = bar_x0 - max(50, W / 4) + 10
+        right_label_x = bar_x1 + max(20, W / 4) - 10
+        c.create_line(bar_x0 - 8, marker_y, bar_x1 + 8, marker_y,
+                     fill="#333", width=2)
+        c.create_text(right_label_x, marker_y, text=f"{avg_drop:+.2f}%",
+                     font=("Microsoft YaHei", 12, "bold"), fill="#C62828")
+
+        # 阈值标注 (左侧竖排)
+        for label, val in [("暴涨", +10), ("0%", 0), ("暴跌-15%", -15), ("极值-25%", -25)]:
+            ly = bar_bot - (val - min_v) / (max_v - min_v) * bar_h
+            c.create_line(bar_x0 - 5, ly, bar_x0, ly, fill="#666")
+            c.create_text(bar_x0 - 10, ly, text=label, anchor="e",
+                         font=("", 8), fill="#555")
+
+    def _draw_alpha_canvas(self, opp_score, msg_prefix):
+        """α/β 反弹机会圆环 (自适应宽度, 居中)"""
+        c = self._w_alpha_canvas
+        c.delete("all")
+        W, H = self._canvas_size(c, w_min=150, h_min=100)
+
+        # 圆环居中
+        cx = W / 2
+        cy = H / 2 - 5
+        r = max(35, min(W, H) / 2 - 20)
+
+        # 颜色映射
+        if opp_score >= 60:
+            arc_color = "#C62828"
+        elif opp_score >= 35:
+            arc_color = "#F57C00"
+        else:
+            arc_color = "#90A4AE"
+
+        # 背景圆 (用 circle 模拟圆环)
+        c.create_oval(cx - r, cy - r, cx + r, cy + r,
+                     outline="#E0E0E0", width=min(14, r // 3))
+
+        # 机会分圆弧
+        angles = opp_score / 100 * 360
+        if angles > 0:
+            c.create_arc(cx - r, cy - r, cx + r, cy + r,
+                        start=90, extent=-angles, style=tk.ARC,
+                        outline=arc_color, width=min(14, r // 3))
+
+        # 中心文字
+        fs = max(14, min(28, r))
+        c.create_text(cx, cy - 2, text=f"{opp_score}",
+                     font=("Microsoft YaHei", fs, "bold"), fill=arc_color)
+        c.create_text(cx, cy + fs / 2 + 4, text="反弹机会分",
+                     font=("", 9), fill="#555")
+
+        # 下方标尺 (紧贴圆环下方)
+        bar_y = cy + r + 12
+        if bar_y + 14 < H:
+            bar_w = min(W - 20, max(80, 2 * r))
+            bar_x0 = cx - bar_w / 2
+            c.create_rectangle(bar_x0, bar_y, bar_x0 + bar_w, bar_y + 8,
+                              fill="#E0E0E0", outline="")
+            filled = bar_w * opp_score / 100
+            c.create_rectangle(bar_x0, bar_y, bar_x0 + filled, bar_y + 8,
+                              fill=arc_color, outline="")
+            c.create_text(bar_x0, bar_y - 4, text="低", anchor="w",
+                         font=("", 8), fill="#666")
+            c.create_text(bar_x0 + bar_w, bar_y - 4, text="高", anchor="e",
+                         font=("", 8), fill="#666")
+
+    def _calc_alpha_beta_opportunity(self):
+        """基于 crash_rally_events 历史数据 + α/β 概念, 计算反弹机会分数 [0~100]"""
+        import sqlite3, os as _os
+        qclaw_db = _os.path.join(_os.path.expanduser("~"), ".qclaw", "stock_analysis.db")
+        db_path = qclaw_db
+        if not _os.path.exists(qclaw_db):
+            alt = getattr(self, "db_path", None) or getattr(self, "DB_PATH", None)
+            if alt and _os.path.exists(alt):
+                db_path = alt
+            else:
+                return 30, "⚠ 无事件库,无法计算历史反弹胜率\n(请先打开 🗓️暴涨暴跌 日历 扫描历史事件)"
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            # 统计暴跌事件反弹胜率
+            cur.execute(
+                "SELECT COUNT(*) FROM crash_rally_events "
+                "WHERE event_type='crash' AND index_pct <= -5")
+            total_crash = cur.fetchone()[0]
+            cur.execute(
+                "SELECT COUNT(*) FROM crash_rally_events "
+                "WHERE event_type='crash' AND index_pct <= -5 "
+                "AND max_recover_pct IS NOT NULL AND max_recover_pct > 0")
+            with_recover = cur.fetchone()[0]
+            cur.execute(
+                "SELECT AVG(max_recover_pct) FROM crash_rally_events "
+                "WHERE event_type='crash' AND index_pct <= -5 "
+                "AND max_recover_pct IS NOT NULL AND max_recover_pct > 0")
+            avg_recover = cur.fetchone()[0] or 0
+            conn.close()
+
+            # 机会分 = 反弹胜率 * 0.6 + 平均反弹幅度映射 * 0.4
+            win_rate = with_recover / max(1, total_crash)
+            # 平均反弹 0% → 0, 30% → 100
+            recover_score = min(100, avg_recover / 30 * 100) if avg_recover > 0 else 0
+            opp_score = int(win_rate * 60 + recover_score * 0.4)
+
+            msg = (f"📊 历史暴跌事件: {total_crash} 次\n"
+                   f"📈 反弹胜率: {win_rate:.0%}  ({with_recover}/{total_crash})\n"
+                   f"💹 平均反弹幅度: {avg_recover:+.1f}%\n"
+                   f"\n🎯 β ETF 低位机会: 指数暴跌后, 被动 β ETF(沪深300ETF/科创50ETF)\n"
+                   f"   反弹胜率高于个股 (2025年7月半导体/科创ETF反弹经典案例)\n"
+                   f"🎯 α ETF 机会: 行业 α ETF (如半导体/AI/创新药ETF)\n"
+                   f"   暴跌后弹性更大, 但需配合情绪周期位置")
+            return opp_score, msg
+        except Exception as e:
+            return 20, f"⚠ 计算历史反弹数据失败: {e}"
+
+    def _draw_alpha_canvas(self, opp_score, msg_prefix):
+        """α/β 反弹机会雷达 — 圆环进度"""
+        c = self._w_alpha_canvas
+        c.delete("all")
+        W = c.winfo_width() or 300
+        H = 150
+        c.config(width=W)
+
+        # 中心
+        cx, cy = W / 2, H / 2 - 10
+        r_outer = 55
+        r_inner = 40
+
+        # 背景圆环
+        c.create_oval(cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer,
+                     outline="#E0E0E0", width=12)
+
+        # 机会分圆环 (从 -90° 顺时针画)
+        # opp_score 0~100 → 弧度
+        import math
+        angles = opp_score / 100 * 360
+        # 颜色映射
+        if opp_score >= 60:
+            arc_color = "#C62828"  # 红 = 机会好
+        elif opp_score >= 35:
+            arc_color = "#F57C00"  # 橙
+        else:
+            arc_color = "#90A4AE"  # 灰 = 机会小
+
+        # Tkinter arc 参数: extent 是度数, start=-90 表示 12 点方向
+        if angles > 0:
+            c.create_arc(cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer,
+                        start=90, extent=-angles, style=tk.ARC,
+                        outline=arc_color, width=12)
+
+        # 中心文字
+        c.create_text(cx, cy - 5, text=f"{opp_score}",
+                     font=("Microsoft YaHei", 24, "bold"), fill=arc_color)
+        c.create_text(cx, cy + 18, text="反弹机会分",
+                     font=("", 9), fill="#555")
+
+        # 下方标尺
+        bar_y = H - 30
+        c.create_rectangle(20, bar_y, W - 20, bar_y + 8, fill="#E0E0E0", outline="")
+        filled = (W - 40) * opp_score / 100
+        c.create_rectangle(20, bar_y, 20 + filled, bar_y + 8, fill=arc_color, outline="")
+        c.create_text(20, bar_y - 5, text="低", anchor="w", font=("", 8), fill="#666")
+        c.create_text(W - 20, bar_y - 5, text="高", anchor="e", font=("", 8), fill="#666")
+
+    def _calc_decision(self, mood_score, avg_drop, alpha_score, info):
+        """综合三因素 → 量化决策
+        返回 (verdict_label, sub_text, pct_0_100, rationale_text)"""
+        # 决策分数 (0=纯等待, 100=积极入场)
+        # 情绪分高(乐观→狂热) → 入场意愿高
+        # 暴跌深 → 入场意愿高 (左侧)
+        # 历史反弹胜率高 → 入场意愿高
+        drop_component = 0
+        if avg_drop <= -15:
+            drop_component = 35  # 暴跌区 → 加仓信号
+        elif avg_drop <= -10:
+            drop_component = 25
+        elif avg_drop <= -5:
+            drop_component = 15
+        elif avg_drop <= 0:
+            drop_component = 8
+        else:
+            drop_component = max(0, 5 - avg_drop)  # 正涨 → 等回调
+
+        score = int(mood_score * 35 + drop_component + alpha_score * 0.3)
+        score = max(5, min(95, score))
+
+        if score >= 70:
+            verdict = "🎯 可以积极入场"
+            sub = f"建议仓位: 5-8 成 | 关注 β ETF 低位 + α ETF 反弹"
+        elif score >= 50:
+            verdict = "🎯 可以轻仓试探"
+            sub = f"建议仓位: 2-5 成 | 优先 β ETF, 观察 α ETF 方向"
+        elif score >= 30:
+            verdict = "⏳ 适合等待"
+            sub = f"建议仓位: 0-2 成 | 等情绪周期走到 绝望/复苏交界"
+        else:
+            verdict = "❄️ 观望为主"
+            sub = f"建议仓位: 空仓或底仓 | 情绪极热/极冷都不宜追"
+
+        # 构建理由
+        reasons = [
+            f"【情绪周期】当前 {mood_score:.0%} ({self._MOOD_STAGES[min(4, int(mood_score*5))][1]})",
+            f"【20日三指数平均】{avg_drop:+.2f}% {'✅ 触发暴跌提示' if avg_drop <= -15 else '正常区间'}",
+            f"【历史反弹胜率】α/β 机会分 {alpha_score}/100",
+            f"【数据源】{info.get('source', '-')}",
+        ]
+        if avg_drop <= -15:
+            reasons.append("💡 暴跌阈值已触发 — 左侧分批建仓 β ETF 胜率最高 (参考 2025年7月半导体ETF反弹)")
+        if mood_score <= 0.30 and alpha_score >= 40:
+            reasons.append("💡 情绪在恐慌/绝望区, 但历史反弹机会分高 — 经典恐慌贪婪反向操作区")
+        if mood_score >= 0.75:
+            reasons.append("⚠️ 情绪偏狂热, 追高风险大, 建议等回调再进")
+
+        rationale = "\n".join(reasons)
+        return verdict, sub, score, rationale
+
     def _save_crash_alert_snapshot_to_news(self):
         """将当前暴跌快照记录到资讯表。"""
         info = self._get_crash_alert_snapshot()

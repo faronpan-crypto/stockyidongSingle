@@ -942,23 +942,37 @@ class AlphaBetaDialog:
                         txt.insert(tk.END, part)
             txt.insert(tk.END, "\n")
 
-        txt.config(state=tk.DISABLED)
+        # ⚠️ 关键: 不能用 state=DISABLED —— DISABLED 状态下 tag_bind 的
+        # <Button-1> 事件根本不会触发！必须保持 NORMAL，然后拦截按键防止编辑
+        def _block_edit(_event):
+            return "break"
+        txt.bind("<Key>", _block_edit)
+        txt.bind("<BackSpace>", _block_edit)
+        txt.bind("<Delete>", _block_edit)
+        txt.bind("<Control-v>", _block_edit)
+        txt.bind("<Control-V>", _block_edit)
+        # 仍然允许鼠标选择（高亮复制），但不允许编辑
+        txt.config(cursor="arrow")
 
     @staticmethod
     def _open_url(url):
-        """用系统默认浏览器打开 URL"""
+        """用系统默认浏览器打开 URL（带 URL 清理 + 错误日志）"""
         import subprocess
         import platform
         try:
+            # 清理 URL（Tk Text widget 可能带尾部换行/空格）
+            u = str(url).strip().rstrip("。，.;；,")
+            if not u:
+                return
             system = platform.system()
             if system == "Darwin":
-                subprocess.Popen(["open", url])
+                subprocess.Popen(["open", u])
             elif system == "Windows":
-                subprocess.Popen(["cmd", "/c", "start", url])
+                subprocess.Popen(["cmd", "/c", "start", u])
             else:
-                subprocess.Popen(["xdg-open", url])
-        except Exception:
-            pass
+                subprocess.Popen(["xdg-open", u])
+        except Exception as e:
+            print(f"[_open_url] 失败: {e}, url={url}")
 
     # ------------------------------------------------------------------
     # 数据工具 Tab
