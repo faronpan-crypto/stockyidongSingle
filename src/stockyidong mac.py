@@ -8670,7 +8670,17 @@ class StockKeywordAnalyzerGUI:
         self.create_text_tab("未命名")
         # 注意:市场指数和热点导航标签页现在在_build_market_nav_section中创建
         # 不再在这里创建,因为它们已经移到快速爬取标签页的market_notebook中
-        # 暴跌标签页(放在等待前)
+        # 情绪日历标签页 (放在暴跌左边)
+        try:
+            emo_tab = ttk.Frame(crawler_control_notebook, padding=4)
+            crawler_control_notebook.add(emo_tab, text="🗓️情绪日历")
+            self._build_emo_cycle_calendar(emo_tab, notebook=crawler_control_notebook)
+            print("[情绪日历] ✅ 嵌入 crawler_control 成功", flush=True)
+        except Exception as _e_emo:
+            import traceback as _tb_emo; _tb_emo.print_exc()
+            print(f"[情绪日历] ❌ 嵌入失败: {_e_emo}", flush=True)
+
+        # 暴跌标签页(放在情绪日历右边)
         crash_tab = ttk.Frame(crawler_control_notebook, padding=10)
         crawler_control_notebook.add(crash_tab, text="暴跌")
 
@@ -47154,6 +47164,301 @@ class StockKeywordAnalyzerGUI:
                 merged[k] = lv
         return merged
 
+    # ════════════════════════════════════════════════════════════════════════
+    # 情绪日历 · 本月复盘面板 (大盘概况 + 重大涨跌 + α/β 板块ETF排行)
+    # ════════════════════════════════════════════════════════════════════════
+    def _update_etf_col(self, loading_lbl, results, parent_frame):
+        """后台 ETF 线程回来后, 销毁 loading 占位 + 渲染 TOP3/BOTTOM3/αβ对比"""
+        try:
+            # 先 destroy 旧 loading 和其他子组件
+            for w in parent_frame.winfo_children():
+                w.destroy()
+
+            if not results:
+                tk.Label(parent_frame,
+                         text="⚠️ 暂无可显示的 ETF 月度数据\n(请检查网络或稍后刷新)",
+                         bg="#0D1B2A", fg="#EF5350",
+                         font=("", 10), anchor="w", justify=tk.LEFT).pack(fill=tk.X, pady=10)
+                return
+
+            results.sort(key=lambda x: x[2], reverse=True)
+            top3 = results[:3]
+            bot3 = results[-3:][::-1]
+
+            tk.Label(parent_frame, text="🔥 TOP 3 (α机会):",
+                     bg="#0D1B2A", fg="#EF5350",
+                     font=("", 10, "bold")).pack(anchor="w")
+            for en, et, p, d in top3:
+                tk.Label(parent_frame,
+                         text=f"  {'+' if p > 0 else ''}{p}%  [{et}] {en}  ({d}天)",
+                         bg="#0D1B2A", fg="#FFCDD2",
+                         font=("", 10), anchor="w").pack(fill=tk.X)
+
+            tk.Label(parent_frame, text="❄️ BOTTOM 3 (错杀α):",
+                     bg="#0D1B2A", fg="#66BB6A",
+                     font=("", 10, "bold")).pack(anchor="w", pady=(8, 0))
+            for en, et, p, d in bot3:
+                tk.Label(parent_frame,
+                         text=f"  {'+' if p > 0 else ''}{p}%  [{et}] {en}  ({d}天)",
+                         bg="#0D1B2A", fg="#C8E6C9",
+                         font=("", 10), anchor="w").pack(fill=tk.X)
+
+            # β vs α
+            beta_pcts = [x[2] for x in results if x[1] == "β"]
+            alpha_pcts = [x[2] for x in results if "α" in x[1]]
+            if beta_pcts and alpha_pcts:
+                b_avg = round(sum(beta_pcts)/len(beta_pcts), 2)
+                a_avg = round(sum(alpha_pcts)/len(alpha_pcts), 2)
+                tk.Label(parent_frame,
+                         text=f"\n📊 β平均: {'+' if b_avg>0 else ''}{b_avg}%  |  "
+                              f"α平均: {'+' if a_avg>0 else ''}{a_avg}%",
+                         bg="#0D1B2A", fg="#FFD54F",
+                         font=("", 9, "bold")).pack(anchor="w")
+                if a_avg > b_avg + 2:
+                    tip = "💡 α > β, 本月选股/行业弹性跑赢指数!"
+                elif b_avg > a_avg + 2:
+                    tip = "💡 β > α, 本月指数行情为主, 大盘ETF稳"
+                else:
+                    tip = "💡 α≈β, 板块轮动快, 分散配置"
+                tk.Label(parent_frame, text=tip,
+                         bg="#0D1B2A", fg="#FFD54F",
+                         font=("", 9), anchor="w", wraplength=260,
+                         justify=tk.LEFT).pack(fill=tk.X, pady=(2, 0))
+        except Exception as e:
+            print(f"[日历] _update_etf_col 异常 (可能窗口已关闭): {e}", flush=True)
+
+    def _render_month_review(self, grid_f, ym, pct_map, close_map):
+        """在月历下方追加一个复盘 Text 面板"""
+        import sqlite3, os as _os, json as _j_rv
+        from datetime import datetime as _dt3
+
+        # 先 destroy 旧面板 (防止重复)
+        for child in grid_f.winfo_children():
+            if getattr(child, "_is_month_review", False):
+                child.destroy()
+        row_idx = max(6, (len(pct_map) > 0 and 6 or 6))
+        # 根据已渲染的格子数算 row_idx
+        row_idx = 6  # 6 行日历后追加
+
+        rev_frame = tk.Frame(grid_f, bg="#0D1B2A")
+        rev_frame._is_month_review = True
+        rev_frame.grid(row=row_idx, column=0, columnspan=7, sticky="nsew",
+                       padx=1, pady=(8, 4))
+        rev_frame.grid_propagate(False)  # 允许控制高度
+
+        # 标题栏
+        title_f = tk.Frame(rev_frame, bg="#0D1B2A")
+        title_f.pack(fill=tk.X, pady=(6, 0), padx=12)
+        tk.Label(title_f, text=f"📊 {ym.year} 年 {ym.month} 月 · 大盘复盘",
+                 bg="#0D1B2A", fg="#FFD54F",
+                 font=("Microsoft YaHei", 13, "bold")).pack(side=tk.LEFT)
+        tk.Label(title_f, text="← 本月发生了什么？重大涨跌原因？α/β机会在哪？",
+                 bg="#0D1B2A", fg="#78909C", font=("", 9)).pack(side=tk.LEFT, padx=8)
+
+        # 正文 (三栏: 大盘概况 | 重大涨跌 | α/β板块ETF)
+        body_f = tk.Frame(rev_frame, bg="#0D1B2A")
+        body_f.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+        col_frames = [tk.Frame(body_f, bg="#0D1B2A") for _ in range(3)]
+        for i, cf in enumerate(col_frames):
+            cf.grid(row=0, column=i, sticky="nsew", padx=6, pady=4)
+            body_f.grid_columnconfigure(i, weight=1)
+
+        # ======================================================
+        # 【列1】大盘概况
+        # ======================================================
+        lf1 = tk.Label(col_frames[0], text="📈 大盘概况",
+                       bg="#0D1B2A", fg="#81D4FA",
+                       font=("Microsoft YaHei", 11, "bold"))
+        lf1.pack(anchor="w")
+        tk.Frame(col_frames[0], bg="#1565C0", height=1).pack(fill=tk.X, pady=(2, 6))
+
+        # 统计
+        if pct_map:
+            vals = list(pct_map.values())
+            up = sum(1 for v in vals if v > 0)
+            dn = sum(1 for v in vals if v < 0)
+            flat = len(vals) - up - dn
+            # 月涨跌幅 (第一根到最后一根)
+            sorted_dates = sorted(pct_map.keys())
+            first_close = close_map.get(sorted_dates[0], 0)
+            last_close = close_map.get(sorted_dates[-1], 0)
+            month_pct = round((last_close - first_close) / first_close * 100, 2) if first_close else 0
+            # 最大涨跌日
+            max_up_date, max_up_val = max(pct_map.items(), key=lambda x: x[1])
+            max_dn_date, max_dn_val = min(pct_map.items(), key=lambda x: x[1])
+            # 连涨连跌
+            cur_streak = 0; max_streak_up = 0; max_streak_dn = 0
+            for ds in sorted_dates:
+                v = pct_map[ds]
+                if v > 0:
+                    cur_streak = cur_streak + 1 if cur_streak > 0 else 1
+                    max_streak_up = max(max_streak_up, cur_streak)
+                elif v < 0:
+                    cur_streak = cur_streak - 1 if cur_streak < 0 else -1
+                    max_streak_dn = min(max_streak_dn, cur_streak)
+                else:
+                    cur_streak = 0
+        else:
+            up = dn = flat = 0; month_pct = 0
+            max_up_date = max_up_val = "-"
+            max_dn_date = max_dn_val = "-"
+            max_streak_up = max_streak_dn = 0
+
+        lines_c1 = [
+            f"📅 交易日: {up + dn + flat} 天",
+            f"📈 涨: {up}天  📉 跌: {dn}天  ➖ 平: {flat}天",
+            f"📊 月涨跌幅: {'+' if month_pct > 0 else ''}{month_pct}%",
+            f"🔥 最大单日涨: {max_up_date}  +{max_up_val}%",
+            f"❄️ 最大单日跌: {max_dn_date}  {max_dn_val}%",
+            f"🔗 最长连涨: {max_streak_up}天  最长连跌: {abs(max_streak_dn)}天",
+        ]
+        for ln in lines_c1:
+            fg = "#EF5350" if "最大单日涨" in ln or "月涨跌幅: +" in ln else (
+                "#66BB6A" if "最大单日跌" in ln or "月涨跌幅: -" in ln else "#ECEFF1")
+            tk.Label(col_frames[0], text=ln, bg="#0D1B2A", fg=fg,
+                     font=("", 10), anchor="w", justify=tk.LEFT).pack(fill=tk.X)
+
+        # ======================================================
+        # 【列2】重大涨跌 + 关联 crash_rally_events
+        # ======================================================
+        lf2 = tk.Label(col_frames[1], text="⚠️ 重大涨跌 & 原因",
+                       bg="#0D1B2A", fg="#FF8A65",
+                       font=("Microsoft YaHei", 11, "bold"))
+        lf2.pack(anchor="w")
+        tk.Frame(col_frames[1], bg="#E64A19", height=1).pack(fill=tk.X, pady=(2, 6))
+
+        # 查 crash_rally_events 当月数据
+        qclaw_db = _os.path.join(_os.path.expanduser("~"), ".qclaw", "stock_analysis.db")
+        crash_events = []
+        try:
+            if _os.path.exists(qclaw_db):
+                conn = sqlite3.connect(qclaw_db)
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT event_date, event_type, index_code, index_name, "
+                    "index_pct, magnitude, trigger, trigger_detail "
+                    "FROM crash_rally_events "
+                    "WHERE event_date LIKE ? "
+                    "ORDER BY ABS(index_pct) DESC LIMIT 10",
+                    (f"{ym.year:04d}-{ym.month:02d}%",))
+                crash_events = cur.fetchall()
+                conn.close()
+        except Exception as e:
+            print(f"[日历] crash_rally 查失败: {e}", flush=True)
+
+        if crash_events:
+            for ev in crash_events[:6]:
+                edate, etype, ecode, ename, epct, emag, etrig, edetail = ev
+                icon = "🟢暴跌" if etype == "crash" else "🔴暴涨"
+                mag_icon = {"极端":"🚨","刹跌":"⚠️","大涨":"🔥","小涨":"📈","小跌":"📉"}.get(emag, "")
+                pct_str = f"{epct:+.2f}%" if epct is not None else "--"
+                tk.Label(col_frames[1],
+                         text=f"{icon}{mag_icon} {edate[-5:]} {ename} {pct_str}",
+                         bg="#0D1B2A", fg="#FFCDD2" if etype == "crash" else "#FFE0B2",
+                         font=("", 9, "bold"), anchor="w").pack(fill=tk.X)
+                reason = (etrig or edetail or "")[:50]
+                if reason:
+                    tk.Label(col_frames[1], text=f"  └ {reason}",
+                             bg="#0D1B2A", fg="#90A4AE",
+                             font=("", 8), anchor="w", wraplength=240,
+                             justify=tk.LEFT).pack(fill=tk.X)
+        else:
+            tk.Label(col_frames[1],
+                     text="💡 暂无历史事件记录\n"
+                          "(打开 🗓️暴涨暴跌 日历 扫描后自动关联)",
+                     bg="#0D1B2A", fg="#78909C",
+                     font=("", 9), anchor="w", justify=tk.LEFT).pack(fill=tk.X, pady=4)
+
+        # 自动推导涨跌原因 (通用财经大事件)
+        _month_factors = {
+            1: ("年末效应", "机构年终做账+跨年资金面变化, 历来震荡加剧"),
+            2: ("春节效应", "节前缩量节后反弹, '肥正月瘦二月'"),
+            3: ("两会行情", "政策预期+政府工作报告, 稳增长板块活跃"),
+            4: ("年报密集披露", "业绩真空期结束, 高送转/一季报行情"),
+            5: ("五穷六绝", "历史规律: 5月往往调整, 6月见底"),
+            6: ("半年报+美联储议息", "成长股承压, 大盘风格占优"),
+            7: ("中报行情", "半导体/科创/消费电子高弹性, 2025年7月经典反弹"),
+            8: ("高温+洪涝", "新能源/抗旱/水利异动, 防御板块走强"),
+            9: ("开学季+国庆前", "消费复苏预期, 节前缩量调整"),
+            10: ("节后修复", "国庆后开门红概率大, 科技成长反弹"),
+            11: ("年底吃饭行情", "机构排名战, 热点轮动快"),
+            12: ("收官之战", "北向资金+中央经济工作会议, 布局来年"),
+        }
+        mname, mdesc = _month_factors.get(ym.month, ("",""))
+        tk.Label(col_frames[1], text=f"\n📅 季节性: {mname}",
+                 bg="#0D1B2A", fg="#B39DDB",
+                 font=("", 9, "bold")).pack(anchor="w", pady=(6, 0))
+        tk.Label(col_frames[1], text=f"  {mdesc}",
+                 bg="#0D1B2A", fg="#90A4AE",
+                 font=("", 8), anchor="w", wraplength=240, justify=tk.LEFT).pack(fill=tk.X)
+
+        # ======================================================
+        # 【列3】α/β 板块 & ETF 涨跌幅排行 (后台异步加载)
+        # ======================================================
+        lf3 = tk.Label(col_frames[2], text="🎯 α/β 板块 ETF 月度排行",
+                       bg="#0D1B2A", fg="#A5D6A7",
+                       font=("Microsoft YaHei", 11, "bold"))
+        lf3.pack(anchor="w")
+        tk.Frame(col_frames[2], bg="#43A047", height=1).pack(fill=tk.X, pady=(2, 6))
+
+        # 内置 α/β ETF 清单
+        _ETF_LIST = [
+            ("沪深300ETF", "sh510300", "β"),
+            ("科创50ETF",  "sh588000", "α+β"),
+            ("中证500ETF", "sh510500", "β"),
+            ("半导体ETF",  "sh512760", "α"),
+            ("芯片ETF",    "sz159995", "α"),
+            ("医药ETF",    "sh512010", "α"),
+            ("新能源ETF",  "sh516160", "α"),
+            ("红利ETF",    "sh510880", "β"),
+            ("黄金ETF",    "sh518880", "α"),
+            ("纳指ETF",    "sh513100", "β"),
+        ]
+
+        # 先显示占位
+        loading_lbl = tk.Label(col_frames[2],
+            text="⏳ 正在加载 ETF 月度数据 (后台, 约10-30秒)...",
+            bg="#0D1B2A", fg="#78909C",
+            font=("", 9), anchor="w", justify=tk.LEFT)
+        loading_lbl.pack(fill=tk.X, pady=10)
+
+        def _bg_fetch_etf():
+            import threading, requests, json
+            results = []
+            for ename, esym, etype in _ETF_LIST:
+                try:
+                    r = requests.get(
+                        "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
+                        params={"symbol": esym, "scale": "240",
+                                "ma": "no", "datalen": "120"},
+                        timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+                    if r.status_code == 200 and r.text.strip():
+                        kl = json.loads(r.text)
+                        month_kl = [k for k in kl if k.get("day","").startswith(
+                            f"{ym.year:04d}-{ym.month:02d}")]
+                        if len(month_kl) >= 2:
+                            fc = float(month_kl[0]["close"])
+                            lc = float(month_kl[-1]["close"])
+                            pct = round((lc - fc) / fc * 100, 2)
+                            results.append((ename, etype, pct, len(month_kl)))
+                except Exception:
+                    pass
+            self.root.after(0, lambda: self._update_etf_col(loading_lbl, results, col_frames[2]))
+
+        import threading as _th_rv
+        try:
+            _th_rv.Thread(target=_bg_fetch_etf, daemon=True).start()
+        except Exception as _th:
+            loading_lbl.config(text=f"❌ ETF加载失败: {_th}", fg="#EF5350")
+
+        # 固定高度, 让滚动条能正确工作
+        rev_frame.update_idletasks()
+        h = rev_frame.winfo_reqheight()
+        rev_frame.config(height=max(h, 280))
+        print(f"[日历] 📊 复盘面板渲染完成, ETFs={len(etf_results)}, "
+              f"crash_events={len(crash_events)}", flush=True)
+
     def _build_emo_cycle_calendar(self, parent_frame, notebook=None):
         """🎭 在容器 frame 里直接渲染情绪周期三维度日历 (不弹窗, 嵌入 Notebook tab)。"""
         print("[情绪周期] 🎭 开始构建 Notebook tab 日历...", flush=True)
@@ -47954,6 +48259,110 @@ class StockKeywordAnalyzerGUI:
             _cal_cv.bind("<Enter>", _on); _cal_cv.bind("<Leave>", _off)
 
             # ---------- 渲染月历 ----------
+            def _fetch_month_index_pct(ym):
+                """拉当月上证指数日线, 返回 {date_str: pct_change} 和 {date_str: close}
+                优先新浪 HTTP 直连 (最稳), 兜底 AKShare. 失败返回 {} 不阻断渲染"""
+                import requests as _req_cal
+                import pandas as _pd
+                try:
+                    # ============ 优先: 新浪 HTTP 直连 (最稳, 不走 AKShare) ============
+                    start_ds = ym.replace(day=1).strftime("%Y-%m-%d")
+                    if ym.month == 12:
+                        end_ds = ym.replace(year=ym.year + 1, month=1, day=1).strftime("%Y-%m-%d")
+                    else:
+                        end_ds = ym.replace(month=ym.month + 1, day=1).strftime("%Y-%m-%d")
+                    # 多拿几天 (前月尾部), 保证能算涨跌幅 (需要前一天收盘)
+                    from datetime import timedelta as _td
+                    pre_start = (ym.replace(day=1) - _td(days=10)).strftime("%Y-%m-%d")
+                    # 新浪 API 用 datalen 取最近 N 天
+                    target_days = 150  # 足够覆盖当月+前月
+                    pct_map = {}
+                    close_map = {}
+                    source_ok = False
+
+                    try:
+                        r = _req_cal.get(
+                            "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
+                            params={"symbol": "sh000001", "scale": "240",
+                                    "ma": "no", "datalen": str(target_days)},
+                            timeout=10,
+                            headers={"User-Agent": "Mozilla/5.0"})
+                        if r.status_code == 200 and r.text.strip():
+                            import json as _j_cal
+                            klines = _j_cal.loads(r.text)
+                            prev_close = None
+                            for k in klines:
+                                ds = k.get("day", "")
+                                if not ds: continue
+                                close = float(k.get("close", 0))
+                                close_map[ds] = close
+                                if prev_close and prev_close > 0:
+                                    pct_map[ds] = round((close - prev_close) / prev_close * 100, 2)
+                                prev_close = close
+                            source_ok = True
+                            print(f"[日历] 📈 新浪源拉到 {len(pct_map)} 天上证日线", flush=True)
+                    except Exception as _e_sina:
+                        print(f"[日历] 新浪源失败, 尝试 AKShare: {_e_sina}", flush=True)
+
+                    if source_ok:
+                        # 过滤当月 (pct_map 包含前几天为了算涨跌幅)
+                        month_pct = {k: v for k, v in pct_map.items()
+                                     if k.startswith(f"{ym.year:04d}-{ym.month:02d}")}
+                        month_close = {k: v for k, v in close_map.items()
+                                       if k.startswith(f"{ym.year:04d}-{ym.month:02d}")}
+                        return month_pct, month_close
+
+                    # ============ 兜底: AKShare index_zh_a_hist ============
+                    try:
+                        import akshare as _ak_cal
+                        start_str = ym.replace(day=1).strftime("%Y%m%d")
+                        if ym.month == 12:
+                            end_date = ym.replace(year=ym.year + 1, month=1, day=1) - _td(days=1)
+                        else:
+                            end_date = ym.replace(month=ym.month + 1, day=1) - _td(days=1)
+                        df = _ak_cal.index_zh_a_hist(
+                            symbol="000001", period="daily",
+                            start_date=start_str, end_date=end_date.strftime("%Y%m%d"))
+                        close_col = "收盘" if "收盘" in df.columns else "close"
+                        date_col = "日期" if "日期" in df.columns else "date"
+                        closes = df[close_col].astype(float).values
+                        dates = df[date_col]
+                        prev = None
+                        for d, c in zip(dates, closes):
+                            ds = _pd.to_datetime(d).strftime("%Y-%m-%d")
+                            close_map[ds] = float(c)
+                            if prev and prev > 0:
+                                pct_map[ds] = round((float(c) - prev) / prev * 100, 2)
+                            prev = float(c)
+                        print(f"[日历] 📈 AKShare兜底拉到 {len(pct_map)} 天", flush=True)
+                        return pct_map, close_map
+                    except Exception as _e_ak:
+                        print(f"[日历] AKShare也失败: {_e_ak}", flush=True)
+
+                    return {}, {}
+                except Exception as _e_all:
+                    print(f"[日历] index fetch 全部失败 (不阻断): {_e_all}", flush=True)
+                    return {}, {}
+
+            def _guess_stage_from_pct(pct, hist_for_date=None):
+                """根据涨跌幅粗估情绪阶段 (仅用于未补录的日期)"""
+                if hist_for_date and hist_for_date.get("stage"):
+                    return hist_for_date["stage"]
+                if pct is None:
+                    return ""
+                if pct >= 5:
+                    return "高潮+"
+                elif pct >= 2:
+                    return "高潮"
+                elif pct >= 0:
+                    return "上涨"
+                elif pct >= -1.5:
+                    return "回调"
+                elif pct >= -3.5:
+                    return "退潮"
+                else:
+                    return "冰点"
+
             def _render_month():
                 print(f"[日历] 🎨 _render_month 开始, hist={len(hist_dict)}天", flush=True)
                 # 每次渲染前先从磁盘 reload (大盘后台可能刚同步完新数据)
@@ -47978,16 +48387,29 @@ class StockKeywordAnalyzerGUI:
 
                     today_str = _dt2.now().strftime("%Y-%m-%d")
 
+                    # 📈 自动拉当月上证指数日线 (为未补录格子提供涨跌上色)
+                    pct_map, close_map = _fetch_month_index_pct(ym)
+                    # 顶部统计更新: 当月大盘涨天数
+                    up_days = sum(1 for v in pct_map.values() if v > 0)
+                    dn_days = sum(1 for v in pct_map.values() if v < 0)
+                    flat_days = len(pct_map) - up_days - dn_days
+                    month_lbl.config(
+                        text=f"{ym.year} 年 {ym.month} 月  |  📈{up_days} 📉{dn_days} ➖{flat_days}")
+
                     row = 0; col = first_wd
                     for d in range(1, days_in_month + 1):
                         date_str = f"{ym.year:04d}-{ym.month:02d}-{d:02d}"
                         is_today = (date_str == today_str)
                         rec = hist_dict.get(date_str)
+                        # 大盘涨跌幅兜底 (未补录时)
+                        auto_pct = pct_map.get(date_str)
+                        auto_close = close_map.get(date_str)
 
                         if rec:
                             pnl = rec.get("pnl", "")
                             ths = rec.get("ths", "")
                             pct_v = rec.get("pct")
+                            if pct_v is None: pct_v = auto_pct  # 兜底
                             if pnl == "赚钱": bg = "#B71C1C"
                             elif pnl == "亏钱": bg = "#2E7D32"
                             elif pct_v is not None:
@@ -47997,7 +48419,18 @@ class StockKeywordAnalyzerGUI:
                             else: bg = "#455A64"
                             border_color = "#E65100" if ths == "向下" else None
                         else:
-                            bg = "#37474F"; border_color = None
+                            # 🟢 未补录 → 用大盘涨跌幅自动上色
+                            if auto_pct is not None:
+                                if auto_pct > 0.5:
+                                    bg = "#B71C1C"       # 涨 → 红
+                                elif auto_pct < -0.5:
+                                    bg = "#2E7D32"       # 跌 → 绿
+                                else:
+                                    bg = "#455A64"       # 平 → 灰蓝
+                            else:
+                                # 非交易日 / 未开市
+                                bg = "#263238" if ym == _dt2.now().replace(day=1) else "#1A2332"
+                            border_color = None
 
                         cell = tk.Frame(grid_f, bg=bg, width=95, height=65,
                                         highlightbackground=border_color or "#1A1A2E",
@@ -48036,10 +48469,16 @@ class StockKeywordAnalyzerGUI:
                         pnl_v = rec.get("pnl", "") if rec else ""
                         pnl_sym = "💰" if pnl_v == "赚钱" else ("💸" if pnl_v == "亏钱" else "·")
                         stage_v = rec.get("stage", "") if rec else ""
+                        # 🟢 未补录但有大盘数据 → 粗估阶段
+                        if not stage_v and auto_pct is not None:
+                            stage_v = _guess_stage_from_pct(auto_pct)
                         stage_v = re.sub(r'[^\u4e00-\u9fa5A-Za-z0-9 ]+', '', str(stage_v or '')).strip()
                         stage_fg = "#FFD54F" if stage_v in ("冰点", "退潮") else "#FFFFFF"
                         emo_s = rec.get("emo_score") if rec else None
+                        # 🟢 涨跌幅: 优先 rec, 其次大盘自动
                         pct_v2 = rec.get("pct") if rec else None
+                        if pct_v2 is None and auto_pct is not None:
+                            pct_v2 = auto_pct
 
                         widget_list = []
                         # 行1: 日期(左) + 同花顺(右)
@@ -48092,6 +48531,14 @@ class StockKeywordAnalyzerGUI:
 
                 is_rebuilding[0] = False
                 print(f"[日历] ✅ 渲染完成, {len(hist_dict)}天数据, cells={len(cells_ref)}", flush=True)
+
+                # ════════════════════════════════════════════════════════════
+                # 📊 本月复盘面板 (嵌在月历下方, 随 Canvas 滚动)
+                # ════════════════════════════════════════════════════════════
+                try:
+                    self._render_month_review(grid_f, ym, pct_map, close_map)
+                except Exception as _rv_e:
+                    print(f"[日历] 复盘面板 warn: {_rv_e}", flush=True)
 
             _render_month()
 
