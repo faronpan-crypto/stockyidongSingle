@@ -11700,4 +11700,652 @@ class DapanMixin:
 
 
 
+    def _update_etf_col(self, loading_lbl, results, parent_frame):
+
+        """后台 ETF 线程回来后, 销毁 loading 占位 + 渲染 TOP3/BOTTOM3/αβ对比"""
+
+        try:
+
+            # 先 destroy 旧 loading 和其他子组件
+
+            for w in parent_frame.winfo_children():
+
+                w.destroy()
+
+
+
+            if not results:
+
+                tk.Label(parent_frame,
+
+                         text="⚠️ 暂无可显示的 ETF 月度数据\n(请检查网络或稍后刷新)",
+
+                         bg="#0D1B2A", fg="#EF5350",
+
+                         font=("", 10), anchor="w", justify=tk.LEFT).pack(fill=tk.X, pady=10)
+
+                return
+
+
+
+            results.sort(key=lambda x: x[2], reverse=True)
+
+            top3 = results[:3]
+
+            bot3 = results[-3:][::-1]
+
+
+
+            tk.Label(parent_frame, text="🔥 TOP 3 (α机会):",
+
+                     bg="#0D1B2A", fg="#EF5350",
+
+                     font=("", 10, "bold")).pack(anchor="w")
+
+            for en, et, p, d in top3:
+
+                tk.Label(parent_frame,
+
+                         text=f"  {'+' if p > 0 else ''}{p}%  [{et}] {en}  ({d}天)",
+
+                         bg="#0D1B2A", fg="#FFCDD2",
+
+                         font=("", 10), anchor="w").pack(fill=tk.X)
+
+
+
+            tk.Label(parent_frame, text="❄️ BOTTOM 3 (错杀α):",
+
+                     bg="#0D1B2A", fg="#66BB6A",
+
+                     font=("", 10, "bold")).pack(anchor="w", pady=(8, 0))
+
+            for en, et, p, d in bot3:
+
+                tk.Label(parent_frame,
+
+                         text=f"  {'+' if p > 0 else ''}{p}%  [{et}] {en}  ({d}天)",
+
+                         bg="#0D1B2A", fg="#C8E6C9",
+
+                         font=("", 10), anchor="w").pack(fill=tk.X)
+
+
+
+            # β vs α
+
+            beta_pcts = [x[2] for x in results if x[1] == "β"]
+
+            alpha_pcts = [x[2] for x in results if "α" in x[1]]
+
+            if beta_pcts and alpha_pcts:
+
+                b_avg = round(sum(beta_pcts)/len(beta_pcts), 2)
+
+                a_avg = round(sum(alpha_pcts)/len(alpha_pcts), 2)
+
+                tk.Label(parent_frame,
+
+                         text=f"\n📊 β平均: {'+' if b_avg>0 else ''}{b_avg}%  |  "
+
+                              f"α平均: {'+' if a_avg>0 else ''}{a_avg}%",
+
+                         bg="#0D1B2A", fg="#FFD54F",
+
+                         font=("", 9, "bold")).pack(anchor="w")
+
+                if a_avg > b_avg + 2:
+
+                    tip = "💡 α > β, 本月选股/行业弹性跑赢指数!"
+
+                elif b_avg > a_avg + 2:
+
+                    tip = "💡 β > α, 本月指数行情为主, 大盘ETF稳"
+
+                else:
+
+                    tip = "💡 α≈β, 板块轮动快, 分散配置"
+
+                tk.Label(parent_frame, text=tip,
+
+                         bg="#0D1B2A", fg="#FFD54F",
+
+                         font=("", 9), anchor="w", wraplength=260,
+
+                         justify=tk.LEFT).pack(fill=tk.X, pady=(2, 0))
+
+        except Exception as e:
+
+            print(f"[日历] _update_etf_col 异常 (可能窗口已关闭): {e}", flush=True)
+
+
+
+    # ════════════════════════════════════════════════════════════════════════
+
+    # 情绪日历 · 共用的大盘日线拉取 (新浪源)
+
+    # ════════════════════════════════════════════════════════════════════════
+
+
+    def _render_month_review(self, grid_f, ym, pct_map, close_map):
+
+        """在月历下方追加一个复盘 Text 面板"""
+
+        import sqlite3, os as _os, json as _j_rv
+
+        from datetime import datetime as _dt3
+
+
+
+        # 先 destroy 旧面板 (防止重复)
+
+        for child in grid_f.winfo_children():
+
+            if getattr(child, "_is_month_review", False):
+
+                child.destroy()
+
+        row_idx = max(6, (len(pct_map) > 0 and 6 or 6))
+
+        # 根据已渲染的格子数算 row_idx
+
+        row_idx = 6  # 6 行日历后追加
+
+
+
+        rev_frame = tk.Frame(grid_f, bg="#0D1B2A")
+
+        rev_frame._is_month_review = True
+
+        rev_frame.grid(row=row_idx, column=0, columnspan=7, sticky="nsew",
+
+                       padx=1, pady=(8, 4))
+
+        rev_frame.grid_propagate(False)  # 允许控制高度
+
+
+
+        # 标题栏
+
+        title_f = tk.Frame(rev_frame, bg="#0D1B2A")
+
+        title_f.pack(fill=tk.X, pady=(6, 0), padx=12)
+
+        tk.Label(title_f, text=f"📊 {ym.year} 年 {ym.month} 月 · 大盘复盘",
+
+                 bg="#0D1B2A", fg="#FFD54F",
+
+                 font=("Microsoft YaHei", 13, "bold")).pack(side=tk.LEFT)
+
+        tk.Label(title_f, text="← 本月发生了什么？重大涨跌原因？α/β机会在哪？",
+
+                 bg="#0D1B2A", fg="#78909C", font=("", 9)).pack(side=tk.LEFT, padx=8)
+
+
+
+        # 正文 (三栏: 大盘概况 | 重大涨跌 | α/β板块ETF)
+
+        body_f = tk.Frame(rev_frame, bg="#0D1B2A")
+
+        body_f.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+
+
+        col_frames = [tk.Frame(body_f, bg="#0D1B2A") for _ in range(3)]
+
+        for i, cf in enumerate(col_frames):
+
+            cf.grid(row=0, column=i, sticky="nsew", padx=6, pady=4)
+
+            body_f.grid_columnconfigure(i, weight=1)
+
+
+
+        # ======================================================
+
+        # 【列1】大盘概况
+
+        # ======================================================
+
+        lf1 = tk.Label(col_frames[0], text="📈 大盘概况",
+
+                       bg="#0D1B2A", fg="#81D4FA",
+
+                       font=("Microsoft YaHei", 11, "bold"))
+
+        lf1.pack(anchor="w")
+
+        tk.Frame(col_frames[0], bg="#1565C0", height=1).pack(fill=tk.X, pady=(2, 6))
+
+
+
+        # 统计
+
+        if pct_map:
+
+            vals = list(pct_map.values())
+
+            up = sum(1 for v in vals if v > 0)
+
+            dn = sum(1 for v in vals if v < 0)
+
+            flat = len(vals) - up - dn
+
+            # 月涨跌幅 (第一根到最后一根)
+
+            sorted_dates = sorted(pct_map.keys())
+
+            first_close = close_map.get(sorted_dates[0], 0)
+
+            last_close = close_map.get(sorted_dates[-1], 0)
+
+            month_pct = round((last_close - first_close) / first_close * 100, 2) if first_close else 0
+
+            # 最大涨跌日
+
+            max_up_date, max_up_val = max(pct_map.items(), key=lambda x: x[1])
+
+            max_dn_date, max_dn_val = min(pct_map.items(), key=lambda x: x[1])
+
+            # 连涨连跌
+
+            cur_streak = 0; max_streak_up = 0; max_streak_dn = 0
+
+            for ds in sorted_dates:
+
+                v = pct_map[ds]
+
+                if v > 0:
+
+                    cur_streak = cur_streak + 1 if cur_streak > 0 else 1
+
+                    max_streak_up = max(max_streak_up, cur_streak)
+
+                elif v < 0:
+
+                    cur_streak = cur_streak - 1 if cur_streak < 0 else -1
+
+                    max_streak_dn = min(max_streak_dn, cur_streak)
+
+                else:
+
+                    cur_streak = 0
+
+        else:
+
+            up = dn = flat = 0; month_pct = 0
+
+            max_up_date = max_up_val = "-"
+
+            max_dn_date = max_dn_val = "-"
+
+            max_streak_up = max_streak_dn = 0
+
+
+
+        lines_c1 = [
+
+            f"📅 交易日: {up + dn + flat} 天",
+
+            f"📈 涨: {up}天  📉 跌: {dn}天  ➖ 平: {flat}天",
+
+            f"📊 月涨跌幅: {'+' if month_pct > 0 else ''}{month_pct}%",
+
+            f"🔥 最大单日涨: {max_up_date}  +{max_up_val}%",
+
+            f"❄️ 最大单日跌: {max_dn_date}  {max_dn_val}%",
+
+            f"🔗 最长连涨: {max_streak_up}天  最长连跌: {abs(max_streak_dn)}天",
+
+        ]
+
+        for ln in lines_c1:
+
+            fg = "#EF5350" if "最大单日涨" in ln or "月涨跌幅: +" in ln else (
+
+                "#66BB6A" if "最大单日跌" in ln or "月涨跌幅: -" in ln else "#ECEFF1")
+
+            tk.Label(col_frames[0], text=ln, bg="#0D1B2A", fg=fg,
+
+                     font=("", 10), anchor="w", justify=tk.LEFT).pack(fill=tk.X)
+
+
+
+        # ======================================================
+
+        # 【列2】重大涨跌 + 关联 crash_rally_events
+
+        # ======================================================
+
+        lf2 = tk.Label(col_frames[1], text="⚠️ 重大涨跌 & 原因",
+
+                       bg="#0D1B2A", fg="#FF8A65",
+
+                       font=("Microsoft YaHei", 11, "bold"))
+
+        lf2.pack(anchor="w")
+
+        tk.Frame(col_frames[1], bg="#E64A19", height=1).pack(fill=tk.X, pady=(2, 6))
+
+
+
+        # 查 crash_rally_events 当月数据
+
+        qclaw_db = _os.path.join(_os.path.expanduser("~"), ".qclaw", "stock_analysis.db")
+
+        crash_events = []
+
+        try:
+
+            if _os.path.exists(qclaw_db):
+
+                conn = sqlite3.connect(qclaw_db)
+
+                cur = conn.cursor()
+
+                cur.execute(
+
+                    "SELECT event_date, event_type, index_name, "
+
+                    "index_pct, magnitude, trigger, trigger_detail "
+
+                    "FROM crash_rally_events "
+
+                    "WHERE event_date LIKE ? "
+
+                    "ORDER BY ABS(index_pct) DESC LIMIT 10",
+
+                    (f"{ym.year:04d}-{ym.month:02d}%",))
+
+                crash_events = cur.fetchall()
+
+                conn.close()
+
+        except Exception as e:
+
+            print(f"[日历] crash_rally 查失败: {e}", flush=True)
+
+
+
+        if crash_events:
+
+            for ev in crash_events[:6]:
+
+                edate, etype, ename, epct, emag, etrig, edetail = ev[0], ev[1], ev[2], ev[3], ev[4], ev[5], ev[6]
+
+                icon = "🟢暴跌" if etype == "crash" else "🔴暴涨"
+
+                mag_icon = {"极端":"🚨","刹跌":"⚠️","大涨":"🔥","小涨":"📈","小跌":"📉"}.get(emag, "")
+
+                pct_str = f"{epct:+.2f}%" if epct is not None else "--"
+
+                tk.Label(col_frames[1],
+
+                         text=f"{icon}{mag_icon} {edate[-5:]} {ename} {pct_str}",
+
+                         bg="#0D1B2A", fg="#FFCDD2" if etype == "crash" else "#FFE0B2",
+
+                         font=("", 9, "bold"), anchor="w").pack(fill=tk.X)
+
+                reason = (etrig or edetail or "")[:50]
+
+                if reason:
+
+                    tk.Label(col_frames[1], text=f"  └ {reason}",
+
+                             bg="#0D1B2A", fg="#90A4AE",
+
+                             font=("", 8), anchor="w", wraplength=240,
+
+                             justify=tk.LEFT).pack(fill=tk.X)
+
+        else:
+
+            tk.Label(col_frames[1],
+
+                     text="💡 暂无历史事件记录\n"
+
+                          "(打开 🗓️暴涨暴跌 日历 扫描后自动关联)",
+
+                     bg="#0D1B2A", fg="#78909C",
+
+                     font=("", 9), anchor="w", justify=tk.LEFT).pack(fill=tk.X, pady=4)
+
+
+
+        # 自动推导涨跌原因 (通用财经大事件)
+
+        _month_factors = {
+
+            1: ("年末效应", "机构年终做账+跨年资金面变化, 历来震荡加剧"),
+
+            2: ("春节效应", "节前缩量节后反弹, '肥正月瘦二月'"),
+
+            3: ("两会行情", "政策预期+政府工作报告, 稳增长板块活跃"),
+
+            4: ("年报密集披露", "业绩真空期结束, 高送转/一季报行情"),
+
+            5: ("五穷六绝", "历史规律: 5月往往调整, 6月见底"),
+
+            6: ("半年报+美联储议息", "成长股承压, 大盘风格占优"),
+
+            7: ("中报行情", "半导体/科创/消费电子高弹性, 2025年7月经典反弹"),
+
+            8: ("高温+洪涝", "新能源/抗旱/水利异动, 防御板块走强"),
+
+            9: ("开学季+国庆前", "消费复苏预期, 节前缩量调整"),
+
+            10: ("节后修复", "国庆后开门红概率大, 科技成长反弹"),
+
+            11: ("年底吃饭行情", "机构排名战, 热点轮动快"),
+
+            12: ("收官之战", "北向资金+中央经济工作会议, 布局来年"),
+
+        }
+
+        mname, mdesc = _month_factors.get(ym.month, ("",""))
+
+        tk.Label(col_frames[1], text=f"\n📅 季节性: {mname}",
+
+                 bg="#0D1B2A", fg="#B39DDB",
+
+                 font=("", 9, "bold")).pack(anchor="w", pady=(6, 0))
+
+        tk.Label(col_frames[1], text=f"  {mdesc}",
+
+                 bg="#0D1B2A", fg="#90A4AE",
+
+                 font=("", 8), anchor="w", wraplength=240, justify=tk.LEFT).pack(fill=tk.X)
+
+
+
+        # ======================================================
+
+        # 【列3】α/β 板块 & ETF 涨跌幅排行 (后台异步加载)
+
+        # ======================================================
+
+        lf3 = tk.Label(col_frames[2], text="🎯 α/β 板块 ETF 月度排行",
+
+                       bg="#0D1B2A", fg="#A5D6A7",
+
+                       font=("Microsoft YaHei", 11, "bold"))
+
+        lf3.pack(anchor="w")
+
+        tk.Frame(col_frames[2], bg="#43A047", height=1).pack(fill=tk.X, pady=(2, 6))
+
+
+
+        # 内置 α/β ETF 清单
+
+        _ETF_LIST = [
+
+            ("沪深300ETF", "sh510300", "β"),
+
+            ("科创50ETF",  "sh588000", "α+β"),
+
+            ("中证500ETF", "sh510500", "β"),
+
+            ("半导体ETF",  "sh512760", "α"),
+
+            ("芯片ETF",    "sz159995", "α"),
+
+            ("医药ETF",    "sh512010", "α"),
+
+            ("新能源ETF",  "sh516160", "α"),
+
+            ("红利ETF",    "sh510880", "β"),
+
+            ("黄金ETF",    "sh518880", "α"),
+
+            ("纳指ETF",    "sh513100", "β"),
+
+        ]
+
+
+
+        # ETF 月度涨跌幅 (timeout=1s, 全挂则放弃, 不阻塞启动)
+
+        results = []
+
+        import requests as _r_etf, json as _j_etf
+
+        for ename, esym, etype in _ETF_LIST:
+
+            try:
+
+                r = _r_etf.get(
+
+                    "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
+
+                    params={"symbol": esym, "scale": "240",
+
+                            "ma": "no", "datalen": "120"},
+
+                    timeout=1, headers={"User-Agent": "Mozilla/5.0"})
+
+                if r.status_code == 200 and r.text.strip():
+
+                    kl = _j_etf.loads(r.text)
+
+                    month_kl = [k for k in kl if k.get("day","").startswith(
+
+                        f"{ym.year:04d}-{ym.month:02d}")]
+
+                    if len(month_kl) >= 2:
+
+                        fc = float(month_kl[0]["close"])
+
+                        lc = float(month_kl[-1]["close"])
+
+                        pct = round((lc - fc) / fc * 100, 2)
+
+                        results.append((ename, etype, pct, len(month_kl)))
+
+            except Exception:
+
+                pass
+
+
+
+        if not results:
+
+            tk.Label(col_frames[2],
+
+                text="⚠️ 当月 ETF 日线拉取失败 (新浪源不可用)\n可稍后点 🔄 手动刷新",
+
+                bg="#0D1B2A", fg="#78909C",
+
+                font=("", 9), justify=tk.LEFT).pack(anchor="w", pady=4)
+
+        else:
+
+            results.sort(key=lambda x: x[2], reverse=True)
+
+            top3 = results[:3]; bot3 = results[-3:]
+
+            betas = [x[2] for x in results if x[1] == "β"]
+
+            alphas = [x[2] for x in results if x[1] == "α"]
+
+            beta_avg = round(sum(betas) / len(betas), 2) if betas else 0
+
+            alpha_avg = round(sum(alphas) / len(alphas), 2) if alphas else 0
+
+
+
+            tk.Label(col_frames[2], text="🔥 涨幅 TOP 3",
+
+                     bg="#0D1B2A", fg="#FF6F00",
+
+                     font=("", 9, "bold")).pack(anchor="w", pady=(4, 0))
+
+            for en, et, pct, _ in top3:
+
+                tk.Label(col_frames[2],
+
+                    text=f"   {en} ({et})  {pct:+.2f}%",
+
+                    bg="#0D1B2A", fg="#FFCDD2" if pct < 0 else "#FFECB3",
+
+                    font=("", 9)).pack(anchor="w")
+
+
+
+            tk.Label(col_frames[2], text="❄️ 跌幅 BOTTOM 3",
+
+                     bg="#0D1B2A", fg="#2E7D32",
+
+                     font=("", 9, "bold")).pack(anchor="w", pady=(6, 0))
+
+            for en, et, pct, _ in bot3:
+
+                tk.Label(col_frames[2],
+
+                    text=f"   {en} ({et})  {pct:+.2f}%",
+
+                    bg="#0D1B2A", fg="#C8E6C9" if pct > 0 else "#EF9A9A",
+
+                    font=("", 9)).pack(anchor="w")
+
+
+
+            tk.Label(col_frames[2], text=f"📊 β 平均 {beta_avg:+.2f}%  vs  α 平均 {alpha_avg:+.2f}%",
+
+                     bg="#0D1B2A", fg="#81D4FA",
+
+                     font=("", 9, "bold")).pack(anchor="w", pady=(8, 0))
+
+            if alpha_avg > beta_avg + 1:
+
+                tip = "💡 α ETF 弹性更大 (下跌后反弹/上涨时跑赢 β)"
+
+            elif beta_avg > alpha_avg + 1:
+
+                tip = "💡 β ETF 领涨 (大盘 β 行情, 被动指数更强)"
+
+            else:
+
+                tip = "💡 α/β 差距不大, 均衡配置"
+
+            tk.Label(col_frames[2], text=tip, bg="#0D1B2A", fg="#B0BEC5",
+
+                     font=("", 8), wraplength=220, justify=tk.LEFT).pack(anchor="w", pady=(2, 4))
+
+
+
+        # 固定高度, 让滚动条能正确工作
+
+        rev_frame.update_idletasks()
+
+        h = rev_frame.winfo_reqheight()
+
+        rev_frame.config(height=max(h, 280))
+
+        print(f"[日历] 📊 复盘面板渲染完成 (height={h})", flush=True)
+
+
+
+
 __all__ = ["DapanMixin"]
