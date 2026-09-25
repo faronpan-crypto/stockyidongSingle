@@ -9036,4 +9036,1429 @@ class DapanMixin:
 
 
 
+    def _load_crash_rally_events(self):
+
+        """从 crash_rally_events 表读历史暴涨暴跌事件，填充暴跌 Tab 的下半 Treeview
+
+        与 crash_rally_calendar.py 共用同一 SQLite 表，保证内容完全一致"""
+
+        tree = getattr(self, "_crash_events_tree", None)
+
+        if tree is None:
+
+            return
+
+        # 清空现有行
+
+        for item in tree.get_children():
+
+            tree.delete(item)
+
+        label = getattr(self, "_crash_events_count_label", None)
+
+        try:
+
+            import sqlite3
+
+            # 找 DB 路径: 优先 crash_rally_calendar.py 用的 ~/.qclaw/stock_analysis.db
+
+            import os as _os
+
+            qclaw_db = _os.path.join(_os.path.expanduser("~"), ".qclaw", "stock_analysis.db")
+
+            db_path = qclaw_db
+
+            # 如果 qclaw_db 不存在，尝试主程序自己的 db
+
+            if not _os.path.exists(qclaw_db):
+
+                alt_db = getattr(self, "db_path", None) or getattr(self, "DB_PATH", None)
+
+                if alt_db and _os.path.exists(alt_db):
+
+                    db_path = alt_db
+
+                else:
+
+                    if label:
+
+                        label.config(text="⚠ 未找到事件库 DB")
+
+                    return
+
+            conn = sqlite3.connect(db_path)
+
+            cur = conn.cursor()
+
+            # 先确保表存在（幂等建表，同 crash_rally_calendar.py）
+
+            cur.execute("""
+
+                CREATE TABLE IF NOT EXISTS crash_rally_events (
+
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                    event_date TEXT, event_type TEXT, index_name TEXT,
+
+                    index_pct REAL, magnitude TEXT, trigger TEXT,
+
+                    trigger_detail TEXT, leading_signals TEXT,
+
+                    signal_days_before INTEGER, recovery_days INTEGER,
+
+                    max_recover_pct REAL, notes TEXT, source_urls TEXT,
+
+                    related_stocks TEXT
+
+                )
+
+            """)
+
+            cur.execute('CREATE INDEX IF NOT EXISTS idx_cr_date ON crash_rally_events(event_date)')
+
+            cur.execute('CREATE INDEX IF NOT EXISTS idx_cr_type ON crash_rally_events(event_type)')
+
+            # 读取
+
+            cur.execute(
+
+                "SELECT id,event_date,event_type,index_name,index_pct,magnitude,trigger "
+
+                "FROM crash_rally_events ORDER BY event_date DESC")
+
+            rows = cur.fetchall()
+
+            conn.close()
+
+            for r in rows:
+
+                eid, date, etype, idx_name, pct, mag, trigger = r
+
+                # 格式化涨跌幅
+
+                pct_str = f"{pct:+.2f}%" if pct is not None else ""
+
+                etype_cn = "暴跌" if etype == "crash" else ("暴涨" if etype == "rally" else str(etype or ""))
+
+                tag = "crash" if etype == "crash" else ("rally" if etype == "rally" else "")
+
+                # id 用字符串存，Treeview selection 返回字符串
+
+                tree.insert("", tk.END, iid=str(eid),
+
+                            values=(date or "", etype_cn, idx_name or "",
+
+                                    pct_str, mag or "", trigger or ""),
+
+                            tags=(tag,) if tag else ())
+
+            if label:
+
+                label.config(text=f"共 {len(rows)} 条 | 源: {db_path}")
+
+        except Exception as e:
+
+            if label:
+
+                label.config(text=f"⚠ 读取事件库失败: {e}")
+
+            print(f"[暴跌Tab] 加载事件库失败: {e}")
+
+    def _open_crash_event_detail(self, event_id_str):
+
+        """双击 Treeview 行 → 打开该暴涨暴跌事件的完整详情"""
+
+        import sqlite3, os as _os
+
+        try:
+
+            eid = int(event_id_str)
+
+        except (ValueError, TypeError):
+
+            return
+
+        qclaw_db = _os.path.join(_os.path.expanduser("~"), ".qclaw", "stock_analysis.db")
+
+        db_path = qclaw_db
+
+        if not _os.path.exists(qclaw_db):
+
+            alt = getattr(self, "db_path", None) or getattr(self, "DB_PATH", None)
+
+            if alt and _os.path.exists(alt):
+
+                db_path = alt
+
+        try:
+
+            conn = sqlite3.connect(db_path)
+
+            cur = conn.cursor()
+
+            cur.execute(
+
+                "SELECT * FROM crash_rally_events WHERE id=?", (eid,))
+
+            row = cur.fetchone()
+
+            cols = [d[0] for d in cur.description]
+
+            conn.close()
+
+            if not row:
+
+                return
+
+            info = dict(zip(cols, row))
+
+            # 格式化显示文本
+
+            lines = []
+
+            lines.append("【暴涨暴跌事件详情】")
+
+            lines.append("=" * 40)
+
+            etype = info.get("event_type", "")
+
+            etype_cn = "暴跌 🟢" if etype == "crash" else ("暴涨 🔴" if etype == "rally" else str(etype))
+
+            lines.append(f"日期:   {info.get('event_date','')}")
+
+            lines.append(f"类型:   {etype_cn}")
+
+            lines.append(f"指数:   {info.get('index_name','')}")
+
+            pct = info.get("index_pct")
+
+            lines.append(f"涨跌幅: {pct:+.2f}%" if pct is not None else "涨跌幅: -")
+
+            lines.append(f"幅度:   {info.get('magnitude','')}")
+
+            lines.append(f"触发:   {info.get('trigger','')}")
+
+            if info.get("trigger_detail"):
+
+                lines.append(f"触发详情:\n  {info['trigger_detail']}")
+
+            if info.get("leading_signals"):
+
+                lines.append(f"提前信号: {info['leading_signals']}")
+
+            sigdays = info.get("signal_days_before")
+
+            if sigdays is not None and sigdays > 0:
+
+                lines.append(f"信号提前: {sigdays} 天")
+
+            recover = info.get("recovery_days")
+
+            if recover is not None:
+
+                if recover < 0:
+
+                    lines.append("收复天数: 未收复")
+
+                else:
+
+                    lines.append(f"收复天数: {recover} 天")
+
+            mr = info.get("max_recover_pct")
+
+            if mr is not None:
+
+                lines.append(f"最大反弹/续跌: {mr:+.2f}%")
+
+            if info.get("notes"):
+
+                lines.append(f"备注: {info['notes']}")
+
+            if info.get("related_stocks"):
+
+                lines.append(f"关联股票: {info['related_stocks']}")
+
+            if info.get("source_urls"):
+
+                urls = str(info["source_urls"]).split("|")
+
+                lines.append("参考来源:")
+
+                for u in urls:
+
+                    u = u.strip()
+
+                    if u:
+
+                        lines.append(f"  {u}")
+
+            content = "\n".join(lines)
+
+            title = f"{etype_cn} {info.get('event_date','')} {info.get('index_name','')}"
+
+            # 复用资讯详情弹窗的智能渲染
+
+            self.open_full_window_viewer_from_content(content, title=title)
+
+        except Exception as e:
+
+            print(f"[暴跌Tab] 打开事件详情失败: {e}")
+
+    def _calc_market_risk_indicators(self):
+
+        """计算今日大盘危险/乐观信号 → (danger_list, opt_list, summary_text)
+
+        每个 list 元素: (bool触发, 名称, 说明)"""
+
+        import requests as _rv, json as _j, math as _math
+
+
+
+        danger = []   # [(bool, name, detail)]
+
+        opt = []
+
+
+
+        closes = []; volumes = []; dates = []
+
+        try:
+
+            r = _rv.get(
+
+                "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
+
+                params={"symbol": "sh000001", "scale": "240",
+
+                        "ma": "no", "datalen": "120"},
+
+                timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+
+            if r.status_code == 200 and r.text.strip():
+
+                kl = _j.loads(r.text)
+
+                # 🔧 关键修复: 按日期升序排序 (新浪本来就是旧→新, 这里保险)
+
+                kl.sort(key=lambda x: x.get("day", ""))
+
+                # 过滤掉 "未来" 数据 (盘中测试数据可能含当天未完成K线)
+
+                from datetime import date as _dt_e
+
+                today_str = _dt_e.today().isoformat()
+
+                kl_clean = []
+
+                for k in kl:
+
+                    ds = k.get("day", "")
+
+                    if ds and ds[:10] <= today_str:   # 只留 ≤ 今天的
+
+                        volumes.append(float(k.get("volume", 0)))
+
+                        dates.append(ds[:10])
+
+                        kl_clean.append(k)
+
+                        closes.append(float(k["close"]))
+
+                # (不再单独缓存给快览面板, 已删除)
+
+                pass
+
+        except Exception as _e:
+
+            print(f"[风险信号] 新浪日线拉失败: {_e}", flush=True)
+
+
+
+        if len(closes) < 20:
+
+            danger.append((True, "数据不足", f"仅 {len(closes)} 天日线, 信号仅供参考"))
+
+            return danger, opt, "⚠️ 数据不足, 信号仅供参考"
+
+
+
+        last = closes[-1]
+
+        ma5 = sum(closes[-5:]) / 5
+
+        ma10 = sum(closes[-10:]) / 10
+
+        ma15 = sum(closes[-15:]) / 15
+
+        ma20 = sum(closes[-20:]) / 20
+
+        ma60 = sum(closes[-60:]) / 60 if len(closes) >= 60 else None
+
+        ma120 = sum(closes[-120:]) / 120 if len(closes) >= 120 else None
+
+
+
+        # 涨跌幅序列
+
+        pct_seq = []
+
+        for i in range(1, len(closes)):
+
+            pct_seq.append(round((closes[i] - closes[i-1]) / closes[i-1] * 100, 2))
+
+        up_days = sum(1 for p in pct_seq[-20:] if p > 0)
+
+        dn_days = sum(1 for p in pct_seq[-20:] if p < 0)
+
+        flat_days = 20 - up_days - dn_days
+
+
+
+        # 连跌天数
+
+        max_consec_dn = 0; cur = 0
+
+        for p in pct_seq[-20:]:
+
+            if p < 0: cur += 1; max_consec_dn = max(max_consec_dn, cur)
+
+            else: cur = 0
+
+        # 连涨天数
+
+        max_consec_up = 0; cur = 0
+
+        for p in pct_seq[-20:]:
+
+            if p > 0: cur += 1; max_consec_up = max(max_consec_up, cur)
+
+            else: cur = 0
+
+
+
+        # 量能 (近5日均量 vs 前15日均量)
+
+        vol_ratio = 1.0
+
+        if len(volumes) >= 20:
+
+            vol_ratio = sum(volumes[-5:]) / sum(volumes[-20:-5]) if sum(volumes[-20:-5]) > 0 else 1.0
+
+
+
+        # ======= 危险信号 =======
+
+        # ① MA 空头排列 (MA5 < MA10 < MA15)
+
+        bear_ma = (ma5 < ma10 < ma15)
+
+        danger.append((bear_ma, "MA 空头排列 (MA5<MA10<MA15)",
+
+                       f"MA5={ma5:.1f} MA10={ma10:.1f} MA15={ma15:.1f}"))
+
+
+
+        # ② 上证跌破 MA60 (牛熊线)
+
+        below_ma60 = (ma60 is not None and last < ma60)
+
+        danger.append((below_ma60, "跌破 MA60 牛熊线",
+
+                       f"当前={last:.1f} MA60={ma60:.1f} 偏离={(last-ma60)/ma60*100:+.2f}%"))
+
+
+
+        # ③ 连续 3 天缩量 (量能比前一日 < 0.85)
+
+        if len(volumes) >= 4:
+
+            vol_shrink = (volumes[-1] < volumes[-2] * 0.85 and
+
+                          volumes[-2] < volumes[-3] * 0.85 and
+
+                          volumes[-3] < volumes[-4] * 0.85)
+
+        else:
+
+            vol_shrink = False
+
+        danger.append((vol_shrink, "连续3天缩量",
+
+                       f"vol_ratio={vol_ratio:.2f} (近5日均量/前15日均量)"))
+
+
+
+        # ④ 近 10 日最大连跌 ≥ 4 天
+
+        danger.append((max_consec_dn >= 4, "近10日连跌≥4天",
+
+                       f"最长连跌 {max_consec_dn} 天"))
+
+
+
+        # ⑤ 近 20 日下跌天数 ≥ 15 天
+
+        danger.append((dn_days >= 15, "20日内下跌≥15天 (跌多涨少)",
+
+                       f"涨{up_days}天 跌{dn_days}天 平{flat_days}天"))
+
+
+
+        # ⑥ MA15 斜率向下 (近5天 MA15 持续下降)
+
+        if len(closes) >= 20:
+
+            ma15_now = ma15
+
+            ma15_5d_ago = sum(closes[-20:-15]) / 5
+
+            ma15_slope_down = ma15_now < ma15_5d_ago
+
+        else:
+
+            ma15_slope_down = False
+
+        danger.append((ma15_slope_down, "MA15 向下发散",
+
+                       f"MA15 现在={ma15:.1f} 5天前={ma15_5d_ago:.1f}"))
+
+
+
+        # ======= 乐观信号 =======
+
+        # ① MA 多头排列 (MA5 > MA10 > MA15 > MA20)
+
+        bull_ma = (ma5 > ma10 > ma15 > ma20)
+
+        opt.append((bull_ma, "MA 多头排列 (MA5>MA10>MA15>MA20)",
+
+                    f"MA5={ma5:.1f} MA10={ma10:.1f} MA15={ma15:.1f}"))
+
+
+
+        # ② 上证站稳 MA60
+
+        opt.append((not below_ma60 and ma60 is not None, "站稳 MA60 牛熊线",
+
+                    f"当前={last:.1f} MA60={ma60:.1f} 偏离={(last-ma60)/ma60*100:+.2f}%"))
+
+
+
+        # ③ 量能放大 (vol_ratio > 1.3)
+
+        opt.append((vol_ratio > 1.3, "放量上涨 (近5日均量>前15日均量×1.3)",
+
+                    f"vol_ratio={vol_ratio:.2f}"))
+
+
+
+        # ④ 近 10 日连涨 ≥ 4 天
+
+        opt.append((max_consec_up >= 4, "近10日连涨≥4天",
+
+                    f"最长连涨 {max_consec_up} 天"))
+
+
+
+        # ⑤ 近 20 日上涨天数 ≥ 13 天
+
+        opt.append((up_days >= 13, "20日内上涨≥13天 (涨多跌少)",
+
+                    f"涨{up_days}天 跌{dn_days}天"))
+
+
+
+        # ⑥ MA15 斜率向上
+
+        opt.append((not ma15_slope_down and len(closes) >= 20, "MA15 向上发散",
+
+                    f"MA15 现在={ma15:.1f} 5天前={ma15_5d_ago:.1f}"))
+
+
+
+        # 综合
+
+        d_count = sum(1 for t, _, _ in danger if t)
+
+        o_count = sum(1 for t, _, _ in opt if t)
+
+
+
+        if d_count >= 3 and o_count <= 1:
+
+            summary = f"🚨 危险预警: {d_count} 个危险信号触发 → 建议减仓至 2-3 成"
+
+        elif d_count >= 2 and o_count <= 2:
+
+            summary = f"⚠️ 偏谨慎: {d_count}个危险 / {o_count}个乐观 → 控制仓位 3-5 成"
+
+        elif o_count >= 3 and d_count <= 1:
+
+            summary = f"🎯 积极信号: {o_count} 个乐观信号触发 → 可积极入场 5-8 成"
+
+        elif o_count >= 2 and d_count <= 2:
+
+            summary = f"😊 偏乐观: {o_count}个乐观 / {d_count}个危险 → 可试探 5-6 成"
+
+        else:
+
+            summary = f"⚖️ 中性: {d_count}个危险 / {o_count}个乐观 → 观望为主 3-5 成"
+
+
+
+        return danger, opt, summary
+
+    def _refresh_market_risk_panel(self):
+
+        """刷新 大盘危险/乐观 信号面板"""
+
+        try:
+
+            danger, opt, summary = self._calc_market_risk_indicators()
+
+
+
+            # 清旧
+
+            for w in self._w_risk_frame.winfo_children(): w.destroy()
+
+            for w in self._w_opt_frame.winfo_children(): w.destroy()
+
+
+
+            def _render_list(parent, items, is_danger):
+
+                for triggered, name, detail in items:
+
+                    row = tk.Frame(parent, bg=parent["bg"])
+
+                    row.pack(fill=tk.X, padx=6, pady=1)
+
+                    icon = "🔴" if (is_danger and triggered) else (
+
+                        "🟢" if (not is_danger and triggered) else "⚪")
+
+                    fg = "#C62828" if (is_danger and triggered) else (
+
+                        "#2E7D32" if (not is_danger and triggered) else "#78909C")
+
+                    txt = f"{icon} {name}"
+
+                    tk.Label(row, text=txt, bg=parent["bg"], fg=fg,
+
+                             font=("", 9, "bold" if triggered else "normal"),
+
+                             anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+                    tk.Label(parent, text=f"    {detail}", bg=parent["bg"], fg="#90A4AE",
+
+                             font=("", 8), anchor="w").pack(fill=tk.X, padx=6)
+
+
+
+            _render_list(self._w_risk_frame, danger, is_danger=True)
+
+            _render_list(self._w_opt_frame, opt, is_danger=False)
+
+
+
+            # 总评
+
+            if summary.startswith("🚨"):
+
+                fg = "#C62828"; bg = "#FFCDD2"
+
+            elif summary.startswith("⚠️"):
+
+                fg = "#E65100"; bg = "#FFE0B2"
+
+            elif summary.startswith("🎯"):
+
+                fg = "#1B5E20"; bg = "#C8E6C9"
+
+            elif summary.startswith("😊"):
+
+                fg = "#2E7D32"; bg = "#E8F5E9"
+
+            else:
+
+                fg = "#333"; bg = "#E0E0E0"
+
+            self._w_risk_summary.config(text=summary, fg=fg, bg=bg)
+
+
+
+        except Exception as _e:
+
+            import traceback as _tb; _tb.print_exc()
+
+            print(f"[风险面板] 刷新失败: {_e}", flush=True)
+
+
+
+    # 等待仪表盘 · 手动判别按钮 (后台线程, 8秒超时)
+
+    # ════════════════════════════════════════════════════════════════════════
+
+    def _do_risk_check(self):
+
+        """🎯 手动触发判别 - 后台线程拉数据, 8秒超时保护"""
+
+        import threading as _th
+
+
+
+        # UI: 按钮禁用 + 状态文字
+
+        try:
+
+            self._btn_risk_check.config(state=tk.DISABLED, text="⏳ 判别中...")
+
+            self._lbl_risk_status.config(text="正在拉新浪日线... (8秒超时)", fg="#1565C0")
+
+        except Exception:
+
+            pass
+
+
+
+        def _worker():
+
+            import time as _tm
+
+            t0 = _tm.time()
+
+            try:
+
+                # 1. 大盘危险/乐观信号 (新浪日线, timeout=8)
+
+                danger, opt, summary = self._calc_market_risk_indicators()
+
+
+
+                # 2. 情绪周期 + 暴跌温度计 (也走新浪日线, 已加 timeout=8)
+
+                info = {}
+
+                try:
+
+                    info = self._get_crash_alert_snapshot() or {}
+
+                except Exception:
+
+                    pass
+
+                mood_score = self._calc_mood_stage(info)
+
+                avg_drop = self._calc_avg_drop(info)
+
+                alpha_score, alpha_msg = self._calc_alpha_beta_opportunity()
+
+
+
+                elapsed = round(_tm.time() - t0, 1)
+
+
+
+                # 回到主线程刷新所有 UI
+
+                def _update_ui():
+
+                    try:
+
+                        self._refresh_market_risk_panel()
+
+                        # 三列图形
+
+                        self._w_last_mood_score = mood_score
+
+                        self._w_last_drop = avg_drop
+
+                        self._w_last_alpha_score = alpha_score
+
+                        self._draw_mood_canvas(mood_score)
+
+                        self._draw_thermo_canvas(avg_drop)
+
+                        self._draw_alpha_canvas(alpha_score, alpha_msg)
+
+                        self._w_alpha_detail.config(text=alpha_msg)
+
+                        # 综合决策
+
+                        decision = self._calc_decision()
+
+                        self._show_decision(decision)
+
+                        # 按钮恢复
+
+                        self._btn_risk_check.config(state=tk.NORMAL, text="🎯 判别今日乐观/悲观")
+
+                        self._lbl_risk_status.config(
+
+                            text=f"✅ 判别完成 ({elapsed}s) · {summary[:40]}",
+
+                            fg="#2E7D32")
+
+                    except Exception as _e_ui:
+
+                        self._lbl_risk_status.config(text=f"❌ UI刷新失败: {_e_ui}", fg="#C62828")
+
+                        self._btn_risk_check.config(state=tk.NORMAL)
+
+                self.root.after(0, _update_ui)
+
+
+
+            except Exception as _e:
+
+                import traceback as _tb; _tb.print_exc()
+
+                self.root.after(0, lambda: (
+
+                    self._btn_risk_check.config(state=tk.NORMAL, text="🎯 判别今日乐观/悲观"),
+
+                    self._lbl_risk_status.config(
+
+                        text=f"❌ 判别失败: {str(_e)[:50]}", fg="#C62828")))
+
+
+
+        _th.Thread(target=_worker, daemon=True).start()
+
+    def _refresh_waiting_dashboard(self):
+
+        """刷新等待 Tab 全部图形化组件（3 个 Canvas + 决策条）"""
+
+        try:
+
+            info = self._get_crash_alert_snapshot()
+
+            self._w_dash_date_label.config(
+
+                text=f"更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+
+
+            # --- 1) 情绪周期位置 ---
+
+            mood_score, mood_name = self._calc_mood_stage(info)
+
+            self._w_last_mood_score = mood_score
+
+            self._w_last_mood_name = mood_name
+
+            self._draw_mood_canvas(mood_score, mood_name)
+
+            self._w_mood_detail.config(
+
+                text=f"当前情绪: {mood_name}\n"
+
+                     f"三指数20日均跌: {info.get('avg_drop_pct', 0):+.2f}%\n"
+
+                     f"数据源: {info.get('source', '-')}")
+
+
+
+            # --- 2) 暴涨暴跌温度计 ---
+
+            avg_drop = info.get('avg_drop_pct', 0) or 0
+
+            self._w_last_avg_drop = avg_drop
+
+            self._draw_thermo_canvas(avg_drop)
+
+            idx_lines = " | ".join(
+
+                f"{k}: {v:+.2f}%" for k, v in info.get('indices', {}).items()
+
+            )
+
+            self._w_crash_detail.config(
+
+                text=f"20日三指数平均: {avg_drop:+.2f}%\n"
+
+                     f"阈值线: -15% 触发暴跌提示\n"
+
+                     f"{idx_lines}")
+
+
+
+            # --- 3) α/β 反弹机会雷达 ---
+
+            alpha_score, alpha_msg = self._calc_alpha_beta_opportunity()
+
+            self._w_last_alpha_score = alpha_score
+
+            self._draw_alpha_canvas(alpha_score, alpha_msg)
+
+            self._w_alpha_detail.config(text=alpha_msg)
+
+
+
+            # --- 4.5) 大盘危险/乐观信号 ---
+
+            try:
+
+                self._refresh_market_risk_panel()
+
+            except Exception:
+
+                pass
+
+
+
+            # --- 5) 综合决策 ---
+
+            verdict, sub, pct, rationale = self._calc_decision(
+
+                mood_score, avg_drop, alpha_score, info)
+
+            self._w_verdict_label.config(text=verdict)
+
+            self._w_verdict_label.config(
+
+                fg="#C62828" if verdict.startswith("🔥") else
+
+                   "#2E7D32" if verdict.startswith("❄") else
+
+                   "#1565C0" if verdict.startswith("🎯") else "#F57F17")
+
+            self._w_verdict_sub.config(text=sub)
+
+            self._w_action_bar["value"] = pct
+
+            self._w_action_pct_label.config(text=f"{pct}%")
+
+            self._w_rationale_text.config(state=tk.NORMAL)
+
+            self._w_rationale_text.delete("1.0", tk.END)
+
+            self._w_rationale_text.insert("1.0", rationale)
+
+            self._w_rationale_text.config(state=tk.DISABLED)
+
+
+
+        except Exception as e:
+
+            print(f"[等待仪表盘] 刷新失败: {e}")
+
+            import traceback
+
+            traceback.print_exc()
+
+    def _draw_mood_canvas(self, score, stage_name):
+
+        """在 Canvas 上绘制情绪周期 5 段色带 + 指针 (自适应宽度)"""
+
+        c = self._w_mood_canvas
+
+        c.delete("all")
+
+        W, H = self._canvas_size(c, w_min=200, h_min=80)
+
+
+
+        # 色带区域 (居中, 上下留空间给标题和底部说明)
+
+        pad_top = 30
+
+        pad_bot = 25
+
+        band_y0 = pad_top
+
+        band_y1 = H - pad_bot
+
+
+
+        segments = self._MOOD_STAGES
+
+        seg_w = W / len(segments)
+
+        for i, (_, name, color) in enumerate(segments):
+
+            x0 = i * seg_w
+
+            x1 = (i + 1) * seg_w
+
+            c.create_rectangle(x0 + 2, band_y0, x1 - 2, band_y1,
+
+                              fill=color, outline="", width=2)
+
+            # 文字标签 (自动选字号)
+
+            font_size = max(8, int(min(12, seg_w / 12)))
+
+            c.create_text((x0 + x1) / 2, (band_y0 + band_y1) / 2, text=name,
+
+                         fill="white", font=("Microsoft YaHei", font_size, "bold"))
+
+
+
+        # 指针 (三角形, 指向当前分数)
+
+        ptr_x = max(10, min(W - 10, score * W))
+
+        ptr_h = 10
+
+        c.create_polygon(ptr_x - 6, band_y0 - ptr_h + 2,
+
+                        ptr_x + 6, band_y0 - ptr_h + 2,
+
+                        ptr_x, band_y0,
+
+                        fill="#333", outline="")
+
+        # 当前百分比 (指针上方)
+
+        c.create_text(ptr_x, band_y0 - ptr_h - 8, text=f"{score:.0%}",
+
+                     font=("Microsoft YaHei", 10, "bold"), fill="#333")
+
+        # 底部标题
+
+        c.create_text(W / 2, H - 8,
+
+                     text=f"当前位置: {stage_name}",
+
+                     font=("Microsoft YaHei", 10), fill="#555")
+
+    def _draw_thermo_canvas(self, avg_drop):
+
+        """温度计: -25% 到 +10% (自适应宽度)"""
+
+        c = self._w_thermo_canvas
+
+        c.delete("all")
+
+        W, H = self._canvas_size(c, w_min=150, h_min=100)
+
+
+
+        # 让温度计居中 (竖在中央)
+
+        mid_x = W / 2
+
+
+
+        # 标尺参数
+
+        min_v, max_v = -25, 10
+
+        bar_w = max(24, min(44, W / 5))
+
+        bar_x0 = mid_x - bar_w / 2
+
+        bar_x1 = mid_x + bar_w / 2
+
+        bar_top = 8
+
+        bar_bot = H - 30
+
+        bar_h = bar_bot - bar_top
+
+
+
+        # 外壳
+
+        c.create_rectangle(bar_x0 - 3, bar_top - 8, bar_x1 + 3, bar_bot + 8,
+
+                          fill="#ECEFF1", outline="#90A4AE")
+
+
+
+        # 分色区 (从顶到底: 暴涨红 → 正常黄 → 暴跌绿 → 极端暴跌深绿)
+
+        zero_y = bar_bot - (0 - min_v) / (max_v - min_v) * bar_h
+
+        crash_y = bar_bot - (-15 - min_v) / (max_v - min_v) * bar_h
+
+        ext_crash_y = bar_bot - (-20 - min_v) / (max_v - min_v) * bar_h
+
+        normal_y = bar_bot - (-5 - min_v) / (max_v - min_v) * bar_h
+
+
+
+        # 自上而下: 暴涨区 (红) → 正常偏热 (浅红) → 正常 (黄) → 轻微跌 (浅黄) → 暴跌 (绿) → 极端 (深绿)
+
+        c.create_rectangle(bar_x0, bar_top, bar_x1, zero_y,
+
+                          fill="#EF5350", outline="")        # 0~+10% 红
+
+        c.create_rectangle(bar_x0, normal_y, bar_x1, zero_y,
+
+                          fill="#FFC107", outline="")        # -5~0% 黄
+
+        c.create_rectangle(bar_x0, crash_y, bar_x1, normal_y,
+
+                          fill="#FFD54F", outline="")        # -15~-5% 浅黄
+
+        c.create_rectangle(bar_x0, ext_crash_y, bar_x1, crash_y,
+
+                          fill="#66BB6A", outline="")        # -20~-15% 浅绿
+
+        c.create_rectangle(bar_x0, bar_bot, bar_x1, ext_crash_y,
+
+                          fill="#2E7D32", outline="")        # <-20% 深绿
+
+
+
+        # 当前值标记 (红柱覆盖)
+
+        val_clamp = max(min_v, min(max_v, avg_drop))
+
+        val_y = bar_bot - (val_clamp - min_v) / (max_v - min_v) * bar_h
+
+        if avg_drop <= 0:
+
+            c.create_rectangle(bar_x0, val_y, bar_x1, zero_y,
+
+                              fill="#C62828", outline="")
+
+        else:
+
+            c.create_rectangle(bar_x0, zero_y, bar_x1, val_y,
+
+                              fill="#C62828", outline="")
+
+
+
+        # 横线指针 + 数值标签 (左侧)
+
+        marker_y = (val_y + bar_top) / 2
+
+        # 从温度计左侧伸出一条线 + 数值
+
+        left_label_x = bar_x0 - max(50, W / 4) + 10
+
+        right_label_x = bar_x1 + max(20, W / 4) - 10
+
+        c.create_line(bar_x0 - 8, marker_y, bar_x1 + 8, marker_y,
+
+                     fill="#333", width=2)
+
+        c.create_text(right_label_x, marker_y, text=f"{avg_drop:+.2f}%",
+
+                     font=("Microsoft YaHei", 12, "bold"), fill="#C62828")
+
+
+
+        # 阈值标注 (左侧竖排)
+
+        for label, val in [("暴涨", +10), ("0%", 0), ("暴跌-15%", -15), ("极值-25%", -25)]:
+
+            ly = bar_bot - (val - min_v) / (max_v - min_v) * bar_h
+
+            c.create_line(bar_x0 - 5, ly, bar_x0, ly, fill="#666")
+
+            c.create_text(bar_x0 - 10, ly, text=label, anchor="e",
+
+                         font=("", 8), fill="#555")
+
+
+
+    def _draw_alpha_canvas(self, opp_score, msg_prefix):
+
+        """α/β 反弹机会圆环 (自适应宽度, 居中)"""
+
+        c = self._w_alpha_canvas
+
+        c.delete("all")
+
+        W, H = self._canvas_size(c, w_min=150, h_min=100)
+
+
+
+        # 圆环居中
+
+        cx = W / 2
+
+        cy = H / 2 - 5
+
+        r = max(35, min(W, H) / 2 - 20)
+
+
+
+        # 颜色映射
+
+        if opp_score >= 60:
+
+            arc_color = "#C62828"
+
+        elif opp_score >= 35:
+
+            arc_color = "#F57C00"
+
+        else:
+
+            arc_color = "#90A4AE"
+
+
+
+        # 背景圆 (用 circle 模拟圆环)
+
+        c.create_oval(cx - r, cy - r, cx + r, cy + r,
+
+                     outline="#E0E0E0", width=min(14, r // 3))
+
+
+
+        # 机会分圆弧
+
+        angles = opp_score / 100 * 360
+
+        if angles > 0:
+
+            c.create_arc(cx - r, cy - r, cx + r, cy + r,
+
+                        start=90, extent=-angles, style=tk.ARC,
+
+                        outline=arc_color, width=min(14, r // 3))
+
+
+
+        # 中心文字
+
+        fs = max(14, min(28, r))
+
+        c.create_text(cx, cy - 2, text=f"{opp_score}",
+
+                     font=("Microsoft YaHei", fs, "bold"), fill=arc_color)
+
+        c.create_text(cx, cy + fs / 2 + 4, text="反弹机会分",
+
+                     font=("", 9), fill="#555")
+
+
+
+        # 下方标尺 (紧贴圆环下方)
+
+        bar_y = cy + r + 12
+
+        if bar_y + 14 < H:
+
+            bar_w = min(W - 20, max(80, 2 * r))
+
+            bar_x0 = cx - bar_w / 2
+
+            c.create_rectangle(bar_x0, bar_y, bar_x0 + bar_w, bar_y + 8,
+
+                              fill="#E0E0E0", outline="")
+
+            filled = bar_w * opp_score / 100
+
+            c.create_rectangle(bar_x0, bar_y, bar_x0 + filled, bar_y + 8,
+
+                              fill=arc_color, outline="")
+
+            c.create_text(bar_x0, bar_y - 4, text="低", anchor="w",
+
+                         font=("", 8), fill="#666")
+
+            c.create_text(bar_x0 + bar_w, bar_y - 4, text="高", anchor="e",
+
+                         font=("", 8), fill="#666")
+
+    def _draw_alpha_canvas(self, opp_score, msg_prefix):
+
+        """α/β 反弹机会雷达 — 圆环进度"""
+
+        c = self._w_alpha_canvas
+
+        c.delete("all")
+
+        W = c.winfo_width() or 300
+
+        H = 150
+
+        c.config(width=W)
+
+
+
+        # 中心
+
+        cx, cy = W / 2, H / 2 - 10
+
+        r_outer = 55
+
+        r_inner = 40
+
+
+
+        # 背景圆环
+
+        c.create_oval(cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer,
+
+                     outline="#E0E0E0", width=12)
+
+
+
+        # 机会分圆环 (从 -90° 顺时针画)
+
+        # opp_score 0~100 → 弧度
+
+        import math
+
+        angles = opp_score / 100 * 360
+
+        # 颜色映射
+
+        if opp_score >= 60:
+
+            arc_color = "#C62828"  # 红 = 机会好
+
+        elif opp_score >= 35:
+
+            arc_color = "#F57C00"  # 橙
+
+        else:
+
+            arc_color = "#90A4AE"  # 灰 = 机会小
+
+
+
+        # Tkinter arc 参数: extent 是度数, start=-90 表示 12 点方向
+
+        if angles > 0:
+
+            c.create_arc(cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer,
+
+                        start=90, extent=-angles, style=tk.ARC,
+
+                        outline=arc_color, width=12)
+
+
+
+        # 中心文字
+
+        c.create_text(cx, cy - 5, text=f"{opp_score}",
+
+                     font=("Microsoft YaHei", 24, "bold"), fill=arc_color)
+
+        c.create_text(cx, cy + 18, text="反弹机会分",
+
+                     font=("", 9), fill="#555")
+
+
+
+        # 下方标尺
+
+        bar_y = H - 30
+
+        c.create_rectangle(20, bar_y, W - 20, bar_y + 8, fill="#E0E0E0", outline="")
+
+        filled = (W - 40) * opp_score / 100
+
+        c.create_rectangle(20, bar_y, 20 + filled, bar_y + 8, fill=arc_color, outline="")
+
+        c.create_text(20, bar_y - 5, text="低", anchor="w", font=("", 8), fill="#666")
+
+        c.create_text(W - 20, bar_y - 5, text="高", anchor="e", font=("", 8), fill="#666")
+
+    def _calc_decision(self, mood_score, avg_drop, alpha_score, info):
+
+        """综合三因素 → 量化决策
+
+        返回 (verdict_label, sub_text, pct_0_100, rationale_text)"""
+
+        # 决策分数 (0=纯等待, 100=积极入场)
+
+        # 情绪分高(乐观→狂热) → 入场意愿高
+
+        # 暴跌深 → 入场意愿高 (左侧)
+
+        # 历史反弹胜率高 → 入场意愿高
+
+        drop_component = 0
+
+        if avg_drop <= -15:
+
+            drop_component = 35  # 暴跌区 → 加仓信号
+
+        elif avg_drop <= -10:
+
+            drop_component = 25
+
+        elif avg_drop <= -5:
+
+            drop_component = 15
+
+        elif avg_drop <= 0:
+
+            drop_component = 8
+
+        else:
+
+            drop_component = max(0, 5 - avg_drop)  # 正涨 → 等回调
+
+
+
+        score = int(mood_score * 35 + drop_component + alpha_score * 0.3)
+
+        score = max(5, min(95, score))
+
+
+
+        if score >= 70:
+
+            verdict = "🎯 可以积极入场"
+
+            sub = f"建议仓位: 5-8 成 | 关注 β ETF 低位 + α ETF 反弹"
+
+        elif score >= 50:
+
+            verdict = "🎯 可以轻仓试探"
+
+            sub = f"建议仓位: 2-5 成 | 优先 β ETF, 观察 α ETF 方向"
+
+        elif score >= 30:
+
+            verdict = "⏳ 适合等待"
+
+            sub = f"建议仓位: 0-2 成 | 等情绪周期走到 绝望/复苏交界"
+
+        else:
+
+            verdict = "❄️ 观望为主"
+
+            sub = f"建议仓位: 空仓或底仓 | 情绪极热/极冷都不宜追"
+
+
+
+        # 构建理由
+
+        reasons = [
+
+            f"【情绪周期】当前 {mood_score:.0%} ({self._MOOD_STAGES[min(4, int(mood_score*5))][1]})",
+
+            f"【20日三指数平均】{avg_drop:+.2f}% {'✅ 触发暴跌提示' if avg_drop <= -15 else '正常区间'}",
+
+            f"【历史反弹胜率】α/β 机会分 {alpha_score}/100",
+
+            f"【数据源】{info.get('source', '-')}",
+
+        ]
+
+        if avg_drop <= -15:
+
+            reasons.append("💡 暴跌阈值已触发 — 左侧分批建仓 β ETF 胜率最高 (参考 2025年7月半导体ETF反弹)")
+
+        if mood_score <= 0.30 and alpha_score >= 40:
+
+            reasons.append("💡 情绪在恐慌/绝望区, 但历史反弹机会分高 — 经典恐慌贪婪反向操作区")
+
+        if mood_score >= 0.75:
+
+            reasons.append("⚠️ 情绪偏狂热, 追高风险大, 建议等回调再进")
+
+
+
+        rationale = "\n".join(reasons)
+
+        return verdict, sub, score, rationale
+
+
+
+
 __all__ = ["DapanMixin"]

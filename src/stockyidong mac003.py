@@ -5360,77 +5360,211 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         # 暴跌标签页(放在等待前)
         crash_tab = ttk.Frame(crawler_control_notebook, padding=10)
         crawler_control_notebook.add(crash_tab, text="暴跌")
+
+        # —— 上半: 实时暴跌状态快照 ——
         crash_top = ttk.Frame(crash_tab)
-        crash_top.pack(fill=tk.X, pady=(0, 8))
+        crash_top.pack(fill=tk.X, pady=(0, 6))
         ttk.Button(crash_top, text="刷新暴跌状态", command=self._refresh_crash_alert_display).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(crash_top, text="记录到资讯表", command=self._save_crash_alert_snapshot_to_news).pack(side=tk.LEFT)
-        self.crash_alert_text_widget = scrolledtext.ScrolledText(crash_tab, height=12, wrap=tk.WORD)
+
+        # ⬇ 新下半: 历史暴涨暴跌事件库 (和 🗓️暴涨暴跌弹窗共用同一 SQLite 表)
+        crash_split = ttk.PanedWindow(crash_tab, orient=tk.VERTICAL)
+        crash_split.pack(fill=tk.BOTH, expand=True)
+
+        # 上: 实时快照
+        top_panel = ttk.Frame(crash_split)
+        crash_split.add(top_panel, weight=1)
+        self.crash_alert_text_widget = scrolledtext.ScrolledText(top_panel, height=10, wrap=tk.WORD)
         self.crash_alert_text_widget.pack(fill=tk.BOTH, expand=True)
         self.crash_alert_text_widget.config(state=tk.DISABLED)
-        self._refresh_crash_alert_display()
-        # 等待观察标签页
-        waiting_tab = ttk.Frame(crawler_control_notebook, padding=10)
+
+        # 下: 历史事件库 Treeview
+        bot_panel = ttk.Frame(crash_split)
+        crash_split.add(bot_panel, weight=2)
+
+        bot_top = ttk.Frame(bot_panel)
+        bot_top.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(bot_top, text="🗓️ 历史暴涨暴跌事件库 (与 🗓️暴涨暴跌按钮 弹窗同步)",
+                  font=("", 10, "bold")).pack(side=tk.LEFT)
+        ttk.Button(bot_top, text="🔄同步事件库", width=10,
+                   command=self._load_crash_rally_events).pack(side=tk.RIGHT, padx=2)
+        self._crash_events_count_label = ttk.Label(bot_top, text="")
+        self._crash_events_count_label.pack(side=tk.RIGHT, padx=8)
+
+        # 6 列 Treeview (和 crash_rally_calendar.py 的 Tab A 完全一致)
+        crash_cols = ("date", "type", "index", "pct", "magnitude", "trigger")
+        self._crash_events_tree = ttk.Treeview(bot_panel, columns=crash_cols, show="headings", height=12)
+        for c, t, w in [("date", "日期", 90), ("type", "类型", 60), ("index", "指数", 100),
+                        ("pct", "涨跌幅%", 80), ("magnitude", "幅度", 60), ("trigger", "触发信号", 200)]:
+            self._crash_events_tree.heading(c, text=t)
+            self._crash_events_tree.column(c, width=w, anchor="center")
+        # 涨跌颜色 tag
+        self._crash_events_tree.tag_configure("crash", foreground="#2E7D32")   # 绿 = 暴跌
+        self._crash_events_tree.tag_configure("rally", foreground="#C62828")   # 红 = 暴涨
+        self._crash_events_tree.pack(fill=tk.BOTH, expand=True, pady=2)
+        # 双击行 → 打开详情（复用 _open_crash_event_detail）
+        def _on_dbl_ev(event):
+            sel = self._crash_events_tree.selection()
+            if not sel:
+                return
+            eid = sel[0]
+            try:
+                self._open_crash_event_detail(eid)
+            except Exception as ex:
+                print(f"[暴跌Tab] 双击打开详情失败: {ex}")
+        self._crash_events_tree.bind("<Double-1>", _on_dbl_ev)
+
+        # 启动零联网: 暴跌快照异步后台拉 (避免阻塞等待 Tab 创建)
+        # self._refresh_crash_alert_display()  # ❌ 同步阻塞
+        self.root.after(500, self._refresh_crash_alert_display)
+
+        # ══════════════════════════════════════════════════════════
+        # 等待 Tab —— 图形化决策仪表盘 (重构版, 可滚动)
+        # ══════════════════════════════════════════════════════════
+        waiting_tab = ttk.Frame(crawler_control_notebook, padding=8)
         crawler_control_notebook.add(waiting_tab, text="等待")
-        waiting_sections = [
-            ("趋势等回调", "trend_pullback"),
-            ("震荡等低点", "range_low"),
-            ("突破等回调", "breakout_pullback"),
-            ("反转等放量", "reversal_volume"),
-        ]
-        self.waiting_reason_map = {}
-        self.waiting_combo_widgets = []
-        self.waiting_section_vars = {}
-        self.waiting_source_widgets = []  # 存储数据源下拉框
-        position_types = ["绩优股", "朋友", "强势股", "妖股", "均值回归"]
-        data_sources = ["数据表", "自选表", "龙虎榜表"]
-        for title, key in waiting_sections:
-            section_frame = ttk.LabelFrame(waiting_tab, padding=10)
-            section_frame.pack(fill=tk.X, pady=6)
-            title_label = tk.Label(
-                section_frame,
-                text=title,
-                font=("Microsoft YaHei", 16, "bold"),
-                fg="#f7c646"
-            )
-            title_label.pack(anchor=tk.W, pady=(0, 6))
-            self.waiting_reason_map[key] = title
-            input_row = ttk.Frame(section_frame)
-            input_row.pack(fill=tk.X, pady=2)
-            ttk.Label(input_row, text="数据源:").pack(side=tk.LEFT)
-            source_var = tk.StringVar(value=data_sources[0])
-            source_combo = ttk.Combobox(input_row, textvariable=source_var, values=data_sources, state="readonly", width=10)
-            source_combo.pack(side=tk.LEFT, padx=5)
-            self.waiting_source_widgets.append(source_combo)
-            ttk.Label(input_row, text="自选股:").pack(side=tk.LEFT, padx=(10, 0))
-            stock_var = tk.StringVar()
-            stock_combo = ttk.Combobox(input_row, textvariable=stock_var, state="readonly", width=25)
-            stock_combo.pack(side=tk.LEFT, padx=5)
-            self.waiting_combo_widgets.append(stock_combo)
-            # 绑定数据源变化事件
-            source_combo.bind("<<ComboboxSelected>>", lambda e, combo=stock_combo, src=source_var: self._update_waiting_stock_combo(combo, src.get()))
-            ttk.Label(input_row, text="类型:").pack(side=tk.LEFT, padx=(10, 0))
-            type_var = tk.StringVar(value=position_types[0])
-            type_combo = ttk.Combobox(
-                input_row, textvariable=type_var,
-                values=position_types, state="readonly", width=10
-            )
-            type_combo.pack(side=tk.LEFT, padx=5)
-            btn_row = ttk.Frame(section_frame)
-            btn_row.pack(fill=tk.X, pady=6)
-            ttk.Button(
-                btn_row,
-                text="开新仓",
-                command=lambda k=key: self._open_waiting_new_position(k)
-            ).pack(side=tk.LEFT)
-            notes_entry = ttk.Entry(section_frame)
-            notes_entry.pack(fill=tk.X, pady=(4, 0))
-            self.waiting_section_vars[key] = {
-                "stock_var": stock_var,
-                "type_var": type_var,
-                "stock_combo": stock_combo,
-                "notes_entry": notes_entry,
-            }
-        self._update_waiting_combo_values()
+
+        # —— 滚动容器 (解决窗口不够高时底部控件被挤没的问题) ——
+        w_canvas = tk.Canvas(waiting_tab, highlightthickness=0, borderwidth=0)
+        w_scroll = ttk.Scrollbar(waiting_tab, orient=tk.VERTICAL, command=w_canvas.yview)
+        w_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        w_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        w_canvas.configure(yscrollcommand=w_scroll.set)
+        # 内部可滚动 Frame
+        w_inner = ttk.Frame(w_canvas)
+        w_win = w_canvas.create_window((0, 0), window=w_inner, anchor="nw")
+        # Frame 宽 = Canvas 宽
+        def _on_w_configure(e):
+            w_canvas.itemconfigure(w_win, width=e.width)
+            w_canvas.configure(scrollregion=w_canvas.bbox("all"))
+        w_canvas.bind("<Configure>", _on_w_configure)
+        w_inner.bind("<Configure>",
+                     lambda e: w_canvas.configure(scrollregion=w_canvas.bbox("all")))
+        # 鼠标滚轮
+        def _on_wheel(e):
+            w_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        w_canvas.bind_all("<MouseWheel>", _on_wheel)
+
+        # 顶部刷新条
+        w_top = ttk.Frame(w_inner)
+        w_top.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(w_top, text="⏳ 等待还是入场？ — 情绪周期 × 暴涨暴跌 × α/β 机会",
+                  font=("", 12, "bold")).pack(side=tk.LEFT)
+        ttk.Button(w_top, text="🔄刷新仪表盘", width=12,
+                   command=self._refresh_waiting_dashboard).pack(side=tk.RIGHT, padx=4)
+        self._w_dash_date_label = ttk.Label(w_top, text="", foreground="#78909C")
+        self._w_dash_date_label.pack(side=tk.RIGHT, padx=8)
+
+        # 三列布局 (Canvas 图形化 —— 固定高度, 不吃决策面板空间)
+        w_main = ttk.Frame(w_inner)
+        w_main.pack(fill=tk.X, pady=4)
+        w_main.columnconfigure(0, weight=1, uniform="w")
+        w_main.columnconfigure(1, weight=1, uniform="w")
+        w_main.columnconfigure(2, weight=1, uniform="w")
+
+        # —— 左: 情绪周期进度条 (横条) ——
+        w_left = ttk.LabelFrame(w_main, text="📈 情绪周期位置", padding=4)
+        w_left.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        self._w_mood_canvas = tk.Canvas(w_left, height=80, bg="#F5F5F5",
+                                        highlightthickness=0)
+        self._w_mood_canvas.pack(fill=tk.X, pady=2)
+        self._w_mood_detail = ttk.Label(w_left, text="", wraplength=300, justify=tk.LEFT)
+        self._w_mood_detail.pack(fill=tk.X, pady=2)
+
+        # —— 中: 暴涨暴跌温度计 ——
+        w_mid = ttk.LabelFrame(w_main, text="🌡️ 暴涨暴跌温度计", padding=4)
+        w_mid.grid(row=0, column=1, sticky="nsew", padx=4)
+        self._w_thermo_canvas = tk.Canvas(w_mid, height=110, bg="#F5F5F5",
+                                          highlightthickness=0)
+        self._w_thermo_canvas.pack(fill=tk.X, pady=2)
+        self._w_crash_detail = ttk.Label(w_mid, text="", wraplength=300, justify=tk.LEFT)
+        self._w_crash_detail.pack(fill=tk.X, pady=2)
+
+        # —— 右: α/β 反弹机会圆环 ——
+        w_right = ttk.LabelFrame(w_main, text="🎯 α/β 反弹机会雷达", padding=4)
+        w_right.grid(row=0, column=2, sticky="nsew", padx=(4, 0))
+        self._w_alpha_canvas = tk.Canvas(w_right, height=110, bg="#F5F5F5",
+                                         highlightthickness=0)
+        self._w_alpha_canvas.pack(fill=tk.X, pady=2)
+        self._w_alpha_detail = ttk.Label(w_right, text="", wraplength=300, justify=tk.LEFT)
+        self._w_alpha_detail.pack(fill=tk.X, pady=2)
+
+        # —— 🎯 手动判别按钮 (启动不自动拉, 用户点了才联网) ——
+        w_act = tk.Frame(w_inner, bg="#FFFFFF")
+        w_act.pack(fill=tk.X, pady=(2, 4))
+        self._btn_risk_check = tk.Button(
+            w_act, text="🎯 判别今日乐观/悲观",
+            font=("Microsoft YaHei", 12, "bold"),
+            fg="#FFFFFF", bg="#1565C0", activebackground="#0D47A1",
+            padx=14, pady=6, cursor="hand2",
+            command=self._do_risk_check)
+        self._btn_risk_check.pack(side=tk.LEFT)
+        self._lbl_risk_status = tk.Label(
+            w_act, text="(点击按钮拉数据判断, 启动不联网)",
+            bg="#FFFFFF", fg="#78909C", font=("", 10))
+        self._lbl_risk_status.pack(side=tk.LEFT, padx=10)
+
+        # —— ⚠️大盘危险 vs ✅大盘乐观 信号面板 (2列) ——
+        w_risk = tk.LabelFrame(w_inner, text="⚠️ 大盘危险信号  ✅ 大盘乐观信号 (基于今日数据)",
+                              bg="#F5F5F5", fg="#333", font=("", 11, "bold"), padx=8, pady=6)
+        w_risk.pack(fill=tk.X, pady=(6, 4))
+        w_risk.columnconfigure(0, weight=1)
+        w_risk.columnconfigure(1, weight=1)
+
+        # 左列: 危险信号
+        risk_col = tk.Frame(w_risk, bg="#FFEBEE")
+        risk_col.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        tk.Label(risk_col, text="⚠️ 危险信号 (出现 ≥3 个 → 减仓)",
+                 bg="#FFEBEE", fg="#C62828",
+                 font=("Microsoft YaHei", 10, "bold")).pack(anchor="w", pady=(2, 4))
+        self._w_risk_frame = risk_col
+
+        # 右列: 乐观信号
+        opt_col = tk.Frame(w_risk, bg="#E8F5E9")
+        opt_col.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+        tk.Label(opt_col, text="✅ 乐观信号 (出现 ≥3 个 → 可积极)",
+                 bg="#E8F5E9", fg="#2E7D32",
+                 font=("Microsoft YaHei", 10, "bold")).pack(anchor="w", pady=(2, 4))
+        self._w_opt_frame = opt_col
+
+        # 总评条
+        self._w_risk_summary = tk.Label(w_risk, text="", bg="#F5F5F5", fg="#333",
+                                        font=("Microsoft YaHei", 11, "bold"))
+        self._w_risk_summary.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+
+        # —— 决策建议 (跨三列) ——
+        w_action = ttk.LabelFrame(w_inner, text="🎬 量化决策：等待 VS 入场", padding=8)
+        w_action.pack(fill=tk.X, pady=(8, 4))
+
+        action_row = ttk.Frame(w_action)
+        action_row.pack(fill=tk.X, pady=2)
+
+        # 左侧: 建议文字
+        self._w_verdict_label = tk.Label(action_row, text="分析中...",
+                                         font=("Microsoft YaHei", 18, "bold"),
+                                         fg="#333")
+        self._w_verdict_label.pack(side=tk.LEFT, padx=8)
+        self._w_verdict_sub = ttk.Label(action_row, text="", foreground="#666")
+        self._w_verdict_sub.pack(side=tk.LEFT, padx=10)
+
+        # 中间: 等待/入场进度条
+        bar_frame = ttk.Frame(w_action)
+        bar_frame.pack(fill=tk.X, pady=4)
+        ttk.Label(bar_frame, text="适合等待").pack(side=tk.LEFT)
+        self._w_action_bar = ttk.Progressbar(bar_frame, maximum=100, value=0, length=400)
+        self._w_action_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
+        ttk.Label(bar_frame, text="可以入场").pack(side=tk.LEFT)
+        self._w_action_pct_label = ttk.Label(bar_frame, text="")
+        self._w_action_pct_label.pack(side=tk.LEFT, padx=6)
+
+        # 建议依据
+        self._w_rationale_text = scrolledtext.ScrolledText(w_action, height=4, wrap=tk.WORD,
+                                                          font=("", 10),
+                                                          background="#FAFAFA")
+        self._w_rationale_text.pack(fill=tk.X, pady=4)
+        self._w_rationale_text.config(state=tk.DISABLED)
+
+        # 旧的等待表单 (保留, 隐藏在 notebook 里) — 暂不移除
         # 成长标签页(放在等待后)
         growth_tab = ttk.Frame(crawler_control_notebook, padding=10)
         crawler_control_notebook.add(growth_tab, text="成长")
