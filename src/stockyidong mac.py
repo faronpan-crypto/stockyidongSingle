@@ -8575,6 +8575,7 @@ class StockKeywordAnalyzerGUI:
             self.emotion_light_2x_canvases.append(c)
         if hasattr(self, '_update_emotion_lights'):
             self._update_emotion_lights()
+
         # 🧭 市场导航已独立为弹窗 (open_market_nav_dialog), 不再内嵌左下角
         # 但仍需预加载配置, 避免首次打开弹窗时才加载阻塞
         # 同时 market_nav_container 初始为 None, 只有弹窗打开时才赋值
@@ -8737,7 +8738,10 @@ class StockKeywordAnalyzerGUI:
                 print(f"[暴跌Tab] 双击打开详情失败: {ex}")
         self._crash_events_tree.bind("<Double-1>", _on_dbl_ev)
 
-        self._refresh_crash_alert_display()  # 同时刷新实时快照 + 事件库
+        # 启动零联网: 暴跌快照异步后台拉 (避免阻塞等待 Tab 创建)
+        # self._refresh_crash_alert_display()  # ❌ 同步阻塞
+        self.root.after(500, self._refresh_crash_alert_display)
+        print("[暴跌Tab] 🔄 snapshot 改为异步加载, 等待 Tab 先创建", flush=True)
         # ══════════════════════════════════════════════════════════
         # 等待 Tab —— 图形化决策仪表盘 (重构版, 可滚动)
         # ══════════════════════════════════════════════════════════
@@ -37274,12 +37278,16 @@ class StockKeywordAnalyzerGUI:
                 # 过滤掉 "未来" 数据 (盘中测试数据可能含当天未完成K线)
                 from datetime import date as _dt_e
                 today_str = _dt_e.today().isoformat()
+                kl_clean = []
                 for k in kl:
                     ds = k.get("day", "")
                     if ds and ds[:10] <= today_str:   # 只留 ≤ 今天的
-                        closes.append(float(k["close"]))
                         volumes.append(float(k.get("volume", 0)))
                         dates.append(ds[:10])
+                        kl_clean.append(k)
+                        closes.append(float(k["close"]))
+                # (不再单独缓存给快览面板, 已删除)
+                pass
         except Exception as _e:
             print(f"[风险信号] 新浪日线拉失败: {_e}", flush=True)
 
@@ -37445,7 +37453,6 @@ class StockKeywordAnalyzerGUI:
             import traceback as _tb; _tb.print_exc()
             print(f"[风险面板] 刷新失败: {_e}", flush=True)
 
-    # ════════════════════════════════════════════════════════════════════════
     # 等待仪表盘 · 手动判别按钮 (后台线程, 8秒超时)
     # ════════════════════════════════════════════════════════════════════════
     def _do_risk_check(self):
@@ -47719,7 +47726,7 @@ class StockKeywordAnalyzerGUI:
                 conn = sqlite3.connect(qclaw_db)
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT event_date, event_type, index_code, index_name, "
+                    "SELECT event_date, event_type, index_name, "
                     "index_pct, magnitude, trigger, trigger_detail "
                     "FROM crash_rally_events "
                     "WHERE event_date LIKE ? "
@@ -47732,7 +47739,7 @@ class StockKeywordAnalyzerGUI:
 
         if crash_events:
             for ev in crash_events[:6]:
-                edate, etype, ecode, ename, epct, emag, etrig, edetail = ev
+                edate, etype, ename, epct, emag, etrig, edetail = ev[0], ev[1], ev[2], ev[3], ev[4], ev[5], ev[6]
                 icon = "🟢暴跌" if etype == "crash" else "🔴暴涨"
                 mag_icon = {"极端":"🚨","刹跌":"⚠️","大涨":"🔥","小涨":"📈","小跌":"📉"}.get(emag, "")
                 pct_str = f"{epct:+.2f}%" if epct is not None else "--"
@@ -47799,7 +47806,7 @@ class StockKeywordAnalyzerGUI:
             ("纳指ETF",    "sh513100", "β"),
         ]
 
-        # 同步拉 ETF 月度涨跌幅 (每只 timeout=3s, 10 只串行)
+        # ETF 月度涨跌幅 (timeout=1s, 全挂则放弃, 不阻塞启动)
         results = []
         import requests as _r_etf, json as _j_etf
         for ename, esym, etype in _ETF_LIST:
@@ -47808,7 +47815,7 @@ class StockKeywordAnalyzerGUI:
                     "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
                     params={"symbol": esym, "scale": "240",
                             "ma": "no", "datalen": "120"},
-                    timeout=3, headers={"User-Agent": "Mozilla/5.0"})
+                    timeout=1, headers={"User-Agent": "Mozilla/5.0"})
                 if r.status_code == 200 and r.text.strip():
                     kl = _j_etf.loads(r.text)
                     month_kl = [k for k in kl if k.get("day","").startswith(
@@ -47938,15 +47945,17 @@ class StockKeywordAnalyzerGUI:
             return cl
 
         # ---- 状态变量 ----
-        # 默认月份
+        # 默认月份: 优先定位到 hist_dict 中最新有数据的月份, 否则当前月
         dates_with_data = [_dt2.strptime(d, "%Y-%m-%d") for d in hist_dict.keys()
                            if isinstance(d, str) and len(d) == 10]
-        if dates_with_data:
-            dates_with_data.append(_dt2.now())
-            # 默认定位到当前月 (而不是最早数据的月份)
-            default_month = _dt2.now().replace(day=1)
+        latest_hist_date = max(dates_with_data) if dates_with_data else None
+        if latest_hist_date:
+            # 定位到有数据的最新月份 (如果是过去月份就定位过去, 没数据才用当前月)
+            default_month = latest_hist_date.replace(day=1)
+            print(f"[情绪周期] 📅 默认跳到有数据的最新月: {default_month.strftime('%Y-%m')} (最新记录 {latest_hist_date.strftime('%Y-%m-%d')})", flush=True)
         else:
             default_month = _dt2.now().replace(day=1)
+            print(f"[情绪周期] 📅 无历史数据, 默认当前月: {default_month.strftime('%Y-%m')}", flush=True)
         view_month = [default_month]
         is_rebuilding = [False]
 
@@ -48231,6 +48240,7 @@ class StockKeywordAnalyzerGUI:
                     nx = ym.replace(month=ym.month+1, day=1)
                 dim = (nx - _td(days=1)).day
                 today_str = _dt2.now().strftime("%Y-%m-%d")
+                latest_str = latest_hist_date.strftime("%Y-%m-%d") if latest_hist_date else None
 
                 # 📈 拉当月上证指数日线 (用于未补录格子兜底上色 + 复盘面板)
                 pct_map, close_map = self._fetch_month_index_pct(ym)
@@ -48246,6 +48256,7 @@ class StockKeywordAnalyzerGUI:
                 for d in range(1, dim + 1):
                     ds = f"{ym.year:04d}-{ym.month:02d}-{d:02d}"
                     is_today = (ds == today_str)
+                    is_latest = (latest_str is not None and ds == latest_str)
                     rec = hist_dict.get(ds)
                     auto_pct = pct_map.get(ds)
 
@@ -48269,9 +48280,18 @@ class StockKeywordAnalyzerGUI:
                             bg = "#263238"
                         bd = None
 
+                    # 边框: 优先 is_latest (黄色醒目) > is_today (浅蓝) > ths向下 > 默认
+                    if is_latest:
+                        cell_bd = "#FFAB00"; cell_thk = 4
+                    elif is_today:
+                        cell_bd = "#29B6F6"; cell_thk = 3
+                    elif bd:
+                        cell_bd = bd; cell_thk = 3
+                    else:
+                        cell_bd = "#1A1A2E"; cell_thk = 1
                     cell = tk.Frame(grid_f, bg=bg, width=95, height=65,
-                                    highlightbackground=bd or "#1A1A2E",
-                                    highlightthickness=3 if bd else 1, cursor="hand2")
+                                    highlightbackground=cell_bd,
+                                    highlightthickness=cell_thk, cursor="hand2")
                     cell.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
                     cell.grid_propagate(False)
 
@@ -48302,9 +48322,10 @@ class StockKeywordAnalyzerGUI:
                     wl = []
                     # 行1: 日期(左) + 同花顺(右)
                     l1 = tk.Frame(cell, bg=bg); l1.pack(fill="x", pady=(2,0)); wl.append(l1)
-                    fg = "#FFD54F" if is_today else "white"
-                    n = tk.Label(l1, text=str(d), bg=bg, fg=fg,
-                                font=("", 11, "bold" if is_today else "normal")); n.pack(side="left", padx=3); wl.append(n)
+                    fg = "#FFD54F" if (is_today or is_latest) else "white"
+                    date_prefix = "📌" if is_latest else ""
+                    n = tk.Label(l1, text=f"{date_prefix}{d}", bg=bg, fg=fg,
+                                font=("", 11, "bold" if (is_today or is_latest) else "normal")); n.pack(side="left", padx=3); wl.append(n)
                     t = tk.Label(l1, text=f"{ths_icon}", bg=bg, fg=ths_fg, font=("", 10)); t.pack(side="right", padx=3); wl.append(t)
                     # 行2: 盈亏emoji (居中大号)
                     p = tk.Label(cell, text=pnl_sym, bg=bg, fg="white", font=("", 14, "bold")); p.pack(pady=0); wl.append(p)
