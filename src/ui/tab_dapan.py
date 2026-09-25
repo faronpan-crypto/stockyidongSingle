@@ -4372,6 +4372,14 @@ class DapanMixin:
                 if col > 6: col = 0; row += 1
 
             for ci in range(7): grid_f.grid_columnconfigure(ci, weight=1)
+
+            # 📊 复盘面板 (嵌在月历下方)
+            try:
+                pct_map_r, close_map_r = self._fetch_month_index_pct(ym)
+                self._render_month_review(grid_f, ym, pct_map_r, close_map_r)
+            except Exception as _rv_e:
+                print(f"[情绪周期] 复盘面板 warn: {_rv_e}", flush=True)
+
             is_rebuilding[0] = False
             _refresh_stats()
 
@@ -12344,6 +12352,113 @@ class DapanMixin:
         rev_frame.config(height=max(h, 280))
 
         print(f"[日历] 📊 复盘面板渲染完成 (height={h})", flush=True)
+
+
+
+
+    def _fetch_month_index_pct(self, ym):
+
+        """拉当月上证指数日线 (新浪源优先, 兜底 AKShare). 返回 (pct_map, close_map)"""
+
+        import requests as _rv_em, json as _j_em, pandas as _pd_em
+
+        from datetime import timedelta as _td_em
+
+        pct_map = {}; close_map = {}
+
+        try:
+
+            r = _rv_em.get(
+
+                "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
+
+                params={"symbol": "sh000001", "scale": "240",
+
+                        "ma": "no", "datalen": "150"},
+
+                timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+
+            if r.status_code == 200 and r.text.strip():
+
+                kl = _j_em.loads(r.text)
+
+                prev = None
+
+                for k in kl:
+
+                    ds = k.get("day", "")
+
+                    if not ds: continue
+
+                    c = float(k.get("close", 0))
+
+                    close_map[ds] = c
+
+                    if prev and prev > 0:
+
+                        pct_map[ds] = round((c - prev) / prev * 100, 2)
+
+                    prev = c
+
+                # 只保留当月
+
+                ym_str = f"{ym.year:04d}-{ym.month:02d}"
+
+                pct_map = {k: v for k, v in pct_map.items() if k.startswith(ym_str)}
+
+                close_map = {k: v for k, v in close_map.items() if k.startswith(ym_str)}
+
+                print(f"[日历] 📈 新浪源拉到 {len(pct_map)} 天上证日线", flush=True)
+
+        except Exception as _e:
+
+            print(f"[日历] 新浪源失败, 尝试 AKShare: {_e}", flush=True)
+
+            try:
+
+                import akshare as _ak_em
+
+                if ym.month == 12:
+
+                    end_date = ym.replace(year=ym.year + 1, month=1, day=1) - _td_em(days=1)
+
+                else:
+
+                    end_date = ym.replace(month=ym.month + 1, day=1) - _td_em(days=1)
+
+                df = _ak_em.index_zh_a_hist(
+
+                    symbol="000001", period="daily",
+
+                    start_date=ym.replace(day=1).strftime("%Y%m%d"),
+
+                    end_date=end_date.strftime("%Y%m%d"))
+
+                cc = "收盘" if "收盘" in df.columns else "close"
+
+                dc = "日期" if "日期" in df.columns else "date"
+
+                prev = None
+
+                for d, c in zip(df[dc], df[cc].astype(float)):
+
+                    ds = _pd_em.to_datetime(d).strftime("%Y-%m-%d")
+
+                    close_map[ds] = float(c)
+
+                    if prev and prev > 0:
+
+                        pct_map[ds] = round((float(c) - prev) / prev * 100, 2)
+
+                    prev = float(c)
+
+                print(f"[日历] 📈 AKShare 兜底拉到 {len(pct_map)} 天", flush=True)
+
+            except Exception as _e2:
+
+                print(f"[日历] AKShare 也失败: {_e2}", flush=True)
+
+        return pct_map, close_map
 
 
 
