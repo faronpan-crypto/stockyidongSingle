@@ -10461,4 +10461,1243 @@ class DapanMixin:
 
 
 
+    def _calc_mood_stage(self, info):
+
+        """计算当前情绪阶段 [0.0~1.0]"""
+
+        avg_drop = info.get('avg_drop_pct')
+
+        if avg_drop is None:
+
+            # 无数据 → 默认中间 (复苏)
+
+            return 0.45, "复苏(数据不足)"
+
+        # 映射: -20% → 0.0 (恐慌), 0% → 0.5 (乐观起点), +10% → 1.0 (狂热)
+
+        # 但暴跌后反弹规律: -15% 以下是买入区, -10% 开始复苏
+
+        if avg_drop <= -20:
+
+            return 0.05, "恐慌"
+
+        elif avg_drop <= -15:
+
+            return 0.15, "恐慌末期 (抄底区)"
+
+        elif avg_drop <= -10:
+
+            return 0.30, "绝望 → 复苏 (左侧机会)"
+
+        elif avg_drop <= -5:
+
+            return 0.45, "复苏"
+
+        elif avg_drop <= 0:
+
+            return 0.55, "乐观初期"
+
+        elif avg_drop <= 5:
+
+            return 0.70, "乐观"
+
+        elif avg_drop <= 10:
+
+            return 0.85, "狂热边缘"
+
+        else:
+
+            return 0.95, "狂热 (警惕)"
+
+    def _calc_alpha_beta_opportunity(self):
+
+        """基于 crash_rally_events 历史数据 + α/β 概念, 计算反弹机会分数 [0~100]"""
+
+        import sqlite3, os as _os
+
+        qclaw_db = _os.path.join(_os.path.expanduser("~"), ".qclaw", "stock_analysis.db")
+
+        db_path = qclaw_db
+
+        if not _os.path.exists(qclaw_db):
+
+            alt = getattr(self, "db_path", None) or getattr(self, "DB_PATH", None)
+
+            if alt and _os.path.exists(alt):
+
+                db_path = alt
+
+            else:
+
+                return 30, "⚠ 无事件库,无法计算历史反弹胜率\n(请先打开 🗓️暴涨暴跌 日历 扫描历史事件)"
+
+        try:
+
+            conn = sqlite3.connect(db_path)
+
+            cur = conn.cursor()
+
+            # 统计暴跌事件反弹胜率
+
+            cur.execute(
+
+                "SELECT COUNT(*) FROM crash_rally_events "
+
+                "WHERE event_type='crash' AND index_pct <= -5")
+
+            total_crash = cur.fetchone()[0]
+
+            cur.execute(
+
+                "SELECT COUNT(*) FROM crash_rally_events "
+
+                "WHERE event_type='crash' AND index_pct <= -5 "
+
+                "AND max_recover_pct IS NOT NULL AND max_recover_pct > 0")
+
+            with_recover = cur.fetchone()[0]
+
+            cur.execute(
+
+                "SELECT AVG(max_recover_pct) FROM crash_rally_events "
+
+                "WHERE event_type='crash' AND index_pct <= -5 "
+
+                "AND max_recover_pct IS NOT NULL AND max_recover_pct > 0")
+
+            avg_recover = cur.fetchone()[0] or 0
+
+            conn.close()
+
+
+
+            # 机会分 = 反弹胜率 * 0.6 + 平均反弹幅度映射 * 0.4
+
+            win_rate = with_recover / max(1, total_crash)
+
+            # 平均反弹 0% → 0, 30% → 100
+
+            recover_score = min(100, avg_recover / 30 * 100) if avg_recover > 0 else 0
+
+            opp_score = int(win_rate * 60 + recover_score * 0.4)
+
+
+
+            msg = (f"📊 历史暴跌事件: {total_crash} 次\n"
+
+                   f"📈 反弹胜率: {win_rate:.0%}  ({with_recover}/{total_crash})\n"
+
+                   f"💹 平均反弹幅度: {avg_recover:+.1f}%\n"
+
+                   f"\n🎯 β ETF 低位机会: 指数暴跌后, 被动 β ETF(沪深300ETF/科创50ETF)\n"
+
+                   f"   反弹胜率高于个股 (2025年7月半导体/科创ETF反弹经典案例)\n"
+
+                   f"🎯 α ETF 机会: 行业 α ETF (如半导体/AI/创新药ETF)\n"
+
+                   f"   暴跌后弹性更大, 但需配合情绪周期位置")
+
+            return opp_score, msg
+
+        except Exception as e:
+
+            return 20, f"⚠ 计算历史反弹数据失败: {e}"
+
+
+
+
+    def _update_waiting_combo_values(self):
+
+        combos = getattr(self, "waiting_combo_widgets", None)
+
+        if not combos:
+
+            return
+
+        options = getattr(self, "managed_stock_names", []) or []
+
+        values = options[-100:]
+
+        for combo in combos:
+
+            current = combo.get()
+
+            combo["values"] = values
+
+            if current and current in values:
+
+                combo.set(current)
+
+
+    def _open_waiting_new_position(self, section_key):
+
+        section = getattr(self, "waiting_section_vars", {}).get(section_key)
+
+        if not section:
+
+            return
+
+        stock_name = section["stock_var"].get().strip()
+
+        if not stock_name:
+
+            messagebox.showwarning("提示", "请选择自选股后再开新仓", parent=self.root)
+
+            return
+
+        position_type = section["type_var"].get() or "绩优股"
+
+        reason = None
+
+        if hasattr(self, "waiting_reason_map"):
+
+            reason = self.waiting_reason_map.get(section_key)
+
+        self._trigger_new_position_dialog(position_type, stock_name, reason=reason)
+
+
+    def _refresh_crash_alert_display(self):
+
+        """刷新暴跌标签页显示 (实时快照 + 历史事件库)"""
+
+        info = self._get_crash_alert_snapshot()
+
+        txt = getattr(self, "crash_alert_text_widget", None)
+
+        if txt is not None:
+
+            try:
+
+                txt.config(state=tk.NORMAL)
+
+                txt.delete("1.0", tk.END)
+
+                txt.insert(tk.END, "【暴跌判定规则】最近20交易日,上证300/中证500/科创30(科创50近似)平均跌幅 <= -15%\n\n")
+
+                for k, v in info.get("indices", {}).items():
+
+                    txt.insert(tk.END, f"{k}: {v:+.2f}%\n")
+
+                extra = info.get("extra_indices", {})
+
+                if extra:
+
+                    txt.insert(tk.END, "\n【附加指数20天涨跌幅】\n")
+
+                    for k, v in extra.items():
+
+                        txt.insert(tk.END, f"{k}: {v:+.2f}%\n")
+
+                avg = info.get("avg_drop_pct")
+
+                if avg is None:
+
+                    txt.insert(tk.END, "\n平均跌幅: 未获取(请检查数据源/网络)\n")
+
+                    txt.insert(tk.END, f"数据源: {info.get('source', '未获取')}\n")
+
+                else:
+
+                    txt.insert(tk.END, f"\n平均跌幅: {avg:+.2f}%\n")
+
+                    txt.insert(tk.END, f"数据源: {info.get('source', '未获取')}\n")
+
+                    if info.get("is_crash"):
+
+                        txt.insert(tk.END, "状态: 触发暴跌提示(记录暴跌转折时刻)\n")
+
+                    else:
+
+                        txt.insert(tk.END, "状态: 未触发暴跌提示\n")
+
+                txt.config(state=tk.DISABLED)
+
+            except Exception as e:
+
+                print(f"[暴跌提示] 刷新快照失败: {e}")
+
+        # 同时刷新下半部分历史事件库
+
+        try:
+
+            self._load_crash_rally_events()
+
+        except Exception as e:
+
+            print(f"[暴跌提示] 刷新事件库失败: {e}")
+
+
+
+    # ════════════════════════════════════════════════════════════════════════
+
+    # 等待 Tab —— 图形化决策仪表盘 (核心方法)
+
+    # ════════════════════════════════════════════════════════════════════════
+
+    # 情绪周期 5 阶段定义
+
+    _MOOD_STAGES = [
+
+        (0.00, "恐慌", "#2E7D32"),    # 绿色
+
+        (0.20, "绝望", "#1565C0"),    # 深蓝
+
+        (0.40, "复苏", "#F9A825"),    # 黄
+
+        (0.60, "乐观", "#FB8C00"),    # 橙
+
+        (0.80, "狂热", "#C62828"),    # 红
+
+    ]
+
+
+
+    # ════════════════════════════════════════════════════════════════════════
+
+    # 等待仪表盘 · 大盘危险/乐观信号 (基于新浪上证指数日线)
+
+    # ════════════════════════════════════════════════════════════════════════
+
+
+    def _canvas_size(self, canvas, w_min=200, h_min=80):
+
+        """从 Canvas 取实际宽高, 未布局完成时用 min 值"""
+
+        try:
+
+            w = max(w_min, canvas.winfo_width())
+
+            h = max(h_min, canvas.winfo_height())
+
+        except Exception:
+
+            w, h = w_min, h_min
+
+        return w, h
+
+
+    def _open_alpha_beta_dialog(self):
+
+        """📐 α/β 阿尔法贝塔 — 调出 alpha_beta_dialog.py"""
+
+        try:
+
+            import sys as _sys_ab, os as _os_ab
+
+            _this_dir = _os_ab.path.dirname(_os_ab.path.abspath(__file__)) if "__file__" in dir() else ""
+
+            if _this_dir and _this_dir not in _sys_ab.path:
+
+                _sys_ab.path.insert(0, _this_dir)
+
+            from alpha_beta_dialog import open_alpha_beta_dialog
+
+            open_alpha_beta_dialog(getattr(self, "root", None))
+
+        except Exception as _e_ab:
+
+            print(f"[大盘] 📐 α/β 阿尔法贝塔启动失败: {_e_ab}", flush=True)
+
+            try:
+
+                import tkinter.messagebox as _mb
+
+                _mb.showerror("📐 α/β 阿尔法贝塔启动失败",
+
+                              f"{_e_ab}\n\n请确认 alpha_beta_dialog.py 在 src/ 目录下")
+
+            except Exception:
+
+                pass
+
+
+    def _gather_ai_staff_risk_context(self):
+
+        """风控员:强制使用联网实时大盘与情绪数据,并附风控补充。"""
+
+        parts = []
+
+        parts.append(self._gather_ai_staff_analyst_context())
+
+        parts.append("\n【风控专用补充 · 指数近日收盘(上证)】\n")
+
+        try:
+
+            import akshare as ak
+
+            df = ak.index_zh_a_hist(symbol="000001", period="daily")
+
+            if df is not None and not df.empty:
+
+                tail = df.tail(8)
+
+                parts.append(tail.to_string(index=False))
+
+            else:
+
+                parts.append("(无)")
+
+        except Exception as e:
+
+            parts.append(f"(失败:{e})")
+
+        return "\n".join(parts)
+
+
+    def _draw_daily_kline_chart(self, parent, kline_data, stock_name, embed_zoom_handler=True):
+
+        """绘制日K线图(Tushare),含均线与支撑/压力线;双击可弹出最大化查看。"""
+
+        try:
+
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+            fig = self._build_daily_kline_figure(kline_data, stock_name, figsize=(12, 6))
+
+            canvas = FigureCanvasTkAgg(fig, parent)
+
+            canvas.draw()
+
+            w = canvas.get_tk_widget()
+
+            w.pack(fill=tk.BOTH, expand=True)
+
+            if embed_zoom_handler:
+
+                w.bind("<Double-Button-1>", lambda e: self._show_daily_kline_zoom(kline_data, stock_name))
+
+        except Exception as e:
+
+            print(f"绘制日K线图失败: {e}")
+
+            import traceback
+
+            traceback.print_exc()
+
+            error_label = ttk.Label(parent, text=f"绘制日K线图失败: {e}", font=("TkDefaultFont", 12), foreground="red")
+
+            error_label.pack(expand=True)
+
+
+    def _draw_15min_kline_chart(self, parent, kline_data, stock_name):
+
+        """绘制15分钟K线图,包含1日、3日、5日、10日、20日均线"""
+
+        try:
+
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+            from matplotlib.figure import Figure
+
+            # 创建图表
+
+            fig = Figure(figsize=(12, 6), dpi=100)
+
+            ax = fig.add_subplot(111)
+
+            data = kline_data['data']
+
+            ma_values = kline_data['ma_values']
+
+            # 准备K线数据
+
+            dates = list(range(len(data)))  # 使用索引作为x轴
+
+            if '开盘' in data.columns:
+
+                opens = data['开盘'].values
+
+                closes = data['收盘'].values
+
+                highs = data['最高'].values
+
+                lows = data['最低'].values
+
+            else:
+
+                # 如果列名不同,尝试使用位置索引
+
+                opens = data.iloc[:, 1].values if len(data.columns) > 1 else data.iloc[:, 0].values
+
+                closes = data.iloc[:, 2].values if len(data.columns) > 2 else data.iloc[:, 0].values
+
+                highs = data.iloc[:, 3].values if len(data.columns) > 3 else data.iloc[:, 0].values
+
+                lows = data.iloc[:, 4].values if len(data.columns) > 4 else data.iloc[:, 0].values
+
+            # 绘制K线(使用蜡烛图样式)
+
+            for i in range(len(dates)):
+
+                color = 'red' if closes[i] >= opens[i] else 'green'
+
+                # 绘制实体(开盘到收盘)
+
+                body_bottom = min(opens[i], closes[i])
+
+                body_top = max(opens[i], closes[i])
+
+                ax.bar(i, body_top - body_bottom, bottom=body_bottom, color=color, alpha=0.8, width=0.6)
+
+                # 绘制上下影线
+
+                ax.plot([i, i], [lows[i], body_bottom], color=color, linewidth=1)
+
+                ax.plot([i, i], [body_top, highs[i]], color=color, linewidth=1)
+
+            # 绘制收盘价折线(辅助线)
+
+            ax.plot(dates, closes, color='black', linewidth=0.5, label='收盘价', alpha=0.5, linestyle='--')
+
+            # 绘制均线(不同颜色)
+
+            ma_colors = {
+
+                'ma1': '#FF0000',   # 红色
+
+                'ma3': '#FFA500',   # 橙色
+
+                'ma5': '#00FF00',   # 绿色
+
+                'ma10': '#0000FF',  # 蓝色
+
+                'ma20': '#FF00FF'   # 紫色
+
+            }
+
+            ma_labels = {
+
+                'ma1': '1日均线',
+
+                'ma3': '3日均线',
+
+                'ma5': '5日均线',
+
+                'ma10': '10日均线',
+
+                'ma20': '20日均线'
+
+            }
+
+            period_map = {
+
+                'ma1': 16,
+
+                'ma3': 48,
+
+                'ma5': 80,
+
+                'ma10': 160,
+
+                'ma20': 320
+
+            }
+
+            for ma_name in ['ma1', 'ma3', 'ma5', 'ma10', 'ma20']:
+
+                if ma_name in ma_values and len(ma_values[ma_name]) > 0:
+
+                    ma_data = ma_values[ma_name]
+
+                    # 对齐日期(均线数据从period-1开始)
+
+                    period = period_map[ma_name]
+
+                    start_idx = min(period-1, len(dates)-1)
+
+                    # 创建对应的x轴索引
+
+                    ma_indices = list(range(start_idx, start_idx + len(ma_data)))
+
+                    # 确保数据长度一致
+
+                    min_len = min(len(ma_indices), len(ma_data))
+
+                    if min_len > 0:
+
+                        ax.plot(ma_indices[:min_len], ma_data[:min_len], color=ma_colors[ma_name],
+
+                               linewidth=1.5, label=ma_labels[ma_name], alpha=0.8)
+
+            ax.set_title(f"{stock_name} - 15分钟K线图(10日周期)", fontsize=12, fontweight='bold')
+
+            ax.set_xlabel("K线序号", fontsize=10)
+
+            ax.set_ylabel("价格", fontsize=10)
+
+            ax.legend(loc='upper left', fontsize=8)
+
+            ax.grid(True, alpha=0.3)
+
+            # 设置x轴刻度(显示部分时间点)
+
+            if len(dates) > 0:
+
+                step = max(1, len(dates) // 10)  # 显示约10个刻度
+
+                ax.set_xticks(dates[::step])
+
+                ax.set_xticklabels([f"K{i+1}" for i in dates[::step]], rotation=45, ha='right')
+
+            # 将图表嵌入到tkinter
+
+            canvas = FigureCanvasTkAgg(fig, parent)
+
+            canvas.draw()
+
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        except Exception as e:
+
+            print(f"绘制K线图失败: {e}")
+
+            import traceback
+
+            traceback.print_exc()
+
+            error_label = ttk.Label(parent,
+
+                                   text=f"绘制K线图失败: {e}",
+
+                                   font=("TkDefaultFont", 12),
+
+                                   foreground="red")
+
+            error_label.pack(expand=True)
+
+
+    def _risk_filter_stock(self, stock_code, stock_name="", kline_data=None, fundamental=None):
+
+        """T5: 全局风控过滤器"""
+
+        result = {"pass": True, "reasons": [], "warnings": []}
+
+        try:
+
+            close_price = None
+
+            if kline_data and kline_data.get('data') is not None:
+
+                df = kline_data['data']
+
+                if len(df) > 0:
+
+                    close_price = float(df['收盘'].values[-1])
+
+            if close_price is not None and close_price < 20:
+
+                result["pass"] = False
+
+                result["reasons"].append(f"股价{close_price:.2f}元<20元,不满足硬标准")
+
+            if kline_data and kline_data.get('data') is not None:
+
+                df = kline_data['data']
+
+                if len(df) >= 60:
+
+                    closes = df['收盘'].values
+
+                    pct_change = (closes[-1] / closes[-60] - 1) * 100
+
+                    if pct_change > 100:
+
+                        result["pass"] = False
+
+                        result["reasons"].append(f"近60日涨幅{pct_change:.1f}%>100%,回避")
+
+                    elif pct_change > 50:
+
+                        result["warnings"].append(f"近60日涨幅{pct_change:.1f}%较高,注意风险")
+
+            if kline_data and kline_data.get('data') is not None:
+
+                p_phase = self._p_phase_classify(kline_data)
+
+                if p_phase.get("phase") == "P3":
+
+                    result["pass"] = False
+
+                    result["reasons"].append("P3狂热期(出货区),不碰")
+
+                elif p_phase.get("phase") == "P0":
+
+                    result["warnings"].append("P0衰退期,需谨慎")
+
+            if fundamental and isinstance(fundamental, dict):
+
+                market_cap = fundamental.get("market_cap", 0)
+
+                if market_cap and market_cap < 100e8:
+
+                    result["warnings"].append(f"市值{market_cap/1e8:.0f}亿<100亿,偏小盘")
+
+                revenue_growth = fundamental.get("revenue_growth", 0)
+
+                if revenue_growth and revenue_growth < 15:
+
+                    result["warnings"].append(f"营收增长{revenue_growth:.1f}%<15%")
+
+        except Exception as e:
+
+            result["warnings"].append(f"风控检查异常: {e}")
+
+        return result
+
+
+    def _show_market_risk_dashboard(self):
+
+        """🚦 大盘风险仪表盘：估值+杠杆+量能+利率 四维度打分，输出逃顶/抄底信号"""
+
+        import subprocess as _sp
+
+        import tkinter as tk
+
+        from tkinter import scrolledtext, ttk
+
+        win = self._toplevel(self.root)
+
+        win.title("🚦 大盘风险仪表盘 · 逃顶/抄底")
+
+        win.geometry("1200x820")
+
+        win.transient(self.root)
+
+        # ===== 顶部 Banner（风险等级配色）=====
+
+        banner = tk.Frame(win, bg="#2F4F4F", height=60)
+
+        banner.pack(fill=tk.X)
+
+        banner.pack_propagate(False)
+
+        bi = tk.Frame(banner, bg="#2F4F4F")
+
+        bi.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+
+        tk.Label(bi, text="🚦 大盘风险仪表盘", font=("", 16, "bold"),
+
+                 fg="white", bg="#2F4F4F").pack(side=tk.LEFT)
+
+        risk_score_lbl = tk.Label(bi, text="--", font=("", 22, "bold"),
+
+                                   fg="#FFD700", bg="#2F4F4F")
+
+        risk_score_lbl.pack(side=tk.LEFT, padx=14)
+
+        risk_level_lbl = tk.Label(bi, text="--", font=("", 14, "bold"),
+
+                                   fg="white", bg="#2F4F4F")
+
+        risk_level_lbl.pack(side=tk.LEFT)
+
+        risk_action_lbl = tk.Label(bi, text="", font=("", 11),
+
+                                    fg="#AAA", bg="#2F4F4F")
+
+        risk_action_lbl.pack(side=tk.LEFT, padx=12)
+
+        # ===== 控制栏 =====
+
+        ctrl = tk.Frame(win)
+
+        ctrl.pack(fill=tk.X, padx=10, pady=6)
+
+        # 日期选择器
+
+        import datetime as _dt3
+
+        _today = _dt3.date.today().strftime("%Y-%m-%d")
+
+        tk.Label(ctrl, text="📅 选择日期:", fg="#555").pack(side=tk.LEFT)
+
+        date_var = tk.StringVar(value=_today)
+
+        date_entry = tk.Entry(ctrl, textvariable=date_var, width=12, font=("", 11))
+
+        date_entry.pack(side=tk.LEFT, padx=2)
+
+        tk.Label(ctrl, text="(YYYY-MM-DD)", fg="#999", font=("", 9)).pack(side=tk.LEFT)
+
+        trade_day_lbl = tk.Label(ctrl, text="", fg="#1565C0", font=("", 10))
+
+        trade_day_lbl.pack(side=tk.LEFT, padx=6)
+
+        # 快速跳转
+
+        def _set_date(days_ago):
+
+            d = _dt3.date.today() - _dt3.timedelta(days=days_ago)
+
+            date_var.set(d.strftime("%Y-%m-%d"))
+
+        tk.Button(ctrl, text="今天", command=lambda: _set_date(0), cursor="hand2").pack(side=tk.LEFT, padx=2)
+
+        tk.Button(ctrl, text="5天前", command=lambda: _set_date(5), cursor="hand2").pack(side=tk.LEFT, padx=2)
+
+        tk.Button(ctrl, text="1月前", command=lambda: _set_date(30), cursor="hand2").pack(side=tk.LEFT, padx=2)
+
+        tk.Button(ctrl, text="3月前", command=lambda: _set_date(90), cursor="hand2").pack(side=tk.LEFT, padx=2)
+
+        tk.Label(ctrl, text="  |  ", fg="#CCC").pack(side=tk.LEFT)
+
+        run_btn = tk.Button(ctrl, text="🔍 拉取数据 + 计算风险",
+
+                            font=("", 11, "bold"), bg="#2F4F4F", fg="white",
+
+                            padx=12, pady=3, cursor="hand2")
+
+        run_btn.pack(side=tk.LEFT, padx=4)
+
+        tk.Label(ctrl, text="四维度共振打分：估值40% + 杠杆25% + 量能20% + 利率15%",
+
+                 fg="#666").pack(side=tk.LEFT, padx=14)
+
+        # ===== 主内容区 =====
+
+        main_frame = ttk.Frame(win)
+
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 6))
+
+        # 左：4 维度条形图 + 原始数据卡片
+
+        left = ttk.LabelFrame(main_frame, text="📊 四维度打分（共振越强越危险）", padding=8)
+
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
+
+        dims_frame = tk.Frame(left, bg="white")
+
+        dims_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # 动态创建维度条
+
+        dim_widgets = {}  # name -> (canvas, score_lbl, desc_lbl)
+
+        def _add_dim_row(parent, name, max_score, weight_color):
+
+            row = tk.Frame(parent, bg="white")
+
+            row.pack(fill=tk.X, pady=6)
+
+            tk.Label(row, text=f"  {name}", font=("", 11, "bold"),
+
+                     bg="white", width=8, anchor="w", fg="#333").pack(side=tk.LEFT)
+
+            canvas = tk.Canvas(row, height=26, bg="#EEE", highlightthickness=0, width=400)
+
+            canvas.pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
+
+            score_lbl = tk.Label(row, text="0/0", font=("", 11, "bold"),
+
+                                  bg="white", fg="#555", width=8, anchor="e")
+
+            score_lbl.pack(side=tk.LEFT, padx=4)
+
+            desc_lbl = tk.Label(row, text="", font=("", 10), bg="white", fg="#888", width=22, anchor="e")
+
+            desc_lbl.pack(side=tk.LEFT)
+
+            dim_widgets[name] = (canvas, score_lbl, desc_lbl, max_score)
+
+            return canvas
+
+        _add_dim_row(dims_frame, "估值", 40, "#1976D2")
+
+        _add_dim_row(dims_frame, "杠杆", 25, "#FF9800")
+
+        _add_dim_row(dims_frame, "量能", 20, "#4CAF50")
+
+        _add_dim_row(dims_frame, "利率", 15, "#9C27B0")
+
+        # 原始数据卡片
+
+        raw_card = tk.Frame(left, bg="#F5F5DC")
+
+        raw_card.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(raw_card, text="📋 原始数据", font=("", 11, "bold")).pack(anchor=tk.W, padx=8, pady=(6, 2))
+
+        raw_txt = scrolledtext.ScrolledText(raw_card, wrap=tk.WORD, height=12,
+
+                                             font=("Menlo", 10), bg="#FDFBF0")
+
+        raw_txt.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+
+        # 右：报告 + 逃顶/抄底方法论
+
+        right = ttk.LabelFrame(main_frame, text="📝 分析报告 + 逃顶/抄底方法论", padding=8)
+
+        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
+
+        report_txt = scrolledtext.ScrolledText(right, wrap=tk.WORD,
+
+                                                font=("Microsoft YaHei", 10))
+
+        report_txt.pack(fill=tk.BOTH, expand=True)
+
+        report_txt.insert("1.0",
+
+            "🚦 大盘风险仪表盘 — 四维度共振打分\n\n"
+
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+            "维度          权重    数据源\n"
+
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+            "💎 估值层      40%    全市场PB 10年分位\n"
+
+            "📈 杠杆层      25%    融资余额 1年分位\n"
+
+            "💰 量能层      20%    两市成交额\n"
+
+            "🏦 利率层      15%    10年国债收益率 5年分位\n"
+
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+            "逃顶组合信号（单一易骗线，共振才行动）：\n"
+
+            "  估值顶  = PE/PB 破历史 90% 分位 + 巴菲特指标>120%\n"
+
+            "  资金顶  = 融资天量 + 新基爆款 + 散户开户暴增\n"
+
+            "  技术顶  = 天量 + 顶背离 + 年线大乖离\n"
+
+            "  政策顶  = 监管降温 + 官媒喊话\n\n"
+
+            "抄底（顶部反向）：\n"
+
+            "  估值底 = PE/PB 历史低位\n"
+
+            "  政策底 = 国家队/降准/重要会议\n"
+
+            "  市场底 = 缩量最后一跌 + 恐慌抛售\n"
+
+            "  情绪底 = 基金冰点 + 销户潮 + 无人谈股\n\n"
+
+            "💡 多维度共振才动手，单一信号容易假突破！\n\n"
+
+            "点击「🔍 拉取最新数据」开始...")
+
+        # ===== 状态条 =====
+
+        status_var = tk.StringVar(value="就绪 · 每周五 16:30 自动跑（cron）")
+
+        ttk.Label(win, textvariable=status_var, anchor=tk.W).pack(fill=tk.X, padx=10, pady=(0, 4))
+
+        # ===== 填充维度条形图 =====
+
+        def _draw_bar(canvas, pct, color="#E74C3C", label=""):
+
+            canvas.delete("all")
+
+            w = canvas.winfo_width() or 400
+
+            h = 26
+
+            canvas.create_rectangle(0, 0, w, h, fill="#F0F0F0", outline="")
+
+            bw = int(w * min(pct, 1.0))
+
+            if bw > 0:
+
+                # 渐变效果：绿→黄→红
+
+                if pct < 0.4: color = "#27AE60"
+
+                elif pct < 0.7: color = "#F39C12"
+
+                else: color = "#E74C3C"
+
+                canvas.create_rectangle(0, 0, bw, h, fill=color, outline="")
+
+            canvas.create_text(w // 2, h // 2, text=label, fill="white", font=("", 10, "bold"))
+
+        def _update_risk_ui(data):
+
+            risk = data.get("risk", {})
+
+            score = risk.get("risk_score", 0)
+
+            level = risk.get("level", "--")
+
+            action = risk.get("action", "")
+
+            # 颜色映射
+
+            if score >= 82: bg, fg = "#8B0000", "#FFD700"       # 极度危险
+
+            elif score >= 65: bg, fg = "#C62828", "white"       # 高风险
+
+            elif score >= 45: bg, fg = "#E67E22", "white"       # 正常偏热
+
+            elif score >= 25: bg, fg = "#27AE60", "white"       # 正常偏低
+
+            else: bg, fg = "#1B5E20", "#FFD700"                 # 底部区域
+
+            banner.configure(bg=bg); bi.configure(bg=bg)
+
+            risk_score_lbl.configure(bg=bg, fg=fg, text=f"{score}")
+
+            risk_level_lbl.configure(bg=bg, fg="white", text=f" [{level}]")
+
+            risk_action_lbl.configure(bg=bg, fg="#FFD700", text=action)
+
+            # 4 维度条形图
+
+            dims = risk.get("dims", {})
+
+            for name, info in dims.items():
+
+                w = dim_widgets.get(name)
+
+                if not w: continue
+
+                canvas, score_lbl, desc_lbl, max_s = w
+
+                sc = info.get("score", 0)
+
+                pct = sc / max_s if max_s else 0
+
+                _draw_bar(canvas, pct, label=f"{sc}/{max_s}  ({pct*100:.0f}%)")
+
+                score_lbl.configure(text=f"{sc}/{max_s}")
+
+                desc_lbl.configure(text=info.get("desc", ""))
+
+            # 原始数据
+
+            raw = data.get("data", {})
+
+            lines = ["═══ 原始数据 ═══", ""]
+
+            # 查询日/实际交易日
+
+            qd = raw.get("query_date", "")
+
+            ad = raw.get("actual_date", "")
+
+            if qd and ad and qd != ad:
+
+                lines.append(f"📅 查询日 {qd} → 实际交易日 {ad}（非交易日自动回退）")
+
+            elif qd == ad:
+
+                lines.append(f"📅 交易日 {qd}")
+
+            lines.append("")
+
+            pb = raw.get("pb", {})
+
+            if pb:
+
+                q_qtl = pb.get('pb_quantile_10y')
+
+                q_str = f"{q_qtl*100:.1f}%" if q_qtl is not None else "N/A"
+
+                lines.append("💎 PB/PE (10年分位):")
+
+                lines.append(f"   上证 {pb.get('close','?')}  PB={pb.get('middlePB','?')}  分位={q_str}")
+
+            margin = raw.get("margin", {})
+
+            if margin:
+
+                m_pct = margin.get('balance_pct_1y')
+
+                m_str = f"{m_pct*100:.1f}%" if m_pct is not None else "N/A"
+
+                lines.append("📈 融资余额:")
+
+                lines.append(f"   沪深合计 {margin.get('balance_total_yi',0):.0f}亿  买入={margin.get('buy_yi',0):.0f}亿  1年分位={m_str}")
+
+            turnover = raw.get("turnover", {})
+
+            if turnover:
+
+                lines.append("💰 两市成交:")
+
+                if turnover.get('total_trillion') is not None:
+
+                    lines.append(f"   沪 {turnover.get('sh_amount_yi',0):.0f}亿 + 深 {turnover.get('sz_amount_yi',0):.0f}亿 = 合计 {turnover.get('total_trillion',0):.2f}万亿")
+
+                else:
+
+                    lines.append(f"   {turnover.get('_note','历史缺失')}")
+
+            bond = raw.get("bond", {})
+
+            if bond:
+
+                b_pct = bond.get('yield_pct_5y')
+
+                b_str = f"{b_pct*100:.1f}%" if b_pct is not None else "N/A"
+
+                lines.append("🏦 10年国债收益率:")
+
+                lines.append(f"   {bond.get('yield_10y',0):.2f}%  5年分位={b_str}")
+
+            lines.append("")
+
+            lines.append(f"⏰ 更新时间: {data.get('time', '?')}")
+
+            raw_txt.delete("1.0", tk.END)
+
+            raw_txt.insert("1.0", "\n".join(lines))
+
+            # 四指数涨跌统计表格
+
+            idx_ret = data.get("index_returns", {})
+
+            for row_id in idx_tv.get_children():
+
+                idx_tv.delete(row_id)
+
+            if idx_ret and "indices" in idx_ret:
+
+                def _pct_fmt(v):
+
+                    if v is None: return "—", ""
+
+                    s = f"{v:+.2f}%"
+
+                    tag = "up" if v > 0 else ("down" if v < 0 else "")
+
+                    return s, tag
+
+                for idx_name, info in idx_ret["indices"].items():
+
+                    if "error" in info:
+
+                        idx_tv.insert("", tk.END, values=(idx_name, "ERR", "—", "—", "—", "—"))
+
+                        continue
+
+                    bc = f"{info.get('base_close', 0):.2f}"
+
+                    p5, t5 = _pct_fmt(info.get("5d", {}).get("pct"))
+
+                    p10, t10 = _pct_fmt(info.get("10d", {}).get("pct"))
+
+                    p20, t20 = _pct_fmt(info.get("20d", {}).get("pct"))
+
+                    pnow, tnow = _pct_fmt(info.get("till_now", {}).get("pct"))
+
+                    tags = (t5, t10, t20, tnow)
+
+                    idx_tv.insert("", tk.END, values=(idx_name, bc, p5, p10, p20, pnow), tags=tags)
+
+                idx_tv.tag_configure("up", foreground="#C62828")
+
+                idx_tv.tag_configure("down", foreground="#2E7D32")
+
+            else:
+
+                for _ in range(4):
+
+                    idx_tv.insert("", tk.END, values=("—", "—", "—", "—", "—", "—"))
+
+            # 报告
+
+            report_txt.delete("1.0", tk.END)
+
+            report_txt.insert("1.0", self._format_dashboard_report(data))
+
+        # ===== 四指数涨跌统计表格（嵌入原始数据卡片下方）=====
+
+        idx_card = tk.Frame(left, bg="#E8F5E9")
+
+        idx_card.pack(fill=tk.X, pady=(6, 0))
+
+        tk.Label(idx_card, text="📈 后续涨跌统计（基准日 → +5/+10/+20 交易日 → 至今）",
+
+                 font=("", 10, "bold"), bg="#E8F5E9", fg="#2E7D32").pack(anchor=tk.W, padx=8, pady=(4, 2))
+
+        idx_cols = ("指数", "基准收盘", "+5日", "+10日", "+20日", "至今")
+
+        idx_tv = ttk.Treeview(idx_card, columns=idx_cols, show="headings", height=5)
+
+        for c, w in [("指数", 80), ("基准收盘", 80), ("+5日", 72), ("+10日", 72), ("+20日", 72), ("至今", 72)]:
+
+            idx_tv.heading(c, text=c)
+
+            idx_tv.column(c, width=w, anchor="center")
+
+        idx_tv.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+        # 空行占位
+
+        for _ in range(4):
+
+            idx_tv.insert("", tk.END, values=("—", "—", "—", "—", "—", "—"))
+
+        # ===== 跑 CLI =====
+
+        import threading
+
+        def _run():
+
+            status_var.set("拉取数据中...")
+
+            try:
+
+                cmd = [sys.executable, self.SKILL_DASHBOARD_SCRIPT, "--json"]
+
+                sel_date = date_var.get().strip()
+
+                if sel_date and sel_date != _today:
+
+                    cmd += ["--date", sel_date]
+
+                proc = _sp.run(cmd, capture_output=True, text=True, timeout=90)
+
+                out = proc.stdout.strip()
+
+                i = out.find("{")
+
+                if i < 0:
+
+                    raise RuntimeError(f"无 JSON 输出: {out[:200]}")
+
+                data = json.loads(out[i:])
+
+                # 显示交易日回退提示
+
+                qd = data.get("data", {}).get("query_date", "")
+
+                ad = data.get("data", {}).get("actual_date", "")
+
+                if qd and ad and qd != ad:
+
+                    win.after(0, lambda: trade_day_lbl.configure(
+
+                        text=f"📂 {qd} 为非交易日 → 回退到 {ad}", fg="#E65100"))
+
+                else:
+
+                    win.after(0, lambda: trade_day_lbl.configure(
+
+                        text=f"📂 交易日 {ad}", fg="#1565C0"))
+
+                win.after(0, lambda: _update_risk_ui(data))
+
+                win.after(0, lambda: status_var.set("✅ 完成"))
+
+            except Exception as e:
+
+                win.after(0, lambda e=e: status_var.set(f"❌ 失败: {e}"))
+
+                win.after(0, lambda e=e: report_txt.delete("1.0", tk.END))
+
+                win.after(0, lambda e=e: report_txt.insert("1.0", f"❌ 拉取失败: {e}"))
+
+        run_btn.configure(command=lambda: threading.Thread(target=_run, daemon=True).start())
+
+        # 立即拉一次
+
+        threading.Thread(target=_run, daemon=True).start()
+
+
+
+
 __all__ = ["DapanMixin"]
