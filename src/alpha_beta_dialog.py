@@ -245,6 +245,231 @@ RISK_TEXT = """
 
 
 # ============================================================================
+# 研读区内容（右侧面板）
+# ============================================================================
+
+CASE_TEXT = """
+╔══════════════════════════════════════════════════════════════╗
+║  🏆 α/β 成功案例 — 用 β 搭台、α 唱戏                        ║
+╚══════════════════════════════════════════════════════════════╝
+
+① 桥水基金 (Ray Dalio) · 风险平价 + α
+─────────────────────────────────────
+  核心：股票 / 债券 / 商品 / 外汇 按波动率配平 (β 打底)
+  α：Pure Alpha 策略 (主动偏离中枢仓位)
+  结果：穿越 2008 年金融危机 (当年仅 −4%)
+  启示：β 定中枢 + α 小偏离，不靠大方向吃满
+
+② 文艺复兴 Medallion (Jim Simons) · 纯 α 量化
+─────────────────────────────────────
+  β ≈ 0 (剥离市场)，纯靠高频量价信号
+  年化 66% (1988–2023)，费用 5% + 44% 业绩
+  启示：真·α 极其稀少，费用也极其昂贵
+
+③ 耶鲁捐赠基金 (David Swensen) · 另类资产 α
+─────────────────────────────────────
+  股票 30% / 固定收益 10% / PE 20% / 对冲基金 20% / 实物 20%
+  60 年长期年化 13.1%，远高于 60/40 基准
+  启示：β 打底 + 另类资产 α (PE/实物/对冲) 增厚
+
+④ 先锋基金 John Bogle · 纯 β 信仰
+─────────────────────────────────────
+  "不要寻找 α，低成本持有全市场 β"
+  先锋指数基金把 β 的费用降到 0.03%，跑赢 90% 主动基金
+  启示：多数人不需要 α，低成本 β 已经够用
+
+⑤ 国内私募：幻方 / 九坤 (中性策略) · 纯 α 剥离 β
+─────────────────────────────────────
+  中证 500 中性：多头量化选股 + 空头股指期货
+  年化 β ≈ 0，α 约 8–15%
+  启示：在震荡市尤其有价值，牛市可能跑输宽基
+
+⑥ 国内量化指增：天弘 / 嘉实 / 招商
+─────────────────────────────────────
+  中证 2000 指增超额 +7.37% (2026 前 7 月, 据需求文档)
+  沪深 300 指增超额 +3.79%
+  中证 500 指增 −0.99% (红海拥挤)
+  启示：α 之王在小市值，红海在中盘
+"""
+
+BOOK_TEXT = """
+╔══════════════════════════════════════════════════════════════╗
+║  📚 α/β 相关书籍 — 从入门到进阶                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+【入门】
+──────────────────────────────────────────────────────
+  《漫步华尔街》(A Random Walk Down Wall Street)
+  Burton G. Malkiel
+  · 第 1 章就讲 CAPM / α / β
+  · 用通俗故事讲清有效市场、指数基金、主动管理
+  · 推荐：先读第 1–4 章建立框架，后面跳读
+
+  《投资最重要的事》(The Most Important Thing)
+  Howard Marks (橡树资本创始人)
+  · 不直接讲 α/β，但讲清"风险"是 β 的同义词
+  · "第二层思维"就是获取 α 的能力
+  · 推荐：全书慢读，每章都有金句
+
+【进阶】
+──────────────────────────────────────────────────────
+  《主动投资的主动失败》(Active Portfolio Management)
+  Grinold & Kahn (BGI/BlackRock)
+  · 机构级 α/β 配置实战手册
+  · 信息比率 (IR) / 基本法则 / 因子投资
+  · 推荐：如果做专业投资，这是圣经
+
+  《聪明的 α 与 β 策略》(Smart Beta)
+  Rob Arnott (Research Affiliates)
+  · 风格因子 β 不是 α！
+  · 低波 / 红利 / 价值 / 动量 都是"聪明 β"
+  · 推荐：想做 ETF 轮动必读
+
+  《量化投资：如何建立自己的算法交易事业》
+  Ernest P. Chan
+  · 用 Python + numpy 实现 β 对冲 / 配对交易
+  · 第 8 章：CAPM 回归与 α 因子
+  · 推荐：程序员视角，代码可跑
+
+【高阶】
+──────────────────────────────────────────────────────
+  《风险平价》(Risk Parity)
+  Edward Qian (PanAgora)
+  · 桥水 All Weather 的数学基础
+  · 用波动率平衡组合风险，而非资金平衡
+  · 推荐：想做全球配置必读
+
+  《因子投资：方法与实践》
+  石川 / 刘洋溢 / 连祥
+  · 国内团队写的因子教科书
+  · A 股有效因子：价值 / 质量 / 动量 / 低波 / 小盘
+  · 推荐：本土因子 α 获取路径
+
+  《对冲基金风云录》(Hedge Fund Mirage)
+  Aaron Brown (Renaissance)
+  · 文艺复兴内部人写的 α 真实面目
+  · 量化 α 的技术壁垒和人才门槛
+  · 推荐：打消"我也能搞量化"的幻想
+"""
+
+INST_TEXT = """
+╔══════════════════════════════════════════════════════════════╗
+║  🏦 顶级机构的 α/β 配置范式                                  ║
+╚══════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+① 桥水 Bridgewater (全球最大对冲基金, 2500 亿美元)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📦 All Weather 全天候组合:
+     股票 30% · 中长债 40% · 通胀债券 15% · 黄金 8% · 商品 7%
+  🎯 核心思路: 风险平价 (各资产对整体波动贡献均衡)
+  ⚠️ α 部分: Pure Alpha 策略 (主动偏离中枢 + 杠杆)
+  🔑 启示: 不赌方向，β 打底 + 小比例 α 杠杆增厚
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+② 耶鲁捐赠基金 Yale Endowment (长期年化 13.1%)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📦 核心-卫星-另类三层:
+     股票 30% · 固收 10% (β 打底)
+     对冲基金 20% · PE 20% · VC 10% · 实物 10% (α 进攻)
+  🎯 核心思路: PE/实物/对冲 = 低 β + 高 α
+  🔑 启示: 60/40 已过时，另类资产是 α 主战场
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+③ 先锋基金 Vanguard (低成本 β 之王)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📦 纯 β 组合:
+     Total Stock Fund (美股全市场) + Total Intl + Total Bond
+  🎯 核心思路: α 幻觉 + 费用侵蚀 = 主动基金必然输
+  🔑 启示: 普通人最佳策略，年费 0.03% 起步
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+④ 文艺复兴 Renaissance Technologies (纯 α 量化)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📦 Medallion 基金:
+     高频量价信号 (β ≈ 0) + 全球期货/股票/期权
+  🎯 核心思路: 剥离所有可对冲 β，纯靠信号 α
+  ⚠️ 费用 5% 固定 + 44% 业绩分红
+  🔑 启示: 真·α 极度稀缺，也极度昂贵
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⑤ A 股头部量化私募 (幻方 / 九坤 / 明汯 / 灵均)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📦 中证 500 / 1000 中性策略:
+     多头量化选股 + 空头股指期货对冲 (β ≈ 0)
+  🎯 核心思路: 因子 α (价值/动量/质量/成长/情绪)
+  📊 历史年化: 15–25% (2018–2023)，超额 8–15%
+  🔑 启示: A 股小市值定价效率低，α 获取窗口仍存在
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⑥ 核心-卫星标准配置模板 (个人/小机构通用)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📦 核心 60–70% (β 打底):
+     宽基 ETF (沪深300/中证A500/中证2000) 40%
+     红利低波 ETF 20%
+  🚀 卫星 30–40% (α 进攻):
+     量化指增 (场外) 15%
+     长期 α 主动基金 10%
+     黄金/量化对冲 5%
+  ⚠️ 再平衡: 季度检查，卫星浮盈移回核心
+"""
+
+LINKS = """
+╔══════════════════════════════════════════════════════════════╗
+║  🔗 α/β 学习资源 — 网址链接 (点击可打开)                     ║
+╚══════════════════════════════════════════════════════════════╝
+
+━━━ 学术 / 理论 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📄 CAPM 原论文 (Sharpe, 1964)
+  https://doi.org/10.1111/j.1540-6261.1964.tb02865.x
+
+📄 Fama-French 三因子 / 五因子模型
+  https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html
+
+📄 AQR 聪明 β (Smart Beta) 白皮书
+  https://www.aqr.com/Insights/Research/White-Papers
+
+━━━ 数据 / 工具 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 akshare (A股 ETF/指数数据, 本程序用的库)
+  https://github.com/akfamily/akshare
+
+📊 tushare (A股历史行情)
+  https://tushare.pro
+
+📊 ETFrun (全球 ETF 全景 + α/β 指标)
+  https://etfrun.com
+
+📊 天天基金网 (国内量化指增基金查询)
+  https://fund.eastmoney.com
+
+━━━ 机构公开报告 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🏦 桥水 All Weather 组合白皮书
+  https://www.bridgewater.com/research-and-insights
+
+🏦 Vanguard 指数基金 vs 主动基金研究
+  https://www.vanguard.ca/en/advisor/advisor-essentials
+
+🏦 富达 Fidelity α/β 资产配置指南
+  https://www.fidelity.com/learning-center/trading-investing
+
+━━━ 中文学习社区 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💬 雪球量化投资 (因子/α 实战)
+  https://xueqiu.com/hq/qmt
+
+💬 集思录 (ETF/LOF/量化)
+  https://www.jisilu.cn
+
+💬 巴比特量化 (crypto 量化, 跨市场 α)
+  https://www.8btc.com
+
+━━━ 本程序自带工具 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🛠️ β 计算器 (CAPM 回归) → 「🔧 数据工具」Tab
+🛠️ 指数表现对比 → 「🔧 数据工具」Tab
+🛠️ ETF 实时扫描 → 「🔧 数据工具」Tab
+"""
+
+
+# ============================================================================
 # akshare 工具函数（带重试 + 降级）
 # ============================================================================
 
@@ -512,8 +737,22 @@ class AlphaBetaDialog:
                   background=[("selected", COLOR_BETA)],
                   foreground=[("selected", "white")])
 
-        nb = ttk.Notebook(self.root, style="AB.TNotebook")
-        nb.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # ---------- 左右分栏 PanedWindow ----------
+        # 左侧: 原 Notebook (参考手册 + 数据工具)，占比约 65%
+        # 右侧: 研读区 (案例/书籍/机构/链接)，占比约 35%
+        pw = ttk.Panedwindow(self.root, orient=tk.HORIZONTAL)
+        pw.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # 左侧主区
+        left_main = tk.Frame(pw, bg=COLOR_BG)
+        pw.add(left_main, weight=7)  # 左侧占 7/10
+
+        # 右侧研读区
+        right_main = self._build_study_panel(pw)
+        pw.add(right_main, weight=4)  # 右侧占 4/10
+
+        nb = ttk.Notebook(left_main, style="AB.TNotebook")
+        nb.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
         # Tab 顺序：参考手册类放前面，数据工具放中间
         self._add_text_tab(nb, "📖 概念定义", CONCEPT_TEXT)
@@ -586,6 +825,140 @@ class AlphaBetaDialog:
                 txt.insert(tk.END, line + "\n", "code")
             else:
                 txt.insert(tk.END, line + "\n")
+
+    # ------------------------------------------------------------------
+    # 右侧研读区 (成功案例 / 书籍 / 机构配置 / 网址链接)
+    # ------------------------------------------------------------------
+    def _build_study_panel(self, parent):
+        """构建右侧研读面板：4 个小 Tab + 可点击链接"""
+        panel = tk.Frame(parent, bg="#0D1B2A")
+
+        # 顶部标题条
+        header = tk.Frame(panel, bg="#0D47A1", height=40)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        tk.Label(header, text="📚 研读区", font=("", 13, "bold"),
+                 fg="white", bg="#0D47A1").pack(side=tk.LEFT, padx=12, pady=6)
+        tk.Label(header, text="案例 · 书籍 · 机构 · 链接",
+                 font=("", 10), fg="#BBDEFB", bg="#0D47A1").pack(side=tk.LEFT, pady=6)
+
+        # 研读区小 Notebook
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure("Study.TNotebook", background="#0D1B2A", borderwidth=0)
+        style.configure("Study.TNotebook.Tab",
+                        padding=[14, 8],
+                        font=("", 11, "bold"),
+                        background="#1B2838",
+                        foreground="#90A4AE")
+        style.map("Study.TNotebook.Tab",
+                  background=[("selected", COLOR_ACCENT)],
+                  foreground=[("selected", "#263238")])
+
+        study_nb = ttk.Notebook(panel, style="Study.TNotebook")
+        study_nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        self._add_study_tab(study_nb, "🏆 成功案例", CASE_TEXT, enable_links=False)
+        self._add_study_tab(study_nb, "📚 推荐书籍", BOOK_TEXT, enable_links=False)
+        self._add_study_tab(study_nb, "🏦 机构配置", INST_TEXT, enable_links=False)
+        self._add_study_tab(study_nb, "🔗 学习链接", LINKS, enable_links=True)
+
+        return panel
+
+    def _add_study_tab(self, notebook, tab_name, content, enable_links=False):
+        """在研读区 Notebook 里加一个 Tab，带可点击链接"""
+        frame = tk.Frame(notebook, bg="#0D1B2A")
+        notebook.add(frame, text=tab_name)
+
+        txt = scrolledtext.ScrolledText(
+            frame, wrap=tk.WORD,
+            font=("Microsoft YaHei", 11),
+            bg="#0D1B2A", fg="#E0E0E0",
+            insertbackground="#E0E0E0",
+            padx=16, pady=14,
+            borderwidth=0, highlightthickness=0,
+            spacing1=3, spacing3=3,
+        )
+        txt.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
+
+        # 研读区自己的 tag 样式
+        txt.tag_configure("h1", font=("", 12, "bold"), foreground=COLOR_ACCENT, spacing1=6, spacing3=4)
+        txt.tag_configure("h2", font=("", 11, "bold"), foreground=COLOR_BETA, spacing1=4)
+        txt.tag_configure("alpha", font=("", 11, "bold"), foreground=COLOR_ALPHA)
+        txt.tag_configure("beta", font=("", 11, "bold"), foreground=COLOR_BETA)
+        txt.tag_configure("gold", font=("", 11, "bold"), foreground="#F57F17")
+        txt.tag_configure("warn", font=("", 11, "bold"), foreground=COLOR_WARN)
+        txt.tag_configure("sub", font=("", 10), foreground="#78909C")
+        txt.tag_configure("url", font=("", 11), foreground="#64B5F6", underline=1)
+        txt.tag_configure("box", background="#1B2838", foreground="#90A4AE",
+                           font=("", 10), relief="flat", borderwidth=1)
+
+        # 按行首符号自动选样式
+        import re as _re
+        url_re = _re.compile(r'https?://[^\s\n]+')
+
+        for line in content.split("\n"):
+            stripped = line.strip()
+
+            # 先分离 URL（如果这行有）
+            urls_in_line = url_re.findall(line)
+            text_parts = url_re.split(line)
+
+            for part in text_parts:
+                if part in urls_in_line:
+                    # 这是 URL，加可点击 tag
+                    txt.insert(tk.END, part, ("url",))
+                    txt.tag_bind("url", "<Button-1>",
+                                 lambda _e, u=part: self._open_url(u))
+                    txt.tag_bind("url", "<Enter>",
+                                 lambda _e: txt.config(cursor="hand2"))
+                    txt.tag_bind("url", "<Leave>",
+                                 lambda _e: txt.config(cursor=""))
+                elif part:
+                    # 非 URL 部分，按行首符号选样式
+                    ps = part.strip()
+                    if ps.startswith("╔") or ps.startswith("╚") or ps.startswith("═══"):
+                        txt.insert(tk.END, part, "h1")
+                    elif ps.startswith("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━") or \
+                         ps.startswith("① ") or ps.startswith("② ") or ps.startswith("③ ") or \
+                         ps.startswith("④ ") or ps.startswith("⑤ ") or ps.startswith("⑥ "):
+                        txt.insert(tk.END, part, "h2")
+                    elif ps.startswith("🔴"):
+                        txt.insert(tk.END, part, "alpha")
+                    elif ps.startswith("🔵"):
+                        txt.insert(tk.END, part, "beta")
+                    elif ps.startswith("💡") or ps.startswith("━━━"):
+                        txt.insert(tk.END, part, "gold")
+                    elif ps.startswith("⚠️") or ps.startswith("❌"):
+                        txt.insert(tk.END, part, "warn")
+                    elif ps.startswith("【") or ps.startswith("· ") or ps.startswith("📄") or \
+                         ps.startswith("📊") or ps.startswith("🏦") or ps.startswith("💬") or \
+                         ps.startswith("🛠️"):
+                        txt.insert(tk.END, part, "sub")
+                    else:
+                        txt.insert(tk.END, part)
+            txt.insert(tk.END, "\n")
+
+        txt.config(state=tk.DISABLED)
+
+    @staticmethod
+    def _open_url(url):
+        """用系统默认浏览器打开 URL"""
+        import subprocess
+        import platform
+        try:
+            system = platform.system()
+            if system == "Darwin":
+                subprocess.Popen(["open", url])
+            elif system == "Windows":
+                subprocess.Popen(["cmd", "/c", "start", url])
+            else:
+                subprocess.Popen(["xdg-open", url])
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # 数据工具 Tab

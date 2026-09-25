@@ -3612,8 +3612,65 @@ class BuildersMixin:
             )
             btn.pack(side=tk.LEFT, padx=(0, 5))
 
+    def open_market_nav_dialog(self):
+        """🧭 市场指数与热点导航 — 独立弹窗入口
+        原先是左下角快速爬取 tab 里的内嵌区域, 现在独立成可拖拽可调整大小的窗口,
+        通过工具tab里的"🧭市场导航"按钮打开, 不再占用左下角宝贵空间"""
+        # 如果已有窗口, 直接置顶
+        if hasattr(self, '_market_nav_dialog_win') and self._market_nav_dialog_win is not None:
+            try:
+                if self._market_nav_dialog_win.winfo_exists():
+                    self._market_nav_dialog_win.lift()
+                    self._market_nav_dialog_win.focus_force()
+                    return
+            except Exception:
+                self._market_nav_dialog_win = None
+        # 创建新窗口
+        win = self._toplevel(self.root)
+        win.title("🧭 市场指数与热点导航")
+        win.geometry("1000x720")
+        win.minsize(800, 560)
+        win.transient(self.root)
+        try:
+            win.attributes("-topmost", True)
+            win.after(500, lambda: win.attributes("-topmost", False))
+        except Exception:
+            pass
+        # 关闭时清理引用
+        def _on_close():
+            try:
+                self._market_nav_dialog_win = None
+                self.market_nav_container = None
+            except Exception:
+                pass
+            try:
+                win.destroy()
+            except Exception:
+                pass
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+        self._market_nav_dialog_win = win
+        # 容器
+        container = ttk.Frame(win)
+        container.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        self.market_nav_container = container
+        # 加载配置
+        if not self.market_nav_config or (isinstance(self.market_nav_config, dict) and len(self.market_nav_config) == 0):
+            try:
+                self.market_nav_config = self.load_market_nav_config()
+            except Exception:
+                self.market_nav_config = {}
+        # 构建导航区域
+        self._build_market_nav_section(container)
+
     def _build_market_nav_section(self, container):
         """构建市场指数与热点导航区域"""
+        # ⚠️ 防护: 如果 container 对应的窗口已销毁, 直接返回
+        # (编辑保存等操作会触发刷新, 但弹窗可能已经关闭)
+        try:
+            if not container or not container.winfo_exists():
+                return
+        except Exception:
+            return
         for child in container.winfo_children():
             child.destroy()
         market_info_frame = ttk.LabelFrame(container, text="市场指数与热点导航", padding=8)

@@ -657,8 +657,9 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         self.market_nav_checkbox_states = self.ai_config_manager.config.get("market_nav_checkbox_states", {})
         self.auto_collect_enabled = self.ai_config_manager.config.get("auto_collect_enabled", False)
         # 如果自动化采集已开启,延迟启动(等待界面加载完成)
-        if self.auto_collect_enabled:
-            self.root.after(30000, self._start_auto_collect)  # 延后 30s  # 5秒后启动
+        # 自动化采集已禁用自动启动 — 用户明确反馈"启动不需要自动联网"
+        # if self.auto_collect_enabled:
+        #     self.root.after(30000, self._start_auto_collect)  # 延后 30s  # 5秒后启动
         self._nav_editor_window = None
         self._stock_mgmt_window = None
         self.pending_waiting_reason = None
@@ -729,9 +730,14 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         left_frame = ttk.Frame(main_frame)
         left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         # 仓位/交易标签页控件框(共用一块位置,可以切换,调整高度)
-        self.position_trading_notebook = ttk.Notebook(left_frame)
-        # 垂直方向也要参与分配,否则「龙头股」等标签页里多行股票格子在部分系统上高度为 0,中间一片空白
-        self.position_trading_notebook.pack(fill=tk.BOTH, expand=False, pady=(0, 1))
+        # ⚠️ 必须用普通 tk.Frame 包裹 ttk.Notebook 并 pack_propagate(False) 强制锁死高度!
+        # 否则 ttk 主题会让 Notebook 根据内部 tab 内容的最小高度自动撑破 configure(height),
+        # 把下面的 toolbar_frame 和 crawler_control_notebook (左下角快速爬取) 挤没!
+        _pos_holder = tk.Frame(left_frame, height=262)
+        _pos_holder.pack_propagate(False)  # ⛔ 锁死高度,绝不被撑大
+        _pos_holder.pack(fill=tk.BOTH, expand=False, pady=(0, 1))
+        self.position_trading_notebook = ttk.Notebook(_pos_holder)
+        self.position_trading_notebook.pack(fill=tk.BOTH, expand=True)
         # 高度与持仓内容匹配为主,腾出左侧下方工具条/快速爬取/导航可视区
         self.position_trading_notebook.configure(height=262)
         # ============ 🗺️ 大盘分析标签页 (重写版: 水温计+情绪地图+板块) ============
@@ -4875,13 +4881,14 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
                 self._refresh_main_from_news(silent=True)
             except Exception as e:
                 print(f"初次从资讯刷新 Main 失败: {e}")
-        try:
-            self.root.after(15000, _deferred_first_news_refresh)  # 延后 15s 避免启动 GIL 竞争
-        except Exception:
-            try:
-                self._refresh_holding_tabs_from_news()
-            except Exception as e:
-                print(f"初次从资讯刷新持仓标签失败: {e}")
+        # 初次从资讯表加载持仓数据: 已禁用自动 — 启动零联网纪律
+        # try:
+        #     self.root.after(15000, _deferred_first_news_refresh)  # 延后 15s 避免启动 GIL 竞争
+        # except Exception:
+        #     try:
+        #         self._refresh_holding_tabs_from_news()
+        #     except Exception as e:
+        #         print(f"初次从资讯刷新持仓标签失败: {e}")
         # 快速爬取:一键/工具按钮自动流式排列(约每行8个)
         batch_quick_frame = ttk.Frame(crawler_frame)
         batch_quick_frame.pack(fill=tk.X, pady=(0, 3))
@@ -4962,6 +4969,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("🎭情绪周期", self._show_emo_cycle_dialog, False, "tools"),
             ("🔮明日预测", self._show_tomorrow_predict_popup, False, "tools"),
             ("预测", self.show_news_prediction_analysis, False, "tools"),
+            ("🧭市场导航", self.open_market_nav_dialog, False, "tools"),
         ]
         # 从配置加载自定义 tab 分配
         _saved = {}
@@ -5255,15 +5263,14 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             self.emotion_light_2x_canvases.append(c)
         if hasattr(self, '_update_emotion_lights'):
             self._update_emotion_lights()
-        self.market_nav_container = ttk.Frame(crawler_frame)
-        self.market_nav_container.pack(fill=tk.BOTH, expand=True, pady=(4, 3))
-        # 延迟加载配置,避免阻塞界面显示
+        # 🧭 市场导航已独立为弹窗 (open_market_nav_dialog), 不再内嵌左下角
+        # 但仍需预加载配置, 避免首次打开弹窗时才加载阻塞
+        self.market_nav_container = None
         if not self.market_nav_config or (isinstance(self.market_nav_config, dict) and len(self.market_nav_config) == 0):
             try:
                 self.market_nav_config = self.load_market_nav_config()
             except Exception:
                 self.market_nav_config = {}
-        self._build_market_nav_section(self.market_nav_container)
         # 文本控制标签页(在快速爬取/文本控制标签页控件框中)
         control_frame = ttk.Frame(crawler_control_notebook, padding=5)
         crawler_control_notebook.add(control_frame, text="文本控制")
@@ -5753,11 +5760,12 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         self.wordcloud_stocks_data = []  # 保存词云中的股票数据(股票名称、逻辑、时间、来源)
         # 更新text_input指向当前活动标签页
         self.update_text_input_reference()
-        # 同花顺情绪指数:启动后约 5 秒先弹一次,之后每半小时再提醒
-        try:
-            self.root.after(15000, self._th_reminder_tick)  # 延后 15s
-        except Exception:
-            pass
+        # 同花顺情绪指数弹窗: 已禁用自动弹出 — 用户明确反馈"不需要启动就弹"
+        # 如需手动设置, 点工具栏"情绪"按钮或大盘分析 Tab 手动查看
+        # try:
+        #     self.root.after(15000, self._th_reminder_tick)  # 延后 15s
+        # except Exception:
+        #     pass
 
 def main():
     try:
@@ -5810,7 +5818,8 @@ def main():
                 load_stock_names()
             except Exception as e:
                 print(f"后台预加载股票名称列表失败: {e}")
-        root.after(3000, lambda: threading.Thread(target=_preload_stock_names, daemon=True).start())
+        # 后台预加载股票名称列表: 已禁用自动 — 启动零联网纪律
+        # root.after(3000, lambda: threading.Thread(target=_preload_stock_names, daemon=True).start())
         # 创建应用实例(在创建过程中会逐步显示界面)
         try:
             app = StockKeywordAnalyzerGUI(root)
@@ -5847,13 +5856,14 @@ def main():
             except Exception as e:
                 print(f"自动打开数据表窗口失败: {e}")
         print(f"🚀 about to enter mainloop at {__import__('time').time()}", flush=True)
-        # 主窗口显示后 2 秒, 自动后台加载大盘最新数据 (不阻塞 mainloop)
-        try:
-            root.after(2000, lambda: (
-                print("[大盘] 🔔 启动后自动触发后台加载...", flush=True),
-                app._bg_load_dapan() if hasattr(app, "_bg_load_dapan") else None
-            ))
-        except Exception: pass
+        # 主窗口显示后, 不再自动后台加载大盘最新数据 — 用户明确反馈"启动不需要自动联网"
+        # 需要时点大盘分析 Tab 右上角 🔄 按钮手动触发 (与程序启动零联网纪律一致)
+        # try:
+        #     root.after(2000, lambda: (
+        #         print("[大盘] 🔔 启动后自动触发后台加载...", flush=True),
+        #         app._bg_load_dapan() if hasattr(app, "_bg_load_dapan") else None
+        #     ))
+        # except Exception: pass
         root.mainloop()
     except Exception as e:
         import traceback

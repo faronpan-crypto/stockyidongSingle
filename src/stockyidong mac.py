@@ -3960,9 +3960,10 @@ class StockKeywordAnalyzerGUI:
         self.crawler_checkbox_states = self.ai_config_manager.config.get("crawler_checkbox_states", {})
         self.market_nav_checkbox_states = self.ai_config_manager.config.get("market_nav_checkbox_states", {})
         self.auto_collect_enabled = self.ai_config_manager.config.get("auto_collect_enabled", False)
-        # 如果自动化采集已开启,延迟启动(等待界面加载完成)
-        if self.auto_collect_enabled:
-            self.root.after(30000, self._start_auto_collect)  # 延后 30s  # 5秒后启动
+        # 自动化采集已禁用自动启动 — 用户明确反馈"启动不需要自动联网"
+        # 需要手动开: 工具栏「工具」tab → 自动化采集开关(或下次点相关按钮时再启动)
+        # if self.auto_collect_enabled:
+        #     self.root.after(30000, self._start_auto_collect)  # 延后 30s  # 5秒后启动
         self._nav_editor_window = None
         self._stock_mgmt_window = None
         self.pending_waiting_reason = None
@@ -8189,13 +8190,15 @@ class StockKeywordAnalyzerGUI:
                 self._refresh_main_from_news(silent=True)
             except Exception as e:
                 print(f"初次从资讯刷新 Main 失败: {e}")
-        try:
-            self.root.after(15000, _deferred_first_news_refresh)  # 延后 15s 避免启动 GIL 竞争
-        except Exception:
-            try:
-                self._refresh_holding_tabs_from_news()
-            except Exception as e:
-                print(f"初次从资讯刷新持仓标签失败: {e}")
+        # 初次从资讯表加载持仓数据: 已禁用自动 — 启动零联网纪律
+        # 需要时点持仓 tab 右上角或手动刷
+        # try:
+        #     self.root.after(15000, _deferred_first_news_refresh)  # 延后 15s 避免启动 GIL 竞争
+        # except Exception:
+        #     try:
+        #         self._refresh_holding_tabs_from_news()
+        #     except Exception as e:
+        #         print(f"初次从资讯刷新持仓标签失败: {e}")
         # 快速爬取:一键/工具按钮自动流式排列(约每行8个)
         batch_quick_frame = ttk.Frame(crawler_frame)
         batch_quick_frame.pack(fill=tk.X, pady=(0, 3))
@@ -8278,6 +8281,7 @@ class StockKeywordAnalyzerGUI:
             ("🎭情绪周期", self._show_emo_cycle_dialog, False, "tools"),
             ("🔮明日预测", self._show_tomorrow_predict_popup, False, "tools"),
             ("预测", self.show_news_prediction_analysis, False, "tools"),
+            ("🧭市场导航", self.open_market_nav_dialog, False, "tools"),
         ]
         # 从配置加载自定义 tab 分配
         _saved = {}
@@ -8571,15 +8575,15 @@ class StockKeywordAnalyzerGUI:
             self.emotion_light_2x_canvases.append(c)
         if hasattr(self, '_update_emotion_lights'):
             self._update_emotion_lights()
-        self.market_nav_container = ttk.Frame(crawler_frame)
-        self.market_nav_container.pack(fill=tk.BOTH, expand=True, pady=(4, 3))
-        # 延迟加载配置,避免阻塞界面显示
+        # 🧭 市场导航已独立为弹窗 (open_market_nav_dialog), 不再内嵌左下角
+        # 但仍需预加载配置, 避免首次打开弹窗时才加载阻塞
+        # 同时 market_nav_container 初始为 None, 只有弹窗打开时才赋值
+        self.market_nav_container = None
         if not self.market_nav_config or (isinstance(self.market_nav_config, dict) and len(self.market_nav_config) == 0):
             try:
                 self.market_nav_config = self.load_market_nav_config()
             except Exception:
                 self.market_nav_config = {}
-        self._build_market_nav_section(self.market_nav_container)
         # 文本控制标签页(在快速爬取/文本控制标签页控件框中)
         control_frame = ttk.Frame(crawler_control_notebook, padding=5)
         crawler_control_notebook.add(control_frame, text="文本控制")
@@ -9069,11 +9073,12 @@ class StockKeywordAnalyzerGUI:
         self.wordcloud_stocks_data = []  # 保存词云中的股票数据(股票名称、逻辑、时间、来源)
         # 更新text_input指向当前活动标签页
         self.update_text_input_reference()
-        # 同花顺情绪指数:启动后约 5 秒先弹一次,之后每半小时再提醒
-        try:
-            self.root.after(15000, self._th_reminder_tick)  # 延后 15s
-        except Exception:
-            pass
+        # 同花顺情绪指数弹窗: 已禁用自动弹出 — 用户明确反馈"不需要启动就弹"
+        # 如需手动设置, 点工具栏"情绪"按钮或大盘分析 Tab 手动查看
+        # try:
+        #     self.root.after(15000, self._th_reminder_tick)  # 延后 15s
+        # except Exception:
+        #     pass
     def _popup_font_family(self):
         import tkinter.font as tkfont
         try:
@@ -9922,14 +9927,10 @@ class StockKeywordAnalyzerGUI:
                         self.jiuyangongshe_crawler = JiuYangGongSheCrawler()
                 except Exception as e:
                     print(f"爬虫延迟初始化失败: {e}")
-            self.root.after(15000, _deferred_crawler_init)  # 延后 15s
-            # Skill 定时调度器(全局每 20s 轮询),延后 6 秒等 UI 就绪
-            def _deferred_skill_scheduler():
-                try:
-                    self._start_skill_scheduler()
-                except Exception as e:
-                    print(f"Skill 调度器启动失败: {e}")
-            self.root.after(25000, _deferred_skill_scheduler)  # 延后 25s
+        # 爬虫延迟初始化和 Skill 调度器: 已禁用自动 — 启动零联网纪律
+        # 需要时手动点爬取按钮(爬虫类会懒加载初始化) 或 手动触发 skill
+        # self.root.after(15000, _deferred_crawler_init)  # 延后 15s
+        # self.root.after(25000, _deferred_skill_scheduler)  # 延后 25s
         # 在界面显示后延迟执行耗时操作(500ms,让UI先渲染)
         self.root.after(500, delayed_init)
     def set_merged_as_default_config(self):
@@ -19687,6 +19688,201 @@ class StockKeywordAnalyzerGUI:
             messagebox.showerror("错误", f"打开全窗口浏览失败: {e}")
             import traceback
             traceback.print_exc()
+
+    # ------------------------------------------------------------------
+    # 资讯/爬取文章 智能渲染
+    # ------------------------------------------------------------------
+    # 高粉丝/高成功率作者名单（持续扩充）
+    _STAR_AUTHORS = {
+        # 淘股吧大V (按粉丝/影响力)
+        "炒股养家", "章盟主", "赵老哥", "炒股不如买基金", "龙飞虎",
+        "职业炒手", "林广昌", "佛山无影脚", "欢乐海岸", "葛卫东",
+        "李大霄", "但斌", "林园", "冯柳", "张坤", "陈光明",
+        "茅台03", "瑞鹤仙", "交易之神", "老杨点股", "股海老船长",
+        # 韭研公社
+        "韭研公社", "选股宝", "华尔街见闻", "财联社", "云财经",
+        # 量化大V
+        "量化小王子", "数据哥", "因子投资", "RiskParity",
+    }
+    # 页头页脚关键词
+    _HEADER_FOOTER_KWS = [
+        "分享到", "版权所有", "版权声明", "免责声明", "联系我们",
+        "举报", "反馈", "意见", "关于我们", "加入收藏", "顶", "踩",
+        "评论", "回复", "删除", "编辑", "修改", "更多", "展开全文",
+        "进入讨论", "查看更多", "阅读全文", "作者的其他文章",
+        "扫码关注", "微信号", "公众号", "微博", "今日头条",
+        "股票代码", "点击下载", "APP下载", "客户端",
+        "风险提示", "投资有风险", "入市需谨慎", "免责",
+        "顶一下", "踩一下", "0", "次", "浏览", "阅读", "收藏",
+    ]
+    # 分隔线
+    _DIVIDER_KWS = ["---", "===", "***", "~~~", "———", "｜｜｜"]
+    # 引用/引用行
+    _QUOTE_PREFIXES = [">", ">>", ">>>", "| ", "│ ", "┃ ", "引用：", "原帖：", "原文："]
+
+    def _smart_render_article(self, text_widget, content):
+        """按行特征给资讯内容上不同颜色和字号的 tag"""
+        import re as _re
+        if not content:
+            text_widget.insert(tk.END, "(空内容)", "content")
+            return
+
+        lines = content.split("\n")
+        first_content_idx = None  # 第一个非空行（可能是标题）
+        for i, line in enumerate(lines):
+            if line.strip():
+                first_content_idx = i
+                break
+
+        url_re = _re.compile(r'https?://[^\s\u4e00-\u9fff]+|www\.[^\s]+')
+        star_list = self._STAR_AUTHORS
+        hf_kws = self._HEADER_FOOTER_KWS
+        div_kws = self._DIVIDER_KWS
+        quote_prefixes = self._QUOTE_PREFIXES
+
+        def _contains_hf_keyword(line_stripped):
+            low = line_stripped.lower()
+            return any(kw in low or kw in line_stripped for kw in hf_kws)
+
+        def _is_divider(line_stripped):
+            s = line_stripped.replace(" ", "")
+            if len(s) < 3:
+                return False
+            # 全是相同的分隔符
+            return all(c in "-=*~—｜" for c in s)
+
+        def _is_time_line(line_stripped):
+            return bool(_re.search(r'\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?', line_stripped) or
+                        _re.search(r'\d{1,2}:\d{2}(:\d{2})?', line_stripped))
+
+        def _is_author_line(line_stripped):
+            # 作者：xxx / 作者 xxx / 楼主：xxx / 楼主 xxx
+            return bool(_re.match(r'^.{0,8}(作者|楼主|博主|发布者|投稿者|来自)[：: ]+', line_stripped)) or \
+                   bool(_re.match(r'^.{0,4}(楼主|作者)\s*[:：]', line_stripped))
+
+        def _contains_essence(line_stripped):
+            return any(kw in line_stripped for kw in ["精华", "加精", "推荐", "置顶", "热门", "头条"])
+
+        def _is_title(line_stripped, is_first_line):
+            if not is_first_line or len(line_stripped) < 4:
+                return False
+            # 第一行且较长，可能是标题
+            if len(line_stripped) < 40:
+                return True
+            # 或者含精华标识
+            return self._contains_essence(line_stripped)
+
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                text_widget.insert(tk.END, "\n")
+                continue
+
+            # ===== 按优先级判断类型 =====
+            # 1. 页头页脚（重复的导航/版权/分享等）
+            if _contains_hf_keyword(stripped) and len(stripped) < 80:
+                text_widget.insert(tk.END, line + "\n", "header_footer")
+                continue
+
+            # 2. 分隔线
+            if _is_divider(stripped):
+                text_widget.insert(tk.END, line + "\n", "divider")
+                continue
+
+            # 3. 精华/推荐标识行（通常是标题行）
+            if _contains_essence(stripped) and len(stripped) < 80:
+                # 里面可能含 URL
+                parts = url_re.split(line)
+                for p in parts:
+                    if not p:
+                        continue
+                    if url_re.fullmatch(p.strip()):
+                        text_widget.insert(tk.END, p, ("url",))
+                        text_widget.tag_bind("url", "<Button-1>",
+                                             lambda _e, u=p.strip(): self._open_url(u))
+                    else:
+                        text_widget.insert(tk.END, p, "essence")
+                text_widget.insert(tk.END, "\n")
+                continue
+
+            # 4. 第一行/标题
+            if idx == first_content_idx and _is_title(stripped, True):
+                text_widget.insert(tk.END, line + "\n",
+                                   "essence" if _contains_essence(stripped) else "title")
+                continue
+
+            # 5. 作者行
+            if _is_author_line(stripped):
+                # 先写"作者："部分
+                m = _re.match(r'^(.+?)[：:]\s*(.+)$', stripped)
+                if m:
+                    prefix = m.group(1) + "："
+                    author_name = m.group(2).strip()
+                    text_widget.insert(tk.END, prefix, "time")
+                    # 判断是否大V
+                    star = any(s in author_name for s in star_list) or len(author_name) <= 4
+                    author_tag = "author_star" if star else "author"
+                    text_widget.insert(tk.END, author_name, author_tag)
+                else:
+                    text_widget.insert(tk.END, line, "author")
+                text_widget.insert(tk.END, "\n")
+                continue
+
+            # 6. 时间行
+            if _is_time_line(stripped) and len(stripped) < 50:
+                text_widget.insert(tk.END, line + "\n", "time")
+                continue
+
+            # 7. 引用行
+            if any(stripped.startswith(p) for p in quote_prefixes):
+                text_widget.insert(tk.END, line + "\n", "quote")
+                continue
+
+            # 8. 正文（含 URL 拆分 + hashtag）
+            parts = url_re.split(line)
+            for p in parts:
+                if not p:
+                    continue
+                if url_re.fullmatch(p.strip()):
+                    url_text = p.strip()
+                    text_widget.insert(tk.END, url_text, ("url",))
+                    text_widget.tag_bind("url", "<Button-1>",
+                                         lambda _e, u=url_text: self._open_url(u))
+                    text_widget.tag_bind("url", "<Enter>",
+                                         lambda _e: text_widget.config(cursor="hand2"))
+                    text_widget.tag_bind("url", "<Leave>",
+                                         lambda _e: text_widget.config(cursor=""))
+                elif "#" in p:
+                    # hashtag 高亮 (#xxx# 或 #xxx)
+                    hashtag_re = _re.compile(r'#[^#\s]+#?')
+                    hp = hashtag_re.split(p)
+                    for h in hp:
+                        if not h:
+                            continue
+                        if h.startswith("#"):
+                            text_widget.insert(tk.END, h, "hashtag")
+                        else:
+                            text_widget.insert(tk.END, h, "content")
+                else:
+                    text_widget.insert(tk.END, p, "content")
+            text_widget.insert(tk.END, "\n")
+
+    @staticmethod
+    def _open_url(url):
+        """跨平台打开 URL"""
+        import subprocess
+        import platform
+        try:
+            system = platform.system()
+            if system == "Darwin":
+                subprocess.Popen(["open", url])
+            elif system == "Windows":
+                subprocess.Popen(["cmd", "/c", "start", url])
+            else:
+                subprocess.Popen(["xdg-open", url])
+        except Exception:
+            pass
+
     def open_full_window_viewer_from_content(self, content, title="资讯内容"):
         """根据内容和标题打开全窗口浏览界面(用于资讯数据表等场景)"""
         try:
@@ -19870,9 +20066,26 @@ class StockKeywordAnalyzerGUI:
             else:
                 viewer_bg_color = "white"
             viewer_text = scrolledtext.ScrolledText(text_panel, wrap=tk.WORD,
-                                                   font=("TkDefaultFont", 16), undo=True, bg=viewer_bg_color)
+                                                   font=("TkDefaultFont", 14), undo=True, bg=viewer_bg_color)
             viewer_text.pack(fill=tk.BOTH, expand=True)
-            viewer_text.insert("1.0", content)
+            # 配置多种样式 tag (用于智能渲染)
+            viewer_text.tag_configure("title",      font=("Microsoft YaHei", 20, "bold"), foreground="#C62828")
+            viewer_text.tag_configure("essence",    font=("Microsoft YaHei", 22, "bold"), foreground="#C62828",
+                                       background="#FFEBEE")
+            viewer_text.tag_configure("author",     font=("Microsoft YaHei", 16, "bold"), foreground="#1565C0")
+            viewer_text.tag_configure("author_star", font=("Microsoft YaHei", 17, "bold"), foreground="#B71C1C",
+                                       background="#FFF9C4")
+            viewer_text.tag_configure("time",       font=("Microsoft YaHei", 11), foreground="#78909C")
+            viewer_text.tag_configure("content",    font=("Microsoft YaHei", 15), foreground="#212121",
+                                       spacing1=4, spacing3=4)
+            viewer_text.tag_configure("header_footer", font=("Microsoft YaHei", 10), foreground="#90A4AE")
+            viewer_text.tag_configure("divider",    font=("Microsoft YaHei", 10), foreground="#CFD8DC")
+            viewer_text.tag_configure("url",        font=("Microsoft YaHei", 14), foreground="#1E88E5", underline=1)
+            viewer_text.tag_configure("hashtag",     font=("Microsoft YaHei", 14, "bold"), foreground="#6A1B9A")
+            viewer_text.tag_configure("quote",       font=("Microsoft YaHei", 13), foreground="#546E7A",
+                                       background="#F5F5F5")
+            # 智能渲染: 按行特征自动选择样式
+            self._smart_render_article(viewer_text, content)
             viewer_text.config(state=tk.NORMAL)
             self._enable_text_copy_menu(viewer_text, readonly=True)
             # 保存引用以便后续更新背景颜色
@@ -34263,8 +34476,64 @@ class StockKeywordAnalyzerGUI:
                 cleaned["desc"] = desc.strip()
             deduped.append(cleaned)
         return deduped
+    def open_market_nav_dialog(self):
+        """🧭 市场指数与热点导航 — 独立弹窗入口
+        原先是左下角快速爬取 tab 里的内嵌区域, 现在独立成可拖拽可调整大小的窗口,
+        通过工具tab里的"🧭市场导航"按钮打开, 不再占用左下角宝贵空间"""
+        # 如果已有窗口, 直接置顶
+        if hasattr(self, '_market_nav_dialog_win') and self._market_nav_dialog_win is not None:
+            try:
+                if self._market_nav_dialog_win.winfo_exists():
+                    self._market_nav_dialog_win.lift()
+                    self._market_nav_dialog_win.focus_force()
+                    return
+            except Exception:
+                self._market_nav_dialog_win = None
+        # 创建新窗口
+        win = self._toplevel(self.root)
+        win.title("🧭 市场指数与热点导航")
+        win.geometry("1000x720")
+        win.minsize(800, 560)
+        win.transient(self.root)
+        try:
+            win.attributes("-topmost", True)
+            win.after(500, lambda: win.attributes("-topmost", False))
+        except Exception:
+            pass
+        # 关闭时清理引用
+        def _on_close():
+            try:
+                self._market_nav_dialog_win = None
+                self.market_nav_container = None
+            except Exception:
+                pass
+            try:
+                win.destroy()
+            except Exception:
+                pass
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+        self._market_nav_dialog_win = win
+        # 容器
+        container = ttk.Frame(win)
+        container.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        self.market_nav_container = container
+        # 加载配置
+        if not self.market_nav_config or (isinstance(self.market_nav_config, dict) and len(self.market_nav_config) == 0):
+            try:
+                self.market_nav_config = self.load_market_nav_config()
+            except Exception:
+                self.market_nav_config = {}
+        # 构建导航区域
+        self._build_market_nav_section(container)
     def _build_market_nav_section(self, container):
         """构建市场指数与热点导航区域"""
+        # ⚠️ 防护: 如果 container 对应的窗口已销毁, 直接返回
+        # (编辑保存等操作会触发刷新, 但弹窗可能已经关闭)
+        try:
+            if not container or not container.winfo_exists():
+                return
+        except Exception:
+            return
         for child in container.winfo_children():
             child.destroy()
         market_info_frame = ttk.LabelFrame(container, text="市场指数与热点导航", padding=8)
@@ -93725,7 +93994,8 @@ def main():
                 load_stock_names()
             except Exception as e:
                 print(f"后台预加载股票名称列表失败: {e}")
-        root.after(3000, lambda: threading.Thread(target=_preload_stock_names, daemon=True).start())
+        # 后台预加载股票名称列表: 已禁用自动 — 启动零联网纪律
+        # root.after(3000, lambda: threading.Thread(target=_preload_stock_names, daemon=True).start())
         # 创建应用实例(在创建过程中会逐步显示界面)
         try:
             app = StockKeywordAnalyzerGUI(root)
@@ -93762,13 +94032,14 @@ def main():
             except Exception as e:
                 print(f"自动打开数据表窗口失败: {e}")
         print(f"🚀 about to enter mainloop at {__import__('time').time()}", flush=True)
-        # 主窗口显示后 2 秒, 自动后台加载大盘最新数据 (不阻塞 mainloop)
-        try:
-            root.after(2000, lambda: (
-                print("[大盘] 🔔 启动后自动触发后台加载...", flush=True),
-                app._bg_load_dapan() if hasattr(app, "_bg_load_dapan") else None
-            ))
-        except Exception: pass
+        # 主窗口显示后, 不再自动后台加载大盘最新数据 — 用户明确反馈"启动不需要自动联网"
+        # 需要时点大盘分析 Tab 右上角 🔄 按钮手动触发 (与程序启动零联网纪律一致)
+        # try:
+        #     root.after(2000, lambda: (
+        #         print("[大盘] 🔔 启动后自动触发后台加载...", flush=True),
+        #         app._bg_load_dapan() if hasattr(app, "_bg_load_dapan") else None
+        #     ))
+        # except Exception: pass
         root.mainloop()
     except Exception as e:
         import traceback
