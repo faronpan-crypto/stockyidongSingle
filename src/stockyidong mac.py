@@ -48887,6 +48887,10 @@ class StockKeywordAnalyzerGUI:
             ax.tick_params(colors="#AAA"); ax.grid(True, alpha=0.12)
             ax.spines['bottom'].set_color('#444'); ax.spines['top'].set_visible(False)
             ax.spines['left'].set_color('#444'); ax.spines['right'].set_visible(False)
+            # 主图 Y 轴: 不要从 0 开始, 用价格区间 ± 5% padding
+            pmax = float(np.max(highs)); pmin = float(np.min(lows))
+            ppad = (pmax - pmin) * 0.08
+            ax.set_ylim(pmin - ppad, pmax + ppad)
             # X 轴日期刻度: 均匀取 6~8 个
             n = len(x); nlabels = min(8, max(4, n // 20))
             tick_idx = np.linspace(0, n-1, nlabels, dtype=int)
@@ -48899,6 +48903,10 @@ class StockKeywordAnalyzerGUI:
             ax_v_ma5 = _sma(vols, 5)
             vm = ~np.isnan(ax_v_ma5)
             if vm.any(): ax_v.plot(x[vm], ax_v_ma5[vm], color='#FF9800', linewidth=0.9, label='VOL MA5')
+            # Y 轴: 从数据最小值开始 (不强制 0)
+            vmax = np.nanmax(vols); vmin = np.nanmin(vols)
+            vpad = (vmax - vmin) * 0.15 if vmax > vmin else vmax * 0.15
+            ax_v.set_ylim(max(0, vmin - vpad), vmax + vpad)
             ax_v.set_ylabel("VOL", color="#AAA"); ax_v.tick_params(colors="#AAA", labelbottom=False)
             ax_v.grid(True, alpha=0.12); ax_v.legend(loc='upper left', fontsize=7)
             for s in ['bottom','top','left','right']: ax_v.spines[s].set_color('#444') if s!='top' else ax_v.spines[s].set_visible(False)
