@@ -48414,7 +48414,7 @@ class StockKeywordAnalyzerGUI:
             return []
 
     def _build_index_trend_tab(self, parent):
-        """📈 指数趋势 Tab: 上证/深成指/创业板 日K线 + MA1/5/10/20/60"""
+        """📈 指数趋势 Tab: 上证/深成指/创业板 日K线 + MA1/5/10/20/60 + 双击放大"""
         import matplotlib
         matplotlib.use("TkAgg")
         import matplotlib.pyplot as plt
@@ -48424,7 +48424,23 @@ class StockKeywordAnalyzerGUI:
         MA_PERIODS = [1, 5, 10, 20, 60]
         MA_COLORS = {1: "#FF6B6B", 5: "#4ECDC4", 10: "#FFE66D", 20: "#95E1D3", 60: "#C7CEEA"}
 
-        top = ttk.Frame(parent)
+        # ---- 滚动容器 (高度翻倍 + 可拖动) ----
+        _wrap = tk.Frame(parent, bg="#1E1E2E")
+        _wrap.pack(fill=tk.BOTH, expand=True)
+        _wrap_canvas = tk.Canvas(_wrap, highlightthickness=0, borderwidth=0, bg="#1E1E2E")
+        _wrap_scroll = ttk.Scrollbar(_wrap, orient=tk.VERTICAL, command=_wrap_canvas.yview)
+        _wrap_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        _wrap_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        _wrap_canvas.configure(yscrollcommand=_wrap_scroll.set)
+        _wrap_inner = tk.Frame(_wrap_canvas, bg="#1E1E2E")
+        _wrap_win = _wrap_canvas.create_window((0, 0), window=_wrap_inner, anchor="nw")
+        _wrap_inner.bind("<Configure>", lambda e: _wrap_canvas.configure(scrollregion=_wrap_canvas.bbox("all")))
+        _wrap_canvas.bind("<Configure>", lambda e: _wrap_canvas.itemconfigure(_wrap_win, width=e.width))
+        def _on_wheel(e): _wrap_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        _wrap_canvas.bind_all("<MouseWheel>", _on_wheel)
+
+        # ---- 顶部工具栏 ----
+        top = ttk.Frame(_wrap_inner)
         top.pack(fill=tk.X, padx=4, pady=4)
         ttk.Label(top, text="指数:").pack(side=tk.LEFT)
         _idx_var = tk.StringVar(value="上证指数")
@@ -48432,26 +48448,57 @@ class StockKeywordAnalyzerGUI:
         ttk.Button(top, text="🔄 刷新", width=8, command=lambda: _redraw()).pack(side=tk.LEFT, padx=4)
         _days_var = tk.StringVar(value="180")
         ttk.Label(top, text=" 天数:").pack(side=tk.LEFT)
-        ttk.Combobox(top, textvariable=_days_var, values=["60","120","180","360"], state="readonly", width=6).pack(side=tk.LEFT, padx=4)
+        ttk.Combobox(top, textvariable=_days_var, values=["60", "120", "180", "360"], state="readonly", width=6).pack(side=tk.LEFT, padx=4)
+        ttk.Label(top, text=" 双击图放大").pack(side=tk.LEFT, padx=10, foreground="#FFD54F")
         _status = tk.Label(top, text="", fg="#888")
         _status.pack(side=tk.RIGHT, padx=8)
 
-        fig = plt.Figure(figsize=(7, 4.5), dpi=100, facecolor="#1E1E2E")
-        _canvas = FigureCanvasTkAgg(fig, master=parent)
-        _canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        # ---- Figure (高度翻倍 4.5 → 9) ----
+        fig = plt.Figure(figsize=(8, 9), dpi=100, facecolor="#1E1E2E")
+        _canvas = FigureCanvasTkAgg(fig, master=_wrap_inner)
+        _canvas.get_tk_widget().pack(fill=tk.X, padx=4, pady=4)
+        try:
+            _tb = NavigationToolbar2Tk(_canvas, _wrap_inner, pack_toolbar=False)
+            _tb.update()
+        except Exception:
+            pass
 
-        def _redraw():
-            name = _idx_var.get(); symbol = INDEX_MAP.get(name, "sh000001")
-            try: days = int(_days_var.get())
-            except: days = 180
-            _status.config(text=f"拉取 {name} ({symbol})...", fg="#42A5F5"); parent.update_idletasks()
-            data = self._fetch_index_daily(symbol, days)
-            if not data: _status.config(text="❌ 拉取失败", fg="#EF5350"); return
-            fig.clear(); ax = fig.add_subplot(111, facecolor="#1E1E2E")
-            days_list = [d["day"] for d in data]
-            closes = [float(d["close"]) for d in data]; opens = [float(d["open"]) for d in data]
-            highs = [float(d["high"]) for d in data]; lows = [float(d["low"]) for d in data]
-            volumes = [float(d.get("volume", 0)) for d in data]; x = list(range(len(closes)))
+        def _ema(data, period):
+            """EMA 计算"""
+            import math
+            if len(data) < period:
+                return [None] * len(data)
+            result = [None] * period
+            sma = sum(data[:period]) / period
+            result.append(sma)
+            k = 2 / (period + 1)
+            for v in data[period:]:
+                result.append(v * k + result[-1] * (1 - k))
+            return result
+
+        def _compute_macd(closes, fast=12, slow=26, signal=9):
+            """返回 (dif, dea, macd_bar)"""
+            ema_fast = _ema(closes, fast)
+            ema_slow = _ema(closes, slow)
+            dif = []
+            for i in range(len(closes)):
+                if ema_fast[i] is None or ema_slow[i] is None:
+                    dif.append(None)
+                else:
+                    dif.append(ema_fast[i] - ema_slow[i])
+            # 过滤 None 再算 DEA
+            valid_start = next((i for i, v in enumerate(dif) if v is not None), -1)
+            dea = [None] * valid_start if valid_start >= 0 else []
+            if valid_start >= 0:
+                _dif_series = [v for v in dif[valid_start:] if v is not None]
+                _dea_series = _ema(_dif_series, signal)
+                # DEA 长度 = len(_dif_series)
+                dea = [None] * valid_start + _dea_series
+            macd_bar = [(None if dif[i] is None or dea[i] is None else 2 * (dif[i] - dea[i])) for i in range(len(closes))]
+            return dif, dea, macd_bar
+
+        def _draw_axes(ax, ax2, ax3, closes, opens, highs, lows, volumes, days_list, x, show_macd=True):
+            """画 K 线 + MA + 成交量 + (可选 MACD)"""
             bar_w = 0.6
             for i in range(len(closes)):
                 color = "#EF5350" if closes[i] >= opens[i] else "#66BB6A"
@@ -48460,25 +48507,100 @@ class StockKeywordAnalyzerGUI:
                 ax.bar(x[i], body_hi - body_lo, bottom=body_lo, width=bar_w, color=color, edgecolor=color, linewidth=0.5)
             for ma_p in MA_PERIODS:
                 if len(closes) < ma_p: continue
-                ma_vals = [None if i+1<ma_p else sum(closes[i+1-ma_p:i+1])/ma_p for i in range(len(closes))]
+                ma_vals = [None if i + 1 < ma_p else sum(closes[i + 1 - ma_p:i + 1]) / ma_p for i in range(len(closes))]
                 ax.plot(x, ma_vals, color=MA_COLORS[ma_p], linewidth=1.2, label=f"MA{ma_p}")
-            ax.set_title(f"{name} 日K (MA 1/5/10/20/60)", color="#FFF", fontsize=11)
+            ax.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", labelcolor="#FFF", ncol=5)
+            ax.set_title("日K (MA 1/5/10/20/60)", color="#FFF", fontsize=11)
             ax.tick_params(colors="#CCC", labelsize=8)
             for sp in ax.spines.values(): sp.set_color("#444")
-            ax.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", labelcolor="#FFF", ncol=5)
-            step = max(1, len(x)//10)
-            ax.set_xticks(x[::step]); ax.set_xticklabels([days_list[i][5:] for i in range(0,len(x),step)], rotation=30, fontsize=7)
             ax.grid(True, alpha=0.2, color="#666")
-            ax2 = ax.twinx()
-            ax2.bar(x, volumes, width=bar_w*0.6, color="#546E7A", alpha=0.4)
-            ax2.set_ylim(0, max(volumes)*3 if volumes else 1)
-            ax2.tick_params(colors="#888", labelsize=7); ax2.set_ylabel("成交量", color="#888", fontsize=8)
-            fig.tight_layout(); _canvas.draw_idle()
-            last, prev = closes[-1], closes[-2] if len(closes)>=2 else closes[-1]
-            pct = (last-prev)/prev*100 if prev else 0
-            _status.config(text=f"✅ {name}  收盘:{last:.2f}  {'+' if pct>0 else ''}{pct:.2f}%  ({days_list[-1]})",
+            step = max(1, len(x) // 10)
+            ax.set_xticks(x[::step])
+            ax.set_xticklabels([days_list[i][5:] for i in range(0, len(x), step)], rotation=30, fontsize=7)
+
+            # 成交量
+            ax2.bar(x, volumes, width=bar_w * 0.6, color="#546E7A", alpha=0.4)
+            ax2.set_ylim(0, max(volumes) * 3 if volumes else 1)
+            ax2.tick_params(colors="#888", labelsize=7)
+            ax2.set_ylabel("量", color="#888", fontsize=8)
+            ax2.grid(True, alpha=0.1, color="#666")
+
+            # MACD
+            if show_macd:
+                dif, dea, macd_bar = _compute_macd(closes)
+                macd_colors = ["#EF5350" if (v is not None and v >= 0) else "#66BB6A" for v in macd_bar]
+                ax3.bar(x, macd_bar, width=bar_w * 0.6, color=macd_colors, alpha=0.7)
+                ax3.plot(x, dif, color="#FFD54F", linewidth=1, label="DIF")
+                ax3.plot(x, dea, color="#42A5F5", linewidth=1, label="DEA")
+                ax3.axhline(0, color="#666", linewidth=0.5)
+                ax3.set_ylabel("MACD", color="#888", fontsize=8)
+                ax3.tick_params(colors="#888", labelsize=7)
+                ax3.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", labelcolor="#FFF", ncol=3)
+                ax3.grid(True, alpha=0.1, color="#666")
+
+        def _redraw():
+            name = _idx_var.get(); symbol = INDEX_MAP.get(name, "sh000001")
+            try: days = int(_days_var.get())
+            except Exception: days = 180
+            _status.config(text=f"拉取 {name} ({symbol})...", fg="#42A5F5"); _wrap.update_idletasks()
+            data = self._fetch_index_daily(symbol, days)
+            if not data: _status.config(text="❌ 拉取失败", fg="#EF5350"); return
+
+            days_list = [d["day"] for d in data]
+            closes = [float(d["close"]) for d in data]; opens = [float(d["open"]) for d in data]
+            highs = [float(d["high"]) for d in data]; lows = [float(d["low"]) for d in data]
+            volumes = [float(d.get("volume", 0)) for d in data]; x = list(range(len(closes)))
+
+            fig.clear()
+            gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 1], hspace=0.3)
+            ax = fig.add_subplot(gs[0], facecolor="#1E1E2E")
+            ax2 = fig.add_subplot(gs[1], facecolor="#1E1E2E", sharex=ax)
+            ax3 = fig.add_subplot(gs[2], facecolor="#1E1E2E", sharex=ax)
+            _draw_axes(ax, ax2, ax3, closes, opens, highs, lows, volumes, days_list, x, show_macd=True)
+            fig.suptitle(f"{name} 日K线图 ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=13, y=0.99)
+            _canvas.draw_idle()
+
+            last, prev = closes[-1], closes[-2] if len(closes) >= 2 else closes[-1]
+            pct = (last - prev) / prev * 100 if prev else 0
+            _status.config(text=f"✅ {name}  收盘:{last:.2f}  {'+' if pct > 0 else ''}{pct:.2f}%  ({days_list[-1]})",
                            fg="#EF5350" if pct >= 0 else "#66BB6A")
-        import threading as _th; _th.Thread(target=_redraw, daemon=True).start()
+
+            # 存数据给双击放大用
+            _last_data["name"] = name; _last_data["symbol"] = symbol
+            _last_data["days"] = days; _last_data["data"] = data
+
+        _last_data = {}
+
+        def _show_large(e):
+            """双击弹大窗口 (完整 K线 + MA + 成交量 + MACD)"""
+            data = _last_data.get("data")
+            if not data: return
+            win = tk.Toplevel(self.root)
+            win.title(f"📈 指数日K完整图 - {_last_data.get('name', '')} ({_last_data.get('days', '')}天)")
+            win.configure(bg="#1E1E2E")
+            try: win.attributes("-topmost", True)
+            except Exception: pass
+            fig_big = plt.Figure(figsize=(14, 10), dpi=100, facecolor="#1E1E2E")
+            cv_big = FigureCanvasTkAgg(fig_big, master=win)
+            cv_big.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            gs = fig_big.add_gridspec(3, 1, height_ratios=[3, 1, 1], hspace=0.3)
+            ax = fig_big.add_subplot(gs[0], facecolor="#1E1E2E")
+            ax2 = fig_big.add_subplot(gs[1], facecolor="#1E1E2E", sharex=ax)
+            ax3 = fig_big.add_subplot(gs[2], facecolor="#1E1E2E", sharex=ax)
+            days_list = [d["day"] for d in data]
+            closes = [float(d["close"]) for d in data]; opens = [float(d["open"]) for d in data]
+            highs = [float(d["high"]) for d in data]; lows = [float(d["low"]) for d in data]
+            volumes = [float(d.get("volume", 0)) for d in data]; x = list(range(len(closes)))
+            _draw_axes(ax, ax2, ax3, closes, opens, highs, lows, volumes, days_list, x, show_macd=True)
+            fig_big.suptitle(f"{_last_data.get('name','')} 日K线图 ({days_list[0]} ~ {days_list[-1]})",
+                             color="#FFF", fontsize=14, y=0.99)
+            cv_big.draw()
+
+        # 绑定双击
+        _canvas.get_tk_widget().bind("<Double-Button-1>", _show_large)
+
+        import threading as _th
+        _th.Thread(target=_redraw, daemon=True).start()
 
     def _show_emo_cycle_dialog(self):
         """🎭 情绪周期三维度输入 → 自动风控警告（系统红灯+同花顺+自己账户盈亏）+ 日历补录"""
