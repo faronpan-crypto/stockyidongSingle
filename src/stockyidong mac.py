@@ -79365,7 +79365,26 @@ class StockKeywordAnalyzerGUI:
         """📊 机构重仓追踪 - 实时龙虎榜 + 北向资金 + 机构增持"""
         import tkinter as tk
         win = tk.Toplevel(self.root)
-        win.title("📊 机构重仓追踪 (实时)"); win.geometry("1200x820")
+        win.title("📊 机构重仓追踪 (实时)")
+        _FS = {"v": 12}
+        bar = ttk.Frame(win); bar.pack(fill=tk.X, padx=8, pady=4)
+        ttk.Label(bar, text="🔤 字号:", font=("Helvetica", _FS["v"]+1)).pack(side=tk.LEFT)
+        def _fs_d(): _FS["v"]=max(9,_FS["v"]-1); _fl_h.configure(text=str(_FS["v"]))
+        def _fs_u(): _FS["v"]=min(20,_FS["v"]+1); _fl_h.configure(text=str(_FS["v"]))
+        ttk.Button(bar, text="−", width=3, command=_fs_d).pack(side=tk.LEFT, padx=3)
+        _fl_h = ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")); _fl_h.pack(side=tk.LEFT)
+        ttk.Button(bar, text="+", width=3, command=_fs_u).pack(side=tk.LEFT)
+        ttk.Label(bar, text="  💡 LabelFrame 点标题折叠/展开", foreground="#888").pack(side=tk.LEFT, padx=20)
+        def _rf_h():
+            try:
+                for w in win.winfo_children():
+                    for ch in w.winfo_children():
+                        try: cls = ch.__class__.__name__
+                        except: continue
+                        if cls in ("Label","LabelFrame","Button"):
+                            try: ch.configure(font=("Helvetica", _FS["v"] if cls!="LabelFrame" else _FS["v"]+1))
+                            except: pass
+            except: pass; win.geometry("1200x820")
         win.configure(bg="#1E1E2E")
         try: win.state("zoomed")
         except Exception: pass
@@ -79394,7 +79413,7 @@ class StockKeywordAnalyzerGUI:
             return f"{v:.0f}"
 
         status1 = tk.Label(t1, text="⏳ 拉取龙虎榜中...", bg="#1E1E2E", fg="#FFD700",
-                           font=("Helvetica", 11)); status1.pack(anchor="w", pady=4)
+                           font=("Helvetica", _FS["v"]+1)); status1.pack(anchor="w", pady=4)
 
         def _render_lhb(df, container):
             for w in container.winfo_children(): w.destroy()
@@ -79420,7 +79439,7 @@ class StockKeywordAnalyzerGUI:
                         str(row.get("上榜原因",""))[:28]]
                 fgs = ["#B0BEC5", "#CE93D8", "#ECEFF1", "#B0BEC5", pct_col, net_col, "#ECEFF1", "#ECEFF1", "#B0BEC5", "#90A4AE"]
                 for txt, fg in zip(data, fgs):
-                    tk.Label(rf, text=txt, bg=bg, fg=fg, font=("Helvetica", 10)).pack(side=tk.LEFT, padx=2)
+                    tk.Label(rf, text=txt, bg=bg, fg=fg, font=("Helvetica", _FS["v"])).pack(side=tk.LEFT, padx=2)
 
         def _lhb_thread():
             import threading as _th
@@ -79440,11 +79459,12 @@ class StockKeywordAnalyzerGUI:
 
         import threading as _th_ab
         _th_ab.Thread(target=_lhb_thread, daemon=True).start()
+        win.after(100, _rf_h)
 
         # ── Tab 2: 🌐 北向资金 (历史净流入) ──
         t2 = _mk_tab(nb, "🌐 北向资金流向")
         status2 = tk.Label(t2, text="⏳ 拉取北向资金中...", bg="#1E1E2E", fg="#FFD700",
-                           font=("Helvetica", 11)); status2.pack(anchor="w", pady=4)
+                           font=("Helvetica", _FS["v"]+1)); status2.pack(anchor="w", pady=4)
         north_container = tk.Frame(t2, bg="#1E1E2E"); north_container.pack(fill=tk.BOTH, expand=True)
 
         def _render_north(df, container):
@@ -79468,7 +79488,7 @@ class StockKeywordAnalyzerGUI:
                 vals = [str(row.get("日期",""))[:10], f"{net:+.2f}", f"{buy:.2f}", f"{sell:.2f}", f"{cum:+.1f}"]
                 fgs = ["#B0BEC5", nc, "#ECEFF1", "#ECEFF1", cc]
                 for txt, fg in zip(vals, fgs):
-                    tk.Label(rf, text=txt, bg=bg, fg=fg, font=("Helvetica", 10)).pack(side=tk.LEFT, padx=6)
+                    tk.Label(rf, text=txt, bg=bg, fg=fg, font=("Helvetica", _FS["v"])).pack(side=tk.LEFT, padx=6)
             # 汇总
             total_net = float(df_r["当日成交净买额"].sum()) / 1e8
             tk.Label(container, text=f"\n📊 近30日北向累计净买: {total_net:+.2f} 亿  ({'🟢 净流入' if total_net>0 else '🔴 净流出'})",
@@ -79508,7 +79528,27 @@ class StockKeywordAnalyzerGUI:
         """🎯 量化因子体系 - Barra CNE6 + IC/IR + 合成方法"""
         import tkinter as tk
         win = tk.Toplevel(self.root)
-        win.title("🎯 量化因子体系 + Barra CNE6 + IC/IR + 合成方法"); win.geometry("1220x820")
+        win.title("🎯 量化因子体系 + Barra CNE6 + IC/IR + 合成方法")
+        _FS = {"v": 12}
+        bar = ttk.Frame(win); bar.pack(fill=tk.X, padx=8, pady=4)
+        ttk.Label(bar, text="🔤 字号:", font=("Helvetica", _FS["v"]+1)).pack(side=tk.LEFT)
+        def _fs_d2(): _FS["v"]=max(9,_FS["v"]-1); _fl_f.configure(text=str(_FS["v"]))
+        def _fs_u2(): _FS["v"]=min(20,_FS["v"]+1); _fl_f.configure(text=str(_FS["v"]))
+        ttk.Button(bar, text="−", width=3, command=_fs_d2).pack(side=tk.LEFT, padx=3)
+        _fl_f = ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")); _fl_f.pack(side=tk.LEFT)
+        ttk.Button(bar, text="+", width=3, command=_fs_u2).pack(side=tk.LEFT)
+        ttk.Label(bar, text="  💡 点标题可折叠/展开", foreground="#888").pack(side=tk.LEFT, padx=20)
+        def _rf_f():
+            try:
+                for w in win.winfo_children():
+                    for ch in w.winfo_children():
+                        try: cls = ch.__class__.__name__
+                        except: continue
+                        if cls in ("Label","LabelFrame","Button"):
+                            try: ch.configure(font=("Helvetica", _FS["v"] if cls!="LabelFrame" else _FS["v"]+1))
+                            except: pass
+            except: pass
+        win.after(100, _rf_f); win.geometry("1220x820")
         win.configure(bg="#1E1E2E")
         try: win.state("zoomed")
         except Exception: pass
@@ -79534,7 +79574,7 @@ class StockKeywordAnalyzerGUI:
         # ── Tab 1: Barra CNE6 完整因子 ──
         t1 = _mk_tab(nb, "📊 Barra CNE6 风格因子")
         tk.Label(t1, text="A 股标准 Barra 风险模型 (CNE6), 10 风格因子 + 行业中性",
-                 bg="#1E1E2E", fg="#B0BEC5", font=("Helvetica", 10)).pack(anchor="w")
+                 bg="#1E1E2E", fg="#B0BEC5", font=("Helvetica", _FS["v"])).pack(anchor="w")
         barra = [
             ("📐 beta", "beta = 个股收益对市场收益回归系数", "高 beta = 牛市弹性大, 熊市跌得多"),
             ("📏 lncap", "ln(市值) — 规模因子", "小市值溢价 (小盘股长期跑赢大盘)"),
@@ -79556,8 +79596,8 @@ class StockKeywordAnalyzerGUI:
             bg = "#263238" if i % 2 == 0 else "#1E1E2E"
             rf = tk.Frame(F1, bg=bg); rf.pack(fill=tk.X)
             tk.Label(rf, text=name, bg=bg, fg="#FFD700", font=("Helvetica", 10, "bold")).pack(side=tk.LEFT, padx=4)
-            tk.Label(rf, text=defn, bg=bg, fg="#B0BEC5", font=("Helvetica", 10)).pack(side=tk.LEFT, padx=4)
-            tk.Label(rf, text=meaning, bg=bg, fg="#81C784", font=("Helvetica", 10)).pack(side=tk.LEFT, padx=4)
+            tk.Label(rf, text=defn, bg=bg, fg="#B0BEC5", font=("Helvetica", _FS["v"])).pack(side=tk.LEFT, padx=4)
+            tk.Label(rf, text=meaning, bg=bg, fg="#81C784", font=("Helvetica", _FS["v"])).pack(side=tk.LEFT, padx=4)
 
         # 行业中性
         F2 = _group(t1, "🏭 行业中性 (CNE6 覆盖 31 个申万一级行业)")
@@ -79567,7 +79607,7 @@ class StockKeywordAnalyzerGUI:
                 "汽车", "机械设备", "煤炭", "石油石化", "环保", "社会服务"]
         row = tk.Frame(F2, bg="#1E1E2E"); row.pack(fill=tk.X)
         for i, ind in enumerate(inds):
-            tk.Label(row, text=f"  {ind}", bg="#1E1E2E", fg="#64B5F6", font=("Helvetica", 9)).grid(
+            tk.Label(row, text=f"  {ind}", bg="#1E1E2E", fg="#64B5F6", font=("Helvetica", _FS["v"]-1)).grid(
                 row=i//7, column=i%7, sticky="w", padx=4)
 
         # ── Tab 2: 因子分类 (量价/基本面/另类) ──
@@ -79613,7 +79653,7 @@ class StockKeywordAnalyzerGUI:
         tk.Label(t3, text="IC (Information Coefficient) = 因子值与下期收益的 Pearson 相关系数\n"
                         "IR (Information Ratio) = IC 均值 / IC 标准差 (衡量因子稳定性)\n"
                         "衰减曲线: 因子 IC 随持仓期 (5/10/20/60 日) 的变化",
-                 bg="#1E1E2E", fg="#B0BEC5", font=("Helvetica", 10), justify=tk.LEFT).pack(anchor="w", pady=(0, 8))
+                 bg="#1E1E2E", fg="#B0BEC5", font=("Helvetica", _FS["v"]), justify=tk.LEFT).pack(anchor="w", pady=(0, 8))
         ic_data = [
             ("📈 动量因子",     "0.05", "0.06", "0.08", "0.10", "中期最强, 短期弱", "衰减慢 → 适合月度调仓"),
             ("💰 价值因子",     "0.03", "0.05", "0.07", "0.09", "稳定正 IC", "长期有效, 熊市抗跌"),
@@ -79635,7 +79675,7 @@ class StockKeywordAnalyzerGUI:
                 fg = "#EF5350" if val.startswith("-") and j > 0 else ("#66BB6A" if j > 0 else "#ECEFF1")
                 if j == 0: fg = "#FFD700"
                 elif j in [5, 6]: fg = "#B0BEC5"
-                tk.Label(rf, text=val, bg=bg, fg=fg, font=("Helvetica", 10)).pack(side=tk.LEFT, padx=6)
+                tk.Label(rf, text=val, bg=bg, fg=fg, font=("Helvetica", _FS["v"])).pack(side=tk.LEFT, padx=6)
 
         # ── Tab 4: 因子合成方法 ──
         t4 = _mk_tab(nb, "🔀 因子合成方法对比")
@@ -79666,9 +79706,9 @@ class StockKeywordAnalyzerGUI:
             bg = "#263238"
             rf = tk.Frame(F, bg=bg); rf.pack(fill=tk.X, pady=4)
             tk.Label(rf, text=f"🧠 {name}", bg=bg, fg="#FFD700", font=("Helvetica", 11, "bold")).pack(anchor="w", padx=4)
-            tk.Label(rf, text=f"   公式: {formula}", bg=bg, fg="#B0BEC5", font=("Helvetica", 10), justify=tk.LEFT).pack(anchor="w", padx=4)
-            tk.Label(rf, text=f"   优缺点: {pros}", bg=bg, fg="#CE93D8", font=("Helvetica", 10), justify=tk.LEFT).pack(anchor="w", padx=4)
-            tk.Label(rf, text=f"   实战: {use_case}", bg=bg, fg="#81C784", font=("Helvetica", 10)).pack(anchor="w", padx=4)
+            tk.Label(rf, text=f"   公式: {formula}", bg=bg, fg="#B0BEC5", font=("Helvetica", _FS["v"]), justify=tk.LEFT).pack(anchor="w", padx=4)
+            tk.Label(rf, text=f"   优缺点: {pros}", bg=bg, fg="#CE93D8", font=("Helvetica", _FS["v"]), justify=tk.LEFT).pack(anchor="w", padx=4)
+            tk.Label(rf, text=f"   实战: {use_case}", bg=bg, fg="#81C784", font=("Helvetica", _FS["v"])).pack(anchor="w", padx=4)
 
         # ── Tab 5: 📚 参考链接 ──
         t5 = _mk_tab(nb, "📚 参考链接")
@@ -79690,7 +79730,15 @@ class StockKeywordAnalyzerGUI:
     def _show_institution_knowledge_dialog(self):
         import tkinter as _tk
         from tkinter import scrolledtext
-        win = _tk.Toplevel(self.root); win.title("📚 机构知识体系 (综合)"); win.geometry("1120x720"); win.configure(bg="#1E1E2E")
+        win = _tk.Toplevel(self.root); win.title("📚 机构知识体系 (综合)"); win.geometry("1120x720")
+        _FS = {"v": 14}
+        bar = ttk.Frame(win); bar.pack(fill=_tk.X, padx=8, pady=4)
+        ttk.Label(bar, text="🔤 字号:", font=("Helvetica", 11)).pack(side=_tk.LEFT)
+        def _fs_d3(): _FS["v"]=max(9,_FS["v"]-1); _fl_k.configure(text=str(_FS["v"]))
+        def _fs_u3(): _FS["v"]=min(20,_FS["v"]+1); _fl_k.configure(text=str(_FS["v"]))
+        ttk.Button(bar, text="−", width=3, command=_fs_d3).pack(side=_tk.LEFT, padx=3)
+        _fl_k = ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")); _fl_k.pack(side=_tk.LEFT)
+        ttk.Button(bar, text="+", width=3, command=_fs_u3).pack(side=_tk.LEFT); win.configure(bg="#1E1E2E")
         nb = ttk.Notebook(win); nb.pack(fill=_tk.BOTH, expand=True, padx=6, pady=6)
         t1 = ttk.Frame(nb); nb.add(t1, text="📄 调研笔记")
         _tk.Label(t1, text="机构量化体系调研 (2026-09-26)", font=("Helvetica", 16, "bold"), foreground="#42A5F5").pack(pady=(20,6))
@@ -79710,17 +79758,27 @@ class StockKeywordAnalyzerGUI:
   - 反向思维: 创新药/有色-黄金被减仓可能有修复机会
   - 先分资金结构再定规则
   - 挑量化看风格约束纪律, 不看单月超额"""
-        st = scrolledtext.ScrolledText(t1, wrap=_tk.WORD, font=("Helvetica", 13))
+        st = scrolledtext.ScrolledText(t1, wrap=_tk.WORD, font=("Helvetica", _FS["v"]))
         st.pack(fill=_tk.BOTH, expand=True, padx=10, pady=10); st.insert("1.0", full.strip()); st.config(state=_tk.DISABLED)
         t2 = ttk.Frame(nb); nb.add(t2, text="🔎 快速查询")
         opts = ttk.Combobox(t2, values=["择时指标","风控指标","2026 指增排名","公募行业权重","Barra CNE6","信息渠道时效"], width=30, font=("Helvetica",13))
         opts.pack(pady=10); opts.current(0)
-        res = scrolledtext.ScrolledText(t2, wrap=_tk.WORD, font=("Helvetica", 13))
+        res = scrolledtext.ScrolledText(t2, wrap=_tk.WORD, font=("Helvetica", _FS["v"]))
         res.pack(fill=_tk.BOTH, expand=True, padx=10, pady=5)
         ans = {"择时指标":"估值分位/ERP/均线/北向/情绪","风控指标":"Barra风格/行业中性/流动性/回撤/因子拥挤","2026 指增排名":"2000 +17.51% > A500 +9.98% > 300 +7.49% > 1000 +6.66% > 选股 +3.75% > 500 +2.45%","公募行业权重":"电子42.66%,通信16.93%,双创56.35%>主板43.55%","Barra CNE6":"beta/lncap/momentum/volatility/liquidity/quality/growth/value/leverage","信息渠道时效":"巨潮:季报1月/半年报2月/年报4月 | 基金:15工作日 | 北向:每季第五交易日"}
         def _on(e): res.config(state=_tk.NORMAL); res.delete("1.0", _tk.END); res.insert("1.0", ans.get(opts.get(),"")); res.config(state=_tk.DISABLED)
         opts.bind("<<ComboboxSelected>>", _on); _on(None)
-
+        def _rf_k():
+            try:
+                for w in win.winfo_children():
+                    for ch in w.winfo_children():
+                        try: cls = ch.__class__.__name__
+                        except: continue
+                        if cls in ("Label","LabelFrame","Button"):
+                            try: ch.configure(font=("Helvetica", _FS["v"] if cls!="LabelFrame" else _FS["v"]+1))
+                            except: pass
+            except: pass
+        win.after(100, _rf_k)
 
 
     def _show_daily_kline_zoom(self, kline_data, stock_name):
