@@ -79255,10 +79255,10 @@ class StockKeywordAnalyzerGUI:
             top.pack(fill=tk.X)
             # 添加只显示主图的选项
             main_only_var = tk.BooleanVar(value=False)
-            ttk.Checkbutton(top, text="只显示主图", variable=main_only_var, command=redraw).pack(side=tk.LEFT, padx=(0, 10))
+            ttk.Checkbutton(top, text="只显示主图", variable=main_only_var).pack(side=tk.LEFT, padx=(0, 10))
             # 添加显示支撑/压力线的选项
             show_support_resistance_var = tk.BooleanVar(value=True)
-            ttk.Checkbutton(top, text="显示支撑/压力线", variable=show_support_resistance_var, command=redraw).pack(side=tk.LEFT, padx=(0, 10))
+            ttk.Checkbutton(top, text="显示支撑/压力线", variable=show_support_resistance_var).pack(side=tk.LEFT, padx=(0, 10))
             ttk.Label(top, text="副图指标(选 2~4 项后点「应用」):", font=("Microsoft YaHei", 10)).pack(
                 side=tk.LEFT, padx=(0, 6)
             )
@@ -79273,13 +79273,12 @@ class StockKeywordAnalyzerGUI:
             for code, _lbl in opt_specs:
                 ivars[code] = tk.BooleanVar(value=code in ("VOL", "MACD", "KDJ"))
             for code, lbl in opt_specs:
-                ttk.Checkbutton(top, text=lbl, variable=ivars[code], command=redraw).pack(side=tk.LEFT, padx=3)
+                ttk.Checkbutton(top, text=lbl, variable=ivars[code]).pack(side=tk.LEFT, padx=3)
             chart_inner = None
             status_var = tk.StringVar(value="")
             def _collect_keys():
                 return [c for c, _ in opt_specs if ivars[c].get()]
             def redraw():
-                print(f"[K线Zoom] redraw() main_only={main_only_var.get()}, 指标={_collect_keys()}", flush=True)
                 if main_only_var.get():
                     # 只显示主图
                     for w in chart_inner.winfo_children():
@@ -79325,7 +79324,7 @@ class StockKeywordAnalyzerGUI:
                         if hasattr(self, '_apply_daily_kline_ax'):
                             self._apply_daily_kline_ax = original_apply
                         messagebox.showerror("错误", f"绘制失败: {ex}", parent=win)
-            ttk.Button(top, text="应用", command=redraw).pack(side=tk.LEFT, padx=(10, 4))
+            ttk.Button(top, text="应用").pack(side=tk.LEFT, padx=(10, 4))
             current_stock_data = {'kline_data': kline_data, 'stock_name': stock_name}
             def calculate_kelly():
                 try:
