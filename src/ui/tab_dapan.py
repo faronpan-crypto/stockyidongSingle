@@ -12560,8 +12560,8 @@ class DapanMixin:
             "医药ETF":    "sh512010", "新能源ETF":  "sh515030", "军工ETF":    "sh512660",
             "消费ETF":    "sz159928", "银行ETF":    "sh512800", "红利ETF":    "sh515180",
         }
-        MA_PERIODS = [1, 5, 10, 20, 60]
-        MA_COLORS = {1: "#FF6B6B", 5: "#4ECDC4", 10: "#FFE66D", 20: "#95E1D3", 60: "#C7CEEA"}
+        MA_PERIODS = [5, 10, 20]
+        MA_COLORS = {5: "#4FC3F7", 10: "#FFB74D", 20: "#BA68C8"}
 
         # ---- 滚动容器 (高度翻倍 + 可拖动) ----
         _wrap = tk.Frame(parent, bg="#1E1E2E")
@@ -12636,18 +12636,18 @@ class DapanMixin:
             bar_w = 0.6
             for i in range(len(closes)):
                 color = "#EF5350" if closes[i] >= opens[i] else "#66BB6A"
-                ax.plot([x[i], x[i]], [lows[i], highs[i]], color=color, linewidth=0.6)
+                ax.plot([x[i], x[i]], [lows[i], highs[i]], color=color, linewidth=1.0, zorder=5)
                 body_lo, body_hi = min(opens[i], closes[i]), max(opens[i], closes[i])
-                ax.bar(x[i], body_hi - body_lo, bottom=body_lo, width=bar_w, color=color, edgecolor=color, linewidth=0.5)
+                ax.bar(x[i], body_hi - body_lo, bottom=body_lo, width=bar_w * 0.85, color=color, edgecolor=color, linewidth=0.5, zorder=5)
             for ma_p in MA_PERIODS:
                 if len(closes) < ma_p: continue
                 ma_vals = [None if i + 1 < ma_p else sum(closes[i + 1 - ma_p:i + 1]) / ma_p for i in range(len(closes))]
-                ax.plot(x, ma_vals, color=MA_COLORS[ma_p], linewidth=1.2, label=f"MA{ma_p}")
-            ax.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", labelcolor="#FFF", ncol=5)
-            ax.set_title("日K (MA 1/5/10/20/60)", color="#FFF", fontsize=11)
+                ax.plot(x, ma_vals, color=MA_COLORS[ma_p], linewidth=0.9, alpha=0.7, zorder=3, label=f"MA{ma_p}")
+            ax.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", labelcolor="#FFF", ncol=3)
+            ax.set_title("日K (MA 5/10/20)", color="#FFF", fontsize=11)
             ax.tick_params(colors="#CCC", labelsize=8)
             for sp in ax.spines.values(): sp.set_color("#444")
-            ax.grid(True, alpha=0.2, color="#666")
+            ax.grid(True, alpha=0.12, color="#666")
             step = max(1, len(x) // 10)
             ax.set_xticks(x[::step])
             ax.set_xticklabels([days_list[i][5:] for i in range(0, len(x), step)], rotation=30, fontsize=7)
@@ -53186,8 +53186,8 @@ class DapanMixin:
             "医药ETF":    "sh512010", "新能源ETF":  "sh515030", "军工ETF":    "sh512660",
             "消费ETF":    "sz159928", "银行ETF":    "sh512800", "红利ETF":    "sh515180",
         }
-        MA_PERIODS = [1, 5, 10, 20, 60]
-        MA_COLORS = {1: "#FF6B6B", 5: "#4ECDC4", 10: "#FFE66D", 20: "#95E1D3", 60: "#C7CEEA"}
+        MA_PERIODS = [5, 10, 20]
+        MA_COLORS = {5: "#4FC3F7", 10: "#FFB74D", 20: "#BA68C8"}
 
         # ---- 滚动容器 (高度翻倍 + 可拖动) ----
         _wrap = tk.Frame(parent, bg="#1E1E2E")
@@ -53262,18 +53262,18 @@ class DapanMixin:
             bar_w = 0.6
             for i in range(len(closes)):
                 color = "#EF5350" if closes[i] >= opens[i] else "#66BB6A"
-                ax.plot([x[i], x[i]], [lows[i], highs[i]], color=color, linewidth=0.6)
+                ax.plot([x[i], x[i]], [lows[i], highs[i]], color=color, linewidth=1.0, zorder=5)
                 body_lo, body_hi = min(opens[i], closes[i]), max(opens[i], closes[i])
-                ax.bar(x[i], body_hi - body_lo, bottom=body_lo, width=bar_w, color=color, edgecolor=color, linewidth=0.5)
+                ax.bar(x[i], body_hi - body_lo, bottom=body_lo, width=bar_w * 0.85, color=color, edgecolor=color, linewidth=0.5, zorder=5)
             for ma_p in MA_PERIODS:
                 if len(closes) < ma_p: continue
                 ma_vals = [None if i + 1 < ma_p else sum(closes[i + 1 - ma_p:i + 1]) / ma_p for i in range(len(closes))]
-                ax.plot(x, ma_vals, color=MA_COLORS[ma_p], linewidth=1.2, label=f"MA{ma_p}")
-            ax.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", labelcolor="#FFF", ncol=5)
-            ax.set_title("日K (MA 1/5/10/20/60)", color="#FFF", fontsize=11)
+                ax.plot(x, ma_vals, color=MA_COLORS[ma_p], linewidth=0.9, alpha=0.7, zorder=3, label=f"MA{ma_p}")
+            ax.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", labelcolor="#FFF", ncol=3)
+            ax.set_title("日K (MA 5/10/20)", color="#FFF", fontsize=11)
             ax.tick_params(colors="#CCC", labelsize=8)
             for sp in ax.spines.values(): sp.set_color("#444")
-            ax.grid(True, alpha=0.2, color="#666")
+            ax.grid(True, alpha=0.12, color="#666")
             step = max(1, len(x) // 10)
             ax.set_xticks(x[::step])
             ax.set_xticklabels([days_list[i][5:] for i in range(0, len(x), step)], rotation=30, fontsize=7)
@@ -82945,17 +82945,17 @@ class DapanMixin:
         highs = data['最高'].values
         lows = data['最低'].values
         for i in range(len(dates)):
-            color = 'red' if closes[i] >= opens[i] else 'green'
+            up = closes[i] >= opens[i]
+            color = '#EF5350' if up else '#66BB6A'
             body_bottom = min(opens[i], closes[i])
             body_top = max(opens[i], closes[i])
-            ax1.bar(i, body_top - body_bottom, bottom=body_bottom, color=color, alpha=0.8, width=0.6)
-            ax1.plot([i, i], [lows[i], body_bottom], color=color, linewidth=1)
-            ax1.plot([i, i], [body_top, highs[i]], color=color, linewidth=1)
-        ax1.plot(dates, closes, color='black', linewidth=0.5, label='收盘价', alpha=0.5, linestyle='--')
-        ma_colors = {'ma1': '#FF0000', 'ma5': '#00FF00', 'ma10': '#0000FF', 'ma20': '#FF00FF', 'vwap': '#FFD700'}
-        ma_labels = {'ma1': '1日均线', 'ma5': '5日均线', 'ma10': '10日均线', 'ma20': '20日均线', 'vwap': '主力成本线'}
-        period_map = {'ma1': 1, 'ma5': 5, 'ma10': 10, 'ma20': 20, 'vwap': 1}
-        for ma_name in ['ma1', 'ma5', 'ma10', 'ma20', 'vwap']:
+            ax1.bar(i, body_top - body_bottom, bottom=body_bottom, color=color, width=0.7, zorder=5)
+            ax1.plot([i, i], [lows[i], body_bottom], color=color, linewidth=1.4, zorder=5)
+            ax1.plot([i, i], [body_top, highs[i]], color=color, linewidth=1.4, zorder=5)
+        ma_colors = {'ma5': '#4FC3F7', 'ma10': '#FFB74D', 'ma20': '#BA68C8', 'ma60': '#A5D6A7'}
+        ma_labels = {'ma5': 'MA5', 'ma10': 'MA10', 'ma20': 'MA20', 'ma60': 'MA60'}
+        period_map = {'ma5': 5, 'ma10': 10, 'ma20': 20, 'ma60': 60}
+        for ma_name in ['ma5', 'ma10', 'ma20', 'ma60']:
             if ma_name not in ma_values or len(ma_values[ma_name]) == 0:
                 continue
             ma_data = ma_values[ma_name]
@@ -82965,7 +82965,7 @@ class DapanMixin:
             min_len = min(len(ma_indices), len(ma_data))
             if min_len > 0:
                 ax1.plot(ma_indices[:min_len], ma_data[:min_len], color=ma_colors[ma_name],
-                        linewidth=1.5, label=ma_labels[ma_name], alpha=0.8)
+                        linewidth=0.9, label=ma_labels[ma_name], alpha=0.65, zorder=3)
         # 股价震荡区间图
         try:
             import numpy as np
@@ -83115,10 +83115,12 @@ class DapanMixin:
                 ax1.text(idx, y_max + y_range * 0.05, f'买{i+1}', fontsize=8,
                         color='#FFD700', ha='center', rotation=90)
         _hint = " 双击图表可放大" if show_zoom_hint else ""
-        ax1.set_title(f"{stock_name} - 日K线图(Tushare){_hint}", fontsize=12, fontweight='bold')
+        ax1.set_title(f"{stock_name} - 日K线图{_hint}", fontsize=12, fontweight='bold')
         ax1.set_ylabel("价格", fontsize=10)
-        ax1.legend(loc='upper left', fontsize=8)
-        ax1.grid(True, alpha=0.3)
+        handles, labels = ax1.get_legend_handles_labels()
+        if handles:
+            ax1.legend(loc='upper left', fontsize=8, framealpha=0.6, facecolor='#1E1E2E', labelcolor='#CCC')
+        ax1.grid(True, alpha=0.15)
         ax1.set_xlabel("日期", fontsize=10)
         def _fmt_date(s):
             if not s or len(s) != 8:
