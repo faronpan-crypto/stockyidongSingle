@@ -13634,25 +13634,25 @@ class DapanMixin:
                 v = ~np.isnan(ma)
                 if v.any(): ax.plot(x[v], ma[v], color=col, linewidth=1.0, label=lbl, zorder=4)
 
-            # BOLL
+            # BOLL (不加 label, 用填充带+中轨虚线识别, 不进图例)
             bv = ~np.isnan(bmid)
             if bv.any():
-                ax.plot(x[bv], bmid[bv], color='#FFEB3B', linewidth=0.9, linestyle='--', label='BOLL中轨', zorder=3)
-                ax.plot(x[bv], bup[bv], color='#FF5722', linewidth=0.7, linestyle=':', label='BOLL上轨')
-                ax.plot(x[bv], blo[bv], color='#00BCD4', linewidth=0.7, linestyle=':', label='BOLL下轨')
+                ax.plot(x[bv], bmid[bv], color='#FFEB3B', linewidth=0.9, linestyle='--', zorder=3)
+                ax.plot(x[bv], bup[bv], color='#FF5722', linewidth=0.7, linestyle=':', alpha=0.6)
+                ax.plot(x[bv], blo[bv], color='#00BCD4', linewidth=0.7, linestyle=':', alpha=0.6)
                 ax.fill_between(x[bv], blo[bv], bup[bv], color='#FFEB3B', alpha=0.06, zorder=1)
 
-            # VWAP
-            ax.plot(x, vwap, color='#FFD700', linewidth=1.2, linestyle='--', label='VWAP主力成本', zorder=5)
+            # VWAP (不加 label)
+            ax.plot(x, vwap, color='#FFD700', linewidth=1.2, linestyle='--', zorder=5)
 
-            # 支撑压力
-            sr_colors = {'R2':'#F44336','R1':'#FF7043','S1':'#26A69A','S2':'#4DB6AC','PP':'#ECEFF1','max':'#FF5722','min':'#00BCD4'}
-            for k, v in sr.items():
-                ax.axhline(v, color=sr_colors.get(k,'#666'), linewidth=0.7, linestyle='--', alpha=0.6, zorder=1)
-                ax.text(len(closes)-1, v, f' {k}={v:.2f}', color=sr_colors.get(k,'#666'), fontsize=7, va='bottom')
+            # 支撑压力 (只画线, 不标文字, 避免拥挤)
+            sr_colors = {'R2':'#F44336','R1':'#FF7043','S1':'#26A69A','S2':'#4DB6AC'}
+            for k in ['R2','R1','S1','S2']:
+                v = sr[k]
+                ax.axhline(v, color=sr_colors[k], linewidth=0.6, linestyle='--', alpha=0.5, zorder=1)
 
             ax.set_title(f"{name} 日K线 ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=13, pad=8)
-            ax.legend(loc='upper left', fontsize=7, ncol=5, framealpha=0.5)
+            ax.legend(loc='upper left', fontsize=7, ncol=4, framealpha=0.5)
             ax.tick_params(colors="#AAA"); ax.grid(True, alpha=0.12)
             ax.spines['bottom'].set_color('#444'); ax.spines['top'].set_visible(False)
             ax.spines['left'].set_color('#444'); ax.spines['right'].set_visible(False)
