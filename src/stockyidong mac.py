@@ -48464,16 +48464,15 @@ class StockKeywordAnalyzerGUI:
             pass
 
         def _ema(data, period):
-            """EMA 计算"""
-            import math
+            """EMA 计算 (长度严格 = len(data))"""
             if len(data) < period:
                 return [None] * len(data)
-            result = [None] * period
+            result = [None] * len(data)
             sma = sum(data[:period]) / period
-            result.append(sma)
+            result[period - 1] = sma
             k = 2 / (period + 1)
-            for v in data[period:]:
-                result.append(v * k + result[-1] * (1 - k))
+            for i in range(period, len(data)):
+                result[i] = data[i] * k + result[i - 1] * (1 - k)
             return result
 
         def _compute_macd(closes, fast=12, slow=26, signal=9):
