@@ -13452,7 +13452,7 @@ class DapanMixin:
         status_var = tk.StringVar(value="")
         ttk.Label(top, textvariable=status_var, foreground="#90A4AE").pack(side=tk.LEFT, padx=10)
 
-        # === 指标选择行 + 说明面板 ===
+        # === 指标选择行 (只保留勾选) ===
         ind_row = ttk.Frame(win, padding=(6, 0)); ind_row.pack(fill=tk.X)
         ttk.Label(ind_row, text="📊 指标:").pack(side=tk.LEFT, padx=(0, 6))
         ind_vars = {
@@ -13466,97 +13466,183 @@ class DapanMixin:
         for k, label in ind_labels:
             ttk.Checkbutton(ind_row, text=label, variable=ind_vars[k]).pack(side=tk.LEFT, padx=3)
 
-        # --- 指标说明字典 ---
+        # --- 指标详细信息字典 ---
         IND_INFO = {
             'macd': {
                 'title': 'MACD 异同移动平均线',
-                'desc': 'EMA12 - EMA26 = DIF(蓝线), DIF的EMA9 = DEA(红线), 柱状 = 2×(DIF-DEA)。\n'
-                        '金叉(DIF上穿DEA)看涨, 死叉(DIF下穿DEA)看跌。零轴上方金叉信号最可靠。\n'
-                        '红柱放大=多头加强, 绿柱放大=空头加强; 柱缩短=动能衰减。顶/底背离是反转信号。',
+                'stars': '⭐⭐⭐⭐⭐', 'star_text': '核心趋势指标',
+                'formula': 'EMA12 - EMA26 = DIF(蓝线)\nDIF的EMA9 = DEA(红线)\n柱状 = 2 × (DIF - DEA)',
+                'core_signals': [
+                    '🟢 金叉(DIF上穿DEA) → 买入信号',
+                    '🔴 死叉(DIF下穿DEA) → 卖出信号',
+                    '🟢🟢 零轴上方金叉 → 强买入(主升浪)',
+                    '🔴🔴 零轴下方死叉 → 强卖出(主跌浪)',
+                    '⬆️ 红柱放大 → 多头动能加强',
+                    '⬇️ 绿柱放大 → 空头动能加强',
+                    '💔 顶背离(股价新高 MACD未新高) → 看跌反转',
+                    '💔 底背离(股价新低 MACD未新低) → 看涨反转',
+                ],
+                'when_to_use': ['中长期趋势跟踪', '判断多空力量强弱', '发现背离反转信号'],
+                'pitfalls': ['震荡市频繁金叉死叉=无效信号', '股价暴涨后MACD滞后钝化', '不能单独使用, 需配合K线形态'],
                 'links': [
-                    ('📖 MACD百度百科', 'https://baike.baidu.com/item/MACD指标'),
-                    ('🎯 雪球MACD教程', 'https://xueqiu.com/873953755/312548885'),
-                    ('💡 东方财富MACD详解', 'https://caifuhao.eastmoney.com/news/202005/1513540202710'),
+                    ('⭐⭐⭐ 百度百科 - 权威定义', 'https://baike.baidu.com/item/MACD指标'),
+                    ('⭐⭐⭐ 雪球MACD实战教程', 'https://xueqiu.com/873953755/312548885'),
+                    ('⭐⭐ 东方财富MACD详解', 'https://caifuhao.eastmoney.com/news/202005/1513540202710'),
                 ],
             },
             'kdj': {
                 'title': 'KDJ 随机指标 (9,3,3)',
-                'desc': 'RSV = (收盘价-N日最低价)/(N日最高价-N日最低价)×100。K=RSV的EMA3, D=K的EMA3, J=3K-2D。\n'
-                        'K/D < 20 超卖区(绿底), K/D > 80 超买区(红底)。\n'
-                        '金叉(20以下最佳)买入, 死叉(80以上最佳)卖出。J值>100超买, <0超卖。\n'
-                        '注意: KDJ在震荡市有效, 单边趋势市容易钝化。',
+                'stars': '⭐⭐⭐⭐', 'star_text': '超买超卖判断',
+                'formula': 'RSV = (收盘-9日最低)/(9日最高-9日最低) × 100\nK = RSV的EMA3\nD = K的EMA3\nJ = 3K - 2D',
+                'core_signals': [
+                    '🟢 K/D < 20 超卖区 → 关注反弹机会',
+                    '🔴 K/D > 80 超买区 → 警惕回调风险',
+                    '🟢 20以下金叉 → 最佳买点',
+                    '🔴 80以上死叉 → 最佳卖点',
+                    '🟢 J < 0 → 严重超卖, 随时反弹',
+                    '🔴 J > 100 → 严重超买, 可能回调',
+                ],
+                'when_to_use': ['震荡市短线买卖点', '判断短期超买超卖', '配合MACD确认入场'],
+                'pitfalls': ['单边趋势市KDJ会长期在超买/超卖区钝化', 'KDJ金叉≠立即涨, 可能反复', '参数(9,3,3)适合日线, 其他周期需调整'],
                 'links': [
-                    ('📖 KDJ百度百科', 'https://baike.baidu.com/item/KDJ指标'),
-                    ('🎯 雪球KDJ实战技巧', 'https://xueqiu.com/1835612492/228934828'),
-                    ('💡 KDJ超买超卖判断', 'https://www.10jqka.com.cn/20200409/c607281985816864.shtml'),
+                    ('⭐⭐⭐ 百度百科', 'https://baike.baidu.com/item/KDJ指标'),
+                    ('⭐⭐⭐ 雪球KDJ实战技巧', 'https://xueqiu.com/1835612492/228934828'),
+                    ('⭐⭐ 同花顺KDJ超买超卖', 'https://www.10jqka.com.cn/20200409/c607281985816864.shtml'),
                 ],
             },
             'wr': {
                 'title': 'WR 威廉指标 (14)',
-                'desc': 'WR = (N日最高价 - 收盘价) / (N日最高价 - N日最低价) × (-100)\n'
-                        '取值范围 -100 ~ 0。WR < -80(下方绿线) = 超卖区, WR > -20(上方红线) = 超买区。\n'
-                        'WR从超卖区上穿-80买入, 从超买区下穿-20卖出。与KDJ互补, 配合使用效果更好。',
+                'stars': '⭐⭐⭐', 'star_text': 'KDJ的互补指标',
+                'formula': 'WR = (14日最高 - 收盘) / (14日最高 - 14日最低) × (-100)\n取值: -100 ~ 0',
+                'core_signals': [
+                    '🟢 WR < -80 (下方绿线) → 超卖区',
+                    '🔴 WR > -20 (上方红线) → 超买区',
+                    '🟢 WR上穿-80 → 买入信号',
+                    '🔴 WR下穿-20 → 卖出信号',
+                    '⚠️ 与KDJ原理相同, WR更灵敏',
+                ],
+                'when_to_use': ['配合KDJ交叉验证', '寻找超买超卖拐点'],
+                'pitfalls': ['单独使用信号不准', '和KDJ重复, 二选一即可', '震荡市好用, 趋势市钝化'],
                 'links': [
-                    ('📖 威廉指标百度百科', 'https://baike.baidu.com/item/威廉指标'),
-                    ('🎯 WR指标实战', 'https://xueqiu.com/5890967038/267454987'),
-                    ('💡 WR与KDJ区别', 'https://www.10jqka.com.cn/20210125/c625805235516864.shtml'),
+                    ('⭐⭐⭐ 百度百科', 'https://baike.baidu.com/item/威廉指标'),
+                    ('⭐⭐ 雪球WR实战', 'https://xueqiu.com/5890967038/267454987'),
+                    ('⭐⭐ WR与KDJ区别', 'https://www.10jqka.com.cn/20210125/c625805235516864.shtml'),
                 ],
             },
             'bias': {
                 'title': 'BIAS 乖离率 (12日)',
-                'desc': 'BIAS = (收盘价 - N日均线) / N日均线 × 100%\n'
-                        '正区(红填充) = 价格在均线上方, 负区(绿填充) = 价格在均线下方。\n'
-                        'BIAS过大说明价格偏离均线过远, 有回归需求(顶背离); BIAS过小则可能反弹。\n'
-                        '上证指数 BIAS(12) 通常 > 15% 超买, < -12% 超卖。',
+                'stars': '⭐⭐⭐⭐', 'star_text': '价格偏离均线',
+                'formula': 'BIAS(N) = (收盘价 - N日均线) / N日均线 × 100%\n正区(红) = 价格在均线上方\n负区(绿) = 价格在均线下方',
+                'core_signals': [
+                    '🔴 BIAS(12) > 15% → 严重超买, 注意回调',
+                    '🟢 BIAS(12) < -12% → 严重超卖, 可能反弹',
+                    '🔴 BIAS顶背离 → 股价新高但BIAS未新高',
+                    '🟢 BIAS底背离 → 股价新低但BIAS未新低',
+                    '📊 大盘BIAS(20) > 30% → 牛市末期',
+                ],
+                'when_to_use': ['判断价格是否过度偏离均线', '大盘极端情绪判断', '配合均线系统使用'],
+                'pitfalls': ['强趋势中BIAS可以长期超买/超卖', '不同标的超买阈值不同(小盘股波动更大)', '不能单独作为买卖依据'],
                 'links': [
-                    ('📖 乖离率百度百科', 'https://baike.baidu.com/item/乖离率'),
-                    ('🎯 BIAS选股技巧', 'https://xueqiu.com/6610295538/304586768'),
-                    ('💡 均线偏离度实战', 'https://caifuhao.eastmoney.com/news/202103/0509543243510'),
+                    ('⭐⭐⭐ 百度百科', 'https://baike.baidu.com/item/乖离率'),
+                    ('⭐⭐⭐ 雪球BIAS选股技巧', 'https://xueqiu.com/6610295538/304586768'),
+                    ('⭐⭐ 东财均线偏离度实战', 'https://caifuhao.eastmoney.com/news/202103/0509543243510'),
                 ],
             },
             'chip': {
                 'title': '筹码分布 (CYQ)',
-                'desc': '基于日K OHLC×成交量近似算法: 每根K线均匀分配30%量+收盘价附近高斯加权70%。\n'
-                        '🟢 绿色柱 = 获利盘(现价以下筹码), 🔴 红色柱 = 套牢盘(现价以上筹码)。\n'
-                        '金色虚线 = 平均成本 (获利盘与套牢盘各占50%)。\n'
-                        '金色阴影 = 90%筹码集中区 (P5 ~ P95)。现价远低于此区间则套牢盘重, 反之获利盘多。',
+                'stars': '⭐⭐⭐⭐⭐', 'star_text': '主力成本判断',
+                'formula': '基于日K OHLC × 成交量近似:\n每根K线 30%量均匀分配 + 70%量在收盘价附近高斯加权',
+                'core_signals': [
+                    '🟢🟢 90%筹码集中在现价附近 → 高度控盘',
+                    '🔴🔴 现价远高于90%筹码区 → 获利盘太重',
+                    '🟢 现价远低于90%筹码区 → 套牢盘沉重',
+                    '💎 平均成本线上方 → 多数人赚钱',
+                    '💀 平均成本线下方 → 多数人亏钱',
+                    '🔥 筹码峰上移 → 获利盘离场, 套牢盘接盘',
+                ],
+                'when_to_use': ['判断主力持仓成本', '评估抛压轻重', '支撑压力位参考'],
+                'pitfalls': ['本算法为近似值, 非精确L2筹码', '分红除权后筹码会断层', '新股/次新股筹码参考价值低'],
                 'links': [
-                    ('📖 筹码分布百度百科', 'https://baike.baidu.com/item/筹码分布'),
-                    ('🎯 筹码峰选股法', 'https://xueqiu.com/9383148762/345678901'),
-                    ('💡 筹码集中度判断', 'https://www.10jqka.com.cn/20200618/c610293847518843.shtml'),
+                    ('⭐⭐⭐ 百度百科', 'https://baike.baidu.com/item/筹码分布'),
+                    ('⭐⭐⭐ 雪球筹码峰选股法', 'https://xueqiu.com/9383148762/345678901'),
+                    ('⭐⭐ 同花顺筹码集中度判断', 'https://www.10jqka.com.cn/20200618/c610293847518843.shtml'),
                 ],
             },
         }
 
-        # --- 说明面板 (Text + Scrollbar) ---
-        info_frame = tk.Frame(ind_row, bg="#2A2A3E")
-        info_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0), pady=2)
-        info_text = tk.Text(info_frame, height=3, bg="#2A2A3E", fg="#ECEFF1",
-                            font=("TkDefaultFont", 8), wrap=tk.WORD,
-                            relief=tk.FLAT, borderwidth=0, padx=8, pady=4, cursor="hand2")
-        info_sb = ttk.Scrollbar(info_frame, orient=tk.VERTICAL, command=info_text.yview)
+        # === 可折叠说明面板 ===
+        info_bar = tk.Frame(win, bg="#2A2A3E"); info_bar.pack(fill=tk.X)
+        info_visible = [True]  # 用列表包一层以便闭包修改
+        toggle_btn = tk.Button(info_bar, text="▼ 📚 指标详解 (点击折叠)", bg="#2A2A3E", fg="#FFD700",
+                               activebackground="#3A3A4E", activeforeground="#FFD700",
+                               relief=tk.FLAT, anchor="w", font=("TkDefaultFont", 9, "bold"),
+                               cursor="hand2", command=lambda: _toggle_info())
+        toggle_btn.pack(fill=tk.X, padx=6, pady=(4, 0))
+        info_body = tk.Frame(win, bg="#2A2A3E")  # pack_forget/pack 切换
+
+        info_text = tk.Text(info_body, height=8, bg="#2A2A3E", fg="#ECEFF1",
+                            font=("TkDefaultFont", 9), wrap=tk.WORD,
+                            relief=tk.FLAT, borderwidth=0, padx=10, pady=6, cursor="hand2")
+        info_sb = ttk.Scrollbar(info_body, orient=tk.VERTICAL, command=info_text.yview)
         info_text.configure(yscrollcommand=info_sb.set)
-        info_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); info_sb.pack(side=tk.RIGHT, fill=tk.Y)
-        info_text.tag_configure('title', foreground='#FFD700', font=("TkDefaultFont", 9, "bold"))
-        info_text.tag_configure('desc', foreground='#B0BEC5', font=("TkDefaultFont", 8))
-        info_text.tag_configure('link', foreground='#42A5F5', font=("TkDefaultFont", 8), underline=True)
+        info_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=6, pady=(0, 4)); info_sb.pack(side=tk.RIGHT, fill=tk.Y, pady=(0, 4))
+        # 标签样式
+        info_text.tag_configure('title', foreground='#FFD700', font=("TkDefaultFont", 10, "bold"), spacing3=4)
+        info_text.tag_configure('stars', foreground='#FF9800', font=("TkDefaultFont", 9, "bold"))
+        info_text.tag_configure('section', foreground='#64B5F6', font=("TkDefaultFont", 9, "bold"))
+        info_text.tag_configure('formula', foreground='#B0BEC5', font=("Menlo", 8), background='#1E1E2E')
+        info_text.tag_configure('signal', foreground='#ECEFF1', font=("TkDefaultFont", 9))
+        info_text.tag_configure('warn', foreground='#EF5350', font=("TkDefaultFont", 9))
+        info_text.tag_configure('ok', foreground='#66BB6A', font=("TkDefaultFont", 9))
+        info_text.tag_configure('link', foreground='#42A5F5', font=("TkDefaultFont", 9), underline=True)
         info_text.configure(state=tk.DISABLED)
+
+        def _toggle_info():
+            if info_visible[0]:
+                info_body.pack_forget(); toggle_btn.configure(text="▶ 📚 指标详解 (点击展开)")
+                info_visible[0] = False
+            else:
+                info_body.pack(fill=tk.BOTH, expand=False, padx=0, pady=(0, 2))
+                toggle_btn.configure(text="▼ 📚 指标详解 (点击折叠)")
+                info_visible[0] = True
+
         def _open_url(url):
             import webbrowser; webbrowser.open(url)
+
         def _update_info():
             info_text.configure(state=tk.NORMAL); info_text.delete('1.0', tk.END)
             selected = [k for k, v in ind_vars.items() if v.get()]
             if not selected:
-                info_text.insert(tk.END, "👈 勾选左侧指标查看说明和链接", 'desc')
+                info_text.insert(tk.END, "👈 勾选左侧指标查看详细说明、核心信号、失效陷阱和参考链接", 'section')
             else:
                 for k in selected:
                     if k not in IND_INFO: continue
                     info = IND_INFO[k]
-                    info_text.insert(tk.END, f"【{info['title']}】\n", 'title')
-                    info_text.insert(tk.END, info['desc'] + "\n", 'desc')
+                    # 标题行
+                    info_text.insert(tk.END, f"【{info['title']}】  ", 'title')
+                    info_text.insert(tk.END, f"{info['stars']}  {info['star_text']}\n", 'stars')
+                    # 公式
+                    info_text.insert(tk.END, "  📐 公式\n", 'section')
+                    for line in info['formula'].split('\n'):
+                        info_text.insert(tk.END, f"    {line}\n", 'formula')
+                    # 核心信号
+                    info_text.insert(tk.END, "  🎯 核心信号\n", 'section')
+                    for sig in info['core_signals']:
+                        tag = 'ok' if '🟢' in sig else ('warn' if '🔴' in sig else 'signal')
+                        info_text.insert(tk.END, f"    {sig}\n", tag)
+                    # 使用场景
+                    info_text.insert(tk.END, "  ✅ 使用场景\n", 'section')
+                    for s in info['when_to_use']:
+                        info_text.insert(tk.END, f"    • {s}\n", 'ok')
+                    # 失效陷阱
+                    info_text.insert(tk.END, "  ⚠️ 失效陷阱\n", 'section')
+                    for p in info['pitfalls']:
+                        info_text.insert(tk.END, f"    • {p}\n", 'warn')
+                    # 链接
+                    info_text.insert(tk.END, "  🔗 参考链接\n", 'section')
                     for label, url in info['links']:
                         start_idx = info_text.index(tk.INSERT)
-                        info_text.insert(tk.END, f"  🔗 {label}\n", 'link')
+                        info_text.insert(tk.END, f"    {label}\n", 'link')
                         end_idx = info_text.index(tk.INSERT)
                         info_text.tag_add(f'url_{url}', start_idx, end_idx)
                         info_text.tag_bind(f'url_{url}', '<Button-1>', lambda e, u=url: _open_url(u))
@@ -13564,9 +13650,11 @@ class DapanMixin:
                         info_text.tag_bind(f'url_{url}', '<Leave>', lambda e: info_text.configure(cursor=''))
                     info_text.insert(tk.END, "\n")
             info_text.configure(state=tk.DISABLED)
+
         for v in ind_vars.values():
             v.trace_add('write', lambda *a: _update_info())
         _update_info()
+        info_body.pack(fill=tk.BOTH, expand=False, padx=0, pady=(0, 2))
 
         # === Canvas + 滚动容器 ===
         wrap = tk.Frame(win, bg="#1E1E2E"); wrap.pack(fill=tk.BOTH, expand=True)
