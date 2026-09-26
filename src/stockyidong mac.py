@@ -78785,15 +78785,7 @@ class StockKeywordAnalyzerGUI:
             notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
             self.sentiment_zone_notebook = notebook
             self.sentiment_zone_text_widgets = {}
-            # ---- Tab 1: 🗓️ 情绪周期日历 (最先显示) ----
-            try:
-                cal_tab = ttk.Frame(notebook)
-                notebook.add(cal_tab, text="🗓️ 情绪周期日历")
-                self._build_emo_cycle_calendar(cal_tab, notebook=notebook)
-            except Exception as _e_emo_tab:
-                import traceback; traceback.print_exc()
-                print(f"[情绪周期日历] tab创建失败: {_e_emo_tab}", flush=True)
-            # ---- Tab 2: 情绪总览 ----
+            # ---- Tab 1: 情绪总览 ----
             tab = ttk.Frame(notebook)
             notebook.add(tab, text="情绪总览")
             txt = scrolledtext.ScrolledText(tab, wrap=tk.WORD, font=("Consolas", 11))
@@ -78803,6 +78795,14 @@ class StockKeywordAnalyzerGUI:
             txt.insert("1.0", "加载中...\n")
             txt.config(state=tk.DISABLED)
             self.sentiment_zone_text_widgets["overview"] = txt
+            # ---- Tab 2: 🗓️ 情绪周期日历 ----
+            try:
+                cal_tab = ttk.Frame(notebook)
+                notebook.add(cal_tab, text="🗓️ 情绪周期日历")
+                self._build_emo_cycle_calendar(cal_tab, notebook=notebook)
+            except Exception as _e_emo_tab:
+                import traceback; traceback.print_exc()
+                print(f"[情绪周期日历] tab创建失败: {_e_emo_tab}", flush=True)
             self._refresh_sentiment_zone_tabs_async()
         except Exception as e:
             ttk.Label(parent, text=f"情绪区间标签页创建失败: {e}", foreground="red").pack(expand=True)
