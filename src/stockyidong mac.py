@@ -48710,7 +48710,7 @@ class StockKeywordAnalyzerGUI:
             return r
 
         def _sma(data, period):
-            """正确的简单移动平均: 前 period-1 个值为 NaN"""
+            """正确的简单移动平均: 前 period-1 个值为 NaN, 等价于 pandas rolling().mean()"""
             arr = np.array([float(v) if v is not None else np.nan for v in data], dtype=float)
             n = len(arr); out = np.full(n, np.nan)
             if n < period: return out
@@ -48720,6 +48720,7 @@ class StockKeywordAnalyzerGUI:
 
         def _bb(closes, n=20, k=2.0):
             mid = _sma(closes, n)
+            # 滚动 std: 前 n-1 为 NaN
             closes_valid = np.array(closes, dtype=float)
             std = np.full(len(closes_valid), np.nan)
             for i in range(n-1, len(closes_valid)):
@@ -48886,6 +48887,10 @@ class StockKeywordAnalyzerGUI:
             ax.tick_params(colors="#AAA"); ax.grid(True, alpha=0.12)
             ax.spines['bottom'].set_color('#444'); ax.spines['top'].set_visible(False)
             ax.spines['left'].set_color('#444'); ax.spines['right'].set_visible(False)
+            # x 轴时间标签 (matplotlib 默认不自动生成)
+            step = max(1, len(x) // 12)
+            ax.set_xticks(x[::step])
+            ax.set_xticklabels([days_list[i][5:] for i in range(0, len(x), step)], rotation=30, fontsize=7, color='#AAA')
 
             # --- VOL ---
             v_colors = ["#d32f2f" if closes[i] >= opens[i] else "#388e3c" for i in range(len(closes))]
@@ -48944,6 +48949,32 @@ class StockKeywordAnalyzerGUI:
             cv.get_tk_widget().pack(fill=tk.X, padx=4, pady=4)
             try: NavigationToolbar2Tk(cv, fig_frame).update()
             except Exception: pass
+
+            # === 鼠标十字线 + 浮动 OHLC 数据 ===
+            vline = ax.axvline(x=-1, color='#FFD700', linewidth=0.8, alpha=0.7, visible=False)
+            hline = ax.axhline(y=-1, color='#FFD700', linewidth=0.8, alpha=0.7, visible=False)
+            info_annot = ax.annotate("", xy=(0,0), xytext=(10,10), textcoords="offset points",
+                                     bbox=dict(boxstyle="round,pad=0.3", fc="#1E1E2E", ec="#FFD700", lw=0.8, alpha=0.95),
+                                     fontsize=8, color="#FFF", visible=False, zorder=10)
+            def _on_move(evt):
+                if evt.inaxes != ax:
+                    vline.set_visible(False); hline.set_visible(False); info_annot.set_visible(False); cv.draw_idle(); return
+                xi = int(round(evt.xdata))
+                if xi < 0 or xi >= len(closes):
+                    vline.set_visible(False); hline.set_visible(False); info_annot.set_visible(False); cv.draw_idle(); return
+                vline.set_visible(True); hline.set_visible(True); info_annot.set_visible(True)
+                vline.set_xdata([xi, xi])
+                oi, hi, li, ci = float(opens[xi]), float(highs[xi]), float(lows[xi]), float(closes[xi])
+                vi = float(vols[xi])
+                chg = (ci - oi) / oi * 100 if oi else 0
+                hline.set_ydata([ci, ci])
+                vline.set_color('#EF5350' if ci >= oi else '#66BB6A')
+                txt = f"{days_list[xi]}  O:{oi:.1f} H:{hi:.1f} L:{li:.1f} C:{ci:.1f} {'+' if chg>=0 else ''}{chg:.2f}% V:{vi/1e4:.1f}万"
+                info_annot.set_text(txt)
+                status_var.set(f"{days_list[xi]} 开{oi:.2f} 高{hi:.2f} 低{li:.2f} 收{ci:.2f} {'+' if chg>=0 else ''}{chg:.2f}% 量{vi/1e4:.1f}万  主力成本{vwap[xi]:.2f}")
+                cv.draw_idle()
+            cv.mpl_connect("motion_notify_event", _on_move)
+            cv.mpl_connect("axes_leave_event", lambda e: (vline.set_visible(False), hline.set_visible(False), info_annot.set_visible(False), cv.draw_idle()))
             status_var.set(f"✅ {len(data)}根 | 支撑 {sr['S1']:.2f} / 压力 {sr['R1']:.2f} | 获利 {profit_ratio*100:.0f}%")
 
         refresh_btn.configure(command=_redraw)
