@@ -48416,23 +48416,39 @@ class StockKeywordAnalyzerGUI:
             return []
 
     def _sina_to_kline_data(self, sina_list):
-        """新浪 list[dict] → _show_daily_kline_zoom 期待的 {"data": DataFrame} 格式"""
+        """新浪 list[dict] → _show_daily_kline_zoom 期待的 {"data": DataFrame, "ma_values": {...}}"""
         import pandas as _pd
         if not sina_list:
             return None
+        closes = []; volumes = []; highs = []; lows = []
         rows = []
         for d in sina_list:
-            rows.append({
-                "日期": d.get("day", ""),
-                "开盘": float(d.get("open", 0)),
-                "收盘": float(d.get("close", 0)),
-                "最高": float(d.get("high", 0)),
-                "最低": float(d.get("low", 0)),
-                "成交量": float(d.get("volume", 0)),
-            })
+            c = float(d.get("close", 0))
+            o = float(d.get("open", 0))
+            h = float(d.get("high", 0))
+            lo = float(d.get("low", 0))
+            v = float(d.get("volume", 0))
+            closes.append(c); volumes.append(v); highs.append(h); lows.append(lo)
+            rows.append({"日期": d.get("day", ""), "开盘": o, "收盘": c, "最高": h, "最低": lo, "成交量": v})
         df = _pd.DataFrame(rows)
-        return {"data": df}
-
+        n = len(closes)
+        # 算 ma_values (sma)
+        ma_values = {}
+        for ma_name, ma_p in [("ma5", 5), ("ma10", 10), ("ma20", 20), ("ma60", 60)]:
+            ma_values[ma_name] = [
+                None if i + 1 < ma_p else sum(closes[i + 1 - ma_p:i + 1]) / ma_p
+                for i in range(n)
+            ]
+        # vwap (累计成交量加权平均价)
+        vwap_values = []
+        cum_pv = 0.0; cum_v = 0.0
+        for i in range(n):
+            typical = (highs[i] + lows[i] + closes[i]) / 3
+            cum_pv += typical * volumes[i]
+            cum_v += volumes[i]
+            vwap_values.append(cum_pv / cum_v if cum_v > 0 else None)
+        ma_values["vwap"] = vwap_values
+        return {"data": df, "ma_values": ma_values}
     def _build_index_trend_tab(self, parent):
         """📈 指数趋势 Tab: 上证/深成指/创业板 日K线 + MA1/5/10/20/60 + 双击放大"""
         import matplotlib
