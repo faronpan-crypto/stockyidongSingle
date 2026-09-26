@@ -12505,6 +12505,24 @@ class DapanMixin:
             print(f"[指数趋势] 拉取 {symbol} 失败: {e}", flush=True)
             return []
 
+    def _sina_to_kline_data(self, sina_list):
+        """新浪 list[dict] → _show_daily_kline_zoom 期待的 {"data": DataFrame} 格式"""
+        import pandas as _pd
+        if not sina_list:
+            return None
+        rows = []
+        for d in sina_list:
+            rows.append({
+                "日期": d.get("day", ""),
+                "开盘": float(d.get("open", 0)),
+                "收盘": float(d.get("close", 0)),
+                "最高": float(d.get("high", 0)),
+                "最低": float(d.get("low", 0)),
+                "成交量": float(d.get("volume", 0)),
+            })
+        df = _pd.DataFrame(rows)
+        return {"data": df}
+
     def _build_index_trend_tab(self, parent):
         """📈 指数趋势 Tab: 上证/深成指/创业板 日K线 + MA1/5/10/20/60 + 双击放大"""
         import matplotlib
@@ -12669,11 +12687,18 @@ class DapanMixin:
         _last_data = {}
 
         def _show_large(e):
-            """双击弹大窗口 (完整 K线 + MA + 成交量 + MACD)"""
+            """双击 → 调现成的 _show_daily_kline_zoom (支撑压力线+指标选择)"""
             data = _last_data.get("data")
+            name = _last_data.get("name", "")
             if not data: return
+            kline = self._sina_to_kline_data(data)
+            # mac.py 有完整的 _show_daily_kline_zoom (支撑压力线+指标选择)
+            if hasattr(self, "_show_daily_kline_zoom"):
+                self._show_daily_kline_zoom(kline, name)
+                return
+            # fallback: 自画大窗口
             win = tk.Toplevel(self.root)
-            win.title(f"📈 指数日K完整图 - {_last_data.get('name', '')} ({_last_data.get('days', '')}天)")
+            win.title(f"📈 指数日K - {name}")
             win.configure(bg="#1E1E2E")
             try: win.attributes("-topmost", True)
             except Exception: pass
@@ -12689,8 +12714,7 @@ class DapanMixin:
             highs = [float(d["high"]) for d in data]; lows = [float(d["low"]) for d in data]
             volumes = [float(d.get("volume", 0)) for d in data]; x = list(range(len(closes)))
             _draw_axes(ax, ax2, ax3, closes, opens, highs, lows, volumes, days_list, x, show_macd=True)
-            fig_big.suptitle(f"{_last_data.get('name','')} 日K线图 ({days_list[0]} ~ {days_list[-1]})",
-                             color="#FFF", fontsize=14, y=0.99)
+            fig_big.suptitle(f"{name} 日K ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=14, y=0.99)
             cv_big.draw()
 
         # 绑定双击
