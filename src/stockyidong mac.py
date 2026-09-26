@@ -47945,8 +47945,8 @@ class StockKeywordAnalyzerGUI:
                 for sym, name, typ in EXT:
                     kl = _fetch(sym, 80)
                     if not kl or len(kl) < 21: continue
-                    closes = _np.array([float(k["close"]) for k in kl])
-                    ma20 = _np.mean(closes[-20:])
+                    closes = _np_ab.array([float(k["close"]) for k in kl])
+                    ma20 = _np_ab.mean(closes[-20:])
                     c0 = closes[-1]; c5 = closes[-6] if len(closes)>=6 else closes[0]
                     c20 = closes[-21]; c60 = closes[0]
                     R_ab.append({'name':name,'sym':sym,'typ':typ,'c0':c0,
