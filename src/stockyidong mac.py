@@ -8019,6 +8019,15 @@ class StockKeywordAnalyzerGUI:
         # 快速爬取/文本控制标签页控件框(共用一块区域,可以切换)
         crawler_control_notebook = ttk.Notebook(left_frame)
         crawler_control_notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 0))
+        # 情绪日历标签页 (放到第一个, 让用户第一眼看到)
+        try:
+            emo_tab = ttk.Frame(crawler_control_notebook, padding=4)
+            crawler_control_notebook.add(emo_tab, text="🗓️情绪日历")
+            self._build_emo_cycle_calendar(emo_tab, notebook=crawler_control_notebook)
+            print("[情绪日历] ✅ 嵌入 crawler_control 成功", flush=True)
+        except Exception as _e_emo:
+            import traceback as _tb_emo; _tb_emo.print_exc()
+            print(f"[情绪日历] ❌ 嵌入失败: {_e_emo}", flush=True)
         # 快速爬取标签页
         crawler_frame = ttk.Frame(crawler_control_notebook, padding=5)
         crawler_control_notebook.add(crawler_frame, text="快速爬取")
@@ -8671,17 +8680,9 @@ class StockKeywordAnalyzerGUI:
         self.create_text_tab("未命名")
         # 注意:市场指数和热点导航标签页现在在_build_market_nav_section中创建
         # 不再在这里创建,因为它们已经移到快速爬取标签页的market_notebook中
-        # 情绪日历标签页 (放在暴跌左边)
-        try:
-            emo_tab = ttk.Frame(crawler_control_notebook, padding=4)
-            crawler_control_notebook.add(emo_tab, text="🗓️情绪日历")
-            self._build_emo_cycle_calendar(emo_tab, notebook=crawler_control_notebook)
-            print("[情绪日历] ✅ 嵌入 crawler_control 成功", flush=True)
-        except Exception as _e_emo:
-            import traceback as _tb_emo; _tb_emo.print_exc()
-            print(f"[情绪日历] ❌ 嵌入失败: {_e_emo}", flush=True)
+        # (情绪日历已移到 notebook 最前面, 见上文)
 
-        # 暴跌标签页(放在情绪日历右边)
+        # 暴跌标签页
         crash_tab = ttk.Frame(crawler_control_notebook, padding=10)
         crawler_control_notebook.add(crash_tab, text="暴跌")
 
