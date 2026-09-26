@@ -12512,7 +12512,17 @@ class DapanMixin:
         import matplotlib.pyplot as plt
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
-        INDEX_MAP = {"上证指数": "sh000001", "深证成指": "sz399001", "创业板指": "sz399006"}
+        INDEX_MAP = {
+            # ---- A 股宽基指数 ----
+            "上证指数": "sh000001", "深证成指": "sz399001", "创业板指": "sz399006",
+            "科创50":   "sh000688", "沪深300":  "sh000300", "上证50":   "sh000016",
+            "中证500":  "sh000905", "中证1000": "sh000852",
+            # ---- 主题/行业 ETF ----
+            "科创ETF":    "sh588000", "半导体ETF":  "sh512760", "黄金ETF":    "sh518880",
+            "纳指ETF":    "sh513100", "日经ETF":    "sh513520", "证券ETF":    "sh512880",
+            "医药ETF":    "sh512010", "新能源ETF":  "sh515030", "军工ETF":    "sh512660",
+            "消费ETF":    "sz159928", "银行ETF":    "sh512800", "红利ETF":    "sh515180",
+        }
         MA_PERIODS = [1, 5, 10, 20, 60]
         MA_COLORS = {1: "#FF6B6B", 5: "#4ECDC4", 10: "#FFE66D", 20: "#95E1D3", 60: "#C7CEEA"}
 
