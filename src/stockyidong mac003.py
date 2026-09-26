@@ -5649,7 +5649,9 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         right_paned.pack(fill=tk.BOTH, expand=True)
         # 上半部分:情绪区间标签页(大盘结构与盘面指标)
         holding_analysis_frame = ttk.LabelFrame(right_paned, text="情绪区间", padding=5)
-        right_paned.add(holding_analysis_frame, weight=3)
+        right_paned.add(holding_analysis_frame, weight=10)
+        # 强制给情绪区间一个合理的初始高度, 防止 PanedWindow 初始 sash 位置太低
+        right_paned.after(200, lambda: right_paned.sashpos(0, 600))
         # 内容区域(使用标签页展示结构化指标)
         self.holding_analysis_container = ttk.Frame(holding_analysis_frame)
         self.holding_analysis_container.pack(fill=tk.BOTH, expand=True)
