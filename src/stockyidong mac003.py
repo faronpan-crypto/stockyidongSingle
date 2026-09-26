@@ -4725,6 +4725,13 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         # 工具标签页(快速爬取里的不常用按钮移过来)
         tools_frame = ttk.Frame(crawler_control_notebook, padding=5)
         crawler_control_notebook.add(tools_frame, text="工具")
+        # ── 工具 Tab 按钮 ──
+        tools_row_a = ttk.Frame(tools_frame); tools_row_a.pack(fill=tk.X, pady=2)
+        _tools_pad = {"side": tk.LEFT, "padx": 2, "pady": 2, "fill": tk.X, "expand": True}
+        ttk.Button(tools_row_a, text="🏛️ 机构公私募", command=self._show_institution_dialog, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_a, text="📊 机构重仓追踪", command=self._show_institution_holdings, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_a, text="🎯 量化因子体系", command=self._show_factor_catalog_dialog, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_a, text="📚 机构知识体系", command=self._show_institution_knowledge_dialog, width=14).pack(**_tools_pad)
         # 将咨询分析、投资、系统、赌博、交易体系、交割单分析按钮移到交易标签页
         trading_buttons_frame = ttk.LabelFrame(trading_tab, text="交易功能", padding=3)
         trading_buttons_frame.pack(fill=tk.X, expand=False, pady=2)
