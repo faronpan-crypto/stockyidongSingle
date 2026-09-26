@@ -13414,6 +13414,565 @@ class DapanMixin:
         win.after(100, _rf_k)
 
 
+
+    # ============================================================
+    # 🃏 策略卡片库 - 四张底层范式 + 实战落地卡片
+    # ============================================================
+    def _show_strategy_cards(self):
+        """🃏 策略卡片库 - 散户赚钱的底层范式 + 实战落地"""
+        import tkinter as tk
+        win = tk.Toplevel(self.root)
+        win.title("🃏 策略卡片库 - 散户赚钱方法系统化"); win.geometry("1280x860")
+        win.configure(bg="#1E1E2E")
+        try: win.state("zoomed")
+        except Exception: pass
+        _FS = {"v": 13}
+        bar = ttk.Frame(win); bar.pack(fill=tk.X, padx=8, pady=4)
+        ttk.Label(bar, text="🔤 字号:", font=("Helvetica", 11)).pack(side=tk.LEFT)
+        def _fs_d(): _FS["v"]=max(9,_FS["v"]-1); _fl.configure(text=str(_FS["v"]))
+        def _fs_u(): _FS["v"]=min(22,_FS["v"]+1); _fl.configure(text=str(_FS["v"]))
+        ttk.Button(bar, text="−", width=3, command=_fs_d).pack(side=tk.LEFT, padx=3)
+        _fl = ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")); _fl.pack(side=tk.LEFT)
+        ttk.Button(bar, text="+", width=3, command=_fs_u).pack(side=tk.LEFT)
+        ttk.Label(bar, text="  💡 点击卡片头折叠/展开", foreground="#888").pack(side=tk.LEFT, padx=20)
+        def _rf():
+            try:
+                for w in win.winfo_children():
+                    for ch in w.winfo_children():
+                        try: cls = ch.__class__.__name__
+                        except: continue
+                        if cls in ("Label","LabelFrame","Button"):
+                            try: ch.configure(font=("Helvetica", _FS["v"] if cls!="LabelFrame" else _FS["v"]+1))
+                            except: pass
+            except: pass
+
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        def _mk_tab(nb_, title):
+            t = ttk.Frame(nb_); nb_.add(t, text=title)
+            cv = tk.Canvas(t, highlightthickness=0, bg="#1E1E2E")
+            sb = ttk.Scrollbar(t, orient=tk.VERTICAL, command=cv.yview); sb.pack(side=tk.RIGHT, fill=tk.Y)
+            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            cv.configure(yscrollcommand=sb.set, bg="#1E1E2E")
+            inner = ttk.Frame(cv, padding=8)
+            cv.create_window((0, 0), window=inner, anchor="nw")
+            cv.bind("<Configure>", lambda e: cv.itemconfigure(1, width=e.width))
+            inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+            cv.bind_all("<MouseWheel>", lambda e: cv.yview_scroll(int(-1*(e.delta/120)), "units"))
+            return inner
+
+        # ── Tab 1: 🧬 四张底层范式 ──
+        t1 = _mk_tab(nb, "🧬 四张底层范式")
+        PARADIGMS = [
+            ("A", "🏦 持股如存定期", "#1565C0",
+             ["低位好股拿 3~5 年, 不盯盘, 靠时间抹平波动赚价值增长",
+              "适合: 有耐心、不看盘、相信价值回归",
+              "不适合: 需要确定性回报、想快速赚钱的人"]),
+            ("B", "🤖 机械执行交易", "#2E7D32",
+             ["固定模式、严格等信号, 把人为思考排除掉",
+              "适合: 能严格遵守纪律、不被情绪左右",
+              "不适合: 喜欢灵活应变、频繁改规则的人"]),
+            ("C", "🔥 专追热点龙头", "#C62828",
+             ["只参与真正热点, 专注短线",
+              "适合: 盯盘时间多、反应快、能严格止损",
+              "不适合: 上班忙、怕波动、持有心态的人"]),
+            ("D", "🎣 耐心等待机会", "#6A1B9A",
+             ["一年只出手 2~3 次, 其余空仓 (需 4~5 年修炼)",
+              "适合: 有极强耐心、能空仓、不追热点",
+              "不适合: 闲不住、手痒、追求刺激的人"]),
+        ]
+        tk.Label(t1, text="一句话: 适合自身性格的方法才最有效",
+                 bg="#1E1E2E", fg="#FFD700", font=("Helvetica", _FS["v"]+2, "bold")).pack(anchor="w", pady=(0, 10))
+        for id_, title, color, bullets in PARADIGMS:
+            card = tk.Frame(t1, bg=color); card.pack(fill=tk.X, pady=6)
+            tk.Label(card, text=f"  {id_}. {title}", bg=color, fg="white",
+                     font=("Helvetica", _FS["v"]+2, "bold"), anchor="w", padx=8, pady=6).pack(fill=tk.X)
+            body = tk.Frame(card, bg="#2A2A3E"); body.pack(fill=tk.X, padx=6, pady=(0, 6))
+            for b in bullets:
+                tk.Label(body, text=f"  ✅ {b}", bg="#2A2A3E", fg="#ECEFF1",
+                         font=("Helvetica", _FS["v"]), anchor="w", padx=4, pady=2,
+                         wraplength=1100, justify=tk.LEFT).pack(fill=tk.X)
+
+        # ── Tab 2: 💼 实战落地卡片 ──
+        t2 = _mk_tab(nb, "💼 实战落地卡片")
+        CARDS = [
+            ("大跌买指数", "恐慌性大跌时买沪深300/创业板50等宽基, 等价格回归",
+             "情绪指数红灯 + 指数跌破MA60 + 单日跌幅>3%",
+             "单品种 ≤30%, 分批3次建仓",
+             "指数站上MA20或情绪转暖 → 卖出",
+             "适合: 🟡 震荡/熊市末期  性格: 稳健派"),
+            ("错杀买龙头", "行业龙头因短期利空/情绪错杀至低价时买, 长期耐心",
+             "PB破净或PE历史分位<20% + 基本面未恶化 + 机构错杀",
+             "单票 ≤15%, 留30%现金补仓",
+             "基本面恶化/逻辑破局/牛市结束 → 卖出 (绝非股价下跌)",
+             "适合: 🟢 全市场  性格: 长期价值派"),
+            ("滚动做熟股", "3~5只基本面扎实股/宽基, 留现金, 涨慢卖跌慢买",
+             "盈利股滞涨10~15% → 卖出; 熟悉股超跌5~10% → 买入",
+             "单票 ≤20%, 现金 ≥30%",
+             "涨卖跌买, 不追涨不杀跌",
+             "适合: 🟡 震荡市  性格: 稳健+灵活"),
+            ("天地一刀斩", "主升浪打法 (MA5>MA10>MA20多头 + 缩量回调 + 倍量大阳)",
+             "MA多头 + 缩量回调 + 倍量大阳站上三线 + 吞没3阴",
+             "分2档建仓, 单票 ≤10%",
+             "高位巨量+对子顶未突破 → 落袋, 破20日线 → 止损",
+             "适合: 🟢 牛市主升浪  性格: 短线交易派"),
+            ("宽基定投", "微笑曲线 - 每月固定金额买指数基金",
+             "每月固定日自动买入",
+             "每月固定金额, 占月收入 ≤20%",
+             "定投3~5年, 估值高位分批赎回",
+             "适合: 🟢🟡🔴 全市场  性格: 懒人理财"),
+            ("网格交易", "震荡市 - 价格每跌X%买, 每涨Y%卖",
+             "震荡市 (MA20横盘 + 波动率>15%)",
+             "单品种 ≤20%, 留足现金",
+             "跌破下轨止损 / 涨破上轨减仓",
+             "适合: 🟡 震荡市  性格: 机械派"),
+            ("红利收息", "高股息蓝筹股, 吃分红+享低波动",
+             "股息率>4% + ROE稳定>12% + 行业龙头",
+             "单票 ≤10%, 分散8~12只",
+             "股息率跌破3%或ROE下降 → 卖出",
+             "适合: 🔴 熊市  性格: 防守派"),
+            ("套利类", "打新/可转债/ETF套利 - 低风险确定性机会",
+             "新债上市顶格申购, ETF折溢价>1.5%套利",
+             "不占用主要仓位",
+             "上市即卖, 折价回归即平",
+             "适合: 🟢🟡 各种市场  性格: 稳健+灵活"),
+        ]
+        header_fmt = ["选股", "择时(进)", "择时(出)", "仓位", "风控"]
+        for cname, desc, entry, pos, exit_, adapt in CARDS:
+            card = tk.LabelFrame(t2, text=f"🃏 {cname}", font=("Helvetica", _FS["v"]+1, "bold"),
+                                 bg="#2A2A3E", fg="#FFD700", padx=8, pady=6)
+            card.pack(fill=tk.X, pady=6)
+            tk.Label(card, text=desc, bg="#2A2A3E", fg="#ECEFF1",
+                     font=("Helvetica", _FS["v"]), wraplength=1150, justify=tk.LEFT).pack(anchor="w", pady=(0,4))
+            grid_f = tk.Frame(card, bg="#2A2A3E"); grid_f.pack(fill=tk.X, pady=2)
+            row_data = [("📥 选股", entry), ("⏱️ 进场", pos), ("🎯 离场", exit_), ("💼 仓位", adapt.split("性格")[0].strip()), ("🛡️ 风控", adapt.split("性格")[1].strip() if "性格" in adapt else "")]
+            for col, (h, v) in enumerate(row_data):
+                col_f = tk.Frame(grid_f, bg="#1E1E2E"); col_f.grid(row=0, column=col, sticky="nsew", padx=3)
+                tk.Label(col_f, text=h, bg="#1E1E2E", fg="#64B5F6",
+                         font=("Helvetica", _FS["v"], "bold")).pack(anchor="w", padx=4, pady=2)
+                tk.Label(col_f, text=v, bg="#1E1E2E", fg="#B0BEC5",
+                         font=("Helvetica", _FS["v"]), wraplength=220, justify=tk.LEFT,
+                         anchor="w").pack(anchor="w", padx=4, pady=(0, 4))
+            for col in range(5): grid_f.grid_columnconfigure(col, weight=1)
+            tk.Label(card, text=f"  🎯 {adapt}", bg="#2A2A3E", fg="#81C784",
+                     font=("Helvetica", _FS["v"]), anchor="w").pack(anchor="w", pady=(4, 0))
+
+        # ── Tab 3: 🎨 性格匹配 ──
+        t3 = _mk_tab(nb, "🎨 性格匹配矩阵")
+        tk.Label(t3, text="选方法前先看自己性格! 性格不匹配 = 纪律执行不了",
+                 bg="#1E1E2E", fg="#FFAB91", font=("Helvetica", _FS["v"]+1, "bold")).pack(anchor="w", pady=(0, 10))
+        MATRIX = [
+            ("💼 存定期 (A股)",  "🔴", "低",  "低",  "低",  "长",  "懒人/耐心派",     "持股收息 + 价值成长"),
+            ("🤖 机械执行",       "🟡", "中",  "中",  "中",  "中",  "纪律派/量化",     "固定信号 + 严格止盈止损"),
+            ("🔥 短线龙头",       "🟢", "高",  "高",  "高",  "短",  "盯盘派/游资风",   "涨停/连板/天地板"),
+            ("🎣 空仓等机会",     "🔴", "低",  "低",  "极低","超长","忍者/大师",     "一年2~3次大机会"),
+            ("📊 滚动做熟股",     "🟡", "中",  "中",  "中",  "中短","稳健派/灵活派",   "3~5只票反复T"),
+            ("💎 错杀买龙头",     "🟡", "中",  "低",  "低",  "长",  "价值派/左侧",     "PB破净+长期持有"),
+        ]
+        hdr = tk.Frame(t3, bg="#2A2A3E"); hdr.pack(fill=tk.X)
+        for h in ["方法", "市场适配", "盯盘", "情绪波动", "资金效率", "时间框架", "适合人群", "变体"]:
+            tk.Label(hdr, text=h, bg="#2A2A3E", fg="#64B5F6", font=("Helvetica", _FS["v"], "bold"),
+                     width=10 if h not in ["方法","适合人群"] else 14).pack(side=tk.LEFT, padx=2, pady=4)
+        for row in MATRIX:
+            bg = "#263238" if MATRIX.index(row)%2==0 else "#1E1E2E"
+            rf = tk.Frame(t3, bg=bg); rf.pack(fill=tk.X)
+            for val in row:
+                tk.Label(rf, text=val, bg=bg, fg="#ECEFF1", font=("Helvetica", _FS["v"]),
+                         width=10 if val not in row[0] and val not in row[-2] and val not in row[-1] else 14).pack(side=tk.LEFT, padx=2, pady=3)
+
+        win.after(100, _rf)
+
+    # ============================================================
+    # ⚙️ 选股/择时/仓位/风控 四引擎
+    # ============================================================
+    def _show_four_engines(self):
+        """⚙️ 选股/择时/仓位/风控 - 四大引擎"""
+        import tkinter as tk
+        win = tk.Toplevel(self.root)
+        win.title("⚙️ 四引擎 - 选股 / 择时 / 仓位 / 风控"); win.geometry("1280x860")
+        win.configure(bg="#1E1E2E")
+        try: win.state("zoomed")
+        except Exception: pass
+        _FS = {"v": 13}
+        bar = ttk.Frame(win); bar.pack(fill=tk.X, padx=8, pady=4)
+        ttk.Label(bar, text="🔤 字号:", font=("Helvetica", 11)).pack(side=tk.LEFT)
+        def _fs_d(): _FS["v"]=max(9,_FS["v"]-1); _fl.configure(text=str(_FS["v"]))
+        def _fs_u(): _FS["v"]=min(22,_FS["v"]+1); _fl.configure(text=str(_FS["v"]))
+        ttk.Button(bar, text="−", width=3, command=_fs_d).pack(side=tk.LEFT, padx=3)
+        _fl = ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")); _fl.pack(side=tk.LEFT)
+        ttk.Button(bar, text="+", width=3, command=_fs_u).pack(side=tk.LEFT)
+        def _rf():
+            try:
+                for w in win.winfo_children():
+                    for ch in w.winfo_children():
+                        try: cls = ch.__class__.__name__
+                        except: continue
+                        if cls in ("Label","LabelFrame","Button"):
+                            try: ch.configure(font=("Helvetica", _FS["v"] if cls!="LabelFrame" else _FS["v"]+1))
+                            except: pass
+            except: pass
+
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        def _mk_tab(nb_, title):
+            t = ttk.Frame(nb_); nb_.add(t, text=title)
+            cv = tk.Canvas(t, highlightthickness=0, bg="#1E1E2E")
+            sb = ttk.Scrollbar(t, orient=tk.VERTICAL, command=cv.yview); sb.pack(side=tk.RIGHT, fill=tk.Y)
+            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            cv.configure(yscrollcommand=sb.set, bg="#1E1E2E")
+            inner = ttk.Frame(cv, padding=8)
+            cv.create_window((0, 0), window=inner, anchor="nw")
+            cv.bind("<Configure>", lambda e: cv.itemconfigure(1, width=e.width))
+            inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+            cv.bind_all("<MouseWheel>", lambda e: cv.yview_scroll(int(-1*(e.delta/120)), "units"))
+            return inner
+
+        def _card(parent, title, color, items):
+            f = tk.LabelFrame(parent, text=title, bg=color, fg="white",
+                              font=("Helvetica", _FS["v"]+1, "bold"), padx=8, pady=6)
+            f.pack(fill=tk.X, pady=5)
+            for label, val in items:
+                rf = tk.Frame(f, bg=color); rf.pack(fill=tk.X, pady=2)
+                tk.Label(rf, text=f"  {label}", bg=color, fg="#FFD700",
+                         font=("Helvetica", _FS["v"], "bold")).pack(side=tk.LEFT, padx=(0,8))
+                tk.Label(rf, text=str(val), bg=color, fg="#ECEFF1",
+                         font=("Helvetica", _FS["v"]), wraplength=1000, justify=tk.LEFT,
+                         anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # ── Tab 1: 🎯 M1 选股引擎 ──
+        t1 = _mk_tab(nb, "🎯 M1 选股")
+        _card(t1, "📦 因子库 (五维)", "#1565C0", [
+            ("基本面", "PE/PB/PS/ROE/ROIC/毛利率/营收增速/利润增速/股息率/现金流质量"),
+            ("技术面", "均线系统(MA5/10/20/60)/量能(缩量放量/换手率)/形态(M头W底/突破/回调)/波动率/ATR"),
+            ("情绪面", "涨停/连板高度/炸板率/涨跌家数比/封板强度/换手率/振幅"),
+            ("资金面", "北向持股/两融余额变化/龙虎榜机构净买入/大单净流入/主力资金流向"),
+            ("筹码面", "股东户数变化/筹码峰集中度/获利盘比例/平均成本位"),
+        ])
+        _card(t1, "🎨 场景模板 (预置)", "#2E7D32", [
+            ("大跌买指数", "恐慌性大跌 + 指数跌破MA60 + 单日跌幅>3%"),
+            ("错杀龙头", "PB破净或PE分位<20% + 基本面未恶化 + 机构错杀"),
+            ("主升浪启动", "MA多头排列 + 缩量回调 + 倍量大阳 + 吞没3阴"),
+            ("游资连板", "涨停高度>3板 + 换手率>15% + 龙虎榜有知名游资"),
+            ("网格标的", "MA20横盘 + 波动率>15% + 上下轨清晰"),
+            ("红利收息", "股息率>4% + ROE稳定>12% + 行业龙头"),
+        ])
+        _card(t1, "🚫 禁投池", "#C62828", [
+            ("ST/*ST", "连续亏损/财务造假风险"),
+            ("解禁高峰", "未来1个月有大额限售股解禁"),
+            ("基本面恶化", "ROE连续2季下降/营收连续3季负增长"),
+            ("退市风险", "连续20日面值以下/净利润为负+营收不足1亿"),
+        ])
+
+        # ── Tab 2: ⏱️ M2 择时引擎 ──
+        t2 = _mk_tab(nb, "⏱️ M2 择时")
+        _card(t2, "📊 大盘择时信号 (综合判断)", "#6A1B9A", [
+            ("均线趋势", "MA5/10/20/60多头排列 → 牛市; 空头 → 熊市; 交织 → 震荡"),
+            ("估值分位", "沪深300 PE分位 >80% 超买, <20% 超卖"),
+            ("ERP股债性价比", "(1/PE - 十年期国债收益率) >4% 便宜, <2% 贵"),
+            ("波动率", "VIX类指标 >25 高波动谨慎, <15 低波动大胆"),
+            ("北向/两融", "北向连续5日净流入 + 融资余额增加 → 机构看多"),
+            ("情绪指标", "涨停>50/跌停<10 → 多头; 跌停>50/涨停<10 → 空头"),
+        ])
+        _card(t2, "🎚️ 市场状态识别", "#2E7D32", [
+            ("🟢 牛市", "满仓 100%, 主升浪卡片启用, 止损放宽"),
+            ("🟡 震荡市", "半仓 50%, 滚动做熟股/网格/红利, 严格止盈止损"),
+            ("🔴 熊市", "空仓或≤20%防御仓, 只启用红利/黄金/债券"),
+            ("🚨 极端恐慌", "满仓/重仓抄底 (情绪指数是60-70%核心)"),
+        ])
+        _card(t2, "🎯 个股买卖点", "#1565C0", [
+            ("买点 - 尾盘进场", "倍量大阳 + 吞没形态 + 尾盘14:50进场 (避盘中诱多)"),
+            ("买点 - 错杀折价", "价格低于均线30%以上 + 基本面未恶化 (左侧布局)"),
+            ("卖点 - 对子顶", "高位 + 连续两根K线高点相同 + 放量 → 主力出货信号"),
+            ("卖点 - 巨量滞涨", "成交量>5日均量2倍 + 涨幅<1% → 换手出货"),
+            ("卖点 - 破位止损", "跌破MA20 + 放量 → 坚决止损 (纪律!)"),
+        ])
+
+        # ── Tab 3: 💼 M3 仓位引擎 ──
+        t3 = _mk_tab(nb, "💼 M3 仓位")
+        _card(t3, "🎛️ 总仓位随大盘调整", "#1565C0", [
+            ("牛市", "总仓位 80~100%, 高Beta标的为主"),
+            ("震荡市", "总仓位 40~60%, 平衡配置"),
+            ("熊市", "总仓位 0~30%, 防御性标的为主或空仓"),
+        ])
+        _card(t3, "⚖️ 单票/单行业上限", "#2E7D32", [
+            ("单票上限", "≤ 10% (呼应公募双十红线)"),
+            ("单行业上限", "≤ 25% (避免行业集中风险)"),
+            ("现金留存", "滚动做T ≥ 30%, 网格 ≥ 40%"),
+            ("波动率目标", "组合波动率 >20% → 自动降仓至15%以内"),
+        ])
+        _card(t3, "📐 分档建仓策略", "#6A1B9A", [
+            ("金字塔式 (看好)", "30% → 30% → 40%, 越涨越轻"),
+            ("倒金字塔 (抄底)", "40% → 30% → 30%, 越跌越重"),
+            ("定投式 (懒人)", "每月固定日等额买入, 不择时"),
+            ("网格式 (震荡)", "每跌N%买一格, 每涨M%卖一格"),
+        ])
+
+        # ── Tab 4: 🛡️ M4 风控引擎 ──
+        t4 = _mk_tab(nb, "🛡️ M4 风控")
+        _card(t4, "🛡️ 事前风控 (防止入坑)", "#2E7D32", [
+            ("投资池/禁投池", "ST/退市/解禁高峰/基本面恶化股自动过滤"),
+            ("单票/单行业上限", "预设阈值, 超过禁止买入"),
+            ("预设止损线", "每笔买入前写清楚止损价 (如MA20或-8%)"),
+            ("最大回撤阈值", "账户回撤 >15% 强制减仓至 30%"),
+            ("买入前白纸黑字", "买入理由/持有时长/卖出条件 (卖出=基本面变化, 绝非股价下跌)"),
+        ])
+        _card(t4, "🛑 事中风控 (实时监控)", "#C62828", [
+            ("实时回撤监控", "每只股票 + 组合级别的回撤追踪"),
+            ("止损止盈触发", "触及预设价 → 自动告警/执行 (可接QMT)"),
+            ("异常波动告警", "单日涨跌>15%/连续3日同方向 → 提示检查"),
+            ("黑天鹅预警", "停牌/退市/业绩雷 → 提前预警"),
+            ("单日最大亏损", "单日亏损 >3% → 当日停止交易"),
+            ("强制空仓条件", "指数破年线 + 放量 / 连续亏损3天 → 空仓"),
+        ])
+        _card(t4, "📊 事后复盘 (归因+纪律)", "#1565C0", [
+            ("归因报告", "赚/亏在哪个因子/哪张卡片/哪次择时"),
+            ("定期复盘", "每周/每月写交易日志"),
+            ("纪律校验", "是否偏离买入前写的卖出条件 / 是否中途换股"),
+            ("连续亏损熔断", "连续亏损5笔 → 停止交易1周, 复盘找问题"),
+        ])
+
+        win.after(100, _rf)
+
+    # ============================================================
+    # 📊 回测/复盘 + 💡 赚钱心法
+    # ============================================================
+    def _show_backtest_review(self):
+        """📊 回测/复盘 - 策略卡片绩效 + 归因"""
+        import tkinter as tk
+        win = tk.Toplevel(self.root)
+        win.title("📊 回测/复盘 - 策略卡片绩效"); win.geometry("1100x780")
+        win.configure(bg="#1E1E2E")
+        try: win.state("zoomed")
+        except Exception: pass
+        _FS = {"v": 13}
+        bar = ttk.Frame(win); bar.pack(fill=tk.X, padx=8, pady=4)
+        ttk.Label(bar, text="🔤 字号:", font=("Helvetica", 11)).pack(side=tk.LEFT)
+        def _fs_d(): _FS["v"]=max(9,_FS["v"]-1); _fl.configure(text=str(_FS["v"]))
+        def _fs_u(): _FS["v"]=min(22,_FS["v"]+1); _fl.configure(text=str(_FS["v"]))
+        ttk.Button(bar, text="−", width=3, command=_fs_d).pack(side=tk.LEFT, padx=3)
+        _fl = ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")); _fl.pack(side=tk.LEFT)
+        ttk.Button(bar, text="+", width=3, command=_fs_u).pack(side=tk.LEFT)
+        def _rf():
+            try:
+                for w in win.winfo_children():
+                    for ch in w.winfo_children():
+                        try: cls = ch.__class__.__name__
+                        except: continue
+                        if cls in ("Label","LabelFrame","Button"):
+                            try: ch.configure(font=("Helvetica", _FS["v"] if cls!="LabelFrame" else _FS["v"]+1))
+                            except: pass
+            except: pass
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        def _mk_tab(nb_, title):
+            t = ttk.Frame(nb_); nb_.add(t, text=title)
+            cv = tk.Canvas(t, highlightthickness=0, bg="#1E1E2E")
+            sb = ttk.Scrollbar(t, orient=tk.VERTICAL, command=cv.yview); sb.pack(side=tk.RIGHT, fill=tk.Y)
+            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            cv.configure(yscrollcommand=sb.set, bg="#1E1E2E")
+            inner = ttk.Frame(cv, padding=8)
+            cv.create_window((0, 0), window=inner, anchor="nw")
+            cv.bind("<Configure>", lambda e: cv.itemconfigure(1, width=e.width))
+            inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+            cv.bind_all("<MouseWheel>", lambda e: cv.yview_scroll(int(-1*(e.delta/120)), "units"))
+            return inner
+
+        t1 = _mk_tab(nb, "📈 指标体系")
+        for title, items in [
+            ("✅ 胜率类", [("胜率", "盈利次数 / 总交易次数"),
+                           ("盈亏比", "平均盈利 / 平均亏损 (必须>1.5)"),
+                           ("期望值", "胜率×平均盈利 - 败率×平均亏损 (必须>0)")]),
+            ("📉 风险类", [("最大回撤", "净值曲线最高点到最低点跌幅 (必须<20%)"),
+                           ("夏普比率", "(年化收益-无风险利率) / 年化波动率 (越高越好)"),
+                           ("卡玛比率", "年化收益 / 最大回撤 (必须>1)"),
+                           ("索提诺比率", "只考虑下行风险的夏普 (更严格)")]),
+            ("📅 收益类", [("年化收益率", "(期末/期初)^(252/天数) - 1"),
+                           ("相对基准超额", "策略收益 - 沪深300收益"),
+                           ("年度胜率", "每年是否正收益 (连续3年正收益才靠谱)")]),
+        ]:
+            f = tk.LabelFrame(t1, text=title, bg="#2A2A3E", fg="#FFD700",
+                              font=("Helvetica", _FS["v"]+1, "bold"), padx=8, pady=6)
+            f.pack(fill=tk.X, pady=5)
+            for n, d in items:
+                tk.Label(f, text=f"  📐 {n}", bg="#2A2A3E", fg="#64B5F6",
+                         font=("Helvetica", _FS["v"], "bold")).pack(anchor="w")
+                tk.Label(f, text=f"     {d}", bg="#2A2A3E", fg="#ECEFF1",
+                         font=("Helvetica", _FS["v"]), wraplength=1100, justify=tk.LEFT).pack(anchor="w", pady=(0,4))
+
+        t2 = _mk_tab(nb, "📋 回测步骤 (MVP)")
+        STEPS = [
+            "1️⃣ 选策略卡片 → 天地一刀斩 / 三稳买入法 (两张起步)",
+            "2️⃣ 选回测区间 → 至少 5 年 (覆盖牛熊震荡)",
+            "3️⃣ 标的范围 → 沪深300 + 中证500 (宽基)",
+            "4️⃣ 实现选股/择时/仓位/风控 四引擎逻辑",
+            "5️⃣ 跑回测 → 胜率/盈亏比/最大回撤/年化",
+            "6️⃣ 对比基准 → 同期沪深300收益",
+            "7️⃣ 压力测试 → 换市场状态 (牛/熊/震荡) 看哪个场景失效",
+            "8️⃣ 纪律校验 → 模拟人性弱点 (追涨/割肉/不止损) 看对收益影响",
+            "9️⃣ MVP → 先跑通 回测→提醒→复盘 闭环, 再扩卡片",
+        ]
+        for s in STEPS:
+            tk.Label(t2, text=s, bg="#1E1E2E", fg="#81C784",
+                     font=("Helvetica", _FS["v"]), anchor="w", wraplength=1100,
+                     justify=tk.LEFT).pack(anchor="w", pady=3)
+
+        t3 = _mk_tab(nb, "📝 复盘日志模板")
+        tk.Label(t3, text="每笔交易留痕 (强制填写):", bg="#1E1E2E", fg="#FFD700",
+                 font=("Helvetica", _FS["v"]+1, "bold")).pack(anchor="w", pady=(0,6))
+        TEMPLATE = [
+            "📅 日期: ____/____/____",
+            "🃏 使用的策略卡片: _______________",
+            "📥 选股理由: _________________________",
+            "⏱️ 进场信号: _________________________",
+            "💼 仓位: ____% (总仓位 ____%)",
+            "🎯 卖出条件: _________________________",
+            "🛡️ 止损位: _______",
+            "📤 实际卖出日: ____/____/____",
+            "💵 盈亏: _______%",
+            "❓ 偏差分析: 按计划执行了吗? 为什么?",
+        ]
+        for t in TEMPLATE:
+            tk.Label(t3, text=t, bg="#2A2A3E", fg="#ECEFF1",
+                     font=("Menlo", _FS["v"]), anchor="w").pack(anchor="w", padx=10, pady=1)
+
+        t4 = _mk_tab(nb, "🔗 参考平台")
+        for n, d, u in [
+            ("📖 聚宽 JoinQuant", "国内顶级回测平台, 策略社区活跃", "https://www.joinquant.com"),
+            ("📖 RiceQuant", "RQAlpha 开源框架, 本地可跑", "https://www.ricequant.com"),
+            ("📖 掘金 MyQuant", "C++撮合引擎, 速度快", "https://www.myquant.cn"),
+            ("📖 BigQuant", "AI因子挖掘 + 选股", "https://www.bigquant.com"),
+            ("📖 Backtrader", "Python 开源回测框架", "https://www.backtrader.com"),
+            ("📖 QuantConnect", "全球市场 + LEAN 引擎", "https://www.quantconnect.com"),
+        ]:
+            f = tk.Frame(t4, bg="#2A2A3E"); f.pack(fill=tk.X, pady=4)
+            tk.Label(f, text=n, bg="#2A2A3E", fg="#42A5F5", font=("Helvetica", _FS["v"]+1, "bold")).pack(side=tk.LEFT, padx=8)
+            tk.Label(f, text=f" — {d}", bg="#2A2A3E", fg="#ECEFF1", font=("Helvetica", _FS["v"])).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            l = tk.Label(f, text="🔗", bg="#2A2A3E", fg="#64B5F6", cursor="hand2", font=("Helvetica", _FS["v"]))
+            l.pack(side=tk.RIGHT, padx=8)
+            l.bind("<Button-1>", lambda e, uu=u: self._open_safe(uu))
+        win.after(100, _rf)
+
+    # ============================================================
+    # 💡 赚钱心法 - 亏损根源 + 纪律 + 方法论
+    # ============================================================
+    def _show_profit_mental_model(self):
+        """💡 赚钱心法 - 散户亏损根源 + 赚钱三条件 + 纪律"""
+        import tkinter as tk
+        win = tk.Toplevel(self.root)
+        win.title("💡 赚钱心法 - 纪律 > 分析 > 预测"); win.geometry("1100x780")
+        win.configure(bg="#1E1E2E")
+        try: win.state("zoomed")
+        except Exception: pass
+        _FS = {"v": 13}
+        bar = ttk.Frame(win); bar.pack(fill=tk.X, padx=8, pady=4)
+        ttk.Label(bar, text="🔤 字号:", font=("Helvetica", 11)).pack(side=tk.LEFT)
+        def _fs_d(): _FS["v"]=max(9,_FS["v"]-1); _fl.configure(text=str(_FS["v"]))
+        def _fs_u(): _FS["v"]=min(22,_FS["v"]+1); _fl.configure(text=str(_FS["v"]))
+        ttk.Button(bar, text="−", width=3, command=_fs_d).pack(side=tk.LEFT, padx=3)
+        _fl = ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")); _fl.pack(side=tk.LEFT)
+        ttk.Button(bar, text="+", width=3, command=_fs_u).pack(side=tk.LEFT)
+        def _rf():
+            try:
+                for w in win.winfo_children():
+                    for ch in w.winfo_children():
+                        try: cls = ch.__class__.__name__
+                        except: continue
+                        if cls in ("Label","LabelFrame","Button"):
+                            try: ch.configure(font=("Helvetica", _FS["v"] if cls!="LabelFrame" else _FS["v"]+1))
+                            except: pass
+            except: pass
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        def _mk_tab(nb_, title):
+            t = ttk.Frame(nb_); nb_.add(t, text=title)
+            cv = tk.Canvas(t, highlightthickness=0, bg="#1E1E2E")
+            sb = ttk.Scrollbar(t, orient=tk.VERTICAL, command=cv.yview); sb.pack(side=tk.RIGHT, fill=tk.Y)
+            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            cv.configure(yscrollcommand=sb.set, bg="#1E1E2E")
+            inner = ttk.Frame(cv, padding=8)
+            cv.create_window((0, 0), window=inner, anchor="nw")
+            cv.bind("<Configure>", lambda e: cv.itemconfigure(1, width=e.width))
+            inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+            cv.bind_all("<MouseWheel>", lambda e: cv.yview_scroll(int(-1*(e.delta/120)), "units"))
+            return inner
+
+        def _block(parent, title, color, bullets):
+            f = tk.LabelFrame(parent, text=title, bg=color, fg="white",
+                              font=("Helvetica", _FS["v"]+1, "bold"), padx=8, pady=6)
+            f.pack(fill=tk.X, pady=5)
+            for b in bullets:
+                tk.Label(f, text=b, bg=color, fg="#ECEFF1", font=("Helvetica", _FS["v"]),
+                         wraplength=1050, justify=tk.LEFT, anchor="w").pack(anchor="w", pady=2)
+
+        # ── Tab 1: 🚨 亏损根源 ──
+        t1 = _mk_tab(nb, "🚨 亏损根源")
+        tk.Label(t1, text="70% 散户亏损 = 短期交易 + 频繁换股 + 追涨割肉 = 追逐短期不确定性",
+                 bg="#C62828", fg="white", font=("Helvetica", _FS["v"]+2, "bold"), padx=12, pady=10).pack(fill=tk.X, pady=(0, 10))
+        _block(t1, "🎯 亏在哪", "#6A1B9A", [
+            "❌ 过度交易: 频繁买卖 → 手续费/滑点吃掉利润 + 情绪干扰",
+            "❌ 追涨杀跌: 涨了想追, 跌了想割 → 买卖点全错",
+            "❌ 不止损: 小亏变大亏 → 套牢后被迫长期持有",
+            "❌ 分散不够: 1~2只票占80%仓位 → 黑天鹅直接爆仓",
+            "❌ 没有计划: 买前不想好卖点 → 凭感觉操作",
+            "❌ 逆势交易: 熊市做T + 杠杆 → 加速亏损",
+        ])
+        _block(t1, "💡 赚钱三条件 (须同时满足)", "#2E7D32", [
+            "✅ 确认牛市 (或至少不是熊市)",
+            "✅ 选中好公司 / 好指数",
+            "✅ 长期持有 (中途不换股、不止盈过早)",
+        ])
+        _block(t1, "📝 买入前白纸黑字写清楚", "#1565C0", [
+            "① 买入理由: _________________________",
+            "② 持有时长: _________________________",
+            "③ 卖出条件 (≠ 股价下跌!):",
+            "   • 基本面变化 (业绩/管理层/行业)",
+            "   • 逻辑破局 (之前看对的逻辑不成立了)",
+            "   • 牛市结束 (大盘转熊, 情绪指数红灯)",
+        ])
+
+        # ── Tab 2: 🏆 纪律铁律 ──
+        t2 = _mk_tab(nb, "🏆 纪律铁律")
+        RULES = [
+            ("🛡️ 空仓是一种操作", "不会空仓 = 不懂交易. 熊市/震荡市空仓 = 战胜90%散户"),
+            ("📊 情绪指数占 60-70%", "情绪红灯 → 清仓空仓! 情绪绿灯 → 积极做多! (你自己说的)"),
+            ("🎯 买点决定盈亏", "好买点即使卖点普通也赚; 坏买点即使卖点完美也亏"),
+            ("🔪 止损要果断", "单笔亏损上限 8%. 破位就走, 不抱幻想"),
+            ("📈 让利润奔跑", "好股票不要过早止盈, 让趋势走完 (但要保护利润)"),
+            ("🧊 冷却期", "连续亏损3笔 → 停止交易1周, 复盘找问题"),
+            ("📉 不抄底下降趋势", "底部猜不准, 等趋势确认再进场 (宁可少赚, 不要抄在半山腰)"),
+            ("💼 不借钱炒股", "杠杆放大的是欲望 + 风险, 不是收益"),
+        ]
+        for title, desc in RULES:
+            f = tk.Frame(t2, bg="#2A2A3E"); f.pack(fill=tk.X, pady=4)
+            tk.Label(f, text=title, bg="#2A2A3E", fg="#FFD700",
+                     font=("Helvetica", _FS["v"]+1, "bold"), anchor="w", padx=8, pady=4).pack(fill=tk.X)
+            tk.Label(f, text=desc, bg="#2A2A3E", fg="#ECEFF1",
+                     font=("Helvetica", _FS["v"]), wraplength=1050, justify=tk.LEFT,
+                     anchor="w", padx=12, pady=(0, 6)).pack(fill=tk.X)
+
+        # ── Tab 3: 🧠 系统价值 ──
+        t3 = _mk_tab(nb, "🧠 为什么需要系统")
+        tk.Label(t3, text="散户最大问题不是\"没方法\", 而是方法太多 + 性格不匹配 + 时点错配",
+                 bg="#1565C0", fg="white", font=("Helvetica", _FS["v"]+1, "bold"), padx=12, pady=10).pack(fill=tk.X, pady=(0, 10))
+        _block(t3, "🎯 系统闭环", "#2E7D32", [
+            "① 选方法 → 策略卡片库 (四张底层范式 + 实战卡片)",
+            "② 匹配性格 → 性格匹配矩阵 (盯盘时间/情绪波动/资金效率)",
+            "③ 匹配市场 → 择时引擎 (牛/震荡/熊 → 启用哪些卡片)",
+            "④ 纪律执行 → 风控引擎 (事前/事中/事后 + 硬约束)",
+            "⑤ 复盘迭代 → 回测引擎 (胜率/盈亏比/最大回撤 + 归因)",
+        ])
+        _block(t3, "💎 核心认知", "#6A1B9A", [
+            "• 纪律 > 分析 > 预测",
+            "• 胜率 40% 但盈亏比 3:1 → 稳赚; 胜率 80% 但盈亏比 0.5:1 → 稳亏",
+            "• 交易系统的反脆弱性 > 单次交易盈利",
+            "• 久赌必输 → 但有风控的赌徒不一定输",
+            "• 承认不确定性 → 放弃预测 → 拥抱概率",
+        ])
+        _block(t3, "🚀 MVP 落地路径", "#C62828", [
+            "1️⃣ 先落 M2 择时 + M4 风控 (散户亏在择时错配 + 无止损)",
+            "2️⃣ 选股用预置模板起步 (大跌买指数 / 天地一刀斩)",
+            "3️⃣ 跑通 回测 → 提醒 → 复盘 闭环",
+            "4️⃣ 再扩卡片 / 接 MiniQMT / 自动执行",
+        ])
+        win.after(100, _rf)
+
+
     def _show_index_kline_dialog(self, initial_symbol=None, initial_days=180):
         """📈 指数/ETF 日K线大弹窗 - 指标可选 MACD/KDJ/WR/BIAS/筹码"""
         import tkinter as tk
