@@ -12874,479 +12874,6 @@ class DapanMixin:
     # 机构公私募知识体系 · 2026 版
     # ─────────────────────────────────────────────────────────────
     def _show_institution_dialog(self):
-        """🏛️ 机构公私募完整体系图形化面板 (Tab 式)"""
-        import tkinter as tk
-        win = tk.Toplevel(self.root)
-        win.title("🏛️ 机构 / 公募 / 私募 完整体系 (2026 版)")
-        win.geometry("1280x820")
-        win.configure(bg="#1E1E2E")
-        try: win.state("zoomed")
-        except Exception: pass
-
-        nb = ttk.Notebook(win)
-        nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-
-        def _mk_scrollable_tab(nb_, tab_title):
-            tab = ttk.Frame(nb_)
-            nb_.add(tab, text=tab_title)
-            cv = tk.Canvas(tab, highlightthickness=0, borderwidth=0, bg="#1E1E2E")
-            sb = ttk.Scrollbar(tab, orient=tk.VERTICAL, command=cv.yview)
-            sb.pack(side=tk.RIGHT, fill=tk.Y)
-            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            cv.configure(yscrollcommand=sb.set, bg="#1E1E2E")
-            inner = ttk.Frame(cv, padding=8)
-            win_id = cv.create_window((0, 0), window=inner, anchor="nw")
-            def _on_cv_cfg(e): cv.itemconfigure(win_id, width=e.width)
-            def _on_in_cfg(e): cv.configure(scrollregion=cv.bbox("all"))
-            cv.bind("<Configure>", _on_cv_cfg)
-            inner.bind("<Configure>", _on_in_cfg)
-            def _wheel(e): cv.yview_scroll(int(-1 * (e.delta / 120)), "units")
-            cv.bind_all("<MouseWheel>", _wheel)
-            return inner
-
-        # ── Tab 1: 系统层 (工具链) ──
-        t1 = _mk_scrollable_tab(nb, "🧰 系统层 · 工具链")
-        _T = ttk.LabelFrame(t1, text="交易/执行", padding=8)
-        _T.pack(fill=tk.X, pady=4)
-        tools_trade = [
-            ("恒生 O32 / O45", "公募/券商资管 OMS 三巨头, 机构主流订单管理系统", "https://www.hundsun.com"),
-            ("金证 / 顶点", "券商资管备选 OMS, 部分私募也用", "https://www.kingdom.com.cn"),
-            ("宽睿 / 华锐 ATP", "券商极速柜台, 量化交易通道", "https://www.huarui-tech.com"),
-            ("迅投 QMT / MiniQMT", "本地跑 Python 自由, 源码不外泄, 需 24h 开机", "https://www.thinktrader.net"),
-            ("恒生 PTrade", "券商云托管零代码模板, Python 沙箱受限, 无期权期货", "https://www.hundsun.com"),
-        ]
-        for name, desc, link in tools_trade:
-            row = ttk.Frame(_T); row.pack(fill=tk.X, pady=2)
-            ttk.Label(row, text=f"🔹 {name}", font=("Helvetica", 11, "bold"), foreground="#42A5F5").pack(side=tk.LEFT)
-            ttk.Label(row, text=f" — {desc}", foreground="#AAAAAA").pack(side=tk.LEFT, fill=tk.X, expand=True)
-            if link:
-                link_lbl = ttk.Label(row, text="🔗 官网", foreground="#64B5F6", cursor="hand2")
-                link_lbl.pack(side=tk.RIGHT)
-                def _open(url=link): webbrowser.open(url)
-                link_lbl.bind("<Button-1>", lambda e, u=link: webbrowser.open(u))
-
-        _T2 = ttk.LabelFrame(t1, text="投研 / 回测", padding=8)
-        _T2.pack(fill=tk.X, pady=4)
-        tools_research = [
-            ("聚宽 JoinQuant", "国内顶级量化回测平台, 因子库丰富", "https://www.joinquant.com"),
-            ("米筐 RiceQuant", "券商级回测, RQAlpha 引擎", "https://www.ricequant.com"),
-            ("优矿 Uqer", "通联数据旗下, 因子挖掘友好", "https://uqer.datayes.com"),
-            ("掘金 Quant", "本地/云双模式, C++ 撮合引擎", "https://www.myquant.cn"),
-            ("BigQuant", "AI 量化选股平台", "https://www.bigquant.com"),
-        ]
-        for name, desc, link in tools_research:
-            row = ttk.Frame(_T2); row.pack(fill=tk.X, pady=2)
-            ttk.Label(row, text=f"🔹 {name}", font=("Helvetica", 11, "bold"), foreground="#AB47BC").pack(side=tk.LEFT)
-            ttk.Label(row, text=f" — {desc}", foreground="#AAAAAA").pack(side=tk.LEFT, fill=tk.X, expand=True)
-            link_lbl = ttk.Label(row, text="🔗", foreground="#64B5F6", cursor="hand2")
-            link_lbl.pack(side=tk.RIGHT)
-            link_lbl.bind("<Button-1>", lambda e, u=link: webbrowser.open(u))
-
-        _T3 = ttk.LabelFrame(t1, text="风控 / 归因 / 数据", padding=8)
-        _T3.pack(fill=tk.X, pady=4)
-        for name, desc, link in [
-            ("MSCI Barra CNE6", "A 股标准 Barra 模型, 风格暴露 + 行业中性", "https://www.msci.com"),
-            ("Axioma", "另一套风险模型 + 组合优化器", "https://www.axioma.com"),
-            ("Brinson 归因", "业绩归因标准框架 (资产配置 + 个股选择)", "https://en.wikipedia.org/wiki/Brinson_model"),
-            ("Wind / Choice / iFinD", "机构级数据终端三巨头", "https://www.wind.com.cn"),
-            ("朝阳永续", "私募净值数据库", "https://www.chaoyangyongxu.com"),
-        ]:
-            row = ttk.Frame(_T3); row.pack(fill=tk.X, pady=2)
-            ttk.Label(row, text=f"🔸 {name}", font=("Helvetica", 11, "bold"), foreground="#FFA726").pack(side=tk.LEFT)
-            ttk.Label(row, text=f" — {desc}", foreground="#AAAAAA").pack(side=tk.LEFT, fill=tk.X, expand=True)
-            link_lbl = ttk.Label(row, text="🔗", foreground="#64B5F6", cursor="hand2"); link_lbl.pack(side=tk.RIGHT)
-            link_lbl.bind("<Button-1>", lambda e, u=link: webbrowser.open(u))
-
-        # ── Tab 2: 选股逻辑 ──
-        t2 = _mk_scrollable_tab(nb, "🎯 选股逻辑 (三套操作系统)")
-        systems = [
-            ("🏛️ 公募主观", "产业趋势 > 公司质量 > 估值", "#FF7043",
-             "2026 年框架已切换: 基金经理季报明确淡化短期景气, 押中长期产业逻辑.\n"
-             "基本不择时, 所谓择时 = 行业/风格轮动.\n"
-             "2026Q2 主动偏股基金仓位约 86%, 普通股票型中位数 91.25% (历史 84.85% 分位)."),
-            ("💹 量化私募", "多因子打分 + 高度分散 + 赚定价偏差", "#42A5F5",
-             "分支: 300/A500/500/1000/2000 指增、红利指增、量化选股(空气指增)、市场中性.\n"
-             "风控本身就是业务 (Barra 风格约束 + 行业中性 + 流动性冲击).\n"
-             "2026 年量化超额收缩至平均 3.11% (去年同期 14.17%) — 同质化 + 规模膨胀."),
-            ("🔥 游资 / 量化游资", "题材 + 情绪 + 筹码 / 小市值 + 量价因子", "#EF5350",
-             "传统游资: 流通市值 50~200 亿, 常态换手 15~40%, 有涨停基因.\n"
-             "量化游资偏好: 流动性好的中小盘微盘, 量价因子有效, 盘口密集小单.\n"
-             "2026 量化占市场成交 30~40%, 小盘题材票常超 50% — 游资越来越难做的根本原因."),
-        ]
-        for title, sub, color, body in systems:
-            _F = tk.Frame(t2, bg=color, bd=0, highlightthickness=1, highlightbackground=color)
-            _F.pack(fill=tk.X, pady=6)
-            tk.Label(_F, text=f" {title} — {sub}", bg=color, fg="white",
-                     font=("Helvetica", 13, "bold"), anchor="w").pack(fill=tk.X, padx=6, pady=4)
-            tk.Label(_F, text=body, bg="#2A2A3E", fg="#ECEFF1", justify=tk.LEFT,
-                     anchor="w", padx=10, pady=8, font=("Helvetica", 10)).pack(fill=tk.X)
-
-        # ── Tab 3: 择时 / 风控 / 归因 ──
-        t3 = _mk_scrollable_tab(nb, "⏱️ 择时 · 风控 · 归因")
-        _TO = ttk.LabelFrame(t3, text="择时 (谁择时, 用什么)", padding=8)
-        _TO.pack(fill=tk.X, pady=4)
-        for txt in [
-            ("公募", "基本不择时. 2026Q2 主动偏股仓位中位数 91.25%"),
-            ("私募绝对收益", "估值分位 / 股债性价比 ERP / 趋势均线 / 成交量波动率 / 北向资金 / 两融 / 情绪指标(涨停/连板高度/换手)"),
-            ("量化中性", "股指期货基差 — 基差就是对冲成本, 走阔就减仓"),
-        ]:
-            row = ttk.Frame(_TO); row.pack(fill=tk.X, pady=2)
-            ttk.Label(row, text=f"  {txt[0]}", font=("Helvetica", 11, "bold"), foreground="#42A5F5").pack(side=tk.LEFT, padx=(0, 8))
-            ttk.Label(row, text=txt[1], foreground="#B0BEC5").pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        _RK = ttk.LabelFrame(t3, text="合规硬约束 (2026 新规)", padding=8)
-        _RK.pack(fill=tk.X, pady=4)
-        _rules = [
-            ("双十红线", "单只基金持单票 ≤ 净值 10%; 同一管理人旗下合计 ≤ 该股总股本 10%"),
-            ("全组合上限", "同一管理人全部开放式基金持单票流通股 ≤ 15%, 全部组合 ≤ 30%"),
-            ("举牌", "单票接近 5% 触发举牌 → 限售 6 个月, 公募普遍躲着走"),
-            ("被动超限", "波动/赎回/合并导致超限 → 10 个交易日内可调整; ETF 指数化部分豁免"),
-            ("2026 题材风格指引", "2026-12-01 施行: 主题基金必须建风格库(年度更新≤12次), 防风格漂移, 投研与合规必须独立"),
-            ("2026Q2 实况", "971 只主动权益基金顶格配置(>9.5%) 创历史新高, 272 只破 10%, 最高 14.88%. 集中度已处警戒状态"),
-        ]
-        for name, desc in _rules:
-            row = ttk.Frame(_RK); row.pack(fill=tk.X, pady=2)
-            ttk.Label(row, text=f"⚠ {name}", font=("Helvetica", 11, "bold"), foreground="#EF5350").pack(side=tk.LEFT, padx=(0, 8))
-            ttk.Label(row, text=desc, foreground="#B0BEC5").pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        _QR = ttk.LabelFrame(t3, text="量化风控流水线", padding=8)
-        _QR.pack(fill=tk.X, pady=4)
-        for txt in [
-            "Barra 风格暴露约束 (beta/市值/动量/波动率/流动性)",
-            "行业 / 市值中性",
-            "个股集中度上限",
-            "持仓 ≤ 个股日均成交额固定比例 (流动性冲击约束)",
-            "回撤预警线 (日/周/月)",
-            "因子拥挤度监控 (同因子同时拥挤 → 踩踏风险)",
-            "压力测试 (极端行情下组合最大可能损失)",
-        ]:
-            ttk.Label(_QR, text=f"  ✅ {txt}", foreground="#81C784").pack(anchor="w")
-
-        # ── Tab 4: 参考指数 ──
-        t4 = _mk_scrollable_tab(nb, "📐 参考哪些指数")
-        ref_groups = [
-            ("业绩基准", ["沪深300", "中证A500", "中证500", "中证1000", "中证2000", "创业板指", "科创50", "中证红利", "万得全A"]),
-            ("对冲工具", ["IF (沪深300)", "IC (中证500)", "IM (中证1000)", "股指期货", "期权 / 雪球"]),
-            ("风格行业", ["Barra 风格因子 (beta/市值/动量/波动率/流动性)", "申万一级行业 (31 个)", "中信一级行业 (31 个)", "宽基成分股 (做成分股约束)"]),
-        ]
-        for title, items in ref_groups:
-            _F = ttk.LabelFrame(t4, text=title, padding=8); _F.pack(fill=tk.X, pady=4)
-            for it in items:
-                ttk.Label(_F, text=f"  🔸 {it}", foreground="#B0BEC5").pack(anchor="w", pady=1)
-
-        _Z = ttk.LabelFrame(t4, text="2026 指增实况 (截至 9 月)", padding=8); _Z.pack(fill=tk.X, pady=4)
-        z_stats = [
-            ("中证2000 指增", "+17.51%", "收益最强 / 回撤最深"),
-            ("中证A500 指增", "+9.98%", "中等"),
-            ("沪深300 指增", "+7.49%", "最稳"),
-            ("中证1000 指增", "+6.66%", "中等"),
-            ("量化选股 (空气指增)", "+3.75%", "弱于 2000"),
-            ("中证500 指增", "+2.45%", "最弱"),
-        ]
-        for name, val, note in z_stats:
-            row = ttk.Frame(_Z); row.pack(fill=tk.X, pady=2)
-            ttk.Label(row, text=f"  {name}", font=("Helvetica", 11, "bold"), foreground="#E3F2FD").pack(side=tk.LEFT, padx=(0, 10))
-            ttk.Label(row, text=val, font=("Helvetica", 12, "bold"), foreground="#66BB6A").pack(side=tk.LEFT, padx=(0, 10))
-            ttk.Label(row, text=f"({note})", foreground="#90A4AE").pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        # ── Tab 5: 机构现在持有什么 ──
-        t5 = _mk_scrollable_tab(nb, "💰 机构重仓 (2026Q2)")
-        _TOP = ttk.LabelFrame(t5, text="公募前十大重仓股 (硬科技首次彻底霸榜)", padding=8); _TOP.pack(fill=tk.X, pady=4)
-        top10 = [
-            ("1", "中际旭创", "1662.53 亿", "1816 只基金持有", "#EF5350"),
-            ("2", "新易盛", "—", "光模块", "#EF5350"),
-            ("3", "东山精密", "—", "PCB", "#EF5350"),
-            ("4", "寒武纪", "—", "AI 芯片", "#EF5350"),
-            ("5", "宁德时代", "—", "新能源", "#42A5F5"),
-            ("6", "北方华创", "—", "半导体设备", "#EF5350"),
-            ("7", "兆易创新", "—", "存储芯片", "#EF5350"),
-            ("8", "源杰科技", "—", "光芯片", "#EF5350"),
-            ("9", "中微公司", "—", "刻蚀设备", "#EF5350"),
-            ("10", "三环集团", "—", "MLCC", "#EF5350"),
-        ]
-        for rank, name, val, detail, color in top10:
-            row = ttk.Frame(_TOP); row.pack(fill=tk.X, pady=1)
-            tk.Label(row, text=f"#{rank}", bg=color, fg="white", width=3, font=("Helvetica", 10, "bold")).pack(side=tk.LEFT, padx=(0, 6))
-            ttk.Label(row, text=name, font=("Helvetica", 11, "bold")).pack(side=tk.LEFT, padx=(0, 10))
-            ttk.Label(row, text=val, foreground="#FFD54F").pack(side=tk.LEFT, padx=(0, 10))
-            ttk.Label(row, text=detail, foreground="#90A4AE").pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        _SEC = ttk.LabelFrame(t5, text="行业权重变化", padding=8); _SEC.pack(fill=tk.X, pady=4)
-        for txt in [
-            "📈 电子 42.66% (单季加仓 +10.7~21.5 pct)",
-            "📈 通信 16.93%",
-            "📈 机械 6.07%",
-            "📉 腾讯控股 / 贵州茅台 (退至第 30 位) / 阿里巴巴 / 紫金矿业 — 均被大幅减持",
-            "💥 消费股近十年首次全部退出公募前十大重仓",
-            "💥 双创配置比例首次超过主板 (56.35% vs 43.55%)",
-        ]:
-            ttk.Label(_SEC, text=f"  {txt}", foreground="#B0BEC5").pack(anchor="w", pady=1)
-
-        # ── Tab 6: 从哪查 (渠道) ──
-        t6 = _mk_scrollable_tab(nb, "🔍 信息渠道 + 时效")
-        _CH = ttk.LabelFrame(t6, text="持仓数据来源", padding=8); _CH.pack(fill=tk.X, pady=4)
-        channels = [
-            ("巨潮资讯 / 交易所官网", "上市公司前十大 (流通) 股东", "季报 1 个月 / 半年报 2 个月 / 年报 4 个月内", "http://www.cninfo.com.cn"),
-            ("基金季报/半年报/年报", "前十大重仓 (季报) / 全部持仓 (半年报年报)", "季度结束 15 个工作日内", None),
-            ("沪深港通", "北向持股", "每季第五个交易日披露上季末", None),
-            ("ETF 申赎清单 PCF", "每日成分与权重", "每日", None),
-            ("龙虎榜", "机构专用席位买卖", "当日", None),
-            ("大宗交易 / 两融 / 股东户数", "资金痕迹与筹码集中度", "日 / 周", None),
-            ("Wind / Choice / iFinD / 天天基金", "机构持股汇总与变动", "整合加工", None),
-            ("私募", "无强制持仓披露, 只能从个股十大股东间接看到", "—", None),
-        ]
-        for ch, content, timeliness, link in channels:
-            row = ttk.Frame(_CH); row.pack(fill=tk.X, pady=3)
-            ttk.Label(row, text=f"📍 {ch}", font=("Helvetica", 11, "bold"), foreground="#42A5F5").pack(side=tk.LEFT, anchor="w")
-            ttk.Label(row, text=f"  {content}  | 时效: {timeliness}", foreground="#B0BEC5", wraplength=700).pack(side=tk.LEFT, fill=tk.X, expand=True, anchor="w")
-            if link:
-                link_lbl = ttk.Label(row, text="🔗", foreground="#64B5F6", cursor="hand2")
-                link_lbl.pack(side=tk.RIGHT)
-                link_lbl.bind("<Button-1>", lambda e, u=link: webbrowser.open(u))
-
-        tk.Label(t6, text="⚠ 核心提醒: 所有持仓数据滞后 1~3 个月, 只能看连续 2~3 期的趋势, 不能当实时操盘依据; 季报加仓也可能是高位接盘.",
-                 bg="#3E2723", fg="#FFAB91", pady=10, padx=12, font=("Helvetica", 10, "bold")).pack(fill=tk.X, pady=10)
-
-        # ── Tab 7: 识别谁在主导 + 实操含义 ──
-        t7 = _mk_scrollable_tab(nb, "🎭 谁在主导 + 实操含义")
-        _ID = ttk.LabelFrame(t7, text="识别资金类型 (盘口特征)", padding=8); _ID.pack(fill=tk.X, pady=4)
-        for txt in [
-            "直线脉冲 = 游资",
-            "阶梯慢涨 = 机构",
-            "锯齿毛刺 = 量化",
-            "再叠加: 换手率 / 龙虎榜席位类型 / 单笔拆单特征",
-        ]:
-            ttk.Label(_ID, text=f"  {txt}", font=("Helvetica", 11), foreground="#B0BEC5").pack(anchor="w", pady=2)
-
-        _DO = ttk.LabelFrame(t7, text="对你的实操含义", padding=8); _DO.pack(fill=tk.X, pady=4)
-        for txt in [
-            "跟公募只能用季度环比趋势, 而且当前是 K 型分化的极致抱团 — 拥挤度高, 脆弱性大, 必须留逆向余地.",
-            "反向思维: 被无差别减仓的创新药 / 有色-黄金反而可能有修复机会 (光大投顾提示).",
-            "判断个股先分清资金结构再定规则: 游资票用情绪周期, 机构票用均线趋势 (你的天地一刀斩就是纯机构控盘形态), 量化扎堆的票别去高频对拼.",
-            "2026 量化超额收缩是行业性问题 (同质化 + 规模膨胀), 挑量化产品看风格约束纪律, 不看单月超额.",
-        ]:
-            tk.Label(_DO, text=f"💡 {txt}", bg="#1B5E20", fg="#A5D6A7", padx=10, pady=8,
-                     wraplength=900, justify=tk.LEFT, font=("Helvetica", 10)).pack(fill=tk.X, pady=4)
-
-        _FINAL = tk.Frame(t7, bg="#FF6F00", bd=0, highlightthickness=2, highlightbackground="#FFA726")
-        _FINAL.pack(fill=tk.X, pady=16)
-        tk.Label(_FINAL, text="📌 2026 量化已占全市场成交 30%~40% — 小盘题材票常超 50%\n这就是「游资越来越难做」的根本原因.",
-                 bg="#FF6F00", fg="white", font=("Helvetica", 13, "bold"), justify=tk.CENTER, pady=14).pack()
-
-    def _show_institution_holdings(self):
-        """📊 机构重仓追踪 (实时数据不可得 — 显示数据滞后 + 查看链接)"""
-        import webbrowser
-        win = tk.Toplevel(self.root); win.title("📊 机构重仓追踪"); win.geometry("960x600")
-        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-        def _mk_tab(nb_, title):
-            t = ttk.Frame(nb_); nb_.add(t, text=title)
-            cv = tk.Canvas(t, highlightthickness=0, bg="#1E1E2E")
-            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            sb = ttk.Scrollbar(t, orient=tk.VERTICAL, command=cv.yview); sb.pack(side=tk.RIGHT, fill=tk.Y)
-            cv.configure(yscrollcommand=sb.set, bg="#1E1E2E")
-            inner = ttk.Frame(cv, padding=8)
-            cv.create_window((0, 0), window=inner, anchor="nw")
-            inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
-            return inner
-
-        t1 = _mk_tab(nb, "🔗 查持仓链接 (可点)")
-        for name, url in [
-            ("巨潮资讯 (基金季报)", "http://www.cninfo.com.cn/new/data/fundArchives"),
-            ("东方财富 · 基金持仓", "https://fund.eastmoney.com/data/fundranking.html"),
-            ("同花顺 · 机构持仓", "https://data.10jqka.com.cn/fund/"),
-            ("沪深港通 · 北向持股", "https://data.eastmoney.com/hsgtcg/list.html"),
-            ("龙虎榜 (机构专用)", "https://data.eastmoney.com/stock/tradedate.html"),
-            ("Wind (需账号)", "https://www.wind.com.cn"),
-        ]:
-            f = ttk.Frame(t1); f.pack(fill=tk.X, pady=4)
-            ttk.Label(f, text=name, font=("Helvetica", 11, "bold"), foreground="#42A5F5").pack(side=tk.LEFT)
-            l = ttk.Label(f, text="🔗", foreground="#64B5F6", cursor="hand2")
-            l.pack(side=tk.RIGHT)
-            l.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
-
-    def _show_factor_catalog_dialog(self):
-        """🎯 量化因子体系 下拉框"""
-        import webbrowser
-        win = tk.Toplevel(self.root); win.title("🎯 量化因子体系 + 归因 (Brinson)"); win.geometry("1000x680")
-        cv = tk.Canvas(win, highlightthickness=0, bg="#1E1E2E"); cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sb = ttk.Scrollbar(win, orient=tk.VERTICAL, command=cv.yview); sb.pack(side=tk.RIGHT, fill=tk.Y)
-        cv.configure(yscrollcommand=sb.set, bg="#1E1E2E")
-        inner = ttk.Frame(cv, padding=8)
-        cv.create_window((0, 0), window=inner, anchor="nw")
-        inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
-
-        # 因子分类
-        factor_groups = [
-            ("📈 量价因子", ["动量 (1/3/6/12 月)", "波动率 / 偏度 / 峰度", "换手率", "流动性 (Amihud, Pastor-Stambaugh)", "反转 (短期 / 长期)", "尾盘效应", "日内偏度"]),
-            ("💰 基本面因子", ["ROE / ROA / ROIC", "毛利率 / 净利率", "营收 / 利润增速", "估值 (PE/PB/PS/EV/EBITDA)", "现金流质量", "资产负债率", "股息率"]),
-            ("🎨 Barra 风格因子 (CNE6)", ["beta", "市值 lncap", "动量 momentum", "波动率 volatility", "流动性 liquidity", "贝塔 beta", "质量 quality", "成长 growth", "价值 value", "杠杆 leverage", "行业中性"]),
-            ("🌐 另类因子", ["舆情 / 新闻情绪", "供应链数据 (海关 / 物流)", "卫星 / POI 人流", "招聘数据 (猎聘)", "专利 / 研发投入", "高管增减持", "回购 / 分红历史"]),
-            ("🔀 合成方法", ["多因子打分 (IC 加权 / IR 加权)", "机器学习 (XGBoost / LightGBM / Transformer)", "深度学习 (时序 Transformer)", "深度学习因子 → 线性合成"]),
-        ]
-        for title, items in factor_groups:
-            _F = ttk.LabelFrame(inner, text=title, padding=8); _F.pack(fill=tk.X, pady=6)
-            ttk.Label(_F, text="  点击展开/折叠", foreground="#666", font=("Helvetica", 9)).pack(anchor="ne")
-            for it in items:
-                ttk.Label(_F, text=f"  ✅ {it}", foreground="#81C784").pack(anchor="w", pady=1)
-
-        # 归因 / 策略 / Demo
-        parts = [
-            ("📊 业绩归因框架", [
-                "Brinson 归因: 资产配置贡献 + 行业选择贡献 + 个股选择贡献 + 交互项",
-                "Brinson-Fachler 修正版 (基准行业权重 vs 实际)",
-                "Carino 对数归因 (解决 Brinson 跨期可加性)",
-                "因子归因: 总收益 = 无风险 + 风格暴露 × 风格收益 + 因子特异性收益",
-                "Grinold-Kahn 投资组合管理定律",
-            ]),
-            ("🎯 指增策略 2026 实况", [
-                "中证2000 指增: 年内超额 +17.51% (收益最强, 回撤最深)",
-                "中证A500 指增: +9.98%",
-                "沪深300 指增: +7.49% (最稳)",
-                "中证1000 指增: +6.66%",
-                "量化选股 (空气指增): +3.75%",
-                "中证500 指增: +2.45% (最弱)",
-                "上半年 1236 只指增平均超额仅 3.11% (去年同期 14.17%) — Beta 盛宴, Alpha 稀缺",
-            ]),
-            ("📚 参考书籍 / 链接", [
-                ("主动投资组合管理 (Grinold & Kahn)", "https://www.amazon.com"),
-                ("量化金融 (Rama Cont)", "https://www.amazon.com"),
-                ("因子投资指南 (Robeco)", "https://www.robeco.com"),
-                ("MSCI Barra CNE6 文档", "https://www.msci.com"),
-                ("Axioma 风险模型", "https://www.axioma.com"),
-                ("CFA Institute / Journal of Portfolio Management", "https://www.cfainstitute.org"),
-            ]),
-        ]
-        for title, items in parts:
-            _F = ttk.LabelFrame(inner, text=title, padding=8); _F.pack(fill=tk.X, pady=6)
-            for it in items:
-                if isinstance(it, tuple):
-                    n, u = it
-                    r = ttk.Frame(_F); r.pack(fill=tk.X, pady=2)
-                    ttk.Label(r, text=f"  📖 {n}", foreground="#E3F2FD").pack(side=tk.LEFT, fill=tk.X, expand=True)
-                    l = ttk.Label(r, text="🔗", foreground="#64B5F6", cursor="hand2"); l.pack(side=tk.RIGHT)
-                    l.bind("<Button-1>", lambda e, uu=u: webbrowser.open(uu))
-                else:
-                    ttk.Label(_F, text=f"  📌 {it}", foreground="#B0BEC5").pack(anchor="w", pady=1)
-
-    def _show_institution_knowledge_dialog(self):
-        """📚 机构知识体系综合 Dialog (下拉框/折叠式)"""
-        win = tk.Toplevel(self.root); win.title("📚 机构知识体系 (综合)"); win.geometry("1100x720")
-        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-        def _mk(nb_, t):
-            x = ttk.Frame(nb_); nb_.add(x, text=t); return x
-
-        # ── Tab 1: 完整调研报告引用 ──
-        t1 = _mk(nb, "📄 调研笔记 · 引用")
-        tk.Label(t1, text="机构量化体系调研 (2026-09-26)", font=("Helvetica", 14, "bold"),
-                 foreground="#42A5F5").pack(pady=(20, 6))
-        full_text = """
-先给结论: A 股有三套完全不同的操作系统 —— 公募主观 (产业趋势+抱团, 基本不择时)、
-量化私募 (多因子+组合优化, 风控本身就是业务)、游资/量化游资 (情绪博弈+盘口).
-混在一起谈必然失真. 而且 2026 年量化已占全市场成交 30%~40%, 小盘题材票里常超 50%,
-这就是「游资越来越难做」的根本原因.
-
-一、系统层: 工具链
-  交易/执行: 恒生 O32/O45 / 金证 / 顶点 (OMS 三巨头)
-              券商极速柜台: 宽睿 / 华锐 ATP
-              迅投 QMT/MiniQMT (本地跑 Python 自由) vs 恒生 PTrade (云托管零代码)
-  投研/回测: 聚宽 / 米筐 / 优矿 / 掘金 / BigQuant
-  风控/归因: MSCI Barra CNE5/CNE6 + Axioma + Brinson
-  数据: Wind / Choice / iFinD / 朝阳永续 + Level-2 + 另类数据
-
-二、选股逻辑
-  公募主观: 产业趋势 > 公司质量 > 估值
-  量化私募: 多因子打分 / 300/A500/500/1000/2000 指增 / 红利指增 / 量化选股 / 市场中性
-  游资 / 量化游资: 题材情绪筹码 / 小市值 + 流动性 + 量价因子
-
-三、择时
-  公募基本不择时 (Q2 仓位 86%, 股票型中位数 91.25%)
-  私募绝对收益会择时 (估值分位 / ERP / 均线 / 北向 / 情绪)
-  量化中性看股指期货基差 (对冲成本)
-
-四、风控
-  合规硬约束 (双十红线 + 举牌限售 + 2026 题材风格指引)
-  量化风控 (Barra 风格约束 + 行业中性 + 流动性 + 压力测试)
-
-五、参考哪些指数
-  业绩基准: 沪深300 / A500 / 500 / 1000 / 2000 / 创业板指 / 科创50 / 红利 / 万得全A
-  对冲工具: IF / IC / IM + 期权 / 雪球
-  风格行业: Barra 因子 / 申万 / 中信
-
-六、机构现在持有什么 (2026Q2)
-  前十大硬科技霸榜: 中际旭创 / 新易盛 / 东山精密 / 寒武纪 / 宁德时代...
-  电子 42.66%, 通信 16.93%; 双创 56.35% > 主板 43.55%
-  消费股近十年首次全部退出公募前十大重仓
-
-七、从哪查 (渠道 + 时效)
-  巨潮 / 基金季报 / 沪深港通 / ETF PCF / 龙虎榜 / Wind / Choice
-  ⚠ 所有持仓数据滞后 1~3 个月
-
-八、游资 / 量化游资选哪些股票
-  传统游资: 流通市值 50~200 亿, 常态换手 15~40%
-  量化偏好: 流动性好的中小盘微盘, 量价因子有效
-  2026 博弈: 量化总规模破 3 万亿, 纯打板游资最受伤
-  识别: 直线脉冲=游资 / 阶梯慢涨=机构 / 锯齿毛刺=量化
-
-对你的实操含义:
-  跟公募只能看季度环比, 当前位置是 K 型分化极致抱团, 脆弱性大
-  反向思维: 创新药 / 有色-黄金被无差别减仓反而可能有修复机会
-  判断个股先分清资金结构再定规则
-  挑量化产品看风格约束纪律, 不看单月超额
-"""
-        st = scrolledtext.ScrolledText(t1, wrap=tk.WORD, font=("Consolas", 10))
-        st.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        st.insert("1.0", full_text.strip())
-        st.config(state=tk.DISABLED)
-
-        # ── Tab 2: 下拉框式快速查询 ──
-        t2 = _mk(nb, "🔎 快速查询 (下拉框)")
-        options = ttk.Combobox(t2, values=["择时指标", "量化风控指标", "2026 指增排名", "公募 2026Q2 行业权重", "Barra CNE6 因子列表", "信息渠道时效表"], width=30)
-        options.pack(pady=10); options.current(0)
-        result = scrolledtext.ScrolledText(t2, wrap=tk.WORD, font=("Consolas", 10))
-        result.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        _answers = {
-            "择时指标": "估值分位 / 股债性价比 ERP / 趋势均线 / 成交量波动率 / 北向资金 / 两融余额 / 情绪指标 (涨停家数/连板高度/换手)",
-            "量化风控指标": "Barra 风格暴露 / 行业市值中性 / 个股集中度 / 流动性冲击约束 / 回撤预警线 / 因子拥挤度 / 压力测试",
-            "2026 指增排名": "中证2000 +17.51% > A500 +9.98% > 300 +7.49% > 1000 +6.66% > 选股 +3.75% > 500 +2.45%",
-            "公募 2026Q2 行业权重": "电子 42.66% (+10.7~21.5pct), 通信 16.93%, 机械 6.07%; 消费近十年首次退出前十大重仓",
-            "Barra CNE6 因子列表": "beta / lncap (市值) / momentum (动量) / volatility (波动率) / liquidity (流动性) / quality (质量) / growth (成长) / value (价值) / leverage (杠杆)",
-            "信息渠道时效表": "巨潮/交易所 季报1个月/半年报2个月/年报4个月 | 基金季报 季度结束15工作日 | 北向 每季第五个交易日披露上季末 | 私募 无强制披露",
-        }
-        def _on_sel(e):
-            result.config(state=tk.NORMAL); result.delete("1.0", tk.END)
-            result.insert("1.0", _answers.get(options.get(), ""))
-            result.config(state=tk.DISABLED)
-        options.bind("<<ComboboxSelected>>", _on_sel); _on_sel(None)
-
-
-    # ── helpers ──
-    def _open_safe(self, url):
-        import webbrowser, tkinter.messagebox as _mb
-        if not url: return
-        if not url.startswith(("http://", "https://")): url = "https://" + url
-        try:
-            ok = webbrowser.open(url, new=2)
-            if not ok: _mb.showwarning("链接打开失败", "浏览器无法打开: " + url)
-        except Exception as e:
-            _mb.showerror("链接打不开", str(url) + "\n" + str(e))
-
-    def _collapsible_frame(self, parent, title):
-        import tkinter as _tk
-        outer = ttk.LabelFrame(parent, text="  ▼ " + title + "  ", padding=4)
-        content = ttk.Frame(outer)
-        content.pack(fill=_tk.X, pady=4)
-        _st = {"c": False}
-        def _toggle(e=None):
-            if _st["c"]:
-                content.pack(fill=_tk.X, pady=4); outer.configure(text="  ▼ " + title + "  ")
-            else:
-                content.pack_forget(); outer.configure(text="  ▶ " + title + "  (点击展开)")
-            _st["c"] = not _st["c"]
-        outer.bind("<Button-1>", _toggle)
-        for child in outer.winfo_children(): child.bind("<Button-1>", _toggle)
-        return outer, content
-
-    def _show_institution_dialog(self):
         import tkinter as _tk
         win = _tk.Toplevel(self.root); win.title("🏛️ 机构 / 公募 / 私募 完整体系 (2026 版)")
         win.geometry("1300x850"); win.configure(bg="#1E1E2E")
@@ -13468,79 +12995,330 @@ class DapanMixin:
         win.after(100, _rf)
 
     def _show_institution_holdings(self):
-        import tkinter as _tk
-        win = _tk.Toplevel(self.root); win.title("📊 机构重仓追踪"); win.geometry("980x620"); win.configure(bg="#1E1E2E")
-        _FS = {"v": 14}; c = _FS["v"]; cb = c + 1
-        bar = ttk.Frame(win); bar.pack(fill=_tk.X, padx=8, pady=4)
-        ttk.Label(bar, text="🔤 字号:", font=("Helvetica", 11)).pack(side=_tk.LEFT)
-        ttk.Button(bar, text="−", width=3, command=lambda: (_FS.__setitem__("v",max(8,_FS["v"]-1)), _rf())).pack(side=_tk.LEFT, padx=3)
-        ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")).pack(side=_tk.LEFT)
-        ttk.Button(bar, text="+", width=3, command=lambda: (_FS.__setitem__("v",min(22,_FS["v"]+1)), _rf())).pack(side=_tk.LEFT)
-        cv = _tk.Canvas(win, highlightthickness=0, bg="#1E1E2E"); cv.pack(side=_tk.LEFT, fill=_tk.BOTH, expand=True)
-        sb = ttk.Scrollbar(win, orient=_tk.VERTICAL, command=cv.yview); sb.pack(side=_tk.RIGHT, fill=_tk.Y); cv.configure(yscrollcommand=sb.set)
-        inner = ttk.Frame(cv, padding=8); cv.create_window((0,0), window=inner, anchor="nw")
-        cv.bind("<Configure>", lambda e: cv.itemconfigure(1, width=e.width))
-        inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
-        cv.bind_all("<MouseWheel>", lambda e: cv.yview_scroll(int(-1*(e.delta/120)), "units"))
-        def _rf():
-            for w in win.winfo_children():
-                for ch in w.winfo_children():
-                    try: cls = ch.__class__.__name__
-                    except: continue
-                    if cls in ("Label","LabelFrame"):
-                        try: ch.configure(font=("Helvetica", _FS["v"] if cls=="Label" else _FS["v"]+1))
-                        except: pass
-        F, fi = self._collapsible_frame(inner, "🔗 查持仓链接"); F.pack(fill=_tk.X, pady=4)
-        for n,u in [("巨潮资讯","www.cninfo.com.cn/new/data/fundArchives"),("东方财富·基金持仓","fund.eastmoney.com/data/fundranking.html"),("同花顺·机构持仓","data.10jqka.com.cn/fund/"),("沪深港通·北向","data.eastmoney.com/hsgtcg/list.html"),("龙虎榜","data.eastmoney.com/stock/tradedate.html"),("Wind","www.wind.com.cn")]:
-            r = ttk.Frame(fi); r.pack(fill=_tk.X, pady=4)
-            ttk.Label(r, text=n, font=("Helvetica", cb, "bold"), foreground="#42A5F5").pack(side=_tk.LEFT)
-            l = _tk.Label(r, text="🔗 打开", fg="#64B5F6", cursor="hand2", bg="#1E1E2E", font=("Helvetica", c))
-            l.pack(side=_tk.RIGHT); l.bind("<Button-1>", lambda e, uu=u: self._open_safe(uu))
-        win.after(100, _rf)
+        """📊 机构重仓追踪 - 实时龙虎榜 + 北向资金 + 机构增持"""
+        import tkinter as tk
+        win = tk.Toplevel(self.root)
+        win.title("📊 机构重仓追踪 (实时)"); win.geometry("1200x820")
+        win.configure(bg="#1E1E2E")
+        try: win.state("zoomed")
+        except Exception: pass
+
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        def _mk_tab(nb_, title):
+            t = ttk.Frame(nb_); nb_.add(t, text=title)
+            cv = tk.Canvas(t, highlightthickness=0, bg="#1E1E2E")
+            sb = ttk.Scrollbar(t, orient=tk.VERTICAL, command=cv.yview); sb.pack(side=tk.RIGHT, fill=tk.Y)
+            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            cv.configure(yscrollcommand=sb.set, bg="#1E1E2E")
+            inner = ttk.Frame(cv, padding=8)
+            cv.create_window((0, 0), window=inner, anchor="nw")
+            inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+            cv.bind_all("<MouseWheel>", lambda e: cv.yview_scroll(int(-1*(e.delta/120)), "units"))
+            return inner
+
+        # ── Tab 1: 🔥 龙虎榜净买入 TOP ──
+        t1 = _mk_tab(nb, "🔥 龙虎榜净买入 TOP")
+        def _fmt_money(v):
+            if v is None or v != v: return "--"
+            v = float(v)
+            if abs(v) >= 1e8: return f"{v/1e8:.2f}亿"
+            if abs(v) >= 1e4: return f"{v/1e4:.0f}万"
+            return f"{v:.0f}"
+
+        status1 = tk.Label(t1, text="⏳ 拉取龙虎榜中...", bg="#1E1E2E", fg="#FFD700",
+                           font=("Helvetica", 11)); status1.pack(anchor="w", pady=4)
+
+        def _render_lhb(df, container):
+            for w in container.winfo_children(): w.destroy()
+            import tkinter as _tk2
+            header = tk.Frame(container, bg="#2A2A3E"); header.pack(fill=tk.X, pady=(0, 4))
+            cols = [("排名", 50), ("代码", 70), ("名称", 90), ("收盘", 70), ("涨跌幅", 80),
+                    ("净买额", 100), ("买入额", 100), ("卖出额", 100), ("上榜日", 90), ("上榜原因", 280)]
+            for text, w in cols:
+                tk.Label(header, text=text, bg="#2A2A3E", fg="#64B5F6",
+                         font=("Helvetica", 10, "bold"), width=w//8).pack(side=tk.LEFT, padx=2)
+            for idx, row in df.iterrows():
+                bg = "#263238" if idx % 2 == 0 else "#1E1E2E"
+                rf = tk.Frame(container, bg=bg); rf.pack(fill=tk.X)
+                pct = row.get("涨跌幅", 0)
+                pct_fmt = f"{pct:+.2f}%" if pct is not None else "--"
+                pct_col = "#EF5350" if pct and pct >= 0 else "#66BB6A"
+                net = row.get("龙虎榜净买额", 0)
+                net_col = "#EF5350" if net and net >= 0 else "#66BB6A"
+                data = [str(idx+1), str(row.get("代码","")), str(row.get("名称","")),
+                        f"{row.get('收盘价',0):.2f}", pct_fmt,
+                        _fmt_money(net), _fmt_money(row.get("龙虎榜买入额",0)),
+                        _fmt_money(row.get("龙虎榜卖出额",0)), str(row.get("上榜日",""))[:10],
+                        str(row.get("上榜原因",""))[:28]]
+                fgs = ["#B0BEC5", "#CE93D8", "#ECEFF1", "#B0BEC5", pct_col, net_col, "#ECEFF1", "#ECEFF1", "#B0BEC5", "#90A4AE"]
+                for txt, fg in zip(data, fgs):
+                    tk.Label(rf, text=txt, bg=bg, fg=fg, font=("Helvetica", 10)).pack(side=tk.LEFT, padx=2)
+
+        def _lhb_thread():
+            import threading as _th
+            try:
+                import akshare as ak
+                from datetime import datetime, timedelta
+                end = datetime.now(); start = end - timedelta(days=7)
+                df = ak.stock_lhb_detail_em(start_date=start.strftime("%Y%m%d"), end_date=end.strftime("%Y%m%d"))
+                if df is not None and len(df) > 0 and "龙虎榜净买额" in df.columns:
+                    df_top = df.sort_values("龙虎榜净买额", ascending=False).head(20).reset_index(drop=True)
+                    win.after(0, lambda: (status1.configure(text=f"✅ {len(df)} 条记录 | TOP 20 净买入", fg="#66BB6A"),
+                                         _render_lhb(df_top, t1)))
+                else:
+                    win.after(0, lambda: status1.configure(text="⚠️ 近期无龙虎榜数据", fg="#FFA726"))
+            except Exception as e:
+                win.after(0, lambda: status1.configure(text=f"❌ 拉取失败: {str(e)[:40]}", fg="#EF5350"))
+
+        import threading as _th_ab
+        _th_ab.Thread(target=_lhb_thread, daemon=True).start()
+
+        # ── Tab 2: 🌐 北向资金 (历史净流入) ──
+        t2 = _mk_tab(nb, "🌐 北向资金流向")
+        status2 = tk.Label(t2, text="⏳ 拉取北向资金中...", bg="#1E1E2E", fg="#FFD700",
+                           font=("Helvetica", 11)); status2.pack(anchor="w", pady=4)
+        north_container = tk.Frame(t2, bg="#1E1E2E"); north_container.pack(fill=tk.BOTH, expand=True)
+
+        def _render_north(df, container):
+            for w in container.winfo_children(): w.destroy()
+            if df is None or len(df) == 0: return
+            # 最近 30 天
+            df_r = df.tail(30).copy()
+            header = tk.Frame(container, bg="#2A2A3E"); header.pack(fill=tk.X, pady=(0, 4))
+            for text, w in [("日期", 100), ("净买额(亿)", 120), ("买入(亿)", 120), ("卖出(亿)", 120), ("累计净买(亿)", 140)]:
+                tk.Label(header, text=text, bg="#2A2A3E", fg="#64B5F6",
+                         font=("Helvetica", 10, "bold")).pack(side=tk.LEFT, padx=4)
+            for idx, (_, row) in enumerate(df_r.iterrows()):
+                bg = "#263238" if idx % 2 == 0 else "#1E1E2E"
+                rf = tk.Frame(container, bg=bg); rf.pack(fill=tk.X)
+                net = float(row.get("当日成交净买额", 0)) / 1e8
+                cum = float(row.get("历史累计净买额", 0)) / 1e8
+                buy = float(row.get("买入成交额", 0)) / 1e8
+                sell = float(row.get("卖出成交额", 0)) / 1e8
+                nc = "#EF5350" if net >= 0 else "#66BB6A"
+                cc = "#EF5350" if cum >= 0 else "#66BB6A"
+                vals = [str(row.get("日期",""))[:10], f"{net:+.2f}", f"{buy:.2f}", f"{sell:.2f}", f"{cum:+.1f}"]
+                fgs = ["#B0BEC5", nc, "#ECEFF1", "#ECEFF1", cc]
+                for txt, fg in zip(vals, fgs):
+                    tk.Label(rf, text=txt, bg=bg, fg=fg, font=("Helvetica", 10)).pack(side=tk.LEFT, padx=6)
+            # 汇总
+            total_net = float(df_r["当日成交净买额"].sum()) / 1e8
+            tk.Label(container, text=f"\n📊 近30日北向累计净买: {total_net:+.2f} 亿  ({'🟢 净流入' if total_net>0 else '🔴 净流出'})",
+                     bg="#1E1E2E", fg="#FFD700", font=("Helvetica", 11, "bold")).pack(anchor="w", pady=6)
+
+        def _north_thread():
+            try:
+                import akshare as ak
+                df = ak.stock_hsgt_hist_em(symbol="北向资金")
+                win.after(0, lambda: (status2.configure(text=f"✅ 拉到 {len(df)} 天北向数据", fg="#66BB6A"),
+                                      _render_north(df, north_container)))
+            except Exception as e:
+                win.after(0, lambda: status2.configure(text=f"❌ 北向数据失败: {str(e)[:40]}", fg="#EF5350"))
+
+        _th_ab.Thread(target=_north_thread, daemon=True).start()
+
+        # ── Tab 3: 🔗 查持仓链接 ──
+        t3 = _mk_tab(nb, "🔗 查持仓链接 (可点)")
+        for name, url, desc in [
+            ("巨潮资讯 · 基金季报", "http://www.cninfo.com.cn/new/data/fundArchives", "公募/私募/保险 季度持仓披露"),
+            ("东方财富 · 基金持仓", "https://fund.eastmoney.com/data/fundranking.html", "基金重仓股 Top 排行"),
+            ("同花顺 · 机构持仓", "https://data.10jqka.com.cn/fund/", "机构进出动向 + 股东户数"),
+            ("沪深港通 · 北向持股", "https://data.eastmoney.com/hsgtcg/list.html", "北向资金 Top 100 重仓股"),
+            ("龙虎榜 (机构专用)", "https://data.eastmoney.com/stock/tradedate.html", "机构专用席位净买入/卖出"),
+            ("聪明钱 · 席位统计", "https://data.10jqka.com.cn/stockpage/hs_300750/", "龙虎榜席位胜率统计"),
+            ("Wind (需账号)", "https://www.wind.com.cn", "机构级 13F/13G/13H 最全数据"),
+            ("朝阳永续", "https://www.chaoyangyongxu.com", "私募净值 + 经理业绩排行榜"),
+        ]:
+            f = ttk.Frame(t3); f.pack(fill=tk.X, pady=4)
+            ttk.Label(f, text=name, font=("Helvetica", 11, "bold"), foreground="#42A5F5").pack(side=tk.LEFT)
+            ttk.Label(f, text=f" — {desc}", foreground="#AAAAAA").pack(side=tk.LEFT, fill=tk.X, expand=True)
+            l = tk.Label(f, text="🔗 打开", fg="#64B5F6", cursor="hand2", bg="#1E1E2E")
+            l.pack(side=tk.RIGHT)
+            l.bind("<Button-1>", lambda e, uu=url: self._open_safe(uu))
 
     def _show_factor_catalog_dialog(self):
-        import tkinter as _tk
-        win = _tk.Toplevel(self.root); win.title("🎯 量化因子体系 + 归因"); win.geometry("1020x700"); win.configure(bg="#1E1E2E")
-        _FS = {"v": 14}; c = _FS["v"]; cb = c + 1
-        bar = ttk.Frame(win); bar.pack(fill=_tk.X, padx=8, pady=4)
-        ttk.Label(bar, text="🔤 字号:", font=("Helvetica", 11)).pack(side=_tk.LEFT)
-        ttk.Button(bar, text="−", width=3, command=lambda: (_FS.__setitem__("v",max(8,_FS["v"]-1)), _rf())).pack(side=_tk.LEFT, padx=3)
-        ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")).pack(side=_tk.LEFT)
-        ttk.Button(bar, text="+", width=3, command=lambda: (_FS.__setitem__("v",min(22,_FS["v"]+1)), _rf())).pack(side=_tk.LEFT)
-        cv = _tk.Canvas(win, highlightthickness=0, bg="#1E1E2E"); cv.pack(side=_tk.LEFT, fill=_tk.BOTH, expand=True)
-        sb = ttk.Scrollbar(win, orient=_tk.VERTICAL, command=cv.yview); sb.pack(side=_tk.RIGHT, fill=_tk.Y); cv.configure(yscrollcommand=sb.set)
-        inner = ttk.Frame(cv, padding=8); cv.create_window((0,0), window=inner, anchor="nw")
-        cv.bind("<Configure>", lambda e: cv.itemconfigure(1, width=e.width))
-        inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
-        cv.bind_all("<MouseWheel>", lambda e: cv.yview_scroll(int(-1*(e.delta/120)), "units"))
-        def _rf():
-            for w in win.winfo_children():
-                for ch in w.winfo_children():
-                    try: cls = ch.__class__.__name__
-                    except: continue
-                    if cls in ("Label","LabelFrame"):
-                        try: ch.configure(font=("Helvetica", _FS["v"] if cls=="Label" else _FS["v"]+1))
-                        except: pass
-        for title, items in [("📈 量价因子",["动量","波动率/偏度/峰度","换手率","流动性(Amihud)","反转","尾盘效应"]),("💰 基本面因子",["ROE/ROA/ROIC","毛利率/净利率","估值","现金流质量","股息率"]),("🎨 Barra CNE6",["beta","lncap(市值)","momentum","volatility","liquidity","quality","growth","value","leverage"]),("🌐 另类因子",["舆情/新闻情绪","供应链数据","POI 人流","招聘数据","专利/研发","高管增减持"]),("🔀 合成方法",["多因子打分(IC/IR 加权)","机器学习(XGBoost/LightGBM)","深度学习(Transformer)"])]:
-            F, fi = self._collapsible_frame(inner, title); F.pack(fill=_tk.X, pady=6)
-            for it in items: ttk.Label(fi, text="  ✅ " + it, font=("Helvetica", c), foreground="#81C784").pack(anchor="w", pady=1)
-        for title, items in [("📊 业绩归因",[("Brinson","资产配置+行业+个股+交互项","en.wikipedia.org/wiki/Brinson_model"),("Carino","跨期可加",""),("因子归因","风格暴露×风格收益+特异性收益","")]),("🎯 2026 指增排名",[("中证2000","+17.51%","最强"),("A500","+9.98%","中"),("300","+7.49%","最稳"),("1000","+6.66%","中"),("选股","+3.75%","弱"),("500","+2.45%","最弱")]),("📚 参考",[("MSCI Barra","www.msci.com"),("Axioma","www.axioma.com")])]:
-            F, fi = self._collapsible_frame(inner, title); F.pack(fill=_tk.X, pady=6)
-            for e in items:
-                if e[1].startswith("+") and not e[2]:
-                    r = ttk.Frame(fi); r.pack(fill=_tk.X, pady=2)
-                    ttk.Label(r, text="  " + e[0], font=("Helvetica", cb, "bold")).pack(side=_tk.LEFT, padx=(0,10))
-                    ttk.Label(r, text=e[1], font=("Helvetica", cb, "bold"), foreground="#66BB6A").pack(side=_tk.LEFT, padx=(0,10))
-                    ttk.Label(r, text="(" + e[2] + ")", font=("Helvetica", c), foreground="#90A4AE").pack(side=_tk.LEFT, fill=_tk.X, expand=True)
-                elif not e[2]:
-                    ttk.Label(fi, text="  📌 " + e[0] + ": " + e[1], font=("Helvetica", c), foreground="#CCCCCC").pack(anchor="w", pady=1)
-                else:
-                    n,u = e[0], e[1]
-                    r = ttk.Frame(fi); r.pack(fill=_tk.X, pady=2)
-                    ttk.Label(r, text="  📖 " + n, font=("Helvetica", c), foreground="#E3F2FD").pack(side=_tk.LEFT, fill=_tk.X, expand=True)
-                    l = _tk.Label(r, text="🔗", fg="#64B5F6", cursor="hand2", bg="#1E1E2E", font=("Helvetica", c))
-                    l.pack(side=_tk.RIGHT); l.bind("<Button-1>", lambda e, uu=u: self._open_safe(uu))
-        win.after(100, _rf)
+        """🎯 量化因子体系 - Barra CNE6 + IC/IR + 合成方法"""
+        import tkinter as tk
+        win = tk.Toplevel(self.root)
+        win.title("🎯 量化因子体系 + Barra CNE6 + IC/IR + 合成方法"); win.geometry("1220x820")
+        win.configure(bg="#1E1E2E")
+        try: win.state("zoomed")
+        except Exception: pass
+
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        def _mk_tab(nb_, title):
+            t = ttk.Frame(nb_); nb_.add(t, text=title)
+            cv = tk.Canvas(t, highlightthickness=0, bg="#1E1E2E")
+            sb = ttk.Scrollbar(t, orient=tk.VERTICAL, command=cv.yview); sb.pack(side=tk.RIGHT, fill=tk.Y)
+            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            cv.configure(yscrollcommand=sb.set, bg="#1E1E2E")
+            inner = ttk.Frame(cv, padding=8)
+            cv.create_window((0, 0), window=inner, anchor="nw")
+            inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+            cv.bind_all("<MouseWheel>", lambda e: cv.yview_scroll(int(-1*(e.delta/120)), "units"))
+            return inner
+
+        def _group(parent, title):
+            F = ttk.LabelFrame(parent, text=title, padding=8); F.pack(fill=tk.X, pady=6)
+            return F
+
+        # ── Tab 1: Barra CNE6 完整因子 ──
+        t1 = _mk_tab(nb, "📊 Barra CNE6 风格因子")
+        tk.Label(t1, text="A 股标准 Barra 风险模型 (CNE6), 10 风格因子 + 行业中性",
+                 bg="#1E1E2E", fg="#B0BEC5", font=("Helvetica", 10)).pack(anchor="w")
+        barra = [
+            ("📐 beta", "beta = 个股收益对市场收益回归系数", "高 beta = 牛市弹性大, 熊市跌得多"),
+            ("📏 lncap", "ln(市值) — 规模因子", "小市值溢价 (小盘股长期跑赢大盘)"),
+            ("📈 momentum", "12-1 月动量 (过去12月去掉最近1月)", "赢家输家效应, A 股短期反转中期动量"),
+            ("📉 volatility", "波动率 + 偏度 + 换手率组合", "高波动 = 投机性强, 牛熊都涨跌幅大"),
+            ("💧 liquidity", "成交额 / 流通市值", "高流动性 = 机构重仓, 但交易拥挤"),
+            ("🧪 quality", "ROE + 毛利率 + 现金流质量", "质量因子长期有效, 防御性强"),
+            ("🌱 growth", "营收增速 + 利润增速", "成长因子 = 高估值高增长"),
+            ("💰 value", "BP + EP + SP + 股息率", "价值因子周期有效, 熊市抗跌"),
+            ("⚖️ leverage", "资产负债率 + 有息负债", "高杠杆 = 金融/地产风格"),
+            ("🧠 sentiment", "分析师预期 + 换手率 + 融资融券", "情绪因子短期有效"),
+        ]
+        F1 = _group(t1, "Barra CNE6 风格因子 (10 个)")
+        header = tk.Frame(F1, bg="#2A2A3E"); header.pack(fill=tk.X, pady=(0, 4))
+        for txt, w in [("因子名", 120), ("定义", 300), ("实战含义", 400)]:
+            tk.Label(header, text=txt, bg="#2A2A3E", fg="#64B5F6",
+                     font=("Helvetica", 10, "bold")).pack(side=tk.LEFT, padx=4)
+        for i, (name, defn, meaning) in enumerate(barra):
+            bg = "#263238" if i % 2 == 0 else "#1E1E2E"
+            rf = tk.Frame(F1, bg=bg); rf.pack(fill=tk.X)
+            tk.Label(rf, text=name, bg=bg, fg="#FFD700", font=("Helvetica", 10, "bold")).pack(side=tk.LEFT, padx=4)
+            tk.Label(rf, text=defn, bg=bg, fg="#B0BEC5", font=("Helvetica", 10)).pack(side=tk.LEFT, padx=4)
+            tk.Label(rf, text=meaning, bg=bg, fg="#81C784", font=("Helvetica", 10)).pack(side=tk.LEFT, padx=4)
+
+        # 行业中性
+        F2 = _group(t1, "🏭 行业中性 (CNE6 覆盖 31 个申万一级行业)")
+        inds = ["农林牧渔", "采掘", "化工", "钢铁", "有色金属", "电子", "家用电器", "食品饮料", "纺织服装",
+                "轻工制造", "医药生物", "公用事业", "交通运输", "房地产", "商业贸易", "休闲服务", "综合",
+                "建筑材料", "建筑装饰", "电气设备", "国防军工", "计算机", "通信", "银行", "非银金融",
+                "汽车", "机械设备", "煤炭", "石油石化", "环保", "社会服务"]
+        row = tk.Frame(F2, bg="#1E1E2E"); row.pack(fill=tk.X)
+        for i, ind in enumerate(inds):
+            tk.Label(row, text=f"  {ind}", bg="#1E1E2E", fg="#64B5F6", font=("Helvetica", 9)).grid(
+                row=i//7, column=i%7, sticky="w", padx=4)
+
+        # ── Tab 2: 因子分类 (量价/基本面/另类) ──
+        t2 = _mk_tab(nb, "📦 因子分类")
+        factor_groups = [
+            ("📈 量价因子", [
+                ("动量", "1/3/6/12 月动量 (赢输效应)"),
+                ("反转", "短期(5日)/长期(60日)反转"),
+                ("波动率", "20日收益率标准差 / 下行波动率"),
+                ("换手率", "20日平均换手率 / 换手率波动"),
+                ("流动性", "Amihud 非流动性比率, Pastor-Stambaugh Gamma"),
+                ("尾盘效应", "收盘前30分钟涨幅, 尾盘抬升/打压"),
+                ("日内偏度", "当日上午 vs 下午收益差 (机构调仓信号)"),
+            ]),
+            ("💰 基本面因子", [
+                ("盈利能力", "ROE / ROA / ROIC / Gross Profitability"),
+                ("成长能力", "营收增速 / 净利润增速 / ROE 变化率"),
+                ("估值", "PE / PB / PS / PCF / EV/EBITDA / PEG"),
+                ("现金流质量", "经营现金流 / 净利润, 应计利润 (Accruals)"),
+                ("杠杆", "资产负债率 / 有息负债率 / 权益乘数"),
+                ("股息率", "TTM 股息率 / 股息支付率"),
+                ("资产效率", "资产周转率 / 存货周转率 / 应收周转率"),
+            ]),
+            ("🌐 另类因子", [
+                ("舆情情绪", "新闻情感 / 社交媒体热度 / 股吧发帖量"),
+                ("供应链", "海关进出口数据 / 物流仓储数据 / 卡车运输指数"),
+                ("地理空间", "卫星图片 (停车场利用率) / POI 人流热度"),
+                ("人才招聘", "猎聘/BOSS直聘招聘量变化 (公司扩张信号)"),
+                ("专利研发", "专利申请数 / R&D 投入 / 专利引用量"),
+                ("高管行为", "高管增减持 / 股权激励 / 离职率"),
+                ("资本动作", "回购 / 分红 / 定增 / 可转债发行"),
+            ]),
+        ]
+        for gtitle, factors in factor_groups:
+            F = _group(t2, gtitle)
+            for fname, fdesc in factors:
+                rf = ttk.Frame(F); rf.pack(fill=tk.X, pady=2)
+                ttk.Label(rf, text=f"🔹 {fname}", font=("Helvetica", 10, "bold"), foreground="#42A5F5").pack(side=tk.LEFT)
+                ttk.Label(rf, text=f" — {fdesc}", foreground="#AAAAAA").pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # ── Tab 3: IC/IR 衰减 ──
+        t3 = _mk_tab(nb, "📉 IC/IR 衰减分析")
+        tk.Label(t3, text="IC (Information Coefficient) = 因子值与下期收益的 Pearson 相关系数\n"
+                        "IR (Information Ratio) = IC 均值 / IC 标准差 (衡量因子稳定性)\n"
+                        "衰减曲线: 因子 IC 随持仓期 (5/10/20/60 日) 的变化",
+                 bg="#1E1E2E", fg="#B0BEC5", font=("Helvetica", 10), justify=tk.LEFT).pack(anchor="w", pady=(0, 8))
+        ic_data = [
+            ("📈 动量因子",     "0.05", "0.06", "0.08", "0.10", "中期最强, 短期弱", "衰减慢 → 适合月度调仓"),
+            ("💰 价值因子",     "0.03", "0.05", "0.07", "0.09", "稳定正 IC", "长期有效, 熊市抗跌"),
+            ("📉 反转因子",     "-0.07","-0.05","-0.03","-0.01", "短期反转最强", "衰减快 → 适合周度调仓"),
+            ("💧 流动性因子",   "-0.04","-0.06","-0.05","-0.03", "流动性溢价", "中等衰减 → 双周调仓"),
+            ("🧪 质量因子",     "0.04", "0.06", "0.08", "0.09", "稳定正 IR", "长期持有, 穿越牛熊"),
+            ("🌱 成长因子",     "0.03", "0.04", "0.05", "0.05", "波动大", "需配合价值因子对冲"),
+            ("⚖️ 杠杆因子",     "-0.02","-0.03","-0.04","-0.05", "金融周期", "熊市有效, 牛市失效"),
+        ]
+        F = _group(t3, "典型因子 IC 衰减 (日频)")
+        header = tk.Frame(F, bg="#2A2A3E"); header.pack(fill=tk.X, pady=(0, 4))
+        for txt in ["因子", "5日IC", "10日IC", "20日IC", "60日IC", "特征", "调仓建议"]:
+            tk.Label(header, text=txt, bg="#2A2A3E", fg="#64B5F6",
+                     font=("Helvetica", 10, "bold")).pack(side=tk.LEFT, padx=6)
+        for i, row in enumerate(ic_data):
+            bg = "#263238" if i % 2 == 0 else "#1E1E2E"
+            rf = tk.Frame(F, bg=bg); rf.pack(fill=tk.X)
+            for j, val in enumerate(row):
+                fg = "#EF5350" if val.startswith("-") and j > 0 else ("#66BB6A" if j > 0 else "#ECEFF1")
+                if j == 0: fg = "#FFD700"
+                elif j in [5, 6]: fg = "#B0BEC5"
+                tk.Label(rf, text=val, bg=bg, fg=fg, font=("Helvetica", 10)).pack(side=tk.LEFT, padx=6)
+
+        # ── Tab 4: 因子合成方法 ──
+        t4 = _mk_tab(nb, "🔀 因子合成方法对比")
+        methods = [
+            ("IC 加权合成",
+             "w_i = IC_i / sum(|IC_j|)\n每个因子按 IC 绝对值加权, IC 高的权重大",
+             "✅ 简单有效, 最常用  ❌ IC 估计不稳定时失效",
+             "聚宽 / RiceQuant 因子合成默认"),
+            ("IR 加权合成",
+             "w_i = IR_i / sum(|IR_j|)\n考虑因子稳定性 (IC/IC_std)",
+             "✅ 更稳健  ❌ 同样依赖历史 IC 估计",
+             "多因子模型进阶方案"),
+            ("机器学习 (XGBoost/LightGBM)",
+             "y = 下一期收益, X = 因子值\n非线性 + 因子交互",
+             "✅ 挖掘非线性  ❌ 过拟合风险, 黑箱",
+             "BigQuant / 掘金 AI 选股"),
+            ("深度学习 (时序 Transformer)",
+             "输入: 因子时序 × N 日  输出: 下一期收益\n注意力机制捕获因子重要性动态变化",
+             "✅ 最强非线性  ❌ 需要大数据量, 训练慢",
+             "学术前沿 / 头部量化私募"),
+            ("深度学习因子 → 线性合成",
+             "先用 1D-CNN / Transformer 挖掘非线性因子, 再用 IC/IR 线性合成",
+             "✅ 兼顾非线性 + 可解释性  ❌ 两步 pipeline 较复杂",
+             "当前 SOTA 方案"),
+        ]
+        F = _group(t4, "因子合成方法对比")
+        for name, formula, pros, use_case in methods:
+            bg = "#263238"
+            rf = tk.Frame(F, bg=bg); rf.pack(fill=tk.X, pady=4)
+            tk.Label(rf, text=f"🧠 {name}", bg=bg, fg="#FFD700", font=("Helvetica", 11, "bold")).pack(anchor="w", padx=4)
+            tk.Label(rf, text=f"   公式: {formula}", bg=bg, fg="#B0BEC5", font=("Helvetica", 10), justify=tk.LEFT).pack(anchor="w", padx=4)
+            tk.Label(rf, text=f"   优缺点: {pros}", bg=bg, fg="#CE93D8", font=("Helvetica", 10), justify=tk.LEFT).pack(anchor="w", padx=4)
+            tk.Label(rf, text=f"   实战: {use_case}", bg=bg, fg="#81C784", font=("Helvetica", 10)).pack(anchor="w", padx=4)
+
+        # ── Tab 5: 📚 参考链接 ──
+        t5 = _mk_tab(nb, "📚 参考链接")
+        for name, url, desc in [
+            ("📖 MSCI Barra CNE6 官方文档", "https://www.msci.com/our-solutions/analytics", "Barra 风险模型白皮书"),
+            ("📖 A 股 Barra 因子详解 (CSDN)", "https://blog.csdn.net/qq_28256683", "中文 Barra CNE5/CNE6 因子解析"),
+            ("🎯 聚宽因子库", "https://www.joinquant.com/help/api/help#factor", "聚宽平台所有可用因子"),
+            ("🎯 RiceQuant 因子分析", "https://www.ricequant.com/doc/rqfactor/", "RQFactor 因子分析框架"),
+            ("🎯 BigQuant AI 量化", "https://www.bigquant.com", "AI 因子挖掘 + 选股"),
+            ("💡 因子 IC/IR 衰减实证", "https://xueqiu.com/873953755/389123456", "雪球量化专栏"),
+        ]:
+            f = ttk.Frame(t5); f.pack(fill=tk.X, pady=4)
+            ttk.Label(f, text=name, font=("Helvetica", 11, "bold"), foreground="#42A5F5").pack(side=tk.LEFT)
+            ttk.Label(f, text=f" — {desc}", foreground="#AAAAAA").pack(side=tk.LEFT, fill=tk.X, expand=True)
+            l = tk.Label(f, text="🔗 打开", fg="#64B5F6", cursor="hand2", bg="#1E1E2E")
+            l.pack(side=tk.RIGHT)
+            l.bind("<Button-1>", lambda e, uu=url: self._open_safe(uu))
 
     def _show_institution_knowledge_dialog(self):
         import tkinter as _tk
