@@ -48626,41 +48626,233 @@ class StockKeywordAnalyzerGUI:
         _last_data = {}
 
         def _show_large(e):
-            """双击 → 调现成的 _show_daily_kline_zoom (支撑压力线+指标选择)"""
-            data = _last_data.get("data")
-            name = _last_data.get("name", "")
-            if not data: return
-            kline = self._sina_to_kline_data(data)
-            # mac.py 有完整的 _show_daily_kline_zoom (支撑压力线+指标选择)
-            if hasattr(self, "_show_daily_kline_zoom"):
-                self._show_daily_kline_zoom(kline, name)
-                return
-            # fallback: 自画大窗口
-            win = tk.Toplevel(self.root)
-            win.title(f"📈 指数日K - {name}")
-            win.configure(bg="#1E1E2E")
-            try: win.attributes("-topmost", True)
-            except Exception: pass
-            fig_big = plt.Figure(figsize=(14, 10), dpi=100, facecolor="#1E1E2E")
-            cv_big = FigureCanvasTkAgg(fig_big, master=win)
-            cv_big.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-            gs = fig_big.add_gridspec(3, 1, height_ratios=[3, 1, 1], hspace=0.3)
-            ax = fig_big.add_subplot(gs[0], facecolor="#1E1E2E")
-            ax2 = fig_big.add_subplot(gs[1], facecolor="#1E1E2E", sharex=ax)
-            ax3 = fig_big.add_subplot(gs[2], facecolor="#1E1E2E", sharex=ax)
-            days_list = [d["day"] for d in data]
-            closes = [float(d["close"]) for d in data]; opens = [float(d["open"]) for d in data]
-            highs = [float(d["high"]) for d in data]; lows = [float(d["low"]) for d in data]
-            volumes = [float(d.get("volume", 0)) for d in data]; x = list(range(len(closes)))
-            _draw_axes(ax, ax2, ax3, closes, opens, highs, lows, volumes, days_list, x, show_macd=True)
-            fig_big.suptitle(f"{name} 日K ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=14, y=0.99)
-            cv_big.draw()
+            """双击 → 自画的指数日K线大弹窗 (不复用持仓股 Dialog)"""
+            symbol = _last_data.get("symbol")
+            days = _last_data.get("days", 180)
+            if not symbol: return
+            self._show_index_kline_dialog(initial_symbol=symbol, initial_days=days)
 
         # 绑定双击
         _canvas.get_tk_widget().bind("<Double-Button-1>", _show_large)
 
         import threading as _th
         _th.Thread(target=_redraw, daemon=True).start()
+
+    def _show_index_kline_dialog(self, initial_symbol=None, initial_days=180):
+        """📈 指数/ETF 日K线大弹窗 (自画, 不复用持仓股 Dialog)"""
+        import tkinter as tk
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        import matplotlib.pyplot as plt
+        from matplotlib import gridspec
+        import numpy as np
+
+        INDICES = [
+            ("上证指数", "sh000001"), ("深证成指", "sz399001"), ("创业板指", "sz399006"), ("科创50", "sh000688"),
+            ("沪深300", "sh000300"), ("中证A500", "sh000211"), ("中证500", "sh000905"),
+            ("中证1000", "sh000852"), ("中证2000", "sh932000"), ("中证红利", "sh000922"),
+            ("科创ETF(588000)", "sh588000"), ("半导体ETF(512760)", "sh512760"),
+            ("黄金ETF(518880)", "sh518880"), ("纳指ETF(513100)", "sh513100"),
+            ("日经ETF(513520)", "sh513520"), ("证券ETF(512880)", "sh512880"),
+            ("医药ETF(512010)", "sh512010"), ("新能源ETF(515030)", "sh515030"),
+            ("军工ETF(512660)", "sh512660"), ("银行ETF(512800)", "sh512800"),
+        ]
+        SYMBOL2NAME = {s: n for n, s in INDICES}
+        DAYS_OPTS = [60, 120, 180, 360]
+
+        win = tk.Toplevel(self.root); win.configure(bg="#1E1E2E")
+        try: win.attributes("-topmost", True)
+        except Exception: pass
+        try: win.state("zoomed")
+        except Exception: win.geometry("1300x900")
+
+        # === 顶栏 ===
+        top = ttk.Frame(win, padding=4); top.pack(fill=tk.X)
+        ttk.Label(top, text="📈 指数日K线图", font=("Microsoft YaHei", 12, "bold")).pack(side=tk.LEFT, padx=(0, 16))
+        sym_var = tk.StringVar(value=initial_symbol or INDICES[0][1])
+        name_lbl = ttk.Label(top, text=SYMBOL2NAME.get(sym_var.get(), ""))
+        name_lbl.pack(side=tk.LEFT, padx=(0, 6))
+        sym_combo = ttk.Combobox(top, textvariable=sym_var,
+                                 values=[s for _, s in INDICES], width=12, state="readonly")
+        sym_combo.pack(side=tk.LEFT, padx=4)
+        days_var = tk.IntVar(value=initial_days)
+        ttk.Label(top, text="天数").pack(side=tk.LEFT, padx=(10, 2))
+        days_combo = ttk.Combobox(top, textvariable=days_var, values=DAYS_OPTS, width=5, state="readonly")
+        days_combo.pack(side=tk.LEFT, padx=4)
+        refresh_btn = ttk.Button(top, text="🔄 刷新")
+        refresh_btn.pack(side=tk.LEFT, padx=8)
+        status_var = tk.StringVar(value="")
+        ttk.Label(top, textvariable=status_var, foreground="#90A4AE").pack(side=tk.LEFT, padx=10)
+
+        # === Canvas + 滚动容器 ===
+        wrap = tk.Frame(win, bg="#1E1E2E"); wrap.pack(fill=tk.BOTH, expand=True)
+        cv_scroll = tk.Canvas(wrap, highlightthickness=0, borderwidth=0, bg="#1E1E2E")
+        cv_scroll.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb = ttk.Scrollbar(wrap, orient=tk.VERTICAL, command=cv_scroll.yview)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        cv_scroll.configure(yscrollcommand=sb.set)
+        fig_frame = tk.Frame(cv_scroll, bg="#1E1E2E")
+        cv_scroll.create_window((0, 0), window=fig_frame, anchor="nw")
+        fig_frame.bind("<Configure>", lambda e: cv_scroll.configure(scrollregion=cv_scroll.bbox("all")))
+        cv_scroll.bind("<Configure>", lambda e: cv_scroll.itemconfigure(cv_scroll.find_withtag("all")[0], width=e.width))
+
+        # === 绘图函数 ===
+        def _ema(data, period):
+            if len(data) < period: return [None]*len(data)
+            r = [None]*len(data); r[period-1] = sum(data[:period])/period
+            k = 2/(period+1)
+            for i in range(period, len(data)): r[i] = data[i]*k + r[i-1]*(1-k)
+            return r
+
+        def _sma(data, period):
+            if len(data) < period: return [None]*len(data)
+            return [None if i+1 < period else sum(data[i+1-period:i+1])/period for i in range(len(data))]
+
+        def _support_resistance(highs, lows, closes):
+            """简单支撑压力线: 最近 30 日 pivot point + 近 10 日高低"""
+            n = len(closes); look = min(30, n)
+            recent_h = max(highs[-look:]); recent_l = min(lows[-look:])
+            pp = (recent_h + recent_l + closes[-1]) / 3
+            r1 = 2*pp - recent_l; r2 = pp + (recent_h - recent_l)
+            s1 = 2*pp - recent_h; s2 = pp - (recent_h - recent_l)
+            return {'R1': r1, 'R2': r2, 'S1': s1, 'S2': s2, 'PP': pp, 'max': recent_h, 'min': recent_l}
+
+        def _redraw(symbol, days):
+            name = SYMBOL2NAME.get(symbol, symbol)
+            name_lbl.configure(text=name)
+            status_var.set(f"⏳ 拉取 {name} ...")
+            def _work():
+                try:
+                    data = self._fetch_index_daily(symbol, days)
+                    if not data:
+                        win.after(0, lambda: status_var.set("❌ 拉取失败")); return
+                    win.after(0, lambda: _render(name, data))
+                except Exception as e:
+                    win.after(0, lambda: status_var.set(f"❌ {e}"))
+            import threading as _th
+            _th.Thread(target=_work, daemon=True).start()
+
+        def _render(name, data):
+            # 清旧图
+            for w in fig_frame.winfo_children(): w.destroy()
+
+            closes = np.array([float(d["close"]) for d in data])
+            opens = np.array([float(d["open"]) for d in data])
+            highs = np.array([float(d["high"]) for d in data])
+            lows  = np.array([float(d["low"]) for d in data])
+            vols  = np.array([float(d.get("volume", 0)) for d in data])
+            days_list = [d["day"] for d in data]
+            x = np.arange(len(closes))
+
+            # 均线
+            ma5  = np.array(_sma(closes, 5))
+            ma10 = np.array(_sma(closes, 10))
+            ma20 = np.array(_sma(closes, 20))
+            ma60 = np.array(_sma(closes, 60))
+
+            # VWAP 主力成本
+            typ = (highs + lows + closes) / 3
+            cum_pv = np.cumsum(typ * vols)
+            cum_v  = np.cumsum(vols)
+            vwap = np.where(cum_v > 0, cum_pv / cum_v, typ)
+
+            # MACD
+            dif = np.array(_ema(closes, 12)) - np.array(_ema(closes, 26))
+            # 修 None → 0
+            dif = np.where([d is None for d in dif], 0.0, dif.astype(float))
+            dea = np.array(_ema(list(dif), 9))
+            dea = np.where([d is None for d in dea], 0.0, dea.astype(float))
+            macd_bar = 2.0 * (dif - dea)
+
+            # 支撑压力
+            sr = _support_resistance(highs, lows, closes)
+
+            # 画图
+            fig = plt.Figure(figsize=(14, 10), dpi=100, facecolor="#1E1E2E")
+            gs = gridspec.GridSpec(4, 1, height_ratios=[4, 1.2, 1.2, 1.2], hspace=0.18)
+            ax   = fig.add_subplot(gs[0], facecolor="#1E1E2E")
+            ax_v = fig.add_subplot(gs[1], facecolor="#1E1E2E", sharex=ax)
+            ax_m = fig.add_subplot(gs[2], facecolor="#1E1E2E", sharex=ax)
+            ax_vw = fig.add_subplot(gs[3], facecolor="#1E1E2E", sharex=ax)
+
+            # === 主图 K 线 ===
+            colors = ["#d32f2f" if closes[i] >= opens[i] else "#388e3c" for i in range(len(closes))]
+            ax.bar(x, closes - opens, bottom=opens, color=colors, width=0.7, zorder=3)
+            ax.vlines(x, lows, highs, colors=colors, linewidth=0.5, zorder=2)
+
+            # MA 均线
+            for ma, color, lbl in [(ma5, '#FF9800', 'MA5'), (ma10, '#2196F3', 'MA10'),
+                                   (ma20, '#9C27B0', 'MA20'), (ma60, '#4CAF50', 'MA60')]:
+                valid = ~np.isnan(ma.astype(float))
+                if valid.any():
+                    ax.plot(x[valid], ma[valid].astype(float), color=color, linewidth=1.0, label=lbl, zorder=4)
+
+            # VWAP 主力成本
+            ax.plot(x, vwap, color='#FFD700', linewidth=1.2, linestyle='--', label='VWAP 主力成本', zorder=5)
+
+            # 支撑压力线
+            sr_colors = {'R2': '#F44336', 'R1': '#FF7043', 'S1': '#26A69A', 'S2': '#4DB6AC', 'PP': '#ECEFF1', 'max': '#FF5722', 'min': '#00BCD4'}
+            for k, v in sr.items():
+                ax.axhline(v, color=sr_colors.get(k, '#666'), linewidth=0.8, linestyle='--', alpha=0.7, zorder=1)
+                ax.text(len(closes)-1, v, f' {k}={v:.2f}', color=sr_colors.get(k, '#666'), fontsize=8, va='bottom')
+
+            ax.set_title(f"{name} 日K线 ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=13, pad=8)
+            ax.legend(loc='upper left', fontsize=8, ncol=5, framealpha=0.5)
+            ax.tick_params(colors="#AAA"); ax.grid(True, alpha=0.15)
+            ax.spines['bottom'].set_color('#444'); ax.spines['top'].set_visible(False)
+            ax.spines['left'].set_color('#444'); ax.spines['right'].set_visible(False)
+
+            # === 成交量 ===
+            v_colors = ["#d32f2f" if closes[i] >= opens[i] else "#388e3c" for i in range(len(closes))]
+            ax_v.bar(x, vols, color=v_colors, width=0.65)
+            ax_v.set_ylabel("VOL", color="#AAA"); ax_v.tick_params(colors="#AAA")
+            ax_v.grid(True, alpha=0.15); ax_v.spines['bottom'].set_color('#444'); ax_v.spines['top'].set_visible(False)
+            ax_v.spines['left'].set_color('#444'); ax_v.spines['right'].set_visible(False)
+            if len(ma5) >= 5 and not np.isnan(ma5[-5]):
+                ax_v_ma5 = np.array(_sma(vols, 5))
+                valid = ~np.isnan(ax_v_ma5.astype(float))
+                if valid.any(): ax_v.plot(x[valid], ax_v_ma5[valid].astype(float), color='#FF9800', linewidth=0.9, label='VOL MA5')
+                ax_v.legend(loc='upper left', fontsize=7)
+
+            # === MACD ===
+            macd_colors = ["#d32f2f" if v >= 0 else "#388e3c" for v in macd_bar]
+            ax_m.bar(x, macd_bar, color=macd_colors, width=0.55, alpha=0.7)
+            ax_m.plot(x, dif, color='#1565c0', linewidth=0.9, label='DIF')
+            ax_m.plot(x, dea, color='#c62828', linewidth=0.9, label='DEA')
+            ax_m.axhline(0, color='gray', linewidth=0.5)
+            ax_m.set_ylabel("MACD", color="#AAA"); ax_m.tick_params(colors="#AAA")
+            ax_m.grid(True, alpha=0.15); ax_m.spines['bottom'].set_color('#444'); ax_m.spines['top'].set_visible(False)
+            ax_m.spines['left'].set_color('#444'); ax_m.spines['right'].set_visible(False)
+            ax_m.legend(loc='upper left', fontsize=7, ncol=3)
+
+            # === VWAP 主力成本区 ===
+            ax_vw.plot(x, closes, color='#ECEFF1', linewidth=0.7, label='收盘')
+            ax_vw.plot(x, vwap, color='#FFD700', linewidth=1.1, linestyle='--', label='VWAP 主力成本')
+            # 主力成本区 ±2% 填充
+            ax_vw.fill_between(x, vwap*0.98, vwap*1.02, color='#FFD700', alpha=0.12, label='±2% 主力成本区')
+            ax_vw.axhline(vwap[-1], color='#FFD700', linewidth=1.0, linestyle=':', alpha=0.8)
+            ax_vw.set_ylabel("主力成本", color="#AAA"); ax_vw.set_xlabel("交易日", color="#AAA")
+            ax_vw.tick_params(colors="#AAA"); ax_vw.grid(True, alpha=0.15)
+            ax_vw.spines['bottom'].set_color('#444'); ax_vw.spines['top'].set_visible(False)
+            ax_vw.spines['left'].set_color('#444'); ax_vw.spines['right'].set_visible(False)
+            ax_vw.legend(loc='upper left', fontsize=7, ncol=3)
+
+            # 隐藏副图 x 轴标签
+            for sub in [ax_v, ax_m]: sub.tick_params(axis='x', labelbottom=False)
+
+            fig.tight_layout()
+            fig.suptitle(f"{name} | 收盘 {closes[-1]:.2f} | 涨跌 {((closes[-1]-closes[-2])/closes[-2]*100 if len(closes)>1 else 0):+.2f}% | 主力成本 {vwap[-1]:.2f}",
+                        color="#FFD700", fontsize=12, y=1.002)
+
+            cv = FigureCanvasTkAgg(fig, master=fig_frame); cv.draw()
+            cv.get_tk_widget().pack(fill=tk.X, padx=4, pady=4)
+            try: NavigationToolbar2Tk(cv, fig_frame).update()
+            except Exception: pass
+            status_var.set(f"✅ {len(data)} 根K线 | 支撑 {sr['S1']:.2f} / 压力 {sr['R1']:.2f}")
+
+        refresh_btn.configure(command=lambda: _redraw(sym_var.get(), days_var.get()))
+        sym_combo.bind("<<ComboboxSelected>>", lambda e: _redraw(sym_var.get(), days_var.get()))
+        days_combo.bind("<<ComboboxSelected>>", lambda e: _redraw(sym_var.get(), days_var.get()))
+        _redraw(sym_var.get(), days_var.get())
 
     def _show_emo_cycle_dialog(self):
         """🎭 情绪周期三维度输入 → 自动风控警告（系统红灯+同花顺+自己账户盈亏）+ 日历补录"""
