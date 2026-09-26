@@ -13479,14 +13479,21 @@ class DapanMixin:
             return r
 
         def _sma(data, period):
+            """正确的简单移动平均: 前 period-1 个值为 NaN, 等价于 pandas rolling().mean()"""
             arr = np.array([float(v) if v is not None else np.nan for v in data], dtype=float)
-            if len(arr) < period: return np.full(len(arr), np.nan)
-            kernel = np.ones(period) / period
-            return np.convolve(arr, kernel, mode='same')
+            n = len(arr); out = np.full(n, np.nan)
+            if n < period: return out
+            cs = np.nancumsum(arr)
+            out[period-1:] = (cs[period-1:] - np.concatenate([[0], cs[:-period]])) / period
+            return out
 
         def _bb(closes, n=20, k=2.0):
             mid = _sma(closes, n)
-            std = np.array([np.std(closes[max(0,i-n+1):i+1]) if i >= n-1 else np.nan for i in range(len(closes))])
+            # 滚动 std: 前 n-1 为 NaN
+            closes_valid = np.array(closes, dtype=float)
+            std = np.full(len(closes_valid), np.nan)
+            for i in range(n-1, len(closes_valid)):
+                std[i] = np.std(closes_valid[i-n+1:i+1])
             return mid, mid + k*std, mid - k*std
 
         def _kdj(highs, lows, closes, n=9):
