@@ -79022,6 +79022,7 @@ class StockKeywordAnalyzerGUI:
                         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
                         status_var.set("当前显示:只显示主图")
                     except Exception as ex:
+                        import traceback as _tb; _tb.print_exc()
                         messagebox.showerror("错误", f"绘制失败: {ex}", parent=win)
                 else:
                     # 显示主图+副图
