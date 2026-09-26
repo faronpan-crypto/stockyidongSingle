@@ -8211,6 +8211,14 @@ class DapanMixin:
             txt.insert("1.0", "加载中...\n")
             txt.config(state=tk.DISABLED)
             self.sentiment_zone_text_widgets["overview"] = txt
+            # ---- Tab 3: 📈 指数趋势 (上证/深成指/创业板 日K + 1/5/10/20/60均线) ----
+            try:
+                idx_tab = ttk.Frame(notebook)
+                notebook.add(idx_tab, text="📈 指数趋势")
+                self._build_index_trend_tab(idx_tab)
+            except Exception as _e_idx:
+                import traceback; traceback.print_exc()
+                print(f"[指数趋势] tab创建失败: {_e_idx}", flush=True)
             self._refresh_sentiment_zone_tabs_async()
         except Exception as e:
             ttk.Label(parent, text=f"情绪区间标签页创建失败: {e}", foreground="red").pack(expand=True)
@@ -12480,6 +12488,149 @@ class DapanMixin:
         return pct_map, close_map
 
 
+
+
+    def _fetch_index_daily(self, symbol="sh000001", days=180):
+        """从新浪拉指数日K线, 返回 list[dict] (day, open, high, low, close, volume)"""
+        import requests as _req, json as _j
+        url = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
+        try:
+            r = _req.get(url, params={"symbol": symbol, "scale": 240, "ma": "no", "datalen": days}, timeout=8)
+            if r.status_code != 200 or not r.text.strip():
+                return []
+            data = _j.loads(r.text)
+            # 新浪返回字段: day, open, high, low, close, volume
+            return sorted(data, key=lambda x: x.get("day", ""))
+        except Exception as e:
+            print(f"[指数趋势] 拉取 {symbol} 失败: {e}", flush=True)
+            return []
+
+    def _build_index_trend_tab(self, parent):
+        """📈 指数趋势 Tab: 上证/深成指/创业板 日K线 + MA1/5/10/20/60"""
+        import matplotlib
+        matplotlib.use("TkAgg")
+        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        import matplotlib.dates as mdates
+        from datetime import datetime
+
+        INDEX_MAP = {
+            "上证指数": "sh000001",
+            "深证成指": "sz399001",
+            "创业板指": "sz399006",
+        }
+        MA_PERIODS = [1, 5, 10, 20, 60]
+        MA_COLORS = {1: "#FF6B6B", 5: "#4ECDC4", 10: "#FFE66D", 20: "#95E1D3", 60: "#C7CEEA"}
+
+        # 顶部工具栏
+        top = ttk.Frame(parent)
+        top.pack(fill=tk.X, padx=4, pady=4)
+        ttk.Label(top, text="指数:").pack(side=tk.LEFT)
+        _idx_var = tk.StringVar(value="上证指数")
+        _idx_combo = ttk.Combobox(top, textvariable=_idx_var, values=list(INDEX_MAP.keys()), state="readonly", width=12)
+        _idx_combo.pack(side=tk.LEFT, padx=4)
+        ttk.Button(top, text="🔄 刷新", width=8,
+                   command=lambda: _redraw()).pack(side=tk.LEFT, padx=4)
+        _days_var = tk.StringVar(value="180")
+        ttk.Label(top, text=" 天数:").pack(side=tk.LEFT)
+        ttk.Combobox(top, textvariable=_days_var, values=["60", "120", "180", "360"],
+                     state="readonly", width=6).pack(side=tk.LEFT, padx=4)
+        _status = tk.Label(top, text="", fg="#888")
+        _status.pack(side=tk.RIGHT, padx=8)
+
+        # Figure 容器
+        fig = plt.Figure(figsize=(7, 4.5), dpi=100, facecolor="#1E1E2E")
+        _canvas = FigureCanvasTkAgg(fig, master=parent)
+        _canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        try:
+            _toolbar = NavigationToolbar2Tk(_canvas, parent, pack_toolbar=False)
+            _toolbar.update()
+        except Exception:
+            pass
+
+        def _redraw():
+            name = _idx_var.get()
+            symbol = INDEX_MAP.get(name, "sh000001")
+            try:
+                days = int(_days_var.get())
+            except Exception:
+                days = 180
+            _status.config(text=f"拉取 {name} ({symbol})...", fg="#42A5F5")
+            parent.update_idletasks()
+
+            data = self._fetch_index_daily(symbol, days)
+            if not data:
+                _status.config(text="❌ 拉取失败 (网络?)", fg="#EF5350")
+                return
+
+            fig.clear()
+            ax = fig.add_subplot(111, facecolor="#1E1E2E")
+
+            # 提取字段
+            days_list = [d["day"] for d in data]
+            closes = [float(d["close"]) for d in data]
+            opens = [float(d["open"]) for d in data]
+            highs = [float(d["high"]) for d in data]
+            lows = [float(d["low"]) for d in data]
+            volumes = [float(d.get("volume", 0)) for d in data]
+            x = list(range(len(closes)))
+
+            # 画 K 线 (红绿柱状)
+            bar_w = 0.6
+            for i in range(len(closes)):
+                color = "#EF5350" if closes[i] >= opens[i] else "#66BB6A"
+                # 上下影线
+                ax.plot([x[i], x[i]], [lows[i], highs[i]], color=color, linewidth=0.6)
+                # 实体
+                body_lo = min(opens[i], closes[i])
+                body_hi = max(opens[i], closes[i])
+                ax.bar(x[i], body_hi - body_lo, bottom=body_lo, width=bar_w, color=color, edgecolor=color, linewidth=0.5)
+
+            # 画均线
+            for ma_p in MA_PERIODS:
+                if len(closes) < ma_p:
+                    continue
+                ma_vals = []
+                for i in range(len(closes)):
+                    if i + 1 < ma_p:
+                        ma_vals.append(None)
+                    else:
+                        ma_vals.append(sum(closes[i+1-ma_p:i+1]) / ma_p)
+                ax.plot(x, ma_vals, color=MA_COLORS[ma_p], linewidth=1.2, label=f"MA{ma_p}")
+
+            # 样式
+            ax.set_title(f"{name} 日K (MA 1/5/10/20/60)", color="#FFF", fontsize=11)
+            ax.tick_params(colors="#CCC", labelsize=8)
+            for spine in ax.spines.values():
+                spine.set_color("#444")
+            ax.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444",
+                      labelcolor="#FFF", ncol=5)
+            # X 轴日期标签 (稀疏)
+            step = max(1, len(x) // 10)
+            ax.set_xticks(x[::step])
+            ax.set_xticklabels([days_list[i][5:] for i in range(0, len(x), step)], rotation=30, fontsize=7)
+            ax.grid(True, alpha=0.2, color="#666")
+
+            # 副图: 成交量
+            ax2 = ax.twinx()
+            ax2.bar(x, volumes, width=bar_w * 0.6, color="#546E7A", alpha=0.4)
+            ax2.set_ylim(0, max(volumes) * 3 if volumes else 1)
+            ax2.tick_params(colors="#888", labelsize=7)
+            ax2.set_ylabel("成交量", color="#888", fontsize=8)
+
+            fig.tight_layout()
+            _canvas.draw_idle()
+
+            # 最新价/涨跌幅
+            last = closes[-1]
+            prev = closes[-2] if len(closes) >= 2 else last
+            pct = (last - prev) / prev * 100 if prev else 0
+            _status.config(text=f"✅ {name}  收盘:{last:.2f}  {'+' if pct>0 else ''}{pct:.2f}%  ({days_list[-1]})",
+                           fg="#EF5350" if pct >= 0 else "#66BB6A")
+
+        # 首次加载 (后台线程, 不阻塞 UI)
+        import threading as _th
+        _th.Thread(target=_redraw, daemon=True).start()
 
 
 __all__ = ["DapanMixin"]
