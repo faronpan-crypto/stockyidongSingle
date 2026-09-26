@@ -8184,14 +8184,17 @@ class DapanMixin:
             txt.insert("1.0", "加载中...\n")
             txt.config(state=tk.DISABLED)
             self.sentiment_zone_text_widgets["overview"] = txt
-            # ---- Tab 2: 🗓️ 情绪周期日历 ----
+            # ---- Tab 2: 🎯 情绪复盘 (只显示月复盘三栏, 不渲染完整日历) ----
             try:
-                cal_tab = ttk.Frame(notebook)
-                notebook.add(cal_tab, text="🗓️ 情绪周期日历")
-                self._build_emo_cycle_calendar(cal_tab, notebook=notebook)
+                rev_tab = ttk.Frame(notebook)
+                notebook.add(rev_tab, text="🎯 情绪复盘")
+                from datetime import datetime as _dt2
+                _ym = _dt2.now()
+                _pf, _cf = self._fetch_month_index_pct(_ym)
+                self._render_month_review(rev_tab, _ym, _pf, _cf)
             except Exception as _e_emo_tab:
                 import traceback; traceback.print_exc()
-                print(f"[情绪周期日历] tab创建失败: {_e_emo_tab}", flush=True)
+                print(f"[情绪复盘] tab创建失败: {_e_emo_tab}", flush=True)
             self._refresh_sentiment_zone_tabs_async()
         except Exception as e:
             ttk.Label(parent, text=f"情绪区间标签页创建失败: {e}", foreground="red").pack(expand=True)
