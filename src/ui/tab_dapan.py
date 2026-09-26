@@ -13634,32 +13634,33 @@ class DapanMixin:
                 v = ~np.isnan(ma)
                 if v.any(): ax.plot(x[v], ma[v], color=col, linewidth=1.0, label=lbl, zorder=4)
 
-            # BOLL (不加 label, 用填充带+中轨虚线识别, 不进图例)
+            # BOLL
             bv = ~np.isnan(bmid)
             if bv.any():
-                ax.plot(x[bv], bmid[bv], color='#FFEB3B', linewidth=0.9, linestyle='--', zorder=3)
-                ax.plot(x[bv], bup[bv], color='#FF5722', linewidth=0.7, linestyle=':', alpha=0.6)
-                ax.plot(x[bv], blo[bv], color='#00BCD4', linewidth=0.7, linestyle=':', alpha=0.6)
+                ax.plot(x[bv], bmid[bv], color='#FFEB3B', linewidth=0.9, linestyle='--', label='BOLL中轨', zorder=3)
+                ax.plot(x[bv], bup[bv], color='#FF5722', linewidth=0.7, linestyle=':', label='BOLL上轨')
+                ax.plot(x[bv], blo[bv], color='#00BCD4', linewidth=0.7, linestyle=':', label='BOLL下轨')
                 ax.fill_between(x[bv], blo[bv], bup[bv], color='#FFEB3B', alpha=0.06, zorder=1)
 
-            # VWAP (不加 label)
-            ax.plot(x, vwap, color='#FFD700', linewidth=1.2, linestyle='--', zorder=5)
+            # VWAP
+            ax.plot(x, vwap, color='#FFD700', linewidth=1.2, linestyle='--', label='VWAP主力成本', zorder=5)
 
-            # 支撑压力 (只画线, 不标文字, 避免拥挤)
-            sr_colors = {'R2':'#F44336','R1':'#FF7043','S1':'#26A69A','S2':'#4DB6AC'}
-            for k in ['R2','R1','S1','S2']:
-                v = sr[k]
-                ax.axhline(v, color=sr_colors[k], linewidth=0.6, linestyle='--', alpha=0.5, zorder=1)
+            # 支撑压力
+            sr_colors = {'R2':'#F44336','R1':'#FF7043','S1':'#26A69A','S2':'#4DB6AC','PP':'#ECEFF1','max':'#FF5722','min':'#00BCD4'}
+            for k, v in sr.items():
+                ax.axhline(v, color=sr_colors.get(k,'#666'), linewidth=0.7, linestyle='--', alpha=0.6, zorder=1)
+                ax.text(len(closes)-1, v, f' {k}={v:.2f}', color=sr_colors.get(k,'#666'), fontsize=7, va='bottom')
 
             ax.set_title(f"{name} 日K线 ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=13, pad=8)
-            ax.legend(loc='upper left', fontsize=7, ncol=4, framealpha=0.5)
+            ax.legend(loc='upper left', fontsize=7, ncol=5, framealpha=0.5)
             ax.tick_params(colors="#AAA"); ax.grid(True, alpha=0.12)
             ax.spines['bottom'].set_color('#444'); ax.spines['top'].set_visible(False)
             ax.spines['left'].set_color('#444'); ax.spines['right'].set_visible(False)
-            # x 轴时间标签 (matplotlib 默认不自动生成)
-            step = max(1, len(x) // 12)
-            ax.set_xticks(x[::step])
-            ax.set_xticklabels([days_list[i][5:] for i in range(0, len(x), step)], rotation=30, fontsize=7, color='#AAA')
+            # X 轴日期刻度: 均匀取 6~8 个
+            n = len(x); nlabels = min(8, max(4, n // 20))
+            tick_idx = np.linspace(0, n-1, nlabels, dtype=int)
+            ax.set_xticks(tick_idx)
+            ax.set_xticklabels([days_list[i] for i in tick_idx], rotation=25, fontsize=7, color="#AAA")
 
             # --- VOL ---
             v_colors = ["#d32f2f" if closes[i] >= opens[i] else "#388e3c" for i in range(len(closes))]
@@ -13718,33 +13719,38 @@ class DapanMixin:
             cv.get_tk_widget().pack(fill=tk.X, padx=4, pady=4)
             try: NavigationToolbar2Tk(cv, fig_frame).update()
             except Exception: pass
-
-            # === 鼠标十字线 + 浮动 OHLC 数据 ===
-            vline = ax.axvline(x=-1, color='#FFD700', linewidth=0.8, alpha=0.7, visible=False)
-            hline = ax.axhline(y=-1, color='#FFD700', linewidth=0.8, alpha=0.7, visible=False)
-            info_annot = ax.annotate("", xy=(0,0), xytext=(10,10), textcoords="offset points",
-                                     bbox=dict(boxstyle="round,pad=0.3", fc="#1E1E2E", ec="#FFD700", lw=0.8, alpha=0.95),
-                                     fontsize=8, color="#FFF", visible=False, zorder=10)
-            def _on_move(evt):
-                if evt.inaxes != ax:
-                    vline.set_visible(False); hline.set_visible(False); info_annot.set_visible(False); cv.draw_idle(); return
-                xi = int(round(evt.xdata))
-                if xi < 0 or xi >= len(closes):
-                    vline.set_visible(False); hline.set_visible(False); info_annot.set_visible(False); cv.draw_idle(); return
-                vline.set_visible(True); hline.set_visible(True); info_annot.set_visible(True)
-                vline.set_xdata([xi, xi])
-                oi, hi, li, ci = float(opens[xi]), float(highs[xi]), float(lows[xi]), float(closes[xi])
-                vi = float(vols[xi])
-                chg = (ci - oi) / oi * 100 if oi else 0
-                hline.set_ydata([ci, ci])
-                vline.set_color('#EF5350' if ci >= oi else '#66BB6A')
-                txt = f"{days_list[xi]}  O:{oi:.1f} H:{hi:.1f} L:{li:.1f} C:{ci:.1f} {'+' if chg>=0 else ''}{chg:.2f}% V:{vi/1e4:.1f}万"
-                info_annot.set_text(txt)
-                status_var.set(f"{days_list[xi]} 开{oi:.2f} 高{hi:.2f} 低{li:.2f} 收{ci:.2f} {'+' if chg>=0 else ''}{chg:.2f}% 量{vi/1e4:.1f}万  主力成本{vwap[xi]:.2f}")
-                cv.draw_idle()
-            cv.mpl_connect("motion_notify_event", _on_move)
-            cv.mpl_connect("axes_leave_event", lambda e: (vline.set_visible(False), hline.set_visible(False), info_annot.set_visible(False), cv.draw_idle()))
             status_var.set(f"✅ {len(data)}根 | 支撑 {sr['S1']:.2f} / 压力 {sr['R1']:.2f} | 获利 {profit_ratio*100:.0f}%")
+
+            # === 鼠标十字线 + 实时数据面板 ===
+            cross_v = ax.axvline(x=-1, color='#42A5F5', linewidth=0.6, alpha=0.7, visible=False, zorder=10)
+            cross_h = ax.axhline(y=-1, color='#42A5F5', linewidth=0.6, alpha=0.7, visible=False, zorder=10)
+            tip = ax.text(0.01, 0.98, '', transform=ax.transAxes, fontsize=8,
+                          color='#ECEFF1', va='top', ha='left',
+                          bbox=dict(boxstyle='round,pad=0.4', fc='#1E1E2E', ec='#42A5F5', alpha=0.92))
+
+            def _on_move(event):
+                if event.inaxes not in [ax, ax_v, ax_m, ax_k]:
+                    cross_v.set_visible(False); cross_h.set_visible(False); tip.set_text(''); cv.draw_idle(); return
+                idx = int(round(event.xdata))
+                if idx < 0 or idx >= len(closes):
+                    cross_v.set_visible(False); cross_h.set_visible(False); tip.set_text(''); cv.draw_idle(); return
+                d = days_list[idx]
+                o, hh, l, c, vv = float(opens[idx]), float(highs[idx]), float(lows[idx]), float(closes[idx]), float(vols[idx])
+                prev_c = float(closes[idx-1]) if idx > 0 else c
+                chg = c - prev_c; pct = chg / prev_c * 100 if prev_c else 0
+                ma5v = ma5[idx]; ma20v = ma20[idx]
+                ma5s = f'{ma5v:.2f}' if not np.isnan(ma5v) else '-'
+                ma20s = f'{ma20v:.2f}' if not np.isnan(ma20v) else '-'
+                bb_s = f'{bup[idx]:.2f}' if not np.isnan(bup[idx]) else '-'
+                txt = (f'{d} | O {o:.2f} H {hh:.2f} L {l:.2f} C {c:.2f}\n'
+                       f'量 {vv/1e4:.0f}万 | 涨跌 {chg:+.2f} ({pct:+.2f}%)\n'
+                       f'MA5 {ma5s} | MA20 {ma20s} | BOLL上 {bb_s}')
+                tip.set_text(txt)
+                cross_v.set_visible(True); cross_v.set_xdata([idx, idx])
+                cross_h.set_visible(True); cross_h.set_ydata([c, c])
+                cv.draw_idle()
+
+            cv.mpl_connect('motion_notify_event', _on_move)
 
         refresh_btn.configure(command=_redraw)
         sym_combo.bind("<<ComboboxSelected>>", lambda e: _redraw())
