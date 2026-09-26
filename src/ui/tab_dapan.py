@@ -13524,12 +13524,12 @@ class DapanMixin:
             cum_v  = np.cumsum(vols)
             vwap = np.where(cum_v > 0, cum_pv / cum_v, typ)
 
-            # MACD
-            dif = np.array(_ema(closes, 12)) - np.array(_ema(closes, 26))
-            # 修 None → 0
-            dif = np.where([d is None for d in dif], 0.0, dif.astype(float))
-            dea = np.array(_ema(list(dif), 9))
-            dea = np.where([d is None for d in dea], 0.0, dea.astype(float))
+            # MACD (先修 None 再运算, 避免 NoneType 减法)
+            _e12 = np.array([0.0 if v is None else float(v) for v in _ema(closes, 12)])
+            _e26 = np.array([0.0 if v is None else float(v) for v in _ema(closes, 26)])
+            dif = _e12 - _e26
+            dea_raw = _ema(dif.tolist(), 9)
+            dea = np.array([0.0 if v is None else float(v) for v in dea_raw])
             macd_bar = 2.0 * (dif - dea)
 
             # 支撑压力
