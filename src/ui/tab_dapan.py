@@ -8188,10 +8188,26 @@ class DapanMixin:
             try:
                 rev_tab = ttk.Frame(notebook)
                 notebook.add(rev_tab, text="🎯 情绪复盘")
+                # 滚动容器 (防止内容过长被截断)
+                _rev_canvas = tk.Canvas(rev_tab, highlightthickness=0, borderwidth=0)
+                _rev_scroll = ttk.Scrollbar(rev_tab, orient=tk.VERTICAL, command=_rev_canvas.yview)
+                _rev_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+                _rev_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                _rev_canvas.configure(yscrollcommand=_rev_scroll.set)
+                _rev_inner = ttk.Frame(_rev_canvas)
+                _rev_win = _rev_canvas.create_window((0, 0), window=_rev_inner, anchor="nw")
+                def _rev_on_config(e):
+                    _rev_canvas.itemconfigure(_rev_win, width=e.width)
+                    _rev_canvas.configure(scrollregion=_rev_canvas.bbox("all"))
+                _rev_canvas.bind("<Configure>", _rev_on_config)
+                _rev_inner.bind("<Configure>", lambda e: _rev_canvas.configure(scrollregion=_rev_canvas.bbox("all")))
+                def _rev_wheel(e): _rev_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+                _rev_canvas.bind_all("<MouseWheel>", _rev_wheel)
                 from datetime import datetime as _dt2
                 _ym = _dt2.now()
                 _pf, _cf = self._fetch_month_index_pct(_ym)
-                self._render_month_review(rev_tab, _ym, _pf, _cf)
+                self._render_month_review(_rev_inner, _ym, _pf, _cf)
+                _rev_canvas.after(300, lambda: _rev_canvas.configure(scrollregion=_rev_canvas.bbox("all")))
             except Exception as _e_emo_tab:
                 import traceback; traceback.print_exc()
                 print(f"[情绪复盘] tab创建失败: {_e_emo_tab}", flush=True)
