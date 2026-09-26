@@ -47659,7 +47659,7 @@ class StockKeywordAnalyzerGUI:
         body_f = tk.Frame(rev_frame, bg="#0D1B2A")
         body_f.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
-        col_frames = [tk.Frame(body_f, bg="#0D1B2A") for _ in range(3)]
+        col_frames = [tk.Frame(body_f, bg="#0D1B2A") for _ in range(4)]
         for i, cf in enumerate(col_frames):
             cf.grid(row=0, column=i, sticky="nsew", padx=6, pady=4)
             body_f.grid_columnconfigure(i, weight=1)
@@ -47881,6 +47881,176 @@ class StockKeywordAnalyzerGUI:
             tk.Label(col_frames[2], text=tip, bg="#0D1B2A", fg="#B0BEC5",
                      font=("", 8), wraplength=220, justify=tk.LEFT).pack(anchor="w", pady=(2, 4))
 
+
+
+        # ======================================================
+
+        # 【列4】🧠 Alpha/Beta 诊断 (扩展指数+ETF, 后台线程拉取)
+
+        # ======================================================
+
+        lf4 = tk.Label(col_frames[3], text="🧠 Alpha/Beta 诊断",
+                       bg="#0D1B2A", fg="#FFD700",
+                       font=("Microsoft YaHei", 11, "bold"))
+        lf4.pack(anchor="w")
+        tk.Frame(col_frames[3], bg="#FFD700", height=1).pack(fill=tk.X, pady=(2, 6))
+
+        # 状态标签 (先显示加载中)
+        diag_status = tk.Label(col_frames[3], text="⏳ 诊断中...",
+                               bg="#0D1B2A", fg="#FFD700",
+                               font=("", 9), anchor="w", wraplength=260, justify=tk.LEFT)
+        diag_status.pack(anchor="w", pady=4, fill=tk.X)
+
+        # 诊断内容容器 (后台线程完成后填充)
+        diag_body = tk.Frame(col_frames[3], bg="#0D1B2A")
+        diag_body.pack(anchor="w", fill=tk.X)
+
+        import threading as _th_ab
+        def _alpha_beta_diag():
+            import requests as _r_ab, json as _j_ab
+            import numpy as _np_ab
+            import traceback as _tb_ab
+            try:
+                # 扩展清单: 5 主要指数 + 现有 ETF
+                EXT = [
+                    ("sh000001", "上证指数", "idx"),
+                    ("sz399001", "深证成指", "idx"),
+                    ("sz399006", "创业板指", "idx"),
+                    ("sh000300", "沪深300", "idx"),
+                    ("sh000905", "中证500", "idx"),
+                    ("sh000852", "中证1000", "idx"),
+                    ("sh510300", "沪深300ETF", "etf"),
+                    ("sh588000", "科创50ETF", "etf"),
+                    ("sh510500", "中证500ETF", "etf"),
+                    ("sh512760", "半导体ETF", "etf"),
+                    ("sh512010", "医药ETF", "etf"),
+                    ("sh518880", "黄金ETF", "etf"),
+                    ("sh513100", "纳指ETF", "etf"),
+                    ("sh512800", "银行ETF", "etf"),
+                    ("sh515030", "新能源ETF", "etf"),
+                    ("sh512660", "军工ETF", "etf"),
+                ]
+                def _fetch(sym, n=80):
+                    try:
+                        r = _r_ab.get(
+                            "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
+                            params={"symbol": sym, "scale": "240", "ma": "no", "datalen": str(n)},
+                            timeout=2, headers={"User-Agent": "Mozilla/5.0"})
+                        if r.status_code == 200 and r.text.strip():
+                            return _j_ab.loads(r.text)
+                    except: pass
+                    return None
+
+                R_ab = []
+                for sym, name, typ in EXT:
+                    kl = _fetch(sym, 80)
+                    if not kl or len(kl) < 21: continue
+                    closes = _np.array([float(k["close"]) for k in kl])
+                    ma20 = _np.mean(closes[-20:])
+                    c0 = closes[-1]; c5 = closes[-6] if len(closes)>=6 else closes[0]
+                    c20 = closes[-21]; c60 = closes[0]
+                    R_ab.append({'name':name,'sym':sym,'typ':typ,'c0':c0,
+                                 'c5':(c0/c5-1)*100,'c20':(c0/c20-1)*100,'c60':(c0/c60-1)*100,
+                                 'above':c0>ma20})
+
+                if not R_ab:
+                    def _no_data():
+                        diag_status.configure(text="⚠️ 数据源暂不可用")
+                    rev_frame.after(0, _no_data); return
+
+                # === 计算 ===
+                idx_list = [x for x in R_ab if x['typ']=='idx']
+                etf_list = [x for x in R_ab if x['typ']=='etf']
+                hs300_ab = next((x for x in idx_list if x['sym']=='sh000300'), None)
+                if not hs300_ab: hs300_ab = idx_list[0] if idx_list else None
+
+                idx_above = sum(1 for x in idx_list if x['above'])
+                n_idx = len(idx_list)
+                if idx_above >= n_idx - 1: regime, beta_ok, regime_color = "🟢 牛市", True, "#66BB6A"
+                elif idx_above >= n_idx // 2 + 1: regime, beta_ok, regime_color = "🟡 震荡偏多", True, "#FFD54F"
+                elif idx_above >= 2: regime, beta_ok, regime_color = "🟠 震荡偏空", False, "#FF8A65"
+                else: regime, beta_ok, regime_color = "🔴 熊市下跌", False, "#EF5350"
+
+                # 风格
+                lc = hs300_ab['c60'] if hs300_ab else 0
+                zz500_ab = next((x for x in idx_list if x['sym']=='sh000905'), None)
+                zz1000_ab = next((x for x in idx_list if x['sym']=='sh000852'), None)
+                cy_ab = next((x for x in idx_list if x['sym']=='sz399006'), None)
+                mc = zz500_ab['c60'] if zz500_ab else 0
+                sc = zz1000_ab['c60'] if zz1000_ab else 0
+                if sc > mc > lc and sc > 0: style = "🔥 小盘成长"
+                elif lc > mc > sc and lc > 0: style = "🏛️ 大盘蓝筹"
+                elif all(v < 0 for v in [lc, mc, sc]): style = "💀 全面撤退"
+                else: style = "🔄 快速轮动"
+
+                # ETF 超额
+                if hs300_ab:
+                    hs20 = hs300_ab['c20']
+                    exc_list = sorted([(e['name'], e['c20']-hs20, e['c20'], e['c5'], e['above'])
+                                       for e in etf_list], key=lambda x:-x[1])
+                else:
+                    exc_list = [(e['name'], 0, e['c20'], e['c5'], e['above']) for e in etf_list]
+
+                # === UI 渲染 ===
+                def _render():
+                    for w in diag_body.winfo_children(): w.destroy()
+                    diag_status.configure(text="", bg="#0D1B2A")
+
+                    # 1. 大盘状态
+                    tk.Label(diag_body, text=f"📊 {idx_above}/{n_idx} 指数站上MA20",
+                             bg="#0D1B2A", fg="#B0BEC5", font=("", 9)).pack(anchor="w")
+                    tk.Label(diag_body, text=f"   → {regime}",
+                             bg="#0D1B2A", fg=regime_color,
+                             font=("", 10, "bold")).pack(anchor="w", pady=(0, 4))
+
+                    # 2. 机构风格
+                    tk.Label(diag_body, text=f"🎨 风格: {style}",
+                             bg="#0D1B2A", fg="#CE93D8",
+                             font=("", 9, "bold")).pack(anchor="w", pady=(0, 4))
+
+                    # 3. 强势 Alpha
+                    tk.Label(diag_body, text="🚀 Alpha ETF (20日超额)",
+                             bg="#0D1B2A", fg="#FF8A65",
+                             font=("", 9, "bold")).pack(anchor="w")
+                    shown = 0
+                    for name, exc, c20, c5, above in exc_list:
+                        if exc <= 0: break
+                        mark = "🟢" if above else "⚪"
+                        tk.Label(diag_body,
+                                 text=f"   {mark} {name} 超额{exc:+.1f}% 5日{c5:+.1f}%",
+                                 bg="#0D1B2A", fg="#FFECB3",
+                                 font=("", 9)).pack(anchor="w")
+                        shown += 1
+                        if shown >= 3: break
+                    if shown == 0:
+                        tk.Label(diag_body, text="   暂无强Alpha",
+                                 bg="#0D1B2A", fg="#78909C",
+                                 font=("", 9)).pack(anchor="w")
+
+                    # 4. 结论
+                    tk.Label(diag_body, text="", bg="#0D1B2A").pack()
+                    if not beta_ok:
+                        tk.Label(diag_body, text="❌ Beta不值得参与!",
+                                 bg="#0D1B2A", fg="#EF5350",
+                                 font=("", 10, "bold")).pack(anchor="w")
+                        tk.Label(diag_body, text="   → 空仓或≤20%防御仓",
+                                 bg="#0D1B2A", fg="#B0BEC5",
+                                 font=("", 9)).pack(anchor="w")
+                    else:
+                        tk.Label(diag_body, text="✅ Beta可以参与",
+                                 bg="#0D1B2A", fg="#66BB6A",
+                                 font=("", 10, "bold")).pack(anchor="w")
+                        tk.Label(diag_body, text="   → 核心65% Beta + 卫星35% Alpha",
+                                 bg="#0D1B2A", fg="#B0BEC5",
+                                 font=("", 9)).pack(anchor="w")
+
+                rev_frame.after(0, _render)
+            except Exception as e:
+                _tb_ab.print_exc()
+                def _err(): diag_status.configure(text=f"诊断失败: {str(e)[:30]}")
+                rev_frame.after(0, _err)
+
+        _th_ab.Thread(target=_alpha_beta_diag, daemon=True).start()
         # 固定高度, 让滚动条能正确工作
         rev_frame.update_idletasks()
         h = rev_frame.winfo_reqheight()
