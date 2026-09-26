@@ -1742,7 +1742,7 @@ def _load_stock_names_impl():
                 else:
                     print("⚠️ 主板/中小板/创业板股票数据为空")
             except Exception as e:
-                _log(f"❌ 加载主板/中小板/创业板股票失败: {e}")
+                print(f"❌ 加载主板/中小板/创业板股票失败: {e}")
             # 加载科创板股票
             kcb_count = 0
             try:
@@ -1759,7 +1759,7 @@ def _load_stock_names_impl():
                 else:
                     print("⚠️ 科创板股票数据为空")
             except Exception as e:
-                _log(f"❌ 加载科创板股票失败: {e}")
+                print(f"❌ 加载科创板股票失败: {e}")
             # 加载ETF(可选,如果不需要可以跳过)
             etf_count = 0
             try:
@@ -1778,7 +1778,7 @@ def _load_stock_names_impl():
                     print("⚠️ ETF基金数据为空")
                     ETF_CACHE_REFRESHED = False
             except Exception as e:
-                _log(f"❌ 加载ETF失败: {e}")
+                print(f"❌ 加载ETF基金失败: {e}")
                 ETF_CACHE_REFRESHED = False
             total_count = len(STOCK_NAMES_SET)
             if total_count > 0:
@@ -2746,7 +2746,7 @@ def get_stock_30day_data_and_calculate_changes(stock_name):
         print(f"✅ {stock_name} 30日数据下载完成,计算涨跌幅成功")
         return result
     except Exception as e:
-        _log(f"❌ {stock_name} 30日数据下载失败: {e}")
+        print(f"❌ {stock_name} 30日数据下载失败: {e}")
         return None
 def analyze_text_dimensions(text):
     """多维度文本分析 - 情绪、市场焦点、风险识别等"""
@@ -2864,7 +2864,7 @@ def analyze_stock_keywords_local(text):
             return "未找到股票名称"
         print(f"🔍 识别出 {len(stock_names)} 只股票,开始快速分析...")
         # 只进行本地文本分析,不调用外部API
-        _log(f"📊 开始本地文本分析,识别出 {len(stock_names)} 只股票...")
+        print(f"📊 开始本地文本分析,识别出 {len(stock_names)} 只股票...")
         # 添加股票名称汇总
         stock_summary = "🔍 **识别出的股票名称汇总**\n"
         stock_summary += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
