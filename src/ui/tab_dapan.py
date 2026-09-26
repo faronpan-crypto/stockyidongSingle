@@ -13408,7 +13408,7 @@ class DapanMixin:
 
 
     def _show_index_kline_dialog(self, initial_symbol=None, initial_days=180):
-        """📈 指数/ETF 日K线大弹窗 (自画, 不复用持仓股 Dialog)"""
+        """📈 指数/ETF 日K线大弹窗 - 中文名下拉 + BOLL + KDJ + 筹码峰"""
         import tkinter as tk
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
         import matplotlib.pyplot as plt
@@ -13425,8 +13425,15 @@ class DapanMixin:
             ("医药ETF(512010)", "sh512010"), ("新能源ETF(515030)", "sh515030"),
             ("军工ETF(512660)", "sh512660"), ("银行ETF(512800)", "sh512800"),
         ]
+        NAME2SYMBOL = {n: s for n, s in INDICES}
         SYMBOL2NAME = {s: n for n, s in INDICES}
         DAYS_OPTS = [60, 120, 180, 360]
+
+        # 初始名字
+        if initial_symbol and initial_symbol in SYMBOL2NAME:
+            init_name = SYMBOL2NAME[initial_symbol]
+        else:
+            init_name = INDICES[0][0]
 
         win = tk.Toplevel(self.root); win.configure(bg="#1E1E2E")
         try: win.attributes("-topmost", True)
@@ -13434,14 +13441,12 @@ class DapanMixin:
         try: win.state("zoomed")
         except Exception: win.geometry("1300x900")
 
-        # === 顶栏 ===
+        # === 顶栏 (名字下拉框) ===
         top = ttk.Frame(win, padding=4); top.pack(fill=tk.X)
         ttk.Label(top, text="📈 指数日K线图", font=("Microsoft YaHei", 12, "bold")).pack(side=tk.LEFT, padx=(0, 16))
-        sym_var = tk.StringVar(value=initial_symbol or INDICES[0][1])
-        name_lbl = ttk.Label(top, text=SYMBOL2NAME.get(sym_var.get(), ""))
-        name_lbl.pack(side=tk.LEFT, padx=(0, 6))
-        sym_combo = ttk.Combobox(top, textvariable=sym_var,
-                                 values=[s for _, s in INDICES], width=12, state="readonly")
+        name_var = tk.StringVar(value=init_name)
+        sym_combo = ttk.Combobox(top, textvariable=name_var,
+                                 values=[n for n, _ in INDICES], width=18, state="readonly")
         sym_combo.pack(side=tk.LEFT, padx=4)
         days_var = tk.IntVar(value=initial_days)
         ttk.Label(top, text="天数").pack(side=tk.LEFT, padx=(10, 2))
@@ -13464,20 +13469,61 @@ class DapanMixin:
         fig_frame.bind("<Configure>", lambda e: cv_scroll.configure(scrollregion=cv_scroll.bbox("all")))
         cv_scroll.bind("<Configure>", lambda e: cv_scroll.itemconfigure(cv_scroll.find_withtag("all")[0], width=e.width))
 
-        # === 绘图函数 ===
+        # === 计算工具 ===
         def _ema(data, period):
-            if len(data) < period: return [None]*len(data)
-            r = [None]*len(data); r[period-1] = sum(data[:period])/period
+            arr = np.array([float(v) if v is not None else 0.0 for v in data], dtype=float)
+            if len(arr) < period: return np.zeros(len(arr))
+            r = np.zeros(len(arr)); r[period-1] = np.mean(arr[:period])
             k = 2/(period+1)
-            for i in range(period, len(data)): r[i] = data[i]*k + r[i-1]*(1-k)
+            for i in range(period, len(arr)): r[i] = arr[i]*k + r[i-1]*(1-k)
             return r
 
         def _sma(data, period):
-            if len(data) < period: return [None]*len(data)
-            return [None if i+1 < period else sum(data[i+1-period:i+1])/period for i in range(len(data))]
+            arr = np.array([float(v) if v is not None else np.nan for v in data], dtype=float)
+            if len(arr) < period: return np.full(len(arr), np.nan)
+            kernel = np.ones(period) / period
+            return np.convolve(arr, kernel, mode='same')
+
+        def _bb(closes, n=20, k=2.0):
+            mid = _sma(closes, n)
+            std = np.array([np.std(closes[max(0,i-n+1):i+1]) if i >= n-1 else np.nan for i in range(len(closes))])
+            return mid, mid + k*std, mid - k*std
+
+        def _kdj(highs, lows, closes, n=9):
+            hh = np.array([max(highs[max(0,i-n+1):i+1]) for i in range(len(highs))])
+            ll = np.array([min(lows[max(0,i-n+1):i+1]) for i in range(len(lows))])
+            rsv = np.where(hh > ll, (closes - ll) / (hh - ll) * 100, 50.0)
+            k = _ema(rsv, 3); d = _ema(k, 3); j = 3*k - 2*d
+            return k, d, j
+
+        def _chip_distribution(data, n_days=60, bins=50):
+            """近似筹码分布: 日K OHLC+Volume → 价格区间成交量分布"""
+            recent = data[-n_days:] if len(data) > n_days else data
+            o = np.array([float(d["open"]) for d in recent])
+            h = np.array([float(d["high"]) for d in recent])
+            l = np.array([float(d["low"]) for d in recent])
+            c = np.array([float(d["close"]) for d in recent])
+            v = np.array([float(d.get("volume", 0)) for d in recent])
+            p_lo, p_hi = np.min(l), np.max(h)
+            if p_hi - p_lo < 0.01: p_hi = p_lo + 1.0
+            bin_w = (p_hi - p_lo) / bins
+            chip = np.zeros(bins)
+            for k in range(len(recent)):
+                span = max(h[k] - l[k], bin_w * 0.5)
+                sigma = span / 3.0
+                for b in range(bins):
+                    b_lo = p_lo + b * bin_w; b_hi = b_lo + bin_w
+                    ov_lo, ov_hi = max(l[k], b_lo), min(h[k], b_hi)
+                    if ov_hi <= ov_lo: continue
+                    uni = v[k] * (ov_hi - ov_lo) / span
+                    bc = (b_lo + b_hi) / 2
+                    w = np.exp(-0.5 * ((bc - c[k]) / sigma) ** 2)
+                    chip[b] += uni * (0.3 + 0.7 * w)
+            total = chip.sum()
+            if total > 0: chip = chip / total
+            return chip, p_lo, p_hi, bin_w
 
         def _support_resistance(highs, lows, closes):
-            """简单支撑压力线: 最近 30 日 pivot point + 近 10 日高低"""
             n = len(closes); look = min(30, n)
             recent_h = max(highs[-look:]); recent_l = min(lows[-look:])
             pp = (recent_h + recent_l + closes[-1]) / 3
@@ -13485,143 +13531,187 @@ class DapanMixin:
             s1 = 2*pp - recent_h; s2 = pp - (recent_h - recent_l)
             return {'R1': r1, 'R2': r2, 'S1': s1, 'S2': s2, 'PP': pp, 'max': recent_h, 'min': recent_l}
 
-        def _redraw(symbol, days):
-            name = SYMBOL2NAME.get(symbol, symbol)
-            name_lbl.configure(text=name)
+        # === 拉取 + 渲染 ===
+        def _redraw():
+            name = name_var.get()
+            symbol = NAME2SYMBOL.get(name, INDICES[0][1])
             status_var.set(f"⏳ 拉取 {name} ...")
-            def _work():
-                try:
-                    data = self._fetch_index_daily(symbol, days)
-                    if not data:
-                        win.after(0, lambda: status_var.set("❌ 拉取失败")); return
-                    win.after(0, lambda: _render(name, data))
-                except Exception as e:
-                    win.after(0, lambda: status_var.set(f"❌ {e}"))
             import threading as _th
+
+            def _work():
+                import traceback as _tb_dbg
+                try:
+                    data = self._fetch_index_daily(symbol, days_var.get())
+                    if not data:
+                        print(f"[指数弹窗] ❌ 拉取空 symbol={symbol}", flush=True)
+                        win.after(0, lambda: status_var.set("❌ 拉取失败")); return
+                    print(f"[指数弹窗] ✅ 拉到 {len(data)} 根K线 name={name}", flush=True)
+                    def _do():
+                        import traceback as _tb2
+                        try: _render(name, data)
+                        except Exception as e:
+                            print(f"[指数弹窗] ❌ _render 异常: {e}", flush=True); _tb2.print_exc()
+                            try: status_var.set(f"❌ 渲染失败: {e}")
+                            except Exception: pass
+                    win.after(0, _do)
+                except Exception as e:
+                    print(f"[指数弹窗] ❌ _work 异常: {e}", flush=True); _tb_dbg.print_exc()
+                    win.after(0, lambda: status_var.set(f"❌ {e}"))
             _th.Thread(target=_work, daemon=True).start()
 
         def _render(name, data):
             # 清旧图
             for w in fig_frame.winfo_children(): w.destroy()
 
-            closes = np.array([float(d["close"]) for d in data])
-            opens = np.array([float(d["open"]) for d in data])
-            highs = np.array([float(d["high"]) for d in data])
-            lows  = np.array([float(d["low"]) for d in data])
-            vols  = np.array([float(d.get("volume", 0)) for d in data])
+            closes = np.array([float(d["close"]) for d in data], dtype=float)
+            opens  = np.array([float(d["open"])  for d in data], dtype=float)
+            highs  = np.array([float(d["high"])  for d in data], dtype=float)
+            lows   = np.array([float(d["low"])   for d in data], dtype=float)
+            vols   = np.array([float(d.get("volume", 0)) for d in data], dtype=float)
             days_list = [d["day"] for d in data]
             x = np.arange(len(closes))
 
             # 均线
-            ma5  = np.array(_sma(closes, 5))
-            ma10 = np.array(_sma(closes, 10))
-            ma20 = np.array(_sma(closes, 20))
-            ma60 = np.array(_sma(closes, 60))
+            ma5  = _sma(closes, 5)
+            ma10 = _sma(closes, 10)
+            ma20 = _sma(closes, 20)
+            ma60 = _sma(closes, 60)
 
-            # VWAP 主力成本
+            # BOLL
+            bmid, bup, blo = _bb(closes, 20, 2.0)
+
+            # VWAP
             typ = (highs + lows + closes) / 3
-            cum_pv = np.cumsum(typ * vols)
-            cum_v  = np.cumsum(vols)
+            cum_pv = np.cumsum(typ * vols); cum_v = np.cumsum(vols)
             vwap = np.where(cum_v > 0, cum_pv / cum_v, typ)
 
-            # MACD (先修 None 再运算, 避免 NoneType 减法)
-            _e12 = np.array([0.0 if v is None else float(v) for v in _ema(closes, 12)])
-            _e26 = np.array([0.0 if v is None else float(v) for v in _ema(closes, 26)])
-            dif = _e12 - _e26
-            dea_raw = _ema(dif.tolist(), 9)
-            dea = np.array([0.0 if v is None else float(v) for v in dea_raw])
-            macd_bar = 2.0 * (dif - dea)
+            # MACD
+            ema12 = _ema(closes, 12); ema26 = _ema(closes, 26)
+            dif = ema12 - ema26; dea = _ema(dif, 9); macd_bar = 2.0 * (dif - dea)
+
+            # KDJ
+            kv, dv, jv = _kdj(highs, lows, closes, 9)
+
+            # 筹码分布
+            chip, cp_lo, cp_hi, cp_bin = _chip_distribution(data, 60, 50)
+            # 计算获利盘比例 (价格 < 收盘价 的筹码占比)
+            cur_price = closes[-1]
+            profit_ratio = float(np.sum(chip[(cp_lo + np.arange(len(chip)) * cp_bin) < cur_price]))
+            # 90% 筹码区间 (获利 5% ~ 95%)
+            cum_chip = np.cumsum(chip)
+            p5_idx = np.searchsorted(cum_chip, 0.05)
+            p95_idx = np.searchsorted(cum_chip, 0.95)
+            p5_price = cp_lo + p5_idx * cp_bin
+            p95_price = cp_lo + p95_idx * cp_bin
+            avg_cost = float((p5_price + p95_price) / 2)
 
             # 支撑压力
             sr = _support_resistance(highs, lows, closes)
 
-            # 画图
-            fig = plt.Figure(figsize=(14, 10), dpi=100, facecolor="#1E1E2E")
-            gs = gridspec.GridSpec(4, 1, height_ratios=[4, 1.2, 1.2, 1.2], hspace=0.18)
+            # === 画图: 5行 gridspec ===
+            fig = plt.Figure(figsize=(15, 14), dpi=100, facecolor="#1E1E2E")
+            gs = gridspec.GridSpec(5, 1, height_ratios=[4, 1.2, 1.2, 1.2, 1.5], hspace=0.18)
             ax   = fig.add_subplot(gs[0], facecolor="#1E1E2E")
             ax_v = fig.add_subplot(gs[1], facecolor="#1E1E2E", sharex=ax)
             ax_m = fig.add_subplot(gs[2], facecolor="#1E1E2E", sharex=ax)
-            ax_vw = fig.add_subplot(gs[3], facecolor="#1E1E2E", sharex=ax)
+            ax_k = fig.add_subplot(gs[3], facecolor="#1E1E2E", sharex=ax)
+            ax_c = fig.add_subplot(gs[4], facecolor="#1E1E2E")  # 筹码不 sharex (独立Y轴)
 
-            # === 主图 K 线 ===
+            # --- 主图 K线 ---
             colors = ["#d32f2f" if closes[i] >= opens[i] else "#388e3c" for i in range(len(closes))]
             ax.bar(x, closes - opens, bottom=opens, color=colors, width=0.7, zorder=3)
             ax.vlines(x, lows, highs, colors=colors, linewidth=0.5, zorder=2)
 
-            # MA 均线
-            for ma, color, lbl in [(ma5, '#FF9800', 'MA5'), (ma10, '#2196F3', 'MA10'),
-                                   (ma20, '#9C27B0', 'MA20'), (ma60, '#4CAF50', 'MA60')]:
-                valid = ~np.isnan(ma.astype(float))
-                if valid.any():
-                    ax.plot(x[valid], ma[valid].astype(float), color=color, linewidth=1.0, label=lbl, zorder=4)
+            # MA
+            for ma, col, lbl in [(ma5,'#FF9800','MA5'),(ma10,'#2196F3','MA10'),(ma20,'#9C27B0','MA20'),(ma60,'#4CAF50','MA60')]:
+                v = ~np.isnan(ma)
+                if v.any(): ax.plot(x[v], ma[v], color=col, linewidth=1.0, label=lbl, zorder=4)
 
-            # VWAP 主力成本
-            ax.plot(x, vwap, color='#FFD700', linewidth=1.2, linestyle='--', label='VWAP 主力成本', zorder=5)
+            # BOLL
+            bv = ~np.isnan(bmid)
+            if bv.any():
+                ax.plot(x[bv], bmid[bv], color='#FFEB3B', linewidth=0.9, linestyle='--', label='BOLL中轨', zorder=3)
+                ax.plot(x[bv], bup[bv], color='#FF5722', linewidth=0.7, linestyle=':', label='BOLL上轨')
+                ax.plot(x[bv], blo[bv], color='#00BCD4', linewidth=0.7, linestyle=':', label='BOLL下轨')
+                ax.fill_between(x[bv], blo[bv], bup[bv], color='#FFEB3B', alpha=0.06, zorder=1)
 
-            # 支撑压力线
-            sr_colors = {'R2': '#F44336', 'R1': '#FF7043', 'S1': '#26A69A', 'S2': '#4DB6AC', 'PP': '#ECEFF1', 'max': '#FF5722', 'min': '#00BCD4'}
+            # VWAP
+            ax.plot(x, vwap, color='#FFD700', linewidth=1.2, linestyle='--', label='VWAP主力成本', zorder=5)
+
+            # 支撑压力
+            sr_colors = {'R2':'#F44336','R1':'#FF7043','S1':'#26A69A','S2':'#4DB6AC','PP':'#ECEFF1','max':'#FF5722','min':'#00BCD4'}
             for k, v in sr.items():
-                ax.axhline(v, color=sr_colors.get(k, '#666'), linewidth=0.8, linestyle='--', alpha=0.7, zorder=1)
-                ax.text(len(closes)-1, v, f' {k}={v:.2f}', color=sr_colors.get(k, '#666'), fontsize=8, va='bottom')
+                ax.axhline(v, color=sr_colors.get(k,'#666'), linewidth=0.7, linestyle='--', alpha=0.6, zorder=1)
+                ax.text(len(closes)-1, v, f' {k}={v:.2f}', color=sr_colors.get(k,'#666'), fontsize=7, va='bottom')
 
             ax.set_title(f"{name} 日K线 ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=13, pad=8)
-            ax.legend(loc='upper left', fontsize=8, ncol=5, framealpha=0.5)
-            ax.tick_params(colors="#AAA"); ax.grid(True, alpha=0.15)
+            ax.legend(loc='upper left', fontsize=7, ncol=5, framealpha=0.5)
+            ax.tick_params(colors="#AAA"); ax.grid(True, alpha=0.12)
             ax.spines['bottom'].set_color('#444'); ax.spines['top'].set_visible(False)
             ax.spines['left'].set_color('#444'); ax.spines['right'].set_visible(False)
 
-            # === 成交量 ===
+            # --- VOL ---
             v_colors = ["#d32f2f" if closes[i] >= opens[i] else "#388e3c" for i in range(len(closes))]
             ax_v.bar(x, vols, color=v_colors, width=0.65)
-            ax_v.set_ylabel("VOL", color="#AAA"); ax_v.tick_params(colors="#AAA")
-            ax_v.grid(True, alpha=0.15); ax_v.spines['bottom'].set_color('#444'); ax_v.spines['top'].set_visible(False)
-            ax_v.spines['left'].set_color('#444'); ax_v.spines['right'].set_visible(False)
-            if len(ma5) >= 5 and not np.isnan(ma5[-5]):
-                ax_v_ma5 = np.array(_sma(vols, 5))
-                valid = ~np.isnan(ax_v_ma5.astype(float))
-                if valid.any(): ax_v.plot(x[valid], ax_v_ma5[valid].astype(float), color='#FF9800', linewidth=0.9, label='VOL MA5')
-                ax_v.legend(loc='upper left', fontsize=7)
+            ax_v_ma5 = _sma(vols, 5)
+            vm = ~np.isnan(ax_v_ma5)
+            if vm.any(): ax_v.plot(x[vm], ax_v_ma5[vm], color='#FF9800', linewidth=0.9, label='VOL MA5')
+            ax_v.set_ylabel("VOL", color="#AAA"); ax_v.tick_params(colors="#AAA", labelbottom=False)
+            ax_v.grid(True, alpha=0.12); ax_v.legend(loc='upper left', fontsize=7)
+            for s in ['bottom','top','left','right']: ax_v.spines[s].set_color('#444') if s!='top' else ax_v.spines[s].set_visible(False)
 
-            # === MACD ===
+            # --- MACD ---
             macd_colors = ["#d32f2f" if v >= 0 else "#388e3c" for v in macd_bar]
             ax_m.bar(x, macd_bar, color=macd_colors, width=0.55, alpha=0.7)
             ax_m.plot(x, dif, color='#1565c0', linewidth=0.9, label='DIF')
             ax_m.plot(x, dea, color='#c62828', linewidth=0.9, label='DEA')
             ax_m.axhline(0, color='gray', linewidth=0.5)
-            ax_m.set_ylabel("MACD", color="#AAA"); ax_m.tick_params(colors="#AAA")
-            ax_m.grid(True, alpha=0.15); ax_m.spines['bottom'].set_color('#444'); ax_m.spines['top'].set_visible(False)
-            ax_m.spines['left'].set_color('#444'); ax_m.spines['right'].set_visible(False)
-            ax_m.legend(loc='upper left', fontsize=7, ncol=3)
+            ax_m.set_ylabel("MACD", color="#AAA"); ax_m.tick_params(colors="#AAA", labelbottom=False)
+            ax_m.grid(True, alpha=0.12); ax_m.legend(loc='upper left', fontsize=7, ncol=3)
+            for s in ['bottom','top','left','right']: ax_m.spines[s].set_color('#444') if s!='top' else ax_m.spines[s].set_visible(False)
 
-            # === VWAP 主力成本区 ===
-            ax_vw.plot(x, closes, color='#ECEFF1', linewidth=0.7, label='收盘')
-            ax_vw.plot(x, vwap, color='#FFD700', linewidth=1.1, linestyle='--', label='VWAP 主力成本')
-            # 主力成本区 ±2% 填充
-            ax_vw.fill_between(x, vwap*0.98, vwap*1.02, color='#FFD700', alpha=0.12, label='±2% 主力成本区')
-            ax_vw.axhline(vwap[-1], color='#FFD700', linewidth=1.0, linestyle=':', alpha=0.8)
-            ax_vw.set_ylabel("主力成本", color="#AAA"); ax_vw.set_xlabel("交易日", color="#AAA")
-            ax_vw.tick_params(colors="#AAA"); ax_vw.grid(True, alpha=0.15)
-            ax_vw.spines['bottom'].set_color('#444'); ax_vw.spines['top'].set_visible(False)
-            ax_vw.spines['left'].set_color('#444'); ax_vw.spines['right'].set_visible(False)
-            ax_vw.legend(loc='upper left', fontsize=7, ncol=3)
+            # --- KDJ ---
+            ax_k.plot(x, kv, color='#FF5722', linewidth=0.9, label='K')
+            ax_k.plot(x, dv, color='#2196F3', linewidth=0.9, label='D')
+            ax_k.plot(x, jv, color='#9C27B0', linewidth=0.8, linestyle=':', label='J')
+            ax_k.axhline(80, color='#EF5350', linewidth=0.5, linestyle='--', alpha=0.5)
+            ax_k.axhline(20, color='#66BB6A', linewidth=0.5, linestyle='--', alpha=0.5)
+            ax_k.fill_between(x, 80, 100, color='#EF5350', alpha=0.06)
+            ax_k.fill_between(x, 0, 20, color='#66BB6A', alpha=0.06)
+            ax_k.set_ylabel("KDJ", color="#AAA"); ax_k.tick_params(colors="#AAA", labelbottom=False)
+            ax_k.set_ylim(-10, 110)
+            ax_k.grid(True, alpha=0.12); ax_k.legend(loc='upper left', fontsize=7, ncol=3)
+            for s in ['bottom','top','left','right']: ax_k.spines[s].set_color('#444') if s!='top' else ax_k.spines[s].set_visible(False)
 
-            # 隐藏副图 x 轴标签
-            for sub in [ax_v, ax_m]: sub.tick_params(axis='x', labelbottom=False)
+            # --- 筹码分布 (水平直方图) ---
+            cp_centers = cp_lo + (np.arange(len(chip)) + 0.5) * cp_bin
+            # 获利盘: 当前价以下的筹码 (绿色), 当前价以上 (红色)
+            chip_colors = ['#66BB6A' if cp_centers[i] < cur_price else '#EF5350' for i in range(len(chip))]
+            ax_c.barh(cp_centers, chip * 100, height=cp_bin * 0.85, color=chip_colors, alpha=0.85)
+            ax_c.axhline(cur_price, color='#FFD700', linewidth=1.2, linestyle='-', label=f'现价 {cur_price:.2f}')
+            ax_c.axhline(avg_cost, color='#FF9800', linewidth=1.0, linestyle='--', label=f'平均成本 {avg_cost:.2f}')
+            ax_c.axhspan(p5_price, p95_price, color='#FFD700', alpha=0.08)
+            ax_c.set_ylabel("价格", color="#AAA"); ax_c.set_xlabel("筹码密度 (%)", color="#AAA")
+            ax_c.tick_params(colors="#AAA")
+            ax_c.grid(True, alpha=0.12)
+            for s in ['bottom','top','left','right']: ax_c.spines[s].set_color('#444') if s!='top' else ax_c.spines[s].set_visible(False)
+            ax_c.legend(loc='lower right', fontsize=7)
 
+            # 标题汇总
+            pct = ((closes[-1] - closes[-2]) / closes[-2] * 100) if len(closes) > 1 else 0
+            fig.suptitle(f"{name} | 收盘 {closes[-1]:.2f} {'+' if pct>=0 else ''}{pct:.2f}% | 主力成本 {vwap[-1]:.2f} | 获利盘 {profit_ratio*100:.1f}% | 90%成本区 {p5_price:.1f}~{p95_price:.1f}",
+                        color="#FFD700", fontsize=12, y=1.003)
             fig.tight_layout()
-            fig.suptitle(f"{name} | 收盘 {closes[-1]:.2f} | 涨跌 {((closes[-1]-closes[-2])/closes[-2]*100 if len(closes)>1 else 0):+.2f}% | 主力成本 {vwap[-1]:.2f}",
-                        color="#FFD700", fontsize=12, y=1.002)
 
             cv = FigureCanvasTkAgg(fig, master=fig_frame); cv.draw()
             cv.get_tk_widget().pack(fill=tk.X, padx=4, pady=4)
             try: NavigationToolbar2Tk(cv, fig_frame).update()
             except Exception: pass
-            status_var.set(f"✅ {len(data)} 根K线 | 支撑 {sr['S1']:.2f} / 压力 {sr['R1']:.2f}")
+            status_var.set(f"✅ {len(data)}根 | 支撑 {sr['S1']:.2f} / 压力 {sr['R1']:.2f} | 获利 {profit_ratio*100:.0f}%")
 
-        refresh_btn.configure(command=lambda: _redraw(sym_var.get(), days_var.get()))
-        sym_combo.bind("<<ComboboxSelected>>", lambda e: _redraw(sym_var.get(), days_var.get()))
-        days_combo.bind("<<ComboboxSelected>>", lambda e: _redraw(sym_var.get(), days_var.get()))
-        _redraw(sym_var.get(), days_var.get())
-
+        refresh_btn.configure(command=_redraw)
+        sym_combo.bind("<<ComboboxSelected>>", lambda e: _redraw())
+        days_combo.bind("<<ComboboxSelected>>", lambda e: _redraw())
+        _redraw()
 
 __all__ = ["DapanMixin"]
