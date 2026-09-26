@@ -12511,7 +12511,7 @@ class DapanMixin:
         if not sina_list:
             return None
         closes = []; volumes = []; highs = []; lows = []
-        rows = []
+        rows = []; trade_dates = []
         for d in sina_list:
             c = float(d.get("close", 0))
             o = float(d.get("open", 0))
@@ -12519,12 +12519,15 @@ class DapanMixin:
             lo = float(d.get("low", 0))
             v = float(d.get("volume", 0))
             closes.append(c); volumes.append(v); highs.append(h); lows.append(lo)
-            rows.append({"日期": d.get("day", ""), "开盘": o, "收盘": c, "最高": h, "最低": lo, "成交量": v})
+            day_str = d.get("day", "")
+            rows.append({"日期": day_str, "开盘": o, "收盘": c, "最高": h, "最低": lo, "成交量": v})
+            # _apply_daily_kline_ax 要 trade_dates 是 8 位 str (20260924), 新浪是 2026-09-24
+            trade_dates.append(day_str.replace("-", ""))
         df = _pd.DataFrame(rows)
         n = len(closes)
-        # 算 ma_values (sma)
+        # 算 ma_values (sma) — 补 ma1 (period_map 需要)
         ma_values = {}
-        for ma_name, ma_p in [("ma5", 5), ("ma10", 10), ("ma20", 20), ("ma60", 60)]:
+        for ma_name, ma_p in [("ma1", 1), ("ma5", 5), ("ma10", 10), ("ma20", 20), ("ma60", 60)]:
             ma_values[ma_name] = [
                 None if i + 1 < ma_p else sum(closes[i + 1 - ma_p:i + 1]) / ma_p
                 for i in range(n)
@@ -12538,8 +12541,7 @@ class DapanMixin:
             cum_v += volumes[i]
             vwap_values.append(cum_pv / cum_v if cum_v > 0 else None)
         ma_values["vwap"] = vwap_values
-        return {"data": df, "ma_values": ma_values}
-
+        return {"data": df, "ma_values": ma_values, "trade_dates": trade_dates}
     def _build_index_trend_tab(self, parent):
         """📈 指数趋势 Tab: 上证/深成指/创业板 日K线 + MA1/5/10/20/60 + 双击放大"""
         import matplotlib
@@ -53135,7 +53137,7 @@ class DapanMixin:
         if not sina_list:
             return None
         closes = []; volumes = []; highs = []; lows = []
-        rows = []
+        rows = []; trade_dates = []
         for d in sina_list:
             c = float(d.get("close", 0))
             o = float(d.get("open", 0))
@@ -53143,12 +53145,15 @@ class DapanMixin:
             lo = float(d.get("low", 0))
             v = float(d.get("volume", 0))
             closes.append(c); volumes.append(v); highs.append(h); lows.append(lo)
-            rows.append({"日期": d.get("day", ""), "开盘": o, "收盘": c, "最高": h, "最低": lo, "成交量": v})
+            day_str = d.get("day", "")
+            rows.append({"日期": day_str, "开盘": o, "收盘": c, "最高": h, "最低": lo, "成交量": v})
+            # _apply_daily_kline_ax 要 trade_dates 是 8 位 str (20260924), 新浪是 2026-09-24
+            trade_dates.append(day_str.replace("-", ""))
         df = _pd.DataFrame(rows)
         n = len(closes)
-        # 算 ma_values (sma)
+        # 算 ma_values (sma) — 补 ma1 (period_map 需要)
         ma_values = {}
-        for ma_name, ma_p in [("ma5", 5), ("ma10", 10), ("ma20", 20), ("ma60", 60)]:
+        for ma_name, ma_p in [("ma1", 1), ("ma5", 5), ("ma10", 10), ("ma20", 20), ("ma60", 60)]:
             ma_values[ma_name] = [
                 None if i + 1 < ma_p else sum(closes[i + 1 - ma_p:i + 1]) / ma_p
                 for i in range(n)
@@ -53162,7 +53167,7 @@ class DapanMixin:
             cum_v += volumes[i]
             vwap_values.append(cum_pv / cum_v if cum_v > 0 else None)
         ma_values["vwap"] = vwap_values
-        return {"data": df, "ma_values": ma_values}
+        return {"data": df, "ma_values": ma_values, "trade_dates": trade_dates}
     def _build_index_trend_tab(self, parent):
         """📈 指数趋势 Tab: 上证/深成指/创业板 日K线 + MA1/5/10/20/60 + 双击放大"""
         import matplotlib
