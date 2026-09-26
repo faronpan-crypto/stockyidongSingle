@@ -13732,8 +13732,8 @@ class DapanMixin:
             # === 鼠标十字线 + 实时数据面板 ===
             cross_v = ax.axvline(x=-1, color='#42A5F5', linewidth=0.6, alpha=0.7, visible=False, zorder=10)
             cross_h = ax.axhline(y=-1, color='#42A5F5', linewidth=0.6, alpha=0.7, visible=False, zorder=10)
-            tip = ax.text(0.01, 0.98, '', transform=ax.transAxes, fontsize=8,
-                          color='#ECEFF1', va='top', ha='left',
+            tip = ax.text(0.99, 0.98, '', transform=ax.transAxes, fontsize=8, ha='right',
+                          color='#ECEFF1', va='top',
                           bbox=dict(boxstyle='round,pad=0.4', fc='#1E1E2E', ec='#42A5F5', alpha=0.92))
 
             def _on_move(event):
