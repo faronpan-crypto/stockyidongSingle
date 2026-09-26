@@ -12568,24 +12568,20 @@ class DapanMixin:
             return result
 
         def _compute_macd(closes, fast=12, slow=26, signal=9):
-            """返回 (dif, dea, macd_bar)"""
+            """返回 (dif, dea, macd_bar) 全 float (None→0.0, matplotlib可直接画)"""
             ema_fast = _ema(closes, fast)
             ema_slow = _ema(closes, slow)
-            dif = []
-            for i in range(len(closes)):
-                if ema_fast[i] is None or ema_slow[i] is None:
-                    dif.append(None)
-                else:
-                    dif.append(ema_fast[i] - ema_slow[i])
-            # 过滤 None 再算 DEA
-            valid_start = next((i for i, v in enumerate(dif) if v is not None), -1)
-            dea = [None] * valid_start if valid_start >= 0 else []
-            if valid_start >= 0:
-                _dif_series = [v for v in dif[valid_start:] if v is not None]
-                _dea_series = _ema(_dif_series, signal)
-                # DEA 长度 = len(_dif_series)
-                dea = [None] * valid_start + _dea_series
-            macd_bar = [(None if dif[i] is None or dea[i] is None else 2 * (dif[i] - dea[i])) for i in range(len(closes))]
+            dif = [0.0 if (ema_fast[i] is None or ema_slow[i] is None) else float(ema_fast[i] - ema_slow[i])
+                   for i in range(len(closes))]
+            # DEA 基于非 None 部分算
+            valid_start = next((i for i, v in enumerate(dif) if v != 0.0), len(dif))
+            if valid_start < len(dif):
+                _dea_series = _ema([v for v in dif[valid_start:]], signal)
+                dea = [0.0] * valid_start + [0.0 if v is None else float(v) for v in _dea_series]
+            else:
+                dea = [0.0] * len(dif)
+            macd_bar = [0.0 if dif[i] == 0.0 and i < valid_start else 2.0 * (dif[i] - dea[i])
+                        for i in range(len(dif))]
             return dif, dea, macd_bar
 
         def _draw_axes(ax, ax2, ax3, closes, opens, highs, lows, volumes, days_list, x, show_macd=True):
@@ -12619,7 +12615,7 @@ class DapanMixin:
             # MACD
             if show_macd:
                 dif, dea, macd_bar = _compute_macd(closes)
-                macd_colors = ["#EF5350" if (v is not None and v >= 0) else "#66BB6A" for v in macd_bar]
+                macd_colors = ["#EF5350" if v >= 0 else "#66BB6A" for v in macd_bar]
                 ax3.bar(x, macd_bar, width=bar_w * 0.6, color=macd_colors, alpha=0.7)
                 ax3.plot(x, dif, color="#FFD54F", linewidth=1, label="DIF")
                 ax3.plot(x, dea, color="#42A5F5", linewidth=1, label="DEA")
