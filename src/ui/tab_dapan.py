@@ -13408,7 +13408,7 @@ class DapanMixin:
 
 
     def _show_index_kline_dialog(self, initial_symbol=None, initial_days=180):
-        """📈 指数/ETF 日K线大弹窗 - 中文名下拉 + BOLL + KDJ + 筹码峰"""
+        """📈 指数/ETF 日K线大弹窗 - 指标可选 MACD/KDJ/WR/BIAS/筹码"""
         import tkinter as tk
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
         import matplotlib.pyplot as plt
@@ -13428,12 +13428,8 @@ class DapanMixin:
         NAME2SYMBOL = {n: s for n, s in INDICES}
         SYMBOL2NAME = {s: n for n, s in INDICES}
         DAYS_OPTS = [60, 120, 180, 360]
-
-        # 初始名字
-        if initial_symbol and initial_symbol in SYMBOL2NAME:
-            init_name = SYMBOL2NAME[initial_symbol]
-        else:
-            init_name = INDICES[0][0]
+        if initial_symbol and initial_symbol in SYMBOL2NAME: init_name = SYMBOL2NAME[initial_symbol]
+        else: init_name = INDICES[0][0]
 
         win = tk.Toplevel(self.root); win.configure(bg="#1E1E2E")
         try: win.attributes("-topmost", True)
@@ -13441,12 +13437,11 @@ class DapanMixin:
         try: win.state("zoomed")
         except Exception: win.geometry("1300x900")
 
-        # === 顶栏 (名字下拉框) ===
-        top = ttk.Frame(win, padding=4); top.pack(fill=tk.X)
-        ttk.Label(top, text="📈 指数日K线图", font=("Microsoft YaHei", 12, "bold")).pack(side=tk.LEFT, padx=(0, 16))
+        # === 顶栏 ===
+        top = ttk.Frame(win, padding=(6, 4)); top.pack(fill=tk.X)
+        ttk.Label(top, text="📈 指数日K线", font=("Microsoft YaHei", 12, "bold")).pack(side=tk.LEFT, padx=(0, 14))
         name_var = tk.StringVar(value=init_name)
-        sym_combo = ttk.Combobox(top, textvariable=name_var,
-                                 values=[n for n, _ in INDICES], width=18, state="readonly")
+        sym_combo = ttk.Combobox(top, textvariable=name_var, values=[n for n, _ in INDICES], width=18, state="readonly")
         sym_combo.pack(side=tk.LEFT, padx=4)
         days_var = tk.IntVar(value=initial_days)
         ttk.Label(top, text="天数").pack(side=tk.LEFT, padx=(10, 2))
@@ -13456,6 +13451,20 @@ class DapanMixin:
         refresh_btn.pack(side=tk.LEFT, padx=8)
         status_var = tk.StringVar(value="")
         ttk.Label(top, textvariable=status_var, foreground="#90A4AE").pack(side=tk.LEFT, padx=10)
+
+        # === 指标选择行 ===
+        ind_row = ttk.Frame(win, padding=(6, 0)); ind_row.pack(fill=tk.X)
+        ttk.Label(ind_row, text="📊 指标:").pack(side=tk.LEFT, padx=(0, 6))
+        ind_vars = {
+            'macd': tk.BooleanVar(value=True),
+            'kdj':  tk.BooleanVar(value=True),
+            'wr':   tk.BooleanVar(value=False),
+            'bias': tk.BooleanVar(value=False),
+            'chip': tk.BooleanVar(value=True),
+        }
+        ind_labels = [('macd', 'MACD'), ('kdj', 'KDJ'), ('wr', 'WR威廉'), ('bias', 'BIAS乖离'), ('chip', '筹码')]
+        for k, label in ind_labels:
+            ttk.Checkbutton(ind_row, text=label, variable=ind_vars[k]).pack(side=tk.LEFT, padx=3)
 
         # === Canvas + 滚动容器 ===
         wrap = tk.Frame(win, bg="#1E1E2E"); wrap.pack(fill=tk.BOTH, expand=True)
@@ -13477,34 +13486,36 @@ class DapanMixin:
             k = 2/(period+1)
             for i in range(period, len(arr)): r[i] = arr[i]*k + r[i-1]*(1-k)
             return r
-
         def _sma(data, period):
-            """正确的简单移动平均: 前 period-1 个值为 NaN, 等价于 pandas rolling().mean()"""
             arr = np.array([float(v) if v is not None else np.nan for v in data], dtype=float)
             n = len(arr); out = np.full(n, np.nan)
             if n < period: return out
             cs = np.nancumsum(arr)
             out[period-1:] = (cs[period-1:] - np.concatenate([[0], cs[:-period]])) / period
             return out
-
         def _bb(closes, n=20, k=2.0):
             mid = _sma(closes, n)
-            # 滚动 std: 前 n-1 为 NaN
-            closes_valid = np.array(closes, dtype=float)
-            std = np.full(len(closes_valid), np.nan)
-            for i in range(n-1, len(closes_valid)):
-                std[i] = np.std(closes_valid[i-n+1:i+1])
+            cv = np.array(closes, dtype=float); std = np.full(len(cv), np.nan)
+            for i in range(n-1, len(cv)): std[i] = np.std(cv[i-n+1:i+1])
             return mid, mid + k*std, mid - k*std
-
+        def _macd(closes, fa=12, sa=26, sig=9):
+            efa = _ema(closes, fa); esa = _ema(closes, sa)
+            dif = efa - esa; dea = _ema(dif, sig); bar = 2.0*(dif - dea)
+            return dif, dea, bar
         def _kdj(highs, lows, closes, n=9):
             hh = np.array([max(highs[max(0,i-n+1):i+1]) for i in range(len(highs))])
             ll = np.array([min(lows[max(0,i-n+1):i+1]) for i in range(len(lows))])
-            rsv = np.where(hh > ll, (closes - ll) / (hh - ll) * 100, 50.0)
+            rsv = np.where(hh > ll, (closes - ll)/(hh - ll)*100, 50.0)
             k = _ema(rsv, 3); d = _ema(k, 3); j = 3*k - 2*d
             return k, d, j
-
-        def _chip_distribution(data, n_days=60, bins=50):
-            """近似筹码分布: 日K OHLC+Volume → 价格区间成交量分布"""
+        def _wr(highs, lows, closes, n=14):
+            hh = np.array([max(highs[max(0,i-n+1):i+1]) for i in range(len(highs))])
+            ll = np.array([min(lows[max(0,i-n+1):i+1]) for i in range(len(lows))])
+            return np.where(hh > ll, (hh - closes)/(hh - ll)*(-100), -50.0)
+        def _bias(closes, n=12):
+            ma = _sma(closes, n)
+            return np.where(~np.isnan(ma), (closes - ma)/ma*100, 0.0)
+        def _chip(data, n_days=60, bins=50):
             recent = data[-n_days:] if len(data) > n_days else data
             o = np.array([float(d["open"]) for d in recent])
             h = np.array([float(d["high"]) for d in recent])
@@ -13513,63 +13524,54 @@ class DapanMixin:
             v = np.array([float(d.get("volume", 0)) for d in recent])
             p_lo, p_hi = np.min(l), np.max(h)
             if p_hi - p_lo < 0.01: p_hi = p_lo + 1.0
-            bin_w = (p_hi - p_lo) / bins
+            bw = (p_hi - p_lo)/bins
             chip = np.zeros(bins)
             for k in range(len(recent)):
-                span = max(h[k] - l[k], bin_w * 0.5)
-                sigma = span / 3.0
+                span = max(h[k]-l[k], bw*0.5); sigma = span/3.0
                 for b in range(bins):
-                    b_lo = p_lo + b * bin_w; b_hi = b_lo + bin_w
-                    ov_lo, ov_hi = max(l[k], b_lo), min(h[k], b_hi)
-                    if ov_hi <= ov_lo: continue
-                    uni = v[k] * (ov_hi - ov_lo) / span
-                    bc = (b_lo + b_hi) / 2
-                    w = np.exp(-0.5 * ((bc - c[k]) / sigma) ** 2)
-                    chip[b] += uni * (0.3 + 0.7 * w)
-            total = chip.sum()
-            if total > 0: chip = chip / total
-            return chip, p_lo, p_hi, bin_w
-
-        def _support_resistance(highs, lows, closes):
+                    bl, bh = p_lo + b*bw, p_lo + (b+1)*bw
+                    ovl, ovh = max(l[k], bl), min(h[k], bh)
+                    if ovh <= ovl: continue
+                    uni = v[k] * (ovh - ovl)/span
+                    bc = bl + bw/2
+                    w = np.exp(-0.5*((bc - c[k])/sigma)**2)
+                    chip[b] += uni * (0.3 + 0.7*w)
+            chip_sum = chip.sum()
+            if chip_sum > 0: chip = chip / chip_sum
+            return chip, p_lo, p_hi, bw
+        def _sr(highs, lows, closes):
             n = len(closes); look = min(30, n)
-            recent_h = max(highs[-look:]); recent_l = min(lows[-look:])
-            pp = (recent_h + recent_l + closes[-1]) / 3
-            r1 = 2*pp - recent_l; r2 = pp + (recent_h - recent_l)
-            s1 = 2*pp - recent_h; s2 = pp - (recent_h - recent_l)
-            return {'R1': r1, 'R2': r2, 'S1': s1, 'S2': s2, 'PP': pp, 'max': recent_h, 'min': recent_l}
+            rh = max(highs[-look:]); rl = min(lows[-look:])
+            pp = (rh + rl + closes[-1])/3
+            return {'R1':2*pp-rl, 'R2':pp+(rh-rl), 'S1':2*pp-rh, 'S2':pp-(rh-rl), 'PP':pp, 'max':rh, 'min':rl}
 
         # === 拉取 + 渲染 ===
         def _redraw():
-            name = name_var.get()
-            symbol = NAME2SYMBOL.get(name, INDICES[0][1])
+            name = name_var.get(); symbol = NAME2SYMBOL.get(name, INDICES[0][1])
             status_var.set(f"⏳ 拉取 {name} ...")
             import threading as _th
-
             def _work():
-                import traceback as _tb_dbg
+                import traceback as _tb
                 try:
                     data = self._fetch_index_daily(symbol, days_var.get())
                     if not data:
-                        print(f"[指数弹窗] ❌ 拉取空 symbol={symbol}", flush=True)
+                        print(f"[指数弹窗] ❌ 空 symbol={symbol}", flush=True)
                         win.after(0, lambda: status_var.set("❌ 拉取失败")); return
-                    print(f"[指数弹窗] ✅ 拉到 {len(data)} 根K线 name={name}", flush=True)
                     def _do():
                         import traceback as _tb2
                         try: _render(name, data)
                         except Exception as e:
-                            print(f"[指数弹窗] ❌ _render 异常: {e}", flush=True); _tb2.print_exc()
+                            print(f"[指数弹窗] ❌ _render: {e}", flush=True); _tb2.print_exc()
                             try: status_var.set(f"❌ 渲染失败: {e}")
                             except Exception: pass
                     win.after(0, _do)
                 except Exception as e:
-                    print(f"[指数弹窗] ❌ _work 异常: {e}", flush=True); _tb_dbg.print_exc()
+                    print(f"[指数弹窗] ❌ _work: {e}", flush=True); _tb.print_exc()
                     win.after(0, lambda: status_var.set(f"❌ {e}"))
             _th.Thread(target=_work, daemon=True).start()
 
         def _render(name, data):
-            # 清旧图
             for w in fig_frame.winfo_children(): w.destroy()
-
             closes = np.array([float(d["close"]) for d in data], dtype=float)
             opens  = np.array([float(d["open"])  for d in data], dtype=float)
             highs  = np.array([float(d["high"])  for d in data], dtype=float)
@@ -13577,149 +13579,140 @@ class DapanMixin:
             vols   = np.array([float(d.get("volume", 0)) for d in data], dtype=float)
             days_list = [d["day"] for d in data]
             x = np.arange(len(closes))
-
-            # 均线
-            ma5  = _sma(closes, 5)
-            ma10 = _sma(closes, 10)
-            ma20 = _sma(closes, 20)
-            ma60 = _sma(closes, 60)
-
-            # BOLL
+            ma5 = _sma(closes, 5); ma10 = _sma(closes, 10)
+            ma20 = _sma(closes, 20); ma60 = _sma(closes, 60)
             bmid, bup, blo = _bb(closes, 20, 2.0)
+            typ = (highs + lows + closes)/3; cum_pv = np.cumsum(typ*vols); cum_v = np.cumsum(vols)
+            vwap = np.where(cum_v > 0, cum_pv/cum_v, typ)
+            dif, dea, macd_bar = _macd(closes)
+            kv, dv, jv = _kdj(highs, lows, closes)
+            wr = _wr(highs, lows, closes)
+            bias = _bias(closes)
+            chip, cp_lo, cp_hi, cp_bin = _chip(data)
+            sr = _sr(highs, lows, closes)
 
-            # VWAP
-            typ = (highs + lows + closes) / 3
-            cum_pv = np.cumsum(typ * vols); cum_v = np.cumsum(vols)
-            vwap = np.where(cum_v > 0, cum_pv / cum_v, typ)
+            v_chips = [k for k in ['macd','kdj','wr','bias'] if ind_vars[k].get()]
+            show_chip = ind_vars['chip'].get()
+            n_rows = 2 + len(v_chips) + (1 if show_chip else 0)  # 主图+VOL + N指标 + 筹码
+            ratios = [4] + [1.2]*len(v_chips) + ([1.5] if show_chip else [])
+            if len(ratios) > 1: ratios.insert(1, 1.2)  # VOL
+            # 重算: 主图(4) VOL(1.2) N指标(各1.2) 筹码(1.5)
+            ratios = [4, 1.2] + [1.2]*len(v_chips) + ([1.5] if show_chip else [])
+            n_rows = len(ratios)
 
-            # MACD
-            ema12 = _ema(closes, 12); ema26 = _ema(closes, 26)
-            dif = ema12 - ema26; dea = _ema(dif, 9); macd_bar = 2.0 * (dif - dea)
+            fig = plt.Figure(figsize=(15, 2.5*n_rows), dpi=100, facecolor="#1E1E2E")
+            gs = gridspec.GridSpec(n_rows, 1, height_ratios=ratios, hspace=0.18)
+            axes = [fig.add_subplot(gs[i], facecolor="#1E1E2E") for i in range(n_rows)]
+            ax = axes[0]; ax_v = axes[1]
+            idx = 2
+            chip_ax = None
+            ind_axes = {}
+            for k in v_chips:
+                ind_axes[k] = axes[idx]; idx += 1
+            if show_chip: chip_ax = axes[idx]
 
-            # KDJ
-            kv, dv, jv = _kdj(highs, lows, closes, 9)
-
-            # 筹码分布
-            chip, cp_lo, cp_hi, cp_bin = _chip_distribution(data, 60, 50)
-            # 计算获利盘比例 (价格 < 收盘价 的筹码占比)
-            cur_price = closes[-1]
-            profit_ratio = float(np.sum(chip[(cp_lo + np.arange(len(chip)) * cp_bin) < cur_price]))
-            # 90% 筹码区间 (获利 5% ~ 95%)
-            cum_chip = np.cumsum(chip)
-            p5_idx = np.searchsorted(cum_chip, 0.05)
-            p95_idx = np.searchsorted(cum_chip, 0.95)
-            p5_price = cp_lo + p5_idx * cp_bin
-            p95_price = cp_lo + p95_idx * cp_bin
-            avg_cost = float((p5_price + p95_price) / 2)
-
-            # 支撑压力
-            sr = _support_resistance(highs, lows, closes)
-
-            # === 画图: 5行 gridspec ===
-            fig = plt.Figure(figsize=(15, 14), dpi=100, facecolor="#1E1E2E")
-            gs = gridspec.GridSpec(5, 1, height_ratios=[4, 1.2, 1.2, 1.2, 1.5], hspace=0.18)
-            ax   = fig.add_subplot(gs[0], facecolor="#1E1E2E")
-            ax_v = fig.add_subplot(gs[1], facecolor="#1E1E2E", sharex=ax)
-            ax_m = fig.add_subplot(gs[2], facecolor="#1E1E2E", sharex=ax)
-            ax_k = fig.add_subplot(gs[3], facecolor="#1E1E2E", sharex=ax)
-            ax_c = fig.add_subplot(gs[4], facecolor="#1E1E2E")  # 筹码不 sharex (独立Y轴)
-
-            # --- 主图 K线 ---
+            # --- 主图 ---
             colors = ["#d32f2f" if closes[i] >= opens[i] else "#388e3c" for i in range(len(closes))]
-            ax.bar(x, closes - opens, bottom=opens, color=colors, width=0.7, zorder=3)
+            ax.bar(x, closes-opens, bottom=opens, color=colors, width=0.7, zorder=3)
             ax.vlines(x, lows, highs, colors=colors, linewidth=0.5, zorder=2)
-
-            # MA
             for ma, col, lbl in [(ma5,'#FF9800','MA5'),(ma10,'#2196F3','MA10'),(ma20,'#9C27B0','MA20'),(ma60,'#4CAF50','MA60')]:
                 v = ~np.isnan(ma)
                 if v.any(): ax.plot(x[v], ma[v], color=col, linewidth=1.0, label=lbl, zorder=4)
-
-            # BOLL
             bv = ~np.isnan(bmid)
             if bv.any():
                 ax.plot(x[bv], bmid[bv], color='#FFEB3B', linewidth=0.9, linestyle='--', label='BOLL中轨', zorder=3)
                 ax.plot(x[bv], bup[bv], color='#FF5722', linewidth=0.7, linestyle=':', label='BOLL上轨')
                 ax.plot(x[bv], blo[bv], color='#00BCD4', linewidth=0.7, linestyle=':', label='BOLL下轨')
                 ax.fill_between(x[bv], blo[bv], bup[bv], color='#FFEB3B', alpha=0.06, zorder=1)
-
-            # VWAP
             ax.plot(x, vwap, color='#FFD700', linewidth=1.2, linestyle='--', label='VWAP主力成本', zorder=5)
-
-            # 支撑压力
             sr_colors = {'R2':'#F44336','R1':'#FF7043','S1':'#26A69A','S2':'#4DB6AC','PP':'#ECEFF1','max':'#FF5722','min':'#00BCD4'}
             for k, v in sr.items():
                 ax.axhline(v, color=sr_colors.get(k,'#666'), linewidth=0.7, linestyle='--', alpha=0.6, zorder=1)
                 ax.text(len(closes)-1, v, f' {k}={v:.2f}', color=sr_colors.get(k,'#666'), fontsize=7, va='bottom')
-
-            ax.set_title(f"{name} 日K线 ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=13, pad=8)
-            ax.legend(loc='upper left', fontsize=7, ncol=5, framealpha=0.5)
-            ax.tick_params(colors="#AAA"); ax.grid(True, alpha=0.12)
-            ax.spines['bottom'].set_color('#444'); ax.spines['top'].set_visible(False)
-            ax.spines['left'].set_color('#444'); ax.spines['right'].set_visible(False)
-            # 主图 Y 轴: 不要从 0 开始, 用价格区间 ± 5% padding
             pmax = float(np.max(highs)); pmin = float(np.min(lows))
             ppad = (pmax - pmin) * 0.08
             ax.set_ylim(pmin - ppad, pmax + ppad)
-            # X 轴日期刻度: 均匀取 6~8 个
-            n = len(x); nlabels = min(8, max(4, n // 20))
-            tick_idx = np.linspace(0, n-1, nlabels, dtype=int)
-            ax.set_xticks(tick_idx)
-            ax.set_xticklabels([days_list[i] for i in tick_idx], rotation=25, fontsize=7, color="#AAA")
+            n_ticks = min(8, max(4, len(x)//20))
+            tick_idx = np.linspace(0, len(x)-1, n_ticks, dtype=int)
+            ax.set_xticks(tick_idx); ax.set_xticklabels([days_list[i] for i in tick_idx], rotation=25, fontsize=7, color="#AAA")
+            ax.set_title(f"{name} ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=13, pad=8)
+            ax.legend(loc='upper left', fontsize=7, ncol=5, framealpha=0.5)
+            ax.tick_params(colors="#AAA"); ax.grid(True, alpha=0.12)
+            for s in ['bottom','top','left','right']: ax.spines[s].set_color('#444') if s!='top' else ax.spines[s].set_visible(False)
 
             # --- VOL ---
-            v_colors = ["#d32f2f" if closes[i] >= opens[i] else "#388e3c" for i in range(len(closes))]
-            ax_v.bar(x, vols, color=v_colors, width=0.65)
-            ax_v_ma5 = _sma(vols, 5)
-            vm = ~np.isnan(ax_v_ma5)
-            if vm.any(): ax_v.plot(x[vm], ax_v_ma5[vm], color='#FF9800', linewidth=0.9, label='VOL MA5')
-            # Y 轴: 从数据最小值开始 (不强制 0)
+            ax_v.bar(x, vols, color=["#d32f2f" if closes[i]>=opens[i] else "#388e3c" for i in range(len(closes))], width=0.65)
+            vma5 = _sma(vols, 5); vm = ~np.isnan(vma5)
+            if vm.any(): ax_v.plot(x[vm], vma5[vm], color='#FF9800', linewidth=0.9, label='VOL MA5')
             vmax = np.nanmax(vols); vmin = np.nanmin(vols)
-            vpad = (vmax - vmin) * 0.15 if vmax > vmin else vmax * 0.15
-            ax_v.set_ylim(max(0, vmin - vpad), vmax + vpad)
+            vpad = (vmax-vmin)*0.15 if vmax>vmin else vmax*0.15
+            ax_v.set_ylim(max(0, vmin-vpad), vmax+vpad)
             ax_v.set_ylabel("VOL", color="#AAA"); ax_v.tick_params(colors="#AAA", labelbottom=False)
             ax_v.grid(True, alpha=0.12); ax_v.legend(loc='upper left', fontsize=7)
             for s in ['bottom','top','left','right']: ax_v.spines[s].set_color('#444') if s!='top' else ax_v.spines[s].set_visible(False)
 
-            # --- MACD ---
-            macd_colors = ["#d32f2f" if v >= 0 else "#388e3c" for v in macd_bar]
-            ax_m.bar(x, macd_bar, color=macd_colors, width=0.55, alpha=0.7)
-            ax_m.plot(x, dif, color='#1565c0', linewidth=0.9, label='DIF')
-            ax_m.plot(x, dea, color='#c62828', linewidth=0.9, label='DEA')
-            ax_m.axhline(0, color='gray', linewidth=0.5)
-            ax_m.set_ylabel("MACD", color="#AAA"); ax_m.tick_params(colors="#AAA", labelbottom=False)
-            ax_m.grid(True, alpha=0.12); ax_m.legend(loc='upper left', fontsize=7, ncol=3)
-            for s in ['bottom','top','left','right']: ax_m.spines[s].set_color('#444') if s!='top' else ax_m.spines[s].set_visible(False)
+            # --- 动态指标副图 ---
+            for key, a in ind_axes.items():
+                if key == 'macd':
+                    mc = ["#d32f2f" if v>=0 else "#388e3c" for v in macd_bar]
+                    a.bar(x, macd_bar, color=mc, width=0.55, alpha=0.7)
+                    a.plot(x, dif, color='#1565c0', linewidth=0.9, label='DIF')
+                    a.plot(x, dea, color='#c62828', linewidth=0.9, label='DEA')
+                    a.axhline(0, color='gray', linewidth=0.5)
+                    a.set_ylabel("MACD", color="#AAA"); a.tick_params(colors="#AAA", labelbottom=False)
+                    a.legend(loc='upper left', fontsize=7, ncol=3)
+                elif key == 'kdj':
+                    a.plot(x, kv, color='#FF5722', linewidth=0.9, label='K')
+                    a.plot(x, dv, color='#2196F3', linewidth=0.9, label='D')
+                    a.plot(x, jv, color='#9C27B0', linewidth=0.8, linestyle=':', label='J')
+                    a.axhline(80, color='#EF5350', linewidth=0.5, linestyle='--', alpha=0.5)
+                    a.axhline(20, color='#66BB6A', linewidth=0.5, linestyle='--', alpha=0.5)
+                    a.set_ylim(-10, 110)
+                    a.set_ylabel("KDJ", color="#AAA"); a.tick_params(colors="#AAA", labelbottom=False)
+                    a.legend(loc='upper left', fontsize=7, ncol=3)
+                elif key == 'wr':
+                    a.plot(x, wr, color='#FF9800', linewidth=0.9, label='WR(14)')
+                    a.axhline(-20, color='#EF5350', linewidth=0.5, linestyle='--', alpha=0.5)
+                    a.axhline(-80, color='#66BB6A', linewidth=0.5, linestyle='--', alpha=0.5)
+                    a.set_ylim(-105, 5)
+                    a.set_ylabel("WR", color="#AAA"); a.tick_params(colors="#AAA", labelbottom=False)
+                    a.legend(loc='upper left', fontsize=7)
+                elif key == 'bias':
+                    a.plot(x, bias, color='#26C6DA', linewidth=0.9, label='BIAS(12)')
+                    a.axhline(0, color='gray', linewidth=0.5)
+                    a.fill_between(x, 0, bias, where=bias>0, color='#EF5350', alpha=0.15)
+                    a.fill_between(x, 0, bias, where=bias<0, color='#66BB6A', alpha=0.15)
+                    a.set_ylabel("BIAS", color="#AAA"); a.tick_params(colors="#AAA", labelbottom=False)
+                    a.legend(loc='upper left', fontsize=7)
+                a.grid(True, alpha=0.12)
+                for s in ['bottom','top','left','right']: a.spines[s].set_color('#444') if s!='top' else a.spines[s].set_visible(False)
 
-            # --- KDJ ---
-            ax_k.plot(x, kv, color='#FF5722', linewidth=0.9, label='K')
-            ax_k.plot(x, dv, color='#2196F3', linewidth=0.9, label='D')
-            ax_k.plot(x, jv, color='#9C27B0', linewidth=0.8, linestyle=':', label='J')
-            ax_k.axhline(80, color='#EF5350', linewidth=0.5, linestyle='--', alpha=0.5)
-            ax_k.axhline(20, color='#66BB6A', linewidth=0.5, linestyle='--', alpha=0.5)
-            ax_k.fill_between(x, 80, 100, color='#EF5350', alpha=0.06)
-            ax_k.fill_between(x, 0, 20, color='#66BB6A', alpha=0.06)
-            ax_k.set_ylabel("KDJ", color="#AAA"); ax_k.tick_params(colors="#AAA", labelbottom=False)
-            ax_k.set_ylim(-10, 110)
-            ax_k.grid(True, alpha=0.12); ax_k.legend(loc='upper left', fontsize=7, ncol=3)
-            for s in ['bottom','top','left','right']: ax_k.spines[s].set_color('#444') if s!='top' else ax_k.spines[s].set_visible(False)
+            # --- 筹码 ---
+            if chip_ax is not None:
+                cp_centers = cp_lo + (np.arange(len(chip))+0.5) * cp_bin
+                cur_p = closes[-1]
+                chip_colors = ['#66BB6A' if cp_centers[i] < cur_p else '#EF5350' for i in range(len(chip))]
+                chip_ax.barh(cp_centers, chip*100, height=cp_bin*0.85, color=chip_colors, alpha=0.85)
+                chip_ax.axhline(cur_p, color='#FFD700', linewidth=1.2, label=f'现价 {cur_p:.2f}')
+                cum_c = np.cumsum(chip); p5_idx = np.searchsorted(cum_c, 0.05); p95_idx = np.searchsorted(cum_c, 0.95)
+                p5_pr = cp_lo + p5_idx*cp_bin; p95_pr = cp_lo + p95_idx*cp_bin
+                chip_ax.axhline((p5_pr+p95_pr)/2, color='#FF9800', linewidth=1.0, linestyle='--', label=f'平均成本 {(p5_pr+p95_pr)/2:.2f}')
+                chip_ax.axhspan(p5_pr, p95_pr, color='#FFD700', alpha=0.08)
+                profit_ratio = float(np.sum(chip[cp_centers < cur_p]))
+                chip_ax.set_ylabel("价格", color="#AAA"); chip_ax.set_xlabel("筹码密度 (%)", color="#AAA")
+                chip_ax.tick_params(colors="#AAA"); chip_ax.grid(True, alpha=0.12)
+                for s in ['bottom','top','left','right']: chip_ax.spines[s].set_color('#444') if s!='top' else chip_ax.spines[s].set_visible(False)
+                chip_ax.legend(loc='lower right', fontsize=7)
+            else:
+                profit_ratio = float(np.sum(chip[cp_lo+(np.arange(len(chip))+0.5)*cp_bin < closes[-1]]))
 
-            # --- 筹码分布 (水平直方图) ---
-            cp_centers = cp_lo + (np.arange(len(chip)) + 0.5) * cp_bin
-            # 获利盘: 当前价以下的筹码 (绿色), 当前价以上 (红色)
-            chip_colors = ['#66BB6A' if cp_centers[i] < cur_price else '#EF5350' for i in range(len(chip))]
-            ax_c.barh(cp_centers, chip * 100, height=cp_bin * 0.85, color=chip_colors, alpha=0.85)
-            ax_c.axhline(cur_price, color='#FFD700', linewidth=1.2, linestyle='-', label=f'现价 {cur_price:.2f}')
-            ax_c.axhline(avg_cost, color='#FF9800', linewidth=1.0, linestyle='--', label=f'平均成本 {avg_cost:.2f}')
-            ax_c.axhspan(p5_price, p95_price, color='#FFD700', alpha=0.08)
-            ax_c.set_ylabel("价格", color="#AAA"); ax_c.set_xlabel("筹码密度 (%)", color="#AAA")
-            ax_c.tick_params(colors="#AAA")
-            ax_c.grid(True, alpha=0.12)
-            for s in ['bottom','top','left','right']: ax_c.spines[s].set_color('#444') if s!='top' else ax_c.spines[s].set_visible(False)
-            ax_c.legend(loc='lower right', fontsize=7)
+            # 隐藏中间副图的 x 标签
+            for a in axes[1:-1]: a.tick_params(axis='x', labelbottom=False)
 
             # 标题汇总
-            pct = ((closes[-1] - closes[-2]) / closes[-2] * 100) if len(closes) > 1 else 0
-            fig.suptitle(f"{name} | 收盘 {closes[-1]:.2f} {'+' if pct>=0 else ''}{pct:.2f}% | 主力成本 {vwap[-1]:.2f} | 获利盘 {profit_ratio*100:.1f}% | 90%成本区 {p5_price:.1f}~{p95_price:.1f}",
+            pct = ((closes[-1]-closes[-2])/closes[-2]*100) if len(closes)>1 else 0
+            title_extra = f" 获利 {profit_ratio*100:.0f}%" if show_chip else ""
+            fig.suptitle(f"{name} | 收 {closes[-1]:.2f} {'+' if pct>=0 else ''}{pct:.2f}% | 主力成本 {vwap[-1]:.2f}{title_extra}",
                         color="#FFD700", fontsize=12, y=1.003)
             fig.tight_layout()
 
@@ -13727,17 +13720,17 @@ class DapanMixin:
             cv.get_tk_widget().pack(fill=tk.X, padx=4, pady=4)
             try: NavigationToolbar2Tk(cv, fig_frame).update()
             except Exception: pass
-            status_var.set(f"✅ {len(data)}根 | 支撑 {sr['S1']:.2f} / 压力 {sr['R1']:.2f} | 获利 {profit_ratio*100:.0f}%")
+            status_var.set(f"✅ {len(data)}根 | 支撑 {sr['S1']:.2f} / 压力 {sr['R1']:.2f}")
 
-            # === 鼠标十字线 + 实时数据面板 ===
+            # === 鼠标十字线 + tooltip ===
+            main_ax_list = [ax, ax_v] + list(ind_axes.values())
             cross_v = ax.axvline(x=-1, color='#42A5F5', linewidth=0.6, alpha=0.7, visible=False, zorder=10)
             cross_h = ax.axhline(y=-1, color='#42A5F5', linewidth=0.6, alpha=0.7, visible=False, zorder=10)
             tip = ax.text(0.99, 0.98, '', transform=ax.transAxes, fontsize=8, ha='right',
                           color='#ECEFF1', va='top',
                           bbox=dict(boxstyle='round,pad=0.4', fc='#1E1E2E', ec='#42A5F5', alpha=0.92))
-
             def _on_move(event):
-                if event.inaxes not in [ax, ax_v, ax_m, ax_k]:
+                if event.inaxes not in main_ax_list:
                     cross_v.set_visible(False); cross_h.set_visible(False); tip.set_text(''); cv.draw_idle(); return
                 idx = int(round(event.xdata))
                 if idx < 0 or idx >= len(closes):
@@ -13745,24 +13738,24 @@ class DapanMixin:
                 d = days_list[idx]
                 o, hh, l, c, vv = float(opens[idx]), float(highs[idx]), float(lows[idx]), float(closes[idx]), float(vols[idx])
                 prev_c = float(closes[idx-1]) if idx > 0 else c
-                chg = c - prev_c; pct = chg / prev_c * 100 if prev_c else 0
+                chg = c - prev_c; pct2 = chg/prev_c*100 if prev_c else 0
                 ma5v = ma5[idx]; ma20v = ma20[idx]
                 ma5s = f'{ma5v:.2f}' if not np.isnan(ma5v) else '-'
                 ma20s = f'{ma20v:.2f}' if not np.isnan(ma20v) else '-'
-                bb_s = f'{bup[idx]:.2f}' if not np.isnan(bup[idx]) else '-'
-                txt = (f'{d} | O {o:.2f} H {hh:.2f} L {l:.2f} C {c:.2f}\n'
-                       f'量 {vv/1e4:.0f}万 | 涨跌 {chg:+.2f} ({pct:+.2f}%)\n'
-                       f'MA5 {ma5s} | MA20 {ma20s} | BOLL上 {bb_s}')
+                txt = (f'{d} | O{o:.2f} H{hh:.2f} L{l:.2f} C{c:.2f}\n'
+                       f'量{vv/1e4:.0f}万 | 涨跌{chg:+.2f}({pct2:+.2f}%)\n'
+                       f'MA5 {ma5s} | MA20 {ma20s}')
                 tip.set_text(txt)
                 cross_v.set_visible(True); cross_v.set_xdata([idx, idx])
                 cross_h.set_visible(True); cross_h.set_ydata([c, c])
                 cv.draw_idle()
-
             cv.mpl_connect('motion_notify_event', _on_move)
 
         refresh_btn.configure(command=_redraw)
         sym_combo.bind("<<ComboboxSelected>>", lambda e: _redraw())
         days_combo.bind("<<ComboboxSelected>>", lambda e: _redraw())
+        for v in ind_vars.values():
+            v.trace_add('write', lambda *a: _redraw())
         _redraw()
 
 __all__ = ["DapanMixin"]
