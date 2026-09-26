@@ -78785,17 +78785,7 @@ class StockKeywordAnalyzerGUI:
             notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
             self.sentiment_zone_notebook = notebook
             self.sentiment_zone_text_widgets = {}
-            # ---- Tab 1: 情绪总览 ----
-            tab = ttk.Frame(notebook)
-            notebook.add(tab, text="情绪总览")
-            txt = scrolledtext.ScrolledText(tab, wrap=tk.WORD, font=("Consolas", 11))
-            txt.pack(fill=tk.BOTH, expand=True)
-            txt.tag_configure("up_bold", foreground="#d32f2f", font=("Consolas", 11, "bold"))
-            txt.tag_configure("down_bold", foreground="#2e7d32", font=("Consolas", 11, "bold"))
-            txt.insert("1.0", "加载中...\n")
-            txt.config(state=tk.DISABLED)
-            self.sentiment_zone_text_widgets["overview"] = txt
-            # ---- Tab 2: 🎯 情绪复盘 (只显示月复盘三栏, 不渲染完整日历) ----
+            # ---- Tab 1: 🎯 情绪复盘 (先显示, 只渲染月复盘三栏, 不渲染完整日历) ----
             try:
                 rev_tab = ttk.Frame(notebook)
                 notebook.add(rev_tab, text="🎯 情绪复盘")
@@ -78822,6 +78812,16 @@ class StockKeywordAnalyzerGUI:
             except Exception as _e_emo_tab:
                 import traceback; traceback.print_exc()
                 print(f"[情绪复盘] tab创建失败: {_e_emo_tab}", flush=True)
+            # ---- Tab 2: 情绪总览 ----
+            tab = ttk.Frame(notebook)
+            notebook.add(tab, text="情绪总览")
+            txt = scrolledtext.ScrolledText(tab, wrap=tk.WORD, font=("Consolas", 11))
+            txt.pack(fill=tk.BOTH, expand=True)
+            txt.tag_configure("up_bold", foreground="#d32f2f", font=("Consolas", 11, "bold"))
+            txt.tag_configure("down_bold", foreground="#2e7d32", font=("Consolas", 11, "bold"))
+            txt.insert("1.0", "加载中...\n")
+            txt.config(state=tk.DISABLED)
+            self.sentiment_zone_text_widgets["overview"] = txt
             self._refresh_sentiment_zone_tabs_async()
         except Exception as e:
             ttk.Label(parent, text=f"情绪区间标签页创建失败: {e}", foreground="red").pack(expand=True)
