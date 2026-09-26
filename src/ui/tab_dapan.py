@@ -12541,7 +12541,7 @@ class DapanMixin:
         _days_var = tk.StringVar(value="180")
         ttk.Label(top, text=" 天数:").pack(side=tk.LEFT)
         ttk.Combobox(top, textvariable=_days_var, values=["60", "120", "180", "360"], state="readonly", width=6).pack(side=tk.LEFT, padx=4)
-        ttk.Label(top, text=" 双击图放大").pack(side=tk.LEFT, padx=10, foreground="#FFD54F")
+        tk.Label(top, text=" 双击图放大", fg="#FFD54F").pack(side=tk.LEFT, padx=10)
         _status = tk.Label(top, text="", fg="#888")
         _status.pack(side=tk.RIGHT, padx=8)
 
