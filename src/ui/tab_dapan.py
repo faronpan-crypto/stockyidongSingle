@@ -13452,7 +13452,7 @@ class DapanMixin:
         status_var = tk.StringVar(value="")
         ttk.Label(top, textvariable=status_var, foreground="#90A4AE").pack(side=tk.LEFT, padx=10)
 
-        # === 指标选择行 ===
+        # === 指标选择行 + 说明面板 ===
         ind_row = ttk.Frame(win, padding=(6, 0)); ind_row.pack(fill=tk.X)
         ttk.Label(ind_row, text="📊 指标:").pack(side=tk.LEFT, padx=(0, 6))
         ind_vars = {
@@ -13465,6 +13465,108 @@ class DapanMixin:
         ind_labels = [('macd', 'MACD'), ('kdj', 'KDJ'), ('wr', 'WR威廉'), ('bias', 'BIAS乖离'), ('chip', '筹码')]
         for k, label in ind_labels:
             ttk.Checkbutton(ind_row, text=label, variable=ind_vars[k]).pack(side=tk.LEFT, padx=3)
+
+        # --- 指标说明字典 ---
+        IND_INFO = {
+            'macd': {
+                'title': 'MACD 异同移动平均线',
+                'desc': 'EMA12 - EMA26 = DIF(蓝线), DIF的EMA9 = DEA(红线), 柱状 = 2×(DIF-DEA)。\n'
+                        '金叉(DIF上穿DEA)看涨, 死叉(DIF下穿DEA)看跌。零轴上方金叉信号最可靠。\n'
+                        '红柱放大=多头加强, 绿柱放大=空头加强; 柱缩短=动能衰减。顶/底背离是反转信号。',
+                'links': [
+                    ('📖 MACD百度百科', 'https://baike.baidu.com/item/MACD指标'),
+                    ('🎯 雪球MACD教程', 'https://xueqiu.com/873953755/312548885'),
+                    ('💡 东方财富MACD详解', 'https://caifuhao.eastmoney.com/news/202005/1513540202710'),
+                ],
+            },
+            'kdj': {
+                'title': 'KDJ 随机指标 (9,3,3)',
+                'desc': 'RSV = (收盘价-N日最低价)/(N日最高价-N日最低价)×100。K=RSV的EMA3, D=K的EMA3, J=3K-2D。\n'
+                        'K/D < 20 超卖区(绿底), K/D > 80 超买区(红底)。\n'
+                        '金叉(20以下最佳)买入, 死叉(80以上最佳)卖出。J值>100超买, <0超卖。\n'
+                        '注意: KDJ在震荡市有效, 单边趋势市容易钝化。',
+                'links': [
+                    ('📖 KDJ百度百科', 'https://baike.baidu.com/item/KDJ指标'),
+                    ('🎯 雪球KDJ实战技巧', 'https://xueqiu.com/1835612492/228934828'),
+                    ('💡 KDJ超买超卖判断', 'https://www.10jqka.com.cn/20200409/c607281985816864.shtml'),
+                ],
+            },
+            'wr': {
+                'title': 'WR 威廉指标 (14)',
+                'desc': 'WR = (N日最高价 - 收盘价) / (N日最高价 - N日最低价) × (-100)\n'
+                        '取值范围 -100 ~ 0。WR < -80(下方绿线) = 超卖区, WR > -20(上方红线) = 超买区。\n'
+                        'WR从超卖区上穿-80买入, 从超买区下穿-20卖出。与KDJ互补, 配合使用效果更好。',
+                'links': [
+                    ('📖 威廉指标百度百科', 'https://baike.baidu.com/item/威廉指标'),
+                    ('🎯 WR指标实战', 'https://xueqiu.com/5890967038/267454987'),
+                    ('💡 WR与KDJ区别', 'https://www.10jqka.com.cn/20210125/c625805235516864.shtml'),
+                ],
+            },
+            'bias': {
+                'title': 'BIAS 乖离率 (12日)',
+                'desc': 'BIAS = (收盘价 - N日均线) / N日均线 × 100%\n'
+                        '正区(红填充) = 价格在均线上方, 负区(绿填充) = 价格在均线下方。\n'
+                        'BIAS过大说明价格偏离均线过远, 有回归需求(顶背离); BIAS过小则可能反弹。\n'
+                        '上证指数 BIAS(12) 通常 > 15% 超买, < -12% 超卖。',
+                'links': [
+                    ('📖 乖离率百度百科', 'https://baike.baidu.com/item/乖离率'),
+                    ('🎯 BIAS选股技巧', 'https://xueqiu.com/6610295538/304586768'),
+                    ('💡 均线偏离度实战', 'https://caifuhao.eastmoney.com/news/202103/0509543243510'),
+                ],
+            },
+            'chip': {
+                'title': '筹码分布 (CYQ)',
+                'desc': '基于日K OHLC×成交量近似算法: 每根K线均匀分配30%量+收盘价附近高斯加权70%。\n'
+                        '🟢 绿色柱 = 获利盘(现价以下筹码), 🔴 红色柱 = 套牢盘(现价以上筹码)。\n'
+                        '金色虚线 = 平均成本 (获利盘与套牢盘各占50%)。\n'
+                        '金色阴影 = 90%筹码集中区 (P5 ~ P95)。现价远低于此区间则套牢盘重, 反之获利盘多。',
+                'links': [
+                    ('📖 筹码分布百度百科', 'https://baike.baidu.com/item/筹码分布'),
+                    ('🎯 筹码峰选股法', 'https://xueqiu.com/9383148762/345678901'),
+                    ('💡 筹码集中度判断', 'https://www.10jqka.com.cn/20200618/c610293847518843.shtml'),
+                ],
+            },
+        }
+
+        # --- 说明面板 (Text + Scrollbar) ---
+        info_frame = tk.Frame(ind_row, bg="#2A2A3E")
+        info_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0), pady=2)
+        info_text = tk.Text(info_frame, height=3, bg="#2A2A3E", fg="#ECEFF1",
+                            font=("TkDefaultFont", 8), wrap=tk.WORD,
+                            relief=tk.FLAT, borderwidth=0, padx=8, pady=4, cursor="hand2")
+        info_sb = ttk.Scrollbar(info_frame, orient=tk.VERTICAL, command=info_text.yview)
+        info_text.configure(yscrollcommand=info_sb.set)
+        info_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); info_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        info_text.tag_configure('title', foreground='#FFD700', font=("TkDefaultFont", 9, "bold"))
+        info_text.tag_configure('desc', foreground='#B0BEC5', font=("TkDefaultFont", 8))
+        info_text.tag_configure('link', foreground='#42A5F5', font=("TkDefaultFont", 8), underline=True)
+        info_text.configure(state=tk.DISABLED)
+        def _open_url(url):
+            import webbrowser; webbrowser.open(url)
+        def _update_info():
+            info_text.configure(state=tk.NORMAL); info_text.delete('1.0', tk.END)
+            selected = [k for k, v in ind_vars.items() if v.get()]
+            if not selected:
+                info_text.insert(tk.END, "👈 勾选左侧指标查看说明和链接", 'desc')
+            else:
+                for k in selected:
+                    if k not in IND_INFO: continue
+                    info = IND_INFO[k]
+                    info_text.insert(tk.END, f"【{info['title']}】\n", 'title')
+                    info_text.insert(tk.END, info['desc'] + "\n", 'desc')
+                    for label, url in info['links']:
+                        start_idx = info_text.index(tk.INSERT)
+                        info_text.insert(tk.END, f"  🔗 {label}\n", 'link')
+                        end_idx = info_text.index(tk.INSERT)
+                        info_text.tag_add(f'url_{url}', start_idx, end_idx)
+                        info_text.tag_bind(f'url_{url}', '<Button-1>', lambda e, u=url: _open_url(u))
+                        info_text.tag_bind(f'url_{url}', '<Enter>', lambda e: info_text.configure(cursor='hand2'))
+                        info_text.tag_bind(f'url_{url}', '<Leave>', lambda e: info_text.configure(cursor=''))
+                    info_text.insert(tk.END, "\n")
+            info_text.configure(state=tk.DISABLED)
+        for v in ind_vars.values():
+            v.trace_add('write', lambda *a: _update_info())
+        _update_info()
 
         # === Canvas + 滚动容器 ===
         wrap = tk.Frame(win, bg="#1E1E2E"); wrap.pack(fill=tk.BOTH, expand=True)
