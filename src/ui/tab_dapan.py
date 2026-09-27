@@ -13973,6 +13973,321 @@ class DapanMixin:
         win.after(100, _rf)
 
 
+    # ============================================================
+    # 🌀 ETF 情绪周期 - 各ETF上行/震荡/下行 + 当月操作建议
+    # ============================================================
+    def _show_etf_cycle_dialog(self):
+        """🌀 ETF 情绪周期 - 各大主要ETF情绪状态 + 核心/卫星配置建议"""
+        import tkinter as tk
+        import requests as _r_etf, json as _j_etf, threading as _th, datetime as _dt
+        win = tk.Toplevel(self.root)
+        win.title("🌀 ETF 情绪周期 - 上行 / 震荡 / 下行"); win.geometry("1320x820")
+        win.configure(bg="#1E1E2E")
+        try: win.state("zoomed")
+        except Exception: pass
+
+        _FS = {"v": 13}
+        bar = ttk.Frame(win); bar.pack(fill=tk.X, padx=8, pady=4)
+        ttk.Label(bar, text="🔤 字号:", font=("Helvetica", 11)).pack(side=tk.LEFT)
+        def _fs_d(): _FS["v"]=max(9,_FS["v"]-1); _fl.configure(text=str(_FS["v"]))
+        def _fs_u(): _FS["v"]=min(20,_FS["v"]+1); _fl.configure(text=str(_FS["v"]))
+        ttk.Button(bar, text="−", width=3, command=_fs_d).pack(side=tk.LEFT, padx=3)
+        _fl = ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")); _fl.pack(side=tk.LEFT)
+        ttk.Button(bar, text="+", width=3, command=_fs_u).pack(side=tk.LEFT)
+        ttk.Label(bar, text="  ⚡ 后台加载, 不阻塞界面", foreground="#FFD700",
+                  font=("Helvetica", 10, "bold")).pack(side=tk.LEFT, padx=20)
+        ttk.Button(bar, text="🔄 重新加载", command=lambda: _load()).pack(side=tk.RIGHT)
+
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        # ── ETF 完整清单 (带分类和默认勾选) ──
+        _ETF_ALL = [
+            # (代码, 新浪符号, 分类, 默认选中)
+            ("上证指数",  "sh000001", "📊 主流指数", True),
+            ("深证成指",  "sz399001", "📊 主流指数", True),
+            ("创业板指",  "sz399006", "📊 主流指数", True),
+            ("沪深300",   "sh000300", "📊 主流指数", True),
+            ("中证500",   "sh000905", "📊 主流指数", True),
+            ("中证1000",  "sh000852", "📊 主流指数", True),
+            ("科创50",    "sh000688", "📊 主流指数", True),
+            # 宽基 ETF
+            ("沪深300ETF", "sh510300", "📈 宽基ETF", True),
+            ("中证500ETF", "sh510500", "📈 宽基ETF", True),
+            ("中证1000ETF","sh512100", "📈 宽基ETF", True),
+            ("科创50ETF",  "sh588000", "📈 宽基ETF", True),
+            ("创业板ETF",  "sz159915", "📈 宽基ETF", True),
+            ("上证50ETF",  "sh510050", "📈 宽基ETF", False),
+            # α/β ETF
+            ("半导体ETF",  "sh512760", "🎯 α/β ETF", True),
+            ("芯片ETF",    "sz159995", "🎯 α/β ETF", False),
+            ("医药ETF",    "sh512010", "🎯 α/β ETF", False),
+            ("新能源ETF",  "sh516160", "🎯 α/β ETF", False),
+            ("纳指ETF",    "sh513100", "🎯 α/β ETF", True),
+            ("标普500ETF", "sh513500", "🎯 α/β ETF", False),
+            # 红利/防御
+            ("红利ETF",    "sh510880", "🛡️ 红利防御", True),
+            ("黄金ETF",    "sh518880", "🛡️ 红利防御", True),
+            ("银行ETF",    "sh512800", "🛡️ 红利防御", False),
+            ("券商ETF",    "sh512000", "🛡️ 红利防御", False),
+            ("军工ETF",    "sh512660", "🛡️ 红利防御", False),
+        ]
+
+        # ── Tab 1: 🌀 ETF 情绪周期一览 ──
+        t1 = ttk.Frame(nb); nb.add(t1, text="🌀 ETF情绪周期")
+        # Treeview
+        cols = ("name", "code", "cycle", "price", "ma20", "ma60", "pct20", "pct60", "slope20")
+        tv = ttk.Treeview(t1, columns=cols, show="headings", height=18)
+        hdrs = {"name": "ETF名称", "code": "代码", "cycle": "周期", "price": "现价",
+                "ma20": "MA20", "ma60": "MA60", "pct20": "vs MA20",
+                "pct60": "vs MA60", "slope20": "MA20斜率"}
+        widths = {"name": 110, "code": 70, "cycle": 70, "price": 75, "ma20": 75,
+                  "ma60": 75, "pct20": 80, "pct60": 80, "slope20": 80}
+        for c in cols:
+            tv.heading(c, text=hdrs[c]); tv.column(c, width=widths[c], anchor="center")
+        tv.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 2))
+        # tag 颜色
+        tv.tag_configure("up", foreground="#66BB6A", background="#1B3A1B")
+        tv.tag_configure("down", foreground="#EF5350", background="#3A1B1B")
+        tv.tag_configure("side", foreground="#FFD54F", background="#3A3A1B")
+        tv.tag_configure("loading", foreground="#888")
+
+        # ── Tab 2: 🧩 ETF 选择 ──
+        t2 = ttk.Frame(nb); nb.add(t2, text="🧩 选择ETF")
+        cv2 = tk.Canvas(t2, highlightthickness=0, bg="#1E1E2E")
+        sb2 = ttk.Scrollbar(t2, orient=tk.VERTICAL, command=cv2.yview); sb2.pack(side=tk.RIGHT, fill=tk.Y)
+        cv2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        cv2.configure(yscrollcommand=sb2.set, bg="#1E1E2E")
+        inner2 = ttk.Frame(cv2); cv2.create_window((0,0), window=inner2, anchor="nw")
+        cv2.bind("<Configure>", lambda e: cv2.itemconfigure(1, width=e.width))
+        inner2.bind("<Configure>", lambda e: cv2.configure(scrollregion=cv2.bbox("all")))
+
+        _check_vars = {}
+        _group_frames = {}
+        for cname, csym, ccat, cdef in _ETF_ALL:
+            if ccat not in _group_frames:
+                gf = tk.LabelFrame(inner2, text=ccat, bg="#2A2A3E", fg="#FFD700",
+                                    font=("Helvetica", _FS["v"], "bold"), padx=10, pady=6)
+                gf.pack(fill=tk.X, padx=8, pady=4)
+                _group_frames[ccat] = gf
+            var = tk.BooleanVar(value=cdef)
+            _check_vars[f"{cname}|{csym}"] = var
+            cb = tk.Checkbutton(_group_frames[ccat], text=f"  {cname} ({csym})", variable=var,
+                                 bg="#2A2A3E", fg="#ECEFF1", selectcolor="#1E1E2E",
+                                 activebackground="#2A2A3E", activeforeground="#ECEFF1",
+                                 font=("Helvetica", _FS["v"]), anchor="w")
+            cb.pack(side=tk.LEFT, padx=8, pady=3)
+        # 全选/全不选按钮
+        bf = tk.Frame(inner2, bg="#1E1E2E"); bf.pack(fill=tk.X, padx=8, pady=6)
+        tk.Button(bf, text="全选", command=lambda: [v.set(True) for v in _check_vars.values()],
+                  bg="#455A64", fg="white", font=("Helvetica", _FS["v"]), padx=10).pack(side=tk.LEFT, padx=4)
+        tk.Button(bf, text="全不选", command=lambda: [v.set(False) for v in _check_vars.values()],
+                  bg="#455A64", fg="white", font=("Helvetica", _FS["v"]), padx=10).pack(side=tk.LEFT, padx=4)
+        tk.Button(bf, text="🧠 加载选中的ETF →", command=lambda: _load(),
+                  bg="#00695C", fg="white", font=("Helvetica", _FS["v"], "bold"), padx=16).pack(side=tk.LEFT, padx=20)
+
+        # ── Tab 3: 📋 当月操作建议 ──
+        t3 = ttk.Frame(nb); nb.add(t3, text="📋 当月操作建议")
+        suggest_text = tk.Text(t3, bg="#12121E", fg="#ECEFF1", font=("Menlo", _FS["v"]),
+                                wrap="word", padx=12, pady=10, height=18)
+        suggest_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+        suggest_text.config(state=tk.DISABLED)
+
+        # ── 情绪周期判断 ──
+        def _judge_cycle(price, ma20, ma60, ma20_slope):
+            """返回 ('上行'/'震荡'/'下行', 置信度描述)"""
+            if None in (price, ma20, ma60, ma20_slope):
+                return ("?", "数据不足")
+            # 主要判断: 价格与MA相对位置
+            if price > ma20 > ma60 and ma20_slope > 0.01:
+                return ("上行", "多头排列+MA20斜率向上")
+            elif price < ma20 < ma60 and ma20_slope < -0.01:
+                return ("下行", "空头排列+MA20斜率向下")
+            elif abs(price - ma20) / ma20 < 0.015:  # 价格贴近 MA20 (±1.5%)
+                return ("震荡", "价格围绕MA20波动")
+            elif ma20 > ma60 and price > ma60:
+                return ("震荡偏多", "MA20>MA60但斜率趋平")
+            elif ma20 < ma60 and price < ma60:
+                return ("震荡偏空", "MA20<MA60但斜率趋平")
+            elif price > ma20:
+                return ("震荡偏多", "价格在MA20上方但斜率不明")
+            else:
+                return ("震荡偏空", "价格在MA20下方但斜率不明")
+
+        def _cycle_emoji(cycle):
+            if "上行" in cycle: return "🟢"
+            if "下行" in cycle: return "🔴"
+            return "🟡"
+
+        def _load():
+            # 清空 Treeview
+            for iid in tv.get_children(): tv.delete(iid)
+            suggest_text.config(state=tk.NORMAL); suggest_text.delete("1.0", tk.END)
+            suggest_text.insert(tk.END, "⏳ 正在加载各ETF K线数据 + 计算情绪周期...\n\n")
+            suggest_text.config(state=tk.DISABLED)
+
+            # 收集选中的 ETF
+            selected = [(n, s) for (n, s, _, _), v in zip(_ETF_ALL, _check_vars.values()) if v.get()]
+            if not selected:
+                suggest_text.config(state=tk.NORMAL)
+                suggest_text.delete("1.0", tk.END)
+                suggest_text.insert(tk.END, "⚠️ 请先在「🧩 选择ETF」Tab勾选要分析的ETF!\n")
+                suggest_text.config(state=tk.DISABLED)
+                return
+
+            # 先在 Treeview 里放 loading
+            for n, s in selected:
+                tv.insert("", tk.END, values=(n, s, "⏳", "-", "-", "-", "-", "-", "-"), tags=("loading",))
+
+            def _fetch_one(name, sym):
+                """拉一个 ETF 的 K 线 + 计算 MA + 判断周期"""
+                try:
+                    r = _r_etf.get(
+                        "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData",
+                        params={"symbol": sym, "scale": "240", "ma": "no", "datalen": "120"},
+                        timeout=2.5, headers={"User-Agent": "Mozilla/5.0"})
+                    if r.status_code != 200 or not r.text.strip():
+                        return name, sym, None
+                    kl = _j_etf.loads(r.text)
+                    if not kl or len(kl) < 30:
+                        return name, sym, None
+                    closes = [float(k["close"]) for k in kl]
+                    price = closes[-1]
+                    ma20 = sum(closes[-20:]) / 20
+                    ma60 = sum(closes[-60:]) / 60 if len(closes) >= 60 else sum(closes) / len(closes)
+                    # MA20 斜率: 最近 5 天 MA20 变化率
+                    if len(closes) >= 25:
+                        old_ma20 = sum(closes[-25:-5]) / 20
+                        ma20_slope = (ma20 - old_ma20) / old_ma20
+                    else:
+                        ma20_slope = 0
+                    cycle, reason = _judge_cycle(price, ma20, ma60, ma20_slope)
+                    return name, sym, {
+                        "price": price, "ma20": ma20, "ma60": ma60,
+                        "slope": ma20_slope, "cycle": cycle, "reason": reason,
+                        "pct20": (price - ma20) / ma20 * 100,
+                        "pct60": (price - ma60) / ma60 * 100,
+                    }
+                except Exception as e:
+                    return name, sym, None
+
+            results = {}
+            def _worker():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                    futures = [pool.submit(_fetch_one, n, s) for n, s in selected]
+                    for fut in concurrent.futures.as_completed(futures):
+                        try:
+                            n, s, data = fut.result()
+                            results[n] = data
+                        except Exception: pass
+                # UI 更新
+                win.after(0, _update_ui)
+
+            def _update_ui():
+                for iid in tv.get_children(): tv.delete(iid)
+                up_list, down_list, side_list, fail_list = [], [], [], []
+                for n, s in selected:
+                    d = results.get(n)
+                    if d is None:
+                        tv.insert("", tk.END, values=(n, s, "❓", "-", "-", "-", "-", "-", "-"))
+                        fail_list.append(n)
+                        continue
+                    cycle_tag = "up" if "上行" in d["cycle"] else ("down" if "下行" in d["cycle"] else "side")
+                    price_s = f"{d['price']:.3f}" if d['price'] < 10 else f"{d['price']:.2f}"
+                    ma20_s = f"{d['ma20']:.3f}" if d['ma20'] < 10 else f"{d['ma20']:.2f}"
+                    ma60_s = f"{d['ma60']:.3f}" if d['ma60'] < 10 else f"{d['ma60']:.2f}"
+                    pct20_s = f"{d['pct20']:+.2f}%"
+                    pct60_s = f"{d['pct60']:+.2f}%"
+                    slope_s = f"{d['slope']*100:+.2f}%"
+                    emoji = _cycle_emoji(d["cycle"])
+                    tv.insert("", tk.END,
+                              values=(n, s, f"{emoji} {d['cycle']}", price_s, ma20_s, ma60_s,
+                                      pct20_s, pct60_s, slope_s),
+                              tags=(cycle_tag,))
+                    if "上行" in d["cycle"]: up_list.append((n, d))
+                    elif "下行" in d["cycle"]: down_list.append((n, d))
+                    else: side_list.append((n, d))
+
+                # ── 生成当月操作建议 ──
+                ym = _dt.date.today()
+                suggest_text.config(state=tk.NORMAL); suggest_text.delete("1.0", tk.END)
+                suggest_text.insert(tk.END, f"{'='*60}\n")
+                suggest_text.insert(tk.END, f"📋 {ym.year}年{ym.month}月 ETF 配置建议\n")
+                suggest_text.insert(tk.END, f"{'='*60}\n\n")
+
+                # 1. 大盘总体判断 (沪深300 / 上证)
+                overall = "震荡"
+                for key in ["沪深300ETF", "沪深300", "上证指数"]:
+                    if key in results and results[key]:
+                        if "上行" in results[key]["cycle"]: overall = "上行"
+                        elif "下行" in results[key]["cycle"]: overall = "下行"
+                        break
+                suggest_text.insert(tk.END, f"🎯 大盘总体状态: {_cycle_emoji(overall)} {overall}\n\n")
+
+                # 2. 核心资产 (β)
+                suggest_text.insert(tk.END, f"── 核心资产 (β) ──\n")
+                core_candidates = []
+                for key in ["沪深300ETF", "中证500ETF", "中证1000ETF", "上证50ETF", "沪深300", "中证500"]:
+                    if key in results and results[key] and "上行" in results[key]["cycle"]:
+                        core_candidates.append(key)
+                if overall == "下行":
+                    suggest_text.insert(tk.END, "  🔴 大盘下行, 核心资产建议: 空仓 / 黄金ETF\n")
+                elif core_candidates:
+                    suggest_text.insert(tk.END, f"  ✅ 核心配置: {' + '.join(core_candidates)}\n")
+                else:
+                    suggest_text.insert(tk.END, "  🟡 震荡市, 核心配置: 少配 / 红利ETF防守\n")
+
+                # 3. 卫星资产 (α)
+                suggest_text.insert(tk.END, f"\n── 卫星资产 (α) ──\n")
+                sat_up = [(n, d) for n, d in up_list if n not in ["沪深300ETF","中证500ETF","中证1000ETF","沪深300","中证500","上证指数"]]
+                if sat_up:
+                    for n, d in sat_up[:5]:
+                        suggest_text.insert(tk.END, f"  🔥 {n} ({d['cycle']}) → 卫星配置, 单只 ≤10%\n")
+                else:
+                    suggest_text.insert(tk.END, "  🟡 无明显上行α标的, 观望为主\n")
+
+                # 4. 防御资产
+                suggest_text.insert(tk.END, f"\n── 防御/红利 ──\n")
+                for key in ["红利ETF", "黄金ETF"]:
+                    if key in results and results[key]:
+                        d = results[key]
+                        tag = _cycle_emoji(d["cycle"])
+                        suggest_text.insert(tk.END, f"  {tag} {key}: {d['cycle']} → {'可作为防守底仓' if overall != '上行' else '牛市中占比 ≤20%'}\n")
+
+                # 5. 明确建议
+                suggest_text.insert(tk.END, f"\n{'='*60}\n")
+                if overall == "上行":
+                    suggest_text.insert(tk.END, "🟢 操作建议: 积极做多\n  核心配指数 + 卫星配上行α + 少量黄金对冲\n")
+                elif overall == "震荡":
+                    suggest_text.insert(tk.END, "🟡 操作建议: 半仓滚动\n  核心少配 + 卫星做波段 + 红利/黄金防守\n")
+                else:
+                    suggest_text.insert(tk.END, "🔴 操作建议: 严控仓位\n  黄金/国债为主, 或直接空仓等待\n")
+
+                if fail_list:
+                    suggest_text.insert(tk.END, f"\n⚠️ 以下ETF数据拉取失败: {', '.join(fail_list)}\n")
+
+                suggest_text.config(state=tk.DISABLED)
+                nb.select(2)  # 自动跳到建议 Tab
+
+            _th.Thread(target=_worker, daemon=True).start()
+
+        # 默认加载一次
+        win.after(300, _load)
+
+        # 字号刷新
+        def _rf():
+            try:
+                for w in win.winfo_children():
+                    for ch in w.winfo_children():
+                        try: cls = ch.__class__.__name__
+                        except: continue
+                        if cls in ("Label","LabelFrame","Button"):
+                            try: ch.configure(font=("Helvetica", _FS["v"] if cls!="LabelFrame" else _FS["v"]+1))
+                            except: pass
+            except: pass
+        win.after(100, _rf)
+
+
     def _show_index_kline_dialog(self, initial_symbol=None, initial_days=180):
         """📈 指数/ETF 日K线大弹窗 - 指标可选 MACD/KDJ/WR/BIAS/筹码"""
         import tkinter as tk
