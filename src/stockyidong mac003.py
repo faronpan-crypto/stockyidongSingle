@@ -812,6 +812,14 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         tk.Button(top_bar, text="🗓️ 暴涨暴跌", bg="#6A1B9A", fg="white", font=("", 9, "bold"),
                   padx=8, pady=0, cursor="hand2",
                   command=self._open_crash_rally_calendar).pack(side=tk.RIGHT, padx=6)
+        # ETF 情绪周期按钮
+        tk.Button(top_bar, text="🌀 ETF周期", bg="#00695C", fg="white", font=("", 9, "bold"),
+                  padx=8, pady=0, cursor="hand2",
+                  command=self._show_etf_cycle_dialog).pack(side=tk.RIGHT, padx=6)
+        # α/β 阿尔法贝塔按钮
+        tk.Button(top_bar, text="📐 α/β", bg="#1565C0", fg="white", font=("", 9, "bold"),
+                  padx=8, pady=0, cursor="hand2",
+                  command=self._open_alpha_beta_dialog).pack(side=tk.RIGHT, padx=6)
 
         # ============ 10日情绪分 + 涨跌幅趋势条 (紧凑 Canvas) ============
         trend_bar = tk.Frame(dapan_tab, bg="#ECEFF1", height=160)
