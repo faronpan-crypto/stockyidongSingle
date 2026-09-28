@@ -80919,6 +80919,9 @@ class StockKeywordAnalyzerGUI:
         # ═══════════════════════════════════════════════════════════
         # Tab 5: 🪨 周期
         # ═══════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════
+        # Tab 5: 🪨 周期 (含2/5年切换 + hover)
+        # ═══════════════════════════════════════════════════════════
         t5 = ttk.Frame(nb); nb.add(t5, text="🪨 周期")
         cyc_top = ttk.Frame(t5); cyc_top.pack(fill=tk.X, padx=4, pady=4)
         CYCLICAL_ETFS = [
@@ -80927,7 +80930,12 @@ class StockKeywordAnalyzerGUI:
             ("sz159980","有色ETF"),("sh515180","红利低波"),
             ("sh516160","新能源ETF"),("sh515790","光伏ETF"),
         ]
-        cyc_btns_frame = ttk.Frame(cyc_top); cyc_btns_frame.pack(side=tk.LEFT)
+        cyc_per_var = tk.StringVar(value="2年")
+        ttk.Label(cyc_top, text="周期:").pack(side=tk.LEFT, padx=(0,2))
+        for _lbl,_days in [("2年",500),("5年",1200)]:
+            ttk.Radiobutton(cyc_top, text=_lbl, variable=cyc_per_var, value=_lbl,
+                command=lambda: _load_cyc()).pack(side=tk.LEFT, padx=2)
+        cyc_btns_frame = ttk.Frame(cyc_top); cyc_btns_frame.pack(side=tk.LEFT, padx=(10,0))
         _cyc_sel = {n: True for _,n in CYCLICAL_ETFS[:5]}
         def _toggle_cyc(n):
             _cyc_sel[n] = not _cyc_sel[n]; _load_cyc()
@@ -80938,43 +80946,75 @@ class StockKeywordAnalyzerGUI:
         cyc_fig_frame = ttk.Frame(t5); cyc_fig_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
         cyc_text = tk.Text(t5, height=10, bg="#252535", fg="#DDD", font=("Helvetica", 10), wrap=tk.WORD)
         cyc_text.pack(fill=tk.X, padx=4, pady=(2,4))
+        cyc_colors = ["#EF5350","#FF9800","#66BB6A","#42A5F5","#AB47BC","#FFD700","#26C6DA","#EC407A"]
+        cyc_data_cache = {}  # sym -> (dates, norm_list, closes_list, name)
 
         def _load_cyc():
             import matplotlib; matplotlib.use('TkAgg')
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            from matplotlib.dates import AutoDateLocator, DateFormatter
+            from datetime import datetime as _dt3
             sel = [(s,n) for s,n in CYCLICAL_ETFS if _cyc_sel.get(n, False)]
             if not sel:
-                for w in cyc_fig_frame.winfo_children(): w.destroy()
-                cyc_text.config(state=tk.NORMAL); cyc_text.delete("1.0", tk.END)
-                cyc_text.insert("1.0", "请至少选一个周期ETF"); cyc_text.config(state=tk.DISABLED); return
-            colors = ["#EF5350","#FF9800","#66BB6A","#42A5F5","#AB47BC","#FFD700","#26C6DA","#EC407A"]
-            fig = Figure(figsize=(10,4), dpi=100, facecolor="#1E1E2E")
+                for w in cyc_fig_frame.winfo_children(): w.destroy(); return
+            period_days = {"2年":500,"5年":1200}.get(cyc_per_var.get(), 500)
+            fig = Figure(figsize=(11,4.2), dpi=100, facecolor="#1E1E2E")
             ax = fig.add_subplot(111, facecolor="#1E1E2E")
             phase_summary = []
+            _hover_data = []  # [(dates, closes, norm, name, color)]
             for idx,(sym,name) in enumerate(sel):
                 try:
                     r = _r.get('https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData',
-                        params={'symbol':sym,'scale':'240','ma':'no','datalen':300}, timeout=3,
+                        params={'symbol':sym,'scale':'240','ma':'no','datalen':period_days}, timeout=3,
                         headers={'User-Agent':'Mozilla/5.0'})
                     kl = _j.loads(r.text) if r.status_code==200 else []
                     closes = [float(k['close']) for k in kl]
-                    # 归一化 (起点=100)
-                    base = closes[0] if closes else 1
-                    norm = [c/base*100 for c in closes]
-                    ax.plot(norm, color=colors[idx%len(colors)], linewidth=1.3, label=name)
-                    # 判断周期阶段
+                    if not closes: continue
+                    dates = [_dt3.strptime(k['day'],"%Y-%m-%d") for k in kl]
+                    base = closes[0]; norm = [c/base*100 for c in closes]
+                    _c = cyc_colors[idx%len(cyc_colors)]
+                    ax.plot(dates, norm, color=_c, linewidth=1.3, label=name)
+                    _hover_data.append((dates, norm, closes, name, _c))
                     if len(closes)>=20:
-                        ma20 = sum(closes[-20:])/20
-                        diff = (closes[-1]-ma20)/ma20
+                        ma20 = sum(closes[-20:])/20; diff = (closes[-1]-ma20)/ma20
                         phase = "🚀上" if diff>0.015 else ("💥下" if diff<-0.015 else "📉震")
                         phase_summary.append(f"{name}:{phase}")
                 except: pass
-            ax.tick_params(colors="#AAA"); ax.spines[:].set_color("#555")
+            ax.text(0.99, 0.97, f"📅 {cyc_per_var.get()}", transform=ax.transAxes,
+                    fontsize=11, color="#FFD700", ha="right", va="top",
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="#3A3A4E", edgecolor="#FFD700", alpha=0.8))
+            ax.tick_params(colors="#AAA", labelsize=8); ax.spines[:].set_color("#555")
+            _loc = AutoDateLocator(minticks=6, maxticks=12); _fmt = DateFormatter("%Y-%m")
+            ax.xaxis.set_major_locator(_loc); ax.xaxis.set_major_formatter(_fmt)
+            fig.autofmt_xdate(rotation=30)
             ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555", labelcolor="#DDD")
-            ax.set_title("🪨 周期ETF 归一化走势 (近300天)", color="#FFD700", fontsize=10)
+            ax.set_title(f"🪨 周期ETF 归一化走势  ({cyc_per_var.get()})", color="#FFD700", fontsize=11, pad=8)
             for w in cyc_fig_frame.winfo_children(): w.destroy()
             canvas = FigureCanvasTkAgg(fig, master=cyc_fig_frame); canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            # 🎯 hover
+            _hl = None
+            def _hm(event):
+                nonlocal _hl
+                if event.inaxes != ax:
+                    if _hl: _hl.remove(); _hl = None; canvas.draw(); return
+                    return
+                try:
+                    from bisect import bisect_left
+                    _tips = []
+                    for _ds, _nm, _cp, _nm2, _col in _hover_data:
+                        _dts = [d.toordinal() for d in _ds]
+                        _pos = bisect_left(_dts, int(event.xdata))
+                        _pos = max(0, min(len(_nm)-1, _pos))
+                        _tips.append(f"{_nm2}: {_cp[_pos]:.3f} | 归一 {_nm[_pos]:.1f}")
+                    if _hl: _hl.remove()
+                    _hl = ax.annotate(f"{_ds[_pos].strftime('%Y-%m-%d')}\n" + "\n".join(_tips),
+                        xy=(event.xdata, event.ydata), xytext=(10, -40), textcoords="offset points",
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="#252535", edgecolor="#FFD700", alpha=0.95),
+                        color="#FFD700", fontsize=8, ha="left")
+                    canvas.draw_idle()
+                except: pass
+            canvas.mpl_connect('motion_notify_event', _hm)
             cyc_text.config(state=tk.NORMAL); cyc_text.delete("1.0", tk.END)
             cyc_text.insert("1.0", f"""🪨 周期ETF当前阶段: {' | '.join(phase_summary) if phase_summary else '无数据'}
 
@@ -80990,10 +81030,13 @@ class StockKeywordAnalyzerGUI:
 
 当前阶段: {'🚀上行期 - 可持有' if any('🚀上' in p for p in phase_summary) else ('💥下行期 - 谨慎' if any('💥下' in p for p in phase_summary) else '📉震荡期 - 观望')}""")
             cyc_text.config(state=tk.DISABLED)
-        _load_cyc()
+
 
         # ═══════════════════════════════════════════════════════════
         # Tab 6: 🌱 成长
+        # ═══════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════
+        # Tab 6: 🌱 成长 (含2/5年切换 + hover)
         # ═══════════════════════════════════════════════════════════
         t6 = ttk.Frame(nb); nb.add(t6, text="🌱 成长")
         gro_top = ttk.Frame(t6); gro_top.pack(fill=tk.X, padx=4, pady=4)
@@ -81003,7 +81046,12 @@ class StockKeywordAnalyzerGUI:
             ("sh516160","新能车ETF"),("sh512660","军工ETF"),
             ("sh515790","光伏ETF"),("sz159995","芯片ETF"),
         ]
-        gro_btns_frame = ttk.Frame(gro_top); gro_btns_frame.pack(side=tk.LEFT)
+        gro_per_var = tk.StringVar(value="2年")
+        ttk.Label(gro_top, text="周期:").pack(side=tk.LEFT, padx=(0,2))
+        for _lbl,_days in [("2年",500),("5年",1200)]:
+            ttk.Radiobutton(gro_top, text=_lbl, variable=gro_per_var, value=_lbl,
+                command=lambda: _load_gro()).pack(side=tk.LEFT, padx=2)
+        gro_btns_frame = ttk.Frame(gro_top); gro_btns_frame.pack(side=tk.LEFT, padx=(10,0))
         _gro_sel = {n: True for _,n in GROWTH_ETFS[:5]}
         def _toggle_gro(n):
             _gro_sel[n] = not _gro_sel[n]; _load_gro()
@@ -81014,37 +81062,73 @@ class StockKeywordAnalyzerGUI:
         gro_fig_frame = ttk.Frame(t6); gro_fig_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
         gro_text = tk.Text(t6, height=10, bg="#252535", fg="#DDD", font=("Helvetica", 10), wrap=tk.WORD)
         gro_text.pack(fill=tk.X, padx=4, pady=(2,4))
+        gro_colors = ["#EF5350","#FF9800","#66BB6A","#42A5F5","#AB47BC","#FFD700","#26C6DA","#EC407A"]
 
         def _load_gro():
             import matplotlib; matplotlib.use('TkAgg')
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            from matplotlib.dates import AutoDateLocator, DateFormatter
+            from datetime import datetime as _dt4
             sel = [(s,n) for s,n in GROWTH_ETFS if _gro_sel.get(n, False)]
             if not sel: return
-            colors = ["#EF5350","#FF9800","#66BB6A","#42A5F5","#AB47BC","#FFD700","#26C6DA","#EC407A"]
-            fig = Figure(figsize=(10,4), dpi=100, facecolor="#1E1E2E")
+            period_days = {"2年":500,"5年":1200}.get(gro_per_var.get(), 500)
+            fig = Figure(figsize=(11,4.2), dpi=100, facecolor="#1E1E2E")
             ax = fig.add_subplot(111, facecolor="#1E1E2E")
             phase_summary = []
+            _hover_data = []
             for idx,(sym,name) in enumerate(sel):
                 try:
                     r = _r.get('https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData',
-                        params={'symbol':sym,'scale':'240','ma':'no','datalen':300}, timeout=3,
+                        params={'symbol':sym,'scale':'240','ma':'no','datalen':period_days}, timeout=3,
                         headers={'User-Agent':'Mozilla/5.0'})
                     kl = _j.loads(r.text) if r.status_code==200 else []
                     closes = [float(k['close']) for k in kl]
-                    base = closes[0] if closes else 1
-                    norm = [c/base*100 for c in closes]
-                    ax.plot(norm, color=colors[idx%len(colors)], linewidth=1.3, label=name)
+                    if not closes: continue
+                    dates = [_dt4.strptime(k['day'],"%Y-%m-%d") for k in kl]
+                    base = closes[0]; norm = [c/base*100 for c in closes]
+                    _c = gro_colors[idx%len(gro_colors)]
+                    ax.plot(dates, norm, color=_c, linewidth=1.3, label=name)
+                    _hover_data.append((dates, norm, closes, name, _c))
                     if len(closes)>=20:
                         ma20 = sum(closes[-20:])/20; diff = (closes[-1]-ma20)/ma20
                         phase = "🚀上" if diff>0.015 else ("💥下" if diff<-0.015 else "📉震")
                         phase_summary.append(f"{name}:{phase}")
                 except: pass
-            ax.tick_params(colors="#AAA"); ax.spines[:].set_color("#555")
+            ax.text(0.99, 0.97, f"📅 {gro_per_var.get()}", transform=ax.transAxes,
+                    fontsize=11, color="#FFD700", ha="right", va="top",
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="#3A3A4E", edgecolor="#FFD700", alpha=0.8))
+            ax.tick_params(colors="#AAA", labelsize=8); ax.spines[:].set_color("#555")
+            _loc = AutoDateLocator(minticks=6, maxticks=12); _fmt = DateFormatter("%Y-%m")
+            ax.xaxis.set_major_locator(_loc); ax.xaxis.set_major_formatter(_fmt)
+            fig.autofmt_xdate(rotation=30)
             ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555", labelcolor="#DDD")
-            ax.set_title("🌱 成长ETF 归一化走势 (近300天)", color="#FFD700", fontsize=10)
+            ax.set_title(f"🌱 成长ETF 归一化走势  ({gro_per_var.get()})", color="#FFD700", fontsize=11, pad=8)
             for w in gro_fig_frame.winfo_children(): w.destroy()
             canvas = FigureCanvasTkAgg(fig, master=gro_fig_frame); canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            # 🎯 hover
+            _hl = None
+            def _hm(event):
+                nonlocal _hl
+                if event.inaxes != ax:
+                    if _hl: _hl.remove(); _hl = None; canvas.draw(); return
+                    return
+                try:
+                    from bisect import bisect_left
+                    _tips = []
+                    for _ds, _nm, _cp, _nm2, _col in _hover_data:
+                        _dts = [d.toordinal() for d in _ds]
+                        _pos = bisect_left(_dts, int(event.xdata))
+                        _pos = max(0, min(len(_nm)-1, _pos))
+                        _tips.append(f"{_nm2}: {_cp[_pos]:.3f} | 归一 {_nm[_pos]:.1f}")
+                    if _hl: _hl.remove()
+                    _hl = ax.annotate(f"{_ds[_pos].strftime('%Y-%m-%d')}\n" + "\n".join(_tips),
+                        xy=(event.xdata, event.ydata), xytext=(10, -40), textcoords="offset points",
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="#252535", edgecolor="#FFD700", alpha=0.95),
+                        color="#FFD700", fontsize=8, ha="left")
+                    canvas.draw_idle()
+                except: pass
+            canvas.mpl_connect('motion_notify_event', _hm)
             gro_text.config(state=tk.NORMAL); gro_text.delete("1.0", tk.END)
             gro_text.insert("1.0", f"""🌱 成长ETF当前阶段: {' | '.join(phase_summary) if phase_summary else '无数据'}
 
@@ -81065,7 +81149,7 @@ class StockKeywordAnalyzerGUI:
 
 当前阶段: {'🚀上行期 - 可重点配置' if any('🚀上' in p for p in phase_summary) else ('💥下行期 - 严控仓位' if any('💥下' in p for p in phase_summary) else '📉震荡期 - 精选个股')}""")
             gro_text.config(state=tk.DISABLED)
-        _load_gro()
+
 
         # 默认加载
         win.after(300, _load)
