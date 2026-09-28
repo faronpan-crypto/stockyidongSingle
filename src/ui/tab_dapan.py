@@ -14489,6 +14489,253 @@ class DapanMixin:
             suggest_text.config(state=tk.DISABLED)
             nb.select(2)  # 跳到建议 Tab
 
+
+        # ═══════════════════════════════════════════════════════════
+        # Tab 4: 📊 估值
+        # ═══════════════════════════════════════════════════════════
+        t4 = ttk.Frame(nb); nb.add(t4, text="📊 估值")
+        val_top = ttk.Frame(t4); val_top.pack(fill=tk.X, padx=4, pady=4)
+        VAL_INDICES = [("sh000001","上证指数"),("sz399001","深证成指"),
+                       ("sz399006","创业板指"),("sh000688","科创50"),
+                       ("sh000300","沪深300"),("sh000905","中证500")]
+        val_name_var = tk.StringVar(value="上证指数")
+        val_sym_var = tk.StringVar(value="sh000001")
+        val_per_var = tk.StringVar(value="2年")
+        ttk.Label(val_top, text="指数:").pack(side=tk.LEFT, padx=(0,2))
+        val_cb = ttk.Combobox(val_top, values=[n for _,n in VAL_INDICES], width=12, state="readonly")
+        val_cb.set("上证指数"); val_cb.pack(side=tk.LEFT, padx=2)
+        ttk.Label(val_top, text=" 周期:").pack(side=tk.LEFT, padx=(0,2))
+        for _lbl,_days in [("2年",500),("5年",1200),("10年",2400)]:
+            ttk.Radiobutton(val_top, text=_lbl, variable=val_per_var, value=_lbl).pack(side=tk.LEFT, padx=2)
+        val_fig_frame = ttk.Frame(t4); val_fig_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
+        val_text = tk.Text(t4, height=10, bg="#252535", fg="#DDD", font=("Helvetica", 10), wrap=tk.WORD)
+        val_text.pack(fill=tk.X, padx=4, pady=(2,4))
+        val_text.insert("1.0", "⏳ 加载估值数据..."); val_text.config(state=tk.DISABLED)
+
+        def _load_val():
+            import matplotlib; matplotlib.use('TkAgg')
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            sym = dict(VAL_INDICES).get(val_name_var.get(), "sh000001")
+            period_days = {"2年":500,"5年":1200,"10年":2400}.get(val_per_var.get(), 500)
+            try:
+                r = _r.get('https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData',
+                    params={'symbol':sym,'scale':'240','ma':'no','datalen':period_days}, timeout=4,
+                    headers={'User-Agent':'Mozilla/5.0'})
+                kl = _j.loads(r.text) if r.status_code==200 else []
+                if not kl: raise Exception("无数据")
+                closes = [float(k['close']) for k in kl]
+                dates = [k['day'] for k in kl]
+                # MA200
+                ma200 = [sum(closes[max(0,i-199):i+1])/min(200,i+1) for i in range(len(closes))]
+                # 当前分位数
+                cur = closes[-1]
+                sorted_c = sorted(closes)
+                pct = sorted_c.index(cur)/len(sorted_c)*100
+                # 画
+                for w in val_fig_frame.winfo_children(): w.destroy()
+                fig = Figure(figsize=(10,4), dpi=100, facecolor="#1E1E2E")
+                ax = fig.add_subplot(111, facecolor="#1E1E2E")
+                xs = list(range(len(closes)))
+                ax.plot(xs, closes, color="#42A5F5", linewidth=1.2, label="收盘价")
+                ax.plot(xs, ma200, color="#FFD700", linewidth=1.0, label="MA200")
+                ax.axhline(sorted_c[int(len(sorted_c)*0.3)], color="#66BB6A", linestyle="--", alpha=0.6, label="30%分位(低估)")
+                ax.axhline(sorted_c[int(len(sorted_c)*0.7)], color="#EF5350", linestyle="--", alpha=0.6, label="70%分位(高估)")
+                ax.fill_between(xs, sorted_c[int(len(sorted_c)*0.3)], sorted_c[int(len(sorted_c)*0.7)], alpha=0.08, color="#FFD54F")
+                ax.tick_params(colors="#AAA"); ax.spines[:].set_color("#555")
+                ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555", labelcolor="#DDD")
+                ax.set_title(f"{val_name_var.get()} 估值 ({val_per_var.get()})  分位数 {pct:.1f}% {'🟢低估' if pct<30 else '🔴高估' if pct>70 else '🟡合理'}",
+                             color="#FFD700", fontsize=10)
+                step = max(1, len(dates)//8)
+                ax.set_xticks(xs[::step]); ax.set_xticklabels([dates[i][5:] for i in xs[::step]], rotation=30, fontsize=7)
+                canvas = FigureCanvasTkAgg(fig, master=val_fig_frame); canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                # 下方说明
+                val_text.config(state=tk.NORMAL); val_text.delete("1.0", tk.END)
+                advice = "🟢低估区 → 可逐步建仓 (长期配置好时机)" if pct<30 else ("🔴高估区 → 警惕回调, 考虑止盈" if pct>70 else "🟡合理区 → 正常持有, 不追涨不割肉")
+                val_text.insert("1.0", f"""📊 {val_name_var.get()} 估值分析 ({val_per_var.get()})
+
+  当前收盘: {cur:.2f}
+  {val_per_var.get()}分位数: {pct:.1f}% ({'低估' if pct<30 else '高估' if pct>70 else '合理'})
+  MA200: {ma200[-1]:.2f} | 偏离: {(cur-ma200[-1])/ma200[-1]*100:+.2f}%
+  30%分位(低估线): {sorted_c[int(len(sorted_c)*0.3)]:.2f}
+  70%分位(高估线): {sorted_c[int(len(sorted_c)*0.7)]:.2f}
+
+💡 交易准则:
+  1. 分位数 < 30% (低估区): 逆向思维好机会, 分批买入宽基定投
+  2. 分位数 > 70% (高估区): 警惕均值回归, 逐步止盈或转防御
+  3. 30%-70% (合理区): 正常持有, 跟随趋势, 不追涨不割肉
+  4. 估值分位数是长期指标, 配合情绪周期做择时: 低估区+冰点=黄金坑
+
+💰 历史验证:
+  2018年底上证分位数<20% → 后续涨50%+
+  2021年初沪深300分位数>85% → 后续跌30%
+  2024年9月上证分位数<25% → 后来一波牛市
+{advice}""")
+                val_text.config(state=tk.DISABLED)
+            except Exception as e:
+                for w in val_fig_frame.winfo_children(): w.destroy()
+                val_text.config(state=tk.NORMAL); val_text.delete("1.0", tk.END)
+                val_text.insert("1.0", f"❌ 加载失败: {e}"); val_text.config(state=tk.DISABLED)
+
+        def _on_val_cb(e):
+            val_sym_var.set(dict(VAL_INDICES).get(val_cb.get(), "sh000001"))
+            _load_val()
+        val_cb.bind("<<ComboboxSelected>>", _on_val_cb)
+        for _w in val_top.winfo_children():
+            _w.bind("<Button-1>", lambda e: _load_val() if e.widget != val_cb else None)
+        _load_val()
+
+        # ═══════════════════════════════════════════════════════════
+        # Tab 5: 🪨 周期
+        # ═══════════════════════════════════════════════════════════
+        t5 = ttk.Frame(nb); nb.add(t5, text="🪨 周期")
+        cyc_top = ttk.Frame(t5); cyc_top.pack(fill=tk.X, padx=4, pady=4)
+        CYCLICAL_ETFS = [
+            ("sh512400","有色金属ETF"),("sh513520","资源ETF"),
+            ("sh515220","煤炭ETF"),("sh512800","钢铁ETF"),
+            ("sz159980","有色ETF"),("sh515180","红利低波"),
+            ("sh516160","新能源ETF"),("sh515790","光伏ETF"),
+        ]
+        cyc_btns_frame = ttk.Frame(cyc_top); cyc_btns_frame.pack(side=tk.LEFT)
+        _cyc_sel = {n: True for _,n in CYCLICAL_ETFS[:5]}
+        def _toggle_cyc(n):
+            _cyc_sel[n] = not _cyc_sel[n]; _load_cyc()
+        for _,n in CYCLICAL_ETFS[:5]:
+            b = ttk.Checkbutton(cyc_btns_frame, text=n, variable=tk.BooleanVar(value=True),
+                                command=lambda x=n: _toggle_cyc(x))
+            b.pack(side=tk.LEFT, padx=3)
+        cyc_fig_frame = ttk.Frame(t5); cyc_fig_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
+        cyc_text = tk.Text(t5, height=10, bg="#252535", fg="#DDD", font=("Helvetica", 10), wrap=tk.WORD)
+        cyc_text.pack(fill=tk.X, padx=4, pady=(2,4))
+
+        def _load_cyc():
+            import matplotlib; matplotlib.use('TkAgg')
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            sel = [(s,n) for s,n in CYCLICAL_ETFS if _cyc_sel.get(n, False)]
+            if not sel:
+                for w in cyc_fig_frame.winfo_children(): w.destroy()
+                cyc_text.config(state=tk.NORMAL); cyc_text.delete("1.0", tk.END)
+                cyc_text.insert("1.0", "请至少选一个周期ETF"); cyc_text.config(state=tk.DISABLED); return
+            colors = ["#EF5350","#FF9800","#66BB6A","#42A5F5","#AB47BC","#FFD700","#26C6DA","#EC407A"]
+            fig = Figure(figsize=(10,4), dpi=100, facecolor="#1E1E2E")
+            ax = fig.add_subplot(111, facecolor="#1E1E2E")
+            phase_summary = []
+            for idx,(sym,name) in enumerate(sel):
+                try:
+                    r = _r.get('https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData',
+                        params={'symbol':sym,'scale':'240','ma':'no','datalen':300}, timeout=3,
+                        headers={'User-Agent':'Mozilla/5.0'})
+                    kl = _j.loads(r.text) if r.status_code==200 else []
+                    closes = [float(k['close']) for k in kl]
+                    # 归一化 (起点=100)
+                    base = closes[0] if closes else 1
+                    norm = [c/base*100 for c in closes]
+                    ax.plot(norm, color=colors[idx%len(colors)], linewidth=1.3, label=name)
+                    # 判断周期阶段
+                    if len(closes)>=20:
+                        ma20 = sum(closes[-20:])/20
+                        diff = (closes[-1]-ma20)/ma20
+                        phase = "🚀上" if diff>0.015 else ("💥下" if diff<-0.015 else "📉震")
+                        phase_summary.append(f"{name}:{phase}")
+                except: pass
+            ax.tick_params(colors="#AAA"); ax.spines[:].set_color("#555")
+            ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555", labelcolor="#DDD")
+            ax.set_title("🪨 周期ETF 归一化走势 (近300天)", color="#FFD700", fontsize=10)
+            for w in cyc_fig_frame.winfo_children(): w.destroy()
+            canvas = FigureCanvasTkAgg(fig, master=cyc_fig_frame); canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            cyc_text.config(state=tk.NORMAL); cyc_text.delete("1.0", tk.END)
+            cyc_text.insert("1.0", f"""🪨 周期ETF当前阶段: {' | '.join(phase_summary) if phase_summary else '无数据'}
+
+💡 周期股交易准则:
+  1. 周期股 = 跟着经济周期走: 复苏→繁荣→衰退→萧条
+  2. 领先指标: PMI / 工业增加值 / CRB商品指数 / 美元指数
+  3. 周期底部特征: 行业普遍亏损 + PE最低 + 换手率最低 → 🧊冰点
+  4. 周期顶部特征: PE最高 + 分析师最乐观 + 产能扩张 → 🔥高潮
+  5. 操作: 底部埋伏(🧊冰点买入) → 中间持有(🌱发酵) → 顶部卖出(🔥高潮)
+
+⚠️ 周期股大忌: 追高! 周期顶部后跌50%是常态
+📌 节奏: 3-4年一轮, 大部分时间应该空仓等下一个冰点
+
+当前阶段: {'🚀上行期 - 可持有' if any('🚀上' in p for p in phase_summary) else ('💥下行期 - 谨慎' if any('💥下' in p for p in phase_summary) else '📉震荡期 - 观望')}""")
+            cyc_text.config(state=tk.DISABLED)
+        _load_cyc()
+
+        # ═══════════════════════════════════════════════════════════
+        # Tab 6: 🌱 成长
+        # ═══════════════════════════════════════════════════════════
+        t6 = ttk.Frame(nb); nb.add(t6, text="🌱 成长")
+        gro_top = ttk.Frame(t6); gro_top.pack(fill=tk.X, padx=4, pady=4)
+        GROWTH_ETFS = [
+            ("sz159915","创业板ETF"),("sh588000","科创50ETF"),
+            ("sh512760","半导体ETF"),("sh515030","新能源ETF"),
+            ("sh516160","新能车ETF"),("sh512660","军工ETF"),
+            ("sh515790","光伏ETF"),("sz159995","芯片ETF"),
+        ]
+        gro_btns_frame = ttk.Frame(gro_top); gro_btns_frame.pack(side=tk.LEFT)
+        _gro_sel = {n: True for _,n in GROWTH_ETFS[:5]}
+        def _toggle_gro(n):
+            _gro_sel[n] = not _gro_sel[n]; _load_gro()
+        for _,n in GROWTH_ETFS[:5]:
+            b = ttk.Checkbutton(gro_btns_frame, text=n, variable=tk.BooleanVar(value=True),
+                                command=lambda x=n: _toggle_gro(x))
+            b.pack(side=tk.LEFT, padx=3)
+        gro_fig_frame = ttk.Frame(t6); gro_fig_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
+        gro_text = tk.Text(t6, height=10, bg="#252535", fg="#DDD", font=("Helvetica", 10), wrap=tk.WORD)
+        gro_text.pack(fill=tk.X, padx=4, pady=(2,4))
+
+        def _load_gro():
+            import matplotlib; matplotlib.use('TkAgg')
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            sel = [(s,n) for s,n in GROWTH_ETFS if _gro_sel.get(n, False)]
+            if not sel: return
+            colors = ["#EF5350","#FF9800","#66BB6A","#42A5F5","#AB47BC","#FFD700","#26C6DA","#EC407A"]
+            fig = Figure(figsize=(10,4), dpi=100, facecolor="#1E1E2E")
+            ax = fig.add_subplot(111, facecolor="#1E1E2E")
+            phase_summary = []
+            for idx,(sym,name) in enumerate(sel):
+                try:
+                    r = _r.get('https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData',
+                        params={'symbol':sym,'scale':'240','ma':'no','datalen':300}, timeout=3,
+                        headers={'User-Agent':'Mozilla/5.0'})
+                    kl = _j.loads(r.text) if r.status_code==200 else []
+                    closes = [float(k['close']) for k in kl]
+                    base = closes[0] if closes else 1
+                    norm = [c/base*100 for c in closes]
+                    ax.plot(norm, color=colors[idx%len(colors)], linewidth=1.3, label=name)
+                    if len(closes)>=20:
+                        ma20 = sum(closes[-20:])/20; diff = (closes[-1]-ma20)/ma20
+                        phase = "🚀上" if diff>0.015 else ("💥下" if diff<-0.015 else "📉震")
+                        phase_summary.append(f"{name}:{phase}")
+                except: pass
+            ax.tick_params(colors="#AAA"); ax.spines[:].set_color("#555")
+            ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555", labelcolor="#DDD")
+            ax.set_title("🌱 成长ETF 归一化走势 (近300天)", color="#FFD700", fontsize=10)
+            for w in gro_fig_frame.winfo_children(): w.destroy()
+            canvas = FigureCanvasTkAgg(fig, master=gro_fig_frame); canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            gro_text.config(state=tk.NORMAL); gro_text.delete("1.0", tk.END)
+            gro_text.insert("1.0", f"""🌱 成长ETF当前阶段: {' | '.join(phase_summary) if phase_summary else '无数据'}
+
+💡 成长股交易准则:
+  1. 成长股 = 高PE高增长: 赚业绩增长的钱, 不是赚估值的钱
+  2. 核心指标: 营收增速 / 利润增速 / ROE / 毛利率变化
+  3. 成长顶部信号: 增速放缓 + PE仍高 → 戴维斯双杀风险
+  4. 成长底部信号: 增速触底回升 + 估值杀到底 → 🚀启动好机会
+  5. 操作: 🌱发酵阶段是最佳持有期 (增速+估值双升)
+
+📊 风格切换规律:
+  牛市中后期: 成长 > 价值 (资金追逐高弹性)
+  熊市/震荡市: 价值 > 成长 (确定性溢价)
+  复苏初期: 周期 > 成长 (先复苏后成长)
+
+⚠️ 成长股大忌: 估值泡沫期追高! 戴维斯双杀跌30-50%很正常
+📌 节奏: 成长股往往3年一轮 (萌芽→爆发→泡沫→沉寂)
+
+当前阶段: {'🚀上行期 - 可重点配置' if any('🚀上' in p for p in phase_summary) else ('💥下行期 - 严控仓位' if any('💥下' in p for p in phase_summary) else '📉震荡期 - 精选个股')}""")
+            gro_text.config(state=tk.DISABLED)
+        _load_gro()
+
         # 默认加载
         win.after(300, _load)
 
