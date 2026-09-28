@@ -80795,7 +80795,8 @@ class StockKeywordAnalyzerGUI:
         val_sym_var = tk.StringVar(value="sh000001")
         val_per_var = tk.StringVar(value="2年")
         ttk.Label(val_top, text="指数:").pack(side=tk.LEFT, padx=(0,2))
-        val_cb = ttk.Combobox(val_top, values=[n for _,n in VAL_INDICES], width=12, state="readonly")
+        val_cb = ttk.Combobox(val_top, values=[n for _,n in VAL_INDICES], width=12, state="readonly",
+                              textvariable=val_name_var)
         val_cb.set("上证指数"); val_cb.pack(side=tk.LEFT, padx=2)
         ttk.Label(val_top, text=" 周期:").pack(side=tk.LEFT, padx=(0,2))
         for _lbl,_days in [("2年",500),("5年",1200),("10年",2400)]:
@@ -80810,7 +80811,7 @@ class StockKeywordAnalyzerGUI:
             import matplotlib; matplotlib.use('TkAgg')
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-            sym = dict(VAL_INDICES).get(val_name_var.get(), "sh000001")
+            sym = {name: sym for sym, name in VAL_INDICES}.get(val_name_var.get(), "sh000001")
             period_days = {"2年":500,"5年":1200,"10年":2400}.get(val_per_var.get(), 500)
             try:
                 r = _r.get('https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData',
@@ -80909,7 +80910,8 @@ class StockKeywordAnalyzerGUI:
                 val_text.insert("1.0", f"❌ 加载失败: {e}"); val_text.config(state=tk.DISABLED)
 
         def _on_val_cb(e):
-            val_sym_var.set(dict(VAL_INDICES).get(val_cb.get(), "sh000001"))
+            val_name_var.set(val_cb.get())
+            val_sym_var.set({name: sym for sym, name in VAL_INDICES}.get(val_cb.get(), "sh000001"))
             _load_val()
         val_cb.bind("<<ComboboxSelected>>", _on_val_cb)
         for _w in val_top.winfo_children():
