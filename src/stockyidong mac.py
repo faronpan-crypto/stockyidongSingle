@@ -80286,48 +80286,26 @@ class StockKeywordAnalyzerGUI:
             ("军工ETF",    "sh512660", "🛡️ 红利防御", False),
         ]
 
-        def _judge_day(closes_arr, idx, opens_arr=None):
-            """六阶段情绪周期 v3 - 加入当日大阳线实体判断 (MA20太滞后)"""
-            if idx < 1: return ("📉", "震荡", "#B0BEC5")
-            _d = closes_arr[idx]; _prev = closes_arr[idx-1]
+        def _judge_day(closes_arr, idx):
+            """淘股吧六阶段情绪周期 (原版: MA20偏离 + 斜率 + 累计涨幅)"""
+            _d = closes_arr[idx]
             _m20 = sum(closes_arr[max(0,idx-19):idx+1]) / min(20, idx+1)
-            _df = (_d - _m20) / _m20
-            # 当日实体涨跌 (优先用 opens 数组, 否则用收盘价变化)
-            if opens_arr and idx < len(opens_arr):
-                _body = (_d - opens_arr[idx]) / opens_arr[idx]
-            else:
-                _body = (_d - _prev) / _prev
-            # 近3天大阳/大阴计数
-            _big_up3 = sum(1 for k in range(max(1,idx-2), idx+1)
-                           if (closes_arr[k] - closes_arr[k-1]) / closes_arr[k-1] > 0.02)
-            _big_dn3 = sum(1 for k in range(max(1,idx-2), idx+1)
-                           if (closes_arr[k] - closes_arr[k-1]) / closes_arr[k-1] < -0.02)
-            # 当日连涨天数 (从最近一根大阴后算)
-            _streak_up = 0
-            for k in range(idx, max(-1, idx-10), -1):
-                if k > 0 and (closes_arr[k] - closes_arr[k-1]) / closes_arr[k-1] > -0.01:
-                    if (closes_arr[k] - closes_arr[k-1]) / closes_arr[k-1] > 0: _streak_up += 1
-                else: break
             if idx >= 10:
                 _slp = (sum(closes_arr[idx-4:idx+1])/5 - sum(closes_arr[idx-9:idx-4])/5) / (sum(closes_arr[idx-9:idx-4])/5)
             else: _slp = 0
-            # ── 核心判断: 大阳线优先 (比 MA20 敏感) ──
-            # 🔥 高潮: 当天大阳 + 连涨5天以上 + MA20偏离大
-            if _body > 0.03 and _streak_up >= 5 and _df > 0.03: return ("🔥", "高潮", "#EF5350")
-            # 🧊 冰点: 连续大阴
-            if _big_dn3 >= 2 and _df < -0.03: return ("🧊", "冰点", "#455A64")
-            # 🚀 启动: 当天大阳 (不管MA20! 爆发初期信号)
-            if _body > 0.02: return ("🚀", "启动", "#2196F3")
-            # 💥 退潮: 当天大阴
-            if _body < -0.02: return ("💥", "退潮", "#4CAF50")
-            # 🌱 发酵: MA20上方 + 斜率向上 + 连涨
-            if _df > 0.01 and _slp > 0.002 and _streak_up >= 3: return ("🌱", "发酵", "#FF9800")
-            # 💥 退潮 (MA20下方+斜率向下, 小阴小阳)
-            if _df < -0.01 and _slp < -0.002: return ("💥", "退潮", "#4CAF50")
-            # 🧊 冰点 (MA20严重偏离)
+            _df = (_d - _m20) / _m20
+            _c5 = (_d - closes_arr[idx-5]) / closes_arr[idx-5] if idx >= 5 else 0
+            _c10 = (_d - closes_arr[idx-10]) / closes_arr[idx-10] if idx >= 10 else 0
+            if _df < -0.04 and _slp < -0.01: return ("🧊", "冰点", "#455A64")
+            if _df > 0.04 and _c5 > 0.03 and _slp > 0.01: return ("🔥", "高潮", "#EF5350")
+            if _df > 0.015 and _slp > 0.005 and _c10 > 0: return ("🌱", "发酵", "#FF9800")
+            if _df > -0.015 and _slp > 0.01 and _c5 > 0: return ("🚀", "启动", "#2196F3")
+            if _df < -0.015 and _slp < -0.005: return ("💥", "退潮", "#4CAF50")
             if _df < -0.04: return ("🧊", "冰点", "#455A64")
+            if abs(_df) <= 0.015 and abs(_slp) < 0.01: return ("📉", "震荡", "#B0BEC5")
+            if _slp > 0.01: return ("🚀", "启动", "#2196F3")
+            if _slp < -0.01: return ("💥", "退潮", "#4CAF50")
             return ("📉", "震荡", "#B0BEC5")
-
         def _fetch_heatmap(name, sym):
             """拉一只 ETF 最近 N_DAYS+25 天 K 线, 返回每天的情绪状态列表"""
             try:
@@ -80339,7 +80317,6 @@ class StockKeywordAnalyzerGUI:
                 kl = _j.loads(r.text)
                 if not kl or len(kl) < 40: return name, sym, None
                 closes = [float(k["close"]) for k in kl]
-                opens = [float(k["open"]) for k in kl]
                 n = len(closes)
                 results = []  # [(date_str, price, emoji, cycle, color)]
                 for i in range(n - _N_DAYS, n):
@@ -80357,7 +80334,7 @@ class StockKeywordAnalyzerGUI:
                         slope = (ma20 - old_ma20) / old_ma20
                     else:
                         slope = 0
-                    emoji, phase, color = _judge_day(closes, i, opens)
+                    emoji, phase, color = _judge_day(closes, i)
                     date_str = kl[i]["day"][-5:]
                     results.append((date_str, day_p, emoji, phase, color, ma20, ma60))
                 # 附加完整历史给趋势图用
