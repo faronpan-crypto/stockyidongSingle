@@ -4048,7 +4048,7 @@ class StockKeywordAnalyzerGUI:
         # ============ 🗺️ 大盘分析标签页 (重写版: 水温计+情绪地图+板块) ============
         dapan_tab = ttk.Frame(self.position_trading_notebook, padding=3)
         self.position_trading_notebook.add(dapan_tab, text="🗺️ 大盘分析")
-        self._dapan_hld_col = {"red": "#C62828", "yellow": "#F57F17", "green": "#2E7D32", "gray": "#BDBDBD"}
+        self._dapan_hld_col = {"red": "#EF5350", "yellow": "#FFD54F", "green": "#66BB6A", "gray": "#BDBDBD"}
 
         # ============ 顶部: 红绿灯 + 水温计 + 情绪周期 (一行) ============
         top_bar = tk.Frame(dapan_tab, bg="#1A237E"); top_bar.pack(fill=tk.X, pady=(0, 3))
@@ -4110,7 +4110,7 @@ class StockKeywordAnalyzerGUI:
                                           cursor="hand2", state="disabled",
                                           command=lambda: self._dapan_stop_event.set())
         self._dapan_stop_btn.pack(side=tk.RIGHT, padx=2)
-        tk.Button(top_bar, text="🔄", bg="#C62828", fg="white", font=("", 9, "bold"),
+        tk.Button(top_bar, text="🔄", bg="#EF5350", fg="white", font=("", 9, "bold"),
                   padx=6, pady=0, cursor="hand2",
                   command=lambda: self._bg_load_dapan()).pack(side=tk.RIGHT, padx=6)
         # 大跌大涨日历按钮
@@ -4139,10 +4139,10 @@ class StockKeywordAnalyzerGUI:
                                                   highlightthickness=0)
         self._dapan_emo_strip_canvas.pack(fill=tk.BOTH, expand=True)
         # 先画默认7阶段
-        _emo_stages_def = [("冰点", "#2E7D32"), ("启动", "#F57F17"),
-                           ("发酵", "#FF6F00"), ("高潮", "#C62828"),
+        _emo_stages_def = [("冰点", "#66BB6A"), ("启动", "#FFD54F"),
+                           ("发酵", "#FF6F00"), ("高潮", "#EF5350"),
                            ("分歧", "#6A1B9A"), ("退潮", "#455A64"),
-                           ("冰点", "#2E7D32")]
+                           ("冰点", "#66BB6A")]
         _seg_w = 90
         for _si, (_sn, _sc) in enumerate(_emo_stages_def):
             _x1 = _si * _seg_w + 2; _x2 = _x1 + _seg_w - 2
@@ -8737,8 +8737,8 @@ class StockKeywordAnalyzerGUI:
             self._crash_events_tree.heading(c, text=t)
             self._crash_events_tree.column(c, width=w, anchor="center")
         # 涨跌颜色 tag
-        self._crash_events_tree.tag_configure("crash", foreground="#2E7D32")   # 绿 = 暴跌
-        self._crash_events_tree.tag_configure("rally", foreground="#C62828")   # 红 = 暴涨
+        self._crash_events_tree.tag_configure("crash", foreground="#66BB6A")   # 绿 = 暴跌
+        self._crash_events_tree.tag_configure("rally", foreground="#EF5350")   # 红 = 暴涨
         self._crash_events_tree.pack(fill=tk.BOTH, expand=True, pady=2)
         # 双击行 → 打开详情（复用 open_full_window_viewer_from_content）
         def _on_dbl_ev(event):
@@ -8853,7 +8853,7 @@ class StockKeywordAnalyzerGUI:
         risk_col = tk.Frame(w_risk, bg="#FFEBEE")
         risk_col.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         tk.Label(risk_col, text="⚠️ 危险信号 (出现 ≥3 个 → 减仓)",
-                 bg="#FFEBEE", fg="#C62828",
+                 bg="#FFEBEE", fg="#EF5350",
                  font=("Microsoft YaHei", 10, "bold")).pack(anchor="w", pady=(2,4))
         self._w_risk_frame = risk_col   # 内部动态填 Label
 
@@ -8861,7 +8861,7 @@ class StockKeywordAnalyzerGUI:
         opt_col = tk.Frame(w_risk, bg="#E8F5E9")
         opt_col.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
         tk.Label(opt_col, text="✅ 乐观信号 (出现 ≥3 个 → 可积极)",
-                 bg="#E8F5E9", fg="#2E7D32",
+                 bg="#E8F5E9", fg="#66BB6A",
                  font=("Microsoft YaHei", 10, "bold")).pack(anchor="w", pady=(2,4))
         self._w_opt_frame = opt_col
 
@@ -17055,7 +17055,7 @@ class StockKeywordAnalyzerGUI:
         # --- 按钮 ---
         btn = tk.Frame(popup); btn.pack(fill=tk.X, padx=10, pady=4)
         tk.Button(btn, text="📥 保存长图 PNG", font=("", 11, "bold"),
-                  bg="#2E7D32", fg="white", padx=14, pady=3, cursor="hand2",
+                  bg="#66BB6A", fg="white", padx=14, pady=3, cursor="hand2",
                   command=lambda: self._save_long_image(img_path_holder[0], title)).pack(side=tk.LEFT, padx=4)
         tk.Button(btn, text="📋 复制文字", font=("", 11), padx=12, cursor="hand2",
                   command=lambda: (popup.clipboard_clear(), popup.clipboard_append(text),
@@ -17089,7 +17089,7 @@ class StockKeywordAnalyzerGUI:
                     import traceback
                     err = f"❌ 长图生成失败：{e}\n{traceback.format_exc()}"
                     popup.after(0, lambda: canvas.create_text(
-                        550, 400, text=err, font=("", 11), fill="#C62828"))
+                        550, 400, text=err, font=("", 11), fill="#EF5350"))
             threading.Thread(target=_work, daemon=True).start()
         def _show_image(path):
             try:
@@ -17110,7 +17110,7 @@ class StockKeywordAnalyzerGUI:
                 canvas.configure(scrollregion=canvas.bbox("all"))
             except Exception as e:
                 canvas.create_text(550, 400, text=f"❌ 图片加载失败：{e}",
-                                   font=("", 11), fill="#C62828")
+                                   font=("", 11), fill="#EF5350")
         popup.after(100, _redraw)  # 延迟一帧让 canvas 有宽度
     @staticmethod
     def _pick_custom_bg(current_bg_list, current_text_list, redraw_cb):
@@ -17193,11 +17193,11 @@ class StockKeywordAnalyzerGUI:
             row_vals += tuple(str(s.get(f'近{i}日','')) for i in range(1, 11))
             row_vals += (str(s.get(ma10_col,'')), "⏳", "-")
             tree.insert("", "end", values=row_vals, tags=("mid",))
-        tree.tag_configure("high", foreground="#C62828")
-        tree.tag_configure("mid", foreground="#F57F17")
-        tree.tag_configure("low", foreground="#2E7D32")
-        tree.tag_configure("red", foreground="#C62828")
-        tree.tag_configure("green", foreground="#2E7D32")
+        tree.tag_configure("high", foreground="#EF5350")
+        tree.tag_configure("mid", foreground="#FFD54F")
+        tree.tag_configure("low", foreground="#66BB6A")
+        tree.tag_configure("red", foreground="#EF5350")
+        tree.tag_configure("green", foreground="#66BB6A")
         sb = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -17462,9 +17462,9 @@ class StockKeywordAnalyzerGUI:
                 f"{r.detail.get('总累计涨幅', '')}",
                 "⏳", "-"
             ))
-        tree.tag_configure("high", foreground="#C62828")
-        tree.tag_configure("mid", foreground="#F57F17")
-        tree.tag_configure("low", foreground="#2E7D32")
+        tree.tag_configure("high", foreground="#EF5350")
+        tree.tag_configure("mid", foreground="#FFD54F")
+        tree.tag_configure("low", foreground="#66BB6A")
         scroll_y = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=scroll_y.set)
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -20341,8 +20341,8 @@ class StockKeywordAnalyzerGUI:
                     pass
             return ""
 
-        tv.tag_configure("up", foreground="#C62828")
-        tv.tag_configure("down", foreground="#2E7D32")
+        tv.tag_configure("up", foreground="#EF5350")
+        tv.tag_configure("down", foreground="#66BB6A")
 
         for r in data_rows:
             vals = [r[i] if i < len(r) else "" for i in range(max_cols)]
@@ -20476,9 +20476,9 @@ class StockKeywordAnalyzerGUI:
                 """重新配置所有 tag 的字体大小（带 scale）"""
                 s = font_scale_var.get()
                 text_w.tag_configure("title",
-                    font=(font_fam, max(10, int(20*s)), "bold"), foreground="#C62828")
+                    font=(font_fam, max(10, int(20*s)), "bold"), foreground="#EF5350")
                 text_w.tag_configure("essence",
-                    font=(font_fam, max(10, int(22*s)), "bold"), foreground="#C62828",
+                    font=(font_fam, max(10, int(22*s)), "bold"), foreground="#EF5350",
                     background="#FFEBEE")
                 text_w.tag_configure("author",
                     font=(font_fam, max(10, int(16*s)), "bold"), foreground="#1565C0")
@@ -37262,11 +37262,11 @@ class StockKeywordAnalyzerGUI:
     # ════════════════════════════════════════════════════════════════════════
     # 情绪周期 5 阶段定义
     _MOOD_STAGES = [
-        (0.00, "恐慌", "#2E7D32"),    # 绿色
+        (0.00, "恐慌", "#66BB6A"),    # 绿色
         (0.20, "绝望", "#1565C0"),    # 深蓝
         (0.40, "复苏", "#F9A825"),    # 黄
         (0.60, "乐观", "#FB8C00"),    # 橙
-        (0.80, "狂热", "#C62828"),    # 红
+        (0.80, "狂热", "#EF5350"),    # 红
     ]
 
     # ════════════════════════════════════════════════════════════════════════
@@ -37440,8 +37440,8 @@ class StockKeywordAnalyzerGUI:
                     row.pack(fill=tk.X, padx=6, pady=1)
                     icon = "🔴" if (is_danger and triggered) else (
                         "🟢" if (not is_danger and triggered) else "⚪")
-                    fg = "#C62828" if (is_danger and triggered) else (
-                        "#2E7D32" if (not is_danger and triggered) else "#78909C")
+                    fg = "#EF5350" if (is_danger and triggered) else (
+                        "#66BB6A" if (not is_danger and triggered) else "#78909C")
                     txt = f"{icon} {name}"
                     tk.Label(row, text=txt, bg=parent["bg"], fg=fg,
                              font=("", 9, "bold" if triggered else "normal"),
@@ -37454,13 +37454,13 @@ class StockKeywordAnalyzerGUI:
 
             # 总评
             if summary.startswith("🚨"):
-                fg = "#C62828"; bg = "#FFCDD2"
+                fg = "#EF5350"; bg = "#FFCDD2"
             elif summary.startswith("⚠️"):
                 fg = "#E65100"; bg = "#FFE0B2"
             elif summary.startswith("🎯"):
                 fg = "#1B5E20"; bg = "#C8E6C9"
             elif summary.startswith("😊"):
-                fg = "#2E7D32"; bg = "#E8F5E9"
+                fg = "#66BB6A"; bg = "#E8F5E9"
             else:
                 fg = "#333"; bg = "#E0E0E0"
             self._w_risk_summary.config(text=summary, fg=fg, bg=bg)
@@ -37520,9 +37520,9 @@ class StockKeywordAnalyzerGUI:
                         self._btn_risk_check.config(state=tk.NORMAL, text="🎯 判别今日乐观/悲观")
                         self._lbl_risk_status.config(
                             text=f"✅ 判别完成 ({elapsed}s) · {summary[:40]}",
-                            fg="#2E7D32")
+                            fg="#66BB6A")
                     except Exception as _e_ui:
-                        self._lbl_risk_status.config(text=f"❌ UI刷新失败: {_e_ui}", fg="#C62828")
+                        self._lbl_risk_status.config(text=f"❌ UI刷新失败: {_e_ui}", fg="#EF5350")
                         self._btn_risk_check.config(state=tk.NORMAL)
                 self.root.after(0, _update_ui)
 
@@ -37531,7 +37531,7 @@ class StockKeywordAnalyzerGUI:
                 self.root.after(0, lambda: (
                     self._btn_risk_check.config(state=tk.NORMAL, text="🎯 判别今日乐观/悲观"),
                     self._lbl_risk_status.config(
-                        text=f"❌ 判别失败: {str(_e)[:50]}", fg="#C62828")))
+                        text=f"❌ 判别失败: {str(_e)[:50]}", fg="#EF5350")))
 
         _th.Thread(target=_worker, daemon=True).start()
 
@@ -37581,9 +37581,9 @@ class StockKeywordAnalyzerGUI:
                 mood_score, avg_drop, alpha_score, info)
             self._w_verdict_label.config(text=verdict)
             self._w_verdict_label.config(
-                fg="#C62828" if verdict.startswith("🔥") else
-                   "#2E7D32" if verdict.startswith("❄") else
-                   "#1565C0" if verdict.startswith("🎯") else "#F57F17")
+                fg="#EF5350" if verdict.startswith("🔥") else
+                   "#66BB6A" if verdict.startswith("❄") else
+                   "#1565C0" if verdict.startswith("🎯") else "#FFD54F")
             self._w_verdict_sub.config(text=sub)
             self._w_action_bar["value"] = pct
             self._w_action_pct_label.config(text=f"{pct}%")
@@ -37708,17 +37708,17 @@ class StockKeywordAnalyzerGUI:
         c.create_rectangle(bar_x0, ext_crash_y, bar_x1, crash_y,
                           fill="#66BB6A", outline="")        # -20~-15% 浅绿
         c.create_rectangle(bar_x0, bar_bot, bar_x1, ext_crash_y,
-                          fill="#2E7D32", outline="")        # <-20% 深绿
+                          fill="#66BB6A", outline="")        # <-20% 深绿
 
         # 当前值标记 (红柱覆盖)
         val_clamp = max(min_v, min(max_v, avg_drop))
         val_y = bar_bot - (val_clamp - min_v) / (max_v - min_v) * bar_h
         if avg_drop <= 0:
             c.create_rectangle(bar_x0, val_y, bar_x1, zero_y,
-                              fill="#C62828", outline="")
+                              fill="#EF5350", outline="")
         else:
             c.create_rectangle(bar_x0, zero_y, bar_x1, val_y,
-                              fill="#C62828", outline="")
+                              fill="#EF5350", outline="")
 
         # 横线指针 + 数值标签 (左侧)
         marker_y = (val_y + bar_top) / 2
@@ -37728,7 +37728,7 @@ class StockKeywordAnalyzerGUI:
         c.create_line(bar_x0 - 8, marker_y, bar_x1 + 8, marker_y,
                      fill="#333", width=2)
         c.create_text(right_label_x, marker_y, text=f"{avg_drop:+.2f}%",
-                     font=("Microsoft YaHei", 12, "bold"), fill="#C62828")
+                     font=("Microsoft YaHei", 12, "bold"), fill="#EF5350")
 
         # 阈值标注 (左侧竖排)
         for label, val in [("暴涨", +10), ("0%", 0), ("暴跌-15%", -15), ("极值-25%", -25)]:
@@ -37750,7 +37750,7 @@ class StockKeywordAnalyzerGUI:
 
         # 颜色映射
         if opp_score >= 60:
-            arc_color = "#C62828"
+            arc_color = "#EF5350"
         elif opp_score >= 35:
             arc_color = "#F57C00"
         else:
@@ -37860,7 +37860,7 @@ class StockKeywordAnalyzerGUI:
         angles = opp_score / 100 * 360
         # 颜色映射
         if opp_score >= 60:
-            arc_color = "#C62828"  # 红 = 机会好
+            arc_color = "#EF5350"  # 红 = 机会好
         elif opp_score >= 35:
             arc_color = "#F57C00"  # 橙
         else:
@@ -40592,9 +40592,9 @@ class StockKeywordAnalyzerGUI:
                                    ("logic","逻辑摘要",260), ("hm_score","🦅心法分",80), ("best_sch","最强流派",100)]:
                 pred_tree.heading(col, text=label)
                 pred_tree.column(col, width=w, anchor="center")
-            pred_tree.tag_configure("high", foreground="#C62828")   # 高分红
-            pred_tree.tag_configure("mid", foreground="#F57F17")    # 中分橙
-            pred_tree.tag_configure("low", foreground="#2E7D32")    # 低分绿
+            pred_tree.tag_configure("high", foreground="#EF5350")   # 高分红
+            pred_tree.tag_configure("mid", foreground="#FFD54F")    # 中分橙
+            pred_tree.tag_configure("low", foreground="#66BB6A")    # 低分绿
             pred_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5, side=tk.LEFT)
             pred_sb = ttk.Scrollbar(bottom_frame, orient="vertical", command=pred_tree.yview)
             pred_tree.configure(yscrollcommand=pred_sb.set)
@@ -42347,7 +42347,7 @@ class StockKeywordAnalyzerGUI:
         # 定义 tag 样式 - A股惯例:红涨绿跌
         # 利多 = 红色,利空 = 绿色
         _BULL_COLOR = "#E53935"   # 利多红
-        _BEAR_COLOR = "#2E7D32"   # 利空绿
+        _BEAR_COLOR = "#66BB6A"   # 利空绿
         _DIM_LABEL = "#9E9E9E"    # 灰色标签
         _NEUTRAL_COLOR = "#FFA726"
         for impact in [3, 2, 1]:
@@ -44855,9 +44855,9 @@ class StockKeywordAnalyzerGUI:
         self._ia_dim_txt = tk.Text(dim_frame, height=8, wrap=tk.WORD, font=("Menlo", 10),
                                     bg="#FAFAFA", relief=tk.FLAT, padx=6, pady=6)
         self._ia_dim_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self._ia_dim_txt.tag_configure("good", foreground="#2E7D32", font=("", 10, "bold"))
-        self._ia_dim_txt.tag_configure("warn", foreground="#F57F17", font=("", 10, "bold"))
-        self._ia_dim_txt.tag_configure("bad", foreground="#C62828", font=("", 10, "bold"))
+        self._ia_dim_txt.tag_configure("good", foreground="#66BB6A", font=("", 10, "bold"))
+        self._ia_dim_txt.tag_configure("warn", foreground="#FFD54F", font=("", 10, "bold"))
+        self._ia_dim_txt.tag_configure("bad", foreground="#EF5350", font=("", 10, "bold"))
         self._ia_dim_txt.tag_configure("emoji", font=("", 12))
 
         # 底部建议区
@@ -44921,8 +44921,8 @@ class StockKeywordAnalyzerGUI:
             # 背景色
             bg_map = {"excellent": "#E8F5E9", "good": "#E3F2FD",
                       "warning": "#FFF8E1", "danger": "#FFEBEE"}
-            fg_map = {"excellent": "#2E7D32", "good": "#1565C0",
-                      "warning": "#F57F17", "danger": "#C62828"}
+            fg_map = {"excellent": "#66BB6A", "good": "#1565C0",
+                      "warning": "#FFD54F", "danger": "#EF5350"}
             cv.create_rectangle(2, 2, cv.winfo_width()-2, 78,
                                 fill=bg_map.get(level, "#F5F5F5"),
                                 outline=fg_map.get(level, "#333"), width=2)
@@ -44948,8 +44948,8 @@ class StockKeywordAnalyzerGUI:
                 # 按涨跌染色行
                 tags = ("up",) if pct > 0 else (("down",) if pct < 0 else ())
                 self._ia_idx_tree.item(self._ia_idx_tree.get_children()[-1], tags=tags)
-            self._ia_idx_tree.tag_configure("up", foreground="#C62828")
-            self._ia_idx_tree.tag_configure("down", foreground="#2E7D32")
+            self._ia_idx_tree.tag_configure("up", foreground="#EF5350")
+            self._ia_idx_tree.tag_configure("down", foreground="#66BB6A")
 
             # === 涨跌广度 ===
             br = alert["breadth"]
@@ -46109,10 +46109,10 @@ class StockKeywordAnalyzerGUI:
                 # 填充
                 fill_h = int(rec_pct / 100 * 42)  # 4~48
                 fill_y = 4 + (42 - fill_h)
-                if rec_pct > 50: fc = "#C62828"
-                elif rec_pct > 25: fc = "#F57F17"
+                if rec_pct > 50: fc = "#EF5350"
+                elif rec_pct > 25: fc = "#FFD54F"
                 elif rec_pct > 0: fc = "#FFB74D"
-                else: fc = "#2E7D32"
+                else: fc = "#66BB6A"
                 tc.create_rectangle(10, fill_y, 12, 48, fill=fc, outline="")
                 tc.create_oval(8, 50, 14, 56, fill=fc, outline="")
                 self._dapan_term_pct_var.set(f"{rec_pct}%")
@@ -46172,10 +46172,10 @@ class StockKeywordAnalyzerGUI:
             try:
                 bar = self._dapan_emo_strip_canvas
                 bar.delete("all")
-                stages = [("冰点", "#2E7D32"), ("启动", "#F57F17"),
-                          ("发酵", "#FF6F00"), ("高潮", "#C62828"),
+                stages = [("冰点", "#66BB6A"), ("启动", "#FFD54F"),
+                          ("发酵", "#FF6F00"), ("高潮", "#EF5350"),
                           ("分歧", "#6A1B9A"), ("退潮", "#455A64"),
-                          ("冰点", "#2E7D32")]
+                          ("冰点", "#66BB6A")]
                 sw = 90
                 for si, (sname, scolor) in enumerate(stages):
                     x1 = si * sw + 2; x2 = x1 + sw - 2
@@ -46211,7 +46211,7 @@ class StockKeywordAnalyzerGUI:
                 for idx, item in enumerate(data):
                     r, c = divmod(idx, cols)
                     bg = "#FFEBEE" if is_hot else "#E8F5E9"
-                    fg = "#C62828" if is_hot else "#2E7D32"
+                    fg = "#EF5350" if is_hot else "#66BB6A"
                     # 卡片
                     card = tk.Frame(parent_frame, bg=bg, highlightbackground=fg,
                                     highlightthickness=1, padx=4, pady=2)
@@ -46222,7 +46222,7 @@ class StockKeywordAnalyzerGUI:
                     nm_lbl = tk.Label(top_row, text=f"{idx+1}. {nm}", bg=bg, fg="#212121",
                                       font=("", 8, "bold"), anchor="w")
                     nm_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
-                    chg_fg = "#C62828" if chg >= 0 else "#2E7D32"
+                    chg_fg = "#EF5350" if chg >= 0 else "#66BB6A"
                     chg_lbl = tk.Label(top_row, text=f"{chg:+.2f}%", bg=bg, fg=chg_fg,
                                        font=("", 9, "bold"))
                     chg_lbl.pack(side=tk.RIGHT)
@@ -46252,12 +46252,12 @@ class StockKeywordAnalyzerGUI:
                 cw = cw or 900
                 # 颜色映射: 情绪分→颜色
                 def _emo_col(s):
-                    if s >= 70: return "#C62828"
+                    if s >= 70: return "#EF5350"
                     if s >= 60: return "#FF6F00"
-                    if s >= 50: return "#F57F17"
+                    if s >= 50: return "#FFD54F"
                     if s >= 40: return "#FFD54F"
                     if s >= 30: return "#9E9E9E"
-                    return "#2E7D32"
+                    return "#66BB6A"
                 if not trend10:
                     tc.create_text(400, 80, text="⏳ 暂无10日趋势数据",
                                    fill="#90A4AE", font=("", 10))
@@ -46274,7 +46274,7 @@ class StockKeywordAnalyzerGUI:
                                    fill="#1A237E", font=("", 9, "bold"))
                     tc.create_text(pad_l+4, 18, text="●情绪分", fill="#FF6F00",
                                    font=("", 8), anchor="w")
-                    tc.create_text(pad_l+60, 18, text="▌上证涨跌", fill="#C62828",
+                    tc.create_text(pad_l+60, 18, text="▌上证涨跌", fill="#EF5350",
                                    font=("", 8), anchor="w")
 
                     # ======== 每天一列 ========
@@ -46348,13 +46348,13 @@ class StockKeywordAnalyzerGUI:
                             bh = 0
                         if chg >= 0:
                             tc.create_rectangle(cx-5, mid_y - bh, cx+5, mid_y,
-                                                fill="#C62828", outline="#C62828")
+                                                fill="#EF5350", outline="#EF5350")
                         elif chg < 0:
                             tc.create_rectangle(cx-5, mid_y, cx+5, mid_y + bh,
-                                                fill="#2E7D32", outline="#2E7D32")
+                                                fill="#66BB6A", outline="#66BB6A")
 
                         # ⑥ 涨跌%标注
-                        tcol = "#C62828" if chg >= 0 else "#2E7D32"
+                        tcol = "#EF5350" if chg >= 0 else "#66BB6A"
                         tc.create_text(cx, mid_y - bh - 3 if chg >= 0 else mid_y + bh + 3,
                                        text=f"{chg:+.1f}", fill=tcol,
                                        font=("", 8, "bold"),
@@ -46954,7 +46954,7 @@ class StockKeywordAnalyzerGUI:
         plan_frame.pack(side="left", fill="both", expand=True, padx=(0,5), pady=4)
 
         mode_color_bg = "#FFEBEE" if mode == "防御" else "#E8F5E9"
-        mode_color_fg = "#C62828" if mode == "防御" else "#2E7D32"
+        mode_color_fg = "#EF5350" if mode == "防御" else "#66BB6A"
         tk.Label(plan_frame, text=f"{'🔴' if mode=='防御' else '🟢'} {mode}模式 (绿灯{data['green_count']}/6)",
             bg=mode_color_bg, fg=mode_color_fg, font=("", 12, "bold")).pack(fill="x", padx=10, pady=(8,4))
 
@@ -46971,7 +46971,7 @@ class StockKeywordAnalyzerGUI:
         bt = data.get("backtest", {})
         if bt.get("win_rate_green") is not None:
             tk.Label(bt_frame, text=f"🟢 绿灯状态胜率: {bt['win_rate_green']:.1f}%",
-                bg="white", fg="#2E7D32", font=("", 11, "bold")).pack(anchor="w", padx=10, pady=(8,2))
+                bg="white", fg="#66BB6A", font=("", 11, "bold")).pack(anchor="w", padx=10, pady=(8,2))
             tk.Label(bt_frame, text=f"  绿灯月均收益: {bt['avg_ret_green']:+.2f}%",
                 bg="white", fg="#333", font=("", 10)).pack(anchor="w", padx=15)
             tk.Label(bt_frame, text=f"  非绿灯月均收益: {bt['avg_ret_red']:+.2f}%",
@@ -47867,7 +47867,7 @@ class StockKeywordAnalyzerGUI:
                     font=("", 9)).pack(anchor="w")
 
             tk.Label(col_frames[2], text="❄️ 跌幅 BOTTOM 3",
-                     bg="#0D1B2A", fg="#2E7D32",
+                     bg="#0D1B2A", fg="#66BB6A",
                      font=("", 9, "bold")).pack(anchor="w", pady=(6, 0))
             for en, et, pct, _ in bot3:
                 tk.Label(col_frames[2],
@@ -48182,7 +48182,7 @@ class StockKeywordAnalyzerGUI:
         tk.Label(toolbar_f, text="", bg="#E65100", width=2, height=1).pack(side=tk.LEFT, padx=1)
         # 右: 功能按钮
         tk.Button(toolbar_f, text="🔄", command=lambda: (_reload_hist(), _render_month()),
-                  bg="#2E7D32", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
+                  bg="#66BB6A", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
         tk.Button(toolbar_f, text="今天", command=lambda: (_reload_hist(), view_month.__setitem__(0,_dt2.now().replace(day=1)), _render_month()),
                   bg="#0D47A1", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
         tk.Button(toolbar_f, text="☁️", command=lambda: _open_sync_dialog(),
@@ -48229,14 +48229,14 @@ class StockKeywordAnalyzerGUI:
                 def _do():
                     _tmp_cfg = {"gist_token": token_var.get().strip(), "gist_id": gist_var.get().strip()}
                     if not _tmp_cfg["gist_token"]:
-                        self.root.after(0, lambda: status_lbl.config(text="❌ Token为空", fg="#C62828"))
+                        self.root.after(0, lambda: status_lbl.config(text="❌ Token为空", fg="#EF5350"))
                         return
                     self._set_emo_sync_config(_tmp_cfg)
                     r = self._emo_gist_push(hist_dict)
                     if r.get("ok") and not gist_var.get().strip():
                         gist_var.set(self._get_emo_sync_config().get("gist_id",""))
                     self.root.after(0, lambda: status_lbl.config(text=r.get("msg",""),
-                                                                  fg="#1B5E20" if r.get("ok") else "#C62828"))
+                                                                  fg="#1B5E20" if r.get("ok") else "#EF5350"))
                 import threading; threading.Thread(target=_do, daemon=True).start()
 
             def _test_pull():
@@ -48248,7 +48248,7 @@ class StockKeywordAnalyzerGUI:
                     if r is not None:
                         self.root.after(0, lambda: status_lbl.config(text=f"✅ 拉到 {len(r)} 天数据", fg="#1B5E20"))
                     else:
-                        self.root.after(0, lambda: status_lbl.config(text="❌ 拉取失败 (Token/ID错或网络)", fg="#C62828"))
+                        self.root.after(0, lambda: status_lbl.config(text="❌ 拉取失败 (Token/ID错或网络)", fg="#EF5350"))
                 import threading; threading.Thread(target=_do, daemon=True).start()
 
             def _save_cfg():
@@ -48260,7 +48260,7 @@ class StockKeywordAnalyzerGUI:
                 dlg.destroy()
 
             bf = tk.Frame(dlg, bg="#263238"); bf.pack(pady=6)
-            tk.Button(bf, text="💾保存并测试", command=_save_cfg, bg="#2E7D32", fg="white",
+            tk.Button(bf, text="💾保存并测试", command=_save_cfg, bg="#66BB6A", fg="white",
                       font=("", 10, "bold"), width=14).pack(side=tk.LEFT, padx=5)
             tk.Button(bf, text="测试拉取", command=_test_pull, bg="#0D47A1", fg="white",
                       font=("", 9), width=10).pack(side=tk.LEFT, padx=3)
@@ -48395,9 +48395,9 @@ class StockKeywordAnalyzerGUI:
                 edit_win.destroy()
 
             bf = tk.Frame(edit_win, bg="#263238"); bf.pack(pady=10)
-            tk.Button(bf, text="💾保存", command=_save, bg="#2E7D32", fg="white",
+            tk.Button(bf, text="💾保存", command=_save, bg="#66BB6A", fg="white",
                       font=("", 10, "bold"), width=10).pack(side=tk.LEFT, padx=5)
-            tk.Button(bf, text="🗑️删除", command=_delete, bg="#C62828", fg="white",
+            tk.Button(bf, text="🗑️删除", command=_delete, bg="#EF5350", fg="white",
                       font=("", 10, "bold"), width=10).pack(side=tk.LEFT, padx=5)
             tk.Button(bf, text="取消", command=edit_win.destroy, bg="#546E7A", fg="white",
                       font=("", 10), width=8).pack(side=tk.LEFT, padx=5)
@@ -49617,11 +49617,11 @@ class StockKeywordAnalyzerGUI:
             tk.Label(top_f, text=f"📅{len(hist_dict)}天 💰{_up}📉{_dn} ⚠️{_bad}", bg="#1A1A2E",
                      fg="#FFD54F", font=("", 9, "bold")).pack(side=tk.LEFT, padx=4)
             tk.Label(top_f, text="", bg="#B71C1C", width=2, height=1).pack(side=tk.LEFT, padx=(6,0))
-            tk.Label(top_f, text="", bg="#2E7D32", width=2, height=1).pack(side=tk.LEFT, padx=1)
+            tk.Label(top_f, text="", bg="#66BB6A", width=2, height=1).pack(side=tk.LEFT, padx=1)
             tk.Label(top_f, text="", bg="#E65100", width=2, height=1).pack(side=tk.LEFT, padx=1)
             # 右侧功能按钮
             tk.Button(top_f, text="🔄", command=lambda: (_reload_hist(), _render_month()),
-                      bg="#2E7D32", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
+                      bg="#66BB6A", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
             tk.Button(top_f, text="今天", command=lambda: _jump_today(),
                       bg="#0D47A1", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
 
@@ -49833,10 +49833,10 @@ class StockKeywordAnalyzerGUI:
                             pct_v = rec.get("pct")
                             if pct_v is None: pct_v = auto_pct  # 兜底
                             if pnl == "赚钱": bg = "#B71C1C"
-                            elif pnl == "亏钱": bg = "#2E7D32"
+                            elif pnl == "亏钱": bg = "#66BB6A"
                             elif pct_v is not None:
                                 if pct_v > 0: bg = "#B71C1C"
-                                elif pct_v < 0: bg = "#2E7D32"
+                                elif pct_v < 0: bg = "#66BB6A"
                                 else: bg = "#455A64"
                             else: bg = "#455A64"
                             border_color = "#E65100" if ths == "向下" else None
@@ -49846,7 +49846,7 @@ class StockKeywordAnalyzerGUI:
                                 if auto_pct > 0.5:
                                     bg = "#B71C1C"       # 涨 → 红
                                 elif auto_pct < -0.5:
-                                    bg = "#2E7D32"       # 跌 → 绿
+                                    bg = "#66BB6A"       # 跌 → 绿
                                 else:
                                     bg = "#455A64"       # 平 → 灰蓝
                             else:
@@ -50786,7 +50786,7 @@ class StockKeywordAnalyzerGUI:
             refs["lbls"]["m1"].configure(text=f"现价 {result['price']:.2f}")
             refs["lbls"]["m2"].configure(text=f"T*={result['T_star_date']}")
             refs["lbls"]["r2l"].configure(fg=th["fg"], text=f"P0={result['P0']:.2f}")
-            refs["lbls"]["r2r"].configure(fg=("#C62828" if result['p0_gain_pct']>=0 else "#2E7D32"),
+            refs["lbls"]["r2r"].configure(fg=("#EF5350" if result['p0_gain_pct']>=0 else "#66BB6A"),
                 text=f"距P0 {result['p0_gain_pct']}%")
             refs["lbls"]["r3l"].configure(text=f"MA20 {result['ma20_state']}")
             refs["lbls"]["r3r"].configure(text=f"距低点 +{result['L_gain_pct']}%")
@@ -51352,7 +51352,7 @@ class StockKeywordAnalyzerGUI:
         ).pack(side="left")
 
         sc = stock.get("total_score", 0)
-        sc_color = "#C62828" if sc >= 70 else ("#F57F17" if sc >= 55 else "#2E7D32")
+        sc_color = "#EF5350" if sc >= 70 else ("#FFD54F" if sc >= 55 else "#66BB6A")
         tk.Label(
             header, text=f"{sc}分",
             bg=sc_color, fg="white", font=("", 9, "bold"), padx=6, pady=1
@@ -51372,7 +51372,7 @@ class StockKeywordAnalyzerGUI:
             bg="white", fg="#333", font=("", 12, "bold")
         ).pack(side="left")
         pct = stock.get("pct", 0)
-        pct_color = "#C62828" if pct >= 0 else "#2E7D32"
+        pct_color = "#EF5350" if pct >= 0 else "#66BB6A"
         tk.Label(
             price_frame, text=f"{pct:+.2f}%",
             bg="white", fg=pct_color, font=("", 10, "bold")
@@ -51464,13 +51464,13 @@ class StockKeywordAnalyzerGUI:
         status_var = tk.StringVar(value="⏳ 正在加载成分股...")
         tk.Label(top, textvariable=status_var, bg="#1A237E", fg="#FFD54F",
                  font=("", 9)).pack(side=tk.LEFT, padx=8)
-        tk.Button(top, text="🔄", bg="#C62828", fg="white", font=("", 9, "bold"),
+        tk.Button(top, text="🔄", bg="#EF5350", fg="white", font=("", 9, "bold"),
                   padx=6, pady=0,
                   command=lambda: self._bg_load_sector_cons(sector_name, tree, status_var)).pack(side=tk.RIGHT, padx=6)
 
         # 操作按钮栏
         btn_row = tk.Frame(win); btn_row.pack(fill=tk.X, padx=4, pady=3)
-        tk.Button(btn_row, text="🦅 批量游资心法扫描 (选中行)", bg="#C62828", fg="white",
+        tk.Button(btn_row, text="🦅 批量游资心法扫描 (选中行)", bg="#EF5350", fg="white",
                   font=("", 9, "bold"), padx=8, pady=2,
                   command=lambda: self._batch_hotmoney_from_sector(tree)).pack(side=tk.LEFT)
         tk.Button(btn_row, text="📊 扫描全部 Top 10", bg="#1565C0", fg="white",
@@ -51528,8 +51528,8 @@ class StockKeywordAnalyzerGUI:
             pct_s = f"{pct:+.2f}" if pct != 0 else "--"
             tag = "up" if pct > 0 else ("dn" if pct < 0 else "flat")
             tree.insert("", tk.END, values=(code, name, pct_s, "待扫描"), tags=(tag,))
-        tree.tag_configure("up", foreground="#C62828")
-        tree.tag_configure("dn", foreground="#2E7D32")
+        tree.tag_configure("up", foreground="#EF5350")
+        tree.tag_configure("dn", foreground="#66BB6A")
         tree.tag_configure("flat", foreground="#666")
         status_var.set(f"✅ {sector_name}: {len(cons)} 只成分股  (双击行 = 个股心法)")
 
@@ -68794,8 +68794,8 @@ class StockKeywordAnalyzerGUI:
                         side.insert(tk.END, f"  板块: {ind or '?'}\n")
                         side.insert(tk.END, f"  大单净额: {bn_str}\n", ("flow_up" if (bn and bn > 0) else ("flow_dn" if (bn and bn < 0) else "")))
                         side.insert(tk.END, f"  基本面: {fs}\n\n")
-                    side.tag_configure("flow_up", foreground="#C62828")
-                    side.tag_configure("flow_dn", foreground="#2E7D32")
+                    side.tag_configure("flow_up", foreground="#EF5350")
+                    side.tag_configure("flow_dn", foreground="#66BB6A")
                     status_var.set(f"✅ 扩展数据已加载 · 共 {len(_signal_results_cache)} 只")
                 self.root.after(0, _update_ui)
             threading.Thread(target=_worker, daemon=True).start()
@@ -71842,10 +71842,10 @@ class StockKeywordAnalyzerGUI:
         result_text.tag_config("sec_title",    foreground="#1565C0", font=("Microsoft YaHei", 11, "bold"))  # ## 大标题
         result_text.tag_config("item_label",   foreground="#37474F", font=("Microsoft YaHei", 11, "bold"))  # - **标签**: 值
         # 情绪色
-        result_text.tag_config("pos",          foreground="#C62828")   # 红: 正面(持有/买入/主线/支撑/涨)
-        result_text.tag_config("pos_bold",     foreground="#C62828", font=("Microsoft YaHei", 11, "bold"))
-        result_text.tag_config("neg",          foreground="#2E7D32")   # 绿: 负面(卖出/减仓/止损/破位/跌)
-        result_text.tag_config("neg_bold",     foreground="#2E7D32", font=("Microsoft YaHei", 11, "bold"))
+        result_text.tag_config("pos",          foreground="#EF5350")   # 红: 正面(持有/买入/主线/支撑/涨)
+        result_text.tag_config("pos_bold",     foreground="#EF5350", font=("Microsoft YaHei", 11, "bold"))
+        result_text.tag_config("neg",          foreground="#66BB6A")   # 绿: 负面(卖出/减仓/止损/破位/跌)
+        result_text.tag_config("neg_bold",     foreground="#66BB6A", font=("Microsoft YaHei", 11, "bold"))
         result_text.tag_config("warn",         foreground="#E65100", background="#FFF3E0")  # 橙底: 条件/警告
         result_text.tag_config("neutral",      foreground="#F57C00")   # 橙: 观望/次主线
         result_text.tag_config("quote",        foreground="#455A64", font=("Microsoft YaHei", 10, "italic"))  # 灰色斜体引用
@@ -79836,11 +79836,11 @@ class StockKeywordAnalyzerGUI:
              ["低位好股拿 3~5 年, 不盯盘, 靠时间抹平波动赚价值增长",
               "适合: 有耐心、不看盘、相信价值回归",
               "不适合: 需要确定性回报、想快速赚钱的人"]),
-            ("B", "🤖 机械执行交易", "#2E7D32",
+            ("B", "🤖 机械执行交易", "#66BB6A",
              ["固定模式、严格等信号, 把人为思考排除掉",
               "适合: 能严格遵守纪律、不被情绪左右",
               "不适合: 喜欢灵活应变、频繁改规则的人"]),
-            ("C", "🔥 专追热点龙头", "#C62828",
+            ("C", "🔥 专追热点龙头", "#EF5350",
              ["只参与真正热点, 专注短线",
               "适合: 盯盘时间多、反应快、能严格止损",
               "不适合: 上班忙、怕波动、持有心态的人"]),
@@ -80015,7 +80015,7 @@ class StockKeywordAnalyzerGUI:
             ("资金面", "北向持股/两融余额变化/龙虎榜机构净买入/大单净流入/主力资金流向"),
             ("筹码面", "股东户数变化/筹码峰集中度/获利盘比例/平均成本位"),
         ])
-        _card(t1, "🎨 场景模板 (预置)", "#2E7D32", [
+        _card(t1, "🎨 场景模板 (预置)", "#66BB6A", [
             ("大跌买指数", "恐慌性大跌 + 指数跌破MA60 + 单日跌幅>3%"),
             ("错杀龙头", "PB破净或PE分位<20% + 基本面未恶化 + 机构错杀"),
             ("主升浪启动", "MA多头排列 + 缩量回调 + 倍量大阳 + 吞没3阴"),
@@ -80023,7 +80023,7 @@ class StockKeywordAnalyzerGUI:
             ("网格标的", "MA20横盘 + 波动率>15% + 上下轨清晰"),
             ("红利收息", "股息率>4% + ROE稳定>12% + 行业龙头"),
         ])
-        _card(t1, "🚫 禁投池", "#C62828", [
+        _card(t1, "🚫 禁投池", "#EF5350", [
             ("ST/*ST", "连续亏损/财务造假风险"),
             ("解禁高峰", "未来1个月有大额限售股解禁"),
             ("基本面恶化", "ROE连续2季下降/营收连续3季负增长"),
@@ -80040,7 +80040,7 @@ class StockKeywordAnalyzerGUI:
             ("北向/两融", "北向连续5日净流入 + 融资余额增加 → 机构看多"),
             ("情绪指标", "涨停>50/跌停<10 → 多头; 跌停>50/涨停<10 → 空头"),
         ])
-        _card(t2, "🎚️ 市场状态识别", "#2E7D32", [
+        _card(t2, "🎚️ 市场状态识别", "#66BB6A", [
             ("🟢 牛市", "满仓 100%, 主升浪卡片启用, 止损放宽"),
             ("🟡 震荡市", "半仓 50%, 滚动做熟股/网格/红利, 严格止盈止损"),
             ("🔴 熊市", "空仓或≤20%防御仓, 只启用红利/黄金/债券"),
@@ -80061,7 +80061,7 @@ class StockKeywordAnalyzerGUI:
             ("震荡市", "总仓位 40~60%, 平衡配置"),
             ("熊市", "总仓位 0~30%, 防御性标的为主或空仓"),
         ])
-        _card(t3, "⚖️ 单票/单行业上限", "#2E7D32", [
+        _card(t3, "⚖️ 单票/单行业上限", "#66BB6A", [
             ("单票上限", "≤ 10% (呼应公募双十红线)"),
             ("单行业上限", "≤ 25% (避免行业集中风险)"),
             ("现金留存", "滚动做T ≥ 30%, 网格 ≥ 40%"),
@@ -80076,14 +80076,14 @@ class StockKeywordAnalyzerGUI:
 
         # ── Tab 4: 🛡️ M4 风控引擎 ──
         t4 = _mk_tab(nb, "🛡️ M4 风控")
-        _card(t4, "🛡️ 事前风控 (防止入坑)", "#2E7D32", [
+        _card(t4, "🛡️ 事前风控 (防止入坑)", "#66BB6A", [
             ("投资池/禁投池", "ST/退市/解禁高峰/基本面恶化股自动过滤"),
             ("单票/单行业上限", "预设阈值, 超过禁止买入"),
             ("预设止损线", "每笔买入前写清楚止损价 (如MA20或-8%)"),
             ("最大回撤阈值", "账户回撤 >15% 强制减仓至 30%"),
             ("买入前白纸黑字", "买入理由/持有时长/卖出条件 (卖出=基本面变化, 绝非股价下跌)"),
         ])
-        _card(t4, "🛑 事中风控 (实时监控)", "#C62828", [
+        _card(t4, "🛑 事中风控 (实时监控)", "#EF5350", [
             ("实时回撤监控", "每只股票 + 组合级别的回撤追踪"),
             ("止损止盈触发", "触及预设价 → 自动告警/执行 (可接QMT)"),
             ("异常波动告警", "单日涨跌>15%/连续3日同方向 → 提示检查"),
@@ -80286,9 +80286,10 @@ class StockKeywordAnalyzerGUI:
         ]
 
         def _judge_day(day_price, ma20, ma60, slope):
-            if day_price > ma20 > ma60 and slope > 0.005: return ("🟢", "上行", "#2E7D32")
-            if day_price < ma20 < ma60 and slope < -0.005: return ("🔴", "下行", "#C62828")
-            return ("🟡", "震荡", "#F57F17")
+            _diff = (day_price - ma20) / ma20
+            if _diff > 0.015: return ("🟢", "上行", "#66BB6A")
+            if _diff < -0.015: return ("🔴", "下行", "#EF5350")
+            return ("🟡", "震荡", "#FFD54F")
 
         def _fetch_heatmap(name, sym):
             """拉一只 ETF 最近 N_DAYS+25 天 K 线, 返回每天的情绪状态列表"""
@@ -81344,16 +81345,16 @@ class StockKeywordAnalyzerGUI:
             bar_w = gap * 0.55
 
             def _emo_score_color(s):
-                if s >= 70: return "#C62828"
+                if s >= 70: return "#EF5350"
                 if s >= 60: return "#FF6F00"
-                if s >= 50: return "#F57F17"
+                if s >= 50: return "#FFD54F"
                 if s >= 40: return "#FFD54F"
                 if s >= 30: return "#9E9E9E"
-                return "#2E7D32"
+                return "#66BB6A"
 
             def _stage_color(stg):
-                _m = {"冰点": "#2E7D32", "启动": "#F57F17", "发酵": "#FF6F00",
-                      "高潮": "#C62828", "分歧": "#6A1B9A", "退潮": "#455A64"}
+                _m = {"冰点": "#66BB6A", "启动": "#FFD54F", "发酵": "#FF6F00",
+                      "高潮": "#EF5350", "分歧": "#6A1B9A", "退潮": "#455A64"}
                 return _m.get(stg, "#78909C")
 
             # 标题
@@ -81384,13 +81385,13 @@ class StockKeywordAnalyzerGUI:
                 bh = int(abs(chg) / max_abs * ((bar_btm_y - bar_top_y) / 2 - 2))
                 if chg >= 0:
                     tc.create_rectangle(x1, mid_y - bh, x2, mid_y,
-                                        fill="#C62828", outline="#C62828")
+                                        fill="#EF5350", outline="#EF5350")
                 else:
                     tc.create_rectangle(x1, mid_y, x2, mid_y + bh,
-                                        fill="#2E7D32", outline="#2E7D32")
+                                        fill="#66BB6A", outline="#66BB6A")
                 # 涨跌%文字
                 fsize = 9 if i == n - 1 else 8
-                tcol = "#C62828" if chg >= 0 else "#2E7D32"
+                tcol = "#EF5350" if chg >= 0 else "#66BB6A"
                 ty = mid_y - bh - 3 if chg >= 0 else mid_y + bh + 3
                 tc.create_text(cx, ty, text=f"{chg:+.1f}%", fill=tcol,
                                font=("", fsize, "bold" if i == n - 1 else ""),
@@ -84954,28 +84955,28 @@ class StockKeywordAnalyzerGUI:
             # ---------- 上图:分时价格 ----------
             # 计算颜色:涨红跌绿(对比昨收或第一个点)
             base = prices[0]
-            ["#C62828" if p >= base else "#2E7D32" for p in prices]
+            ["#EF5350" if p >= base else "#66BB6A" for p in prices]
             # 简化:整个线用渐变色太复杂,用红色线 + 涨跌区域填色
             ax_price.plot(x, prices, color="#333333", linewidth=1.2, label="分时")
             # 填充涨跌
             for i in range(1, len(prices)):
                 if prices[i] >= prices[i - 1]:
-                    ax_price.plot(x[i - 1:i + 1], prices[i - 1:i + 1], color="#C62828", linewidth=1.8)
+                    ax_price.plot(x[i - 1:i + 1], prices[i - 1:i + 1], color="#EF5350", linewidth=1.8)
                 else:
-                    ax_price.plot(x[i - 1:i + 1], prices[i - 1:i + 1], color="#2E7D32", linewidth=1.8)
+                    ax_price.plot(x[i - 1:i + 1], prices[i - 1:i + 1], color="#66BB6A", linewidth=1.8)
             ax_price.fill_between(x, prices, prices[0],
-                                  where=(prices >= prices[0]), color="#C62828", alpha=0.08)
+                                  where=(prices >= prices[0]), color="#EF5350", alpha=0.08)
             ax_price.fill_between(x, prices, prices[0],
-                                  where=(prices < prices[0]), color="#2E7D32", alpha=0.08)
+                                  where=(prices < prices[0]), color="#66BB6A", alpha=0.08)
             ax_price.axhline(prices[0], color="gray", linestyle="--", linewidth=0.8, alpha=0.5, label="昨收/今开")
             # 标注背离点
             for d in divs:
                 i1, i2 = d["idx1"], d["idx2"]
                 p1, p2 = d["price1"], d["price2"]
                 if d["type"] == "top":
-                    color = "#2E7D32"  # 顶背离→绿色(卖)
+                    color = "#66BB6A"  # 顶背离→绿色(卖)
                 else:
-                    color = "#C62828"  # 底背离→红色(买)
+                    color = "#EF5350"  # 底背离→红色(买)
                 # 连线
                 ax_price.plot([i1, i2], [p1, p2], color=color, linewidth=2.0, linestyle="--", alpha=0.8)
                 # 标记点
@@ -85003,7 +85004,7 @@ class StockKeywordAnalyzerGUI:
             ax_price.set_ylabel("价格")
             ax_price.grid(True, alpha=0.3)
             # ---------- 下图:MACD ----------
-            bar_colors = ["#C62828" if h >= 0 else "#2E7D32" for h in hist_arr]
+            bar_colors = ["#EF5350" if h >= 0 else "#66BB6A" for h in hist_arr]
             ax_macd.bar(x, hist_arr, color=bar_colors, alpha=0.6, width=1.0, label="MACD柱")
             ax_macd.plot(x, dif_arr, color="#FF6F00", linewidth=1.2, label="DIF")
             ax_macd.plot(x, dea_arr, color="#1565C0", linewidth=1.2, label="DEA")
@@ -85012,7 +85013,7 @@ class StockKeywordAnalyzerGUI:
             for d in divs:
                 i1, i2 = d["idx1"], d["idx2"]
                 d1, d2 = d["dif1"], d["dif2"]
-                color = "#2E7D32" if d["type"] == "top" else "#C62828"
+                color = "#66BB6A" if d["type"] == "top" else "#EF5350"
                 ax_macd.plot([i1, i2], [d1, d2], color=color, linewidth=2.0, linestyle="--", alpha=0.8)
                 ax_macd.scatter([i1, i2], [d1, d2], color=color, s=40, zorder=5)
             ax_macd.set_ylabel("MACD")
@@ -85085,9 +85086,9 @@ class StockKeywordAnalyzerGUI:
                     bot_c = sum(1 for d in divs if d["type"] == "bottom")
                     summary_labels[name].config(
                         text=f"{name}({_dlabel}): ⚠️ {len(divs)}背离(顶{top_c}/底{bot_c})",
-                        foreground="#C62828" if bot_c else "#FF6F00")
+                        foreground="#EF5350" if bot_c else "#FF6F00")
                 else:
-                    summary_labels[name].config(text=f"{name}({_dlabel}): ✅ 无背离", foreground="#2E7D32")
+                    summary_labels[name].config(text=f"{name}({_dlabel}): ✅ 无背离", foreground="#66BB6A")
             _draw(idx_var.get())
         def _analyze_all():
             """获取所有指数数据 + 检测背离"""
@@ -85127,9 +85128,9 @@ class StockKeywordAnalyzerGUI:
                     bot_c = sum(1 for d in divs if d["type"] == "bottom")
                     summary_labels[name].config(
                         text=f"{name}({_dlabel}): ⚠️ {len(divs)}背离(顶{top_c}/底{bot_c})",
-                        foreground="#C62828" if bot_c else "#FF6F00")
+                        foreground="#EF5350" if bot_c else "#FF6F00")
                 else:
-                    summary_labels[name].config(text=f"{name}({_dlabel}): ✅ 无背离", foreground="#2E7D32")
+                    summary_labels[name].config(text=f"{name}({_dlabel}): ✅ 无背离", foreground="#66BB6A")
             if any_success:
                 for name, _ in INDEX_DEFS:
                     c = _cached.get(name)
@@ -85254,9 +85255,9 @@ class StockKeywordAnalyzerGUI:
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         hsb.pack(fill=tk.X)
         # 表头颜色 + 字体加粗大一号,显著区分
-        tree.tag_configure("extreme", foreground="#C62828", font=("", 12, "bold"))
+        tree.tag_configure("extreme", foreground="#EF5350", font=("", 12, "bold"))
         tree.tag_configure("blood", foreground="#E65100", font=("", 12, "bold"))
-        tree.tag_configure("low", foreground="#F57F17", font=("", 11, "bold"))
+        tree.tag_configure("low", foreground="#FFD54F", font=("", 11, "bold"))
         tree.tag_configure("normal", foreground="#666666", font=("", 11))
         # ===== 双击股票行 → 打开日K线图 =====
         def _open_kline_on_double(event):
@@ -85388,7 +85389,7 @@ except Exception as e:
                 ax_pie.clear()
                 counts = [len(extreme), len(blood), len(low), len(normal)]
                 labels = ["🩸极血腥", "🩸血腥", "⚠️偏低", "✅正常"]
-                colors_pie = ["#C62828", "#E65100", "#F57F17", "#B0BEC5"]
+                colors_pie = ["#EF5350", "#E65100", "#FFD54F", "#B0BEC5"]
                 total = sum(counts)
                 if total > 0:
                     _wedges, _texts, _autotexts = ax_pie.pie(
@@ -85405,9 +85406,9 @@ except Exception as e:
                 if bar_data:
                     names = [f"{s.get('name','?')}({s.get('code','')})" for s in bar_data]
                     dists = [s.get("dist_60", 0) for s in bar_data]
-                    bar_colors = ["#C62828" if s.get("level")=="extreme"
+                    bar_colors = ["#EF5350" if s.get("level")=="extreme"
                                   else "#E65100" if s.get("level")=="blood"
-                                  else "#F57F17" for s in bar_data]
+                                  else "#FFD54F" for s in bar_data]
                     y_pos = np.arange(len(names))
                     ax_bar.barh(y_pos, dists, color=bar_colors, edgecolor="white", height=0.7)
                     ax_bar.set_yticks(y_pos)
@@ -85415,7 +85416,7 @@ except Exception as e:
                     ax_bar.set_xlabel("距60日低点 (%)", fontsize=9)
                     ax_bar.set_title("💉 距60日低点最低 Top15", fontsize=11, fontweight="bold")
                     ax_bar.invert_yaxis()
-                    ax_bar.axvline(x=0.5, color="#C62828", linestyle="--", alpha=0.5, label="极血腥线 0.5%")
+                    ax_bar.axvline(x=0.5, color="#EF5350", linestyle="--", alpha=0.5, label="极血腥线 0.5%")
                     ax_bar.axvline(x=2.0, color="#E65100", linestyle="--", alpha=0.5, label="血腥线 2%")
                     ax_bar.legend(fontsize=8, loc="lower right")
                     ax_bar.grid(axis="x", alpha=0.3)
@@ -85426,9 +85427,9 @@ except Exception as e:
                 ax_scatter.clear()
                 scatter_data = extreme + blood + low + normal
                 if scatter_data:
-                    levels = {"extreme": ("🩸极血腥", "#C62828"),
+                    levels = {"extreme": ("🩸极血腥", "#EF5350"),
                               "blood": ("🩸血腥", "#E65100"),
-                              "low": ("⚠️偏低", "#F57F17"),
+                              "low": ("⚠️偏低", "#FFD54F"),
                               "normal": ("✅正常", "#B0BEC5")}
                     for lvl, (lbl, color) in levels.items():
                         pts = [s for s in scatter_data if s.get("level") == lvl]
@@ -85439,9 +85440,9 @@ except Exception as e:
                             ax_scatter.scatter(xs, ys, s=sizes, c=color, alpha=0.7,
                                               edgecolors="white", linewidths=0.5,
                                               label=f"{lbl}({len(pts)})")
-                    ax_scatter.axvline(x=0.5, color="#C62828", linestyle="--", alpha=0.4)
+                    ax_scatter.axvline(x=0.5, color="#EF5350", linestyle="--", alpha=0.4)
                     ax_scatter.axvline(x=2.0, color="#E65100", linestyle="--", alpha=0.4)
-                    ax_scatter.axvline(x=5.0, color="#F57F17", linestyle="--", alpha=0.4)
+                    ax_scatter.axvline(x=5.0, color="#FFD54F", linestyle="--", alpha=0.4)
                     ax_scatter.axhline(y=0, color="gray", linestyle="-", alpha=0.3)
                     ax_scatter.set_xlabel("距60日低点 (%)", fontsize=9)
                     ax_scatter.set_ylabel("今日涨跌 (%)", fontsize=9)
@@ -85588,7 +85589,7 @@ except Exception as e:
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         hsb.pack(fill=tk.X)
-        tree.tag_configure("strong", foreground="#C62828", font=("", 11, "bold"))
+        tree.tag_configure("strong", foreground="#EF5350", font=("", 11, "bold"))
         tree.tag_configure("mid", foreground="#E65100", font=("", 11, "bold"))
         tree.tag_configure("weak", foreground="#666666", font=("", 11))
         # ============ 列头双击排序 ============
@@ -85895,7 +85896,7 @@ except Exception as e:
                 ax_bar.text(s + 1, i, f"{s:.1f} {type_icon}", va="center",
                             fontsize=9, fontweight="bold")
             ax_bar.set_xlim(0, 120)
-            ax_bar.axvline(x=70, color="#C62828", linestyle="--", alpha=0.6, linewidth=1.5, label="主线≥70")
+            ax_bar.axvline(x=70, color="#EF5350", linestyle="--", alpha=0.6, linewidth=1.5, label="主线≥70")
             ax_bar.axvline(x=40, color="#E65100", linestyle="--", alpha=0.6, linewidth=1.5, label="活跃≥40")
             ax_bar.legend(fontsize=8, loc="lower right", framealpha=0.9)
             ax_bar.grid(axis="x", alpha=0.3, linestyle=":")
@@ -86087,7 +86088,7 @@ except Exception as e:
         db_btn = ttk.Button(row2, text="📦 只读DB历史", width=14)
         db_btn.pack(side=tk.LEFT, padx=(0, 10))
         status_var = tk.StringVar(value="💡 点「开始爬取+分析」实时抓淘股吧精华+韭研 → AI提取热点板块")
-        ttk.Label(row2, textvariable=status_var, font=("", 10), foreground="#2E7D32"
+        ttk.Label(row2, textvariable=status_var, font=("", 10), foreground="#66BB6A"
                   ).pack(side=tk.LEFT, fill=tk.X, expand=True)
         # ===== 3 Treeview =====
         body = ttk.LabelFrame(win, text="📋 淘韭热点结果 (双击看日K · 单击看6维详细分析)", padding=3)
@@ -86970,25 +86971,25 @@ except Exception as e:
         win.geometry("1400x920")
         win.transient(self.root)
         # ============ 1 顶部说明 Banner ============
-        banner = tk.Frame(win, bg="#2E7D32", height=80)
+        banner = tk.Frame(win, bg="#66BB6A", height=80)
         banner.pack(fill=tk.X)
         banner.pack_propagate(False)
-        banner_inner = tk.Frame(banner, bg="#2E7D32")
+        banner_inner = tk.Frame(banner, bg="#66BB6A")
         banner_inner.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
         tk.Label(banner_inner, text="💰 是否加仓 · 智能分析器",
                  font=("Microsoft YaHei", 17, "bold"),
-                 bg="#2E7D32", fg="#FFFFFF").pack(anchor="w")
+                 bg="#66BB6A", fg="#FFFFFF").pack(anchor="w")
         desc = (
             "🎯 输入股票代码 → 自动计算 MA/RSI/MACD/布林带 → 规则引擎评分"
             " + AI 智能建议(凯利公式 · 正金字塔 · 本金铁律)"
         )
         tk.Label(banner_inner, text=desc,
                  font=("Microsoft YaHei", 11),
-                 bg="#2E7D32", fg="#E8F5E9").pack(anchor="w")
+                 bg="#66BB6A", fg="#E8F5E9").pack(anchor="w")
         hint = "🟢 建议加仓 (≥+6)   ⚪ 中性观望 (-2~+5)   🔴 建议不加 (≤-2)"
         tk.Label(banner_inner, text=hint,
                  font=("Microsoft YaHei", 10, "bold"),
-                 bg="#2E7D32", fg="#FFD54F").pack(anchor="w")
+                 bg="#66BB6A", fg="#FFD54F").pack(anchor="w")
         # ============ 2 输入栏 ============
         top = ttk.LabelFrame(win, text="📝 输入参数", padding=8)
         top.pack(fill=tk.X, padx=5, pady=(5, 2))
@@ -87234,13 +87235,13 @@ except Exception as e:
             ax_price.grid(True, alpha=0.2)
             ax_price.set_ylabel("价格")
             # ---- 量能 ----
-            vol_colors = ["#C62828" if closes[i] >= closes[i - 1] else "#2E7D32"
+            vol_colors = ["#EF5350" if closes[i] >= closes[i - 1] else "#66BB6A"
                           for i in range(1, len(closes))]
             ax_vol.bar(x[1:], volumes[1:], color=vol_colors, width=0.8)
             ax_vol.grid(True, alpha=0.2)
             ax_vol.set_ylabel("量")
             # ---- MACD ----
-            bar_colors = ["#C62828" if h >= 0 else "#2E7D32" for h in hist]
+            bar_colors = ["#EF5350" if h >= 0 else "#66BB6A" for h in hist]
             ax_macd.bar(x, hist, color=bar_colors, width=0.8, alpha=0.6)
             ax_macd.plot(x, dif, color="#FF6F00", linewidth=0.9, label="DIF")
             ax_macd.plot(x, dea, color="#1565C0", linewidth=0.9, label="DEA")
@@ -87250,10 +87251,10 @@ except Exception as e:
             ax_macd.set_ylabel("MACD")
             # ---- RSI ----
             ax_rsi.plot(x, rsi, color="#7B1FA2", linewidth=1.1)
-            ax_rsi.axhline(70, color="#C62828", linestyle="--", linewidth=0.6, label="70超买")
-            ax_rsi.axhline(30, color="#2E7D32", linestyle="--", linewidth=0.6, label="30超卖")
-            ax_rsi.fill_between(x, 70, 100, alpha=0.08, color="#C62828")
-            ax_rsi.fill_between(x, 0, 30, alpha=0.08, color="#2E7D32")
+            ax_rsi.axhline(70, color="#EF5350", linestyle="--", linewidth=0.6, label="70超买")
+            ax_rsi.axhline(30, color="#66BB6A", linestyle="--", linewidth=0.6, label="30超卖")
+            ax_rsi.fill_between(x, 70, 100, alpha=0.08, color="#EF5350")
+            ax_rsi.fill_between(x, 0, 30, alpha=0.08, color="#66BB6A")
             ax_rsi.legend(loc="upper left", fontsize=8)
             ax_rsi.set_ylim(0, 100)
             ax_rsi.grid(True, alpha=0.2)
@@ -87458,8 +87459,8 @@ except Exception as e:
                         # === 1 规则引擎结论 ===
                         verdict, score, max_s, reasons, warnings = _rule_engine(tech)
                         verdict_map = {
-                            "YES": ("✅ 建议加仓", "#C62828", "👍 综合技术面支持加仓"),
-                            "NO": ("❌ 建议观望/不加", "#2E7D32", "⚠️ 技术面不支持加仓,等回调或趋势确认"),
+                            "YES": ("✅ 建议加仓", "#EF5350", "👍 综合技术面支持加仓"),
+                            "NO": ("❌ 建议观望/不加", "#66BB6A", "⚠️ 技术面不支持加仓,等回调或趋势确认"),
                             "NEUTRAL": ("⚖️ 中性,可轻仓试探", "#FF6F00", "🤔 多空因素交织,建议不超过5%轻仓"),
                         }
                         v_text, _v_color, v_desc = verdict_map[verdict]
@@ -87780,7 +87781,7 @@ except Exception as e:
                   bg="#EDE7F6", fg="#4A148C", cursor="hand2",
                   command=_preview_long_image).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="📥 保存长图", font=("", 11, "bold"), padx=10,
-                  bg="#2E7D32", fg="white", cursor="hand2",
+                  bg="#66BB6A", fg="white", cursor="hand2",
                   command=_save_long_image_direct).pack(side=tk.LEFT, padx=5)
         tk.Button(bg_row, text="🎨 自定义", font=("", 10), padx=6,
                   command=_pick_custom, cursor="hand2").pack(side=tk.LEFT, padx=8)
@@ -87984,7 +87985,7 @@ except Exception as e:
             action = risk.get("action", "")
             # 颜色映射
             if score >= 82: bg, fg = "#8B0000", "#FFD700"       # 极度危险
-            elif score >= 65: bg, fg = "#C62828", "white"       # 高风险
+            elif score >= 65: bg, fg = "#EF5350", "white"       # 高风险
             elif score >= 45: bg, fg = "#E67E22", "white"       # 正常偏热
             elif score >= 25: bg, fg = "#27AE60", "white"       # 正常偏低
             else: bg, fg = "#1B5E20", "#FFD700"                 # 底部区域
@@ -88064,8 +88065,8 @@ except Exception as e:
                     pnow, tnow = _pct_fmt(info.get("till_now", {}).get("pct"))
                     tags = (t5, t10, t20, tnow)
                     idx_tv.insert("", tk.END, values=(idx_name, bc, p5, p10, p20, pnow), tags=tags)
-                idx_tv.tag_configure("up", foreground="#C62828")
-                idx_tv.tag_configure("down", foreground="#2E7D32")
+                idx_tv.tag_configure("up", foreground="#EF5350")
+                idx_tv.tag_configure("down", foreground="#66BB6A")
             else:
                 for _ in range(4):
                     idx_tv.insert("", tk.END, values=("—", "—", "—", "—", "—", "—"))
@@ -88076,7 +88077,7 @@ except Exception as e:
         idx_card = tk.Frame(left, bg="#E8F5E9")
         idx_card.pack(fill=tk.X, pady=(6, 0))
         tk.Label(idx_card, text="📈 后续涨跌统计（基准日 → +5/+10/+20 交易日 → 至今）",
-                 font=("", 10, "bold"), bg="#E8F5E9", fg="#2E7D32").pack(anchor=tk.W, padx=8, pady=(4, 2))
+                 font=("", 10, "bold"), bg="#E8F5E9", fg="#66BB6A").pack(anchor=tk.W, padx=8, pady=(4, 2))
         idx_cols = ("指数", "基准收盘", "+5日", "+10日", "+20日", "至今")
         idx_tv = ttk.Treeview(idx_card, columns=idx_cols, show="headings", height=5)
         for c, w in [("指数", 80), ("基准收盘", 80), ("+5日", 72), ("+10日", 72), ("+20日", 72), ("至今", 72)]:
@@ -88586,7 +88587,7 @@ except Exception as e:
         win.geometry("1280x920")
         win.minsize(1100, 780)
         now = datetime.datetime.now()
-        banner_color = "#C62828"  # A股红
+        banner_color = "#EF5350"  # A股红
         # ===== Banner =====
         banner = tk.Frame(win, bg=banner_color, height=56); banner.pack(fill=tk.X)
         tk.Label(banner, text="🇨🇳 A股红绿灯", bg=banner_color, fg="white",
@@ -88697,7 +88698,7 @@ except Exception as e:
         tk.Label(emo_header, text="🗺️ 市场情绪地图 · 情绪分热力图 + 涨跌停趋势",
                  bg="#3F51B5", fg="white", font=("", 11, "bold")).pack(side=tk.LEFT, padx=10, pady=5)
         emo_status = tk.StringVar(value="⏳ 点击下方按钮加载数据...")
-        tk.Button(emo_header, text="🔄 更新情绪数据", bg="#C62828", fg="white",
+        tk.Button(emo_header, text="🔄 更新情绪数据", bg="#EF5350", fg="white",
                   font=("", 10, "bold"), padx=10, pady=1, cursor="hand2",
                   command=lambda: _bg_load_emo()).pack(side=tk.RIGHT, padx=8, pady=3)
         tk.Label(emo_header, textvariable=emo_status, bg="#3F51B5", fg="#FFD54F",
@@ -88735,13 +88736,13 @@ except Exception as e:
         canvas_bar.create_text(300, 55, text="⏳ 等待数据...", fill="#999", font=("", 11))
 
         def _emo_col(s):
-            if s >= 70: return "#C62828"
+            if s >= 70: return "#EF5350"
             if s >= 60: return "#E53935"
             if s >= 55: return "#FF7043"
-            if s >= 45: return "#F57F17"
+            if s >= 45: return "#FFD54F"
             if s >= 35: return "#455A64"
             if s >= 25: return "#66BB6A"
-            return "#2E7D32"
+            return "#66BB6A"
 
         def _draw_emo(sent_data):
             """渲染情绪图 (趋势+热力条)"""
@@ -88771,9 +88772,9 @@ except Exception as e:
                     hb = abs(chg) / max_chg * (pt_h/2 - 2)
                     x1, x2 = xc - bar_w/2, xc + bar_w/2
                     if chg >= 0:
-                        canvas_trend.create_rectangle(x1, zero_y - hb, x2, zero_y, fill="#C62828", outline="")
+                        canvas_trend.create_rectangle(x1, zero_y - hb, x2, zero_y, fill="#EF5350", outline="")
                     else:
-                        canvas_trend.create_rectangle(x1, zero_y, x2, zero_y + hb, fill="#2E7D32", outline="")
+                        canvas_trend.create_rectangle(x1, zero_y, x2, zero_y + hb, fill="#66BB6A", outline="")
                 # 情绪分折线 (平滑近似)
                 sent_pts = []
                 for i, d in enumerate(dl):
@@ -88794,9 +88795,9 @@ except Exception as e:
                         canvas_trend.create_text(x, 150 - pad_b + 12, text=d.get("date","")[-4:],
                                                  fill="#555", font=("", 7))
                 # 图例
-                canvas_trend.create_rectangle(pad_l+4, 4, pad_l+14, 12, fill="#C62828", outline="")
+                canvas_trend.create_rectangle(pad_l+4, 4, pad_l+14, 12, fill="#EF5350", outline="")
                 canvas_trend.create_text(pad_l+18, 8, text="涨", fill="#333", font=("", 8), anchor="w")
-                canvas_trend.create_rectangle(pad_l+34, 4, pad_l+44, 12, fill="#2E7D32", outline="")
+                canvas_trend.create_rectangle(pad_l+34, 4, pad_l+44, 12, fill="#66BB6A", outline="")
                 canvas_trend.create_text(pad_l+48, 8, text="跌", fill="#333", font=("", 8), anchor="w")
                 canvas_trend.create_line(pad_l+68, 8, pad_l+82, 8, fill="#FF6F00", width=2)
                 canvas_trend.create_text(pad_l+86, 8, text="情绪分", fill="#FF6F00", font=("", 8), anchor="w")
@@ -88816,7 +88817,7 @@ except Exception as e:
                     canvas_bar.create_rectangle(x1, 18, x2, 52, fill=col, outline="white", width=1)
                     canvas_bar.create_text((x1+x2)//2, 35, text=f"{s:.0f}", fill="white", font=("", 8, "bold"))
                     # 下方块: 涨跌
-                    bc = "#C62828" if chg >= 0 else "#2E7D32"
+                    bc = "#EF5350" if chg >= 0 else "#66BB6A"
                     canvas_bar.create_rectangle(x1, 58, x2, 76, fill=bc, outline="white", width=1)
                     canvas_bar.create_text((x1+x2)//2, 67, text=f"{chg:+.1f}", fill="white", font=("", 7))
                     # 日期
@@ -88824,14 +88825,14 @@ except Exception as e:
                         canvas_bar.create_text((x1+x2)//2, 88, text=dt2[-4:], fill="#555", font=("", 7))
                     canvas_bar.create_text((x1+x2)//2, 100, text=f"zt{zt}", fill="#888", font=("", 7))
                 # 图例
-                canvas_bar.create_rectangle(pb_l, 2, pb_l+12, 10, fill="#C62828", outline="")
-                canvas_bar.create_text(pb_l+16, 6, text="≥60热", fill="#C62828", font=("", 7), anchor="w")
-                canvas_bar.create_rectangle(pb_l+60, 2, pb_l+72, 10, fill="#F57F17", outline="")
-                canvas_bar.create_text(pb_l+76, 6, text="45暖", fill="#F57F17", font=("", 7), anchor="w")
+                canvas_bar.create_rectangle(pb_l, 2, pb_l+12, 10, fill="#EF5350", outline="")
+                canvas_bar.create_text(pb_l+16, 6, text="≥60热", fill="#EF5350", font=("", 7), anchor="w")
+                canvas_bar.create_rectangle(pb_l+60, 2, pb_l+72, 10, fill="#FFD54F", outline="")
+                canvas_bar.create_text(pb_l+76, 6, text="45暖", fill="#FFD54F", font=("", 7), anchor="w")
                 canvas_bar.create_rectangle(pb_l+110, 2, pb_l+122, 10, fill="#455A64", outline="")
                 canvas_bar.create_text(pb_l+126, 6, text="35中性", fill="#455A64", font=("", 7), anchor="w")
-                canvas_bar.create_rectangle(pb_l+170, 2, pb_l+182, 10, fill="#2E7D32", outline="")
-                canvas_bar.create_text(pb_l+186, 6, text="<35冷", fill="#2E7D32", font=("", 7), anchor="w")
+                canvas_bar.create_rectangle(pb_l+170, 2, pb_l+182, 10, fill="#66BB6A", outline="")
+                canvas_bar.create_text(pb_l+186, 6, text="<35冷", fill="#66BB6A", font=("", 7), anchor="w")
 
                 # ===== 快照 =====
                 snap = sent_data.get("latest_snapshot", {})
@@ -88849,7 +88850,7 @@ except Exception as e:
                 import traceback; traceback.print_exc()
                 canvas_trend.delete("all"); canvas_bar.delete("all")
                 canvas_trend.create_text(300, 75, text=f"❌ 渲染错误: {str(e)[:40]}",
-                                         fill="#C62828", font=("", 10))
+                                         fill="#EF5350", font=("", 10))
 
         def _bg_load_emo():
             """后台加载情绪数据"""
@@ -88903,12 +88904,12 @@ except Exception as e:
         report_txt.tag_config("hdr",       foreground="#1565C0", font=("", 12, "bold"))
         report_txt.tag_config("meta",      foreground="#607D8B", font=("", 10))
         report_txt.tag_config("sep",       foreground="#B0BEC5")
-        report_txt.tag_config("green_tag", foreground="#2E7D32", font=("", 11, "bold"))
-        report_txt.tag_config("red_tag",   foreground="#C62828", font=("", 11, "bold"))
+        report_txt.tag_config("green_tag", foreground="#66BB6A", font=("", 11, "bold"))
+        report_txt.tag_config("red_tag",   foreground="#EF5350", font=("", 11, "bold"))
         report_txt.tag_config("yellow_tag",foreground="#E65100", font=("", 11, "bold"))
         report_txt.tag_config("green_bg",  foreground="#1B5E20", background="#E8F5E9")
         report_txt.tag_config("red_bg",    foreground="#B71C1C", background="#FFEBEE")
-        report_txt.tag_config("yellow_bg", foreground="#F57F17", background="#FFFDE7")
+        report_txt.tag_config("yellow_bg", foreground="#FFD54F", background="#FFFDE7")
         def _render_ai_report(text, score, level, signals):
             """把 AI 报告按情绪面打上彩色 tag"""
             report_txt.config(state=tk.NORMAL)
@@ -89461,7 +89462,7 @@ except Exception as e:
         copy_btn.grid(row=0, column=6, padx=(4, 0))
         longimg_btn = tk.Button(ctrl, text="🖼️ 生成长图",
                                 font=("", 10), padx=8, pady=3, cursor="hand2",
-                                bg="#2E7D32", fg="white")
+                                bg="#66BB6A", fg="white")
         longimg_btn.grid(row=0, column=7, padx=(4, 0))
         # ===== PanedWindow =====
         paned = ttk.PanedWindow(win, orient=tk.HORIZONTAL)
@@ -90002,9 +90003,9 @@ except Exception as e:
         # 六大游资流派 + 每位归属
         SCHOOLS = [
             ("情绪周期流", "#7B1FA2", "养家/92科比/陈小群", "情绪阶段(冰点→高潮)+仓位管理", "🔴 量化最难替代: 情绪无法被机器完全捕捉"),
-            ("龙头战法流", "#C62828", "赵老哥/Asking/刺客", "二板定龙+弱转强+分歧一致", "🟡 部分失效: 量化打板吞噬机会, 弱转强仍可"),
-            ("低吸反包流", "#F57F17", "乔帮主/作手新一", "强势股缩量回踩+资金回流", "🟡 部分失效: 反包板减少, 但缩量回踩仍有效"),
-            ("趋势波段流", "#2E7D32", "章盟主/方新侠/孙哥", "主升持有+下降通道空仓", "🟢 仍有效: 大级别趋势是量化盲区"),
+            ("龙头战法流", "#EF5350", "赵老哥/Asking/刺客", "二板定龙+弱转强+分歧一致", "🟡 部分失效: 量化打板吞噬机会, 弱转强仍可"),
+            ("低吸反包流", "#FFD54F", "乔帮主/作手新一", "强势股缩量回踩+资金回流", "🟡 部分失效: 反包板减少, 但缩量回踩仍有效"),
+            ("趋势波段流", "#66BB6A", "章盟主/方新侠/孙哥", "主升持有+下降通道空仓", "🟢 仍有效: 大级别趋势是量化盲区"),
             ("首板隔日套利流", "#1565C0", "佛山/成都帮/上塘路", "打首板隔日必走", "🔴 几乎失效: 量化抢跑严重, 首板溢价被吃"),
             ("分仓复利悟道流", "#4527A0", "退学/北京炒家/涅槃", "账户风控总闸+连亏熔断", "🟢 永远有效: 风控是人性, 量化管不了账户总闸"),
         ]
@@ -90228,7 +90229,7 @@ except Exception as e:
             tk.Label(row, text=f"💡 {skill}", bg="#ECEFF1", fg="#555", font=("", 8)).pack(side=tk.LEFT, padx=(0, 12))
             tk.Label(row, text=remark, bg="#ECEFF1", fg=scolor, font=("", 8, "bold")).pack(side=tk.RIGHT)
         tk.Label(map_inner, text="⚠️ 游资心法仅供参考, 量化围猎时代多数已失效. 核心价值: 风控+情绪周期+大级别趋势",
-                 bg="#ECEFF1", fg="#C62828", font=("", 8, "italic")).pack(anchor="w", padx=6, pady=(4, 2))
+                 bg="#ECEFF1", fg="#EF5350", font=("", 8, "italic")).pack(anchor="w", padx=6, pady=(4, 2))
         # 标签页选择 (复用 ALL_GROUPS)
         ALL_GROUPS_HM = [
             (1,"自持股",True),(2,"龙头股",True),(4,"Main",True),(6,"同花顺",True),
@@ -90294,7 +90295,7 @@ except Exception as e:
             tk.Label(top, text="   🔎 关键词:", bg="#ECEFF1", font=("", 10)).pack(side=tk.LEFT, padx=(12, 4))
             kw_var = tk.StringVar(value="游资,赵老哥,炒股养家,方新侠,章盟主,葛卫东,作手新一,瑞鹤仙,陈小群,92科比,佛山,成都帮,上塘路,刺客,Asking,养家心法")
             tk.Entry(top, textvariable=kw_var, width=55).pack(side=tk.LEFT, padx=4)
-            go_btn = tk.Button(top, text="🔍 查DB", bg="#C62828", fg="white",
+            go_btn = tk.Button(top, text="🔍 查DB", bg="#EF5350", fg="white",
                                font=("", 10, "bold"), relief=tk.FLAT, padx=10, cursor="hand2")
             go_btn.pack(side=tk.LEFT, padx=8)
             tk.Label(top, text="   💡 双击行看全文 | Ctrl+多选", bg="#ECEFF1", font=("", 9), fg="#666").pack(side=tk.RIGHT, padx=6)
@@ -90306,7 +90307,7 @@ except Exception as e:
             # AI 分析条 (在 status 上方)
             ai_bar = tk.Frame(win2, bg="#FFF8E1"); ai_bar.pack(fill=tk.X, side=tk.BOTTOM, pady=(0, 2))
             sel_var = tk.StringVar(value="0")
-            tk.Label(ai_bar, textvariable=sel_var, bg="#FFF8E1", fg="#C62828", font=("", 10, "bold")).pack(side=tk.LEFT, padx=(6, 2))
+            tk.Label(ai_bar, textvariable=sel_var, bg="#FFF8E1", fg="#EF5350", font=("", 10, "bold")).pack(side=tk.LEFT, padx=(6, 2))
             tk.Label(ai_bar, text="条被选中", bg="#FFF8E1", fg="#666", font=("", 10)).pack(side=tk.LEFT)
             tk.Label(ai_bar, text="  |  ⌘A全选 / Ctrl+点击多选", bg="#FFF8E1", fg="#888", font=("", 9)).pack(side=tk.LEFT)
             # 按钮先创建占位, 后面 _ai_analyze 函数定义完再绑定 command
@@ -90412,9 +90413,9 @@ except Exception as e:
                             txt_w = _st.ScrolledText(wr, font=("Menlo", 11), wrap=tk.WORD, bg="#FAFAFA")
                             txt_w.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
                             # 配色 tag
-                            txt_w.tag_configure("hotmoney", foreground="#C62828", font=("", 11, "bold"))
+                            txt_w.tag_configure("hotmoney", foreground="#EF5350", font=("", 11, "bold"))
                             txt_w.tag_configure("stock", foreground="#1565C0", font=("", 11, "bold"))
-                            txt_w.tag_configure("logic", foreground="#2E7D32")
+                            txt_w.tag_configure("logic", foreground="#66BB6A")
                             txt_w.tag_configure("header", foreground="#1A237E", font=("", 12, "bold"))
                             txt_w.insert(tk.END, result)
                             # 自动高亮 **text** 和 - 开头的股票行
@@ -90527,7 +90528,7 @@ except Exception as e:
                                " | ".join(f"{t}:{c}" for t, c in top_tabs))
 
             go_btn.config(command=_load_news); _load_news()
-        youzi_btn = tk.Button(ctrl, text="🦁 游资资讯", bg="#C62828", fg="white", font=("", 10, "bold"),
+        youzi_btn = tk.Button(ctrl, text="🦁 游资资讯", bg="#EF5350", fg="white", font=("", 10, "bold"),
                               relief=tk.FLAT, padx=10, cursor="hand2", command=_show_youzi_news)
         youzi_btn.grid(row=len(ALL_GROUPS_HM)//7+3, column=1, padx=4, pady=4, sticky="w")
         # ===== 主显示区: ScrolledText =====
@@ -90538,9 +90539,9 @@ except Exception as e:
         tree.tag_configure("yhx", background="#FFF8E1")
         tree.tag_configure("bhx", background="#FFEBEE")
         tree.tag_configure("stk", foreground="#1A237E", font=("Menlo", 10, "bold"))
-        tree.tag_configure("gn", foreground="#2E7D32", font=("Menlo", 10, "bold"))
-        tree.tag_configure("rn", foreground="#C62828", font=("Menlo", 10, "bold"))
-        tree.tag_configure("yn", foreground="#F57F17", font=("Menlo", 10, "bold"))
+        tree.tag_configure("gn", foreground="#66BB6A", font=("Menlo", 10, "bold"))
+        tree.tag_configure("rn", foreground="#EF5350", font=("Menlo", 10, "bold"))
+        tree.tag_configure("yn", foreground="#FFD54F", font=("Menlo", 10, "bold"))
         tree._line_data = {}  # 行号 -> data dict
         # ===== 扫描 worker =====
         def _scan():
@@ -90712,12 +90713,12 @@ except Exception as e:
                         def _render():
                             print(f"  🎨 _render called, results={len(results)}", flush=True)
                             tree.config(state=tk.NORMAL); tree.delete("1.0", tk.END); tree._line_data = {}
-                            tree.tag_configure("red_fg", foreground="#C62828")
-                            tree.tag_configure("green_fg", foreground="#2E7D32")
+                            tree.tag_configure("red_fg", foreground="#EF5350")
+                            tree.tag_configure("green_fg", foreground="#66BB6A")
                             tree.tag_configure("bold", font=("", 9, "bold"))
-                            tree.tag_configure("strong", foreground="#C62828", font=("", 9, "bold"))
-                            tree.tag_configure("mid", foreground="#F57F17", font=("", 9, "bold"))
-                            tree.tag_configure("weak", foreground="#2E7D32", font=("", 9, "bold"))
+                            tree.tag_configure("strong", foreground="#EF5350", font=("", 9, "bold"))
+                            tree.tag_configure("mid", foreground="#FFD54F", font=("", 9, "bold"))
+                            tree.tag_configure("weak", foreground="#66BB6A", font=("", 9, "bold"))
                             hotmoney_names = [n for (n,_,_,_) in HOTMONEY]
                             hdr_stk = f"{'股票':<10} {'代码':<10} {'组':<4} {'现价':>7} {'涨跌%':>7}"
                             hdr_hm = "".join(f" {n[:4]:>5}" for n in hotmoney_names)
@@ -91009,7 +91010,7 @@ except Exception as e:
                 def _draw_progress(cv, x, y, score, w=180, h=14):
                     """Canvas 画彩色进度条: 灰底 → 红/黄/绿渐块 → 中间文字"""
                     cv.create_rectangle(x, y, x+w, y+h, fill="#E0E0E0", outline="", tags="bar")
-                    color = "#2E7D32" if score >= 65 else ("#F57F17" if score >= 45 else "#C62828")
+                    color = "#66BB6A" if score >= 65 else ("#FFD54F" if score >= 45 else "#EF5350")
                     fill_w = max(4, int(score / 100.0 * w))
                     cv.create_rectangle(x, y, x+fill_w, y+h, fill=color, outline="", tags="bar")
                     cv.create_text(x + w/2, y + h/2, text=f"{score}", fill="white",
@@ -91040,7 +91041,7 @@ except Exception as e:
                     # 维度明细 (grid 两列)
                     dv = tk.Frame(card, bg="white"); dv.pack(fill=tk.X, padx=4, pady=2)
                     for j, (ln, mark, pts) in enumerate(d["dims"]):
-                        fg_dv = {"🟢": "#2E7D32", "🔴": "#C62828", "🟡": "#F57F17"}.get(mark, "#555")
+                        fg_dv = {"🟢": "#66BB6A", "🔴": "#EF5350", "🟡": "#FFD54F"}.get(mark, "#555")
                         tk.Label(dv, text=f"{mark} {ln}", bg="white", fg=fg_dv, font=("", 8)
                                  ).grid(row=j//2, column=j%2*2, sticky="w", padx=2, pady=1)
                         tk.Label(dv, text=pts, bg="white", fg=fg_dv, font=("", 8, "bold")
@@ -91110,7 +91111,7 @@ except Exception as e:
                         ax_v = fig.add_subplot(gs[1], facecolor="#FAFAFA", sharex=ax_k)
                         ax_i = fig.add_subplot(gs[2], facecolor="#FAFAFA", sharex=ax_k)
                         x = list(range(len(cl)))
-                        cols_k = ["#C62828" if c >= o else "#2E7D32" for c, o in zip(cl, op)]
+                        cols_k = ["#EF5350" if c >= o else "#66BB6A" for c, o in zip(cl, op)]
                         # ===== 主图: K线 + MA + BOLL =====
                         ax_k.bar(x, [h - l for h, l in zip(hi, lo)], bottom=lo, width=0.6, color=cols_k, alpha=0.5)
                         ax_k.bar(x, [abs(c - o) for c, o in zip(cl, op)], bottom=[min(c, o) for c, o in zip(cl, op)], width=0.6, color=cols_k)
@@ -91134,7 +91135,7 @@ except Exception as e:
                         # ===== 指标副图 =====
                         ind = current_indicator[0]
                         if ind == "MACD":
-                            ax_i.bar(x, macd_hist, color=["#C62828" if v >= 0 else "#2E7D32" for v in macd_hist], width=0.6, alpha=0.8)
+                            ax_i.bar(x, macd_hist, color=["#EF5350" if v >= 0 else "#66BB6A" for v in macd_hist], width=0.6, alpha=0.8)
                             ax_i.plot(x, dif, color="#FF9800", lw=1, label="DIF")
                             ax_i.plot(x, dea, color="#2196F3", lw=1, label="DEA")
                             ax_i.axhline(0, color="#999", lw=0.5)
@@ -91143,7 +91144,7 @@ except Exception as e:
                             ax_i.plot(x, kdj_k, color="#FF9800", lw=1, label="K")
                             ax_i.plot(x, kdj_d, color="#2196F3", lw=1, label="D")
                             ax_i.plot(x, kdj_j, color="#9C27B0", lw=1, label="J")
-                            ax_i.axhline(80, color="#C62828", lw=0.5, ls="--"); ax_i.axhline(20, color="#2E7D32", lw=0.5, ls="--")
+                            ax_i.axhline(80, color="#EF5350", lw=0.5, ls="--"); ax_i.axhline(20, color="#66BB6A", lw=0.5, ls="--")
                             ax_i.set_ylabel("KDJ", fontsize=8); ax_i.set_ylim(-20, 120)
                         elif ind == "BIAS":
                             ax_i.plot(x, bias6, color="#FF9800", lw=1, label="BIAS6")
@@ -91155,7 +91156,7 @@ except Exception as e:
                             # BOLL 已在主图叠加, 这里显示 %B 和带宽
                             pct_b = [(cl[i]-boll_lo[i])/(boll_up[i]-boll_lo[i]) if not _m.isnan(boll_up[i]-boll_lo[i]) else float("nan") for i in range(len(cl))]
                             ax_i.plot(x, pct_b, color="#2196F3", lw=1, label="%B")
-                            ax_i.axhline(1, color="#C62828", lw=0.5, ls="--"); ax_i.axhline(0, color="#2E7D32", lw=0.5, ls="--")
+                            ax_i.axhline(1, color="#EF5350", lw=0.5, ls="--"); ax_i.axhline(0, color="#66BB6A", lw=0.5, ls="--")
                             ax_i.set_ylabel("BOLL %B", fontsize=8); ax_i.set_ylim(-0.5, 1.5)
                         ax_i.legend(fontsize=7, loc="upper left"); ax_i.grid(True, alpha=0.2)
                         cv2.draw_idle()
@@ -91223,7 +91224,7 @@ except Exception as e:
                     prev_close = cl[-2] if len(cl) >= 2 else cl[0]
                     cur_price = cl[last]
                     chg_pct = (cur_price - prev_close) / prev_close * 100
-                    color_up = "#C62828"; color_dn = "#2E7D32"
+                    color_up = "#EF5350"; color_dn = "#66BB6A"
                     cur_col = color_up if chg_pct >= 0 else color_dn
                     # 信息面板分区
                     tk.Label(info_f, text=f"{data['name']}({data['code']})",
@@ -91317,11 +91318,11 @@ except Exception as e:
                 txt2.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
                 txt2.tag_configure("sch", foreground="#1A237E", font=("", 12, "bold"),
                                    background="#E8EAF6")
-                txt2.tag_configure("hotm", foreground="#C62828", font=("", 11, "bold"))
+                txt2.tag_configure("hotm", foreground="#EF5350", font=("", 11, "bold"))
                 txt2.tag_configure("quote", foreground="#1565C0", font=("Menlo", 10, "italic"))
-                txt2.tag_configure("bold", foreground="#C62828", font=("", 10, "bold"))
+                txt2.tag_configure("bold", foreground="#EF5350", font=("", 10, "bold"))
                 txt2.tag_configure("theory", foreground="#424242", font=("", 9))
-                txt2.tag_configure("risk", foreground="#2E7D32", font=("", 9))
+                txt2.tag_configure("risk", foreground="#66BB6A", font=("", 9))
                 txt2.tag_configure("sep", foreground="#BDBDBD")
 
                 # 按流派分组
@@ -91380,13 +91381,13 @@ except Exception as e:
                         if q["limit_up"]: match += 25
                         match = max(0, min(100, 50 + match))
                         if q["limit_up"] and emo in ("发酵", "高潮"):
-                            return ("🟢", "#2E7D32", "✅ 情绪高潮+涨停, 情绪流最佳参与点", match)
+                            return ("🟢", "#66BB6A", "✅ 情绪高潮+涨停, 情绪流最佳参与点", match)
                         elif emo in ("冰点", "退潮"):
-                            return ("🔴", "#C62828", f"❌ 情绪【{emo}】, 情绪流原则上应空仓, 逆势必亏", match)
+                            return ("🔴", "#EF5350", f"❌ 情绪【{emo}】, 情绪流原则上应空仓, 逆势必亏", match)
                         elif q["pc"] >= 3 and q["vr"] >= 1.2:
-                            return ("🟢", "#2E7D32", "✅ 放量上涨+情绪配合, 情绪流可参与", match)
+                            return ("🟢", "#66BB6A", "✅ 放量上涨+情绪配合, 情绪流可参与", match)
                         else:
-                            return ("🟡", "#F57F17", f"⚠️ 情绪【{emo}】, 情绪特征不明显, 观望", match)
+                            return ("🟡", "#FFD54F", f"⚠️ 情绪【{emo}】, 情绪特征不明显, 观望", match)
                     elif sn == "龙头战法流":
                         # 核心: 均线多头 + 强趋势 + 量能
                         match = 50
@@ -91397,13 +91398,13 @@ except Exception as e:
                         if q["dn5"] >= 2: match -= 20
                         match = max(0, min(100, match))
                         if q["limit_up"] and q["ma_ok"]:
-                            return ("🟢", "#2E7D32", "✅ 涨停+均线多头, 龙头战法核心标的", match)
+                            return ("🟢", "#66BB6A", "✅ 涨停+均线多头, 龙头战法核心标的", match)
                         elif q["ma_ok"] and q["vr"] >= 1.2:
-                            return ("🟢", "#2E7D32", "✅ 均线多头+量能配合, 可关注龙头候选", match)
+                            return ("🟢", "#66BB6A", "✅ 均线多头+量能配合, 可关注龙头候选", match)
                         elif q["dn5"] >= 2 or not q["ma_ok"]:
-                            return ("🔴", "#C62828", "❌ 均线空头或连跌, 龙头战法不做下降趋势", match)
+                            return ("🔴", "#EF5350", "❌ 均线空头或连跌, 龙头战法不做下降趋势", match)
                         else:
-                            return ("🟡", "#F57F17", "⚠️ 特征中性, 是否龙头需结合板块地位", match)
+                            return ("🟡", "#FFD54F", "⚠️ 特征中性, 是否龙头需结合板块地位", match)
                     elif sn == "低吸反包流":
                         # 核心: 强势股回调缩量 + 均线支撑
                         match = 50
@@ -91413,13 +91414,13 @@ except Exception as e:
                         if q["dn5"] >= 3: match -= 15
                         match = max(0, min(100, match))
                         if q["pc"] <= -2 and q["vol_shrink"] and q["ma_ok"]:
-                            return ("🟢", "#2E7D32", "✅ 回调缩量+均线多头, 低吸反包完美候选", match)
+                            return ("🟢", "#66BB6A", "✅ 回调缩量+均线多头, 低吸反包完美候选", match)
                         elif q["bias20"] >= -5 and q["bias20"] <= 0:
-                            return ("🟡", "#F57F17", f"⚠️ 接近MA20支撑(偏离{q['bias20']:+.1f}%), 等待止跌信号", match)
+                            return ("🟡", "#FFD54F", f"⚠️ 接近MA20支撑(偏离{q['bias20']:+.1f}%), 等待止跌信号", match)
                         elif q["dn5"] >= 3:
-                            return ("🔴", "#C62828", f"❌ 连跌{q['dn5']}天, 可能继续下探, 别急着抄底", match)
+                            return ("🔴", "#EF5350", f"❌ 连跌{q['dn5']}天, 可能继续下探, 别急着抄底", match)
                         else:
-                            return ("🟡", "#F57F17", "⚠️ 无典型低吸特征, 耐心等缩量回踩", match)
+                            return ("🟡", "#FFD54F", "⚠️ 无典型低吸特征, 耐心等缩量回踩", match)
                     elif sn == "趋势波段流":
                         # 核心: 均线多头 + 大级别趋势
                         match = 50
@@ -91429,27 +91430,27 @@ except Exception as e:
                         if not q["ma_ok"]: match -= 30
                         match = max(0, min(100, match))
                         if q["ma_ok"] and q["pct3"] >= -5:
-                            return ("🟢", "#2E7D32", "✅ 均线多头+接近前高, 趋势波段最佳持有/买入点", match)
+                            return ("🟢", "#66BB6A", "✅ 均线多头+接近前高, 趋势波段最佳持有/买入点", match)
                         elif q["ma_ok"]:
-                            return ("🟢", "#2E7D32", "✅ 均线多头排列, 趋势向上, 可波段持有", match)
+                            return ("🟢", "#66BB6A", "✅ 均线多头排列, 趋势向上, 可波段持有", match)
                         else:
-                            return ("🔴", "#C62828", "❌ 均线空头排列, 下降通道, 趋势流应空仓", match)
+                            return ("🔴", "#EF5350", "❌ 均线空头排列, 下降通道, 趋势流应空仓", match)
                     elif sn == "首板隔日套利流":
                         # 核心: 低价小盘 + 首板涨停 (无法直接判断, 给中性判断)
                         if q["limit_up"] and q["vr"] >= 2.0:
-                            return ("🟡", "#F57F17", "⚠️ 涨停+爆量, 若为首板可考虑, 但注意A字杀风险", 60)
+                            return ("🟡", "#FFD54F", "⚠️ 涨停+爆量, 若为首板可考虑, 但注意A字杀风险", 60)
                         elif q["limit_up"]:
-                            return ("🟡", "#F57F17", "⚠️ 涨停, 首板套利需确认封板时间+封单量", 50)
+                            return ("🟡", "#FFD54F", "⚠️ 涨停, 首板套利需确认封板时间+封单量", 50)
                         else:
-                            return ("🔴", "#C62828", "❌ 未涨停, 首板套利流无操作机会", 20)
+                            return ("🔴", "#EF5350", "❌ 未涨停, 首板套利流无操作机会", 20)
                     elif sn == "分仓复利悟道流":
                         # 核心: 风险控制 — 永远适用, 但在退潮期特别重要
                         if emo in ("冰点", "退潮"):
-                            return ("🟢", "#2E7D32", f"✅ 情绪【{emo}】, 分仓风控尤其重要, 建议降低仓位", 80)
+                            return ("🟢", "#66BB6A", f"✅ 情绪【{emo}】, 分仓风控尤其重要, 建议降低仓位", 80)
                         elif q["dn5"] >= 2:
-                            return ("🟢", "#2E7D32", f"✅ 连跌{q['dn5']}天, 分仓复利要求严格控回撤, 谨慎加仓", 75)
+                            return ("🟢", "#66BB6A", f"✅ 连跌{q['dn5']}天, 分仓复利要求严格控回撤, 谨慎加仓", 75)
                         else:
-                            return ("🟢", "#2E7D32", "✅ 分仓复利是总闸, 永远适用, 严格执行仓位纪律", 70)
+                            return ("🟢", "#66BB6A", "✅ 分仓复利是总闸, 永远适用, 严格执行仓位纪律", 70)
                     return ("🟡", "#555", "—", 50)
 
                 # ===== Tab3: 🗺️ 流派诊断 + 综合建议 (左右布局) =====
@@ -91518,7 +91519,7 @@ except Exception as e:
                     right_c = tk.Frame(card, bg="white"); right_c.pack(side=tk.RIGHT, fill=tk.Y, padx=4)
                     cv3 = tk.Canvas(right_c, width=110, height=14, bg="#EEEEEE",
                                     highlightthickness=0); cv3.pack(pady=(6, 1), anchor="w")
-                    bar_col = "#2E7D32" if pct >= 65 else ("#F57F17" if pct >= 45 else "#C62828")
+                    bar_col = "#66BB6A" if pct >= 65 else ("#FFD54F" if pct >= 45 else "#EF5350")
                     cv3.create_rectangle(0, 0, min(pct*1.1, 110), 14, fill=bar_col, outline="")
                     cv3.create_text(55, 7, text=f"{pct:.0f}%", fill="white", font=("", 8, "bold"))
                     tk.Label(right_c, text=judge, bg="white", fg=color, font=("", 9, "bold"),
@@ -91635,50 +91636,50 @@ except Exception as e:
                     q = _q; emo = q["emo"]; pc = q["pc"]
                     if idx == 0:  # 只做最强/龙头
                         if q["limit_up"] and q["ma_ok"]:
-                            return ("🟢", "#2E7D32", "✅ 涨停+均线多头, 属于市场关注焦点")
+                            return ("🟢", "#66BB6A", "✅ 涨停+均线多头, 属于市场关注焦点")
                         elif q["ma_ok"] and q["vr"] >= 1.5:
-                            return ("🟢", "#2E7D32", "✅ 均线多头+量能放大, 强势特征明显")
+                            return ("🟢", "#66BB6A", "✅ 均线多头+量能放大, 强势特征明显")
                         elif q["vr"] < 0.7 and not q["ma_ok"]:
-                            return ("🔴", "#C62828", "❌ 缩量+均线空头, 非最强股, 注意跟风风险")
-                        return ("🟡", "#F57F17", "⚠️ 特征中性, 是否最强需结合板块判断")
+                            return ("🔴", "#EF5350", "❌ 缩量+均线空头, 非最强股, 注意跟风风险")
+                        return ("🟡", "#FFD54F", "⚠️ 特征中性, 是否最强需结合板块判断")
                     elif idx == 1:  # 买分歧卖一致
                         if pc <= -3 and q["vol_shrink"] and q["ma_ok"]:
-                            return ("🟢", "#2E7D32", "✅ 分歧回调+量缩+均线多头, 适合低吸买入点")
+                            return ("🟢", "#66BB6A", "✅ 分歧回调+量缩+均线多头, 适合低吸买入点")
                         elif pc >= 7 and q["vr"] > 2.0:
-                            return ("🔴", "#C62828", "❌ 高潮大涨+爆量, 一致度高, 适合卖出而非买入")
-                        return ("🟡", "#F57F17", "⚠️ 非典型分歧/一致, 观望为主")
+                            return ("🔴", "#EF5350", "❌ 高潮大涨+爆量, 一致度高, 适合卖出而非买入")
+                        return ("🟡", "#FFD54F", "⚠️ 非典型分歧/一致, 观望为主")
                     elif idx == 2:  # 严格止损
                         if pc <= -5:
-                            return ("🔴", "#C62828", "❌ 当日跌超5%, 已触3-5%止损线, 该割!")
+                            return ("🔴", "#EF5350", "❌ 当日跌超5%, 已触3-5%止损线, 该割!")
                         elif q["dn5"] >= 3 and q["pct3"] < -8:
-                            return ("🔴", "#C62828", f"❌ 近5日连跌{q['dn5']}天, 距60日高点{q['pct3']:+.1f}%, 止损预警!")
-                        return ("🟢", "#2E7D32", "✅ 当前状态良好, 尚未触发止损阈值")
+                            return ("🔴", "#EF5350", f"❌ 近5日连跌{q['dn5']}天, 距60日高点{q['pct3']:+.1f}%, 止损预警!")
+                        return ("🟢", "#66BB6A", "✅ 当前状态良好, 尚未触发止损阈值")
                     elif idx == 3:  # 空仓智慧
                         if emo in ("冰点", "退潮") and pc < 0:
-                            return ("🔴", "#C62828", f"❌ 情绪【{emo}】+当日下跌, 空仓更安全, 别逆势!")
+                            return ("🔴", "#EF5350", f"❌ 情绪【{emo}】+当日下跌, 空仓更安全, 别逆势!")
                         elif emo in ("冰点", "退潮"):
-                            return ("🟡", "#F57F17", f"⚠️ 情绪【{emo}】, 原则上应空仓, 谨慎开新仓")
-                        return ("🟢", "#2E7D32", f"✅ 情绪【{emo}】, 可积极操作")
+                            return ("🟡", "#FFD54F", f"⚠️ 情绪【{emo}】, 原则上应空仓, 谨慎开新仓")
+                        return ("🟢", "#66BB6A", f"✅ 情绪【{emo}】, 可积极操作")
                     elif idx == 4:  # 忘记成本
                         if not q["ma_ok"] and q["vr"] < 1.0:
-                            return ("🔴", "#C62828", "❌ 均线空头+缩量, 假设空仓你还会买吗? 别被成本绑架!")
+                            return ("🔴", "#EF5350", "❌ 均线空头+缩量, 假设空仓你还会买吗? 别被成本绑架!")
                         elif q["ma_ok"] and q["vr"] >= 1.0:
-                            return ("🟢", "#2E7D32", "✅ 均线多头+量正常, 空仓状态下也值得买入, 成本不影响决策")
-                        return ("🟡", "#F57F17", "⚠️ 特征混合, 建议客观评估而非锚定成本")
+                            return ("🟢", "#66BB6A", "✅ 均线多头+量正常, 空仓状态下也值得买入, 成本不影响决策")
+                        return ("🟡", "#FFD54F", "⚠️ 特征混合, 建议客观评估而非锚定成本")
                     elif idx == 5:  # 不补仓摊薄
                         if q["dn5"] >= 2 and not q["ma_ok"]:
-                            return ("🔴", "#C62828", f"❌ 连跌{q['dn5']}天+均线空头, 切勿补仓摊薄!")
-                        return ("🟢", "#2E7D32", "✅ 当前无被套迹象, 无摊薄风险")
+                            return ("🔴", "#EF5350", f"❌ 连跌{q['dn5']}天+均线空头, 切勿补仓摊薄!")
+                        return ("🟢", "#66BB6A", "✅ 当前无被套迹象, 无摊薄风险")
                     elif idx == 6:  # 计划交易
-                        return ("🟡", "#F57F17", "⚠️ 需自行确认: 今天操作是否在盘前计划内?")
+                        return ("🟡", "#FFD54F", "⚠️ 需自行确认: 今天操作是否在盘前计划内?")
                     elif idx == 7:  # 情绪周期
                         if emo in ("启动", "发酵"):
-                            return ("🟢", "#2E7D32", f"✅ 情绪【{emo}】, 启动试错/发酵加仓阶段, 可积极")
+                            return ("🟢", "#66BB6A", f"✅ 情绪【{emo}】, 启动试错/发酵加仓阶段, 可积极")
                         elif emo == "高潮":
-                            return ("🟡", "#F57F17", f"⚠️ 情绪【{emo}】, 高潮阶段应逐步减仓")
+                            return ("🟡", "#FFD54F", f"⚠️ 情绪【{emo}】, 高潮阶段应逐步减仓")
                         elif emo in ("退潮", "冰点"):
-                            return ("🔴", "#C62828", f"❌ 情绪【{emo}】, 退潮/冰点应空仓, 不逆势!")
-                        return ("🟡", "#F57F17", f"⚠️ 情绪【{emo}】, 震荡阶段谨慎操作")
+                            return ("🔴", "#EF5350", f"❌ 情绪【{emo}】, 退潮/冰点应空仓, 不逆势!")
+                        return ("🟡", "#FFD54F", f"⚠️ 情绪【{emo}】, 震荡阶段谨慎操作")
                     return ("🟡", "#555", "—")
 
                 for i, (rule, desc) in enumerate(UNIVERSAL_RULES):
@@ -91688,7 +91689,7 @@ except Exception as e:
                     # 左: 铁律名 (红) + 描述 (灰小号, 同右对齐靠近)
                     left = tk.Frame(card4, bg="white"); left.pack(side=tk.LEFT, fill=tk.X, expand=True)
                     tk.Label(left, text=f"{'⚔️' if i < 3 else '🛡️'}  {rule}",
-                             bg="white", fg="#C62828", font=("", 10, "bold")
+                             bg="white", fg="#EF5350", font=("", 10, "bold")
                              ).pack(side=tk.LEFT, padx=(6, 4), pady=4)
                     tk.Label(left, text=f"· {desc}", bg="white", fg="#888",
                              font=("", 8)).pack(side=tk.LEFT, pady=4)
@@ -92232,7 +92233,7 @@ except Exception as e:
         # 画K线 (简化版 OHLC bar, 红涨绿跌)
         for i in range(n):
             up = cl[i] >= op[i]
-            c = "#C62828" if up else "#2E7D32"
+            c = "#EF5350" if up else "#66BB6A"
             # 影线 (high-low vertical)
             ax1.plot([i, i], [lo[i], hi[i]], color=c, linewidth=0.7)
             # 实体 (open-close)
@@ -92271,7 +92272,7 @@ except Exception as e:
                 ax1.annotate("", xy=(pos, y_pos), xytext=(pos, y_pos * 0.988),
                              arrowprops={"arrowstyle": "->", "color": "#FFD600", "lw": 1.8})
                 ax1.scatter([pos], [y_pos], marker="^", color="#FFD600", s=35, zorder=10,
-                            edgecolors="#F57F17", linewidths=0.8, label="_底部转折")
+                            edgecolors="#FFD54F", linewidths=0.8, label="_底部转折")
         # 顶部转折点: 红色三角形向下 (放在K线上方)
         for pos, ma_val in top_turns:
             if pos < len(hi):
@@ -92287,7 +92288,7 @@ except Exception as e:
             _legend_labels = []
             if bottom_turns:
                 _legend_extra.append(Line2D([0], [0], marker="^", color="w",
-                                            markerfacecolor="#FFD600", markeredgecolor="#F57F17", markersize=8))
+                                            markerfacecolor="#FFD600", markeredgecolor="#FFD54F", markersize=8))
                 _legend_labels.append("成本底转折")
             if top_turns:
                 _legend_extra.append(Line2D([0], [0], marker="v", color="w",
@@ -92306,7 +92307,7 @@ except Exception as e:
         # 成交量
         for i in range(n):
             up = cl[i] >= op[i]
-            c = "#C62828" if up else "#2E7D32"
+            c = "#EF5350" if up else "#66BB6A"
             ax2.bar(i, vo[i]/1e4, width=0.6, color=c, alpha=0.8)
         ax2.set_ylabel("量(万)", fontsize=8, color="#555")
         ax2.tick_params(colors="#555", labelsize=7, labelbottom=False)
@@ -92314,7 +92315,7 @@ except Exception as e:
         ax2.set_facecolor("#FAFAFA")
 
         # MACD
-        macd_colors = ["#C62828" if v >= 0 else "#2E7D32" for v in macd_h]
+        macd_colors = ["#EF5350" if v >= 0 else "#66BB6A" for v in macd_h]
         ax3.bar(x_idx, macd_h, color=macd_colors, width=0.7, alpha=0.8)
         ax3.plot(x_idx, dif, color="#FF6F00", linewidth=0.7, label="DIF")
         ax3.plot(x_idx, dea, color="#1565C0", linewidth=0.7, label="DEA")
@@ -92362,7 +92363,7 @@ except Exception as e:
         elif avg_score >= 40: judge_lines.append("🔶 情绪分化, 轻仓试探")
         else: judge_lines.append("❌ 多数游资不看好, 观望为宜")
         tk.Label(right1, text="🏆 综合判定", font=("", 10, "bold"),
-                 bg="#FAFAFA", fg="#C62828").pack(anchor="w", pady=(6, 2))
+                 bg="#FAFAFA", fg="#EF5350").pack(anchor="w", pady=(6, 2))
         tk.Label(right1, text="\n".join(judge_lines), font=("", 9), bg="#E3F2FD", fg="#1565C0",
                  justify=tk.LEFT, padx=8, pady=6, anchor="w",
                  highlightbackground="#90CAF9", highlightthickness=1).pack(fill=tk.X, pady=2)
@@ -92372,7 +92373,7 @@ except Exception as e:
                  bg="#FAFAFA", fg="#1A237E").pack(anchor="w", pady=(6, 2))
         hm_names = list(scores.keys())
         def _score_color(s):
-            return "#C62828" if s >= 65 else ("#F57F17" if s >= 45 else "#2E7D32")
+            return "#EF5350" if s >= 65 else ("#FFD54F" if s >= 45 else "#66BB6A")
         for nm in hm_names:
             sc = scores[nm]
             col_fg = _score_color(sc)
@@ -92390,7 +92391,7 @@ except Exception as e:
         tab2 = tk.Frame(nb, bg="#FAFAFA"); nb.add(tab2, text=" 📖 心法语录 ")
         txt2 = scrolledtext.ScrolledText(tab2, font=("", 10), bg="#FAFAFA", wrap=tk.WORD)
         txt2.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        txt2.tag_config("hm_name", foreground="#C62828", font=("", 12, "bold"))
+        txt2.tag_config("hm_name", foreground="#EF5350", font=("", 12, "bold"))
         txt2.tag_config("hm_sch", foreground="#1565C0", font=("", 9, "italic"))
         for nm in hm_names:
             sc = scores[nm]
@@ -92406,7 +92407,7 @@ except Exception as e:
         txt3 = scrolledtext.ScrolledText(tab3, font=("", 10), bg="#FAFAFA", wrap=tk.WORD)
         txt3.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         txt3.tag_config("sch_name", foreground="#1A237E", font=("", 11, "bold"))
-        txt3.tag_config("sch_hot", foreground="#C62828", font=("", 11, "bold"))
+        txt3.tag_config("sch_hot", foreground="#EF5350", font=("", 11, "bold"))
         txt3.tag_config("phi", foreground="#1565C0", font=("", 9, "italic"))
 
         SCHOOLS_INFO = [
@@ -92439,8 +92440,8 @@ except Exception as e:
         tab4 = tk.Frame(nb, bg="#FAFAFA"); nb.add(tab4, text=" ⚡ 铁律诊断 ")
         txt4 = scrolledtext.ScrolledText(tab4, font=("", 10), bg="#FAFAFA", wrap=tk.WORD)
         txt4.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        txt4.tag_config("pass", foreground="#2E7D32", font=("", 10, "bold"))
-        txt4.tag_config("fail", foreground="#C62828", font=("", 10, "bold"))
+        txt4.tag_config("pass", foreground="#66BB6A", font=("", 10, "bold"))
+        txt4.tag_config("fail", foreground="#EF5350", font=("", 10, "bold"))
 
         # 公共量化字典
         ma_ok = m5 > m10 > m20
@@ -92701,9 +92702,9 @@ except Exception as e:
         tree.tag_configure("yh", background="#FFFDE7")
         tree.tag_configure("gh", background="#E8F5E9")
         tree.tag_configure("bh", background="#F5F5F5")
-        tree.tag_configure("rn", foreground="#C62828", font=("Menlo",10,"bold"))
-        tree.tag_configure("gn", foreground="#2E7D32", font=("Menlo",10,"bold"))
-        tree.tag_configure("yn", foreground="#F57F17", font=("Menlo",10,"bold"))
+        tree.tag_configure("rn", foreground="#EF5350", font=("Menlo",10,"bold"))
+        tree.tag_configure("gn", foreground="#66BB6A", font=("Menlo",10,"bold"))
+        tree.tag_configure("yn", foreground="#FFD54F", font=("Menlo",10,"bold"))
         tree.tag_configure("stk", foreground="#1A237E", font=("Menlo",10,"bold"))
         tree.tag_configure("bn", foreground="#666")
         tree.insert(tk.END, "⏳ 等待扫描...", "bn")
@@ -92722,9 +92723,9 @@ except Exception as e:
                                             bg="#FAFAFA", height=28)
         ai_txt.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 4))
         ai_txt.tag_configure("h",  foreground="#4A148C", font=("", 12, "bold"))
-        ai_txt.tag_configure("rg", foreground="#C62828", background="#FFEBEE")
-        ai_txt.tag_configure("yg", foreground="#F57F17", background="#FFFDE7")
-        ai_txt.tag_configure("gg", foreground="#2E7D32", background="#E8F5E9")
+        ai_txt.tag_configure("rg", foreground="#EF5350", background="#FFEBEE")
+        ai_txt.tag_configure("yg", foreground="#FFD54F", background="#FFFDE7")
+        ai_txt.tag_configure("gg", foreground="#66BB6A", background="#E8F5E9")
         ai_txt.insert(tk.END, "⏳ 等待扫描...\n\n扫描完成后 AI 会在此给出整体持仓策略建议。", "h")
         ai_txt.config(state=tk.DISABLED)
         def _render_ai(text):
@@ -93244,7 +93245,7 @@ except Exception as e:
                         x = np.arange(n)
                         # 画 K 线 (蜡烛)
                         for i in range(n):
-                            color = "#C62828" if closes[i] >= opens[i] else "#2E7D32"
+                            color = "#EF5350" if closes[i] >= opens[i] else "#66BB6A"
                             # 影线
                             ax.plot([x[i], x[i]], [lows[i], highs[i]], color=color, lw=0.8)
                             # 实体
@@ -93427,11 +93428,11 @@ except Exception as e:
                      font=("", 10, "bold")).pack(fill=tk.X, pady=(2, 2))
             rs_big = int(self.rhx_score) if self.rhx_score not in ("-", None, "") else 50
             if rs_big >= 70:
-                rhx_col, rhx_txt = "#2E7D32", f"✅ 强势可做 ({rs_big}/100)"
+                rhx_col, rhx_txt = "#66BB6A", f"✅ 强势可做 ({rs_big}/100)"
             elif rs_big >= 50:
-                rhx_col, rhx_txt = "#F57F17", f"⚠️ 观察等待 ({rs_big}/100)"
+                rhx_col, rhx_txt = "#FFD54F", f"⚠️ 观察等待 ({rs_big}/100)"
             else:
-                rhx_col, rhx_txt = "#C62828", f"❌ 坚决回避 ({rs_big}/100)"
+                rhx_col, rhx_txt = "#EF5350", f"❌ 坚决回避 ({rs_big}/100)"
             tk.Label(rhx_card, text=rhx_txt, bg="#E8EAF6", fg=rhx_col,
                      font=("", 14, "bold")).pack(pady=(4, 2))
             rhx_detail = (f"均线{self._rhx_ma_dir} | 量比{self.vol_r} | "
@@ -93444,10 +93445,10 @@ except Exception as e:
             tk.Label(lm_card, text="📐 利弗莫尔四支柱", bg="#00695C", fg="white",
                      font=("", 10, "bold")).pack(fill=tk.X, pady=(2, 2))
             lm_tag_display = self.lm_tag or "⏸️无数据"
-            if lm_tag_display.startswith("✅"): lm_main_col = "#2E7D32"
+            if lm_tag_display.startswith("✅"): lm_main_col = "#66BB6A"
             elif lm_tag_display.startswith("🔺"): lm_main_col = "#1565C0"
-            elif lm_tag_display.startswith(("🔻", "🚫")): lm_main_col = "#C62828"
-            else: lm_main_col = "#F57F17"
+            elif lm_tag_display.startswith(("🔻", "🚫")): lm_main_col = "#EF5350"
+            else: lm_main_col = "#FFD54F"
             tk.Label(lm_card, text=lm_tag_display, bg="#E0F2F1", fg=lm_main_col,
                      font=("", 14, "bold")).pack(pady=(4, 2))
             lm_sl_display = self.lm_sl_str or ""
@@ -93522,13 +93523,13 @@ except Exception as e:
                     f_display = max(-0.05, min(0.25, f))
                     # 颜色 + 大文字
                     if f >= 0.15:
-                        col = "#2E7D32"; label = f"✅ 建议重仓 {f_display:.1%}"
+                        col = "#66BB6A"; label = f"✅ 建议重仓 {f_display:.1%}"
                     elif f >= 0.05:
-                        col = "#F57F17"; label = f"⚠️ 建议轻仓 {f_display:.1%}"
+                        col = "#FFD54F"; label = f"⚠️ 建议轻仓 {f_display:.1%}"
                     elif f > 0:
                         col = "#EF6C00"; label = f"⚠️ 极轻仓 {f_display:.1%}"
                     else:
-                        col = "#C62828"; label = "❌ 不建议参与 0%"
+                        col = "#EF5350"; label = "❌ 不建议参与 0%"
                     detail = (f"b={b:.2f} 盈亏比  p={p:.1%} 胜率  "
                               f"avg_win={avg_win:.2%}  avg_loss={avg_loss:.2%}\n"
                               f"f = ({b:.2f}×{p:.1%} - {q:.1%}) / {b:.2f} = {f:.4f}")
@@ -93547,9 +93548,9 @@ except Exception as e:
             tk.Label(bot_left, text="🤖 AI 深度解读", bg="white", fg="#333", font=("", 11, "bold")).pack(anchor="w", padx=6, pady=(6,2))
             ai = scrolledtext.ScrolledText(bot_left, font=("", 10), wrap=tk.WORD, height=10, bg="#FAFAFA")
             ai.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0,4))
-            ai.tag_configure("rg", foreground="#C62828", background="#FFEBEE")
-            ai.tag_configure("yg", foreground="#F57F17", background="#FFFDE7")
-            ai.tag_configure("gg", foreground="#2E7D32", background="#E8F5E9")
+            ai.tag_configure("rg", foreground="#EF5350", background="#FFEBEE")
+            ai.tag_configure("yg", foreground="#FFD54F", background="#FFFDE7")
+            ai.tag_configure("gg", foreground="#66BB6A", background="#E8F5E9")
             ai.insert(tk.END, "⏳ AI 分析中 + 拉日K线图...")
             ai.config(state=tk.DISABLED)
             def _go():
@@ -93614,7 +93615,7 @@ except Exception as e:
                             vs = df_k3["vol"].astype(float).tolist() if "vol" in df_k3.columns else [0]*len(cs)
                             x = list(range(len(cs)))
                             ds = df_k3["trade_date"].tolist()
-                            cols = ["#C62828" if c >= o else "#2E7D32" for c, o in zip(cs, opens)]
+                            cols = ["#EF5350" if c >= o else "#66BB6A" for c, o in zip(cs, opens)]
                             def _ma(a, n): return [sum(a[i-n:i])/n for i in range(n,len(a))] if len(a)>=n else None
                             m5=_ma(cs,5); m10=_ma(cs,10); m20=_ma(cs,20); m60=_ma(cs,60)
                             step = max(1, len(cs)//8)
@@ -93690,14 +93691,14 @@ except Exception as e:
                                     for idx, ind in enumerate(indicators):
                                         a = local_axs[idx+1]
                                     if ind == "VOL":
-                                        vcols = ["#C62828" if cs[i]>=opens[i] else "#2E7D32" for i in range(len(vs))]
+                                        vcols = ["#EF5350" if cs[i]>=opens[i] else "#66BB6A" for i in range(len(vs))]
                                         a.bar(x, vs, width=0.6, color=vcols, alpha=0.7)
                                         a.set_ylabel("VOL", fontsize=8); a.grid(True, alpha=0.2)
                                     elif ind == "MACD":
                                         if dif and dea:
                                             a.plot(x, dif, color="#E91E63", lw=0.8, label="DIF")
                                             a.plot(x, dea, color="#2196F3", lw=0.8, label="DEA")
-                                            mcols = ["#C62828" if v>=0 else "#2E7D32" for v in macd_hist]
+                                            mcols = ["#EF5350" if v>=0 else "#66BB6A" for v in macd_hist]
                                             a.bar(x, macd_hist, width=0.6, color=mcols, alpha=0.6)
                                         a.axhline(0, color="#888", lw=0.5); a.set_ylabel("MACD", fontsize=8); a.legend(fontsize=6, loc="upper left"); a.grid(True, alpha=0.2)
                                     elif ind == "BIAS":
@@ -93785,12 +93786,12 @@ except Exception as e:
                                             r07 = hi_price - 0.7 * diff
                                             r0786 = hi_price - 0.786 * diff
                                             fib_label = "上涨回撤"
-                                            fib_color = "#2E7D32"
+                                            fib_color = "#66BB6A"
                                         else:  # 下跌趋势: 从低点反弹
                                             r07 = lo_price + 0.7 * diff
                                             r0786 = lo_price + 0.786 * diff
                                             fib_label = "下跌反弹"
-                                            fib_color = "#C62828"
+                                            fib_color = "#EF5350"
                                             # 4) 强趋势判定: 回撤幅度 > 15% 且 MA20 方向一致
                                         ma20_last = m20[-1] if m20 else cs[-1]
                                         ma20_prev = m20[-10] if m20 and len(m20) > 10 else cs[-10]
@@ -94069,7 +94070,7 @@ except Exception as e:
                             val_lbl.configure(text=f"{info['cur']:.2f}  {info['trend']}")
                             chg = info['chg']
                             chg_lbl.configure(text=f"{chg:+.2f}%  MA20={info['ma20']:.1f} MA60={info['ma60']:.1f}",
-                                              fg="#C62828" if chg >= 0 else "#2E7D32")
+                                              fg="#EF5350" if chg >= 0 else "#66BB6A")
                 win.after(0, _update_price_ui)
                 # ========== 2. A股贵金属股票列表 ==========
                 # 先清空
@@ -94223,7 +94224,7 @@ except Exception as e:
         now = dt.datetime.now()
         is_trading = self._is_a_share_trading_time(now)
         # ===== Banner =====
-        banner_color = "#C62828" if is_trading else "#1565C0"
+        banner_color = "#EF5350" if is_trading else "#1565C0"
         banner = tk.Frame(win, bg=banner_color, height=56); banner.pack(fill=tk.X)
         tk.Label(banner, text="📈 背离做T", bg=banner_color, fg="white",
                  font=("", 16, "bold")).pack(side=tk.LEFT, padx=14, pady=10)
@@ -94325,11 +94326,11 @@ except Exception as e:
                             stage_labels[_n]["ma"].configure(text="MA: Skill打分", fg="#666")
                             stage_labels[_n]["stage"].configure(
                                     text=f"{_ss} {_dd} [早盘Skill]",
-                                    fg={"S1": "#C62828", "S2": "#E65100",
-                                    "S3": "#1565C0", "S4": "#2E7D32"}.get(_ss, "#888"))
+                                    fg={"S1": "#EF5350", "S2": "#E65100",
+                                    "S3": "#1565C0", "S4": "#66BB6A"}.get(_ss, "#888"))
                             stage_labels[_n]["suggest"].configure(text=f"做T: {direction[:25]}",
-                                    fg={"S1": "#C62828", "S2": "#E65100",
-                                    "S3": "#1565C0", "S4": "#2E7D32"}.get(_ss, "#888"))
+                                    fg={"S1": "#EF5350", "S2": "#E65100",
+                                    "S3": "#1565C0", "S4": "#66BB6A"}.get(_ss, "#888"))
                         except Exception: pass
                     # 做T建议摘要
                     win.after(0, lambda: t_summary_var.set(
@@ -94386,7 +94387,7 @@ except Exception as e:
                         f"\n❌ Skill 执行失败: {_e}\n\n{_tb.format_exc()[:1500]}"))
             threading.Thread(target=_mwork, daemon=True).start()
         morning_btn = tk.Button(ctrl, text="☀️ 早盘S-T指导", font=("", 11, "bold"),
-                                    bg="#F57F17", fg="white", padx=14, pady=3, cursor="hand2",
+                                    bg="#FFD54F", fg="white", padx=14, pady=3, cursor="hand2",
                                     activebackground="#E65100", activeforeground="white")
         morning_btn.pack(side=tk.LEFT, padx=6)
         morning_btn.configure(command=_run_morning_skill)
@@ -94415,7 +94416,7 @@ except Exception as e:
             value="点击「🔍开始分析」获取大盘阶段诊断 + 做T方向建议")
         tk.Label(t_frame, textvariable=t_summary_var, font=("", 12, "bold"),
                  fg=banner_color, wraplength=1100, justify="left",
-                 anchor="w", bg="#FFF8E1" if banner_color == "#C62828" else "#E3F2FD",
+                 anchor="w", bg="#FFF8E1" if banner_color == "#EF5350" else "#E3F2FD",
                  padx=10, pady=8).pack(fill=tk.X, padx=6, pady=6)
         # ===== 主结果区 =====
         main_paned = ttk.Panedwindow(win, orient=tk.HORIZONTAL)
@@ -94647,7 +94648,7 @@ except Exception as e:
         # 按钮
         btn_row = tk.Frame(right_f); btn_row.pack(fill=tk.X, pady=(6, 0))
         tk.Button(btn_row, text="💾 保存到资讯表", font=("", 10, "bold"),
-                  bg="#2E7D32", fg="white", padx=10, pady=2, cursor="hand2").pack(
+                  bg="#66BB6A", fg="white", padx=10, pady=2, cursor="hand2").pack(
             side=tk.LEFT, padx=4)
         tk.Button(btn_row, text="📜 刷新历史", font=("", 10), padx=10, pady=2,
                   cursor="hand2").pack(side=tk.LEFT, padx=4)
@@ -94758,12 +94759,12 @@ except Exception as e:
                     try:
                         stage_labels[name]["price"].configure(
                             text=f"现价: {cur:.2f}" if cur else "现价: 自研",
-                            fg="#C62828" if (cur and ma20 and cur > ma20) else "#2E7D32")
+                            fg="#EF5350" if (cur and ma20 and cur > ma20) else "#66BB6A")
                         stage_labels[name]["ma"].configure(
                             text=f"MA5={ma5:.2f} MA10={ma10:.2f} MA20={ma20:.2f} MA60={ma60:.2f}"
                                     if ma5 else f"MA: {src or '自研'}", fg="#666")
-                        stage_color = {"S1": "#C62828", "S2": "#E65100",
-                                       "S3": "#1565C0", "S4": "#2E7D32"}.get(stage, "#888")
+                        stage_color = {"S1": "#EF5350", "S2": "#E65100",
+                                       "S3": "#1565C0", "S4": "#66BB6A"}.get(stage, "#888")
                         src_tag = f" [{src}]" if src else ""
                         stage_labels[name]["stage"].configure(
                             text=f"{stage} {desc}{src_tag}", fg=stage_color)
@@ -95130,7 +95131,7 @@ except Exception as e:
                   bg="#FFCDD2", fg="#B71C1C", cursor="hand2",
                   command=_preview_long).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="📥 保存长图", font=("", 11, "bold"), padx=10,
-                  bg="#2E7D32", fg="white", cursor="hand2",
+                  bg="#66BB6A", fg="white", cursor="hand2",
                   command=_save_long_direct).pack(side=tk.LEFT, padx=5)
         def _pick_custom():
             from tkinter import colorchooser
@@ -95498,7 +95499,7 @@ except Exception as e:
                     win.after(0, lambda: tk.messagebox.showerror("❌", err))
             threading.Thread(target=_w, daemon=True).start()
         tk.Button(btn_frame, text="📥 保存长图", font=("", 11, "bold"), padx=10,
-                  bg="#2E7D32", fg="white", cursor="hand2",
+                  bg="#66BB6A", fg="white", cursor="hand2",
                   command=_save_long).pack(side=tk.LEFT, padx=5)
         # ===== 结果区 =====
         result_frame = tk.LabelFrame(win, text="📖 舆情分析报告",
@@ -95631,8 +95632,8 @@ except Exception as e:
             """用 Canvas 原生绘图,四个可视化模块一目了然"""
             try:
                 # ===== A 股统一颜色常量(红涨绿跌)=====
-                _RED_UP = "#C62828"; _RED_UP_LIGHT = "#EF5350"     # 涨/好/积极 → 红
-                _GREEN_DOWN = "#2E7D32"; _GREEN_DOWN_LIGHT = "#66BB6A"  # 跌/坏/消极 → 绿
+                _RED_UP = "#EF5350"; _RED_UP_LIGHT = "#EF5350"     # 涨/好/积极 → 红
+                _GREEN_DOWN = "#66BB6A"; _GREEN_DOWN_LIGHT = "#66BB6A"  # 跌/坏/消极 → 绿
                 _ORANGE_T = "#FF9800"    # 做T(中性偏积极)
                 _BLUE = "#2196F3"; _YELLOW = "#FFC107"; _GRAY = "#9E9E9E"
                 c = dashboard
@@ -95753,10 +95754,10 @@ except Exception as e:
         def _write(msg, tag=None):
             text.insert(tk.END, msg, tag); text.see(tk.END)
         text.tag_config("title", font=("Microsoft YaHei", 14, "bold"), foreground="#1565C0")
-        text.tag_config("h2", font=("Microsoft YaHei", 12, "bold"), foreground="#C62828")
+        text.tag_config("h2", font=("Microsoft YaHei", 12, "bold"), foreground="#EF5350")
         text.tag_config("h3", font=("Microsoft YaHei", 10, "bold"), foreground="#37474F")
-        text.tag_config("good", foreground="#2E7D32")
-        text.tag_config("bad", foreground="#C62828")
+        text.tag_config("good", foreground="#66BB6A")
+        text.tag_config("bad", foreground="#EF5350")
         text.tag_config("dim", foreground="#888")
         def load_yesterday_context():
             """从 news_info 表查最近一条 wukong/定时Skill 的昨日 S 阶段判定"""

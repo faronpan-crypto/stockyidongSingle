@@ -3004,10 +3004,10 @@ class DapanMixin:
                 # 填充
                 fill_h = int(rec_pct / 100 * 42)  # 4~48
                 fill_y = 4 + (42 - fill_h)
-                if rec_pct > 50: fc = "#C62828"
-                elif rec_pct > 25: fc = "#F57F17"
+                if rec_pct > 50: fc = "#EF5350"
+                elif rec_pct > 25: fc = "#FFD54F"
                 elif rec_pct > 0: fc = "#FFB74D"
-                else: fc = "#2E7D32"
+                else: fc = "#66BB6A"
                 tc.create_rectangle(10, fill_y, 12, 48, fill=fc, outline="")
                 tc.create_oval(8, 50, 14, 56, fill=fc, outline="")
                 self._dapan_term_pct_var.set(f"{rec_pct}%")
@@ -3067,10 +3067,10 @@ class DapanMixin:
             try:
                 bar = self._dapan_emo_strip_canvas
                 bar.delete("all")
-                stages = [("冰点", "#2E7D32"), ("启动", "#F57F17"),
-                          ("发酵", "#FF6F00"), ("高潮", "#C62828"),
+                stages = [("冰点", "#66BB6A"), ("启动", "#FFD54F"),
+                          ("发酵", "#FF6F00"), ("高潮", "#EF5350"),
                           ("分歧", "#6A1B9A"), ("退潮", "#455A64"),
-                          ("冰点", "#2E7D32")]
+                          ("冰点", "#66BB6A")]
                 sw = 90
                 for si, (sname, scolor) in enumerate(stages):
                     x1 = si * sw + 2; x2 = x1 + sw - 2
@@ -3106,7 +3106,7 @@ class DapanMixin:
                 for idx, item in enumerate(data):
                     r, c = divmod(idx, cols)
                     bg = "#FFEBEE" if is_hot else "#E8F5E9"
-                    fg = "#C62828" if is_hot else "#2E7D32"
+                    fg = "#EF5350" if is_hot else "#66BB6A"
                     # 卡片
                     card = tk.Frame(parent_frame, bg=bg, highlightbackground=fg,
                                     highlightthickness=1, padx=4, pady=2)
@@ -3117,7 +3117,7 @@ class DapanMixin:
                     nm_lbl = tk.Label(top_row, text=f"{idx+1}. {nm}", bg=bg, fg="#212121",
                                       font=("", 8, "bold"), anchor="w")
                     nm_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
-                    chg_fg = "#C62828" if chg >= 0 else "#2E7D32"
+                    chg_fg = "#EF5350" if chg >= 0 else "#66BB6A"
                     chg_lbl = tk.Label(top_row, text=f"{chg:+.2f}%", bg=bg, fg=chg_fg,
                                        font=("", 9, "bold"))
                     chg_lbl.pack(side=tk.RIGHT)
@@ -3147,12 +3147,12 @@ class DapanMixin:
                 cw = cw or 900
                 # 颜色映射: 情绪分→颜色
                 def _emo_col(s):
-                    if s >= 70: return "#C62828"
+                    if s >= 70: return "#EF5350"
                     if s >= 60: return "#FF6F00"
-                    if s >= 50: return "#F57F17"
+                    if s >= 50: return "#FFD54F"
                     if s >= 40: return "#FFD54F"
                     if s >= 30: return "#9E9E9E"
-                    return "#2E7D32"
+                    return "#66BB6A"
                 if not trend10:
                     tc.create_text(400, 80, text="⏳ 暂无10日趋势数据",
                                    fill="#90A4AE", font=("", 10))
@@ -3169,7 +3169,7 @@ class DapanMixin:
                                    fill="#1A237E", font=("", 9, "bold"))
                     tc.create_text(pad_l+4, 18, text="●情绪分", fill="#FF6F00",
                                    font=("", 8), anchor="w")
-                    tc.create_text(pad_l+60, 18, text="▌上证涨跌", fill="#C62828",
+                    tc.create_text(pad_l+60, 18, text="▌上证涨跌", fill="#EF5350",
                                    font=("", 8), anchor="w")
 
                     # ======== 每天一列 ========
@@ -3242,13 +3242,13 @@ class DapanMixin:
                             bh = 0
                         if chg >= 0:
                             tc.create_rectangle(cx-5, mid_y - bh, cx+5, mid_y,
-                                                fill="#C62828", outline="#C62828")
+                                                fill="#EF5350", outline="#EF5350")
                         elif chg < 0:
                             tc.create_rectangle(cx-5, mid_y, cx+5, mid_y + bh,
-                                                fill="#2E7D32", outline="#2E7D32")
+                                                fill="#66BB6A", outline="#66BB6A")
 
                         # ⑥ 涨跌%标注
-                        tcol = "#C62828" if chg >= 0 else "#2E7D32"
+                        tcol = "#EF5350" if chg >= 0 else "#66BB6A"
                         tc.create_text(cx, mid_y - bh - 3 if chg >= 0 else mid_y + bh + 3,
                                        text=f"{chg:+.1f}", fill=tcol,
                                        font=("", 8, "bold"),
@@ -4035,7 +4035,7 @@ class DapanMixin:
         tk.Label(toolbar_f, text="", bg="#E65100", width=2, height=1).pack(side=tk.LEFT, padx=1)
         # 右: 功能按钮
         tk.Button(toolbar_f, text="🔄", command=lambda: (_reload_hist(), _render_month()),
-                  bg="#2E7D32", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
+                  bg="#66BB6A", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
         tk.Button(toolbar_f, text="今天", command=lambda: (_reload_hist(), view_month.__setitem__(0,_dt2.now().replace(day=1)), _render_month()),
                   bg="#0D47A1", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
         tk.Button(toolbar_f, text="☁️", command=lambda: _open_sync_dialog(),
@@ -4082,14 +4082,14 @@ class DapanMixin:
                 def _do():
                     _tmp_cfg = {"gist_token": token_var.get().strip(), "gist_id": gist_var.get().strip()}
                     if not _tmp_cfg["gist_token"]:
-                        self.root.after(0, lambda: status_lbl.config(text="❌ Token为空", fg="#C62828"))
+                        self.root.after(0, lambda: status_lbl.config(text="❌ Token为空", fg="#EF5350"))
                         return
                     self._set_emo_sync_config(_tmp_cfg)
                     r = self._emo_gist_push(hist_dict)
                     if r.get("ok") and not gist_var.get().strip():
                         gist_var.set(self._get_emo_sync_config().get("gist_id",""))
                     self.root.after(0, lambda: status_lbl.config(text=r.get("msg",""),
-                                                                  fg="#1B5E20" if r.get("ok") else "#C62828"))
+                                                                  fg="#1B5E20" if r.get("ok") else "#EF5350"))
                 import threading; threading.Thread(target=_do, daemon=True).start()
 
             def _test_pull():
@@ -4101,7 +4101,7 @@ class DapanMixin:
                     if r is not None:
                         self.root.after(0, lambda: status_lbl.config(text=f"✅ 拉到 {len(r)} 天数据", fg="#1B5E20"))
                     else:
-                        self.root.after(0, lambda: status_lbl.config(text="❌ 拉取失败 (Token/ID错或网络)", fg="#C62828"))
+                        self.root.after(0, lambda: status_lbl.config(text="❌ 拉取失败 (Token/ID错或网络)", fg="#EF5350"))
                 import threading; threading.Thread(target=_do, daemon=True).start()
 
             def _save_cfg():
@@ -4113,7 +4113,7 @@ class DapanMixin:
                 dlg.destroy()
 
             bf = tk.Frame(dlg, bg="#263238"); bf.pack(pady=6)
-            tk.Button(bf, text="💾保存并测试", command=_save_cfg, bg="#2E7D32", fg="white",
+            tk.Button(bf, text="💾保存并测试", command=_save_cfg, bg="#66BB6A", fg="white",
                       font=("", 10, "bold"), width=14).pack(side=tk.LEFT, padx=5)
             tk.Button(bf, text="测试拉取", command=_test_pull, bg="#0D47A1", fg="white",
                       font=("", 9), width=10).pack(side=tk.LEFT, padx=3)
@@ -4248,9 +4248,9 @@ class DapanMixin:
                 edit_win.destroy()
 
             bf = tk.Frame(edit_win, bg="#263238"); bf.pack(pady=10)
-            tk.Button(bf, text="💾保存", command=_save, bg="#2E7D32", fg="white",
+            tk.Button(bf, text="💾保存", command=_save, bg="#66BB6A", fg="white",
                       font=("", 10, "bold"), width=10).pack(side=tk.LEFT, padx=5)
-            tk.Button(bf, text="🗑️删除", command=_delete, bg="#C62828", fg="white",
+            tk.Button(bf, text="🗑️删除", command=_delete, bg="#EF5350", fg="white",
                       font=("", 10, "bold"), width=10).pack(side=tk.LEFT, padx=5)
             tk.Button(bf, text="取消", command=edit_win.destroy, bg="#546E7A", fg="white",
                       font=("", 10), width=8).pack(side=tk.LEFT, padx=5)
@@ -4646,11 +4646,11 @@ class DapanMixin:
             tk.Label(top_f, text=f"📅{len(hist_dict)}天 💰{_up}📉{_dn} ⚠️{_bad}", bg="#1A1A2E",
                      fg="#FFD54F", font=("", 9, "bold")).pack(side=tk.LEFT, padx=4)
             tk.Label(top_f, text="", bg="#B71C1C", width=2, height=1).pack(side=tk.LEFT, padx=(6,0))
-            tk.Label(top_f, text="", bg="#2E7D32", width=2, height=1).pack(side=tk.LEFT, padx=1)
+            tk.Label(top_f, text="", bg="#66BB6A", width=2, height=1).pack(side=tk.LEFT, padx=1)
             tk.Label(top_f, text="", bg="#E65100", width=2, height=1).pack(side=tk.LEFT, padx=1)
             # 右侧功能按钮
             tk.Button(top_f, text="🔄", command=lambda: (_reload_hist(), _render_month()),
-                      bg="#2E7D32", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
+                      bg="#66BB6A", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
             tk.Button(top_f, text="今天", command=lambda: _jump_today(),
                       bg="#0D47A1", fg="white", font=("", 8, "bold"), padx=5, pady=1).pack(side=tk.RIGHT, padx=(2,0))
 
@@ -4744,10 +4744,10 @@ class DapanMixin:
                             ths = rec.get("ths", "")
                             pct_v = rec.get("pct")
                             if pnl == "赚钱": bg = "#B71C1C"
-                            elif pnl == "亏钱": bg = "#2E7D32"
+                            elif pnl == "亏钱": bg = "#66BB6A"
                             elif pct_v is not None:
                                 if pct_v > 0: bg = "#B71C1C"
-                                elif pct_v < 0: bg = "#2E7D32"
+                                elif pct_v < 0: bg = "#66BB6A"
                                 else: bg = "#455A64"
                             else: bg = "#455A64"
                             border_color = "#E65100" if ths == "向下" else None
@@ -5639,7 +5639,7 @@ class DapanMixin:
             refs["lbls"]["m1"].configure(text=f"现价 {result['price']:.2f}")
             refs["lbls"]["m2"].configure(text=f"T*={result['T_star_date']}")
             refs["lbls"]["r2l"].configure(fg=th["fg"], text=f"P0={result['P0']:.2f}")
-            refs["lbls"]["r2r"].configure(fg=("#C62828" if result['p0_gain_pct']>=0 else "#2E7D32"),
+            refs["lbls"]["r2r"].configure(fg=("#EF5350" if result['p0_gain_pct']>=0 else "#66BB6A"),
                 text=f"距P0 {result['p0_gain_pct']}%")
             refs["lbls"]["r3l"].configure(text=f"MA20 {result['ma20_state']}")
             refs["lbls"]["r3r"].configure(text=f"距低点 +{result['L_gain_pct']}%")
@@ -8355,16 +8355,16 @@ class DapanMixin:
             bar_w = gap * 0.55
 
             def _emo_score_color(s):
-                if s >= 70: return "#C62828"
+                if s >= 70: return "#EF5350"
                 if s >= 60: return "#FF6F00"
-                if s >= 50: return "#F57F17"
+                if s >= 50: return "#FFD54F"
                 if s >= 40: return "#FFD54F"
                 if s >= 30: return "#9E9E9E"
-                return "#2E7D32"
+                return "#66BB6A"
 
             def _stage_color(stg):
-                _m = {"冰点": "#2E7D32", "启动": "#F57F17", "发酵": "#FF6F00",
-                      "高潮": "#C62828", "分歧": "#6A1B9A", "退潮": "#455A64"}
+                _m = {"冰点": "#66BB6A", "启动": "#FFD54F", "发酵": "#FF6F00",
+                      "高潮": "#EF5350", "分歧": "#6A1B9A", "退潮": "#455A64"}
                 return _m.get(stg, "#78909C")
 
             # 标题
@@ -8395,13 +8395,13 @@ class DapanMixin:
                 bh = int(abs(chg) / max_abs * ((bar_btm_y - bar_top_y) / 2 - 2))
                 if chg >= 0:
                     tc.create_rectangle(x1, mid_y - bh, x2, mid_y,
-                                        fill="#C62828", outline="#C62828")
+                                        fill="#EF5350", outline="#EF5350")
                 else:
                     tc.create_rectangle(x1, mid_y, x2, mid_y + bh,
-                                        fill="#2E7D32", outline="#2E7D32")
+                                        fill="#66BB6A", outline="#66BB6A")
                 # 涨跌%文字
                 fsize = 9 if i == n - 1 else 8
-                tcol = "#C62828" if chg >= 0 else "#2E7D32"
+                tcol = "#EF5350" if chg >= 0 else "#66BB6A"
                 ty = mid_y - bh - 3 if chg >= 0 else mid_y + bh + 3
                 tc.create_text(cx, ty, text=f"{chg:+.1f}%", fill=tcol,
                                font=("", fsize, "bold" if i == n - 1 else ""),
@@ -9673,9 +9673,9 @@ class DapanMixin:
 
                         "🟢" if (not is_danger and triggered) else "⚪")
 
-                    fg = "#C62828" if (is_danger and triggered) else (
+                    fg = "#EF5350" if (is_danger and triggered) else (
 
-                        "#2E7D32" if (not is_danger and triggered) else "#78909C")
+                        "#66BB6A" if (not is_danger and triggered) else "#78909C")
 
                     txt = f"{icon} {name}"
 
@@ -9701,7 +9701,7 @@ class DapanMixin:
 
             if summary.startswith("🚨"):
 
-                fg = "#C62828"; bg = "#FFCDD2"
+                fg = "#EF5350"; bg = "#FFCDD2"
 
             elif summary.startswith("⚠️"):
 
@@ -9713,7 +9713,7 @@ class DapanMixin:
 
             elif summary.startswith("😊"):
 
-                fg = "#2E7D32"; bg = "#E8F5E9"
+                fg = "#66BB6A"; bg = "#E8F5E9"
 
             else:
 
@@ -9833,11 +9833,11 @@ class DapanMixin:
 
                             text=f"✅ 判别完成 ({elapsed}s) · {summary[:40]}",
 
-                            fg="#2E7D32")
+                            fg="#66BB6A")
 
                     except Exception as _e_ui:
 
-                        self._lbl_risk_status.config(text=f"❌ UI刷新失败: {_e_ui}", fg="#C62828")
+                        self._lbl_risk_status.config(text=f"❌ UI刷新失败: {_e_ui}", fg="#EF5350")
 
                         self._btn_risk_check.config(state=tk.NORMAL)
 
@@ -9855,7 +9855,7 @@ class DapanMixin:
 
                     self._lbl_risk_status.config(
 
-                        text=f"❌ 判别失败: {str(_e)[:50]}", fg="#C62828")))
+                        text=f"❌ 判别失败: {str(_e)[:50]}", fg="#EF5350")))
 
 
 
@@ -9953,11 +9953,11 @@ class DapanMixin:
 
             self._w_verdict_label.config(
 
-                fg="#C62828" if verdict.startswith("🔥") else
+                fg="#EF5350" if verdict.startswith("🔥") else
 
-                   "#2E7D32" if verdict.startswith("❄") else
+                   "#66BB6A" if verdict.startswith("❄") else
 
-                   "#1565C0" if verdict.startswith("🎯") else "#F57F17")
+                   "#1565C0" if verdict.startswith("🎯") else "#FFD54F")
 
             self._w_verdict_sub.config(text=sub)
 
@@ -10135,7 +10135,7 @@ class DapanMixin:
 
         c.create_rectangle(bar_x0, bar_bot, bar_x1, ext_crash_y,
 
-                          fill="#2E7D32", outline="")        # <-20% 深绿
+                          fill="#66BB6A", outline="")        # <-20% 深绿
 
 
 
@@ -10149,13 +10149,13 @@ class DapanMixin:
 
             c.create_rectangle(bar_x0, val_y, bar_x1, zero_y,
 
-                              fill="#C62828", outline="")
+                              fill="#EF5350", outline="")
 
         else:
 
             c.create_rectangle(bar_x0, zero_y, bar_x1, val_y,
 
-                              fill="#C62828", outline="")
+                              fill="#EF5350", outline="")
 
 
 
@@ -10175,7 +10175,7 @@ class DapanMixin:
 
         c.create_text(right_label_x, marker_y, text=f"{avg_drop:+.2f}%",
 
-                     font=("Microsoft YaHei", 12, "bold"), fill="#C62828")
+                     font=("Microsoft YaHei", 12, "bold"), fill="#EF5350")
 
 
 
@@ -10219,7 +10219,7 @@ class DapanMixin:
 
         if opp_score >= 60:
 
-            arc_color = "#C62828"
+            arc_color = "#EF5350"
 
         elif opp_score >= 35:
 
@@ -10341,7 +10341,7 @@ class DapanMixin:
 
         if opp_score >= 60:
 
-            arc_color = "#C62828"  # 红 = 机会好
+            arc_color = "#EF5350"  # 红 = 机会好
 
         elif opp_score >= 35:
 
@@ -10773,7 +10773,7 @@ class DapanMixin:
 
     _MOOD_STAGES = [
 
-        (0.00, "恐慌", "#2E7D32"),    # 绿色
+        (0.00, "恐慌", "#66BB6A"),    # 绿色
 
         (0.20, "绝望", "#1565C0"),    # 深蓝
 
@@ -10781,7 +10781,7 @@ class DapanMixin:
 
         (0.60, "乐观", "#FB8C00"),    # 橙
 
-        (0.80, "狂热", "#C62828"),    # 红
+        (0.80, "狂热", "#EF5350"),    # 红
 
     ]
 
@@ -11462,7 +11462,7 @@ class DapanMixin:
 
             if score >= 82: bg, fg = "#8B0000", "#FFD700"       # 极度危险
 
-            elif score >= 65: bg, fg = "#C62828", "white"       # 高风险
+            elif score >= 65: bg, fg = "#EF5350", "white"       # 高风险
 
             elif score >= 45: bg, fg = "#E67E22", "white"       # 正常偏热
 
@@ -11622,9 +11622,9 @@ class DapanMixin:
 
                     idx_tv.insert("", tk.END, values=(idx_name, bc, p5, p10, p20, pnow), tags=tags)
 
-                idx_tv.tag_configure("up", foreground="#C62828")
+                idx_tv.tag_configure("up", foreground="#EF5350")
 
-                idx_tv.tag_configure("down", foreground="#2E7D32")
+                idx_tv.tag_configure("down", foreground="#66BB6A")
 
             else:
 
@@ -11646,7 +11646,7 @@ class DapanMixin:
 
         tk.Label(idx_card, text="📈 后续涨跌统计（基准日 → +5/+10/+20 交易日 → 至今）",
 
-                 font=("", 10, "bold"), bg="#E8F5E9", fg="#2E7D32").pack(anchor=tk.W, padx=8, pady=(4, 2))
+                 font=("", 10, "bold"), bg="#E8F5E9", fg="#66BB6A").pack(anchor=tk.W, padx=8, pady=(4, 2))
 
         idx_cols = ("指数", "基准收盘", "+5日", "+10日", "+20日", "至今")
 
@@ -12330,7 +12330,7 @@ class DapanMixin:
 
             tk.Label(col_frames[2], text="❄️ 跌幅 BOTTOM 3",
 
-                     bg="#0D1B2A", fg="#2E7D32",
+                     bg="#0D1B2A", fg="#66BB6A",
 
                      font=("", 9, "bold")).pack(anchor="w", pady=(6, 0))
 
@@ -13467,11 +13467,11 @@ class DapanMixin:
              ["低位好股拿 3~5 年, 不盯盘, 靠时间抹平波动赚价值增长",
               "适合: 有耐心、不看盘、相信价值回归",
               "不适合: 需要确定性回报、想快速赚钱的人"]),
-            ("B", "🤖 机械执行交易", "#2E7D32",
+            ("B", "🤖 机械执行交易", "#66BB6A",
              ["固定模式、严格等信号, 把人为思考排除掉",
               "适合: 能严格遵守纪律、不被情绪左右",
               "不适合: 喜欢灵活应变、频繁改规则的人"]),
-            ("C", "🔥 专追热点龙头", "#C62828",
+            ("C", "🔥 专追热点龙头", "#EF5350",
              ["只参与真正热点, 专注短线",
               "适合: 盯盘时间多、反应快、能严格止损",
               "不适合: 上班忙、怕波动、持有心态的人"]),
@@ -13646,7 +13646,7 @@ class DapanMixin:
             ("资金面", "北向持股/两融余额变化/龙虎榜机构净买入/大单净流入/主力资金流向"),
             ("筹码面", "股东户数变化/筹码峰集中度/获利盘比例/平均成本位"),
         ])
-        _card(t1, "🎨 场景模板 (预置)", "#2E7D32", [
+        _card(t1, "🎨 场景模板 (预置)", "#66BB6A", [
             ("大跌买指数", "恐慌性大跌 + 指数跌破MA60 + 单日跌幅>3%"),
             ("错杀龙头", "PB破净或PE分位<20% + 基本面未恶化 + 机构错杀"),
             ("主升浪启动", "MA多头排列 + 缩量回调 + 倍量大阳 + 吞没3阴"),
@@ -13654,7 +13654,7 @@ class DapanMixin:
             ("网格标的", "MA20横盘 + 波动率>15% + 上下轨清晰"),
             ("红利收息", "股息率>4% + ROE稳定>12% + 行业龙头"),
         ])
-        _card(t1, "🚫 禁投池", "#C62828", [
+        _card(t1, "🚫 禁投池", "#EF5350", [
             ("ST/*ST", "连续亏损/财务造假风险"),
             ("解禁高峰", "未来1个月有大额限售股解禁"),
             ("基本面恶化", "ROE连续2季下降/营收连续3季负增长"),
@@ -13671,7 +13671,7 @@ class DapanMixin:
             ("北向/两融", "北向连续5日净流入 + 融资余额增加 → 机构看多"),
             ("情绪指标", "涨停>50/跌停<10 → 多头; 跌停>50/涨停<10 → 空头"),
         ])
-        _card(t2, "🎚️ 市场状态识别", "#2E7D32", [
+        _card(t2, "🎚️ 市场状态识别", "#66BB6A", [
             ("🟢 牛市", "满仓 100%, 主升浪卡片启用, 止损放宽"),
             ("🟡 震荡市", "半仓 50%, 滚动做熟股/网格/红利, 严格止盈止损"),
             ("🔴 熊市", "空仓或≤20%防御仓, 只启用红利/黄金/债券"),
@@ -13692,7 +13692,7 @@ class DapanMixin:
             ("震荡市", "总仓位 40~60%, 平衡配置"),
             ("熊市", "总仓位 0~30%, 防御性标的为主或空仓"),
         ])
-        _card(t3, "⚖️ 单票/单行业上限", "#2E7D32", [
+        _card(t3, "⚖️ 单票/单行业上限", "#66BB6A", [
             ("单票上限", "≤ 10% (呼应公募双十红线)"),
             ("单行业上限", "≤ 25% (避免行业集中风险)"),
             ("现金留存", "滚动做T ≥ 30%, 网格 ≥ 40%"),
@@ -13707,14 +13707,14 @@ class DapanMixin:
 
         # ── Tab 4: 🛡️ M4 风控引擎 ──
         t4 = _mk_tab(nb, "🛡️ M4 风控")
-        _card(t4, "🛡️ 事前风控 (防止入坑)", "#2E7D32", [
+        _card(t4, "🛡️ 事前风控 (防止入坑)", "#66BB6A", [
             ("投资池/禁投池", "ST/退市/解禁高峰/基本面恶化股自动过滤"),
             ("单票/单行业上限", "预设阈值, 超过禁止买入"),
             ("预设止损线", "每笔买入前写清楚止损价 (如MA20或-8%)"),
             ("最大回撤阈值", "账户回撤 >15% 强制减仓至 30%"),
             ("买入前白纸黑字", "买入理由/持有时长/卖出条件 (卖出=基本面变化, 绝非股价下跌)"),
         ])
-        _card(t4, "🛑 事中风控 (实时监控)", "#C62828", [
+        _card(t4, "🛑 事中风控 (实时监控)", "#EF5350", [
             ("实时回撤监控", "每只股票 + 组合级别的回撤追踪"),
             ("止损止盈触发", "触及预设价 → 自动告警/执行 (可接QMT)"),
             ("异常波动告警", "单日涨跌>15%/连续3日同方向 → 提示检查"),
@@ -13903,7 +13903,7 @@ class DapanMixin:
         # ── Tab 1: 🚨 亏损根源 ──
         t1 = _mk_tab(nb, "🚨 亏损根源")
         tk.Label(t1, text="70% 散户亏损 = 短期交易 + 频繁换股 + 追涨割肉 = 追逐短期不确定性",
-                 bg="#C62828", fg="white", font=("Helvetica", _FS["v"]+2, "bold"), padx=12, pady=10).pack(fill=tk.X, pady=(0, 10))
+                 bg="#EF5350", fg="white", font=("Helvetica", _FS["v"]+2, "bold"), padx=12, pady=10).pack(fill=tk.X, pady=(0, 10))
         _block(t1, "🎯 亏在哪", "#6A1B9A", [
             "❌ 过度交易: 频繁买卖 → 手续费/滑点吃掉利润 + 情绪干扰",
             "❌ 追涨杀跌: 涨了想追, 跌了想割 → 买卖点全错",
@@ -13912,7 +13912,7 @@ class DapanMixin:
             "❌ 没有计划: 买前不想好卖点 → 凭感觉操作",
             "❌ 逆势交易: 熊市做T + 杠杆 → 加速亏损",
         ])
-        _block(t1, "💡 赚钱三条件 (须同时满足)", "#2E7D32", [
+        _block(t1, "💡 赚钱三条件 (须同时满足)", "#66BB6A", [
             "✅ 确认牛市 (或至少不是熊市)",
             "✅ 选中好公司 / 好指数",
             "✅ 长期持有 (中途不换股、不止盈过早)",
@@ -13950,7 +13950,7 @@ class DapanMixin:
         t3 = _mk_tab(nb, "🧠 为什么需要系统")
         tk.Label(t3, text="散户最大问题不是\"没方法\", 而是方法太多 + 性格不匹配 + 时点错配",
                  bg="#1565C0", fg="white", font=("Helvetica", _FS["v"]+1, "bold"), padx=12, pady=10).pack(fill=tk.X, pady=(0, 10))
-        _block(t3, "🎯 系统闭环", "#2E7D32", [
+        _block(t3, "🎯 系统闭环", "#66BB6A", [
             "① 选方法 → 策略卡片库 (四张底层范式 + 实战卡片)",
             "② 匹配性格 → 性格匹配矩阵 (盯盘时间/情绪波动/资金效率)",
             "③ 匹配市场 → 择时引擎 (牛/震荡/熊 → 启用哪些卡片)",
@@ -13964,7 +13964,7 @@ class DapanMixin:
             "• 久赌必输 → 但有风控的赌徒不一定输",
             "• 承认不确定性 → 放弃预测 → 拥抱概率",
         ])
-        _block(t3, "🚀 MVP 落地路径", "#C62828", [
+        _block(t3, "🚀 MVP 落地路径", "#EF5350", [
             "1️⃣ 先落 M2 择时 + M4 风控 (散户亏在择时错配 + 无止损)",
             "2️⃣ 选股用预置模板起步 (大跌买指数 / 天地一刀斩)",
             "3️⃣ 跑通 回测 → 提醒 → 复盘 闭环",
@@ -14031,9 +14031,10 @@ class DapanMixin:
         ]
 
         def _judge_day(day_price, ma20, ma60, slope):
-            if day_price > ma20 > ma60 and slope > 0.005: return ("🟢", "上行", "#2E7D32")
-            if day_price < ma20 < ma60 and slope < -0.005: return ("🔴", "下行", "#C62828")
-            return ("🟡", "震荡", "#F57F17")
+            _diff = (day_price - ma20) / ma20
+            if _diff > 0.015: return ("🟢", "上行", "#66BB6A")
+            if _diff < -0.015: return ("🔴", "下行", "#EF5350")
+            return ("🟡", "震荡", "#FFD54F")
 
         def _fetch_heatmap(name, sym):
             """拉一只 ETF 最近 N_DAYS+25 天 K 线, 返回每天的情绪状态列表"""
