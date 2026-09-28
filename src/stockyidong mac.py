@@ -80637,6 +80637,42 @@ class StockKeywordAnalyzerGUI:
             else:
                 _combo, _combo_advice = "➖ 震荡中性", "方向不明, 半仓观望, 等双强信号"
 
+            # ── 大盘 vs ETF 组合信号 ──
+            _PHASE_SCORE = {"🧊冰点":-3,"💥退潮":-2,"📉震荡":0,"🚀启动":1,"🌱发酵":2,"🔥高潮":3}
+            _etf_scores = []
+            for _n2, _s2 in selected:
+                _d2 = _all_results.get(_n2)
+                if _d2: _etf_scores.append(_PHASE_SCORE.get(_d2["days"][-1][3], 0))
+            _etf_avg = sum(_etf_scores) / len(_etf_scores) if _etf_scores else 0
+            _sh_trend = ""
+            try:
+                import requests as _r4, json as _j4
+                _rk4 = _r4.get('https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData',
+                    params={'symbol':'sh000001','scale':'240','ma':'no','datalen':'25'}, timeout=2.5,
+                    headers={'User-Agent':'Mozilla/5.0'})
+                if _rk4.status_code == 200:
+                    _kl4 = _j4.loads(_rk4.text); _cls4 = [float(k['close']) for k in _kl4]
+                    if len(_cls4) >= 20:
+                        _ma20_4 = sum(_cls4[-20:]) / 20
+                        _sh_slope = (_cls4[-1] - _ma20_4) / _ma20_4 * 100
+                        _sh_prev = (_cls4[-1] - _cls4[-2]) / _cls4[-2] * 100
+                        _sh_trend = f"上证MA20偏离 {_sh_slope:+.2f}% (昨收 {_sh_prev:+.2f}%)"
+            except Exception: pass
+            if not _sh_trend: _sh_slope = 0
+            _sh_good = _sh_slope > 0.3
+            _etf_good = _etf_avg > 0.5
+            _etf_bad = _etf_avg < -0.5
+            if _sh_good and _etf_good:
+                _combo, _combo_advice = "✅ 双强共振", "大盘↑ + ETF↑ → 积极做多, 核心ETF+卫星α全配"
+            elif not _sh_good and _etf_bad:
+                _combo, _combo_advice = "❌ 双弱共振", "大盘↓ + ETF↓ → 空仓/轻仓, 只留红利/黄金防御"
+            elif _sh_good and _etf_bad:
+                _combo, _combo_advice = "⚠️ 矛盾信号", "大盘↑ 但ETF↓ → 短期赚快钱行情, 注意轮动不追高"
+            elif not _sh_good and _etf_good:
+                _combo, _combo_advice = "⚠️ 结构背离", "大盘↓ 但ETF↑ → 结构性行情, 只选强ETF做波段"
+            else:
+                _combo, _combo_advice = "➖ 震荡中性", "方向不明, 半仓观望, 等双强信号"
+
             # 找出各周期的 ETF
             ups, downs, sides = [], [], []
             for n, s in selected:
