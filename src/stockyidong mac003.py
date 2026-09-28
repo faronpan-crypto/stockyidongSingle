@@ -4947,6 +4947,8 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("📊持股仪表盘", self._show_portfolio_dashboard, False, "quick"),
             ("🦅游资心法", self._show_hotmoney_check, False, "quick"),
             ("🏅贵金属", self._show_precious_metals_dialog, False, "quick"),
+            ("🗓️暴涨暴跌", self._open_crash_rally_calendar, False, "quick"),
+            ("🌀ETF周期", self._show_etf_cycle_dialog, False, "quick"),
             # ---- 💰 资金/持仓 (quick) ----
             ("📈资金方向", self._show_capital_direction_dialog, False, "quick"),
             ("💰是否加仓", self._show_add_position_dialog, False, "quick"),

@@ -14211,7 +14211,6 @@ class DapanMixin:
 
         def _show_trend_for(name):
             """画选中 ETF 的趋势图"""
-            nonlocal _selected_etf
             data = _all_results.get(name)
             if data is None: return
             _selected_etf = name
@@ -14296,7 +14295,6 @@ class DapanMixin:
             _draw_heatmap(_all_results)
 
             def _worker():
-                nonlocal _all_results
                 with _cf.ThreadPoolExecutor(max_workers=10) as pool:
                     futs = {pool.submit(_fetch_heatmap, n, s): n for n, s in selected}
                     for fut in _cf.as_completed(futs):
