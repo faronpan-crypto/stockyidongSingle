@@ -80300,12 +80300,12 @@ class StockKeywordAnalyzerGUI:
             if _df > 0.04 and _c5 > 0.03 and _slp > 0.01: return ("🔥", "高潮", "#EF5350")
             if _df > 0.015 and _slp > 0.005 and _c10 > 0: return ("🌱", "发酵", "#FF9800")
             if _df > -0.015 and _slp > 0.01 and _c5 > 0: return ("🚀", "启动", "#2196F3")
-            if _df < -0.015 and _slp < -0.005: return ("💥", "退潮", "#FF9800")
+            if _df < -0.015 and _slp < -0.005: return ("💥", "退潮", "#4CAF50")
             if _df < -0.04: return ("🧊", "冰点", "#455A64")
-            if abs(_df) <= 0.015 and abs(_slp) < 0.01: return ("📉", "震荡", "#FFF59D")
+            if abs(_df) <= 0.015 and abs(_slp) < 0.01: return ("📉", "震荡", "#B0BEC5")
             if _slp > 0.01: return ("🚀", "启动", "#2196F3")
-            if _slp < -0.01: return ("💥", "退潮", "#FF9800")
-            return ("📉", "震荡", "#FFF59D")
+            if _slp < -0.01: return ("💥", "退潮", "#4CAF50")
+            return ("📉", "震荡", "#B0BEC5")
 
         def _fetch_heatmap(name, sym):
             """拉一只 ETF 最近 N_DAYS+25 天 K 线, 返回每天的情绪状态列表"""
@@ -80354,7 +80354,7 @@ class StockKeywordAnalyzerGUI:
                  bg="#1E1E2E", fg="#FFD700", font=("Helvetica", _FS["v"]+1, "bold")).pack(side=_tk.LEFT)
         # 图例
         _tk.Label(top_f, text="🟢上行", bg="#1E1E2E", fg="#FF9800", font=("Helvetica", _FS["v"])).pack(side=_tk.RIGHT, padx=4)
-        _tk.Label(top_f, text="🟡震荡", bg="#1E1E2E", fg="#FFF59D", font=("Helvetica", _FS["v"])).pack(side=_tk.RIGHT, padx=4)
+        _tk.Label(top_f, text="🟡震荡", bg="#1E1E2E", fg="#B0BEC5", font=("Helvetica", _FS["v"])).pack(side=_tk.RIGHT, padx=4)
         _tk.Label(top_f, text="🔴下行", bg="#1E1E2E", fg="#EF5350", font=("Helvetica", _FS["v"])).pack(side=_tk.RIGHT, padx=4)
         _tk.Label(top_f, text="图例:", bg="#1E1E2E", fg="#888", font=("Helvetica", _FS["v"])).pack(side=_tk.RIGHT, padx=(20,4))
 
@@ -80524,7 +80524,7 @@ class StockKeywordAnalyzerGUI:
             # MA20 黄线
             ma20_pts = []
             for i, m in enumerate(ma20): ma20_pts.extend([x0_f(i), y0_f(m)])
-            trend_canvas.create_line(*ma20_pts, fill="#FFF59D", width=2)
+            trend_canvas.create_line(*ma20_pts, fill="#B0BEC5", width=2)
             # MA60 红线
             ma60_pts = []
             for i, m in enumerate(ma60): ma60_pts.extend([x0_f(i), y0_f(m)])
@@ -80549,8 +80549,8 @@ class StockKeywordAnalyzerGUI:
             # 图例
             trend_canvas.create_line(pad_l + 4, pad_t + 4, pad_l + 14, pad_t + 4, fill="#42A5F5", width=2)
             trend_canvas.create_text(pad_l + 18, pad_t + 4, text="K线", fill="#42A5F5", font=("Helvetica", 8), anchor="w")
-            trend_canvas.create_line(pad_l + 50, pad_t + 4, pad_l + 60, pad_t + 4, fill="#FFF59D", width=2)
-            trend_canvas.create_text(pad_l + 64, pad_t + 4, text="MA20", fill="#FFF59D", font=("Helvetica", 8), anchor="w")
+            trend_canvas.create_line(pad_l + 50, pad_t + 4, pad_l + 60, pad_t + 4, fill="#B0BEC5", width=2)
+            trend_canvas.create_text(pad_l + 64, pad_t + 4, text="MA20", fill="#B0BEC5", font=("Helvetica", 8), anchor="w")
             trend_canvas.create_line(pad_l + 110, pad_t + 4, pad_l + 120, pad_t + 4, fill="#EF5350", width=2)
             trend_canvas.create_text(pad_l + 124, pad_t + 4, text="MA60", fill="#EF5350", font=("Helvetica", 8), anchor="w")
 
