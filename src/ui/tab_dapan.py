@@ -14119,7 +14119,7 @@ class DapanMixin:
         tk.Label(top_f, text=f"📊 ETF 情绪热力图 (最近 {_N_DAYS} 个交易日)",
                  bg="#1E1E2E", fg="#FFD700", font=("Helvetica", _FS["v"]+1, "bold")).pack(side=tk.LEFT)
         # 图例
-        _leg = [("🧊冰点","#455A64"),("💥退潮","#FF9800"),("📉震荡","#B0BEC5"),("🚀启动","#2196F3"),("🌱发酵","#FF9800"),("🔥高潮","#EF5350")]
+        _leg = [("🧊冰点","#455A64"),("💥退潮","#4CAF50"),("📉震荡","#B0BEC5"),("🚀启动","#2196F3"),("🌱发酵","#FF9800"),("🔥高潮","#EF5350")]
         for _em, _col in _leg:
             tk.Label(top_f, text=f"{_em}", bg="#1E1E2E", fg=_col, font=("Helvetica", _FS["v"]+1)).pack(side=tk.RIGHT, padx=3)
         tk.Label(top_f, text="| 情绪周期六阶段:", bg="#1E1E2E", fg="#888", font=("Helvetica", _FS["v"])).pack(side=tk.RIGHT, padx=(10,4))

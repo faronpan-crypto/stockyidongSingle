@@ -80374,11 +80374,12 @@ class StockKeywordAnalyzerGUI:
         top_f = _tk.Frame(t1, bg="#1E1E2E"); top_f.pack(fill=_tk.X, padx=4, pady=(4, 2))
         _tk.Label(top_f, text=f"📊 ETF 情绪热力图 (最近 {_N_DAYS} 个交易日)",
                  bg="#1E1E2E", fg="#FFD700", font=("Helvetica", _FS["v"]+1, "bold")).pack(side=_tk.LEFT)
-        # 图例
-        _tk.Label(top_f, text="🟢上行", bg="#1E1E2E", fg="#FF9800", font=("Helvetica", _FS["v"])).pack(side=_tk.RIGHT, padx=4)
-        _tk.Label(top_f, text="🟡震荡", bg="#1E1E2E", fg="#B0BEC5", font=("Helvetica", _FS["v"])).pack(side=_tk.RIGHT, padx=4)
-        _tk.Label(top_f, text="🔴下行", bg="#1E1E2E", fg="#EF5350", font=("Helvetica", _FS["v"])).pack(side=_tk.RIGHT, padx=4)
-        _tk.Label(top_f, text="图例:", bg="#1E1E2E", fg="#888", font=("Helvetica", _FS["v"])).pack(side=_tk.RIGHT, padx=(20,4))
+        # 六阶段图例 (右到左显示, 先放高潮→冰点)
+        _leg6 = [("🔥高潮","#EF5350"),("🌱发酵","#FF9800"),("🚀启动","#2196F3"),
+                 ("📉震荡","#B0BEC5"),("💥退潮","#4CAF50"),("🧊冰点","#455A64")]
+        for _em, _col in _leg6:
+            _tk.Label(top_f, text=f"{_em}", bg="#1E1E2E", fg=_col, font=("Helvetica", _FS["v"]+1)).pack(side=_tk.RIGHT, padx=3)
+        _tk.Label(top_f, text="| 情绪周期六阶段:", bg="#1E1E2E", fg="#888", font=("Helvetica", _FS["v"])).pack(side=_tk.RIGHT, padx=(10,4))
 
         heatmap_canvas = _tk.Canvas(t1, bg="#1E1E2E", height=180, highlightthickness=0)
         heatmap_canvas.pack(fill=_tk.X, padx=4, pady=2)
