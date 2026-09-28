@@ -14506,7 +14506,8 @@ class DapanMixin:
         val_cb.set("上证指数"); val_cb.pack(side=tk.LEFT, padx=2)
         ttk.Label(val_top, text=" 周期:").pack(side=tk.LEFT, padx=(0,2))
         for _lbl,_days in [("2年",500),("5年",1200),("10年",2400)]:
-            ttk.Radiobutton(val_top, text=_lbl, variable=val_per_var, value=_lbl).pack(side=tk.LEFT, padx=2)
+            ttk.Radiobutton(val_top, text=_lbl, variable=val_per_var, value=_lbl,
+                command=lambda: _load_val()).pack(side=tk.LEFT, padx=2)
         val_fig_frame = ttk.Frame(t4); val_fig_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
         val_text = tk.Text(t4, height=10, bg="#252535", fg="#DDD", font=("Helvetica", 10), wrap=tk.WORD)
         val_text.pack(fill=tk.X, padx=4, pady=(2,4))
@@ -14524,8 +14525,10 @@ class DapanMixin:
                     headers={'User-Agent':'Mozilla/5.0'})
                 kl = _j.loads(r.text) if r.status_code==200 else []
                 if not kl: raise Exception("无数据")
+                from datetime import datetime as _dt2
                 closes = [float(k['close']) for k in kl]
-                dates = [k['day'] for k in kl]
+                dates = [_dt2.strptime(k['day'],"%Y-%m-%d") for k in kl]
+                date_strs = [k['day'] for k in kl]
                 # MA200
                 ma200 = [sum(closes[max(0,i-199):i+1])/min(200,i+1) for i in range(len(closes))]
                 # 当前分位数
@@ -14534,21 +14537,56 @@ class DapanMixin:
                 pct = sorted_c.index(cur)/len(sorted_c)*100
                 # 画
                 for w in val_fig_frame.winfo_children(): w.destroy()
-                fig = Figure(figsize=(10,4), dpi=100, facecolor="#1E1E2E")
+                fig = Figure(figsize=(11,4.2), dpi=100, facecolor="#1E1E2E")
                 ax = fig.add_subplot(111, facecolor="#1E1E2E")
-                xs = list(range(len(closes)))
-                ax.plot(xs, closes, color="#42A5F5", linewidth=1.2, label="收盘价")
-                ax.plot(xs, ma200, color="#FFD700", linewidth=1.0, label="MA200")
-                ax.axhline(sorted_c[int(len(sorted_c)*0.3)], color="#66BB6A", linestyle="--", alpha=0.6, label="30%分位(低估)")
-                ax.axhline(sorted_c[int(len(sorted_c)*0.7)], color="#EF5350", linestyle="--", alpha=0.6, label="70%分位(高估)")
-                ax.fill_between(xs, sorted_c[int(len(sorted_c)*0.3)], sorted_c[int(len(sorted_c)*0.7)], alpha=0.08, color="#FFD54F")
-                ax.tick_params(colors="#AAA"); ax.spines[:].set_color("#555")
+                import matplotlib.dates as _md
+                ax.plot(dates, closes, color="#42A5F5", linewidth=1.2, label="收盘价")
+                ax.plot(dates, ma200, color="#FFD700", linewidth=1.0, label="MA200")
+                _low30 = sorted_c[int(len(sorted_c)*0.3)]; _high70 = sorted_c[int(len(sorted_c)*0.7)]
+                ax.axhline(_low30, color="#66BB6A", linestyle="--", alpha=0.7, label=f"30%分位 低估 {_low30:.1f}")
+                ax.axhline(_high70, color="#EF5350", linestyle="--", alpha=0.7, label=f"70%分位 高估 {_high70:.1f}")
+                ax.fill_between(dates, _low30, _high70, alpha=0.1, color="#FFD54F")
+                # 标注当前周期在图上 (右上)
+                ax.text(0.99, 0.97, f"📅 {val_per_var.get()}", transform=ax.transAxes,
+                        fontsize=11, color="#FFD700", ha="right", va="top",
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="#3A3A4E", edgecolor="#FFD700", alpha=0.8))
+                ax.tick_params(colors="#AAA", labelsize=8); ax.spines[:].set_color("#555")
+                # 格式化日期 X 轴
+                _locator = _md.AutoDateLocator(minticks=6, maxticks=12)
+                _formatter = _md.DateFormatter("%Y-%m")
+                ax.xaxis.set_major_locator(_locator); ax.xaxis.set_major_formatter(_formatter)
+                fig.autofmt_xdate(rotation=30)
                 ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555", labelcolor="#DDD")
-                ax.set_title(f"{val_name_var.get()} 估值 ({val_per_var.get()})  分位数 {pct:.1f}% {'🟢低估' if pct<30 else '🔴高估' if pct>70 else '🟡合理'}",
-                             color="#FFD700", fontsize=10)
-                step = max(1, len(dates)//8)
-                ax.set_xticks(xs[::step]); ax.set_xticklabels([dates[i][5:] for i in xs[::step]], rotation=30, fontsize=7)
+                ax.set_title(f"{val_name_var.get()} 估值  分位数 {pct:.1f}% {'🟢低估' if pct<30 else '🔴高估' if pct>70 else '🟡合理'}  |  {val_per_var.get()}数据",
+                             color="#FFD700", fontsize=11, pad=8)
                 canvas = FigureCanvasTkAgg(fig, master=val_fig_frame); canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                # 🎯 鼠标 hover tooltip
+                _hover_label = None
+                def _on_mouse_move(event):
+                    nonlocal _hover_label
+                    if event.inaxes != ax:
+                        if _hover_label: _hover_label.remove(); _hover_label = None; canvas.draw(); return
+                        return
+                    try:
+                        _xs_list = list(range(len(closes)))
+                        _idx = int(round(event.xdata)) if isinstance(event.xdata,(int,float)) else event.xdata
+                        # 找最近数据点
+                        from bisect import bisect_left
+                        _dts = [d.toordinal() for d in dates]
+                        _tgt = int(event.xdata)
+                        _pos = bisect_left(_dts, _tgt)
+                        _pos = max(0, min(len(closes)-1, _pos))
+                        _ds = date_strs[_pos]; _cp = closes[_pos]; _mp = ma200[_pos]
+                        _df2 = (_cp-_mp)/_mp*100 if _mp>0 else 0
+                        if _hover_label: _hover_label.remove()
+                        _tip = f"{_ds}\n收盘 {_cp:.2f}\nMA200 {_mp:.2f} ({_df2:+.1f}%)"
+                        _hover_label = ax.annotate(_tip,
+                            xy=(dates[_pos], _cp), xytext=(10, -30), textcoords="offset points",
+                            bbox=dict(boxstyle="round,pad=0.3", facecolor="#252535", edgecolor="#FFD700", alpha=0.95),
+                            color="#FFD700", fontsize=8, ha="left")
+                        canvas.draw_idle()
+                    except: pass
+                canvas.mpl_connect('motion_notify_event', _on_mouse_move)
                 # 下方说明
                 val_text.config(state=tk.NORMAL); val_text.delete("1.0", tk.END)
                 advice = "🟢低估区 → 可逐步建仓 (长期配置好时机)" if pct<30 else ("🔴高估区 → 警惕回调, 考虑止盈" if pct>70 else "🟡合理区 → 正常持有, 不追涨不割肉")
