@@ -14081,7 +14081,7 @@ class DapanMixin:
                         slope = 0
                     emoji, phase, color = _judge_day(closes, i)
                     date_str = kl[i]["day"][-5:]
-                    results.append((date_str, day_p, emoji, cycle, color, ma20, ma60))
+                    results.append((date_str, day_p, emoji, phase, color, ma20, ma60))
                 # 附加完整历史给趋势图用
                 full_history = [(kl[i]["day"], closes[i]) for i in range(max(0,n-60), n)]
                 return name, sym, {"days": results, "history": full_history, "last": closes[-1]}
