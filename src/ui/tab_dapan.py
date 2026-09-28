@@ -14030,11 +14030,26 @@ class DapanMixin:
             ("军工ETF",    "sh512660", "🛡️ 红利防御", False),
         ]
 
-        def _judge_day(day_price, ma20, ma60, slope):
-            _diff = (day_price - ma20) / ma20
-            if _diff > 0.015: return ("🟢", "上行", "#66BB6A")
-            if _diff < -0.015: return ("🔴", "下行", "#EF5350")
-            return ("🟡", "震荡", "#FFD54F")
+        def _judge_day(closes_arr, idx):
+            """淘股吧六阶段情绪周期判断"""
+            _d = closes_arr[idx]
+            _m20 = sum(closes_arr[max(0,idx-19):idx+1]) / 20
+            if idx >= 10:
+                _slp = (sum(closes_arr[idx-4:idx+1])/5 - sum(closes_arr[idx-9:idx-4])/5) / (sum(closes_arr[idx-9:idx-4])/5)
+            else: _slp = 0
+            _df = (_d - _m20) / _m20
+            _c5 = (_d - closes_arr[idx-5]) / closes_arr[idx-5] if idx >= 5 else 0
+            _c10 = (_d - closes_arr[idx-10]) / closes_arr[idx-10] if idx >= 10 else 0
+            if _df < -0.04 and _slp < -0.01: return ("🧊", "冰点", "#455A64")
+            if _df > 0.04 and _c5 > 0.03 and _slp > 0.01: return ("🔥", "高潮", "#EF5350")
+            if _df > 0.015 and _slp > 0.005 and _c10 > 0: return ("🌱", "发酵", "#66BB6A")
+            if _df > -0.015 and _slp > 0.01 and _c5 > 0: return ("🚀", "启动", "#26A69A")
+            if _df < -0.015 and _slp < -0.005: return ("💥", "退潮", "#8D6E63")
+            if _df < -0.04: return ("🧊", "冰点", "#455A64")
+            if abs(_df) <= 0.015 and abs(_slp) < 0.01: return ("📉", "震荡", "#FFD54F")
+            if _slp > 0.01: return ("🚀", "启动", "#26A69A")
+            if _slp < -0.01: return ("💥", "退潮", "#8D6E63")
+            return ("📉", "震荡", "#FFD54F")
 
         def _fetch_heatmap(name, sym):
             """拉一只 ETF 最近 N_DAYS+25 天 K 线, 返回每天的情绪状态列表"""
@@ -14064,7 +14079,7 @@ class DapanMixin:
                         slope = (ma20 - old_ma20) / old_ma20
                     else:
                         slope = 0
-                    emoji, cycle, color = _judge_day(day_p, ma20, ma60, slope)
+                    emoji, phase, color = _judge_day(closes, i)
                     date_str = kl[i]["day"][-5:]
                     results.append((date_str, day_p, emoji, cycle, color, ma20, ma60))
                 # 附加完整历史给趋势图用
@@ -14082,10 +14097,10 @@ class DapanMixin:
         tk.Label(top_f, text=f"📊 ETF 情绪热力图 (最近 {_N_DAYS} 个交易日)",
                  bg="#1E1E2E", fg="#FFD700", font=("Helvetica", _FS["v"]+1, "bold")).pack(side=tk.LEFT)
         # 图例
-        tk.Label(top_f, text="🟢上行", bg="#1E1E2E", fg="#66BB6A", font=("Helvetica", _FS["v"])).pack(side=tk.RIGHT, padx=4)
-        tk.Label(top_f, text="🟡震荡", bg="#1E1E2E", fg="#FFD54F", font=("Helvetica", _FS["v"])).pack(side=tk.RIGHT, padx=4)
-        tk.Label(top_f, text="🔴下行", bg="#1E1E2E", fg="#EF5350", font=("Helvetica", _FS["v"])).pack(side=tk.RIGHT, padx=4)
-        tk.Label(top_f, text="图例:", bg="#1E1E2E", fg="#888", font=("Helvetica", _FS["v"])).pack(side=tk.RIGHT, padx=(20,4))
+        _leg = [("🧊冰点","#455A64"),("💥退潮","#8D6E63"),("📉震荡","#FFD54F"),("🚀启动","#26A69A"),("🌱发酵","#66BB6A"),("🔥高潮","#EF5350")]
+        for _em, _col in _leg:
+            tk.Label(top_f, text=f"{_em}", bg="#1E1E2E", fg=_col, font=("Helvetica", _FS["v"]+1)).pack(side=tk.RIGHT, padx=3)
+        tk.Label(top_f, text="| 情绪周期六阶段:", bg="#1E1E2E", fg="#888", font=("Helvetica", _FS["v"])).pack(side=tk.RIGHT, padx=(10,4))
 
         heatmap_canvas = tk.Canvas(t1, bg="#1E1E2E", height=180, highlightthickness=0)
         heatmap_canvas.pack(fill=tk.X, padx=4, pady=2)
@@ -14309,14 +14324,16 @@ class DapanMixin:
         def _on_done(selected):
             _draw_heatmap(_all_results)
             # 快照
-            up_cnt = sum(1 for n, _ in selected if _all_results.get(n) and _all_results[n]["days"][-1][2] == "🟢")
-            dn_cnt = sum(1 for n, _ in selected if _all_results.get(n) and _all_results[n]["days"][-1][2] == "🔴")
-            sd_cnt = sum(1 for n, _ in selected if _all_results.get(n) and _all_results[n]["days"][-1][2] == "🟡")
+            _phases = {"🚀启动":0,"🌱发酵":0,"🔥高潮":0,"💥退潮":0,"🧊冰点":0,"📉震荡":0}
+            for n, _ in selected:
+                d = _all_results.get(n)
+                if d: _phases[d["days"][-1][3]] = _phases.get(d["days"][-1][3], 0) + 1
             fail = sum(1 for n, _ in selected if _all_results.get(n) is None)
             tot = len(selected) - fail
-            snap_lbl.config(text=(f"📊 已加载 {tot}/{tot+fail} 只ETF  |  "
-                                  f"🟢上行 {up_cnt}  🟡震荡 {sd_cnt}  🔴下行 {dn_cnt}"
-                                  f"{'  ⚠️ '+str(fail)+'只无数据' if fail else ''}"))
+            _top = sorted(_phases.items(), key=lambda x:-x[1])[:3]
+            snap_lbl.config(text=(f"📊 {tot}/{tot+fail}只ETF  |  "
+                                  + "  ".join(f"{k}{v}" for k,v in _top if v>0)
+                                  + (f"  ⚠️ {fail}只无数据" if fail else "")))
             # 生成建议
             _gen_suggestion(selected)
 
@@ -14335,12 +14352,12 @@ class DapanMixin:
                 if not d: continue
                 # 看最后 5 天的主周期
                 last5 = d["days"][-5:] if len(d["days"]) >= 5 else d["days"]
-                emojis = [x[2] for x in last5]
+                phases_list = [x[3] for x in last5]
                 from collections import Counter
-                cnt = Counter(emojis)
+                cnt = Counter(phases_list)
                 majority = cnt.most_common(1)[0][0]
-                if majority == "🟢": ups.append(n)
-                elif majority == "🔴": downs.append(n)
+                if majority in ("🚀启动","🌱发酵","🔥高潮"): ups.append(n)
+                elif majority in ("💥退潮","🧊冰点"): downs.append(n)
                 else: sides.append(n)
             # 总体判断
             if ups and not downs:
