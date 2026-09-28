@@ -80615,6 +80615,16 @@ class StockKeywordAnalyzerGUI:
                 if majority in ("🚀启动","🌱发酵","🔥高潮"): ups.append(n)
                 elif majority in ("💥退潮","🧊冰点"): downs.append(n)
                 else: sides.append(n)
+            # 组合信号 (最顶部结论)
+            lines.extend([
+                f"",
+                f"{'─'*60}",
+                f"🔔 大盘 vs ETF 组合信号: {_combo}",
+                f"   ETF 平均周期得分: {_etf_avg:+.2f}  (>-0.5偏空, <+0.5偏多)",
+                f"   {_sh_trend}",
+                f"   💡 {_combo_advice}",
+                f"{'─'*60}",
+            ])
             # 总体判断
             if ups and not downs:
                 overall = "🟢 做多主导"
