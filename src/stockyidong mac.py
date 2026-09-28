@@ -7992,6 +7992,7 @@ class StockKeywordAnalyzerGUI:
             ("最新N条分析", 9, self.analyze_latest_n_stocks),
             ("📊 批量股票分析", 9, self.show_batch_stock_analyzer),
             ("龙虎榜", 6, self.show_top_list_dialog),
+            ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
         ]):
             ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(
                 side=tk.LEFT, padx=(0 if idx_btn == 0 else tp, 0)
@@ -8262,7 +8263,6 @@ class StockKeywordAnalyzerGUI:
             ("🦅游资心法", self._show_hotmoney_check, False, "quick"),
             ("🏅贵金属", self._show_precious_metals_dialog, False, "quick"),
             ("🗓️暴涨暴跌", self._open_crash_rally_calendar, False, "quick"),
-            ("🌀ETF周期", self._show_etf_cycle_dialog, False, "quick"),
             ("📐α/β配置", self._open_alpha_beta_dialog, False, "quick"),
             # ---- 💰 资金/持仓 (quick) ----
             ("📈资金方向", self._show_capital_direction_dialog, False, "quick"),
