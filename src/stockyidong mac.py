@@ -80237,7 +80237,8 @@ class StockKeywordAnalyzerGUI:
 
     def _show_etf_cycle_dialog(self):
         """🌀 ETF 情绪周期 - 热力图 + 趋势线 (最近15天)"""
-        import tkinter as tk
+        import tkinter as _tk
+        from tkinter import ttk as _ttk
         import requests as _r, json as _j, threading as _th, datetime as _dt, concurrent.futures as _cf
         win = _tk.Toplevel(self.root)
         win.title("🌀 ETF 情绪周期 - 热力图 + 趋势线"); win.geometry("1400x820")
@@ -80248,16 +80249,16 @@ class StockKeywordAnalyzerGUI:
         _N_DAYS = 15  # 热力图显示天数
 
         _FS = {"v": 13}
-        bar = ttk.Frame(win); bar.pack(fill=_tk.X, padx=8, pady=4)
-        ttk.Label(bar, text="🔤 字号:", font=("Helvetica", 11)).pack(side=_tk.LEFT)
+        bar = _ttk.Frame(win); bar.pack(fill=_tk.X, padx=8, pady=4)
+        _ttk.Label(bar, text="🔤 字号:", font=("Helvetica", 11)).pack(side=_tk.LEFT)
         def _fs_d(): _FS["v"]=max(9,_FS["v"]-1); _fl.configure(text=str(_FS["v"]))
         def _fs_u(): _FS["v"]=min(20,_FS["v"]+1); _fl.configure(text=str(_FS["v"]))
-        ttk.Button(bar, text="−", width=3, command=_fs_d).pack(side=_tk.LEFT, padx=3)
-        _fl = ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")); _fl.pack(side=_tk.LEFT)
-        ttk.Button(bar, text="+", width=3, command=_fs_u).pack(side=_tk.LEFT)
-        ttk.Label(bar, text=f"  📊 显示最近 {_N_DAYS} 个交易日 | 图形化情绪热力图",
+        _ttk.Button(bar, text="−", width=3, command=_fs_d).pack(side=_tk.LEFT, padx=3)
+        _fl = _ttk.Label(bar, text=str(_FS["v"]), font=("Helvetica", 12, "bold")); _fl.pack(side=_tk.LEFT)
+        _ttk.Button(bar, text="+", width=3, command=_fs_u).pack(side=_tk.LEFT)
+        _ttk.Label(bar, text=f"  📊 显示最近 {_N_DAYS} 个交易日 | 图形化情绪热力图",
                   foreground="#FFD700", font=("Helvetica", 10, "bold")).pack(side=_tk.LEFT, padx=20)
-        ttk.Button(bar, text="🔄 重新加载", command=lambda: _load()).pack(side=_tk.RIGHT)
+        _ttk.Button(bar, text="🔄 重新加载", command=lambda: _load()).pack(side=_tk.RIGHT)
 
         # ── ETF 清单 ──
         _ETF_ALL = [
@@ -80344,9 +80345,9 @@ class StockKeywordAnalyzerGUI:
                 return name, sym, None
 
         # ── Tab 1: 📊 热力图 + 趋势 ──
-        nb = ttk.Notebook(win); nb.pack(fill=_tk.BOTH, expand=True, padx=6, pady=6)
+        nb = _ttk.Notebook(win); nb.pack(fill=_tk.BOTH, expand=True, padx=6, pady=6)
 
-        t1 = ttk.Frame(nb); nb.add(t1, text="📊 热力图+趋势")
+        t1 = _ttk.Frame(nb); nb.add(t1, text="📊 热力图+趋势")
         # 上部: 热力图 Canvas
         top_f = _tk.Frame(t1, bg="#1E1E2E"); top_f.pack(fill=_tk.X, padx=4, pady=(4, 2))
         _tk.Label(top_f, text=f"📊 ETF 情绪热力图 (最近 {_N_DAYS} 个交易日)",
@@ -80375,11 +80376,11 @@ class StockKeywordAnalyzerGUI:
         snap_lbl.pack(fill=_tk.X)
 
         # ── Tab 2: 🧩 选择ETF ──
-        t2 = ttk.Frame(nb); nb.add(t2, text="🧩 选择ETF")
+        t2 = _ttk.Frame(nb); nb.add(t2, text="🧩 选择ETF")
         cv2 = _tk.Canvas(t2, highlightthickness=0, bg="#1E1E2E"); cv2.pack(side=_tk.LEFT, fill=_tk.BOTH, expand=True)
-        sb2 = ttk.Scrollbar(t2, orient=_tk.VERTICAL, command=cv2.yview); sb2.pack(side=_tk.RIGHT, fill=_tk.Y)
+        sb2 = _ttk.Scrollbar(t2, orient=_tk.VERTICAL, command=cv2.yview); sb2.pack(side=_tk.RIGHT, fill=_tk.Y)
         cv2.configure(yscrollcommand=sb2.set, bg="#1E1E2E")
-        inner2 = ttk.Frame(cv2); cv2.create_window((0,0), window=inner2, anchor="nw")
+        inner2 = _ttk.Frame(cv2); cv2.create_window((0,0), window=inner2, anchor="nw")
         cv2.bind("<Configure>", lambda e: cv2.itemconfigure(1, width=e.width))
         inner2.bind("<Configure>", lambda e: cv2.configure(scrollregion=cv2.bbox("all")))
 
@@ -80406,7 +80407,7 @@ class StockKeywordAnalyzerGUI:
                   bg="#00695C", fg="white", font=("Helvetica", _FS["v"], "bold"), padx=16).pack(side=_tk.LEFT, padx=20)
 
         # ── Tab 3: 📋 操作建议 ──
-        t3 = ttk.Frame(nb); nb.add(t3, text="📋 当月操作建议")
+        t3 = _ttk.Frame(nb); nb.add(t3, text="📋 当月操作建议")
         suggest_text = _tk.Text(t3, bg="#12121E", fg="#ECEFF1", font=("Menlo", _FS["v"]),
                                 wrap="word", padx=12, pady=10, height=18)
         suggest_text.pack(fill=_tk.BOTH, expand=True, padx=8, pady=6)
