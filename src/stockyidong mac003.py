@@ -5590,6 +5590,15 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         # 成长标签页(放在等待后)
         growth_tab = ttk.Frame(crawler_control_notebook, padding=10)
         crawler_control_notebook.add(growth_tab, text="成长")
+        # ── 淘股吧 Tab (邮票格子) ──
+        taoguba_tab = ttk.Frame(crawler_control_notebook, padding=8)
+        crawler_control_notebook.add(taoguba_tab, text="📯 淘股吧")
+        self._build_taoguba_stamp_tab(taoguba_tab)
+        # ── 韭研公社 Tab (邮票格子) ──
+        jiuyan_tab = ttk.Frame(crawler_control_notebook, padding=8)
+        crawler_control_notebook.add(jiuyan_tab, text="🧭 韭研公社")
+        self._build_jiuyan_stamp_tab(jiuyan_tab)
+
         growth_top = ttk.Frame(growth_tab)
         growth_top.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(growth_top, text="指数范围:").pack(side=tk.LEFT)

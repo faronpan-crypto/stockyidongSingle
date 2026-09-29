@@ -8952,6 +8952,18 @@ class StockKeywordAnalyzerGUI:
         # 成长标签页(放在等待后)
         growth_tab = ttk.Frame(crawler_control_notebook, padding=10)
         crawler_control_notebook.add(growth_tab, text="成长")
+        # 成长 Tab 已就位
+
+        # ── 淘股吧 Tab (邮票格子) ──
+        taoguba_tab = ttk.Frame(crawler_control_notebook, padding=8)
+        crawler_control_notebook.add(taoguba_tab, text="📯 淘股吧")
+        self._build_taoguba_stamp_tab(taoguba_tab)
+
+        # ── 韭研公社 Tab (邮票格子) ──
+        jiuyan_tab = ttk.Frame(crawler_control_notebook, padding=8)
+        crawler_control_notebook.add(jiuyan_tab, text="🧭 韭研公社")
+        self._build_jiuyan_stamp_tab(jiuyan_tab)
+
         growth_top = ttk.Frame(growth_tab)
         growth_top.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(growth_top, text="指数范围:").pack(side=tk.LEFT)
@@ -37163,6 +37175,477 @@ class StockKeywordAnalyzerGUI:
             except Exception:
                 pass
         _th.Thread(target=_scan_worker, daemon=True).start()
+
+    # ─────────────────────────────────────────────────────────────
+    # 📯 淘股吧 / 🧭 韭研公社 · 邮票格子 Tab
+    # ─────────────────────────────────────────────────────────────
+    def _build_taoguba_stamp_tab(self, parent):
+        """📯 淘股吧 邮票格子 Tab"""
+        top = ttk.Frame(parent); top.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(top, text="📯 淘股吧热股扫描 — 邮票格子 (红涨绿跌, 词频徽标=提及次数)",
+                  font=("", 11, "bold")).pack(side=tk.LEFT)
+        ttk.Button(top, text="🔄刷新淘股吧", width=14,
+                   command=lambda: self._refresh_stamp_board("taoguba")).pack(side=tk.RIGHT)
+        self._taoguba_stamp_status = ttk.Label(top, text="")
+        self._taoguba_stamp_status.pack(side=tk.RIGHT, padx=8)
+        cv = tk.Canvas(parent, highlightthickness=0, bg="#1E1E2E")
+        sb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=cv.yview)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        cv.configure(yscrollcommand=sb.set, bg="#1E1E2E")
+        inner = ttk.Frame(cv, padding=4)
+        win_id = cv.create_window((0, 0), window=inner, anchor="nw")
+        cv.bind("<Configure>", lambda e: cv.itemconfigure(win_id, width=e.width))
+        inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        self._taoguba_stamp_inner = inner
+        self._taoguba_stamp_data = []
+        self._taoguba_stamp_hover = None
+        cv.bind("<Motion>", lambda e: self._on_stamp_hover(e, "taoguba"))
+        cv.bind("<Leave>", lambda e: self._hide_stamp_hover("taoguba"))
+        def _wheel(e): cv.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        cv.bind_all("<MouseWheel>", _wheel)
+
+    def _build_jiuyan_stamp_tab(self, parent):
+        """🧭 韭研公社 邮票格子 Tab"""
+        top = ttk.Frame(parent); top.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(top, text="🧭 韭研公社热股扫描 — 邮票格子 (红涨绿跌, 词频徽标=提及次数)",
+                  font=("", 11, "bold")).pack(side=tk.LEFT)
+        ttk.Button(top, text="🔄刷新韭研公社", width=14,
+                   command=lambda: self._refresh_stamp_board("jiuyan")).pack(side=tk.RIGHT)
+        self._jiuyan_stamp_status = ttk.Label(top, text="")
+        self._jiuyan_stamp_status.pack(side=tk.RIGHT, padx=8)
+        cv = tk.Canvas(parent, highlightthickness=0, bg="#1E1E2E")
+        sb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=cv.yview)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        cv.configure(yscrollcommand=sb.set, bg="#1E1E2E")
+        inner = ttk.Frame(cv, padding=4)
+        win_id = cv.create_window((0, 0), window=inner, anchor="nw")
+        cv.bind("<Configure>", lambda e: cv.itemconfigure(win_id, width=e.width))
+        inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        self._jiuyan_stamp_inner = inner
+        self._jiuyan_stamp_data = []
+        self._jiuyan_stamp_hover = None
+        cv.bind("<Motion>", lambda e: self._on_stamp_hover(e, "jiuyan"))
+        cv.bind("<Leave>", lambda e: self._hide_stamp_hover("jiuyan"))
+        def _wheel(e): cv.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        cv.bind_all("<MouseWheel>", _wheel)
+
+    def _refresh_stamp_board(self, source):
+        """🔄 邮票格子 — 三级热股 + 淘韭文本爬虫加权
+        1) 爬淘股吧/韭研文本 → 提代码 + 股票名匹配 → 词频加权
+        2) 新浪换手率/成交额 Top 50 (交易时段)
+        3) 预设沪深300热门池 (兜底)
+        行情: 腾讯 qt.gtimg.cn (稳定活源)"""
+        import threading as _th, json as _json
+        status = getattr(self, f"_{source}_stamp_status", None)
+        if status:
+            status.configure(text="⏳ 正在爬取淘韭文本...", foreground="#FFA726")
+
+        # ── 股票名→代码映射 (淘韭常用名) ──
+        _NAME2CODE = {
+            "贵州茅台": "sh600519", "茅台": "sh600519",
+            "中国平安": "sh601318", "平安": "sh601318",
+            "招商银行": "sh600036", "招行": "sh600036",
+            "兴业银行": "sh601166", "宁波银行": "sz002142",
+            "中信证券": "sh600030", "华泰证券": "sh601688",
+            "海通证券": "sh600837", "东方财富": "sz300059",
+            "恒瑞医药": "sh600276", "药明康德": "sh603259",
+            "紫金矿业": "sh601899", "洛阳钼业": "sh603993",
+            "江西铜业": "sh600362",
+            "隆基绿能": "sh601012", "隆基": "sh601012",
+            "长江电力": "sh600900",
+            "格力电器": "sz000651", "格力": "sz000651",
+            "美的集团": "sz000333", "美的": "sz000333",
+            "比亚迪": "sz002594",
+            "宁德时代": "sz300750", "宁德": "sz300750",
+            "京东方": "sz000725", "京东方A": "sz000725",
+            "立讯精密": "sz002475",
+            "五粮液": "sz000858", "五 粮 液": "sz000858",
+            "泸州老窖": "sz000568",
+            "山西汾酒": "sh600809", "汾酒": "sh600809",
+            "洋河股份": "sz002304",
+            "海康威视": "sz002415",
+            "紫金矿业": "sh601899",
+            "中国神华": "sh601088",
+            "中国建筑": "sh601668",
+            "中国石油": "sh601857",
+            "中国石化": "sh600028",
+            "中国人寿": "sh601628",
+            "新华保险": "sh601336",
+            "万华化学": "sh600309",
+            "海螺水泥": "sh600585",
+            "三一重工": "sh600031",
+            "长城汽车": "sh601633",
+            "上汽集团": "sh600104",
+            "海尔智家": "sh600690",
+            "金龙鱼": "sz300999",
+            "伊利股份": "sh600887", "伊利": "sh600887",
+            "澳洋健康": "sz002172", "澳洋": "sz002172",
+            "津药药业": "sh600488",
+            "捷成股份": "sz300182",
+            "中国中免": "sh601888", "中免": "sh601888",
+        }
+        _PRESET_HOT = [
+            "sh600519","sh601318","sh600036","sh601012","sh600900","sh600030","sh601899",
+            "sh600276","sh601166","sh601225","sh600585","sh600031","sh601138","sh600104",
+            "sh600050","sh600309","sh601169","sh600887","sh601888","sh600809","sh600583",
+            "sh600000","sh601398","sh601939","sh601988","sh601288","sh601668","sh601857",
+            "sh600028","sh601088","sh600019","sh601006","sh600690","sh600085","sh601601",
+            "sz000858","sz000001","sz300750","sz000725","sz002475","sz300059","sz000333",
+            "sz300015","sz002594","sz000568","sz300124","sz002230","sz002415","sz300274",
+            "sz300014","sz000651","sz002460","sz002142","sz000538","sz002049","sz300027",
+            "sz300003","sz002410","sz002466"
+        ]
+
+        def _worker():
+            import re, time as _time, requests as _req
+            from collections import Counter
+            from bs4 import BeautifulSoup as _BS
+
+            # ── Step 0: 爬淘韭文本, 提代码 + 股票名匹配 ──
+            freq_counter = Counter()  # code → 提及次数
+            source_map = {}           # code → 来源标签 ("淘韭爬取"/"预设"/"换手率"/"成交额")
+            text_count = 0
+
+            def _prefix(c):
+                if c.startswith(("600","601","603","605","688")): return f"sh{c}"
+                if c.startswith(("000","001","002","003","300","301")): return f"sz{c}"
+                return None
+
+            def _set_status(text, color="#FFA726"):
+                if status:
+                    try: self.root.after(0, lambda t=text, c=color: (
+                        status.configure(text=t, foreground=c),
+                        self.root.update_idletasks()))
+                    except: pass
+
+            def _crawl_text(scr, max_pages=5, max_articles=30):
+                sess = _req.Session()
+                sess.headers.update({
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Referer': 'https://www.tgb.cn/',
+                })
+                arts = []
+                _set_status(f"⏳ {scr} 爬列表中...", "#FFA726")
+                if scr == "taoguba":
+                    for pg in range(1, max_pages + 1):
+                        url = f"https://www.tgb.cn/jinghua/?page={pg}" if pg > 1 else "https://www.tgb.cn/jinghua/"
+                        try:
+                            r = sess.get(url, timeout=15)
+                            soup = _BS(r.text, 'html.parser')
+                            for a in soup.find_all('a', title=True):
+                                h = a.get('href', ''); t = a['title'].strip()
+                                if len(t) < 5: continue
+                                if not any(k in h for k in ['/a/', '/article/', '/blog/']): continue
+                                if h.startswith('/'): h = f"https://www.tgb.cn{h}"
+                                arts.append({'title': t, 'url': h})
+                        except: pass
+                        _time.sleep(0.2)
+                else:  # jiuyan
+                    jiuyan_urls = [
+                        "https://www.jiuyangongshe.com/",
+                        "https://www.jiuyangongshe.com/hot",
+                        "https://www.jiuyangongshe.com/new",
+                        "https://www.jiuyangongshe.com/industry",
+                    ]
+                    for url in jiuyan_urls:
+                        try:
+                            r = sess.get(url, timeout=12)
+                            soup = _BS(r.text, 'html.parser')
+                            for a in soup.find_all('a', href=True):
+                                h = a.get('href', '')
+                                if '/a/' not in h: continue
+                                t = (a.get_text(strip=True) or '').strip()
+                                if len(t) < 5: continue
+                                full_h = h if h.startswith('http') else f"https://www.jiuyangongshe.com{h}"
+                                arts.append({'title': t, 'url': full_h})
+                            # 韭研 HTML SSR 直接提代码 (稳定来源!)
+                            for c in re.findall(r'\b([036]\d{5})\b', r.text):
+                                p = _prefix(c)
+                                if p:
+                                    freq_counter[p] += 1
+                                    source_map[p] = f"{scr}SSR"
+                            # 韭研 HTML 匹配股票名
+                            for name, code in sorted(_NAME2CODE.items(), key=lambda x: -len(x[0])):
+                                if name in r.text:
+                                    freq_counter[code] += 1
+                                    source_map[code] = f"{scr}SSR"
+                        except: pass
+                        _time.sleep(0.2)
+
+                _set_status(f"⏳ {scr} 列表 {len(arts)} 篇, 爬详情...", "#FFA726")
+                # 去重
+                seen_urls = set()
+                uniq = []
+                for a in arts:
+                    if a['url'] not in seen_urls:
+                        seen_urls.add(a['url']); uniq.append(a)
+
+                # 爬详情页
+                for i, art in enumerate(uniq[:max_articles]):
+                    if i % 10 == 0:
+                        _set_status(f"⏳ {scr} 爬详情 {i}/{min(len(uniq),max_articles)}...", "#FFA726")
+                    try:
+                        r = sess.get(art['url'], timeout=10)
+                        soup = _BS(r.text, 'html.parser')
+                        content_div = None
+                        for cls in ['N_art_content', 'N_Content', 'artContent',
+                                    'article-content', 'Content', 'article-body',
+                                    'main-content', 'art_content']:
+                            try: div = soup.select_one(f'.{cls}')
+                            except: div = None
+                            if div and len(div.get_text(strip=True)) > 30:
+                                content_div = div; break
+                        if not content_div:
+                            divs = soup.find_all('div')
+                            if divs: content_div = max(divs, key=lambda d: len(d.get_text(strip=True)))
+                        text = (content_div.get_text(strip=True) if content_div else art['title'])[:4000]
+                        full_text = art['title'] + " " + text
+                        # 正则提 6 位代码
+                        for c in re.findall(r'\b([036]\d{5})\b', full_text):
+                            p = _prefix(c)
+                            if p:
+                                freq_counter[p] += 1
+                                source_map[p] = f"{scr}详情"
+                        # 股票名匹配
+                        for name, code in sorted(_NAME2CODE.items(), key=lambda x: -len(x[0])):
+                            if name in full_text:
+                                freq_counter[code] += 1
+                                source_map[code] = f"{scr}详情"
+                        text_count += 1
+                        _time.sleep(0.15)
+                    except: pass
+
+            # 执行爬取
+            _set_status(f"⏳ 开始爬 {source}...", "#FFA726")
+            try:
+                _crawl_text(source, max_pages=5, max_articles=30)
+                # 爬取结果汇总
+                top3 = freq_counter.most_common(3)
+                top3_str = ", ".join(f"{c[-4:]}:{f}次" for c,f in top3) if top3 else "零"
+                _set_status(f"📌 爬取: {text_count}篇 → {len(freq_counter)}只 ({top3_str})", "#FFA726")
+                print(f"[邮票格子] {source} 爬 {text_count} 篇, 代码提及 {sum(freq_counter.values())} 次, 独立 {len(freq_counter)} 只 → Top3: {top3_str}", flush=True)
+            except Exception as e:
+                print(f"[邮票格子] {source} 爬取异常: {e}", flush=True)
+                _set_status(f"⚠️ 爬取异常, 继续加载...", "#FFA726")
+
+            # ── Step 1: 拿热股池 (交易时段热股 + 预设池) ──
+            h = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+                 "Referer": "https://finance.sina.com.cn"}
+            stock_rank = []
+            used = set(freq_counter.keys())  # 已爬取的优先
+
+            # 1-a) 新浪换手率 Top 50
+            for node in ["hs_a", "sh_a", "sz_a"]:
+                if stock_rank and len(stock_rank) >= 30: break
+                try:
+                    r = _req.get(
+                        "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData",
+                        params={"page": 1, "num": 50, "sort": "turnoverratio", "asc": 0, "node": node},
+                        timeout=10, headers=h)
+                    for it in _json.loads(r.text):
+                        sym = it.get("symbol", "")
+                        if sym.startswith("bj") or sym in used: continue
+                        trade = float(it.get("trade", 0) or 0)
+                        score = float(it.get("turnoverratio", 0) or 0)
+                        if trade > 0 and score > 0:
+                            stock_rank.append((sym, score, "换手率")); used.add(sym)
+                except: pass
+
+            # 1-b) 新浪成交额 Top 50
+            if len(stock_rank) < 30:
+                for node in ["hs_a", "sh_a", "sz_a"]:
+                    if len(stock_rank) >= 30: break
+                    try:
+                        r = _req.get(
+                            "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData",
+                            params={"page": 1, "num": 50, "sort": "amount", "asc": 0, "node": node},
+                            timeout=10, headers=h)
+                        for it in _json.loads(r.text):
+                            sym = it.get("symbol", "")
+                            if sym.startswith("bj") or sym in used: continue
+                            trade = float(it.get("trade", 0) or 0)
+                            score = float(it.get("amount", 0) or 0) / 1e8
+                            if trade > 0 and score > 0:
+                                stock_rank.append((sym, score, "成交额")); used.add(sym)
+                    except: pass
+
+            # 1-c) 预设池兜底
+            for sym in _PRESET_HOT:
+                if sym in used: continue
+                stock_rank.append((sym, 0.0, "预设")); used.add(sym)
+
+            if not stock_rank and not freq_counter:
+                self.root.after(0, lambda: (
+                    status.configure(text="❌ 热股池空", foreground="#EF5350") if status else None))
+                return
+
+            # ── Step 2: 合并 → 腾讯行情 → rows ──
+            # 先把 freq_counter 里已爬取的代码也加入 stock_rank
+            for code, freq in freq_counter.items():
+                stock_rank.append((code, freq * 0.5, "爬取"))  # 爬取代码按提及次数加权
+
+            # 排序取 Top 60
+            stock_rank.sort(key=lambda x: x[1], reverse=True)
+            stock_rank = stock_rank[:60]
+
+            # ── Step 2: 腾讯 qt.gtimg.cn 实时行情批量拉涨跌幅 ──
+            # 格式: v_sh600519="1~贵州茅台~600519~now~close~open~..." 分号分隔
+            codes = [s[0] for s in stock_rank]
+            batch_size = 40  # 腾讯单 URL 限制 ~50
+            stock_info = {}
+            for bi in range(0, len(codes), batch_size):
+                batch = codes[bi:bi + batch_size]
+                try:
+                    r = _req.get(f"https://qt.gtimg.cn/q={','.join(batch)}", timeout=10,
+                                 headers={"User-Agent": "Mozilla/5.0", "Referer": "https://gu.qq.com/"})
+                    for seg in r.text.strip().split(";"):
+                        if "=" not in seg or '"' not in seg: continue
+                        var_part, val_part = seg.split("=", 1)
+                        code = var_part.split("_")[-1]
+                        fields = val_part.strip('"').split("~")
+                        if len(fields) < 5: continue
+                        name = fields[1] or fields[2]
+                        try:
+                            now = float(fields[3]) if fields[3] else 0.0
+                            close = float(fields[4]) if fields[4] else 0.0
+                            pct = (now - close) / close * 100 if close > 0 else 0.0
+                        except Exception:
+                            pct = 0.0
+                        stock_info[code] = {"name": name, "pct": round(pct, 2)}
+                except Exception as e:
+                    print(f"[邮票格子] 腾讯行情 batch {bi} 失败: {e}", flush=True)
+            if not stock_info:
+                print(f"[邮票格子] {source} 行情全挂, 用代码填充", flush=True)
+
+            # ── Step 3: 组装 rows ──
+            rows = []
+            for code, score, src in stock_rank:
+                info = stock_info.get(code, {"name": code[-6:], "pct": 0.0})
+                # 爬取代码: 直接用 freq_counter 里的真实提及次数 + 来源
+                if code in freq_counter:
+                    freq = freq_counter[code]
+                    origin = source_map.get(code, f"{source}爬取")
+                else:
+                    freq = max(1, min(99, int(score / 0.5))) if score > 0 else 1
+                    origin = src
+                rows.append({
+                    "code": code, "name": info["name"],
+                    "pct": info["pct"], "freq": freq,
+                    "origin": origin,  # 来源标签 "韭研SSR"/"淘股吧详情"/"换手率"/"预设"
+                })
+
+            # 爬取代码置顶 (按提及次数排), 热股池按 score 排
+            _crawl_rows = [r for r in rows if r['code'] in freq_counter]
+            _other_rows = [r for r in rows if r['code'] not in freq_counter]
+            _crawl_rows.sort(key=lambda x: -x['freq'])
+            _other_rows.sort(key=lambda x: -x['pct'])  # 其余按涨跌幅排
+            rows = _crawl_rows + _other_rows
+
+            self.root.after(0, lambda: self._render_stamp_board(source, rows, status))
+
+        _th.Thread(target=_worker, daemon=True).start()
+
+    def _render_stamp_board(self, source, rows, status=None):
+        """主线程: 画邮票格子 (用 grid + 强制 scrollregion)"""
+        import tkinter as tk
+        inner = getattr(self, f"_{source}_stamp_inner", None)
+        if inner is None:
+            return
+        # 强制更新, 拿到 inner 真实宽度
+        inner.update_idletasks()
+        for w in inner.winfo_children(): w.destroy()
+        self.__dict__[f"_{source}_stamp_data"] = rows
+        CELL_W, CELL_H = 86, 94
+        COL_W, ROW_H = 92, 100
+        PAD = 4
+        # 统计爬取代码数量
+        crawl_cnt = sum(1 for r in rows if r.get('origin','') in ("taogubaSSR","taoguba详情","jiuyanSSR","jiuyan详情") or "爬取" in r.get('origin',''))
+        if status:
+            extra = f" 🧲爬取{crawl_cnt}只" if crawl_cnt > 0 else ""
+            status.configure(text=f"✅ {len(rows)}只热股{extra}", foreground="#81C784")
+        # 算列数: inner 当前宽度 / 每列占位
+        iw = inner.winfo_width()
+        if iw < 50:  # inner 还没尺寸 → 用父 Canvas
+            try:
+                cv = inner.master
+                iw = cv.winfo_width() if hasattr(cv, 'winfo_width') else 800
+            except: iw = 800
+        cols = max(3, iw // COL_W)  # 至少 3 列
+        # 强制 inner 有尺寸 (grid 布局需要)
+        total_rows = (len(rows) + cols - 1) // cols
+        inner.configure(width=cols * COL_W, height=total_rows * ROW_H)
+        inner.grid_propagate(False)
+        # 画 grid
+        for i, item in enumerate(rows):
+            r, c = divmod(i, cols)
+            pct = item["pct"]
+            if pct > 0.5: bg = "#C62828"
+            elif pct < -0.5: bg = "#2E7D32"
+            else: bg = "#37474F"
+            stamp = tk.Frame(inner, bg=bg, width=CELL_W, height=CELL_H,
+                             highlightthickness=1, highlightbackground="#455A64",
+                             cursor="hand2")
+            stamp.grid(row=r, column=c, padx=PAD // 2, pady=PAD // 2, sticky="nw")
+            stamp.grid_propagate(False)
+            name_lbl = tk.Label(stamp, text=item["name"], bg=bg, fg="white",
+                                font=("Helvetica", 10, "bold"), anchor="center")
+            name_lbl.pack(fill=tk.BOTH, expand=True, padx=2, pady=(14, 0))
+            pct_text = f"{pct:+.2f}%"
+            pct_lbl = tk.Label(stamp, text=pct_text, bg=bg, fg="white",
+                               font=("Helvetica", 10, "bold"))
+            pct_lbl.pack(side=tk.BOTTOM, pady=(0, 4))
+            if item["freq"] >= 3:
+                freq_bg = "#FF6F00" if item["freq"] >= 10 else "#EF5350" if item["freq"] >= 5 else "#FF8A65"
+                freq_lbl = tk.Label(stamp, text=str(item["freq"]), bg=freq_bg, fg="white",
+                                    font=("Helvetica", 8, "bold"), padx=4, pady=0)
+                freq_lbl.place(relx=1.0, rely=0.0, x=-3, y=2, anchor="ne")
+            stamp._stamp = item
+            for w in (stamp, name_lbl, pct_lbl):
+                w.bind("<Motion>", lambda e, it=item: self._show_stamp_hover(e, source, it))
+                w.bind("<Leave>", lambda e: self._hide_stamp_hover(source))
+        # 强制刷新 scrollregion
+        inner.update_idletasks()
+        try:
+            cv = inner.master
+            cv.configure(scrollregion=cv.bbox("all"))
+        except Exception as e:
+            print(f"[邮票格子] scrollregion 更新: {e}", flush=True)
+        print(f"[邮票格子] {source} 渲染完成: {len(rows)} 只, {cols} 列, {total_rows} 行", flush=True)
+
+    def _show_stamp_hover(self, event, source, item):
+        """hover 显示详情"""
+        import tkinter as tk
+        tip = getattr(self, f"_{source}_stamp_hover", None)
+        if tip is None:
+            tip = tk.Toplevel(self.root); tip.overrideredirect(True); tip.configure(bg="#263238")
+            tip.attributes("-topmost", True)
+            setattr(self, f"_{source}_stamp_hover", tip)
+        x = self.root.winfo_rootx() + event.x_root - self.root.winfo_pointerx() + 12
+        y = self.root.winfo_rooty() + event.y_root - self.root.winfo_pointery() + 12
+        tip.geometry(f"+{max(0, x)}+{max(0, y)}")
+        for w in tip.winfo_children(): w.destroy()
+        tk.Label(tip, text=f"📌 {item['name']} ({item['code']})", bg="#263238", fg="#42A5F5",
+                 font=("Helvetica", 11, "bold")).pack(anchor="w", padx=10, pady=(6, 2))
+        tk.Label(tip, text=f"📈 涨跌幅: {item['pct']:+.2f}%", bg="#263238",
+                 fg="#EF5350" if item['pct'] > 0 else "#66BB6A",
+                 font=("Helvetica", 10)).pack(anchor="w", padx=10)
+        tk.Label(tip, text=f"🔤 词频强度: 被提及 {item['freq']} 次", bg="#263238", fg="#FFD54F",
+                 font=("Helvetica", 10)).pack(anchor="w", padx=10)
+        origin = item.get('origin', '')
+        if origin in ("taogubaSSR", "taoguba详情", "jiuyanSSR", "jiuyan详情") or "爬取" in origin:
+            tk.Label(tip, text=f"🧲 来源: {origin} (爬取!)", bg="#263238", fg="#FF8A65",
+                     font=("Helvetica", 10, "bold")).pack(anchor="w", padx=10, pady=(2, 6))
+        else:
+            tk.Label(tip, text=f"📊 来源: {origin}", bg="#263238", fg="#90A4AE",
+                     font=("Helvetica", 9)).pack(anchor="w", padx=10, pady=(2, 6))
+
+    def _hide_stamp_hover(self, source):
+        tip = getattr(self, f"_{source}_stamp_hover", None)
+        if tip: tip.withdraw()
+
 
     def _load_crash_rally_events(self):
         """从 crash_rally_events 表读历史暴涨暴跌事件，填充暴跌 Tab 的下半 Treeview
