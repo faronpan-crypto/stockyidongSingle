@@ -291,97 +291,104 @@ def api_stocks_realtime():
 # ======================================================================
 @app.get("/api/v1/scan/crash-warning")
 def api_scan_crash_warning():
-    """市场广度 + 涨跌家数 + 涨停跌停 — 用于判断是否恐慌"""
-    try:
-        signals = []
+    """市场广度 + 涨跌家数 + 涨停跌停 — 用于判断是否恐慌
+    带 10 秒超时保护，超时则返回降级数据
+    """
+    result_holder = {"data": None}
+    done_event = threading.Event()
 
-        # 方式1：先尝试 akshare 全市场行情（盘中有效）
-        up = dn = flat = zt = dt = total = None
+    def _worker():
         try:
-            import akshare as ak
-            import pandas as pd
-            spot = ak.stock_zh_a_spot_em()
-            if spot is not None and len(spot) > 0:
-                total = len(spot)
-                up = int((spot["涨跌幅"] > 0).sum())
-                dn = int((spot["涨跌幅"] < 0).sum())
-                flat = total - up - dn
-                zt = int((spot["涨跌幅"] >= 9.5).sum())
-                dt = int((spot["涨跌幅"] <= -9.5).sum())
-        except Exception as e_ak:
-            print(f"[crash-warning] akshare fail: {e_ak}")
+            signals = []
+            up = dn = flat = zt = dt = total = None
+            try:
+                import akshare as ak
+                import pandas as pd
+                spot = ak.stock_zh_a_spot_em()
+                if spot is not None and len(spot) > 0:
+                    total = len(spot)
+                    up = int((spot["涨跌幅"] > 0).sum())
+                    dn = int((spot["涨跌幅"] < 0).sum())
+                    flat = total - up - dn
+                    zt = int((spot["涨跌幅"] >= 9.5).sum())
+                    dt = int((spot["涨跌幅"] <= -9.5).sum())
+            except Exception as e_ak:
+                print(f"[crash-warning] akshare fail: {e_ak}")
 
-        if total is None:
-            return jsonify({
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "signals": [{"name": "数据源", "value": "离线", "level": "gray", "desc": "非交易时段或网络不可用"}],
-                "recommendation": "数据暂不可用",
-                "confidence": 0,
+            if total is None:
+                result_holder["data"] = {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "signals": [{"name": "数据源", "value": "离线", "level": "gray", "desc": "非交易时段或网络不可用"}],
+                    "recommendation": "数据暂不可用",
+                    "confidence": 0,
+                }
+                return
+
+            signals.append({
+                "name": "涨跌家数", "value": up, "down": dn, "flat": flat, "total": total,
+                "level": "red" if up < 800 else ("yellow" if up < 1600 else "green"),
+                "desc": "恐慌区" if up < 800 else ("观望区" if up < 1600 else "安全区"),
+            })
+            signals.append({
+                "name": "涨停家数", "value": zt,
+                "level": "green" if zt >= 30 else ("yellow" if zt >= 10 else "red"),
+                "desc": "市场活跃度" if zt >= 10 else "赚钱效应弱",
+            })
+            signals.append({
+                "name": "跌停家数", "value": dt,
+                "level": "red" if dt >= 50 else ("yellow" if dt >= 20 else "green"),
+                "desc": "恐慌加剧" if dt >= 20 else "恐慌有限",
             })
 
-        # 涨跌家数信号
-        signals.append({
-            "name": "涨跌家数",
-            "value": up,
-            "down": dn,
-            "flat": flat,
-            "total": total,
-            "level": "red" if up < 800 else ("yellow" if up < 1600 else "green"),
-            "desc": "恐慌区" if up < 800 else ("观望区" if up < 1600 else "安全区"),
-        })
-        # 涨停/跌停
-        signals.append({
-            "name": "涨停家数",
-            "value": zt,
-            "level": "green" if zt >= 30 else ("yellow" if zt >= 10 else "red"),
-            "desc": "市场活跃度" if zt >= 10 else "赚钱效应弱",
-        })
-        signals.append({
-            "name": "跌停家数",
-            "value": dt,
-            "level": "red" if dt >= 50 else ("yellow" if dt >= 20 else "green"),
-            "desc": "恐慌加剧" if dt >= 20 else "恐慌有限",
-        })
+            ratio = up / max(dn, 1)
+            signals.append({
+                "name": "涨跌比", "value": round(ratio, 2),
+                "level": "red" if ratio < 0.5 else ("yellow" if ratio < 1.2 else "green"),
+                "desc": f"{up}涨 / {dn}跌 / {flat}平",
+            })
 
-        # 涨跌比例
-        ratio = up / max(dn, 1)
-        signals.append({
-            "name": "涨跌比",
-            "value": round(ratio, 2),
-            "level": "red" if ratio < 0.5 else ("yellow" if ratio < 1.2 else "green"),
-            "desc": f"{up}涨 / {dn}跌 / {flat}平",
-        })
+            score = 0
+            if up < 800: score += 2
+            elif up < 1600: score += 1
+            if dt >= 50: score += 2
+            elif dt >= 20: score += 1
+            if ratio < 0.5: score += 2
+            elif ratio < 1.2: score += 1
 
-        # 综合建议
-        score = 0
-        if up < 800: score += 2
-        elif up < 1600: score += 1
-        if dt >= 50: score += 2
-        elif dt >= 20: score += 1
-        if ratio < 0.5: score += 2
-        elif ratio < 1.2: score += 1
+            if score >= 5:
+                rec, conf = "建议减仓观望，市场恐慌明显", 0.85
+            elif score >= 3:
+                rec, conf = "谨慎操作，控制仓位", 0.65
+            elif score >= 1:
+                rec, conf = "市场中性，可正常操作", 0.5
+            else:
+                rec, conf = "市场情绪良好，可积极操作", 0.7
 
-        if score >= 5:
-            rec = "建议减仓观望，市场恐慌明显"
-            conf = 0.85
-        elif score >= 3:
-            rec = "谨慎操作，控制仓位"
-            conf = 0.65
-        elif score >= 1:
-            rec = "市场中性，可正常操作"
-            conf = 0.5
-        else:
-            rec = "市场情绪良好，可积极操作"
-            conf = 0.7
+            result_holder["data"] = {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "signals": signals, "recommendation": rec, "confidence": conf,
+            }
+        except Exception as e:
+            print(f"[crash-warning] worker exception: {e}")
+        finally:
+            done_event.set()
 
-        return jsonify({
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "signals": signals,
-            "recommendation": rec,
-            "confidence": conf,
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # 启动线程 + 10 秒超时
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    done_event.wait(timeout=10)
+
+    if result_holder["data"] is not None:
+        return jsonify(result_holder["data"])
+
+    # 超时降级
+    print("[crash-warning] TIMEOUT → 降级返回")
+    return jsonify({
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "signals": [{"name": "数据源", "value": "超时", "level": "gray", "desc": "行情接口响应慢，请稍后重试"}],
+        "recommendation": "数据暂不可用，请稍后刷新",
+        "confidence": 0,
+    })
 
 
 # ======================================================================

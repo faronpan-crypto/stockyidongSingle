@@ -1,0 +1,48 @@
+name: StockAnalyzer
+options:
+  bundleIdPrefix: com.stockidong
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  xcodeVersion: "15.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: ""  # 用户需要在 Xcode 里设置自己的 Team
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1"  # iPhone only
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    SUPPORTED_PLATFORMS: "iphoneos"
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+    INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    INFOPLIST_KEY_UIRequiredDeviceCapabilities: "[armv7]"
+    INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "[UIInterfaceOrientationPortrait]"
+    INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "[UIInterfaceOrientationPortrait,UIInterfaceOrientationPortraitUpsideDown,UIInterfaceOrientationLandscapeLeft,UIInterfaceOrientationLandscapeRight]"
+    INFOPLIST_KEY_CFBundleDisplayName: "Stock分析"
+    ENABLE_PREVIEWS: YES
+    PRODUCT_BUNDLE_IDENTIFIER: com.stockidong.analyzer
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  StockAnalyzer:
+    type: application
+    platform: iOS
+    sources:
+      - path: StockAnalyzer
+        excludes:
+          - "**/*.xcassets/**/*.imageset"
+    settings:
+      base:
+        PRODUCT_NAME: StockAnalyzer
+    info:
+      path: StockAnalyzer/Info.plist
+      properties:
+        CFBundleName: "Stock分析"
+        CFBundleDisplayName: "Stock分析"
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    scheme:
+      gatherCoverageData: false
