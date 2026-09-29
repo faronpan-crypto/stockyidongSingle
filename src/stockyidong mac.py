@@ -2986,11 +2986,31 @@ def generate_wordcloud(text, callback, tab_name=None, time_str=None):
                     return "gray"
             except:
                 return "gray"
+        # 自动检测可用的中文字体 (跨平台)
+        _font_path = None
+        for _fp in [
+            'C:/Windows/Fonts/simhei.ttf',                       # Windows
+            '/System/Library/Fonts/STHeiti Medium.ttc',            # macOS 黑体
+            '/System/Library/Fonts/Hiragino Sans GB.ttc',          # macOS 冬青黑体
+            '/System/Library/Fonts/Supplemental/Songti.ttc',       # macOS 宋体
+            '/System/Library/Fonts/PingFang.ttc',                  # macOS 苹方
+            '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',     # Linux
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',  # Linux Noto
+        ]:
+            if os.path.exists(_fp):
+                _font_path = _fp
+                break
+        if _font_path is None:
+            # 兜底: 让 wordcloud 用默认字体 (只能显示英文)
+            _font_path = None
+        else:
+            print(f"[词云] ✅ 使用字体: {_font_path}", flush=True)
+
         # 生成词云
         wordcloud = WordCloud(
-            width=480, height=360,  # 缩小到60% (800*0.6=480, 600*0.6=360)
+            width=480, height=360,
             background_color='white',
-            font_path='C:/Windows/Fonts/simhei.ttf',
+            font_path=_font_path,
             max_words=100,
             min_font_size=20,
             max_font_size=80,
@@ -8703,6 +8723,7 @@ class StockKeywordAnalyzerGUI:
         crash_top = ttk.Frame(crash_tab)
         crash_top.pack(fill=tk.X, pady=(0, 6))
         ttk.Button(crash_top, text="刷新暴跌状态", command=self._refresh_crash_alert_display).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(crash_top, text="🔄扫描最新异动", command=self._scan_crash_rally_latest).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(crash_top, text="记录到资讯表", command=self._save_crash_alert_snapshot_to_news).pack(side=tk.LEFT)
 
         # ⬇ 新下半: 历史暴涨暴跌事件库 (和 🗓️暴涨暴跌弹窗共用同一 SQLite 表)
@@ -37085,6 +37106,64 @@ class StockKeywordAnalyzerGUI:
             out["avg_drop_pct"] = avg
             out["is_crash"] = avg <= -15.0
         return out
+
+    def _scan_crash_rally_latest(self):
+        """🔄 扫描最新指数日K异动, 自动写入 crash_rally_events 表 (新浪源, 零联网依赖)"""
+        import sqlite3 as _sq, threading as _th, requests as _req, json as _j
+        INDEXES = [
+            ("上证", "sh000001"), ("深证", "sz399001"), ("创业板", "sz399006"),
+            ("科创50", "sh000688"), ("沪深300", "sh000300"),
+        ]
+        def _scan_worker():
+            new_count = 0
+            url = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
+            try:
+                conn = _sq.connect(os.path.join(os.path.expanduser("~"), ".qclaw", "stock_analysis.db"))
+                cur = conn.cursor()
+                for idx_name, idx_code in INDEXES:
+                    try:
+                        r = _req.get(url, params={"symbol": idx_code, "scale": 240, "ma": "no", "datalen": 180}, timeout=8)
+                        if r.status_code != 200 or not r.text.strip():
+                            continue
+                        daily = sorted(_j.loads(r.text), key=lambda x: x.get("day", ""))
+                        closes = [float(d.get("close", 0)) for d in daily]
+                        dates = [d.get("day", "") for d in daily]
+                        for i in range(1, len(closes)):
+                            prev = closes[i - 1]
+                            if prev <= 0:
+                                continue
+                            pct = (closes[i] - prev) / prev * 100
+                            if abs(pct) < 2.0:
+                                continue
+                            # magnitude
+                            if pct < -7: mag = "崩盘"
+                            elif pct < -3: mag = "大跌"
+                            elif pct < 0: mag = "刹跌"
+                            elif pct > 8: mag = "暴涨"
+                            elif pct > 3: mag = "大涨"
+                            else: mag = "小涨"
+                            ev_type = "crash" if pct < 0 else "rally"
+                            cur.execute("INSERT OR IGNORE INTO crash_rally_events \
+                                (event_date,event_type,index_name,index_pct,magnitude,trigger,trigger_detail,source_urls) \
+                                VALUES (?,?,?,?,?,?,?,?)",
+                                (dates[i], ev_type, idx_name, round(pct, 2), mag,
+                                 "自动扫描", "", "sina_daily"))
+                            if cur.rowcount > 0:
+                                new_count += 1
+                        print(f"[暴跌Tab] {idx_name} 扫完 ({len(daily)}根), 新增 {new_count} 条", flush=True)
+                    except Exception as e:
+                        print(f"[暴跌Tab] {idx_name} 扫描失败: {e}", flush=True)
+                conn.commit(); conn.close()
+                print(f"[暴跌Tab] 🔄 扫描完成, 本次新增 {new_count} 条异动事件", flush=True)
+            except Exception as e:
+                print(f"[暴跌Tab] 扫描线程错误: {e}", flush=True)
+            # 回到主线程刷新 Treeview
+            try:
+                self.root.after(0, self._load_crash_rally_events)
+            except Exception:
+                pass
+        _th.Thread(target=_scan_worker, daemon=True).start()
+
     def _load_crash_rally_events(self):
         """从 crash_rally_events 表读历史暴涨暴跌事件，填充暴跌 Tab 的下半 Treeview
         与 crash_rally_calendar.py 共用同一 SQLite 表，保证内容完全一致"""

@@ -5386,6 +5386,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         crash_top = ttk.Frame(crash_tab)
         crash_top.pack(fill=tk.X, pady=(0, 6))
         ttk.Button(crash_top, text="刷新暴跌状态", command=self._refresh_crash_alert_display).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(crash_top, text="🔄扫描最新异动", command=self._scan_crash_rally_latest).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(crash_top, text="记录到资讯表", command=self._save_crash_alert_snapshot_to_news).pack(side=tk.LEFT)
 
         # ⬇ 新下半: 历史暴涨暴跌事件库 (和 🗓️暴涨暴跌弹窗共用同一 SQLite 表)

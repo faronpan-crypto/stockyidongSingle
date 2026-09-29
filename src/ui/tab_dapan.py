@@ -9071,6 +9071,63 @@ class DapanMixin:
 
 
 
+    def _scan_crash_rally_latest(self):
+        """🔄 扫描最新指数日K异动, 自动写入 crash_rally_events 表 (新浪源, 零联网依赖)"""
+        import sqlite3 as _sq, threading as _th, requests as _req, json as _j
+        INDEXES = [
+            ("上证", "sh000001"), ("深证", "sz399001"), ("创业板", "sz399006"),
+            ("科创50", "sh000688"), ("沪深300", "sh000300"),
+        ]
+        def _scan_worker():
+            new_count = 0
+            url = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
+            try:
+                conn = _sq.connect(os.path.join(os.path.expanduser("~"), ".qclaw", "stock_analysis.db"))
+                cur = conn.cursor()
+                for idx_name, idx_code in INDEXES:
+                    try:
+                        r = _req.get(url, params={"symbol": idx_code, "scale": 240, "ma": "no", "datalen": 180}, timeout=8)
+                        if r.status_code != 200 or not r.text.strip():
+                            continue
+                        daily = sorted(_j.loads(r.text), key=lambda x: x.get("day", ""))
+                        closes = [float(d.get("close", 0)) for d in daily]
+                        dates = [d.get("day", "") for d in daily]
+                        for i in range(1, len(closes)):
+                            prev = closes[i - 1]
+                            if prev <= 0:
+                                continue
+                            pct = (closes[i] - prev) / prev * 100
+                            if abs(pct) < 2.0:
+                                continue
+                            # magnitude
+                            if pct < -7: mag = "崩盘"
+                            elif pct < -3: mag = "大跌"
+                            elif pct < 0: mag = "刹跌"
+                            elif pct > 8: mag = "暴涨"
+                            elif pct > 3: mag = "大涨"
+                            else: mag = "小涨"
+                            ev_type = "crash" if pct < 0 else "rally"
+                            cur.execute("INSERT OR IGNORE INTO crash_rally_events \
+                                (event_date,event_type,index_name,index_pct,magnitude,trigger,trigger_detail,source_urls) \
+                                VALUES (?,?,?,?,?,?,?,?)",
+                                (dates[i], ev_type, idx_name, round(pct, 2), mag,
+                                 "自动扫描", "", "sina_daily"))
+                            if cur.rowcount > 0:
+                                new_count += 1
+                        print(f"[暴跌Tab] {idx_name} 扫完 ({len(daily)}根), 新增 {new_count} 条", flush=True)
+                    except Exception as e:
+                        print(f"[暴跌Tab] {idx_name} 扫描失败: {e}", flush=True)
+                conn.commit(); conn.close()
+                print(f"[暴跌Tab] 🔄 扫描完成, 本次新增 {new_count} 条异动事件", flush=True)
+            except Exception as e:
+                print(f"[暴跌Tab] 扫描线程错误: {e}", flush=True)
+            # 回到主线程刷新 Treeview
+            try:
+                self.root.after(0, self._load_crash_rally_events)
+            except Exception:
+                pass
+        _th.Thread(target=_scan_worker, daemon=True).start()
+
     def _load_crash_rally_events(self):
 
         """从 crash_rally_events 表读历史暴涨暴跌事件，填充暴跌 Tab 的下半 Treeview
