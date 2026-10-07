@@ -365,9 +365,9 @@ def fetch_lhb(cb):
     return "\n".join(out)
 
 
-def fetch_skill_blood(cb):
-    """🩸 带血筹码 Skill (~/.qclaw/skills/blood-chips-scanner)"""
-    import sys as _sys, os as _os
+def _blood_via_code(cb):
+    """🩸 带血筹码 — 降级: import scanner 跑"""
+    import sys as _sys
     if _SKILL_BLOOD not in _sys.path:
         _sys.path.insert(0, _SKILL_BLOOD)
     try:
@@ -376,19 +376,15 @@ def fetch_skill_blood(cb):
         cb(f"⚠️ 不能导入 blood-chips-scanner: {e}")
         return f"(带血筹码 Skill 未安装: {e})"
 
-    cb("🔍 扫描全市场带血筹码 (4937只 A股)...")
+    cb("🔍 跑 blood-chips-scanner...")
     result = bcs.scan_market(top_n=50, verbose=False)
     report = bcs.generate_report(result)
-    # 提取核心行: 血腥区 + 偏低区
-    lines = report.split("\n")
-    blood_lines = [l for l in lines if '🩸' in l or ('|' in l and not l.startswith('---'))]
     cb(f"✅ 扫描完成, 报告 {len(report)} 字")
-    # 返回精简版 (完整 Markdown 报告前 800 字)
     return report[:1000]
 
 
-def fetch_skill_trend(cb):
-    """📈 趋势三阶段 Skill (~/.trae-cn/skills/trend-phase-scanner)"""
+def _trend_via_code(cb):
+    """📈 趋势三阶段 — 降级: import trend_phase_scanner 跑"""
     import sys as _sys
     if _SKILL_TREND not in _sys.path:
         _sys.path.insert(0, _SKILL_TREND)
@@ -398,46 +394,130 @@ def fetch_skill_trend(cb):
         cb(f"⚠️ 不能导入 trend-phase-scanner: {e}")
         return f"(趋势三阶段 Skill 未安装: {e})"
 
-    # sina_hist 需要纯 6 位代码 + sina 自己加 sh/sz 前缀
-    cb("🔍 取扫描候选股 (蓝筹 + 热门)...")
+    cb("🔍 跑 trend-phase-scanner (蓝筹28+lhb12)...")
     candidates = _get_trend_candidates(cb)
     if not candidates:
-        cb("⚠️ 无候选股")
-        return "(趋势三阶段: 无候选股)"
+        return "(无候选股)"
 
-    cb(f"🔍 扫描 {len(candidates)} 只股票...")
     results = []
-    for name, code6 in candidates[:30]:  # code6 是纯 6 位代码
+    for name, code6 in candidates[:30]:
         try:
-            r = tps.process((code6, name))  # 纯代码!
+            r = tps.process((code6, name))
             if r: results.append(r)
-            else: cb(f"   → {name}: 无信号/数据不足")
-        except Exception as e:
-            cb(f"   → {name}: 失败({e})")
+        except Exception:
+            pass
 
     if not results:
         cb("⚠️ 无有效结果")
-        return "(趋势三阶段: 扫描无结果, 候选股数据不足)"
+        return "(趋势三阶段: 扫描无结果)"
 
-    cb(f"✅ {len(results)} 只有效结果")
-    groups = {"初期": [], "中期": [], "末期": [], "下跌/超卖": []}
+    groups = {}
     for r in results:
         phase = r.get("phase", "")
-        nm = r.get("name", "?"); sc = r.get("score", 0)
-        entry = f"  · {nm} — {phase} (得分:{sc})"
-        matched = False
-        for gkey in groups:
-            if gkey in phase or (gkey == "下跌/超卖" and ("下跌" in phase or "超卖" in phase)):
-                groups[gkey].append(entry); matched = True; break
-        if not matched and phase:
-            groups.setdefault("其他", []).append(entry)
+        key = phase[:4] if len(phase) > 4 else phase
+        groups.setdefault(key, []).append(f"  · {r['name']} — {phase} (得分:{r['score']})")
+    
+    out = ["\n【📈 趋势三阶段 (降级跑)】"]
+    for k, items in groups.items():
+        out.append(f"\n  ▶ {k} ({len(items)}只):")
+        out.extend(items[:5])
+    return "\n".join(out) + f"\n\n共 {len(results)} 只有效结果"
 
-    out = ["\n【📈 趋势三阶段扫描 (Top30)】"]
-    for gkey, items in groups.items():
-        if items:
-            out.append(f"\n  ▶ {gkey} ({len(items)}只):")
-            out.extend(items)
-    return "\n".join(out)
+
+def fetch_skill_trend(cb):
+    """📈 趋势三阶段 — 直接读 Skill 浏览器跑出来的 .md 报告
+    
+    Skill 运行时写到:
+      ~/Agent/stockyidong_project/data/trend_phase_scan_YYYYMMDD_HHMM.md
+    """
+    import glob as _glob, os as _os_local
+    import time as _time_local
+    
+    # 1. 找最新 .md (skill 浏览器写的完整报告)
+    db_path = _stock_db()  # .../data/stock_analysis.db
+    data_dir = _os_local.path.dirname(db_path)  # .../data/ (trend md 也在这里)
+    md_files = sorted(_glob.glob(_os_local.path.join(data_dir, "trend_phase_scan_*.md")))
+    if md_files:
+        latest = md_files[-1]
+        mtime = _os_local.path.getmtime(latest)
+        age_min = (_time_local.time() - mtime) / 60
+        if age_min < 60*6:  # 6 小时内有效
+            cb(f"📂 读 Skill md: {_os.path.basename(latest)} ({age_min:.0f}分钟前)")
+            with open(latest, "r", encoding="utf-8") as f:
+                content = f.read()
+            # 精简: 只取标题+汇总+Top10
+            lines = content.split("\n")
+            summary = []
+            for i, l in enumerate(lines):
+                if l.startswith("# 📊") or l.startswith("**资讯股") or l.startswith("**汇总"):
+                    summary.append(l)
+                elif l.startswith("## "):
+                    summary.append(l)
+                elif l.startswith("|") and any(str(x) in l for x in range(1, 11)) and l[2:3].isdigit():
+                    # Top10 行
+                    summary.append(l)
+                elif l.startswith("**汇总："):
+                    summary.append(l)
+            cb(f"✅ {len(content)} 字 → 精简 {len(summary)} 行")
+            return "\n".join(summary)
+        else:
+            cb(f"⚠️ md 太旧 ({age_min/60:.1f}小时前), 降级跑代码")
+    else:
+        cb("⚠️ 无 Skill md 输出, 降级跑代码")
+
+    # 2. 降级: 直接 import Skill 代码跑 (蓝筹候选 + 新浪K线)
+    return _trend_via_code(cb)
+
+
+def fetch_skill_blood(cb):
+    """🩸 带血筹码 — 直接读 Skill 浏览器跑出来的 .json/.md"""
+    import json as _json, glob as _glob
+    import time as _time_local
+    
+    # 1. 先看 skill-output cache
+    cache_dir = _os.path.expanduser("~/Library/Caches/skill-output")
+    blood_json = _os.path.join(cache_dir, "blood_chips_scanner.json")
+    if _os.path.exists(blood_json):
+        try:
+            with open(blood_json, "r") as f:
+                d = _json.load(f)
+            if d.get("success"):
+                mtime = _os.path.getmtime(blood_json)
+                age_min = (_time_local.time() - mtime) / 60
+                cb(f"📂 读 Skill json ({age_min:.0f}分钟前): 扫描 {d.get('total_scanned','?')} 只")
+                
+                lines = [f"# 🩸 带血筹码扫描 — Skill输出 ({age_min:.0f}分钟前)\n"]
+                
+                # 振幅 Top30 = 接近 60 日低点的
+                amp = d.get("amplitude_top30", [])
+                if amp:
+                    lines.append(f"\n## 振幅偏低 Top (接近带血筹码)\n")
+                    lines.append("| # | 股票 | 代码 | 现价 | 振幅 | 60日低点 |")
+                    lines.append("|---|------|------|------|------|---------|")
+                    for i, s in enumerate(amp[:15]):
+                        nm = s.get("name","?"); cd = s.get("code","?")
+                        pr = s.get("price","?"); am = s.get("amplitude","?")
+                        lo = s.get("low_60d","?")
+                        lines.append(f"| {i+1} | {nm} | {cd} | {pr} | {am}% | {lo} |")
+                
+                # 换手率 Top = 关注热点
+                turn = d.get("turnover_top30", [])
+                if turn:
+                    lines.append(f"\n## 换手率 Top (活跃带血筹码)\n")
+                    lines.append("| # | 股票 | 代码 | 换手率 | 振幅 |")
+                    lines.append("|---|------|------|--------|------|")
+                    for i, s in enumerate(turn[:10]):
+                        nm = s.get("name","?"); cd = s.get("code","?")
+                        tr = s.get("turnover","?"); am = s.get("amplitude","?")
+                        lines.append(f"| {i+1} | {nm} | {cd} | {tr}% | {am}% |")
+                
+                cb(f"✅ json 解析 → {len(amp)}振幅 + {len(turn)}换手率")
+                return "\n".join(lines)
+        except Exception as e:
+            cb(f"⚠️ json 解析失败: {e}")
+    
+    # 2. 降级: 直接 import scanner
+    return _blood_via_code(cb)
 
 
 def _get_trend_candidates(cb):
