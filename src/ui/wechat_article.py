@@ -398,25 +398,26 @@ def fetch_skill_trend(cb):
         cb(f"⚠️ 不能导入 trend-phase-scanner: {e}")
         return f"(趋势三阶段 Skill 未安装: {e})"
 
-    cb("🔍 取扫描候选股...")
+    # sina_hist 需要纯 6 位代码 + sina 自己加 sh/sz 前缀
+    cb("🔍 取扫描候选股 (蓝筹 + 热门)...")
     candidates = _get_trend_candidates(cb)
     if not candidates:
         cb("⚠️ 无候选股")
         return "(趋势三阶段: 无候选股)"
 
-    cb(f"🔍 扫描 {len(candidates)} 只股票 (每只要拉 120 天K线)...")
+    cb(f"🔍 扫描 {len(candidates)} 只股票...")
     results = []
-    for name, code in candidates[:25]:  # tuple: (name, code)
+    for name, code6 in candidates[:30]:  # code6 是纯 6 位代码
         try:
-            r = tps.process((code, name))  # 要 tuple!
+            r = tps.process((code6, name))  # 纯代码!
             if r: results.append(r)
-            else: cb(f"   → {name}: 数据不足或无信号")
+            else: cb(f"   → {name}: 无信号/数据不足")
         except Exception as e:
             cb(f"   → {name}: 失败({e})")
 
     if not results:
         cb("⚠️ 无有效结果")
-        return "(趋势三阶段: 扫描无结果, 股票数据不足)"
+        return "(趋势三阶段: 扫描无结果, 候选股数据不足)"
 
     cb(f"✅ {len(results)} 只有效结果")
     groups = {"初期": [], "中期": [], "末期": [], "下跌/超卖": []}
@@ -431,7 +432,7 @@ def fetch_skill_trend(cb):
         if not matched and phase:
             groups.setdefault("其他", []).append(entry)
 
-    out = ["\n【📈 趋势三阶段扫描 (Top25)】"]
+    out = ["\n【📈 趋势三阶段扫描 (Top30)】"]
     for gkey, items in groups.items():
         if items:
             out.append(f"\n  ▶ {gkey} ({len(items)}只):")
@@ -440,25 +441,54 @@ def fetch_skill_trend(cb):
 
 
 def _get_trend_candidates(cb):
-    """取扫描候选股 → list of (name, code) tuples"""
+    """取扫描候选股 → list of (name, 纯6位code) tuples
+    
+    策略: 
+    1. 蓝筹股 (50只常见A股) — 新浪肯定有数据
+    2. 龙虎榜里的主板股票 (过滤北交所/退市)
+    """
     import sqlite3 as _sc
+
+    # 第一梯队: 蓝筹 (新浪数据最全)
+    BLUE_CHIPS = [
+        "600519","002594","601318","300750","000858","600036","601888","600276",
+        "000333","000651","600887","000895","000002","601899","601012","002415",
+        "300059","002475","600809","600900","601888","002714","601398","601939",
+        "601328","600030","600585","000568","600582","300760",
+    ]
+    NAMES = {
+        "600519":"贵州茅台","002594":"比亚迪","601318":"中国平安","300750":"宁德时代",
+        "000858":"五粮液","600036":"招商银行","601888":"中国中免","600276":"恒瑞医药",
+        "000333":"美的集团","000651":"格力电器","600887":"伊利股份","000895":"双汇发展",
+        "000002":"万科A","601899":"紫金矿业","601012":"隆基绿能","002415":"海康威视",
+        "300059":"东方财富","002475":"立讯精密","600809":"山西汾酒","600900":"长江电力",
+        "002714":"牧原股份","601398":"工商银行","601939":"建设银行","601328":"交通银行",
+        "600030":"中信证券","600585":"海螺水泥","000568":"泸州老窖","300760":"迈瑞医疗",
+    }
+    out = [(NAMES.get(c, c), c) for c in BLUE_CHIPS[:28] if c in NAMES]
+
+    # 第二梯队: lhb_records 里的主板股票 (排除 301/300/北交所/退市)
     try:
         conn = _sc.connect(_stock_db())
         cur = conn.cursor()
-        cur.execute("SELECT DISTINCT name, ts_code FROM lhb_records ORDER BY trade_date DESC LIMIT 30")
+        cur.execute("SELECT DISTINCT name, ts_code FROM lhb_records ORDER BY trade_date DESC LIMIT 40")
         rows = cur.fetchall()
         conn.close()
-        cb(f"   → lhb_records 候选 {len(rows)} 只")
-        out = []
+        added = 0
         for name, tscode in rows:
             if not name or not tscode: continue
-            code = tscode.split(".")[0]  # e.g. "601868"
-            market = "sh" if code.startswith(("6","9","5")) else "sz"
-            out.append((name, market + code))  # 补 sh/sz 前缀
-        return out
+            code6 = tscode.split(".")[0]  # 纯 6 位
+            # 跳过科创板/北交所 (688/4/8开头) 和已退市
+            if code6.startswith(("688","4","8","9")): continue
+            # 跳过已有
+            if any(c == code6 for _, c in out): continue
+            out.append((name, code6)); added += 1
+            if added >= 12: break
+        cb(f"  候选: 蓝筹28 + lhb主板{added} = {len(out)} 只")
     except Exception as e:
-        cb(f"   ⚠️ 候选获取失败: {e}")
-        return []
+        cb(f"  lhb 候选失败: {e}")
+
+    return out[:40]
 
 
 # -------- 8. 全球市场 --------
