@@ -643,45 +643,32 @@ class CangweiMixin:
 
     def _refresh_holding_tabs_from_news(self, run_hold_checks=False):
         """从资讯表按日期+频次刷新持仓7-14(原持仓1-持仓8):取最近8天资讯,每页为该日股票按频次排序,标签名改为MMDD。"""
-        news_meta = {}
-        days_data = get_news_stocks_by_date_and_frequency(ndays=8, meta=news_meta)
+        # 1. 后台拉取 (不卡 UI)
+        import threading as _th_rh
+        def _bg():
+            news_meta = {}
+            days_data = get_news_stocks_by_date_and_frequency(ndays=8, meta=news_meta)
+            # 2. 回主线程渲染
+            self.root.after(0, lambda: self._apply_days_to_holding_tabs(
+                days_data, news_meta=news_meta, run_hold_checks=run_hold_checks, show_msg=True))
+        _th_rh.Thread(target=_bg, daemon=True).start()
+
+    def _apply_days_to_holding_tabs(self, days_data, news_meta=None, run_hold_checks=False, show_msg=False):
+        """(UI 线程) 把已拿到的 days_data 渲染到持仓 7-14 组。"""
+        if news_meta is None:
+            news_meta = {}
         if not days_data:
-            reason = news_meta.get("reason")
-            if reason == "db_error":
-                msg = (
-                    f"读取资讯表失败:{news_meta.get('error', '')}\n\n"
-                    f"数据库:{DB_PATH}\n\n"
-                    "若提示 database or disk is full:\n"
-                    "1)清理 C: 与 D: 剩余空间;\n"
-                    "2)彻底退出本程序后重新打开(启动时会把临时目录指到 D:\\StockAnalyzer\\temp,若设了 STOCK_ANALYZER_DATA_DIR 则为该目录下 temp);\n"
-                    "3)仍失败时可在启动前手动设置环境变量 SQLITE_TMPDIR 到空间足够的文件夹。"
-                )
-            elif reason == "no_stock_dict":
-                msg = "未能加载「股票代码-名称」对照表,无法从资讯正文识别六位代码。请检查网络或本地缓存后重试。"
-            elif reason == "no_rows":
-                msg = (
-                    "资讯表(news_info)里目前没有记录。\n\n"
-                    "请先使用「一键资讯」「批量爬取资讯」或各爬虫将内容保存进股票资讯表,再点「从资讯刷新」。"
-                )
-            elif reason == "no_valid_dates":
-                msg = news_meta.get("hint") or "资讯记录无法按日期归类(created_at 异常)。"
-            else:
-                msg = "资讯表中暂无有效数据。请先爬取并保存资讯到股票资讯表(news_info)。"
-            try:
-                messagebox.showinfo("提示", msg, parent=self.root)
-            except Exception:
-                pass
+            if show_msg:
+                reason = news_meta.get("reason")
+                msg = {
+                    "no_rows": "资讯表(news_info)里目前没有记录。",
+                    "no_stock_dict": "未能加载股票代码-名称对照表。",
+                    "no_valid_dates": news_meta.get("hint") or "资讯记录无法按日期归类。",
+                    "db_error": f"读取资讯表失败:{news_meta.get('error','')}",
+                }.get(reason, "资讯表中暂无有效数据。")
+                try: messagebox.showinfo("提示", msg, parent=self.root)
+                except Exception: pass
             return
-        if news_meta.get("reason") == "no_codes_in_news" or news_meta.get("total_stock_slots", -1) == 0:
-            try:
-                messagebox.showwarning(
-                    "提示",
-                    (news_meta.get("hint") or "资讯里没有解析出有效 A 股代码。")
-                    + "\n\n仍会尝试按日期更新「持仓1~8」标签名,但中间股票格子可能为空。",
-                    parent=self.root,
-                )
-            except Exception:
-                pass
         for i, day_info in enumerate(days_data):
             group_index = 7 + i
             stocks = day_info.get("stocks", [])
@@ -884,6 +871,33 @@ class CangweiMixin:
                 command=lambda: self._refresh_holding_tabs_from_news(run_hold_checks=True),
                 width=10,
             ).pack(side=tk.LEFT, padx=(0, 3))
+            # 🔧 启动后 4 秒自动从资讯刷新持仓 7-14 组 (后台线程, 不卡 UI)
+            try:
+                import threading as _th_auto
+                def _auto_news_refresh_worker():
+                    """后台线程: 拉资讯 → 切回主线程渲染 (不卡 UI)"""
+                    try:
+                        # 1. 后台拉取 (可能慢, 不卡 UI)
+                        from data.snapshot import get_news_stocks_by_date_and_frequency
+                        meta = {}
+                        days_data = get_news_stocks_by_date_and_frequency(ndays=8, meta=meta)
+                        if not days_data:
+                            print(f"[持仓] 自动资讯刷新: 无有效数据 ({meta.get('reason')})", flush=True)
+                            return
+                        # 2. 回主线程渲染 (UI 操作必须在主线程)
+                        def _update_ui():
+                            try:
+                                self._apply_days_to_holding_tabs(days_data, run_hold_checks=False)
+                                print(f"[持仓] group_index=7: 自动资讯刷新完成, {len(days_data)} 天", flush=True)
+                            except Exception as _eu:
+                                print(f"[持仓] 自动刷新 UI 更新失败: {_eu}", flush=True)
+                        self.root.after(0, _update_ui)
+                    except Exception as _ew:
+                        print(f"[持仓] 自动刷新后台线程异常: {_ew}", flush=True)
+                self.root.after(4000, lambda: _th_auto.Thread(target=_auto_news_refresh_worker, daemon=True).start())
+                print("[持仓] group_index=7: 已预约启动 4s 后后台自动从资讯刷新 7-14 组", flush=True)
+            except Exception as _e_hold7:
+                print(f"[持仓] 启动自动刷新资讯失败: {_e_hold7}", flush=True)
         # 持仓股显示区域(不占满垂直剩余空间,避免行被强行拉高顶掉下方板块/导航)
         holding_stocks_frame = ttk.Frame(holding_frame)
         holding_stocks_frame.pack(fill=tk.X, expand=False)

@@ -13364,10 +13364,17 @@ class RestMixin:
             if s >= 25: return "#66BB6A"
             return "#2E7D32"
 
+        _emo_last_dates = None  # 防抖: 只在数据变化时重绘
+
         def _draw_emo(sent_data):
-            """渲染情绪图 (趋势+热力条)"""
+            """渲染情绪图 (趋势+热力条) — 防抖, 相同数据不重复画"""
+            nonlocal _emo_last_dates
             try:
                 dl = sent_data.get("data", []) if sent_data else []
+                _cur_dates = tuple(d.get("date", "") for d in dl)
+                if _emo_last_dates == _cur_dates:
+                    return  # 数据没变, 跳过 (避免 Configure 重复触发)
+                _emo_last_dates = _cur_dates
                 if not dl:
                     canvas_trend.delete("all"); canvas_bar.delete("all")
                     canvas_trend.create_text(300, 75, text="暂无数据", fill="#999", font=("", 11))
@@ -13474,40 +13481,89 @@ class RestMixin:
 
         def _bg_load_emo():
             """后台加载情绪数据"""
-            emo_status.set("⏳ 运行 market_sentiment.py ...")
+            emo_status.set("⏳ 加载情绪数据...")
             def _run():
                 try:
+                    sd = None
+                    # 1. 先读 market_sentiment_data.json (主数据源)
                     if _os_sent.path.exists(EMOTION_JSON):
                         with open(EMOTION_JSON) as f:
                             sd = _js_sent.load(f)
-                        win.after(0, lambda: _draw_emo(sd))
+
+                    # 2. 用 emo_history.json 补最新缺失日期 (数据源滞后兜底)
+                    _emo_hist_path = _os_sent.path.join(EMOTION_SKILL_DIR, "stockyidong_emo_history.json")
+                    if sd and _os_sent.path.exists(_emo_hist_path):
+                        try:
+                            with open(_emo_hist_path) as _ef:
+                                _eh = _js_sent.load(_ef)
+                            dl = sd.get("data", [])
+                            if dl:
+                                _last_date = dl[-1].get("date", "")  # e.g. "20260918"
+                                _fmt_emo_hist = {}  # "20260930" -> record
+                                for _k, _v in _eh.items():
+                                    _fmt_emo_hist[_k.replace("-", "")] = _v
+                                _added = 0
+                                for _ed in sorted(_fmt_emo_hist.keys()):
+                                    if _ed > _last_date:
+                                        _ev = _fmt_emo_hist[_ed]
+                                        dl.append({
+                                            "date": _ed,
+                                            "sh_chg": float(_ev.get("pct", 0) or 0),
+                                            "sentiment_score": float(_ev.get("emo_score", 50) or 50),
+                                            "zt_count": int(_ev.get("zt", 0) or 0),
+                                            "dt_count": int(_ev.get("dt", 0) or 0),
+                                            "index_close": _ev.get("close", 0),
+                                        })
+                                        _added += 1
+                                if _added > 0:
+                                    sd["data"] = dl
+                                    sd["meta"]["end_date"] = dl[-1]["date"]
+                                    sd["meta"]["generated_at"] = "just now"
+                                    print(f"[情绪地图] 📌 emo_history 补了 {_added} 天, 最新={dl[-1]['date']}")
+                        except Exception as _e_emo2:
+                            print(f"[情绪地图] emo_history 补全失败: {_e_emo2}")
+
+                    if sd:
+                        win.after(0, lambda s=sd: _draw_emo(s))
                         meta = sd.get("meta", {})
                         win.after(0, lambda: emo_status.set(
                             f"✅ {meta.get('start_date','')}~{meta.get('end_date','')} {len(sd.get('data',[]))}天"))
                     else:
-                        emo_status.set("❌ 无缓存, 运行 skill ...")
-                        try:
-                            _sp_sent.run(["python3", EMOTION_PY], capture_output=True, text=True, timeout=60)
-                            if _os_sent.path.exists(EMOTION_JSON):
-                                with open(EMOTION_JSON) as f:
-                                    sd = _js_sent.load(f)
-                                win.after(0, lambda: _draw_emo(sd))
-                        except Exception as e2:
-                            emo_status.set(f"❌ 运行失败: {str(e2)[:30]}")
+                        emo_status.set("❌ 无缓存")
                 except Exception as e:
                     emo_status.set(f"❌ 加载失败: {str(e)[:30]}")
             _th_sent.Thread(target=_run, daemon=True).start()
-        # 自动加载缓存
+        # 自动加载缓存 (+ emo_history 补全)
         def _auto_emo():
             import time as _t; _t.sleep(1.5)
             try:
                 if _os_sent.path.exists(EMOTION_JSON):
                     with open(EMOTION_JSON) as f: sd = _js_sent.load(f)
-                    win.after(0, lambda: _draw_emo(sd))
+                    # emo_history 补全
+                    _ehp = _os_sent.path.join(EMOTION_SKILL_DIR, "stockyidong_emo_history.json")
+                    if _os_sent.path.exists(_ehp):
+                        try:
+                            with open(_ehp) as _ef: _eh = _js_sent.load(_ef)
+                            dl = sd.get("data", [])
+                            if dl:
+                                _last = dl[-1]["date"]
+                                _fmt = {k.replace("-",""): v for k,v in _eh.items()}
+                                for _ed in sorted(_fmt.keys()):
+                                    if _ed > _last:
+                                        _ev = _fmt[_ed]
+                                        dl.append({"date": _ed, "sh_chg": float(_ev.get("pct",0) or 0),
+                                                   "sentiment_score": float(_ev.get("emo_score",50) or 50),
+                                                   "zt_count": int(_ev.get("zt",0) or 0),
+                                                   "dt_count": int(_ev.get("dt",0) or 0),
+                                                   "index_close": _ev.get("close",0)})
+                                sd["data"] = dl
+                                sd["meta"]["end_date"] = dl[-1]["date"]
+                        except Exception: pass
+                    win.after(0, lambda s=sd: _draw_emo(s))
                     meta = sd.get("meta", {})
                     win.after(0, lambda: emo_status.set(
-                        f"📂 缓存 {meta.get('start_date','')}~{meta.get('end_date','')} {len(sd.get('data',[]))}天"))
-                    print("[情绪地图] 📂 自动加载缓存成功", flush=True)
+                        f"📂 {meta.get('start_date','')}~{meta.get('end_date','')} {len(sd.get('data',[]))}天"))
+                    print(f"[情绪地图] 📂 自动加载缓存+补全, {len(sd.get('data',[]))}天", flush=True)
             except Exception as e:
                 print(f"[情绪地图] ⚠️ 自动加载失败: {e}", flush=True)
         _th_sent.Thread(target=_auto_emo, daemon=True).start()

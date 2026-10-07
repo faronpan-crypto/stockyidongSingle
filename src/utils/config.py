@@ -12,6 +12,7 @@ import re
 import json
 import time as _ts_time
 import threading as _ts_threading
+import platform as _platform
 from urllib.parse import urljoin
 
 # ==================== 第三方库 availability 标志 ====================
@@ -67,7 +68,10 @@ ETF_CACHE_REFRESHED = False
 STOCK_NAMES_LOAD_LOCK = _threading.Lock()
 
 # ==================== Phase 1: 路径常量 ====================
-D_DATA_DIR = (os.environ.get("STOCK_ANALYZER_DATA_DIR") or r"D:\StockAnalyzer").strip() or r"D:\StockAnalyzer"
+_DEFAULT_DATA_DIR_MAC = os.path.expanduser("~/StockAnalyzer")
+_DEFAULT_DATA_DIR_WIN = r"D:\StockAnalyzer"
+_DEFAULT_DATA_DIR = _DEFAULT_DATA_DIR_MAC if _platform.system() == "Darwin" else _DEFAULT_DATA_DIR_WIN
+D_DATA_DIR = (os.environ.get("STOCK_ANALYZER_DATA_DIR") or _DEFAULT_DATA_DIR).strip() or _DEFAULT_DATA_DIR
 D_DB_DIR = os.path.join(D_DATA_DIR, "Database")
 D_OUTPUT_DIR = os.path.join(D_DATA_DIR, "Output")
 D_EXPORT_DIR = os.path.join(D_DATA_DIR, "Export")
@@ -129,7 +133,29 @@ if _db_override:
 elif os.path.isfile(_PROJECT_LOCAL_DB):
     DB_PATH = os.path.normpath(_PROJECT_LOCAL_DB)
 else:
-    DB_PATH = os.path.join(D_DB_DIR, "stock_analysis.db")
+    # PyInstaller 打包后 __file__ 指向临时解压目录, 额外扫描常见位置
+    _candidates = []
+    # 1. sys.executable 所在目录向上找项目
+    if getattr(sys, "frozen", False):
+        _exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        _bundle_root = os.path.normpath(os.path.join(_exe_dir, "..", ".."))
+        _candidates.append(os.path.join(_bundle_root, "data", "stock_analysis.db"))
+        _candidates.append(os.path.join(_bundle_root, "..", "data", "stock_analysis.db"))
+        _candidates.append(os.path.join(_exe_dir, "data", "stock_analysis.db"))
+    # 2. 当前工作目录
+    _candidates.append(os.path.join(os.getcwd(), "data", "stock_analysis.db"))
+    # 3. D_DB_DIR 下 (默认 ~/StockAnalyzer/Database)
+    _candidates.append(os.path.join(D_DB_DIR, "stock_analysis.db"))
+    _found = next((p for p in _candidates if p and os.path.isfile(p)), None)
+    if _found:
+        DB_PATH = os.path.normpath(_found)
+    else:
+        DB_PATH = os.path.join(D_DB_DIR, "stock_analysis.db")
+        # 确保目录存在, 否则 sqlite3.connect 会失败
+        try:
+            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        except Exception:
+            pass
 
 
 def _load_tushare_token_from_local_file():

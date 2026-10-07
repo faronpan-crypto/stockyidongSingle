@@ -36,6 +36,23 @@ import sqlite3
 class NewsMixin:
     """新闻/资讯/股吧/爬虫"""
 
+    def save_news_info_to_db(self, tab_name, content):
+        """保存资讯到数据库 (mac003/mac 共用实现)"""
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute('''
+                INSERT INTO news_info (tab_name, content, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+            ''', (tab_name, content, current_time, current_time))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"保存资讯到数据库失败: {e}", flush=True)
+            return False
+
     def _schedule_rt_news_link_reapply_under_win(self, win):
         """含实时快讯的 ScrolledText 在改弹窗字号后重绑蓝色可点行。"""
         def walk(w):
@@ -379,13 +396,13 @@ class NewsMixin:
                     return
                 for tab_info in left_tabs:
                     title = f"左侧_{tab_info['title']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                    if save_news_info_to_db(title, tab_info['content']):
+                    if self.save_news_info_to_db(title, tab_info['content']):
                         saved_count += 1
                     else:
                         failed_count += 1
                 for tab_info in right_tabs:
                     title = f"右侧_{tab_info['title']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                    if save_news_info_to_db(title, tab_info['content']):
+                    if self.save_news_info_to_db(title, tab_info['content']):
                         saved_count += 1
                     else:
                         failed_count += 1
@@ -456,7 +473,7 @@ class NewsMixin:
                         summary_content = "\n\n".join(all_content)
                         # 保存到资讯数据表
                         tab_name = f"批量爬取资讯_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                        if save_news_info_to_db(tab_name, summary_content):
+                        if self.save_news_info_to_db(tab_name, summary_content):
                             self.root.after(0, lambda: messagebox.showinfo("成功",
                                 f"批量爬取完成!\n\n"
                                 f"共爬取 {len(selected_urls)} 个网址\n"
@@ -1837,7 +1854,7 @@ class NewsMixin:
                     messagebox.showinfo("提示", "当前没有可保存的内容。", parent=win)
                     return
                 tab_name = f"AI预测_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                if save_news_info_to_db(tab_name, content):
+                if self.save_news_info_to_db(tab_name, content):
                     messagebox.showinfo("成功", f"已保存到资讯表,标题:{tab_name}", parent=win)
                 else:
                     messagebox.showerror("错误", "保存到资讯表失败。", parent=win)
@@ -2668,7 +2685,7 @@ class NewsMixin:
                     wordcloud_link = f"\n\n[词云图片]\n文件路径: {os.path.abspath(wordcloud_save_path)}\n图片链接: file:///{os.path.abspath(wordcloud_save_path).replace(os.sep, '/')}\n"
                     content += wordcloud_link
             # 保存到数据库
-            if save_news_info_to_db(tab_title, content):
+            if self.save_news_info_to_db(tab_title, content):
                 messagebox.showinfo("成功", f"已保存标签页 '{tab_title}' 到资讯数据库")
                 # 如果是警世通言记录,更新最近记录显示
                 if tab_title.startswith("警示") and hasattr(self, 'update_warning_recent_records'):
@@ -2722,7 +2739,7 @@ class NewsMixin:
                 wordcloud_link = f"\n\n[词云图片]\n文件路径: {os.path.abspath(wordcloud_save_path)}\n图片链接: file:///{os.path.abspath(wordcloud_save_path).replace(os.sep, '/')}\n"
                 content += wordcloud_link
             # 保存到数据库
-            if save_news_info_to_db(tab_title, content):
+            if self.save_news_info_to_db(tab_title, content):
                 messagebox.showinfo("成功", f"已保存结果标签页 '{tab_title}' 到资讯数据库")
             else:
                 messagebox.showerror("错误", "保存失败")

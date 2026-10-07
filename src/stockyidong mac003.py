@@ -3746,7 +3746,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
                 # 保存到资讯数据库
                 try:
                     news_tab_name = f"开新仓-{position_type}-{stock_name}-{current_date}"
-                    if save_news_info_to_db(news_tab_name, record_text):
+                    if self.save_news_info_to_db(news_tab_name, record_text):
                         print(f"开新仓记录已保存到资讯数据库: {news_tab_name}")
                 except Exception as e:
                     print(f"保存到资讯数据库失败: {e}")
@@ -3762,7 +3762,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
                         fail_case_record += f"判断时间: {current_datetime}\n"
                         fail_case_record += f"失败案例内容:\n{fail_case_content}\n"
                         fail_case_record += "="*50 + "\n"
-                        if save_news_info_to_db(fail_case_tab_name, fail_case_record):
+                        if self.save_news_info_to_db(fail_case_tab_name, fail_case_record):
                             print(f"失败案例已保存到资讯数据库: {fail_case_tab_name}")
                 except Exception as e:
                     print(f"保存失败案例到资讯数据库失败: {e}")
@@ -3797,7 +3797,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
                     try:
                         # 使用"开新仓记录"作为标识
                         news_tab_name = f"开新仓记录-{position_type}-{stock_name}-{current_date}"
-                        if save_news_info_to_db(news_tab_name, record_text):
+                        if self.save_news_info_to_db(news_tab_name, record_text):
                             messagebox.showinfo("成功", "开新仓记录已保存到案例数据库", parent=result_dialog)
                         else:
                             messagebox.showerror("错误", "保存到案例数据库失败", parent=result_dialog)
@@ -4689,10 +4689,25 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("📊 批量股票分析", 9, self.show_batch_stock_analyzer),
             ("龙虎榜", 6, self.show_top_list_dialog),
             ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
+            ("📈价增量涨", 10, self._show_price_volume_dialog),
+            ("🏛️美联储分析", 12, self._show_fed_analysis_dialog),
+            ("🌏纳指日经套利", 10, self._show_etf_holiday_dialog),
+            ("📸风格化", 8, self._show_photo_style_dialog),
+            ("📱日报", 7, self._show_wechat_dialog),
         ]):
-            ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(
-                side=tk.LEFT, padx=(0 if idx_btn == 0 else tp, 0)
-            )
+            if "📸" in txt or "📱" in txt:
+                import traceback as _tb_toolbar
+                def _wrap(_c=cmd, _t=txt):
+                    print(f"[🎯工具栏] 点击 '{_t}'", flush=True)
+                    try: _c()
+                    except Exception as _e:
+                        print(f"[🎯工具栏❌] '{_t}': {_e}", flush=True)
+                        _tb_toolbar.print_exc()
+                ttk.Button(toolbar_row1, text=txt, width=w, command=_wrap).pack(
+                    side=tk.LEFT, padx=(0 if idx_btn == 0 else tp, 0))
+            else:
+                ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(
+                    side=tk.LEFT, padx=(0 if idx_btn == 0 else tp, 0))
         batch_crawl_news_btn = tk.Button(
             toolbar_row2, text="批量爬取资讯", width=10,
             command=self.batch_crawl_news, bg="yellow", fg="black",
@@ -4982,6 +4997,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("分析引擎", self.show_stock_analysis_engine_dialog, False, "tools"),
             ("OCR识别", self.open_ocr_crawler, False, "tools"),
             ("tushare", self.show_tushare_skills_dialog, False, "tools"),
+            ("📸照片风格化", self._show_photo_style_dialog, False, "tools"),
             # ---- 💼 持仓/预测 (tools) ----
             ("自持股监测", self._show_self_holding_monitor_popup, False, "tools"),
             ("🧬生命周期", self._show_lifecycle_popup, False, "tools"),
@@ -4990,6 +5006,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("预测", self.show_news_prediction_analysis, False, "tools"),
             ("🧭市场导航", self.open_market_nav_dialog, False, "tools"),
         ]
+        print(f"[🔎] _BUTTON_DEFAULTS 共 {len(_BUTTON_DEFAULTS)} 项, 含📸: {any('📸' in str(t) for t in _BUTTON_DEFAULTS)}", flush=True)
         # 从配置加载自定义 tab 分配
         _saved = {}
         try:
@@ -5042,7 +5059,17 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
                 except Exception:
                     pass
             else:
-                _b.config(command=_info["cmd"])
+                _cmd = _info["cmd"]
+                def _safe_cmd(_c=_cmd, _t=_txt):
+                    import traceback as _tb2
+                    print(f"[🖱️] 点击按钮 '{_t}', cmd={_c.__name__ if hasattr(_c,'__name__') else str(_c)[:40]}", flush=True)
+                    try:
+                        _c()
+                        print(f"[🖱️] '{_t}' 执行成功", flush=True)
+                    except Exception as _e:
+                        print(f"[🖱️❌] '{_t}' 执行异常: {_e}", flush=True)
+                        _tb2.print_exc()
+                _b.config(command=_safe_cmd)
                 try:
                     _b.config(highlightbackground="systemWindowBackgroundColor", highlightthickness=0)
                 except Exception:
@@ -5098,6 +5125,9 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
                 _target_grid = quick_grid if _info["tab"] == "quick" else tools_grid
                 _b = _build_button(_target_grid, _txt, _info)
                 _apply_button_command(_b, _txt, _info)
+                if "📸" in _txt:
+                    _real_cmd = _b.cget("command")
+                    print(f"[🔍] 📸按钮实际 command={_real_cmd}, type={type(_real_cmd)}", flush=True)
                 # 绑定右键菜单(始终可用)
                 _b.bind("<Button-3>", lambda _e, t=_txt, b=_b: _popup_move_menu(t, b))
                 if _info["tab"] == "quick":
