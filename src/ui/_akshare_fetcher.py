@@ -47,27 +47,57 @@ def _code6_to_ts(code6: str) -> str:
 
 def fetch_daily_kline(code6: str, days: int = 250, adjust: str = "qfq") -> pd.DataFrame | None:
     """
-    拉日K线 (前复权, 默认250根) — 五级降级
-    当前机器实测可用源: 同花顺 > 新浪 (间歇性反爬) > 腾讯 (限频) > 东财 (网络封)
+    拉日K线 (前复权, 默认250根) — Tushare Pro 优先 + 四级降级
+    Tushare Pro 0.08s 稳通, 放第一
+    akshare stock_zh_a_daily 依赖 mini-racer (已 stub, 失效)
     返回 DataFrame 列: date, open, high, low, close, volume
     失败返回 None
     """
     code6 = str(code6).strip()
 
-    # ==== 方案1: akshare 新浪 stock_zh_a_daily (最稳, 偶发反爬) ====
+    # ==== 方案0: Tushare Pro (0.08s 稳通, 放第一!) ====
     try:
-        import akshare as ak
-        sym = _code6_to_sina(code6)
-        df = ak.stock_zh_a_daily(symbol=sym, adjust=adjust)
-        if df is not None and len(df) > 0:
-            df = df.rename(columns={"vol": "volume"})
-            for c in ["open", "high", "low", "close", "volume"]:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
-            df = df.sort_values("date").tail(days).reset_index(drop=True)
-            if len(df) >= 30:
-                return df[["date", "open", "high", "low", "close", "volume"]]
+        import tushare as ts
+        import os as _os
+        from datetime import datetime as _dt, timedelta as _td
+        tk = (_os.environ.get("TUSHARE_TOKEN") or "").strip()
+        if not tk:
+            # 从 config 读
+            try:
+                from utils.config import TS_DEFAULT_TOKEN
+                tk = (TS_DEFAULT_TOKEN or "").strip()
+            except Exception:
+                pass
+        if tk:
+            ts.set_token(tk)
+            pro = ts.pro_api()
+            ts_code = f"{code6}.SH" if code6.startswith(("6", "5", "9")) else f"{code6}.SZ"
+            end = _dt.now().strftime('%Y%m%d')
+            start = (_dt.now() - _td(days=days + 30)).strftime('%Y%m%d')
+            df = pro.daily(ts_code=ts_code, start_date=start, end_date=end)
+            if df is not None and not df.empty:
+                df = df.sort_values('trade_date').tail(days)
+                out = pd.DataFrame({
+                    'date': pd.to_datetime(df['trade_date']),
+                    'open': df['open'].astype(float),
+                    'high': df['high'].astype(float),
+                    'low': df['low'].astype(float),
+                    'close': df['close'].astype(float),
+                    'volume': df['vol'].astype(float),
+                }).reset_index(drop=True)
+                if len(out) >= 30:
+                    return out
     except Exception:
         pass
+
+    # ==== 方案1: akshare 新浪 stock_zh_a_daily (mini-racer stub 后失效, 跳过) ====
+    # try:
+    #     import akshare as ak
+    #     sym = _code6_to_sina(code6)
+    #     df = ak.stock_zh_a_daily(symbol=sym, adjust=adjust)
+    #     ...
+    # except:
+    #     pass
 
     # ==== 方案2: 新浪直连 JSON (akshare 解析 bug 时兜底) ====
     try:

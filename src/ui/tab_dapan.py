@@ -22746,10 +22746,37 @@ class DapanMixin:
                 _sina_sym = "sz" + pure
             daily = None
             stock_name = pure
+            # ===== 优先 Tushare Pro (0.08s 稳通) =====
             try:
-                daily = _ak.stock_zh_a_daily(symbol=_sina_sym, adjust="qfq")
-            except Exception as _e1:
-                print(f"[游资心法] 新浪 akshare 挂: {_e1}, 尝试新浪直连JSON")
+                _ts_tok = (os.environ.get("TUSHARE_TOKEN") or "").strip() or globals().get('TS_DEFAULT_TOKEN', '')
+                if not _ts_tok and hasattr(self, 'ts_token') and self.ts_token:
+                    _ts_tok = self.ts_token.strip()
+                if _ts_tok and _ts_pro is not None:
+                    _ts_pro.set_token(_ts_tok)
+                    _ts_client = _ts_pro.pro_api()
+                    _ts_code = f"{pure}.SH" if pure.startswith(("6", "5", "9")) else f"{pure}.SZ"
+                    _end = _dt_now.now().strftime('%Y%m%d')
+                    _start = (_dt_now.now() - _td(days=180)).strftime('%Y%m%d')
+                    _ts_df = _ts_client.daily(ts_code=_ts_code, start_date=_start, end_date=_end)
+                    if _ts_df is not None and not _ts_df.empty:
+                        _ts_df = _ts_df.sort_values('trade_date').tail(80)
+                        daily = _pd.DataFrame({
+                            'date': _pd.to_datetime(_ts_df['trade_date']),
+                            'open': _ts_df['open'].astype(float),
+                            'high': _ts_df['high'].astype(float),
+                            'low': _ts_df['low'].astype(float),
+                            'close': _ts_df['close'].astype(float),
+                            'volume': _ts_df['vol'].astype(float),
+                        }).reset_index(drop=True)
+                        print(f"[游资心法] ✅ Tushare Pro 获取 {len(daily)} 根 ({pure})")
+            except Exception as _e0:
+                print(f"[游资心法] Tushare Pro 挂: {_e0}")
+            
+            if daily is None:
+                try:
+                    daily = _ak.stock_zh_a_daily(symbol=_sina_sym, adjust="qfq")
+                except Exception as _e1:
+                    print(f"[游资心法] 新浪 akshare 挂: {_e1}, 尝试新浪直连JSON")
                 try:
                     import requests as _req; import json as _json
                     _url = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
