@@ -207,13 +207,8 @@ class StockDetailMixin:
             return None
 
     def _get_daily_kline_data_tushare(self, stock_code, days=60):
-        """获取日K线数据, akshare 优先, Tushare 兜底 (daily 被熔断/积分不足时)"""
-        # ===== 方案1: akshare (新浪 + 直连兜底) =====
-        try:
-            return self._get_daily_kline_data_akshare(stock_code, days)
-        except Exception:
-            pass
-        # ===== 方案2: Tushare =====
+        """获取日K线数据: Tushare Pro 优先 (0.08s), akshare 兜底"""
+        # ===== 方案1: Tushare =====
         try:
             if TS_AVAILABLE and (getattr(self, 'ts_token', None) or TS_DEFAULT_TOKEN):
                 self._ensure_tushare_client(self.ts_token or TS_DEFAULT_TOKEN)
@@ -248,9 +243,15 @@ class StockDetailMixin:
                             vwap_values.append(float(cum_amount / cum_vol) if cum_vol > 0 else float(typ))
                     ma_values['vwap'] = vwap_values
                     dates_list = list(df['trade_date'].astype(str))
+                    print(f"  [K线] ✅ Tushare Pro tab_stock_detail {stock_code} {len(data)} 根")
                     return {'data': data, 'ma_values': ma_values, 'dates': dates_list, 'trade_dates': dates_list}
         except Exception as e:
-            print(f"  [K线] Tushare 兜底也失败: {e}")
+            print(f"  [K线] tab_stock_detail Tushare 挂: {e}")
+        # ===== 方案2: akshare 兜底 =====
+        try:
+            return self._get_daily_kline_data_akshare(stock_code, days)
+        except Exception as e:
+            print(f"  [K线] tab_stock_detail akshare 挂: {e}")
         return None
 
     def _get_daily_kline_data_akshare(self, stock_code, days=60):
