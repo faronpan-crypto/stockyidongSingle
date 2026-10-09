@@ -101,33 +101,9 @@ class CangweiMixin:
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # ========== 异步算游资心法分 ==========
-        import threading as _th_shm
-        def _bg_hm():
-            for i, s in enumerate(stocks):
-                if not win.winfo_exists(): break
-                try:
-                    hm = self._hm_calc_for_stock(s.get('code',''))
-                    sc = hm.get("avg_score")
-                    best = hm.get("best_sch", "-")
-                    tag = "high" if sc and sc >= 65 else ("mid" if sc and sc >= 45 else "low")
-                    sc_txt = "-" if sc is None else f"{int(sc)}"
-                    def _upd(idx=i, _sc=sc_txt, _tg=tag, _bst=best):
-                        if not win.winfo_exists(): return
-                        try:
-                            kids = tree.get_children()
-                            if idx < len(kids):
-                                vals = list(tree.item(kids[idx], "values"))
-                                vals[13] = _sc
-                                vals[14] = _bst
-                                tree.item(kids[idx], values=vals, tags=(_tg,))
-                        except Exception:
-                            pass
-                    self.root.after(0, _upd)
-                except Exception:
-                    pass
-                time.sleep(0.3)
-        _th_shm.Thread(target=_bg_hm, daemon=True).start()
+        # ========== 游资心法懒加载: 默认 "⏳双击看全解" 占位, 双击行弹窗才跑 ==========
+        # 之前后台线程 0.4s × 14只 = 6s, 改成懒加载秒出
+        # 双击弹窗 _on_double 里 215 行会按需调用 _hm_calc_for_stock
 
         # ========== 双击行 → 预测逻辑 + 游资心法全解 + 10日涨跌 + MA10 ==========
         def _on_double(evt):
@@ -1702,22 +1678,9 @@ class CangweiMixin:
                     if not kelly_result.get('signal_lightweight'):
                         kelly_percent = kelly_result['ratio'] * 100
                         display_text += f" [{kelly_percent:.1f}%]"
-                # 游资心法得分 (异步缓存)
-                _hm_key = stock_code
-                _hm_cache = getattr(self, '_hm_scores_cache', {})
-                _hm_score = _hm_cache.get(_hm_key)
-                if _hm_score is not None and isinstance(_hm_score, (int, float)):
-                    display_text += f" 🦅{int(_hm_score)}"
-                elif _hm_key and _hm_key.isdigit() and len(_hm_key) == 6:
-                    # cache miss → 后台线程算, 算完后刷新按钮
-                    import threading as _th_hm
-                    def _hm_bg(_code, _idx, _gi):
-                        try:
-                            self._hm_calc_for_stock(_code)
-                            self.root.after(0, lambda: self._update_holding_label(_idx, group_index=_gi, fetch_daily_change=False))
-                        except Exception:
-                            pass
-                    _th_hm.Thread(target=_hm_bg, args=(_hm_key, index, group_index), daemon=True).start()
+                # 游资心法: 懒加载, 只显示占位符 "🦅双击看全解", 后台不跑
+                # 双击弹窗里才按需算 _hm_calc_for_stock (tab_cangwei.py:5366)
+                display_text += " 🦅双击"
                 # 当日涨跌幅:优先使用持仓检测传入的值,否则实时拉取
                 change_pct_text = ""
                 current_price = None
