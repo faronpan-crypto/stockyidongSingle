@@ -4976,30 +4976,24 @@ class CangweiMixin:
 
 
     def _check_moving_averages_for_holding(self, stock_code, stock_name):
-        """检测持仓股的均线(1日、5日、10日、20日)"""
+        """检测持仓股的均线(1日、5日、10日、20日) — Tushare Pro 优先"""
         try:
-            # 获取历史数据(至少需要20日)
-            hist_data = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="qfq", start_date="")
-            if hist_data.empty or len(hist_data) < 20:
+            hist_data = self._get_daily_kline_data_tushare(stock_code, days=30)
+            if not hist_data:
                 return {'ma1': False, 'ma5': False, 'ma10': False, 'ma20': False}
-            # 取最近20日数据
-            recent_data = hist_data.tail(20)
-            close_prices = recent_data['收盘'].values
-            current_price = close_prices[-1]
-            # 计算均线
-            ma1 = close_prices[-1]  # 1日均线就是当前价格
+            data = hist_data['data']
+            if data is None or len(data) < 20:
+                return {'ma1': False, 'ma5': False, 'ma10': False, 'ma20': False}
+            close_prices = data['收盘'].values
+            current_price = float(close_prices[-1])
+            ma1 = current_price
             ma5 = sum(close_prices[-5:]) / 5 if len(close_prices) >= 5 else current_price
             ma10 = sum(close_prices[-10:]) / 10 if len(close_prices) >= 10 else current_price
             ma20 = sum(close_prices[-20:]) / 20 if len(close_prices) >= 20 else current_price
-            # 检测:当前价格是否在均线之上(通过=红色,未通过=绿色)
-            return {
-                'ma1': current_price >= ma1,  # 1日均线总是通过
-                'ma5': current_price >= ma5,
-                'ma10': current_price >= ma10,
-                'ma20': current_price >= ma20
-            }
+            return {'ma1': True, 'ma5': current_price >= ma5,
+                    'ma10': current_price >= ma10, 'ma20': current_price >= ma20}
         except Exception as e:
-            print(f"检测均线失败 {stock_code}: {e}")
+            print(f"[均线检测] 失败 {stock_code}: {e}")
             return {'ma1': False, 'ma5': False, 'ma10': False, 'ma20': False}
 
 

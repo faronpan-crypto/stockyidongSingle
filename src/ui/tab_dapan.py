@@ -53729,79 +53729,60 @@ class DapanMixin:
             return None
 
     def _get_daily_kline_data_tushare(self, stock_code, days=60):
-        """获取日K线数据: akshare 优先, Tushare 兜底 (Tushare daily 被熔断/积分不足)"""
-        # ===== 方案1: akshare (新浪, 稳定) =====
+        """获取日K线数据: Tushare 优先 (0.08s), akshare 兜底"""
+        # ===== 方案1: Tushare (0.08s 稳通) =====
+        try:
+            if TS_AVAILABLE and (getattr(self, 'ts_token', None) or TS_DEFAULT_TOKEN):
+                self._ensure_tushare_client(self.ts_token or TS_DEFAULT_TOKEN)
+                ts_code = self._format_ts_code(str(stock_code).zfill(6))
+                end_date = datetime.now().strftime('%Y%m%d')
+                start_date = (datetime.now() - timedelta(days=days + 30)).strftime('%Y%m%d')
+                df = self.ts_client.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+                if df is not None and not df.empty:
+                    df = df.sort_values('trade_date').tail(days).reset_index(drop=True)
+                    _vol = df['vol'].astype(float) if 'vol' in df.columns else pd.Series(np.zeros(len(df)))
+                    data = pd.DataFrame({
+                        '开盘': df['open'].astype(float),
+                        '收盘': df['close'].astype(float),
+                        '最高': df['high'].astype(float),
+                        '最低': df['low'].astype(float),
+                        '成交量': _vol,
+                    })
+                    close_prices = data['收盘'].values
+                    opens = data['开盘'].values
+                    highs = data['最高'].values
+                    lows = data['最低'].values
+                    periods = {'ma1': min(1, len(close_prices)), 'ma5': min(5, len(close_prices)),
+                               'ma10': min(10, len(close_prices)), 'ma20': min(20, len(close_prices))}
+                    ma_values = {}
+                    for ma_name, period in periods.items():
+                        if len(close_prices) >= period:
+                            ma_values[ma_name] = [float(sum(close_prices[i - period + 1:i + 1]) / period)
+                                                  for i in range(period - 1, len(close_prices))]
+                        else:
+                            ma_values[ma_name] = []
+                    vwap_values = []
+                    if len(close_prices) >= 2:
+                        cum_amount = cum_vol = 0.0
+                        for i in range(len(close_prices)):
+                            typical_price = (opens[i] + highs[i] + lows[i] + close_prices[i]) / 4.0
+                            cum_amount += typical_price * float(data['成交量'].iloc[i])
+                            cum_vol += float(data['成交量'].iloc[i])
+                            vwap_values.append(float(cum_amount / cum_vol) if cum_vol > 0 else typical_price)
+                    ma_values['vwap'] = vwap_values
+                    dates_list = df['trade_date'].tolist()
+                    print(f"  [K线] ✅ Tushare Pro {stock_code} {len(data)} 根")
+                    return {'data': data, 'ma_values': ma_values, 'dates': dates_list,
+                            'trade_dates': dates_list, '_source': 'tushare'}
+        except Exception as _e:
+            print(f"  [K线] Tushare 挂: {_e}")
+        
+        # ===== 方案2: akshare 兜底 =====
         try:
             return self._get_daily_kline_data_akshare(stock_code, days)
         except Exception as _e:
-            print(f"  [K线] akshare 也异常: {_e}, 尝试 Tushare 兜底")
-        # ===== 方案2: Tushare =====
-        try:
-            if not TS_AVAILABLE or not (getattr(self, 'ts_token', None) or TS_DEFAULT_TOKEN):
-                return None
-            self._ensure_tushare_client(self.ts_token or TS_DEFAULT_TOKEN)
-            ts_code = self._format_ts_code(str(stock_code).zfill(6))
-            end_date = datetime.now().strftime('%Y%m%d')
-            start_date = (datetime.now() - timedelta(days=days + 30)).strftime('%Y%m%d')
-            df = self.ts_client.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
-            if df is None or df.empty:
-                print(f"  [Tushare] 返回空数据,回退 akshare")
-                return self._get_daily_kline_data_akshare(stock_code, days)
-            df = df.sort_values('trade_date').tail(days).reset_index(drop=True)
-            # 转为与 _draw 兼容的列名(成交量:Tushare daily 的 vol 单位为手)
-            _vol = df['vol'].astype(float) if 'vol' in df.columns else pd.Series(np.zeros(len(df)))
-            data = pd.DataFrame({
-                '开盘': df['open'].astype(float),
-                '收盘': df['close'].astype(float),
-                '最高': df['high'].astype(float),
-                '最低': df['low'].astype(float),
-                '成交量': _vol,
-            })
-            close_prices = data['收盘'].values
-            opens = data['开盘'].values
-            highs = data['最高'].values
-            lows = data['最低'].values
-            len(close_prices)
-            periods = {
-                'ma1': min(1, len(close_prices)),
-                'ma5': min(5, len(close_prices)),
-                'ma10': min(10, len(close_prices)),
-                'ma20': min(20, len(close_prices))
-            }
-            ma_values = {}
-            for ma_name, period in periods.items():
-                if len(close_prices) >= period:
-                    ma_values[ma_name] = []
-                    for i in range(period - 1, len(close_prices)):
-                        ma_value = float(sum(close_prices[i - period + 1:i + 1]) / period)
-                        ma_values[ma_name].append(ma_value)
-                else:
-                    ma_values[ma_name] = []
-            # 主力成本线(VWAP):累计成交额 / 累计成交量,通达信算法
-            # 成交均价 = (开盘 + 最高 + 最低 + 收盘) / 4
-            vwap_values = []
-            if len(close_prices) >= 2:
-                cum_amount = 0.0
-                cum_vol = 0.0
-                for i in range(len(close_prices)):
-                    typical_price = (opens[i] + highs[i] + lows[i] + close_prices[i]) / 4.0
-                    amount = typical_price * float(data['成交量'].iloc[i])
-                    cum_amount += amount
-                    cum_vol += float(data['成交量'].iloc[i])
-                    if cum_vol > 0:
-                        vwap_values.append(float(cum_amount / cum_vol))
-                    else:
-                        vwap_values.append(float(typical_price))
-            ma_values['vwap'] = vwap_values
-            return {
-                'data': data,
-                'ma_values': ma_values,
-                'dates': list(df['trade_date'].astype(str)),
-                'trade_dates': list(df['trade_date'].astype(str))
-            }
-        except Exception as e:
-            print(f"获取日K线数据(Tushare)失败 {stock_code}: {e},回退 akshare")
-            return self._get_daily_kline_data_akshare(str(stock_code).zfill(6), days)
+            print(f"  [K线] akshare 也异常: {_e}")
+        return None
 
     def _compute_energy_analysis_report_text(self, stock_code, days=60):
         """持仓详情用:能量学分析(聚集/发散、震荡方向、螺旋/等幅、涨跌角度与力度),基于近 N 日日线 OHLC。"""
