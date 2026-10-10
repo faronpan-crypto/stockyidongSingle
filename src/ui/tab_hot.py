@@ -5497,13 +5497,21 @@ class HotMixin:
                     seen.add(sc)
                     gi_name = {1: "持仓", 2: "龙头", 4: "Main", 6: "同花顺"}.get(gi, f"G{gi}")
                     combo_items.append(f"{sn}({sc})[{gi_name}]")
-        except Exception:
+        except Exception as _e:
             pass
 
-        # --- 2. 龙头股 ---
+        # --- 2. 龙头股 (涨停池) — 必须传具体日期! date="" 东财不认 ---
         try:
+            import datetime as _dt_hm2
+            _today = _dt_hm2.now().strftime("%Y%m%d")
             import akshare as _ak_hm
-            zt = _ak_hm.stock_zt_pool_em(date="")
+            zt = _ak_hm.stock_zt_pool_em(date=_today)
+            if (zt is None or zt.empty) and _today:
+                # 非交易日 → 往前找最近交易日
+                for _d_off in range(1, 7):
+                    _d = (_dt_hm2.now() - _dt_hm2.timedelta(days=_d_off)).strftime("%Y%m%d")
+                    zt = _ak_hm.stock_zt_pool_em(date=_d)
+                    if zt is not None and not zt.empty: break
             if zt is not None and not zt.empty and "代码" in zt.columns and "名称" in zt.columns:
                 for _, row in zt.head(30).iterrows():
                     sc = str(row["代码"]).zfill(6)
@@ -5513,39 +5521,26 @@ class HotMixin:
         except Exception:
             pass
 
-        # --- 3. 最近资讯股 (SQLite crawled_articles) ---
+        # --- 3. 资讯/热门股 (从程序已有的缓存方法拿) ---
         try:
-            import sqlite3 as _sq_hm
-            import os as _os_hm
-            _db = _os_hm.path.expanduser("~/.qclaw/stock_analysis.db")
-            if _os_hm.path.exists(_db):
-                _conn = _sq_hm.connect(_db)
-                _conn.row_factory = _sq_hm.Row
-                _cur = _conn.cursor()
-                try:
-                    _cur.execute("SELECT DISTINCT stock_name, stock_code FROM crawled_articles WHERE stock_code IS NOT NULL AND stock_code != '' ORDER BY crawl_time DESC LIMIT 30")
-                    for _row in _cur.fetchall():
-                        sc = str(_row["stock_code"]).zfill(6)
-                        if sc not in seen:
-                            seen.add(sc)
-                            combo_items.append(f"{_row['stock_name']}({sc})[资讯]")
-                except Exception:
-                    pass
-                _conn.close()
+            # 优先用 self 上的热门股缓存 (crawler_control 爬过的)
+            _cache = getattr(self, '_hot_stocks_cache', None) or getattr(self, '_news_stock_cache', None)
+            if _cache and isinstance(_cache, list):
+                for _item in _cache[:30]:
+                    try:
+                        _nm, _cd = _item
+                        _cd = str(_cd).zfill(6)
+                        if _cd not in seen and _nm:
+                            seen.add(_cd)
+                            combo_items.append(f"{_nm}({_cd})[资讯]")
+                    except Exception:
+                        pass
         except Exception:
             pass
 
-        # --- 兜底: 用 news_stocks_merged ---
-        if not combo_items:
-            try:
-                from src.akshare_utils import get_news_stocks_merged_recent_days
-                hot = get_news_stocks_merged_recent_days(ndays=3)
-                for nm, cd in hot[:20]:
-                    if cd not in seen:
-                        seen.add(cd)
-                        combo_items.append(f"{nm}({cd})[热门]")
-            except Exception:
-                pass
+        # --- 兜底: 任何情况下至少要有 auto_name/auto_code ---
+        if not combo_items and auto_code:
+            combo_items.append(f"{auto_name or ''}({auto_code})[默认]")
 
         stock_var = tk.StringVar(value="")
         cb = ttk.Combobox(sel_frame, textvariable=stock_var, values=combo_items,
