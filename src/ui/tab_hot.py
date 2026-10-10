@@ -4606,10 +4606,21 @@ class HotMixin:
                 pw = _ttk2.PanedWindow(tab1, orient=tk.HORIZONTAL); pw.pack(fill=tk.BOTH, expand=True)
                 left_f = tk.Frame(pw, bg="#F5F5F5"); pw.add(left_f, weight=3)
                 right_f = tk.Frame(pw, bg="#FAFAFA"); pw.add(right_f, weight=5)
-                # right_f 内部再分: K线图(left) + 信息面板(right, 同花顺风格)
+                # right_f 内部再分: K线图(left) + 信息面板(right, 同花顺风格, 可滚动)
                 kline_f = tk.Frame(right_f, bg="#FAFAFA"); kline_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-                info_f = tk.Frame(right_f, bg="white", width=200); info_f.pack(side=tk.RIGHT, fill=tk.Y)
-                info_f.pack_propagate(False)
+                _info_canvas = tk.Canvas(right_f, width=220, bg="white", highlightthickness=0)
+                _info_sb = tk.Scrollbar(right_f, orient=tk.VERTICAL, command=_info_canvas.yview)
+                _info_canvas.configure(yscrollcommand=_info_sb.set)
+                _info_sb.pack(side=tk.RIGHT, fill=tk.Y)
+                _info_canvas.pack(side=tk.RIGHT, fill=tk.BOTH)
+                info_f = tk.Frame(_info_canvas, bg="white")
+                _info_canvas.create_window((0, 0), window=info_f, anchor="nw")
+                info_f.bind("<Configure>", lambda e: _info_canvas.configure(scrollregion=_info_canvas.bbox("all")))
+                # 滚轮滚动
+                def _info_on_wheel(event):
+                    _info_canvas.yview_scroll(-1 if event.button == 4 else 1, "units")
+                _info_canvas.bind("<Button-4>", _info_on_wheel)
+                _info_canvas.bind("<Button-5>", _info_on_wheel)
                 # 左侧: 卡片网格
                 canvas = tk.Canvas(left_f, bg="#F5F5F5", highlightthickness=0)
                 sb_c = tk.Scrollbar(left_f, orient=tk.VERTICAL, command=canvas.yview)
@@ -4990,6 +5001,222 @@ class HotMixin:
                         tk.Label(sec4, text=f"{val:+.2f}" if nm.startswith("B") else f"{val:.2f}",
                                  bg="white", fg="#333", font=("", 8)
                                  ).grid(row=i, column=1, sticky="e", padx=4, pady=0)
+
+                    # ===== sec5: 🔍 主流分析 (量+价+机构/游资票+控盘+操盘意见) =====
+                    import math as _mm_ch
+                    _vo_arr = list(vo[-60:]) if len(vo) >= 60 else list(vo)
+                    _vol_ma5c = sum(_vo_arr[-5:]) / 5
+                    _vol_ma20c = sum(_vo_arr[-20:]) / 20 if len(_vo_arr) >= 20 else _vo_arr[-1]
+                    _vol_r520 = _vol_ma5c / _vol_ma20c if _vol_ma20c > 0 else 1.0
+                    _vol_chg5 = ((_vo_arr[-1] - _vo_arr[-5]) / _vo_arr[-5] * 100
+                                 if len(_vo_arr) >= 6 and _vo_arr[-5] > 0 else 0)
+                    _vol_status = ("放量" if _vol_r520 > 1.3 else
+                                   ("缩量" if _vol_r520 < 0.7 else "正常"))
+                    _vol_icon = "🟢" if _vol_r520 > 1.1 else ("🔴" if _vol_r520 < 0.8 else "🟡")
+
+                    _cur_p = cl[last]
+                    _ma20_last = m20[last] if isinstance(m20, list) and m20 else (m20 if m20 else _cur_p)
+                    _pvm20 = (_cur_p - _ma20_last) / _ma20_last * 100 if _ma20_last else 0
+                    _ma60_last = m60[last] if isinstance(m60, list) and m60 else (m60 if m60 else _cur_p)
+                    _pvm60 = (_cur_p - _ma60_last) / _ma60_last * 100 if _ma60_last else 0
+                    _hi60 = max(hi[-60:]) if len(hi) >= 60 else max(hi)
+                    _pvhi60 = (_cur_p - _hi60) / _hi60 * 100
+                    _atr_list = []
+                    for _ii in range(1, len(cl)):
+                        _trv = max(hi[_ii] - lo[_ii], abs(hi[_ii] - cl[_ii - 1]), abs(lo[_ii] - cl[_ii - 1]))
+                        _atr_list.append(_trv)
+                    _atr14 = (sum(_atr_list[-14:]) / 14 if len(_atr_list) >= 14
+                              else (sum(_atr_list) / len(_atr_list) if _atr_list else _cur_p * 0.02))
+                    _volatility = _atr14 / _cur_p * 100
+                    _price_status = ("低位" if _pvhi60 < -20 else
+                                     ("高位" if _pvhi60 > -5 else "中位"))
+                    _price_icon = ("🟢" if _pvm20 > 0 and _pvm60 > 0 else
+                                   ("🔴" if _pvm20 < -3 else "🟡"))
+
+                    # --- LHB 数据库查询 ---
+                    _tsc_lhb = data.get("ts_code", "")
+                    _lhb_90d = 0
+                    _lhb_net = 0.0
+                    try:
+                        import sqlite3 as _sq3_ch
+                        _db_candidates = []
+                        if os.path.exists(DB_PATH):
+                            _db_candidates.append(DB_PATH)
+                        _alt_db = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                               "data", "stock_analysis.db")
+                        if os.path.exists(_alt_db) and _alt_db not in _db_candidates:
+                            _db_candidates.append(_alt_db)
+                        _alt2 = os.path.join(os.getcwd(), "data", "stock_analysis.db")
+                        if os.path.exists(_alt2) and _alt2 not in _db_candidates:
+                            _db_candidates.append(_alt2)
+                        for _dbp in _db_candidates:
+                            try:
+                                _cn = _sq3_ch.connect(_dbp, timeout=3)
+                                _cu = _cn.cursor()
+                                _cut = (datetime.now() - timedelta(days=90)).strftime("%Y%m%d")
+                                _cu.execute(
+                                    "SELECT COUNT(*), COALESCE(SUM(net_amount),0) FROM lhb_records WHERE ts_code=? AND trade_date>=?",
+                                    (_tsc_lhb, _cut))
+                                _rw = _cu.fetchone()
+                                if _rw and _rw[0]:
+                                    _lhb_90d = int(_rw[0])
+                                    _lhb_net = float(_rw[1])
+                                _cn.close()
+                                break
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+
+                    # --- 换手率 / 市值 (从已有 data_dict 或 spot_em 兜底) ---
+                    _tr_val = data.get("tr")
+                    _mv_yi = data.get("total_mv") or data.get("mv")
+                    if _mv_yi is not None and _mv_yi > 1e5:
+                        _mv_yi = _mv_yi / 1e4  # 万元 → 亿元
+                    if _tr_val is None or _mv_yi is None:
+                        try:
+                            import akshare as _ak_ch
+                            _spot_ch = _ak_ch.stock_zh_a_spot_em()
+                            if _spot_ch is not None and len(_spot_ch) > 0:
+                                _cd_ch = str(data.get("code", "")).zfill(6)
+                                _rw_ch = _spot_ch[_spot_ch["代码"] == _cd_ch]
+                                if len(_rw_ch) > 0:
+                                    _rw_ch = _rw_ch.iloc[0]
+                                    if _tr_val is None and "换手率" in _rw_ch.index:
+                                        _tv = str(_rw_ch["换手率"]).strip()
+                                        if _tv and _tv not in ("-", "", "nan"):
+                                            _tr_val = float(_tv)
+                                    if _mv_yi is None and "总市值" in _rw_ch.index:
+                                        _mv_raw = str(_rw_ch["总市值"]).strip()
+                                        if _mv_raw and _mv_raw not in ("-", "", "nan"):
+                                            _mv_yi = float(_mv_raw) / 1e8
+                        except Exception:
+                            pass
+
+                    # --- 机构票 vs 游资票 打分 ---
+                    _yzz = 0
+                    if _lhb_90d >= 5: _yzz += 30
+                    elif _lhb_90d >= 2: _yzz += 15
+                    if _tr_val and _tr_val > 5: _yzz += 20
+                    elif _tr_val and _tr_val > 3: _yzz += 10
+                    if _mv_yi and _mv_yi < 50: _yzz += 25
+                    elif _mv_yi and _mv_yi < 100: _yzz += 10
+                    elif _mv_yi and _mv_yi > 200: _yzz -= 20
+                    if _volatility > 4: _yzz += 15
+                    elif _volatility < 1.5: _yzz -= 15
+                    _yzz = max(-30, min(100, _yzz))
+
+                    if _yzz >= 40:
+                        _t_type, _t_desc, _t_col = (
+                            "🔥 游资票",
+                            f"近90天登龙虎榜{_lhb_90d}次, 换手{_tr_val:.1f}%, 市值{_mv_yi:.0f}亿" if _mv_yi and _tr_val
+                            else "活跃游资博弈",
+                            "#C62828")
+                    elif _yzz >= 15:
+                        _t_type, _t_desc, _t_col = (
+                            "⚖️ 混合票",
+                            f"机构游资共存, 市值{_mv_yi:.0f}亿" if _mv_yi else "多主力博弈",
+                            "#F57F17")
+                    else:
+                        _t_type, _t_desc, _t_col = (
+                            "🏛️ 机构票",
+                            f"低换手稳, 市值{_mv_yi:.0f}亿" if _mv_yi else "机构控盘",
+                            "#2E7D32")
+
+                    # --- 控盘程度 ---
+                    _boll_w = (abs(boll_up[last] - boll_lo[last]) / _cur_p * 100
+                               if not _mm_ch.isnan(boll_up[last]) and not _mm_ch.isnan(boll_lo[last]) else 5)
+                    _ctrl = 50
+                    if _boll_w < 5: _ctrl += 20
+                    elif _boll_w > 12: _ctrl -= 15
+                    _ctrl -= int(_yzz * 0.1)
+                    _ctrl = max(0, min(100, _ctrl))
+                    if _ctrl >= 70:
+                        _c_lv, _c_desc, _c_col = "🟢 高度控盘", f"布林宽{_boll_w:.1f}%, 蓄势充分", "#2E7D32"
+                    elif _ctrl >= 45:
+                        _c_lv, _c_desc, _c_col = "🟡 中度控盘", f"布林宽{_boll_w:.1f}%, 筹码分散", "#F57F17"
+                    else:
+                        _c_lv, _c_desc, _c_col = "🔴 弱控盘", f"布林宽{_boll_w:.1f}%, 多空争夺", "#C62828"
+
+                    # --- 综合操盘意见 ---
+                    _parts = []
+                    if m5[last] > m10[last] > _ma20_last and _pvm60 > 0:
+                        _parts.append("🟢 多头趋势, 顺势持有")
+                    elif m5[last] < m10[last] < _ma20_last:
+                        _parts.append("🔴 空头排列, 观望或止损")
+                    else:
+                        _parts.append("🟡 震荡整理, 观望为主")
+                    if _vol_status == "放量" and cl[last] > cl[last - 1]:
+                        _parts.append("🟢 放量上涨, 资金进场")
+                    elif _vol_status == "缩量" and _pvm20 > 0:
+                        _parts.append("🟡 缩量上涨, 警惕动能不足")
+                    elif _vol_status == "放量" and cl[last] < cl[last - 1]:
+                        _parts.append("🔴 放量下跌, 抛压沉重")
+                    if _pvhi60 > -5:
+                        _parts.append("🔴 接近前高, 追高风险大")
+                    elif _pvhi60 < -25:
+                        _parts.append("🟢 低位, 关注底部放量机会")
+                    if _ctrl >= 70:
+                        _parts.append("🟢 高度控盘, 蓄势突破可期")
+                    _emo_now = data.get("emo_stage", _q.get("emo", "震荡"))
+                    if _emo_now in ("冰点", "退潮") and _yzz >= 30:
+                        _parts.append("🔴 情绪退潮+游资票, 严禁追高")
+                    elif _emo_now in ("发酵", "高潮") and _yzz >= 30:
+                        _parts.append("🟢 情绪+游资共振, 顺势持股")
+
+                    _total_op = 40
+                    if m5[last] > m10[last] > _ma20_last: _total_op += 25
+                    if _pvm60 > 0: _total_op += 15
+                    if _vol_r520 >= 1.0: _total_op += 10
+                    if _pvhi60 >= -10: _total_op += 10
+                    if _ctrl >= 50: _total_op += 10
+                    if _emo_now in ("发酵", "高潮"): _total_op += 15
+                    if _yzz >= 30 and _emo_now in ("冰点", "退潮"): _total_op -= 20
+                    if _pvm20 < -5: _total_op -= 15
+                    _total_op = max(0, min(100, _total_op))
+                    if _total_op >= 70:
+                        _action, _a_col = "✅ 可考虑买入 / 加仓", "#2E7D32"
+                    elif _total_op >= 50:
+                        _action, _a_col = "⚠️ 轻仓试探 / 持有观察", "#F57F17"
+                    elif _total_op >= 35:
+                        _action, _a_col = "🔶 观望为主 / 严格止损", "#C62828"
+                    else:
+                        _action, _a_col = "❌ 建议卖出 / 空仓", "#6A1B9A"
+
+                    # --- 渲染 sec5 ---
+                    sec5 = tk.LabelFrame(info_f, text="🔍 主流分析", bg="white", fg="#C62828",
+                                         font=("", 9, "bold"), relief=tk.FLAT)
+                    sec5.pack(fill=tk.X, padx=6, pady=4)
+                    _rows5 = [
+                        ("量能", f"{_vol_icon} {_vol_status} ({_vol_r520:.2f}x)",
+                         f"5日均量/20日均量, 近5日{_vol_chg5:+.0f}%",
+                         "#2E7D32" if _vol_icon == "🟢" else "#C62828" if _vol_icon == "🔴" else "#F57F17"),
+                        ("股价位置", f"{_price_icon} {_price_status}",
+                         f"MA20偏离{_pvm20:+.1f}% | 距60日高{_pvhi60:+.1f}% | 波动率{_volatility:.1f}%",
+                         "#2E7D32" if _price_icon == "🟢" else "#C62828" if _price_icon == "🔴" else "#F57F17"),
+                        ("机构/游资票", _t_type, _t_desc, _t_col),
+                        ("控盘程度", _c_lv, _c_desc, _c_col),
+                    ]
+                    for _ri, (_lbl, _val, _det, _cll) in enumerate(_rows5):
+                        tk.Label(sec5, text=_lbl, bg="white", fg="#666", font=("", 8)
+                                 ).grid(row=_ri * 2, column=0, sticky="w", padx=4, pady=(2, 0))
+                        tk.Label(sec5, text=_val, bg="white", fg=_cll, font=("", 9, "bold")
+                                 ).grid(row=_ri * 2, column=1, sticky="e", padx=4, pady=(2, 0))
+                        tk.Label(sec5, text=_det, bg="white", fg="#999", font=("", 7), wraplength=180,
+                                 justify=tk.LEFT
+                                 ).grid(row=_ri * 2 + 1, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 3))
+
+                    _op_bar = tk.Frame(sec5, bg="#FFF3E0", relief=tk.RIDGE, bd=1)
+                    _op_bar.grid(row=len(_rows5) * 2, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 3))
+                    tk.Label(_op_bar, text="🎯 综合评分 & 操盘建议", bg="#FFF3E0", fg="#666",
+                             font=("", 8)).pack(anchor="w", padx=4, pady=(4, 0))
+                    tk.Label(_op_bar, text=f"{_total_op}/100", bg="#FFF3E0", fg=_a_col,
+                             font=("", 16, "bold")).pack(anchor="w", padx=4)
+                    tk.Label(_op_bar, text=_action, bg="#FFF3E0", fg=_a_col,
+                             font=("", 10, "bold")).pack(anchor="w", padx=4, pady=(0, 4))
+                    for _rsn in _parts[:5]:
+                        tk.Label(_op_bar, text=_rsn, bg="#FFF3E0", fg="#333",
+                                 font=("", 8)).pack(anchor="w", padx=6)
 
                 # ===== Tab2: 📖 心法语录 =====
                 tab2 = tk.Frame(nb, bg="#FAFAFA"); nb.add(tab2, text=" 📖 心法语录 ")
