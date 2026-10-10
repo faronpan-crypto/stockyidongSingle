@@ -17,6 +17,9 @@ except ImportError: ts = None
 try:
     import requests
 except ImportError: requests = None
+try:
+    from bs4 import BeautifulSoup
+except ImportError: BeautifulSoup = None
 from utils.network import safe_call
 from utils.config import *  # 路径/配置/Token
 from data.snapshot import *  # get_news_stocks_* 函数

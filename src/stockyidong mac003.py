@@ -4693,8 +4693,9 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("🏛️美联储分析", 12, self._show_fed_analysis_dialog),
             ("🌏纳指日经套利", 10, self._show_etf_holiday_dialog),
             ("📱日报", 7, self._show_wechat_dialog),
+            ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
         ]):
-            if "📸" in txt or "📱" in txt:
+            if "📸" in txt or "📱" in txt or "🦅" in txt:
                 import traceback as _tb_toolbar
                 def _wrap(_c=cmd, _t=txt):
                     print(f"[🎯工具栏] 点击 '{_t}'", flush=True)

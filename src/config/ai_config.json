@@ -468,6 +468,36 @@
   ],
   "history_holdings": [
     {
+      "stock_name": "2579",
+      "stock_code": "中京电子",
+      "replaced_date": "2026-10-10 18:37:28"
+    },
+    {
+      "stock_name": "2614",
+      "stock_code": "奥佳华",
+      "replaced_date": "2026-10-10 18:37:28"
+    },
+    {
+      "stock_name": "2232",
+      "stock_code": "启明信息",
+      "replaced_date": "2026-10-10 18:37:28"
+    },
+    {
+      "stock_name": "2422",
+      "stock_code": "科伦药业",
+      "replaced_date": "2026-10-10 18:37:28"
+    },
+    {
+      "stock_name": "2050",
+      "stock_code": "三花智控",
+      "replaced_date": "2026-10-10 18:37:28"
+    },
+    {
+      "stock_name": "2470",
+      "stock_code": "金正大",
+      "replaced_date": "2026-10-10 18:37:28"
+    },
+    {
       "stock_name": "新华文轩",
       "stock_code": "601811",
       "replaced_date": "2026-09-29 10:42:35"
@@ -935,36 +965,6 @@
     {
       "stock_name": "瑞泰新材",
       "stock_code": "301238",
-      "replaced_date": "2026-09-24 06:44:39"
-    },
-    {
-      "stock_name": "山子高科",
-      "stock_code": "000981",
-      "replaced_date": "2026-09-24 06:44:39"
-    },
-    {
-      "stock_name": "海马汽车",
-      "stock_code": "000572",
-      "replaced_date": "2026-09-24 06:44:39"
-    },
-    {
-      "stock_name": "中视传媒",
-      "stock_code": "600088",
-      "replaced_date": "2026-09-24 06:44:39"
-    },
-    {
-      "stock_name": "龙版传媒",
-      "stock_code": "605577",
-      "replaced_date": "2026-09-24 06:44:39"
-    },
-    {
-      "stock_name": "万邦医药",
-      "stock_code": "301520",
-      "replaced_date": "2026-09-24 06:44:39"
-    },
-    {
-      "stock_name": "众泰汽车",
-      "stock_code": "000980",
       "replaced_date": "2026-09-24 06:44:39"
     }
   ],
@@ -1863,5 +1863,809 @@
     "阿兹海默",
     "AI语料",
     "肝炎概念"
+  ],
+  "holding_stocks_5": [
+    {
+      "index": 0,
+      "stock_name": "白银有色",
+      "stock_code": "601212"
+    },
+    {
+      "index": 1,
+      "stock_name": "哈药股份",
+      "stock_code": "600664"
+    },
+    {
+      "index": 2,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 3,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 4,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 5,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 6,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 7,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 8,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 9,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 10,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 11,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 12,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 13,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 14,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 15,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 16,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 17,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 18,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 19,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 20,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 21,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 22,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 23,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 24,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 25,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 26,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 27,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 28,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 29,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 30,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 31,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 32,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 33,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 34,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 35,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 36,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 37,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 38,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 39,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 40,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 41,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 42,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 43,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 44,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 45,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 46,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 47,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 48,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 49,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 50,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 51,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 52,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 53,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 54,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 55,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 56,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 57,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 58,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 59,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 60,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 61,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 62,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 63,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 64,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 65,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 66,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 67,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 68,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 69,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 70,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 71,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 72,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 73,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 74,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 75,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 76,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 77,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 78,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 79,
+      "stock_name": "",
+      "stock_code": ""
+    }
+  ],
+  "holding_stocks": [
+    {
+      "index": 0,
+      "stock_name": "索菱股份",
+      "stock_code": "002766"
+    },
+    {
+      "index": 1,
+      "stock_name": "德方纳米",
+      "stock_code": "300769"
+    },
+    {
+      "index": 2,
+      "stock_name": "东微半导",
+      "stock_code": "688261"
+    },
+    {
+      "index": 3,
+      "stock_name": "斯达半导",
+      "stock_code": "603290"
+    },
+    {
+      "index": 4,
+      "stock_name": "拓普集团",
+      "stock_code": "601689"
+    },
+    {
+      "index": 5,
+      "stock_name": "白银有色",
+      "stock_code": "601212"
+    },
+    {
+      "index": 6,
+      "stock_name": "首华燃气",
+      "stock_code": "300483"
+    },
+    {
+      "index": 7,
+      "stock_name": "长江电力",
+      "stock_code": "600900"
+    },
+    {
+      "index": 8,
+      "stock_name": "新力金融",
+      "stock_code": "600318"
+    },
+    {
+      "index": 9,
+      "stock_name": "紫金矿业",
+      "stock_code": "601899"
+    },
+    {
+      "index": 10,
+      "stock_name": "华电辽能",
+      "stock_code": "600396"
+    },
+    {
+      "index": 11,
+      "stock_name": "中京电子",
+      "stock_code": "002579"
+    },
+    {
+      "index": 12,
+      "stock_name": "新华传媒",
+      "stock_code": "600825"
+    },
+    {
+      "index": 13,
+      "stock_name": "国芳集团",
+      "stock_code": "601086"
+    },
+    {
+      "index": 14,
+      "stock_name": "振芯科技",
+      "stock_code": "300101"
+    },
+    {
+      "index": 15,
+      "stock_name": "天威视讯",
+      "stock_code": "002238"
+    },
+    {
+      "index": 16,
+      "stock_name": "普源精电",
+      "stock_code": "688337"
+    },
+    {
+      "index": 17,
+      "stock_name": "奥佳华",
+      "stock_code": "002614"
+    },
+    {
+      "index": 18,
+      "stock_name": "吉鑫科技",
+      "stock_code": "601218"
+    },
+    {
+      "index": 19,
+      "stock_name": "海峡创新",
+      "stock_code": "300300"
+    },
+    {
+      "index": 20,
+      "stock_name": "景旺电子",
+      "stock_code": "603228"
+    },
+    {
+      "index": 21,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 22,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 23,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 24,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 25,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 26,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 27,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 28,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 29,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 30,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 31,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 32,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 33,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 34,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 35,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 36,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 37,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 38,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 39,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 40,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 41,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 42,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 43,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 44,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 45,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 46,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 47,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 48,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 49,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 50,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 51,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 52,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 53,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 54,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 55,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 56,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 57,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 58,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 59,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 60,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 61,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 62,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 63,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 64,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 65,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 66,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 67,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 68,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 69,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 70,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 71,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 72,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 73,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 74,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 75,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 76,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 77,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 78,
+      "stock_name": "",
+      "stock_code": ""
+    },
+    {
+      "index": 79,
+      "stock_name": "",
+      "stock_code": ""
+    }
   ]
 }
