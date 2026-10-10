@@ -4736,6 +4736,7 @@ class HotMixin:
                     show_golden = tk.BooleanVar(value=False)   # 黄金分割线
                     show_fibo = tk.BooleanVar(value=False)      # 斐波那契回撤
                     show_support = tk.BooleanVar(value=False)    # 支撑压力线
+                    show_bs_points = tk.BooleanVar(value=True)   # 买卖点标记
                     vol_ma_opts = [5, 10, 20]                   # 量能均线 (固定显示)
 
                     def _draw_chart():
@@ -4761,7 +4762,7 @@ class HotMixin:
                         ax_k.plot(x, boll_mid, color="#FF5722", lw=0.8, ls="-", label="BOLL中轨")
                         ax_k.plot(x, boll_lo, color="#FF5722", lw=0.8, ls=":", label="BOLL下轨")
 
-                        # ---- 辅助线叠加 (可选) ----
+                        # ===== 辅助线叠加 (可选) =====
                         if show_support.get():
                             # 支撑压力线: 最近 60 天的前高前低
                             look = min(60, len(cl))
@@ -4791,6 +4792,143 @@ class HotMixin:
                                 col = "#FF6F00" if show_golden.get() else "#6A1B9A"
                                 ax_k.axhline(level, color=col, lw=0.5, ls="-.", alpha=0.6)
                                 ax_k.text(x[0], level, f" {r:.1%}", fontsize=6, color=col, va="bottom")
+
+                        # ===== 🔔 买卖点标记 (主流技术方法综合判断) =====
+                        if show_bs_points.get():
+                            # --- 金叉 / 死叉 (MA5×MA10) ---
+                            _buy_pts = []  # (idx, y, label, color, symbol)
+                            _sell_pts = []
+                            _add_pts = []
+                            _red_pts = []
+                            # MA5×MA10
+                            for _i in range(1, len(cl)):
+                                if _m.isnan(m5[_i]) or _m.isnan(m10[_i]): continue
+                                if _m.isnan(m5[_i-1]) or _m.isnan(m10[_i-1]): continue
+                                if m5[_i-1] < m10[_i-1] and m5[_i] >= m10[_i]:
+                                    _buy_pts.append((_i, lo[_i] * 0.97, "MA金", "#2E7D32", "★"))
+                                elif m5[_i-1] > m10[_i-1] and m5[_i] <= m10[_i]:
+                                    _sell_pts.append((_i, hi[_i] * 1.03, "MA死", "#C62828", "▼"))
+                            # MACD DIF×DEA (零轴下方金叉更可信)
+                            for _i in range(1, len(dif)):
+                                if dif[_i-1] < dea[_i-1] and dif[_i] >= dea[_i]:
+                                    if dif[_i] < 0:
+                                        _buy_pts.append((_i, lo[_i] * 0.96, "MACD金", "#1565C0", "★"))
+                                    else:
+                                        _add_pts.append((_i, lo[_i] * 0.95, "MACD金(强)", "#FF9800", "▲"))
+                                elif dif[_i-1] > dea[_i-1] and dif[_i] <= dea[_i]:
+                                    if dif[_i] > 0:
+                                        _sell_pts.append((_i, hi[_i] * 1.04, "MACD死", "#B71C1C", "▼"))
+                                    else:
+                                        _red_pts.append((_i, hi[_i] * 1.05, "MACD死(弱)", "#6A1B9A", "▽"))
+                            # KDJ K×D (低位金叉=买入, 高位死叉=卖出)
+                            for _i in range(1, len(kdj_k)):
+                                if kdj_k[_i-1] < kdj_d[_i-1] and kdj_k[_i] >= kdj_d[_i]:
+                                    if kdj_k[_i] < 30:
+                                        _buy_pts.append((_i, lo[_i] * 0.95, "KDJ金(低)", "#388E3C", "★"))
+                                elif kdj_k[_i-1] > kdj_d[_i-1] and kdj_k[_i] <= kdj_d[_i]:
+                                    if kdj_k[_i] > 70:
+                                        _sell_pts.append((_i, hi[_i] * 1.05, "KDJ死(高)", "#D32F2F", "▼"))
+                            # 布林带 (触及下轨反弹 / 上轨回落)
+                            for _i in range(1, len(cl)):
+                                if _m.isnan(boll_lo[_i]) or _m.isnan(boll_up[_i]): continue
+                                if cl[_i-1] <= boll_lo[_i-1] and cl[_i] > boll_lo[_i] and cl[_i] > op[_i]:
+                                    _buy_pts.append((_i, lo[_i] * 0.96, "布林反弹", "#00796B", "★"))
+                                elif cl[_i-1] >= boll_up[_i-1] and cl[_i] < boll_up[_i] and cl[_i] < op[_i]:
+                                    _sell_pts.append((_i, hi[_i] * 1.04, "布林回落", "#BF360C", "▼"))
+                            # 锤子线 (看涨形态: 下影>实体2倍, 小实体)
+                            for _i in range(2, len(cl)-2):
+                                _body = abs(cl[_i] - op[_i])
+                                _total = hi[_i] - lo[_i]
+                                if _total <= 0 or _body > _total * 0.3: continue
+                                _up_shadow = hi[_i] - max(cl[_i], op[_i])
+                                _dn_shadow = min(cl[_i], op[_i]) - lo[_i]
+                                if _dn_shadow > _body * 2 and _up_shadow < _body:
+                                    # 再加: 下影触及近期支撑 (左右都比它高)
+                                    if lo[_i] <= lo[_i-1] and lo[_i] <= lo[_i+1]:
+                                        _buy_pts.append((_i, lo[_i] * 0.94, "锤子线", "#004D40", "★"))
+                            # 射击之星 (看跌形态: 上影>实体2倍)
+                            for _i in range(2, len(cl)-2):
+                                _body = abs(cl[_i] - op[_i])
+                                _total = hi[_i] - lo[_i]
+                                if _total <= 0 or _body > _total * 0.3: continue
+                                _up_shadow = hi[_i] - max(cl[_i], op[_i])
+                                _dn_shadow = min(cl[_i], op[_i]) - lo[_i]
+                                if _up_shadow > _body * 2 and _dn_shadow < _body:
+                                    if hi[_i] >= hi[_i-1] and hi[_i] >= hi[_i+1]:
+                                        _sell_pts.append((_i, hi[_i] * 1.06, "射击之星", "#880E4F", "▼"))
+                            # 放量突破前高 → 加仓
+                            _vol_ma20_ch = [sum(vo[max(0,j-19):j+1])/min(20,j+1) for j in range(len(vo))]
+                            for _i in range(20, len(cl)):
+                                _prev_hi = max(hi[_i-20:_i])
+                                if cl[_i] > _prev_hi and vo[_i] > _vol_ma20_ch[_i] * 1.5:
+                                    # 去重: 附近2格内没有加仓标记
+                                    if not any(abs(p[0] - _i) < 3 for p in _add_pts):
+                                        _add_pts.append((_i, lo[_i] * 0.93, "放量突破", "#F57C00", "▲"))
+                            # 放量跌破前低 → 减仓
+                            for _i in range(20, len(cl)):
+                                _prev_lo = min(lo[_i-20:_i])
+                                if cl[_i] < _prev_lo and vo[_i] > _vol_ma20_ch[_i] * 1.5:
+                                    if not any(abs(p[0] - _i) < 3 for p in _red_pts):
+                                        _red_pts.append((_i, hi[_i] * 1.07, "放量破位", "#4A148C", "▽"))
+                            # --- 去重合并: 同一根K线上多个信号只留最强 ---
+                            def _dedup(pts_list):
+                                # 同 idx 保留 y 最低(买入) / 最高(卖出)
+                                _best = {}
+                                for _idx, _y, _lbl, _col, _sym in pts_list:
+                                    if _idx not in _best:
+                                        _best[_idx] = (_y, _lbl, _col, _sym)
+                                    else:
+                                        _old_y = _best[_idx][0]
+                                        if _y < _old_y:  # 买入: 取更低的y (更显眼)
+                                            _best[_idx] = (_y, _lbl, _col, _sym)
+                                return [(_idx, _best[_idx][0], _best[_idx][1], _best[_idx][2], _best[_idx][3])
+                                        for _idx in sorted(_best.keys())]
+                            _buy_pts = _dedup(_buy_pts)
+                            _sell_pts = _dedup(_sell_pts)
+                            _add_pts = _dedup(_add_pts)
+                            _red_pts = _dedup(_red_pts)
+                            # --- 只显示最近 80 根, 避免太密集 ---
+                            _cut = max(0, len(cl) - 80)
+                            _buy_pts = [p for p in _buy_pts if p[0] >= _cut]
+                            _sell_pts = [p for p in _sell_pts if p[0] >= _cut]
+                            _add_pts = [p for p in _add_pts if p[0] >= _cut]
+                            _red_pts = [p for p in _red_pts if p[0] >= _cut]
+
+                            # --- 绘制标记 (按类型分组 scatter, 提高效率) ---
+                            _mp_cls = [
+                                (_buy_pts, "*", "#2E7D32", "★ 买入"),
+                                (_add_pts, "^", "#F57C00", "▲ 加仓"),
+                                (_sell_pts, "v", "#C62828", "▼ 卖出"),
+                                (_red_pts, "v", "#6A1B9A", "▽ 减仓"),
+                            ]
+                            _bs_handles = []
+                            for _pts_grp, _marker_grp, _col_grp, _lbl_grp in _mp_cls:
+                                if not _pts_grp: continue
+                                _xs_g = [p[0] for p in _pts_grp]
+                                _ys_g = [p[1] for p in _pts_grp]
+                                _sc = ax_k.scatter(_xs_g, _ys_g, marker=_marker_grp, s=110,
+                                                   color=_col_grp, zorder=15,
+                                                   edgecolors="white", linewidths=0.8)
+                                _bs_handles.append(_sc)
+                                # 标签文字 (每个点)
+                                for _pt in _pts_grp:
+                                    _idx_p, _y_p, _lbl_p, _col_p, _sym_p = _pt
+                                    _offset_y = -12 if _sym_p in ("★", "▲") else 12
+                                    _va_p = "top" if _sym_p in ("★", "▲") else "bottom"
+                                    ax_k.annotate(_lbl_p, xy=(_idx_p, _y_p),
+                                                  xytext=(0, _offset_y), textcoords="offset points",
+                                                  fontsize=5.5, color=_col_p, ha="center", va=_va_p,
+                                                  fontweight="bold", zorder=16)
+                            if _bs_handles:
+                                _leg_labels_grp = [h[3] for h in _mp_cls if h[0]]
+                                _prev_leg = ax_k.get_legend()
+                                if _prev_leg:
+                                    ax_k.add_artist(_prev_leg)
+                                from matplotlib.legend import Legend as _ML
+                                _leg2 = _ML(ax_k, _bs_handles, _leg_labels_grp,
+                                            loc="upper right", fontsize=6, framealpha=0.7,
+                                            handletextpad=0.5)
+                                ax_k.add_artist(_leg2)
 
                         n_inds = len(selected_indicators)
                         ax_k.set_title(f"{data['name']}({data['code']})  日K线  |  指标: {'/'.join(selected_indicators)}", fontsize=10)
@@ -4890,6 +5028,9 @@ class HotMixin:
                                    bg="#FAFAFA", fg="#FF6F00", font=("",9)).pack(side=tk.LEFT, padx=3)
                     tk.Checkbutton(aux_f, text="🟣斐波那契", variable=show_fibo, command=_draw_chart,
                                    bg="#FAFAFA", fg="#6A1B9A", font=("",9)).pack(side=tk.LEFT, padx=3)
+                    tk.Checkbutton(aux_f, text="🛒买卖点", variable=show_bs_points, command=_draw_chart,
+                                   bg="#FAFAFA", fg="#C62828", font=("",9, "bold")).pack(side=tk.LEFT, padx=3)
+                    tk.Label(aux_f, text="  ★买 ▲加 ▼卖 ▽减", bg="#FAFAFA", fg="#888", font=("",7)).pack(side=tk.LEFT, padx=2)
                     tk.Label(aux_f, text="  (量能已固定 MA5/MA10/MA20, 看金叉死叉)", bg="#FAFAFA", fg="#888", font=("",7)).pack(side=tk.LEFT, padx=6)
                     # 初始绘制
                     _draw_chart()
