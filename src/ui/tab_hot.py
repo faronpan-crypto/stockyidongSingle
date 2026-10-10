@@ -4490,9 +4490,19 @@ class HotMixin:
                             new_data["price"] = _rd.get("price")
                             new_data["turnover"] = _rd.get("turnover")
                             break
-                    # 关闭当前弹窗 → 后台算 → 重开
+                    # ⚡ 最简单修: 停掉当前弹窗 → 直接调完整自动流程
+                    # self._open_hotmoney_single_dialog(auto_code=...) 会走完整的
+                    #   tushare daily → daily_basic → 情绪引擎 → 7位游资评分 → 完整弹窗
+                    # 不复用当前这个半成品 _bg_calc (缺 daily_basic / akshare 降级 / 机构票分析)
                     try: top.destroy()
-                    except: pass
+                    except Exception: pass
+                    # after(50) 让 old Toplevel 先销毁, 再开新的
+                    self.root.after(50, lambda: self._open_hotmoney_single_dialog(
+                        auto_code=target_code, auto_name=target_name or target_code))
+                    return
+
+                    # --- 以下老代码保留但不再走 ---
+                    _ = new_data  # 静默引用
                     # 复用 _calc_and_open 的逻辑: 后台线程拉K线+情绪+评分 → 开新弹窗
                     def _bg_calc():
                         import json as _js3
