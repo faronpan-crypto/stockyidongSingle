@@ -5417,9 +5417,11 @@ class HotMixin:
         sel_frame = tk.Frame(sel_win, bg="#1A237E"); sel_frame.pack(pady=6)
         tk.Label(sel_frame, text="股票:", font=("", 11, "bold"), bg="#1A237E", fg="white").pack(side=tk.LEFT, padx=6)
 
-        # 下拉框数据: 所有标签页的持仓股
+        # 下拉框数据: 持仓股 + 龙头股 + 最近资讯股
         combo_items = []
         seen = set()
+
+        # --- 1. 持仓股 ---
         try:
             all_h = self._get_all_holding_stocks()
             for sn, sc, gi, _pi in all_h:
@@ -5429,13 +5431,51 @@ class HotMixin:
                     combo_items.append(f"{sn}({sc})[{gi_name}]")
         except Exception:
             pass
-        # 确保有默认热门股
+
+        # --- 2. 龙头股 ---
+        try:
+            import akshare as _ak_hm
+            zt = _ak_hm.stock_zt_pool_em(date="")
+            if zt is not None and not zt.empty and "代码" in zt.columns and "名称" in zt.columns:
+                for _, row in zt.head(30).iterrows():
+                    sc = str(row["代码"]).zfill(6)
+                    if sc not in seen:
+                        seen.add(sc)
+                        combo_items.append(f"{row['名称']}({sc})[涨停]")
+        except Exception:
+            pass
+
+        # --- 3. 最近资讯股 (SQLite crawled_articles) ---
+        try:
+            import sqlite3 as _sq_hm
+            import os as _os_hm
+            _db = _os_hm.path.expanduser("~/.qclaw/stock_analysis.db")
+            if _os_hm.path.exists(_db):
+                _conn = _sq_hm.connect(_db)
+                _conn.row_factory = _sq_hm.Row
+                _cur = _conn.cursor()
+                try:
+                    _cur.execute("SELECT DISTINCT stock_name, stock_code FROM crawled_articles WHERE stock_code IS NOT NULL AND stock_code != '' ORDER BY crawl_time DESC LIMIT 30")
+                    for _row in _cur.fetchall():
+                        sc = str(_row["stock_code"]).zfill(6)
+                        if sc not in seen:
+                            seen.add(sc)
+                            combo_items.append(f"{_row['stock_name']}({sc})[资讯]")
+                except Exception:
+                    pass
+                _conn.close()
+        except Exception:
+            pass
+
+        # --- 兜底: 用 news_stocks_merged ---
         if not combo_items:
             try:
                 from src.akshare_utils import get_news_stocks_merged_recent_days
                 hot = get_news_stocks_merged_recent_days(ndays=3)
                 for nm, cd in hot[:20]:
-                    combo_items.append(f"{nm}({cd})[热门]")
+                    if cd not in seen:
+                        seen.add(cd)
+                        combo_items.append(f"{nm}({cd})[热门]")
             except Exception:
                 pass
 
