@@ -4672,64 +4672,119 @@ class HotMixin:
                     bias12 = [(cl[i]-m10[i])/m10[i]*100 if m10[i] else 0 for i in range(len(cl))]
                     bias24 = [(cl[i]-m20[i])/m20[i]*100 if m20[i] else 0 for i in range(len(cl))]
 
-                    current_indicator = ["MACD"]  # 默认 MACD
+                    # RSI (14) + BOLL %B
+                    rsi14 = [50.0]*len(cl)
+                    for i in range(14, len(cl)):
+                        up = sum(max(cl[j]-op[j], 0) for j in range(i-13, i+1)) / 14
+                        dn = sum(max(op[j]-cl[j], 0) for j in range(i-13, i+1)) / 14
+                        rsi14[i] = 100 - 100/(1 + up/dn) if dn > 0 else 100
+
+                    # ========== 用户可选状态 ==========
+                    selected_indicators = ["MACD"]  # 默认 MACD, 可多选
+                    show_golden = tk.BooleanVar(value=False)   # 黄金分割线
+                    show_fibo = tk.BooleanVar(value=False)      # 斐波那契回撤
+                    show_support = tk.BooleanVar(value=False)    # 支撑压力线
+                    vol_ma_opts = [5, 10, 20]                   # 量能均线 (固定显示)
+
                     def _draw_chart():
-                        # 根据指标数量决定 subplot 布局 (K线 + 量能 + 指标副图)
                         fig.clear()
-                        n_panels = 3  # K线 + 量能 + 指标
-                        gs = fig.add_gridspec(n_panels, 1, height_ratios=[3, 1, 1], hspace=0.05)
-                        ax_k = fig.add_subplot(gs[0], facecolor="#FAFAFA")
-                        ax_v = fig.add_subplot(gs[1], facecolor="#FAFAFA", sharex=ax_k)
-                        ax_i = fig.add_subplot(gs[2], facecolor="#FAFAFA", sharex=ax_k)
+                        # 动态 panel: 主图(1) + 量能(1) + len(selected_indicators)
+                        n_panels = 2 + max(1, len(selected_indicators))
+                        heights = [3] + [1] * (n_panels - 1)
+                        gs = fig.add_gridspec(n_panels, 1, height_ratios=heights, hspace=0.05)
+                        axes_list = [fig.add_subplot(gs[0], facecolor="#FAFAFA")]
+                        for _i in range(1, n_panels):
+                            axes_list.append(fig.add_subplot(gs[_i], facecolor="#FAFAFA", sharex=axes_list[0]))
+                        ax_k = axes_list[0]; ax_v = axes_list[1]
                         x = list(range(len(cl)))
                         cols_k = ["#C62828" if c >= o else "#2E7D32" for c, o in zip(cl, op)]
                         # ===== 主图: K线 + MA + BOLL =====
                         ax_k.bar(x, [h - l for h, l in zip(hi, lo)], bottom=lo, width=0.6, color=cols_k, alpha=0.5)
                         ax_k.bar(x, [abs(c - o) for c, o in zip(cl, op)], bottom=[min(c, o) for c, o in zip(cl, op)], width=0.6, color=cols_k)
-                        ax_k.plot(range(len(cl)), m5, color="#FF9800", lw=1, label="MA5")
-                        ax_k.plot(range(len(cl)), m10, color="#9C27B0", lw=1, label="MA10")
-                        ax_k.plot(range(len(cl)), m20, color="#2196F3", lw=1.2, label="MA20")
-                        ax_k.plot(range(len(cl)), m60, color="#6D4C41", lw=1.2, label="MA60", ls="--")
-                        ax_k.plot(range(len(cl)), boll_up, color="#FF5722", lw=0.8, ls=":", label="BOLL上轨")
-                        ax_k.plot(range(len(cl)), boll_mid, color="#FF5722", lw=0.8, ls="-", label="BOLL中轨")
-                        ax_k.plot(range(len(cl)), boll_lo, color="#FF5722", lw=0.8, ls=":", label="BOLL下轨")
-                        ax_k.set_title(f"{data['name']}({data['code']})  日K线  |  指标: {'/'.join(current_indicator)}", fontsize=10)
+                        ax_k.plot(x, m5, color="#FF9800", lw=1, label="MA5")
+                        ax_k.plot(x, m10, color="#9C27B0", lw=1, label="MA10")
+                        ax_k.plot(x, m20, color="#2196F3", lw=1.2, label="MA20")
+                        ax_k.plot(x, m60, color="#6D4C41", lw=1.2, label="MA60", ls="--")
+                        ax_k.plot(x, boll_up, color="#FF5722", lw=0.8, ls=":", label="BOLL上轨")
+                        ax_k.plot(x, boll_mid, color="#FF5722", lw=0.8, ls="-", label="BOLL中轨")
+                        ax_k.plot(x, boll_lo, color="#FF5722", lw=0.8, ls=":", label="BOLL下轨")
+
+                        # ---- 辅助线叠加 (可选) ----
+                        if show_support.get():
+                            # 支撑压力线: 最近 60 天的前高前低
+                            look = min(60, len(cl))
+                            recent_cl = cl[-look:]; recent_hi = hi[-look:]; recent_lo = lo[-look:]
+                            highs = []; lows = []
+                            for i in range(2, look-2):
+                                if recent_hi[i] > recent_hi[i-1] and recent_hi[i] > recent_hi[i-2] and recent_hi[i] > recent_hi[i+1] and recent_hi[i] > recent_hi[i+2]:
+                                    highs.append((x[-look+i], recent_hi[i]))
+                            for i in range(2, look-2):
+                                if recent_lo[i] < recent_lo[i-1] and recent_lo[i] < recent_lo[i-2] and recent_lo[i] < recent_lo[i+1] and recent_lo[i] < recent_lo[i+2]:
+                                    lows.append((x[-look+i], recent_lo[i]))
+                            for pos, h in highs[:3]:
+                                ax_k.axhline(h, color="#E53935", lw=0.6, ls="--", alpha=0.7)
+                                ax_k.text(x[-1], h, f" 压力 {h:.1f}", fontsize=6, color="#E53935", va="bottom")
+                            for pos, l in lows[:3]:
+                                ax_k.axhline(l, color="#43A047", lw=0.6, ls="--", alpha=0.7)
+                                ax_k.text(x[-1], l, f" 支撑 {l:.1f}", fontsize=6, color="#43A047", va="top")
+
+                        if show_golden.get() or show_fibo.get():
+                            # 黄金分割 + 斐波那契回撤 (同一套比例, 共用开关)
+                            fibo_ratios = [0.236, 0.382, 0.5, 0.618, 0.786]
+                            look = min(120, len(cl))
+                            seg_high = max(hi[-look:]); seg_low = min(lo[-look:])
+                            seg_range = seg_high - seg_low
+                            for r in fibo_ratios:
+                                level = seg_high - seg_range * r
+                                col = "#FF6F00" if show_golden.get() else "#6A1B9A"
+                                ax_k.axhline(level, color=col, lw=0.5, ls="-.", alpha=0.6)
+                                ax_k.text(x[0], level, f" {r:.1%}", fontsize=6, color=col, va="bottom")
+
+                        n_inds = len(selected_indicators)
+                        ax_k.set_title(f"{data['name']}({data['code']})  日K线  |  指标: {'/'.join(selected_indicators)}", fontsize=10)
                         ax_k.legend(fontsize=6, loc="upper left", ncol=4); ax_k.grid(True, alpha=0.2)
                         ax_k.tick_params(labelbottom=False, labelsize=8)
-                        # ===== 量能 =====
+
+                        # ===== 量能 + MA5/MA10/MA20 =====
                         ax_v.bar(x, vo, color=cols_k, width=0.6, alpha=0.8)
-                        if len(vo) >= 20:
-                            mv20 = sum(vo[-20:]) / 20
-                            ax_v.axhline(mv20, color="#2196F3", lw=0.8, ls="--", label="VOL_MA20")
-                        ax_v.set_ylabel("成交量", fontsize=8); ax_v.legend(fontsize=7); ax_v.grid(True, alpha=0.2)
-                        ax_v.tick_params(labelbottom=False, labelsize=8)
-                        # ===== 指标副图 =====
-                        ind = current_indicator[0]
-                        if ind == "MACD":
-                            ax_i.bar(x, macd_hist, color=["#C62828" if v >= 0 else "#2E7D32" for v in macd_hist], width=0.6, alpha=0.8)
-                            ax_i.plot(x, dif, color="#FF9800", lw=1, label="DIF")
-                            ax_i.plot(x, dea, color="#2196F3", lw=1, label="DEA")
-                            ax_i.axhline(0, color="#999", lw=0.5)
-                            ax_i.set_ylabel("MACD", fontsize=8)
-                        elif ind == "KDJ":
-                            ax_i.plot(x, kdj_k, color="#FF9800", lw=1, label="K")
-                            ax_i.plot(x, kdj_d, color="#2196F3", lw=1, label="D")
-                            ax_i.plot(x, kdj_j, color="#9C27B0", lw=1, label="J")
-                            ax_i.axhline(80, color="#C62828", lw=0.5, ls="--"); ax_i.axhline(20, color="#2E7D32", lw=0.5, ls="--")
-                            ax_i.set_ylabel("KDJ", fontsize=8); ax_i.set_ylim(-20, 120)
-                        elif ind == "BIAS":
-                            ax_i.plot(x, bias6, color="#FF9800", lw=1, label="BIAS6")
-                            ax_i.plot(x, bias12, color="#2196F3", lw=1, label="BIAS12")
-                            ax_i.plot(x, bias24, color="#9C27B0", lw=1, label="BIAS24")
-                            ax_i.axhline(0, color="#999", lw=0.5)
-                            ax_i.set_ylabel("BIAS%", fontsize=8)
-                        elif ind == "BOLL":
-                            # BOLL 已在主图叠加, 这里显示 %B 和带宽
-                            pct_b = [(cl[i]-boll_lo[i])/(boll_up[i]-boll_lo[i]) if not _m.isnan(boll_up[i]-boll_lo[i]) else float("nan") for i in range(len(cl))]
-                            ax_i.plot(x, pct_b, color="#2196F3", lw=1, label="%B")
-                            ax_i.axhline(1, color="#C62828", lw=0.5, ls="--"); ax_i.axhline(0, color="#2E7D32", lw=0.5, ls="--")
-                            ax_i.set_ylabel("BOLL %B", fontsize=8); ax_i.set_ylim(-0.5, 1.5)
-                        ax_i.legend(fontsize=7, loc="upper left"); ax_i.grid(True, alpha=0.2)
+                        ma_colors = {5: "#FF9800", 10: "#9C27B0", 20: "#2196F3"}
+                        ma_ls = {5: "-", 10: "-", 20: "--"}
+                        for _mv in vol_ma_opts:
+                            if len(vo) >= _mv:
+                                _arr = [sum(vo[max(0,i-_mv+1):i+1])/(i-max(0,i-_mv+1)+1) for i in range(len(vo))]
+                                ax_v.plot(x, _arr, color=ma_colors.get(_mv, "#666"), lw=0.9, ls=ma_ls.get(_mv, "-"),
+                                          label=f"VOL_MA{_mv}")
+                        ax_v.set_ylabel("成交量", fontsize=8); ax_v.legend(fontsize=7, loc="upper left", ncol=3)
+                        ax_v.grid(True, alpha=0.2); ax_v.tick_params(labelbottom=False, labelsize=8)
+
+                        # ===== 指标副图 (可多选叠加) =====
+                        ind_colors = {"MACD": "#FF9800", "KDJ": "#9C27B0", "RSI": "#E91E63", "BIAS": "#2196F3"}
+                        for idx, ind in enumerate(selected_indicators):
+                            ax_i = axes_list[2 + idx]
+                            if ind == "MACD":
+                                ax_i.bar(x, macd_hist, color=["#C62828" if v >= 0 else "#2E7D32" for v in macd_hist], width=0.6, alpha=0.8)
+                                ax_i.plot(x, dif, color="#FF9800", lw=1, label="DIF")
+                                ax_i.plot(x, dea, color="#2196F3", lw=1, label="DEA")
+                                ax_i.axhline(0, color="#999", lw=0.5)
+                                ax_i.set_ylabel("MACD", fontsize=8)
+                            elif ind == "KDJ":
+                                ax_i.plot(x, kdj_k, color="#FF9800", lw=1, label="K")
+                                ax_i.plot(x, kdj_d, color="#2196F3", lw=1, label="D")
+                                ax_i.plot(x, kdj_j, color="#9C27B0", lw=1, label="J")
+                                ax_i.axhline(80, color="#C62828", lw=0.5, ls="--"); ax_i.axhline(20, color="#2E7D32", lw=0.5, ls="--")
+                                ax_i.set_ylabel("KDJ", fontsize=8); ax_i.set_ylim(-20, 120)
+                            elif ind == "RSI":
+                                ax_i.plot(x, rsi14, color="#E91E63", lw=1, label="RSI14")
+                                ax_i.axhline(70, color="#C62828", lw=0.5, ls="--"); ax_i.axhline(30, color="#2E7D32", lw=0.5, ls="--")
+                                ax_i.axhline(50, color="#999", lw=0.4, ls=":")
+                                ax_i.set_ylabel("RSI14", fontsize=8); ax_i.set_ylim(0, 100)
+                            elif ind == "BIAS":
+                                ax_i.plot(x, bias6, color="#FF9800", lw=1, label="BIAS6")
+                                ax_i.plot(x, bias12, color="#2196F3", lw=1, label="BIAS12")
+                                ax_i.plot(x, bias24, color="#9C27B0", lw=1, label="BIAS24")
+                                ax_i.axhline(0, color="#999", lw=0.5)
+                                ax_i.set_ylabel("BIAS%", fontsize=8)
+                            ax_i.legend(fontsize=7, loc="upper left"); ax_i.grid(True, alpha=0.2)
                         cv2.draw_idle()
 
                     # 初始化 Figure
@@ -4757,20 +4812,33 @@ class HotMixin:
                     tk.Button(btn_f, text="全部", command=lambda: (fig.axes[0].set_xlim(full_xlim), fig.canvas.draw_idle()), bg="#C8E6C9", font=("",8), relief=tk.FLAT).pack(side=tk.LEFT, padx=1)
                     tk.Button(btn_f, text="最新▶", command=lambda: (fig.axes[0].set_xlim(max(0,len(cl)-60),len(cl)), fig.canvas.draw_idle()), bg="#FFE0B2", font=("",8), relief=tk.FLAT).pack(side=tk.LEFT, padx=1)
                     tk.Label(btn_f, text="  🔍 滚轮缩放 | 🖱️ Shift+拖拽平移", bg="#FAFAFA", fg="#666", font=("",8)).pack(side=tk.RIGHT, padx=4)
-                    # 指标切换按钮组
-                    tk.Label(ind_f, text="📊 指标副图:", bg="#FAFAFA", font=("",9, "bold")).pack(side=tk.LEFT, padx=(0,4))
-                    def _ind_factory(name, color):
-                        def _switch():
-                            current_indicator[0] = name
-                            for b,_ in ind_btns: b.config(bg="#FFD54F" if b==btn else "#E0E0E0")
-                            _draw_chart()
-                        return _switch
-                    ind_btns = []
-                    for nm, col in [("MACD","#FF9800"),("KDJ","#9C27B0"),("BIAS","#2196F3"),("BOLL","#FF5722")]:
-                        btn = tk.Button(ind_f, text=nm, command=_ind_factory(nm, col), bg="#FFD54F" if nm=="MACD" else "#E0E0E0",
-                                        font=("",9, "bold"), relief=tk.FLAT, padx=6, pady=1)
-                        btn.pack(side=tk.LEFT, padx=2); ind_btns.append((btn, nm))
-                    tk.Label(ind_f, text="  (BOLL已在主图叠加, 此处%B)", bg="#FAFAFA", fg="#888", font=("",7)).pack(side=tk.LEFT, padx=4)
+                    # 指标多选 Checkbutton 组 (替代单选按钮)
+                    ind_f = tk.Frame(kline_f, bg="#FAFAFA"); ind_f.pack(fill=tk.X, side=tk.TOP, padx=2, pady=1)
+                    tk.Label(ind_f, text="📊 指标副图(可多选叠加):", bg="#FAFAFA", font=("",9, "bold")).pack(side=tk.LEFT, padx=(0,4))
+                    ind_vars = {}
+                    for nm, col, default_on in [("MACD","#FF9800",True),("KDJ","#9C27B0",False),("RSI","#E91E63",False),("BIAS","#2196F3",False)]:
+                        var = tk.BooleanVar(value=default_on)
+                        ind_vars[nm] = var
+                        def _mk(nm0=nm):
+                            def _toggle():
+                                sels = [n for n,v in ind_vars.items() if v.get()]
+                                selected_indicators[:] = sels if sels else ["MACD"]
+                                _draw_chart()
+                            return _toggle
+                        cb = tk.Checkbutton(ind_f, text=nm, variable=var, command=_mk(),
+                                            bg="#FAFAFA", fg=col, font=("",9, "bold"), selectcolor="white")
+                        cb.pack(side=tk.LEFT, padx=3)
+
+                    # 主图辅助线开关
+                    aux_f = tk.Frame(kline_f, bg="#FAFAFA"); aux_f.pack(fill=tk.X, side=tk.TOP, padx=2, pady=1)
+                    tk.Label(aux_f, text="📐 主图辅助线:", bg="#FAFAFA", font=("",9, "bold")).pack(side=tk.LEFT, padx=(0,4))
+                    tk.Checkbutton(aux_f, text="🔺支撑压力", variable=show_support, command=_draw_chart,
+                                   bg="#FAFAFA", fg="#43A047", font=("",9)).pack(side=tk.LEFT, padx=3)
+                    tk.Checkbutton(aux_f, text="🟠黄金分割", variable=show_golden, command=_draw_chart,
+                                   bg="#FAFAFA", fg="#FF6F00", font=("",9)).pack(side=tk.LEFT, padx=3)
+                    tk.Checkbutton(aux_f, text="🟣斐波那契", variable=show_fibo, command=_draw_chart,
+                                   bg="#FAFAFA", fg="#6A1B9A", font=("",9)).pack(side=tk.LEFT, padx=3)
+                    tk.Label(aux_f, text="  (量能已固定 MA5/MA10/MA20, 看金叉死叉)", bg="#FAFAFA", fg="#888", font=("",7)).pack(side=tk.LEFT, padx=6)
                     # 初始绘制
                     _draw_chart()
                     cv2.get_tk_widget().pack(fill=tk.BOTH, expand=True, side=tk.BOTTOM)
