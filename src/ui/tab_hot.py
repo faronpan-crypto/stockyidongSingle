@@ -4396,7 +4396,7 @@ class HotMixin:
                 # ==== 切换股票区域 ====
                 switch_f = tk.Frame(bn, bg="#1A237E"); switch_f.pack(side=tk.LEFT, padx=10)
                 tk.Label(switch_f, text="🔄 切换:", bg="#1A237E", fg="#FFD54F", font=("", 9, "bold")).pack(side=tk.LEFT, padx=(0,4))
-                # 候选列表: 已扫描股票 + 持仓股 + 涨停池 (合并去重)
+                # 候选列表: 持仓股置顶(不排序, 保持持仓顺序) + 已扫描 + 涨停池 (去重)
                 candidates = []; cand_set = set()
                 def _add_cand(_nm, _cd, _tag=""):
                     _cd = str(_cd).zfill(6)
@@ -4404,14 +4404,14 @@ class HotMixin:
                         cand_set.add(_cd)
                         _tag_s = f"[{_tag}]" if _tag else ""
                         candidates.append(f"{_nm}({_cd}){_tag_s}")
-                # 1) 已扫描的
-                for _rd in tree._line_data.values():
-                    _add_cand(_rd.get("name",""), _rd.get("code",""))
-                # 2) 持仓股
+                # 1) 持仓股 (置顶, 保持持仓顺序)
                 try:
                     for sn, sc, _gi, _pi in self._get_all_holding_stocks():
                         _add_cand(sn, sc, "持仓")
                 except Exception: pass
+                # 2) 已扫描的
+                for _rd in tree._line_data.values():
+                    _add_cand(_rd.get("name",""), _rd.get("code",""))
                 # 3) 涨停池
                 try:
                     import datetime as _dt3
@@ -4427,7 +4427,7 @@ class HotMixin:
                         for _, _r in zt3.head(30).iterrows():
                             _add_cand(_r.get("名称",""), _r.get("代码",""), "涨停")
                 except Exception: pass
-                candidates = sorted(set(candidates))
+                # 不再 sorted: 保持 持仓→已扫描→涨停 顺序
                 # 写文件标记方便 debug (100% 不会丢)
                 try:
                     open("/tmp/hm_combo_debug.txt","w").write(
