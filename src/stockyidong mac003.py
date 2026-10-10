@@ -4692,7 +4692,6 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("📈价增量涨", 10, self._show_price_volume_dialog),
             ("🏛️美联储分析", 12, self._show_fed_analysis_dialog),
             ("🌏纳指日经套利", 10, self._show_etf_holiday_dialog),
-            ("📸风格化", 8, self._show_photo_style_dialog),
             ("📱日报", 7, self._show_wechat_dialog),
         ]):
             if "📸" in txt or "📱" in txt:
