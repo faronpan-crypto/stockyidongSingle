@@ -4396,13 +4396,47 @@ class HotMixin:
                 # ==== 切换股票区域 ====
                 switch_f = tk.Frame(bn, bg="#1A237E"); switch_f.pack(side=tk.LEFT, padx=10)
                 tk.Label(switch_f, text="🔄 切换:", bg="#1A237E", fg="#FFD54F", font=("", 9, "bold")).pack(side=tk.LEFT, padx=(0,4))
-                # 候选列表: 从 table._line_data 拿 (所有扫描过的股票)
-                candidates = []
+                # 候选列表: 已扫描股票 + 持仓股 + 涨停池 (合并去重)
+                candidates = []; cand_set = set()
+                def _add_cand(_nm, _cd, _tag=""):
+                    _cd = str(_cd).zfill(6)
+                    if _cd not in cand_set and _nm and _nm != _cd:
+                        cand_set.add(_cd)
+                        _tag_s = f"[{_tag}]" if _tag else ""
+                        candidates.append(f"{_nm}({_cd}){_tag_s}")
+                # 1) 已扫描的
                 for _rd in tree._line_data.values():
-                    candidates.append(f"{_rd['name']}({_rd['code']})")
-                candidates = sorted(set(candidates))
+                    _add_cand(_rd.get("name",""), _rd.get("code",""))
+                # 2) 持仓股
                 try:
-                    cb = _ttk2.Combobox(switch_f, values=candidates, width=18, state="readonly", font=("", 9))
+                    for sn, sc, _gi, _pi in self._get_all_holding_stocks():
+                        _add_cand(sn, sc, "持仓")
+                except Exception: pass
+                # 3) 涨停池
+                try:
+                    import datetime as _dt3
+                    import akshare as _ak3
+                    _today3 = _dt3.now().strftime("%Y%m%d")
+                    zt3 = _ak3.stock_zt_pool_em(date=_today3)
+                    if (zt3 is None or zt3.empty) and _today3:
+                        for _o in range(1, 7):
+                            _d3 = (_dt3.now() - _dt3.timedelta(days=_o)).strftime("%Y%m%d")
+                            zt3 = _ak3.stock_zt_pool_em(date=_d3)
+                            if zt3 is not None and not zt3.empty: break
+                    if zt3 is not None and not zt3.empty and "代码" in zt3.columns:
+                        for _, _r in zt3.head(30).iterrows():
+                            _add_cand(_r.get("名称",""), _r.get("代码",""), "涨停")
+                except Exception: pass
+                candidates = sorted(set(candidates))
+                # 写文件标记方便 debug (100% 不会丢)
+                try:
+                    open("/tmp/hm_combo_debug.txt","w").write(
+                        f"time={time.time()}\ncount={len(candidates)}\nfirst_10={candidates[:10]}\n"
+                    )
+                except Exception as _e4:
+                    pass
+                try:
+                    cb = _ttk2.Combobox(switch_f, values=candidates, width=22, state="normal", font=("", 9))
                     cb.set(f"{data['name']}({data['code']})")
                 except:
                     cb = None
@@ -4420,24 +4454,31 @@ class HotMixin:
                     combo_val = cb.get() if cb else ""
                     search = manual or combo_val
                     if not search: return
-                    # 先从已扫描的 _line_data 里找
-                    for _rd in tree._line_data.values():
-                        c = str(_rd.get("code", "")); n = str(_rd.get("name", "")); t = str(_rd.get("ts_code", ""))
-                        if search in (c, n) or search in t or search in f"{n}({c})":
-                            target_code = c; target_name = n; target_tsc = t
-                            break
-                    # 2) 没找到: 假设手输的是代码, 推断市场后缀
-                    if not target_tsc and manual and manual.isdigit() and len(manual) == 6:
-                        mc = manual
+                    # 2) 先从 search 里正则抽 6 位 code (万能!)
+                    import re as _re_sw
+                    _m_sw = _re_sw.search(r"(\d{6})", search)
+                    if _m_sw:
+                        target_code = _m_sw.group(1)
+                    # 2b) 从已扫描的 _line_data 里找 code 匹配
+                    if target_code:
+                        for _rd in tree._line_data.values():
+                            c = str(_rd.get("code", "")); t = str(_rd.get("ts_code", ""))
+                            if c == target_code or t and t.startswith(target_code):
+                                target_name = str(_rd.get("name", "")); target_tsc = t
+                                break
+                    # 2c) 从 combo 值里也找名字 (strip [tag])
+                    if not target_name:
+                        _m_n = _re_sw.match(r"([^(\[]+)", search)
+                        if _m_n: target_name = _m_n.group(1).strip()
+                    # 3) 推断市场后缀 (ts_code)
+                    if target_code and not target_tsc:
+                        mc = target_code
                         if mc.startswith(("6","9","5")): target_tsc = mc + ".SH"
                         elif mc.startswith(("0","3","2")): target_tsc = mc + ".SZ"
                         elif mc.startswith(("4","8","9")): target_tsc = mc + ".BJ"
-                        target_code = mc
-                        target_name = mc  # 暂时用代码当名字, 后面可能会从 tushare 拿真实名
                     if not target_tsc:
-                        # 弹窗提示
                         import tkinter.messagebox as _mb
-                        _mb.showinfo("提示", f"没找到股票: {search}\n请确认代码或名称正确")
+                        _mb.showinfo("提示", f"没找到股票: {search}\n请输入6位代码或名称")
                         return
                     # 构造新 data (先只放基础字段, 后续线程里补)
                     new_data = {"name": target_name, "code": target_code, "ts_code": target_tsc,
@@ -5486,45 +5527,67 @@ class HotMixin:
         tk.Label(sel_frame, text="股票:", font=("", 11, "bold"), bg="#1A237E", fg="white").pack(side=tk.LEFT, padx=6)
 
         # 下拉框数据: 持仓股 + 龙头股 + 最近资讯股
+        # 先定义文件 debug (避免 print 缓冲)
+        _log_path = "/tmp/hm_open_debug.log"
+        def _fdbg(msg):
+            try:
+                with open(_log_path, "a") as _f:
+                    _f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+            except Exception:
+                pass
+        # 清空旧的
+        try: open(_log_path, "w").close()
+        except Exception: pass
+        _fdbg(f"=== _open_hotmoney_single_dialog 开始 auto_code={auto_code} ===")
+
         combo_items = []
         seen = set()
 
         # --- 1. 持仓股 ---
         try:
             all_h = self._get_all_holding_stocks()
+            _fdbg(f"1._get_all_holding_stocks() 返回 {len(all_h)} 只")
             for sn, sc, gi, _pi in all_h:
                 if sc not in seen:
                     seen.add(sc)
                     gi_name = {1: "持仓", 2: "龙头", 4: "Main", 6: "同花顺"}.get(gi, f"G{gi}")
                     combo_items.append(f"{sn}({sc})[{gi_name}]")
+            _fdbg(f"1.持仓股: {len(combo_items)} 只")
         except Exception as _e:
-            pass
+            _fdbg(f"1.持仓股 挂: {_e}\n{traceback.format_exc()}")
 
-        # --- 2. 龙头股 (涨停池) — 必须传具体日期! date="" 东财不认 ---
+        # --- 2. 龙头股 (涨停池) ---
         try:
-            import datetime as _dt_hm2
+            from datetime import datetime as _dt_hm2, timedelta as _td_hm2
             _today = _dt_hm2.now().strftime("%Y%m%d")
             import akshare as _ak_hm
+            _fdbg(f"2.拉涨停池 date={_today}...")
             zt = _ak_hm.stock_zt_pool_em(date=_today)
             if (zt is None or zt.empty) and _today:
-                # 非交易日 → 往前找最近交易日
                 for _d_off in range(1, 7):
-                    _d = (_dt_hm2.now() - _dt_hm2.timedelta(days=_d_off)).strftime("%Y%m%d")
+                    _d = (_dt_hm2.now() - _td_hm2(days=_d_off)).strftime("%Y%m%d")
+                    _fdbg(f"  尝试 date={_d}...")
                     zt = _ak_hm.stock_zt_pool_em(date=_d)
                     if zt is not None and not zt.empty: break
+            _fdbg(f"2.涨停池结果: type={type(zt)}, len={len(zt) if zt is not None else 'None'}, empty={zt is not None and zt.empty}, cols={list(zt.columns) if zt is not None else 'None'}")
             if zt is not None and not zt.empty and "代码" in zt.columns and "名称" in zt.columns:
+                _before = len(combo_items)
                 for _, row in zt.head(30).iterrows():
                     sc = str(row["代码"]).zfill(6)
                     if sc not in seen:
                         seen.add(sc)
                         combo_items.append(f"{row['名称']}({sc})[涨停]")
-        except Exception:
-            pass
+                _fdbg(f"2.涨停池: +{len(combo_items)-_before} 只")
+            else:
+                _fdbg(f"2.涨停池: 空")
+        except Exception as _e:
+            _fdbg(f"2.涨停池 挂: {_e}\n{traceback.format_exc()}")
 
-        # --- 3. 资讯/热门股 (从程序已有的缓存方法拿) ---
+        # --- 3. 资讯/热门股 ---
         try:
-            # 优先用 self 上的热门股缓存 (crawler_control 爬过的)
             _cache = getattr(self, '_hot_stocks_cache', None) or getattr(self, '_news_stock_cache', None)
+            _fdbg(f"3.资讯 cache: type={type(_cache)}, len={len(_cache) if _cache else 0}")
+            _before = len(combo_items)
             if _cache and isinstance(_cache, list):
                 for _item in _cache[:30]:
                     try:
@@ -5535,12 +5598,17 @@ class HotMixin:
                             combo_items.append(f"{_nm}({_cd})[资讯]")
                     except Exception:
                         pass
-        except Exception:
-            pass
+            _fdbg(f"3.资讯: +{len(combo_items)-_before} 只")
+        except Exception as _e:
+            _fdbg(f"3.资讯 挂: {_e}\n{traceback.format_exc()}")
 
-        # --- 兜底: 任何情况下至少要有 auto_name/auto_code ---
+        _fdbg(f"=== combo_items 总数={len(combo_items)}, 前10={combo_items[:10]} ===")
+
+        # --- 兜底 ---
         if not combo_items and auto_code:
             combo_items.append(f"{auto_name or ''}({auto_code})[默认]")
+
+        print(f"[游资心法下拉] 总 combo_items={len(combo_items)}", flush=True)
 
         stock_var = tk.StringVar(value="")
         cb = ttk.Combobox(sel_frame, textvariable=stock_var, values=combo_items,
@@ -5566,6 +5634,7 @@ class HotMixin:
 
         # 确定按钮
         def _on_confirm():
+            _fdbg(f"_on_confirm 被调! raw='{stock_var.get()}'")
             raw = stock_var.get().strip()
             if not raw:
                 status_var.set("⚠️ 请选择或输入股票"); return
@@ -5577,14 +5646,24 @@ class HotMixin:
             if not stock_code:
                 # 尝试从名称反查
                 try:
+                    _fdbg(f"  尝试 get_stock_code_by_name({stock_name})...")
                     stock_code = get_stock_code_by_name(stock_name)
-                except Exception:
+                    _fdbg(f"  反查结果: {stock_code}")
+                except Exception as _e:
+                    _fdbg(f"  get_stock_code_by_name 挂: {_e}")
                     pass
             if not stock_code:
                 status_var.set("⚠️ 无法识别股票代码，请输入6位数字"); return
-            sel_win.destroy()
+            _fdbg(f"  解析成功 stock_code={stock_code}, stock_name={stock_name}")
+            try: sel_win.destroy()
+            except Exception: pass
+            _fdbg(f"  sel_win destroyed, 开始调 _run_hotmoney_single_analysis")
             # 后台线程分析
-            self._run_hotmoney_single_analysis(stock_code, stock_name, HM_LIST, TRA_TO_SCHOOL)
+            try:
+                self._run_hotmoney_single_analysis(stock_code, stock_name, HM_LIST, TRA_TO_SCHOOL)
+                _fdbg(f"  _run_hotmoney_single_analysis 已调起")
+            except Exception as _e:
+                _fdbg(f"  _run_hotmoney_single_analysis 挂: {_e}\n{traceback.format_exc()}")
 
         tk.Button(sel_win, text="确定分析 →", command=_on_confirm,
                   font=("", 11, "bold"), bg="#FF6F00", fg="white",
@@ -5699,16 +5778,23 @@ class HotMixin:
         tk.Label(prog, textvariable=prog_status, font=("", 10), bg="#1A237E", fg="#FFD54F").pack()
 
         def _bg():
+            _log2 = "/tmp/hm_bg_debug.log"
+            def _d(msg):
+                try:
+                    with open(_log2, "a") as _f:
+                        _f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+                except Exception: pass
             try:
+                open(_log2, "w").close()
+                # ⚠️ Treeview 会把全数字 str 转成 int, 这里强制转回 str (先转再用!)
+                _sc = str(stock_code); _sn = str(stock_name)
+                _d(f"=== _bg 线程启动 stock_code={_sc}, stock_name={_sn} ===")
                 # ⚠️ 兜底: 如果外部传了 None, 用内嵌默认值
                 nonlocal hm_list, tra_to_school
                 if hm_list is None or len(hm_list) == 0:
                     hm_list = _DEFAULT_HM
                 if tra_to_school is None or len(tra_to_school) == 0:
                     tra_to_school = _DEFAULT_SCHOOL
-                # ⚠️ Treeview 会把全数字 str 转成 int, 这里强制转回 str
-                nonlocal stock_code, stock_name
-                stock_code = str(stock_code); stock_name = str(stock_name)
 
                 _pro = _ts_pro.pro_api()
                 today = _dt_now.now().strftime("%Y%m%d")
@@ -5722,18 +5808,21 @@ class HotMixin:
                     latest = today
 
                 # 推断ts_code
-                tsc = stock_code
-                if stock_code.startswith(("6", "9", "5")): tsc += ".SH"
-                elif stock_code.startswith(("0", "3", "2")): tsc += ".SZ"
-                elif stock_code.startswith(("4", "8")): tsc += ".BJ"
+                tsc = _sc
+                if _sc.startswith(("6", "9", "5")): tsc += ".SH"
+                elif _sc.startswith(("0", "3", "2")): tsc += ".SZ"
+                elif _sc.startswith(("4", "8")): tsc += ".BJ"
                 else: tsc += ".SZ"
+                _d(f"tsc={tsc}, latest={latest}")
 
                 prog.after(0, lambda: prog_status.set("⏳ 拉取历史K线..."))
                 _hm_src = "tushare"
+                _d("开始拉 tushare daily...")
                 try:
                     df = _pro.daily(ts_code=tsc, start_date="20240601", end_date=latest)
+                    _d(f"tushare daily 返回 len={len(df) if df is not None else 'None'}")
                 except Exception as _e_ts:
-                    print(f"[游资心法] tushare daily 失败: {_e_ts}, 切 akshare")
+                    _d(f"tushare daily 失败: {_e_ts}")
                     df = None
 
                 if df is None or len(df) < 30:
@@ -5746,7 +5835,7 @@ class HotMixin:
                         # === 通道1: 东方财富 ===
                         try:
                             hist = _ak_hm.stock_zh_a_hist(
-                                symbol=stock_code, period="daily",
+                                symbol=_sc, period="daily",
                                 start_date=_start_date, end_date=_end_date, adjust="qfq")
                             if hist is not None and len(hist) >= 30:
                                 df = hist; _hm_src = "akshare-em"
@@ -5756,8 +5845,8 @@ class HotMixin:
                         # === 通道2: 腾讯 ===
                         if df is None:
                             try:
-                                _prefix = "sh" if stock_code.startswith("6") else "sz"
-                                for _sym in [_prefix + stock_code, stock_code]:
+                                _prefix = "sh" if _sc.startswith("6") else "sz"
+                                for _sym in [_prefix + _sc, _sc]:
                                     try:
                                         hist = _ak_hm.stock_zh_a_hist_tx(
                                             symbol=_sym, start_date=_start_date,
@@ -5781,8 +5870,8 @@ class HotMixin:
                         # === 通道3: 新浪 ===
                         if df is None:
                             try:
-                                _prefix = "sh" if stock_code.startswith("6") else "sz"
-                                for _sym in [_prefix + stock_code, stock_code]:
+                                _prefix = "sh" if _sc.startswith("6") else "sz"
+                                for _sym in [_prefix + _sc, _sc]:
                                     try:
                                         hist = _ak_hm.stock_zh_a_daily(
                                             symbol=_sym, start_date=_start_date,
@@ -5805,7 +5894,7 @@ class HotMixin:
                     prog.after(0, lambda: prog_status.set("❌ K线数据不足"))
                     import tkinter.messagebox as _mb
                     prog.after(200, prog.destroy)
-                    _mb.showwarning("提示", f"{stock_name} K线数据不足30天\n(已尝试 tushare + akshare 三通道)", parent=self.root)
+                    _mb.showwarning("提示", f"{_sn} K线数据不足30天\n(已尝试 tushare + akshare 三通道)", parent=self.root)
                     return
 
                 # 统一列名: 确保 trade_date/open/high/low/close/vol 都存在
@@ -5869,7 +5958,7 @@ class HotMixin:
                         import akshare as _ak_basic
                         spot = _ak_basic.stock_zh_a_spot_em()
                         if spot is not None and len(spot) > 0:
-                            row = spot[spot["代码"] == stock_code]
+                            row = spot[spot["代码"] == _sc]
                             if len(row) > 0:
                                 row = row.iloc[0]
                                 if tr is None and "换手率" in row.index and row["换手率"] not in ("", "-", None):
@@ -5928,7 +6017,7 @@ class HotMixin:
                 prog.after(0, prog.destroy)
                 # 构造完整 data 字典, 注入 _show_hotmoney_check 用已有的完整弹窗
                 data_dict = {
-                    "code": stock_code, "name": stock_name,
+                    "code": _sc, "name": _sn,
                     "price": price, "ts_code": tsc,
                     "pct": pct_day, "pct_chg": pct_day,  # 两个都给, 兼容不同读取方
                     "kline_data": (cl, hi, lo, vo, op, dt_list or []),
@@ -5944,6 +6033,10 @@ class HotMixin:
 
             except Exception as e:
                 import traceback; traceback.print_exc()
+                try:
+                    with open(_log2, "a") as _f:
+                        _f.write(f"[{time.strftime('%H:%M:%S')}] ❌ EXCEPTION: {e}\n{traceback.format_exc()}\n")
+                except Exception: pass
                 prog.after(0, prog.destroy)
                 import tkinter.messagebox as _mb
                 _mb.showerror("错误", f"分析失败: {e}", parent=self.root)

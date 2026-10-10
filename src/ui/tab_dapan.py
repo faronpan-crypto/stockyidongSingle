@@ -44463,21 +44463,11 @@ class DapanMixin:
             popup_window: 弹出窗口引用(用于更新显示)
         """
         import_window = self._toplevel(self.root)
-        import_window.title("导入持仓股")
-        import_window.geometry("600x550")
-        # 持仓位置选择(在窗口顶部)
-        position_frame = ttk.Frame(import_window)
-        position_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
-        ttk.Label(position_frame, text="选择持仓位置:", font=("TkDefaultFont", 11)).pack(side=tk.LEFT, padx=(0, 5))
-        position_var = tk.StringVar(value="1")
-        # 根据max_count确定可选择的持仓位置数量
-        max_positions = max_count if max_count else 20
-        position_combo = ttk.Combobox(position_frame, textvariable=position_var,
-                                      values=[f"{i+1}" for i in range(max_positions)],
-                                      state="readonly", width=10)
-        position_combo.pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Label(position_frame, text="(选择要修改的持仓位置)", font=("TkDefaultFont", 8),
-                 foreground="gray").pack(side=tk.LEFT)
+        import_window.title(f"📦 导入持仓股 (group{group_index}, 最多 {max_count} 只)")
+        import_window.geometry("680x620")
+        # 顶部说明
+        ttk.Label(import_window, text="💡 可跨 Tab 多选股票, 累加到队列 → 全部选完后点 [📥 批量导入]\n(自动从第一个空位开始填, 不覆盖已有股票)",
+                 foreground="gray", font=("", 9), wraplength=640, justify=tk.LEFT).pack(anchor=tk.W, padx=10, pady=(10, 5))
         # 创建标签页
         notebook = ttk.Notebook(import_window)
         notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -44620,170 +44610,130 @@ class DapanMixin:
         # 初始加载
         load_lhb_stocks()
         ttk.Button(lhb_tab, text="刷新", command=load_lhb_stocks).pack(pady=5)
-        # 选择按钮
-        def select_stocks():
-            """选择股票并填充到持仓股"""
-            # 获取选定的持仓位置索引(0-19)
-            position_text = position_var.get()
-            # 兼容旧格式"持仓1"和新格式"1"
-            position_text = position_text.replace("持仓", "")
-            position_index = int(position_text) - 1
-            current_tab = notebook.index(notebook.select())
-            stocks_to_import = []
-            if current_tab == 0:  # 持仓输入标签页
-                # 从输入框读取
-                input_content = input_text.get("1.0", tk.END).strip()
-                if not input_content:
-                    messagebox.showwarning("警告", "请输入股票名称或代码", parent=import_window)
-                    return
-                # 解析输入(每行一个)
-                lines = [line.strip() for line in input_content.split('\n') if line.strip()]
+        # ====== 改成多 tab 复选 + 队列批量导入模式 ======
+        # 把所有 Listbox 改成可复选 (EXTENDED = 点击多选)
+        for _lb in [history_listbox, db_listbox, stock_data_listbox, lhb_listbox]:
+            try: _lb.configure(selectmode=tk.EXTENDED, exportselection=False)
+            except Exception: pass
+        # 窗口底部: 批量导入队列 + 操作按钮
+        queue_frame = ttk.LabelFrame(import_window, text="📦 待导入队列 (跨 Tab 累积, 全部完成后点批量导入)")
+        queue_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+        queue_listbox = tk.Listbox(queue_frame, height=4, selectmode=tk.SINGLE, exportselection=False)
+        queue_listbox.pack(fill=tk.X, padx=5, pady=3)
+        queue_set = set()  # 去重用
+        def _addToQueue(name, code):
+            """把一只股票加到队列"""
+            if not name and not code: return
+            key = (code or "", name or "")
+            if key in queue_set: return
+            queue_set.add(key)
+            queue_listbox.insert(tk.END, f"{name or ''}({code or ''})")
+        def _pullFromTab(tab_idx):
+            """从当前 tab 拉选中的股票进队列"""
+            mappings = [  # (tab_idx, listbox, tab_name)
+                (1, history_listbox, "历史持仓"),
+                (2, db_listbox, "自选股"),
+                (3, stock_data_listbox, "股票数据"),
+                (4, lhb_listbox, "龙虎榜"),
+            ]
+            if tab_idx == 0:
+                # 持仓输入 Tab
+                content = input_text.get("1.0", tk.END).strip()
+                lines = [l.strip() for l in content.split('\n') if l.strip()]
+                if not lines:
+                    messagebox.showwarning("提示", "请先输入股票名称或代码", parent=import_window); return
                 for line in lines:
-                    # 解析股票名称和代码
-                    stock_name = None
-                    stock_code = None
-                    # 检查是否是股票代码(6位数字)
-                    if line.isdigit() and len(line) == 6:
-                        stock_code = line
-                        stock_name = None  # 稍后通过代码获取名称
-                    elif "(" in line and ")" in line:
-                        # 格式:名称(代码) 或 代码(名称)
-                        parts = line.split("(")
-                        if len(parts) == 2:
-                            part1 = parts[0].strip()
-                            part2 = parts[1].replace(")", "").strip()
-                            if part2.isdigit() and len(part2) == 6:
-                                # 名称(代码)
-                                stock_name = part1
-                                stock_code = part2
-                            else:
-                                # 代码(名称)
-                                stock_code = part1
-                                stock_name = part2
-                    else:
-                        # 可能是股票名称或代码
-                        if line.isdigit() and len(line) == 6:
-                            stock_code = line
-                        else:
-                            stock_name = line
-                    stocks_to_import.append((stock_name, stock_code))
-            elif current_tab == 1:  # 历史持仓股
-                selected_indices = history_listbox.curselection()
-                if not selected_indices:
-                    messagebox.showwarning("警告", "请先选择股票", parent=import_window)
-                    return
-                stocks_list = history_listbox
-                for idx in selected_indices:
-                    stock_text = stocks_list.get(idx)
-                    # 解析股票名称和代码
-                    if "(" in stock_text and ")" in stock_text:
-                        stock_name = stock_text.split("(")[0].strip()
-                        stock_code = stock_text.split("(")[1].replace(")", "").strip()
-                    else:
-                        stock_name = stock_text.strip()
-                        stock_code = None
-                    stocks_to_import.append((stock_name, stock_code))
-            elif current_tab == 2:  # 自选股数据表
-                selected_indices = db_listbox.curselection()
-                if not selected_indices:
-                    messagebox.showwarning("警告", "请先选择股票", parent=import_window)
-                    return
-                stocks_list = db_listbox
-                for idx in selected_indices:
-                    stock_text = stocks_list.get(idx)
-                    # 解析股票名称和代码
-                    if "(" in stock_text and ")" in stock_text:
-                        stock_name = stock_text.split("(")[0].strip()
-                        stock_code = stock_text.split("(")[1].replace(")", "").strip()
-                    else:
-                        stock_name = stock_text.strip()
-                        stock_code = None
-                    stocks_to_import.append((stock_name, stock_code))
-            elif current_tab == 3:  # 股票数据表
-                selected_indices = stock_data_listbox.curselection()
-                if not selected_indices:
-                    messagebox.showwarning("警告", "请先选择股票", parent=import_window)
-                    return
-                stocks_list = stock_data_listbox
-                for idx in selected_indices:
-                    stock_text = stocks_list.get(idx)
-                    # 解析股票名称和代码
-                    if "(" in stock_text and ")" in stock_text:
-                        stock_name = stock_text.split("(")[0].strip()
-                        stock_code = stock_text.split("(")[1].replace(")", "").strip()
-                    else:
-                        stock_name = stock_text.strip()
-                        stock_code = None
-                    stocks_to_import.append((stock_name, stock_code))
-            elif current_tab == 4:  # 龙虎榜数据表
-                selected_indices = lhb_listbox.curselection()
-                if not selected_indices:
-                    messagebox.showwarning("警告", "请先选择股票", parent=import_window)
-                    return
-                stocks_list = lhb_listbox
-                for idx in selected_indices:
-                    stock_text = stocks_list.get(idx)
-                    # 解析股票名称和代码
-                    if "(" in stock_text and ")" in stock_text:
-                        stock_name = stock_text.split("(")[0].strip()
-                        stock_code = stock_text.split("(")[1].replace(")", "").strip()
-                    else:
-                        stock_name = stock_text.strip()
-                        stock_code = None
-                    stocks_to_import.append((stock_name, stock_code))
-            if not stocks_to_import:
-                messagebox.showwarning("警告", "没有可导入的股票", parent=import_window)
-                return
-            # 获取对应组的数据结构
-            holding_stocks, _holding_labels, _holding_kelly_results, _holding_low_diff_results = self._get_holding_group_data(group_index)
-            # 填充到选定的持仓位置(从选定位置开始,最多max_count个)
-            imported_count = 0
-            for i, (stock_name, stock_code) in enumerate(stocks_to_import):
-                if position_index + i >= max_count:
-                    break
-                # 如果没有股票代码,尝试通过名称获取
-                if not stock_code and stock_name:
-                    stock_code = get_stock_code_by_name(stock_name)
-                # 如果没有股票名称,尝试通过代码获取
-                if not stock_name and stock_code:
+                    nm, cd = None, None
+                    if line.isdigit() and len(line) == 6: cd = line
+                    elif "(" in line:
+                        nm = line.split("(")[0].strip()
+                        cd = line.split("(")[1].replace(")", "").strip()
+                    else: nm = line
+                    _addToQueue(nm, cd)
+                messagebox.showinfo("添加成功", f"已添加 {len(lines)} 只到队列\n队列总数: {queue_listbox.size()}", parent=import_window)
+            else:
+                info = mappings[tab_idx - 1]
+                sel = info[1].curselection()
+                if not sel:
+                    messagebox.showwarning("提示", f"请先在 [{info[2]}] Tab 里多选股票\n(按住 Cmd 点击可多选)", parent=import_window); return
+                added = 0
+                for idx in sel:
+                    txt = info[1].get(idx)
+                    if "(" in txt:
+                        nm = txt.split("(")[0].strip()
+                        cd = txt.split("(")[1].replace(")", "").strip()
+                    else: nm, cd = txt.strip(), None
+                    before = queue_listbox.size(); _addToQueue(nm, cd)
+                    if queue_listbox.size() > before: added += 1
+                messagebox.showinfo("添加成功",
+                    f"[{info[2]}] 选了 {len(sel)} 只, 新增 {added} 只\n队列总数: {queue_listbox.size()}\n窗口保持打开, 可去其他 Tab 继续选!",
+                    parent=import_window)
+        def _commitImport():
+            """批量导入队列 → 自动找第一个空位开始填 → 关闭窗口"""
+            if queue_listbox.size() == 0:
+                messagebox.showwarning("提示", "队列为空, 请先添加股票", parent=import_window); return
+            # 找第一个空位 (不是 fixed position 了!)
+            holding_stocks, _, _, _ = self._get_holding_group_data(group_index)
+            start_pos = 0
+            for i in range(max_count):
+                if i >= len(holding_stocks) or holding_stocks[i] in (None, "", (None, None), ("", "")):
+                    start_pos = i; break
+            # 批量填
+            imported = 0
+            for i in range(queue_listbox.size()):
+                if start_pos + i >= max_count: break
+                txt = queue_listbox.get(i)
+                nm = txt.split("(")[0] if "(" in txt else txt
+                cd = txt.split("(")[1].replace(")", "").rstrip(")") if "(" in txt else ""
+                nm = nm.strip(); cd = cd.rstrip(")").strip()
+                if not cd and nm:
+                    try: cd = get_stock_code_by_name(nm) or ""
+                    except Exception: pass
+                if not nm and cd:
                     try:
-                        import akshare as ak
-                        stock_info = ak.stock_individual_info_em(symbol=stock_code)
-                        if stock_info is not None and not stock_info.empty:
-                            for _, row in stock_info.iterrows():
-                                if row.get('item', '') == '股票简称' or row.get('item', '') == '股票名称':
-                                    stock_name = row.get('value', '')
-                                    break
-                    except:
-                        pass
-                # 确保至少有一个值
-                if stock_name or stock_code:
-                    holding_stocks[position_index + i] = (stock_name if stock_name else '', stock_code if stock_code else '')
-                else:
-                    holding_stocks[position_index + i] = None
-                # 立即更新显示(不执行检测)
-                self._update_holding_label(position_index + i, check_conditions=False, group_index=group_index)
-                # 强制刷新界面
+                        import akshare as _akq
+                        info = _akq.stock_individual_info_em(symbol=cd)
+                        if info is not None and not info.empty:
+                            for _, row in info.iterrows():
+                                if row.get('item') in ('股票简称','股票名称'): nm = row.get('value',''); break
+                    except Exception: pass
+                holding_stocks[start_pos + i] = (nm, cd) if (nm or cd) else None
+                imported += 1
+                self._update_holding_label(start_pos + i, check_conditions=False, group_index=group_index)
                 self._safe_update_idletasks()
-                imported_count += 1
-            # 强制更新所有持仓标签显示(不执行检测)
-            for j in range(max_count):
-                if j < len(holding_stocks):
-                    self._update_holding_label(j, check_conditions=False, group_index=group_index)
-                self._safe_update_idletasks()
-            # 如果是在弹出窗口中,更新弹出窗口显示
-            if popup_window and hasattr(popup_window, '_update_display'):
-                popup_window._update_display()
-            # 保存持仓股到配置文件
             self._save_holdings_to_config(group_index)
+            # 最后强制刷新全部显示
+            for j in range(max_count):
+                self._update_holding_label(j, check_conditions=False, group_index=group_index)
+                self._safe_update_idletasks()
             import_window.destroy()
-            messagebox.showinfo("成功", f"已导入 {imported_count} 个持仓股到{position_text}并保存,正在检测...", parent=self.root)
-            # 导入后自动触发一次检测
+            messagebox.showinfo("完成", f"✅ 批量导入 {imported} 只到 group{group_index}\n正在检测...", parent=self.root)
             self._check_holdings(group_index, max_count=max_count)
-        button_frame = ttk.Frame(import_window)
-        button_frame.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Button(button_frame, text="确定", command=select_stocks, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="取消", command=import_window.destroy, width=10).pack(side=tk.LEFT, padx=5)
+        def _clearQueue():
+            queue_listbox.delete(0, tk.END); queue_set.clear()
+        def _removeOne():
+            sel = queue_listbox.curselection()
+            if not sel: return
+            idx = sel[0]; txt = queue_listbox.get(idx)
+            queue_listbox.delete(idx)
+            # 也从 set 里清
+            nm = txt.split("(")[0] if "(" in txt else txt
+            cd = txt.split("(")[1].rstrip(")") if "(" in txt else ""
+            queue_set.discard((cd.strip(), nm.strip()))
+        # 队列操作按钮
+        qbtn_f = ttk.Frame(queue_frame); qbtn_f.pack(fill=tk.X, padx=5, pady=(0,5))
+        ttk.Button(qbtn_f, text="⬅️ 从当前 Tab 加到队列",
+                   command=lambda: _pullFromTab(notebook.index(notebook.select())), width=22).pack(side=tk.LEFT, padx=2)
+        ttk.Button(qbtn_f, text="❌ 移除选中", command=_removeOne, width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(qbtn_f, text="🗑️ 清空队列", command=_clearQueue, width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(qbtn_f, text=f"📥 批量导入 ({max_count} 上限)",
+                   command=_commitImport, width=18, style="Accent.TButton").pack(side=tk.RIGHT, padx=2)
+        # 底部窗口级按钮 (取消)
+        foot = ttk.Frame(import_window); foot.pack(fill=tk.X, padx=10, pady=(2, 8))
+        ttk.Button(foot, text="关闭窗口", command=import_window.destroy, width=12).pack(side=tk.RIGHT)
+        ttk.Label(foot,
+                  text="💡 跨 Tab 累加到队列 → 全部完成后点 [📥 批量导入]\n(从第一个空位自动开始填, 不覆盖已有)",
+                  foreground="gray", font=("", 8)).pack(side=tk.LEFT)
     def _manage_holdings(self, group_index=1, max_count=20, popup_window=None):
         """持仓股管理(编辑当前持仓股)"""
         # 获取对应组的数据结构
