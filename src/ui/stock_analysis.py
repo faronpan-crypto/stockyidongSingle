@@ -1150,11 +1150,13 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             # [?] 方法说明按钮 — 右侧挂一个小按钮
             _kn_key = title if title in KNOWLEDGE else re.sub(r"[（(].*?[)）]", "", title).strip()
             if _kn_key in KNOWLEDGE:
-                _help_btn = tk.Button(lf, text="❓", command=lambda _t=title: _show_method_knowledge(win, _t),
-                                      bg="#FFFFFF", fg="#4527A0", font=("", 9, "bold"),
-                                      relief=tk.FLAT, padx=6, pady=0, cursor="hand2")
-                # place 在 LabelFrame 右上角 (标题栏区域)
-                _help_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-6, y=-2)
+                _header_row = tk.Frame(lf, bg="#FFFFFF"); _header_row.pack(fill=tk.X, padx=6, pady=(2,0))
+                tk.Label(_header_row, text="", bg="#FFFFFF").pack(side=tk.LEFT, fill=tk.X, expand=True)
+                _help_btn = tk.Button(_header_row, text="❓ 方法说明",
+                                      command=lambda _t=title: _show_method_knowledge(win, _t),
+                                      bg="#E8EAF6", fg="#4527A0", font=("", 8),
+                                      relief=tk.FLAT, padx=8, pady=0, cursor="hand2")
+                _help_btn.pack(side=tk.RIGHT, pady=2)
             tk.Label(lf, text=f"💡 {desc}", bg="#FFF8E1", fg="#666", font=("", 8), wraplength=380,
                      justify=tk.LEFT).pack(fill=tk.X, padx=6, pady=4)
             # 结果区
@@ -1551,7 +1553,24 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             if tag: nm = f"[{tag}] {nm}"
             result.append(f"{nm} ({tsc})")
 
-        # ① SQLite data/stock_analysis.db 已分析过的股票
+        # ① 持仓股 (web_data/holdings_state.json — 用户真实持仓)
+        try:
+            _hs_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                     "web_data", "holdings_state.json")
+            if os.path.exists(_hs_path):
+                with open(_hs_path) as f: _hs = json.load(f)
+                for _g in _hs.get("groups", []):
+                    if not isinstance(_g, list): continue
+                    for _item in _g:
+                        if isinstance(_item, dict):
+                            _c6 = str(_item.get("code","")).strip()
+                            _nm = str(_item.get("name","")).strip()
+                            if not _c6 or not _c6.isdigit() or len(_c6) != 6: continue
+                            _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
+                            _add(_nm, _tsc, "持仓")
+        except Exception: pass
+
+        # ② SQLite data/stock_analysis.db 已分析过的股票
         _db_paths = [
             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "data", "stock_analysis.db"),
@@ -1566,9 +1585,10 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 for _tbl, _code_col, _name_col in [
                     ("stock_data", "stock_code", "stock_name"),
                     ("market_codes", "code", "name"),
+                    ("positions", "stock_code", "stock_name"),
                 ]:
                     try:
-                        cur.execute(f"SELECT {_code_col}, {_name_col} FROM {_tbl} LIMIT 80")
+                        cur.execute(f"SELECT {_code_col}, {_name_col} FROM {_tbl} LIMIT 100")
                         for row in cur.fetchall():
                             _c6 = str(row[0]).strip()
                             if not _c6 or not _c6.isdigit() or len(_c6) != 6: continue
@@ -1579,28 +1599,40 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 conn.close()
             except Exception: pass
 
-        # ② akshare 龙头 (成交额前 30, 过滤停牌)
+        # ③ tushare 全市场缓存里的热门龙头 (不依赖网络, 秒出)
+        try:
+            mp = _load_name_code_map()
+            cn_map = mp.get("cn", {})
+            for _nm in ["贵州茅台","五粮液","中国平安","招商银行","美的集团","恒瑞医药",
+                        "比亚迪","宁德时代","海康威视","隆基绿能","东方财富","立讯精密",
+                        "中信证券","紫金矿业","海尔智家","万华化学","中国神华","长江电力",
+                        "海天味业","海螺水泥","药明康德","迈瑞医疗","爱尔眼科","立讯精密",
+                        "中科曙光","寒武纪","中际旭创","金山办公"]:
+                if _nm in cn_map:
+                    _add(_nm, cn_map[_nm], "龙头")
+        except Exception: pass
+
+        # ④ akshare 龙头 (成交额前 30, 过滤停牌)
         try:
             import akshare as ak
             _spot = ak.stock_zh_a_spot_em()
             if _spot is not None and len(_spot) > 0:
-                # 先过滤掉停牌/ST/退市
                 _spot = _spot[~_spot["名称"].astype(str).apply(_is_bad_name)]
                 if len(_spot) > 0:
                     _amt_col = "成交额" if "成交额" in _spot.columns else None
                     if _amt_col:
-                        _spot2 = _spot.sort_values(_amt_col, ascending=False).head(30)
+                        _spot2 = _spot.sort_values(_amt_col, ascending=False).head(25)
                     else:
-                        _spot2 = _spot.head(30)
+                        _spot2 = _spot.head(25)
                     for _, r in _spot2.iterrows():
                         _c6 = str(r.get("代码", "")).strip()
                         _nm = _clean_name(str(r.get("名称", "")).strip())
                         if not _c6.isdigit() or len(_c6) != 6: continue
                         _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
-                        _add(_nm, _tsc, "龙头")
+                        _add(_nm, _tsc, "热门")
         except Exception: pass
 
-        # ③ akshare 涨停池 (交易日才有, 过滤停牌标识)
+        # ⑤ akshare 涨停池
         try:
             import akshare as ak; from datetime import datetime
             _zt = ak.stock_zt_pool_em(date=datetime.now().strftime("%Y%m%d"))
@@ -1615,7 +1647,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     _add(_nm or _tsc, _tsc, "涨停")
         except Exception: pass
 
-        # ④ 兜底: 15 只常用龙头 (不依赖网络)
+        # 兜底: 常用龙头 (无网络也能出)
         if len(result) < 30:
             for _tsc, _nm in [
                 ("600519.SH","贵州茅台"),("000858.SZ","五粮液"),("601318.SH","中国平安"),
@@ -1623,10 +1655,11 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 ("600276.SH","恒瑞医药"),("002594.SZ","比亚迪"),("300750.SZ","宁德时代"),
                 ("601888.SH","中国中免"),("002415.SZ","海康威视"),("601012.SH","隆基绿能"),
                 ("300059.SZ","东方财富"),("002475.SZ","立讯精密"),("600030.SH","中信证券"),
+                ("601398.SH","工商银行"),("601628.SH","中国人寿"),("601318.SH","中国平安"),
             ]:
                 _add(_nm, _tsc, "常用")
 
-        print(f"[股票分析候选] 共 {len(result)} 只")
+        print(f"[股票分析候选] 共 {len(result)} 只 (持仓→历史→龙头→热门→涨停)")
         return result[:200]
 
 
