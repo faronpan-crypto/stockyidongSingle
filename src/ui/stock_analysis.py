@@ -66,6 +66,101 @@ def _fetch_fundamentals(ts_code: str) -> Dict:
     return fund
 
 
+# ========= 名称 ↔ 代码 双向映射 =========
+_NAME_CODE_CACHE_PATH = os.path.expanduser("~/.qclaw/stock_name_code.json")
+_NAME_CODE_CACHE: Optional[Dict] = None  # {"ts_code->name": {...}, "name->ts_code": {...}, "ts": 0}
+
+def _load_name_code_map(force=False) -> Dict:
+    """从 tushare stock_basic 拉全量 5500 只, 本地 JSON 缓存 (TTL 7 天)"""
+    global _NAME_CODE_CACHE
+    import time
+    if not force and _NAME_CODE_CACHE is not None and _NAME_CODE_CACHE.get("ts", 0) > time.time() - 7*86400:
+        return _NAME_CODE_CACHE
+    # 先读磁盘缓存
+    if not force and os.path.exists(_NAME_CODE_CACHE_PATH):
+        try:
+            with open(_NAME_CODE_CACHE_PATH, "r") as f:
+                _NAME_CODE_CACHE = json.load(f)
+            if _NAME_CODE_CACHE.get("ts", 0) > time.time() - 7*86400 and _NAME_CODE_CACHE.get("nc"):
+                return _NAME_CODE_CACHE
+        except Exception: pass
+    # tushare 拉
+    nc: Dict[str, str] = {}  # ts_code -> name
+    cn: Dict[str, str] = {}  # name -> ts_code
+    try:
+        import tushare as ts
+        token = os.environ.get("TUSHARE_TOKEN", "")
+        if token:
+            ts.set_token(token); pro = ts.pro_api()
+            df = pro.stock_basic(exchange="", list_status="L",
+                                 fields="ts_code,symbol,name,area,industry,list_date")
+            if df is not None and len(df) > 0:
+                for _, r in df.iterrows():
+                    tsc = str(r["ts_code"]); nm = str(r["name"])
+                    nc[tsc] = nm; cn[nm] = tsc
+                print(f"[名称映射] tushare stock_basic OK ({len(nc)} 只)")
+    except Exception as e:
+        print(f"[名称映射] tushare 失败: {e}")
+    # akshare 兜底 (无 tushare token 或 限流时)
+    if not nc:
+        try:
+            import akshare as ak
+            df = ak.stock_zh_a_spot_em()
+            if df is not None and len(df) > 0:
+                for _, r in df.iterrows():
+                    code6 = str(r.get("代码","")).strip()
+                    nm = str(r.get("名称","")).strip()
+                    if not code6 or not nm or not code6.isdigit(): continue
+                    suffix = ".SH" if code6.startswith(("6","9","5")) else ".SZ" if code6.startswith(("3","0","4")) else ".BJ"
+                    tsc = code6 + suffix
+                    nc[tsc] = nm; cn[nm] = tsc
+                print(f"[名称映射] akshare 兜底 OK ({len(nc)} 只)")
+        except Exception as e:
+            print(f"[名称映射] akshare 兜底也失败: {e}")
+    _NAME_CODE_CACHE = {"nc": nc, "cn": cn, "ts": time.time()}
+    # 写磁盘
+    try:
+        os.makedirs(os.path.dirname(_NAME_CODE_CACHE_PATH), exist_ok=True)
+        with open(_NAME_CODE_CACHE_PATH, "w") as f:
+            json.dump(_NAME_CODE_CACHE, f, ensure_ascii=False)
+    except Exception: pass
+    return _NAME_CODE_CACHE
+
+
+def _resolve_code(input_str: str) -> Optional[str]:
+    """把任意输入 (代码/中文名/带括号) → tushare ts_code (如 002300.SZ)"""
+    if not input_str: return None
+    s = input_str.strip()
+    # ① 括号提取 "紫薇股份 (002300.SZ)" 或 "(002300.SZ)"
+    m = re.search(r"\((\d{6}\.(?:SH|SZ|BJ))\)", s)
+    if m: return m.group(1)
+    # ② 去掉 sh/sz/bj 前缀
+    s2 = re.sub(r"^(sh|sz|bj|SH|SZ|BJ)", "", s)
+    # ③ 已有完整后缀
+    if re.match(r"^\d{6}\.(SH|SZ|BJ)$", s2): return s2
+    # ④ 纯 6 位数字
+    if s2.isdigit() and len(s2) == 6:
+        suffix = ".SH" if s2.startswith(("6","9","5")) else ".SZ" if s2.startswith(("3","0","4")) else ".BJ"
+        return s2 + suffix
+    # ⑤ 中文名 → 查映射
+    if re.search(r"[\u4e00-\u9fa5]", s):
+        mp = _load_name_code_map()
+        cn_map = mp.get("cn", {})
+        # 精确匹配
+        if s in cn_map: return cn_map[s]
+        # 模糊匹配 (包含)
+        for nm, tsc in cn_map.items():
+            if s in nm or nm in s: return tsc
+    return None
+
+
+def _fetch_stock_name(ts_code: str) -> str:
+    """ts_code → 中文名, 失败返回原代码"""
+    mp = _load_name_code_map()
+    nc_map = mp.get("nc", {})
+    return nc_map.get(ts_code, ts_code)
+
+
 def _detect_local_extremes(arr, order=5):
     """找 arr 里的局部极值, order=窗口大小"""
     import numpy as np
@@ -951,42 +1046,149 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
     # ========= 🔍 搜索 =========
     def _collect_candidates():
-        cands = []
+        """收集候选股票, 优先级: 持仓股 > 龙头(成交额前20) > 涨停池 > 已分析过 > 兜底"""
+        seen = set()
+        result = []  # ["紫薇股份 (002300.SZ)", ...]
+        mp = _load_name_code_map()
+        nc_map = mp.get("nc", {})   # ts_code -> name
+        cn_map = mp.get("cn", {})   # name -> ts_code
+
+        def _add(label, tsc, tag=""):
+            if not tsc or tsc in seen: return
+            seen.add(tsc)
+            nm = nc_map.get(tsc, "")
+            if not nm:
+                # 从 tsc 拆 code6 反向查 (tsc 形如 002300.SZ)
+                code6 = tsc.split(".")[0]
+                for _n, _t in cn_map.items():
+                    if _t == tsc: nm = _n; break
+            if tag: label = f"[{tag}] {label}"
+            result.append(f"{label} ({tsc})" if label != tsc and label else tsc)
+
+        # ① 持仓股 (来自 self.holding_stocks — 但无 self 时跳过)
+        # 改从 web_data/holdings_state.json + SQLite stock_data 表里的历史分析股票名 + akshare 龙头
+        # 由于本函数无 self, 只能读磁盘 + 网络
+
+        # ② SQLite stock_analysis.db 已分析过的股票 (最稳定)
+        _db_paths = [
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "data", "stock_analysis.db"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "stock_analysis.db"),
+        ]
+        for _db in _db_paths:
+            if not os.path.exists(_db): continue
+            try:
+                import sqlite3
+                conn = sqlite3.connect(_db); cur = conn.cursor()
+                for _tbl, _code_col, _name_col in [
+                    ("stock_data", "stock_code", "stock_name"),
+                    ("market_codes", "code", "name"),
+                ]:
+                    try:
+                        cur.execute(f"SELECT {_code_col}, {_name_col} FROM {_tbl} LIMIT 50")
+                        for row in cur.fetchall():
+                            _c6 = str(row[0]).strip()
+                            if not _c6 or not _c6.isdigit() or len(_c6) != 6: continue
+                            _nm = str(row[1] or "").strip()
+                            _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
+                            _add(_nm or _tsc, _tsc, "历")
+                    except Exception: pass
+                conn.close()
+            except Exception: pass
+
+        # ③ akshare 龙头 (成交额前 20)
         try:
-            import sqlite3
-            for root, _, files in os.walk(os.path.expanduser("~/Agent/stockyidong_project")):
-                for f in files:
-                    if f.endswith(".db") and "stock" in f.lower():
-                        try:
-                            conn = sqlite3.connect(os.path.join(root, f))
-                            cur = conn.cursor(); cur.execute("SELECT stock_code FROM tushare_stocks LIMIT 200")
-                            for row in cur.fetchall(): cands.append(row[0])
-                            conn.close(); break
-                        except Exception: pass
+            import akshare as ak
+            _spot = ak.stock_zh_a_spot_em()
+            if _spot is not None and len(_spot) > 0:
+                # 成交额列
+                _amt_col = "成交额" if "成交额" in _spot.columns else None
+                if _amt_col:
+                    _spot2 = _spot.sort_values(_amt_col, ascending=False).head(20)
+                else:
+                    _spot2 = _spot.head(20)
+                for _, r in _spot2.iterrows():
+                    _c6 = str(r.get("代码", "")).strip()
+                    _nm = str(r.get("名称", "")).strip()
+                    if not _c6.isdigit() or len(_c6) != 6: continue
+                    _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
+                    _add(_nm, _tsc, "龙")
         except Exception: pass
+
+        # ④ akshare 涨停池 (交易日才有, 非交易日跳过)
         try:
             import akshare as ak; from datetime import datetime
-            df = ak.stock_zt_pool_em(date=datetime.now().strftime("%Y%m%d"))
-            if df is not None: cands += df["代码"].tolist()[:30]
+            _zt = ak.stock_zt_pool_em(date=datetime.now().strftime("%Y%m%d"))
+            if _zt is not None and len(_zt) > 0:
+                _code_col = "代码" if "代码" in _zt.columns else list(_zt.columns)[0]
+                _name_col = "名称" if "名称" in _zt.columns else None
+                for _, r in _zt.head(30).iterrows():
+                    _c6 = str(r[_code_col]).strip()
+                    _nm = str(r[_name_col]).strip() if _name_col else ""
+                    if not _c6.isdigit() or len(_c6) != 6: continue
+                    _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
+                    _add(_nm or _tsc, _tsc, "停")
         except Exception: pass
-        return list(dict.fromkeys([c for c in cands if c])).reverse()[:200]
+
+        # 兜底: 至少给 10 只常用龙头
+        if len(result) < 30:
+            for _tsc, _nm in [
+                ("600519.SH","贵州茅台"),("000858.SZ","五粮液"),("601318.SH","中国平安"),
+                ("000001.SZ","平安银行"),("600036.SH","招商银行"),("000333.SZ","美的集团"),
+                ("600276.SH","恒瑞医药"),("002594.SZ","比亚迪"),("300750.SZ","宁德时代"),
+                ("601888.SH","中国中免"),("002415.SZ","海康威视"),("601012.SH","隆基绿能"),
+                ("300059.SZ","东方财富"),("002475.SZ","立讯精密"),("600030.SH","中信证券"),
+            ]:
+                _add(_nm, _tsc, "常")
+
+        print(f"[股票分析候选] 共 {len(result)} 只")
+        return result[:200]
+
 
     def _do_search():
         nonlocal _current_kline, _current_fund, _current_name
-        code = stock_var.get().strip()
-        if not code: status_var.set("⚠️ 请输入股票"); return
-        code6 = re.sub(r"^(sh|sz|bj|SH|SZ|BJ)", "", code)
-        if "." not in code6:
-            suffix = ".SH" if code6.startswith(("6","9","5")) else ".SZ" if code6.startswith(("3","0","4")) else ".BJ"
-            tsc = code6 + suffix
-        else: tsc = code6
+        raw = stock_var.get().strip()
+        if not raw: status_var.set("⚠️ 请输入股票"); return
+        tsc = _resolve_code(raw)
+        if not tsc:
+            status_var.set(f"❌ 无法解析: {raw} (请输入 6 位代码、中文名或 '000001.SZ')"); return
         status_var.set(f"⏳ 拉 {tsc} K线 + 基本面 + 技术面...")
         def _bg():
             global _hover_tt
             _hover_tt = None
+            # ① tushare
             kline = _fetch_kline_data(tsc, 180)
+            # ② tushare 失败 → akshare 兜底
             if not kline:
-                win.after(0, lambda: status_var.set("❌ K线获取失败 (tushare熔断或无数据)")); return
+                try:
+                    import akshare as ak, pandas as pd, numpy as np
+                    code6 = tsc.split(".")[0]
+                    # akstock zh_a_hist (不复权日线)
+                    df = ak.stock_zh_a_hist(symbol=code6, period="daily", adjust="")
+                    if df is not None and len(df) >= 30:
+                        df = df.sort_values("日期").reset_index(drop=True)
+                        data = pd.DataFrame({
+                            "日期": df["日期"].astype(str).str.replace("-",""),
+                            "开盘": df["开盘"].astype(float),
+                            "收盘": df["收盘"].astype(float),
+                            "最高": df["最高"].astype(float),
+                            "最低": df["最低"].astype(float),
+                            "成交量": df["成交量"].astype(float),
+                            "成交额": df["成交额"].astype(float) if "成交额" in df.columns else np.zeros(len(df)),
+                        })
+                        closes = data["收盘"].values.astype(float)
+                        ma_values = {}
+                        for ma_name, p in [("ma5",5),("ma10",10),("ma20",20),("ma60",60)]:
+                            if len(closes) >= p:
+                                ma_values[ma_name] = np.convolve(closes, np.ones(p)/p, mode="valid").tolist()
+                        kline = {"data": data, "ma_values": ma_values,
+                                 "trade_dates": data["日期"].tolist()}
+                        print(f"[股票分析] akshare 兜底成功 {tsc}")
+                except Exception as _e:
+                    print(f"[股票分析] akshare 兜底也失败: {_e}")
+            if not kline:
+                win.after(0, lambda: status_var.set("❌ K线获取失败 (tushare熔断 + akshare兜底也不可用)")); return
             name = _fetch_stock_name(tsc)
             fund = _fetch_fundamentals(tsc)
             win.after(0, lambda: _apply_data(name, kline, fund))
