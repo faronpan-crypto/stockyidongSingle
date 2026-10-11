@@ -18567,32 +18567,24 @@ class DapanMixin:
             ttk.Button(bottom, text="导出Excel", command=export_excel).pack(side=tk.LEFT, padx=(0, 8))
         except Exception as e:
             messagebox.showerror("错误", f"打开资讯AI分析窗口失败: {e}")
-    def _show_stock_analysis_dialog(self, stock_code, stock_name):
-        """显示股票分析弹窗(带K线和逻辑)"""
-        # 创建分析窗口
-        analysis_window = self._toplevel(self.root)
-        analysis_window.title(f"股票分析 - {stock_name}({stock_code})")
-        analysis_window.geometry("1400x800")
-        analysis_window.transient(self.root)
-        # 主框架
-        main_frame = ttk.Frame(analysis_window, padding=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        # 标题
-        ttk.Label(main_frame, text=f"{stock_name}({stock_code})",
-                 font=("TkDefaultFont", 14, "bold")).pack(pady=(0, 10))
-        # K线图框架
-        kline_frame = ttk.LabelFrame(main_frame, text="日K线图(Tushare)", padding=10)
-        kline_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        # 同花顺情绪指数日线图(放在日K线图下方)
-        sentiment_frame = ttk.LabelFrame(main_frame, text="同花顺情绪指数(日线)", padding=10)
-        sentiment_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        # 逻辑显示框架
-        logic_frame = ttk.LabelFrame(main_frame, text="逻辑分析", padding=10)
-        logic_frame.pack(fill=tk.X)
-        logic_text = tk.Text(logic_frame, height=10, wrap=tk.WORD)
-        logic_text.pack(fill=tk.BOTH, expand=True)
-        logic_text.insert("1.0", "正在加载...")
-        # 在后台线程中加载K线图、同花顺情绪指数图与逻辑
+    def _show_stock_analysis_dialog(self, *args, **kwargs):
+        """📊 股票分析 — 新版 lazy import (兼容旧调用)
+
+        调用方式:
+          1) self._show_stock_analysis_dialog()                    # 工具栏按钮 (无参)
+          2) self._show_stock_analysis_dialog(code, name)          # 旧调用 (双击持仓股)
+        """
+        import traceback as _tb
+        print(f"[📊股票分析] 被调用! args={args}, kwargs={kwargs}", flush=True)
+        stock_code = kwargs.get("stock_code") or (args[0] if len(args)>=1 else None)
+        stock_name = kwargs.get("stock_name") or (args[1] if len(args)>=2 else None)
+        try:
+            from ui.stock_analysis import show_stock_analysis_dialog as _sa
+            ai_fn = getattr(self, 'call_ai_model', None)
+            win = getattr(self, 'root', None) or getattr(self, '_root', None)
+            _sa(win, call_ai_fn=ai_fn, auto_code=stock_code, auto_name=stock_name)
+        except Exception as e:
+            print(f"[📊股票分析❌] {e}", flush=True); _tb.print_exc()
         def load_stock_analysis():
             try:
                 # 获取日K线数据(Tushare)

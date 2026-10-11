@@ -69,7 +69,7 @@ def _fetch_stock_name(ts_code: str) -> str:
 
 
 # ============= UI 弹窗 =============
-def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None):
+def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None, auto_name=None):
     import tkinter as tk
     from tkinter import ttk, messagebox
     import webbrowser
@@ -566,8 +566,20 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None):
     def _load_candidates():
         cands = _collect_candidates()
         combo.configure(values=cands)
-        if cands: combo.set(cands[0])
-        status_var.set(f"✅ 候选 {len(cands)} 只 (持仓+涨停)")
+        # 优先预填 auto_code (来自工具栏/双击入口)
+        target = auto_code or ""
+        if target:
+            # 去掉 sh/sz 前缀
+            t6 = re.sub(r"^(sh|sz|bj|SH|SZ|BJ)", "", target)
+            combo.set(t6)
+            status_var.set(f"🎯 自动加载: {auto_name or t6}")
+            # 自动触发分析
+            win.after(300, _do_search)
+        elif cands:
+            combo.set(cands[0])
+            status_var.set(f"✅ 候选 {len(cands)} 只 (持仓+涨停)")
+        else:
+            status_var.set("⚠️ 未找到候选股, 请手动输入")
     threading.Thread(target=_load_candidates, daemon=True).start()
 
     win.bind("<Return>", lambda e: _do_search())

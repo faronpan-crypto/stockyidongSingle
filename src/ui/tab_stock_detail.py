@@ -897,45 +897,44 @@ class StockDetailMixin:
                 nonlocal hover_tt
                 def _on_motion(event):
                     nonlocal hover_tt
-                    if not show_bt_var.get():
-                        if hover_tt: hover_tt.destroy(); hover_tt = None; return
-                    if event.inaxes is None or event.xdata is None:
-                        if hover_tt: hover_tt.destroy(); hover_tt = None; return
-                    idx = int(round(event.xdata))
-                    if idx not in hover_bs_cache:
-                        if hover_tt: hover_tt.destroy(); hover_tt = None; return
-                    sig_type, label, color = hover_bs_cache[idx]
-                    bt = hover_bt_cache.get(sig_type)
-                    # 构造 tooltip 文本
-                    _type_zh = {"buy":"★买入","add":"▲加仓","sell":"▼卖出","reduce":"▽减仓"}.get(sig_type, sig_type)
-                    lines = [f"🎯 {_type_zh} — {label}", ""]
-                    if bt:
-                        cnt, wr, avg_g, avg_l, plr = bt
-                        lines.append(f"📊 历史信号: {cnt} 次")
-                        lines.append(f"✅ 胜率: {wr:.1f}%")
-                        lines.append(f"💰 平均盈利: +{avg_g:.2f}%")
-                        lines.append(f"💔 平均亏损: -{avg_l:.2f}%")
-                        lines.append(f"⚖️ 盈亏比: {plr:.2f}")
-                    else:
-                        lines.append("⚠️ 历史信号不足 3 次")
-                    text = "\n".join(lines)
-                    # 创建/更新 tooltip 窗口
-                    if hover_tt is None or not hover_tt.winfo_exists():
-                        hover_tt = tk.Toplevel(win)
-                        hover_tt.wm_overrideredirect(True)
-                        hover_tt.attributes("-topmost", True)
-                        hover_tt.configure(bg="#263238")
-                        tk.Label(hover_tt, text=text, bg="#263238", fg="#FFFFFF",
-                                 font=("", 10, "bold"), padx=10, pady=6, justify=tk.LEFT).pack()
-                    else:
-                        for w in hover_tt.winfo_children(): w.destroy()
-                        tk.Label(hover_tt, text=text, bg="#263238", fg="#FFFFFF",
-                                 font=("", 10, "bold"), padx=10, pady=6, justify=tk.LEFT).pack()
-                    # 定位 (跟随鼠标, 避免超出屏幕)
-                    mx = win.winfo_pointerx(); my = win.winfo_pointery()
-                    hover_tt.geometry(f"+{mx+15}+{my+15}")
+                    try:
+                        if not show_bt_var.get():
+                            if hover_tt: hover_tt.destroy(); hover_tt = None; return
+                        if event.inaxes is None or event.xdata is None:
+                            if hover_tt: hover_tt.destroy(); hover_tt = None; return
+                        idx = int(round(event.xdata))
+                        if idx not in hover_bs_cache:
+                            if hover_tt: hover_tt.destroy(); hover_tt = None; return
+                        sig_type, label, color = hover_bs_cache[idx]
+                        bt = hover_bt_cache.get(sig_type)
+                        _type_zh = {"buy":"★买入","add":"▲加仓","sell":"▼卖出","reduce":"▽减仓"}.get(sig_type, sig_type)
+                        lines = [f"🎯 {_type_zh} — {label}", ""]
+                        if bt:
+                            cnt, wr, avg_g, avg_l, plr = bt
+                            lines.append(f"📊 历史信号: {cnt} 次")
+                            lines.append(f"✅ 胜率: {wr:.1f}%")
+                            lines.append(f"💰 平均盈利: +{avg_g:.2f}%")
+                            lines.append(f"💔 平均亏损: -{avg_l:.2f}%")
+                            lines.append(f"⚖️ 盈亏比: {plr:.2f}")
+                        else:
+                            lines.append("⚠️ 历史信号不足 3 次")
+                        text = "\n".join(lines)
+                        if hover_tt is None or not hover_tt.winfo_exists():
+                            hover_tt = tk.Toplevel(win)
+                            hover_tt.wm_overrideredirect(True)
+                            hover_tt.attributes("-topmost", True)
+                            hover_tt.configure(bg="#263238")
+                            tk.Label(hover_tt, text=text, bg="#263238", fg="#FFFFFF",
+                                     font=("", 10, "bold"), padx=10, pady=6, justify=tk.LEFT).pack()
+                        else:
+                            for w in hover_tt.winfo_children(): w.destroy()
+                            tk.Label(hover_tt, text=text, bg="#263238", fg="#FFFFFF",
+                                     font=("", 10, "bold"), padx=10, pady=6, justify=tk.LEFT).pack()
+                        mx = win.winfo_pointerx(); my = win.winfo_pointery()
+                        hover_tt.geometry(f"+{mx+15}+{my+15}")
+                    except Exception:
+                        if hover_tt: hover_tt.destroy(); hover_tt = None
                 canvas.mpl_connect("motion_notify_event", _on_motion)
-                # 离开时隐藏
                 def _on_leave(event):
                     nonlocal hover_tt
                     if hover_tt: hover_tt.destroy(); hover_tt = None

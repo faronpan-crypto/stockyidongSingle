@@ -4,11 +4,12 @@
   "providers": {
     "deepseek": {
       "base_url": "https://api.deepseek.com/v1",
-      "api_key": "",
+      "api_key": "sk-255db1f6651a465b9e8daac02ebb2b25",
       "model": "deepseek-chat",
       "mode": "chat",
       "temperature": 0.3,
-      "timeout": 60
+      "timeout": 60.0,
+      "endpoint": "/chat/completions"
     },
     "doubao": {
       "base_url": "https://ark.cn-beijing.volces.com",
@@ -17,7 +18,7 @@
       "model": "doubao-seedance-1-0-pro-250528",
       "mode": "chat",
       "temperature": 0.3,
-      "timeout": 60
+      "timeout": 60.0
     },
     "ollama": {
       "base_url": "http://localhost:11434",
@@ -25,7 +26,8 @@
       "model": "qwen2.5:7b",
       "mode": "chat",
       "temperature": 0.3,
-      "timeout": 60
+      "timeout": 60.0,
+      "api_key": ""
     }
   },
   "tushare": {
@@ -55,14 +57,14 @@
     }
   },
   "holding_tab_names": {
-    "7": "1010",
-    "8": "1009",
-    "9": "1008",
-    "10": "1007",
-    "11": "1006",
-    "12": "1005",
-    "13": "1004",
-    "14": "1003"
+    "7": "1011",
+    "8": "1010",
+    "9": "1009",
+    "10": "1008",
+    "11": "1007",
+    "12": "1006",
+    "13": "1005",
+    "14": "1004"
   },
   "holding_stocks_4": [
     {
