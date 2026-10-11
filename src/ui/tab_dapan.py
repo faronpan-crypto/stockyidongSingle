@@ -14101,7 +14101,8 @@ class DapanMixin:
         print("[💰比价] 按钮被点击!", flush=True)
         try:
             from ui.price_compare import show_price_compare_dialog as _spc
-            _spc(getattr(self, 'root', None) or getattr(self, '_root', None) or None)
+            ai_fn = getattr(self, 'call_ai_model', None)
+            _spc(getattr(self, 'root', None) or getattr(self, '_root', None), call_ai_fn=ai_fn)
         except Exception as e:
             print(f"[💰比价❌] {e}", flush=True)
             _tb.print_exc()
