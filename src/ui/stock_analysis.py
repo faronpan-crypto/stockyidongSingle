@@ -810,7 +810,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
     # ===== 左侧: Notebook 6 Tab =====
     left_f = tk.Frame(pw, bg="#ECEFF1")
-    pw.add(left_f, minsize=420)
+    pw.add(left_f, minsize=280)
     nb = ttk.Notebook(left_f); nb.pack(fill=tk.BOTH, expand=True)
     tabs = {
         "📈 形态": tk.Frame(nb, bg="#FFFFFF"),
@@ -826,7 +826,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
     # ===== 右侧: K 线 =====
     right_f = tk.Frame(pw, bg="#FAFAFA")
-    pw.add(right_f, minsize=600)
+    pw.add(right_f, minsize=420)
     rt = tk.Frame(right_f, bg="#FAFAFA"); rt.pack(fill=tk.X, pady=(0,4))
     ttk.Label(rt, text="K线图 + 指标 + 买卖点 (hover 查看胜率+凯利公式)",
               font=("", 11, "bold"), background="#FAFAFA", foreground="#1565C0").pack(side=tk.LEFT, padx=6)
@@ -850,10 +850,10 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     _right_inner.pack(fill=tk.BOTH, expand=True)
     # — 中间: matplotlib K 线图 (左侧大块) —
     chart_inner = tk.Frame(_right_inner, bg="#FAFAFA")
-    _right_inner.add(chart_inner, minsize=500)
+    _right_inner.add(chart_inner, minsize=320)
     # — 右侧: 实时行情竖排面板 —
-    info_panel = tk.Frame(_right_inner, bg="#FFFFFF", bd=1, relief=tk.SOLID, width=260)
-    _right_inner.add(info_panel, minsize=240)
+    info_panel = tk.Frame(_right_inner, bg="#FFFFFF", bd=1, relief=tk.SOLID, width=220)
+    _right_inner.add(info_panel, minsize=180)
 
     # — info_panel 从上到下: 大字号价格 → 日期 → 指标表 (竖排) —
     info_header = tk.Frame(info_panel, bg="#ECEFF1"); info_header.pack(fill=tk.X)
