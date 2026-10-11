@@ -832,6 +832,166 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                             ("fib","斐波那契",True),("gold","黄金分割",True),("zs","缠论中枢",False)]:
         aux_vars[_k] = tk.BooleanVar(value=_def)
         ttk.Checkbutton(_aux_frame, text=_lbl, variable=aux_vars[_k]).pack(side=tk.LEFT, padx=2)
+
+    # ===== 同花顺风格实时数据面板 (最新价+涨跌+开高低收+量额+换手+PE+市值+量比) =====
+    info_panel = tk.Frame(right_f, bg="#FFFFFF", bd=1, relief=tk.SOLID)
+    info_panel.pack(fill=tk.X, pady=(2,4), padx=2)
+    # — 左区: 最新价 + 涨跌额 + 涨跌幅 (大字号 红绿色) —
+    info_left = tk.Frame(info_panel, bg="#FFFFFF"); info_left.pack(side=tk.LEFT, padx=(12,14), pady=6)
+    _tk_cn_var = tk.StringVar(value="--")   # 最新价
+    _tk_cp_var = tk.StringVar(value="--")   # 涨跌额
+    _tk_cpct_var = tk.StringVar(value="--") # 涨跌幅%
+    _tk_open_var = tk.StringVar(value="今开 --")
+    _tk_high_var = tk.StringVar(value="最高 --")
+    _tk_low_var = tk.StringVar(value="最低 --")
+    _tk_preclose_var = tk.StringVar(value="昨收 --")
+    _tk_vol_var = tk.StringVar(value="量 --")
+    _tk_amount_var = tk.StringVar(value="额 --")
+    _tk_turn_var = tk.StringVar(value="换手 --")
+    _tk_amp_var = tk.StringVar(value="振幅 --")
+    _tk_pe_var = tk.StringVar(value="PE --")
+    _tk_mv_var = tk.StringVar(value="市值 --")
+    _tk_pb_var = tk.StringVar(value="PB --")
+    _tk_vol_ratio_var = tk.StringVar(value="量比 --")
+    _tk_name_label = tk.Label(info_left, text="", bg="#FFFFFF", fg="#333", font=("", 9, "bold"))
+    _tk_name_label.pack(anchor="w")
+    _tk_price_label = tk.Label(info_left, textvariable=_tk_cn_var, bg="#FFFFFF", fg="#C62828",
+                                font=("", 22, "bold")); _tk_price_label.pack(anchor="w")
+    _tk_chg_row = tk.Frame(info_left, bg="#FFFFFF"); _tk_chg_row.pack(anchor="w")
+    _tk_cp_lbl = tk.Label(_tk_chg_row, textvariable=_tk_cp_var, bg="#FFFFFF", fg="#C62828",
+                           font=("", 11, "bold")); _tk_cp_lbl.pack(side=tk.LEFT)
+    _tk_cpct_lbl = tk.Label(_tk_chg_row, textvariable=_tk_cpct_var, bg="#FFFFFF", fg="#C62828",
+                             font=("", 11)); _tk_cpct_lbl.pack(side=tk.LEFT, padx=(8,0))
+    _tk_date_lbl = tk.Label(info_left, text="", bg="#FFFFFF", fg="#888", font=("", 8))
+    _tk_date_lbl.pack(anchor="w")
+    # — 右区: 三列 × 4 个指标 —
+    info_right = tk.Frame(info_panel, bg="#FFFFFF"); info_right.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=6, padx=(0,8))
+    def _mk_indicator(parent, row, col, label, var, desc=""):
+        fr = tk.Frame(parent, bg="#FFFFFF"); fr.grid(row=row, column=col, sticky="w", padx=10, pady=2)
+        tk.Label(fr, text=label, bg="#FFFFFF", fg="#888", font=("", 8)).pack(anchor="w")
+        tk.Label(fr, textvariable=var, bg="#FFFFFF", fg="#333", font=("", 10, "bold")).pack(anchor="w")
+    info_r1 = tk.Frame(info_right, bg="#FFFFFF"); info_r1.pack(fill=tk.X)
+    _mk_indicator(info_r1, 0, 0, "今开", _tk_open_var)
+    _mk_indicator(info_r1, 0, 1, "最高", _tk_high_var)
+    _mk_indicator(info_r1, 0, 2, "最低", _tk_low_var)
+    _mk_indicator(info_r1, 0, 3, "昨收", _tk_preclose_var)
+    info_r2 = tk.Frame(info_right, bg="#FFFFFF"); info_r2.pack(fill=tk.X)
+    _mk_indicator(info_r2, 0, 0, "成交量", _tk_vol_var)
+    _mk_indicator(info_r2, 0, 1, "成交额", _tk_amount_var)
+    _mk_indicator(info_r2, 0, 2, "换手率", _tk_turn_var)
+    _mk_indicator(info_r2, 0, 3, "振幅", _tk_amp_var)
+    info_r3 = tk.Frame(info_right, bg="#FFFFFF"); info_r3.pack(fill=tk.X)
+    _mk_indicator(info_r3, 0, 0, "PE(TTM)", _tk_pe_var)
+    _mk_indicator(info_r3, 0, 1, "PB", _tk_pb_var)
+    _mk_indicator(info_r3, 0, 2, "总市值", _tk_mv_var)
+    _mk_indicator(info_r3, 0, 3, "量比(5/20)", _tk_vol_ratio_var)
+    # — 刷新按钮: 右侧最右边 —
+    _refresh_spot_btn = tk.Button(info_right, text="🔄 实时行情", command=lambda: _refresh_realtime(),
+                                   bg="#E3F2FD", fg="#1565C0", font=("", 9), relief=tk.FLAT, padx=8)
+    _refresh_spot_btn.pack(side=tk.RIGHT, pady=4)
+
+    def _refresh_realtime():
+        """异步刷新 akshare spot_em 实时行情 + 更新面板"""
+        import threading as _th
+        def _bg():
+            nonlocal _current_name
+            tsc = _current_kline.get("ts_code","") if _current_kline else ""
+            c6 = re.sub(r"\.(SH|SZ|BJ)$", "", tsc)
+            spot = None
+            try:
+                import akshare as ak
+                _s = ak.stock_zh_a_spot_em()
+                if _s is not None and len(_s) > 0:
+                    _mt = _s[_s["代码"].astype(str).str.startswith(c6)]
+                    if len(_mt) > 0: spot = _mt.iloc[0].to_dict()
+            except Exception as e:
+                print(f"[📊实时行情] spot失败: {e}")
+            win.after(0, lambda: _apply_realtime(spot))
+        _th.Thread(target=_bg, daemon=True).start()
+
+    def _apply_realtime(spot):
+        """把 akshare spot dict 应用到面板 + 更新 _current_kline 最新 bar"""
+        nonlocal _hover_cache
+        if not _current_kline: return
+        data = _current_kline["data"]
+        col_map = {}
+        if spot:
+            col_map = {"今开":"今开", "最高":"最高", "最低":"最低", "昨收":"昨收",
+                       "最新价":"最新价", "成交量":"成交量", "成交额":"成交额",
+                       "换手率":"换手率", "振幅":"振幅", "市盈率-动态":"市盈率", "市净率":"市净率",
+                       "总市值":"总市值"}
+        # 取最新 bar (kline data 的最后一行) 作为默认数据源
+        i = len(data) - 1
+        row = data.iloc[i]
+        date_str = str(row.get("日期",""))
+        o = float(row["开盘"]); h = float(row["最高"]); l = float(row["最低"]); c = float(row["收盘"])
+        vol = float(row["成交量"])
+        pre_close = float(data.iloc[i-1]["收盘"]) if i > 0 else c
+        # 涨跌
+        chg = c - pre_close; pct = chg / pre_close * 100
+        up = chg >= 0
+        fg = "#C62828" if up else "#2E7D32"
+        # spot 覆盖 (有更实时的就用实时)
+        if spot:
+            c = float(spot.get("最新价", c))
+            o = float(spot.get("今开", o)); h = float(spot.get("最高", h))
+            l = float(spot.get("最低", l)); pre_close = float(spot.get("昨收", pre_close))
+            vol = float(spot.get("成交量", vol))
+            chg = c - pre_close; pct = chg / pre_close * 100
+            up = chg >= 0; fg = "#C62828" if up else "#2E7D32"
+            date_str = date_str + " · 实时"
+        # 更新左边大字号
+        _tk_price_label.configure(fg=fg); _tk_cp_lbl.configure(fg=fg); _tk_cpct_lbl.configure(fg=fg)
+        _tk_cn_var.set(f"{c:.2f}")
+        _tk_cp_var.set(f"{'+' if chg>=0 else ''}{chg:.2f}")
+        _tk_cpct_var.set(f"{'+' if pct>=0 else ''}{pct:.2f}%")
+        _tk_name_label.configure(text=f"{_current_name} ({_current_kline.get('ts_code','')})")
+        _tk_date_lbl.configure(text=f"📅 {date_str}")
+        # 更新右区指标
+        def _fmt_vol(v):
+            v = float(v)
+            if v >= 1e8: return f"{v/1e8:.2f}亿"
+            if v >= 1e4: return f"{v/1e4:.0f}万"
+            return f"{v:.0f}"
+        _tk_open_var.set(f"{o:.2f}"); _tk_high_var.set(f"{h:.2f}")
+        _tk_low_var.set(f"{l:.2f}"); _tk_preclose_var.set(f"{pre_close:.2f}")
+        # 量额: tushare daily 单位是手 / 千元, spot_em 单位是股 / 元
+        if spot:
+            _tk_vol_var.set(f"{_fmt_vol(vol)}")
+            _tk_amount_var.set(_fmt_vol(float(spot.get("成交额",0))))
+        else:
+            _tk_vol_var.set(f"{_fmt_vol(vol*100)}")  # 手→股
+            _tk_amount_var.set(f"{_fmt_vol(float(row.get('成交额',0))*1000)}")  # 千元→元
+        # 换手率: spot 直接有, 否则从 fund 取
+        if spot and spot.get("换手率"): _tk_turn_var.set(f"{float(spot['换手率']):.2f}%")
+        elif _current_fund.get("tr") is not None: _tk_turn_var.set(f"{_current_fund['tr']:.2f}%")
+        else: _tk_turn_var.set("--")
+        # 振幅
+        amp = (h - l) / pre_close * 100 if pre_close > 0 else 0
+        _tk_amp_var.set(f"{amp:.2f}%")
+        # PE / PB
+        if spot:
+            _tk_pe_var.set(f"{float(spot.get('市盈率-动态',0)):.1f}" if spot.get("市盈率-动态") else "--")
+            _tk_pb_var.set(f"{float(spot.get('市净率',0)):.2f}" if spot.get("市净率") else "--")
+        elif _current_fund.get("pe_ttm") is not None: _tk_pe_var.set(f"{_current_fund['pe_ttm']:.1f}")
+        elif _current_fund.get("pb") is not None: _tk_pb_var.set(f"{_current_fund['pb']:.2f}")
+        else:
+            _tk_pe_var.set("--"); _tk_pb_var.set("--")
+        # 市值 (spot 是元, 转亿)
+        if spot and spot.get("总市值"):
+            _tk_mv_var.set(f"{float(spot['总市值'])/1e8:.1f}亿")
+        elif _current_fund.get("mv") is not None:
+            _tk_mv_var.set(f"{_current_fund['mv']:.0f}亿")
+        else: _tk_mv_var.set("--")
+        # 量比: 5日均量 / 20日均量 (用 kline data 自己算)
+        if len(data) >= 20:
+            v_arr = data["成交量"].values.astype(float)
+            v5 = np.mean(v_arr[-5:]) if v_arr[-5:].sum() > 0 else 1
+            v20 = np.mean(v_arr[-20:]) if v_arr[-20:].sum() > 0 else 1
+            ratio_5 = vol / v5 if v5 > 0 else 1
+            ratio_20 = vol / v20 if v20 > 0 else 1
+            _tk_vol_ratio_var.set(f"5日 {ratio_5:.2f}  20日 {ratio_20:.2f}")
+        else: _tk_vol_ratio_var.set("--")
     chart_inner = tk.Frame(right_f, bg="#FAFAFA"); chart_inner.pack(fill=tk.BOTH, expand=True, pady=4)
 
     # ===== 状态缓存 =====
@@ -1360,7 +1520,40 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                             ax_main.text(_x_min, _zs["ZD"], f"中枢ZD={_zs['ZD']:.2f}", fontsize=6, color="#FF9800", va="top")
                 except Exception as _e:
                     pass  # 缠论辅助线失败不影响主图
-            ax_main.set_title(f"{_current_name} - 日K线图 (hover K线看胜率+凯利)", fontsize=11, fontweight="bold")
+            # 默认显示最新交易日详细数据 (不用等鼠标移上去): 日期+开高低收+涨跌+量+额+换手+量比
+            try:
+                i = len(data) - 1
+                d_last = data.iloc[i]
+                _d = str(d_last.get("日期",""))
+                _o = float(d_last["开盘"]); _h = float(d_last["最高"]); _l = float(d_last["最低"])
+                _c = float(d_last["收盘"])
+                _vol = float(d_last["成交量"])
+                _pre = float(data.iloc[i-1]["收盘"]) if i > 0 else _c
+                _chg = _c - _pre; _pct = _chg / _pre * 100 if _pre > 0 else 0
+                _fg = "#C62828" if _chg >= 0 else "#2E7D32"
+                def _fv(v, mul=1):
+                    v = float(v) * mul
+                    if abs(v) >= 1e8: return f"{v/1e8:.2f}亿"
+                    if abs(v) >= 1e4: return f"{v/1e4:.0f}万"
+                    return f"{v:.0f}"
+                _amt = float(d_last.get("成交额", 0)) * 1000  # tushare daily 千元→元
+                # 量比
+                v_arr = data["成交量"].values.astype(float)
+                v5 = np.mean(v_arr[-5:]) if len(v_arr) >= 5 and v_arr[-5:].sum() > 0 else 0
+                v20 = np.mean(v_arr[-20:]) if len(v_arr) >= 20 and v_arr[-20:].sum() > 0 else 0
+                _vr5 = (_vol / v5) if v5 > 0 else 1.0
+                _vr20 = (_vol / v20) if v20 > 0 else 1.0
+                # 换手率优先 spot_em (已经在 _apply_realtime 更新面板), 退而求其次用 fund
+                _tr = _current_fund.get("tr")
+                _tr_str = f"换手{_tr:.2f}%" if _tr is not None else ""
+                title = (f"{_current_name} · {_d}  "
+                         f"收{_c:.2f} ({'+' if _chg>=0 else ''}{_chg:.2f} {'+' if _pct>=0 else ''}{_pct:.2f}%)  "
+                         f"开{_o:.2f} 高{_h:.2f} 低{_l:.2f} 昨收{_pre:.2f}  "
+                         f"量{_fv(_vol*100)} 额{_fv(_amt)} {_tr_str} "
+                         f"量比5日{_vr5:.2f}/20日{_vr20:.2f}")
+            except Exception:
+                title = f"{_current_name} - 日K线图 (hover 看胜率+凯利)"
+            ax_main.set_title(title, fontsize=10, fontweight="bold", color="#37474F")
             ax_main.legend(loc="upper left", fontsize=7); ax_main.grid(True, alpha=0.25)
             # 副图
             for row, key in enumerate(sel, start=1):
@@ -1729,7 +1922,9 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     def _apply_data(name, kline, fund):
         nonlocal _current_kline, _current_fund, _current_name
         _current_name = name; _current_kline = kline; _current_fund = fund
+        _current_kline["ts_code"] = tsc   # 补 ts_code 字段给实时行情面板
         _render_all(); _redraw_chart()
+        _apply_realtime(spot=None)         # 自动填充同花顺面板 (先用 kline data)
         status_var.set(f"✅ {name}({stock_var.get().strip()}) 六大流派分析完成")
 
     def _update_ai(text):
