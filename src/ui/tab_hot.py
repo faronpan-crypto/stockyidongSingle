@@ -6320,19 +6320,38 @@ class HotMixin:
                 try:
                     df_b = _pro.daily_basic(ts_code=tsc, trade_date=latest,
                                             fields="turnover_rate,pe_ttm,total_mv")
+                    _d(f"daily_basic 返回 len={len(df_b) if df_b is not None else 'None'}")
                     if df_b is not None and len(df_b) > 0:
                         tr = float(df_b.iloc[0]["turnover_rate"]) if df_b.iloc[0].get("turnover_rate") else None
                         pe = float(df_b.iloc[0]["pe_ttm"]) if df_b.iloc[0].get("pe_ttm") else None
                         mv = float(df_b.iloc[0]["total_mv"]) if df_b.iloc[0].get("total_mv") else None
-                except Exception:
-                    pass
+                except Exception as _e_db:
+                    _d(f"daily_basic 失败: {_e_db}")
+                    print(f"[游资心法] daily_basic 失败: {_e_db}")
 
-                # tushare 限频时 akshare spot_em 补 (只有缺才补, 不浪费请求)
+                # tushare 限频时 akshare spot_em 补 — 加 timeout 防卡死
                 if tr is None or pe is None or mv is None:
-                    try:
-                        import akshare as _ak_basic
-                        spot = _ak_basic.stock_zh_a_spot_em()
-                        if spot is not None and len(spot) > 0:
+                    _d(f"daily_basic 缺 tr={tr is None}, pe={pe is None}, mv={mv is None}, 尝试 spot_em...")
+                    def _try_spot():
+                        try:
+                            import akshare as _ak_basic
+                            return _ak_basic.stock_zh_a_spot_em()
+                        except Exception:
+                            return None
+                    # timeout=12s, spot_em 全市场扫描 5000 只有时会卡很久
+                    from concurrent.futures import ThreadPoolExecutor as _TPE, TimeoutError as _TTO
+                    with _TPE(max_workers=1) as _ex:
+                        _f = _ex.submit(_try_spot)
+                        try:
+                            spot = _f.result(timeout=12)
+                        except _TTO:
+                            _d("spot_em timeout 12s, 放弃")
+                            spot = None
+                        except Exception as _e_sp:
+                            _d(f"spot_em 异常: {_e_sp}")
+                            spot = None
+                    if spot is not None and len(spot) > 0:
+                        try:
                             row = spot[spot["代码"] == _sc]
                             if len(row) > 0:
                                 row = row.iloc[0]
@@ -6341,9 +6360,10 @@ class HotMixin:
                                 if pe is None and "市盈率-动态" in row.index and row["市盈率-动态"] not in ("", "-", None):
                                     pe = float(row["市盈率-动态"])
                                 if mv is None and "总市值" in row.index and row["总市值"] not in ("", "-", None):
-                                    mv = float(row["总市值"]) / 1e4  # spot_em 单位元 → tushare 万元
-                    except Exception as _e_basic:
-                        print(f"[游资心法] akshare spot_em daily_basic 失败: {_e_basic}")
+                                    mv = float(row["总市值"]) / 1e4
+                        except Exception as _e_basic:
+                            print(f"[游资心法] akshare spot_em 提取失败: {_e_basic}")
+                    _d(f"spot_em 后 tr={tr}, pe={pe}, mv={mv}")
 
                 # 情绪引擎
                 prog.after(0, lambda: prog_status.set("⏳ 调用情绪周期流引擎..."))
