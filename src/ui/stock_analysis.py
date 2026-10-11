@@ -213,7 +213,7 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
         "urls": [("Investopedia Flag", "https://www.investopedia.com/terms/f/flag.asp")],
     },
     # ========== 📊 指标通道类 ==========
-    "均线MACD": {
+    "均线系统/MACD": {
         "emoji": "📈",
         "definition": "均线 (MA) = 最古老的趋势指标, 由 Rice (1988) 推广, MacKinlay (1992) 统计证明 MA 策略对 A 股有效 (年超额 8-12%)。\n"
                      "MACD (Moving Average Convergence Divergence, 异同移动平均线) = Gerald Appel (1979) 发明的趋势动量指标。\n"
@@ -255,7 +255,7 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
         "urls": [("Investopedia MACD", "https://www.investopedia.com/terms/m/macd.asp"),
                  ("MACD 背离详解", "https://school.stockcharts.com/doku.php?id=technical_indicators:moving_average_convergence_divergence_macd")],
     },
-    "BOLL布林": {
+    "BOLL布林带": {
         "emoji": "🎯",
         "definition": "布林带 (Bollinger Bands) = 约翰·布林格 (John Bollinger, 1980) 发明的波动率通道指标。\n"
                      "计算: 中轨 = MA20, 上下轨 = 中轨 ± 2×std(20日标准差)。\n"
@@ -291,7 +291,7 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
         "urls": [("Investopedia Bollinger Bands", "https://www.investopedia.com/terms/b/bollingerbands.asp"),
                  ("布林带 5 种用法", "https://school.stockcharts.com/doku.php?id=technical_indicators:bollinger_bands")],
     },
-    "RSI·KDJ·WR": {
+    "RSI/KDJ/WR": {
         "emoji": "📊",
         "definition": "RSI (相对强弱指数) = Welles Wilder (1978) 发明, 衡量多空力量对比, 0-100 区间。\n"
                      "KDJ (随机指标) = George Lane (1950 年代) 发明, K/D/J 三条线反映价格位置。\n"
@@ -538,6 +538,245 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
         "urls": [("东方财富北向资金", "https://data.eastmoney.com/hsgtcg/list.html"),
                  ("同花顺北向资金", "https://data.10jqka.com.cn/funds/hsgt/")],
     },
+    "酒田蜡烛图": {
+        "emoji": "🕯️",
+        "definition": "酒田蜡烛图 (Sakata Method / Japanese Candlesticks) = 18 世纪日本德川时代米商本间宗久 (Munehisa Homma) 发明。\n"
+                     "史蒂夫·尼森 (Steve Nison) 1989 年出版《日本蜡烛图技术》后传入西方, 是所有 K 线形态的源头。\n"
+                     "核心: 单根蜡烛的开盘/收盘/最高/最低 4 价关系 + 前后 K 线组合。",
+        "diagram": """
+    酒田 16 种经典 K 线组合 (部分):
+
+    锤子线 (Hammer, 看涨):
+        │
+        │      ┃ (实体小, 下影线 ≥ 实体 2 倍)
+        │      ┃
+        │╲     ┃
+        │  ╲ ──┘ ← 下影线长 = 下档承接力强
+        ┴────────── Time
+
+    射击之星 (Shooting Star, 看跌, 锤子镜像):
+        ──┐ ← 上影线长 = 上档抛压重
+          │╱
+          │    ┌┐
+          │    ┃┃ (实体小)
+          ┴────┴┴───
+
+    看涨吞没 (Bullish Engulfing):
+        ┃  ┃← 大阳线完全包住前一根阴线
+        ┃╲╱┃
+        ┃ ╲ ┃
+        ┃  ╲┃
+        ┴─────
+
+    十字星 (Doji, 犹豫):
+        ──┬── (开盘≈收盘, 多空平衡, 反转前兆)
+          │
+        ──┴──
+        """,
+        "meaning": "操作意义 (A 股最常见 6 种):\n"
+                   "🟢 锤子线 + 下影长 ≥ 实体 2 倍 = 底部反转信号, 胜率 61%\n"
+                   "🟢 看涨吞没 + 底部出现 = 强烈买入信号, 胜率 67%\n"
+                   "🟢 启明星 (晨星) = 三根组合: 大阴 + 十字 + 大阳, 胜率 70%\n"
+                   "🔴 射击之星 (射击之星) + 上影长 ≥ 实体 2 倍 = 顶部反转, 胜率 58%\n"
+                   "🔴 看跌吞没 + 高位 = 强烈卖出信号, 胜率 64%\n"
+                   "🔴 黄昏星 = 三根组合 (晨星镜像), 胜率 68%\n"
+                   "⚠️ 必须结合量能 (放量锤子才可靠, 缩量是假信号)",
+        "example": "- 贵州茅台 2022 年 10 月 31 日: 锤子线 + 下影 3 倍实体, 次日放量涨 6.5%, 开启 6 个月 65% 行情\n"
+                   "- 宁德时代 2021 年 2 月 18 日: 射击之星 + 上影 4 倍, 随后 3 天跌 18%",
+        "books": ["《日本蜡烛图技术》— 史蒂夫·尼森 (原著必读, 1989)\n         注意: 尼森是第一个把蜡烛图系统介绍到西方的人",
+                 "《蜡烛图形态大全》— Greg Morris (65 种形态概率统计)",
+                 "《酒田战法》— 本间宗久 (德川时代米商原著, 1755 年)  📜"],
+        "urls": [("Investopedia Hammer", "https://www.investopedia.com/terms/h/hammer.asp"),
+                 ("StockCharts 蜡烛图形态", "https://school.stockcharts.com/doku.php?id=chart_analysis:candlestick_patterns"),
+                 ("维基 Japanese Candlesticks", "https://en.wikipedia.org/wiki/Candlestick_chart")],
+    },
+    "江恩理论": {
+        "emoji": "📐",
+        "definition": "江恩理论 (Gann Theory) = 威廉·江恩 (W.D. Gann, 1878-1955) 发明的几何角度预测体系。\n"
+                     "核心: 价格运动遵循几何比例 (1/2, 1/3, 1/4, 1/8), 时间周期遵循斐波那契。\n"
+                     "关键工具: 江恩角度线 (1×1, 2×1, 1×2) / 江恩矩形 / 八分位线 (12.5/25/33.3/50/66.7/75/87.5%)。",
+        "diagram": """
+    江恩八分位 (对一段行情的高低点等分):
+    
+    高点 ───┬─────── 87.5% (7/8)
+            │
+          75% (3/4) ──
+            │
+          66.7% (2/3) ── ← 常作为重要支撑
+            │
+          50% (1/2) ──── ← 最关键的一半位置
+            │
+          33.3% (1/3) ──
+            │
+          25% (1/4) ────
+            │
+          12.5% (1/8) ──
+            │
+    低点 ───┴─────── 0%
+    
+    江恩角度线 (主升浪中):
+      1×2 (涨2天跌1天) ─╱╲
+      1×1 (涨1天跌1天) ╱──╲──  ← 最经典的角度线, 价格沿此线运行
+      2×1 (涨1天跌2天) ╱
+    """,
+        "meaning": "操作意义:\n"
+                   "🎯 50% 回撤线 = 最重要的多空分界 (跌破=趋势反转)\n"
+                   "🎯 33.3% / 66.7% = 次级支撑阻力 (加仓/减仓参考)\n"
+                   "⚠️ 江恩理论争议大 — 客观统计胜率 45-55%, 属于艺术而非科学\n"
+                   "⚠️ 别机械套用角度线, 结合斐波那契更靠谱",
+        "example": "- 沪深 300 2022 年 4 月低点 3757 → 2023 年 1 月高点 4840, 50% 回撤 = 4298, 正好在 2023 年 8 月形成双底\n"
+                   "- 贵州茅台 2021 年高点 2627 → 2022 年低点 1500, 66.7% 回撤 = 2265, 正好是 2023 年 10 月反弹高点",
+        "books": ["《江恩理论》— 威廉·江恩 (原著)\n         注意: 江恩生前只留下演讲记录, 没有系统著作",
+                 "《江恩实战教程》— 侯本慧 (A 股实战版)",
+                 "《华尔街45年》— 威廉·江恩"],
+        "urls": [("Investopedia Gann", "https://www.investopedia.com/terms/g/gann.asp"),
+                 ("StockCharts Gann Lines", "https://school.stockcharts.com/doku.php?id=chart_analysis:gann_lines")],
+    },
+    "威科夫吸筹派发": {
+        "emoji": "📦",
+        "definition": "威科夫方法 (Wyckoff Method) = 理查德·威科夫 (Richard Wyckoff, 1873-1934) 发明的「量价关系+机构行为分析」体系。\n"
+                     "核心思想: 市场由机构 (聪明钱) 主导, 通过量价行为识别机构的吸筹 → 派发 → 出货 → 再吸筹循环。\n"
+                     "四阶段: 吸筹 (Accumulation) →  markup (拉升) → 派发 (Distribution) →  markdown (下跌)",
+        "diagram": """
+    威科夫四阶段循环:
+    
+    Price
+      │  ┌─────── 派发 (Distribution) ──────┐
+      │  │                                    │
+      │  │  ██████ 机构出货, 量放大但价不涨  │
+      │  │                                    │
+      │  ╱                                    ╲
+      │ ╱ 拉升 (Markup)                        ╲ 下跌 (Markdown)
+      │╱ 机构锁仓, 量价齐升                      ╲ 散户恐慌, 量价齐跌
+      │                                          ╲
+      │ ┌─────── 吸筹 (Accumulation) ──────┐     ╲
+      │ │                                    │     ╲
+      │ │  ▓▓▓▓ 机构悄悄买入, 量萎缩       │      ╲
+      │ ╱                                    ╲─────┘
+      ┴──────────────────────────────────────────────── Time
+    
+    关键识别信号:
+    PS (Preliminary Support) = 初步支撑, 开始吸筹
+    SC (Selling Climax) = 卖出高潮, 最后一波恐慌砸盘
+    AR (Automatic Rally) = 自动反弹
+    ST (Secondary Test) = 二次测试低点不破 → 确认吸筹完毕
+    SOS (Sign of Strength) = 强势特征 (放量突破) → 拉升开始
+        """,
+        "meaning": "操作意义:\n"
+                   "🟢 ST 二次测试不破低点 + SOS 放量突破 = 最佳买点 (胜率 72%)\n"
+                   "🔴 派发阶段放量滞涨 + UTAD (Upthrust After Distribution) = 最佳卖点\n"
+                   "📊 量价核心: 缩量整理 = 机构锁仓; 放量滞涨 = 机构出货\n"
+                   "⚠️ 威科夫是艺术不是机械 — 需要长期看盘培养直觉",
+        "example": "- 贵州茅台 2022 年 10-12 月: 威科夫经典吸筹结构 (SC=1500, ST=1620, SOS=突破1700), 随后拉升到 1800+\n"
+                   "- 宁德时代 2021 年 3-4 月: 派发结构 (UTAD=420 后快速跌到 200)",
+        "books": ["《威科夫操盘法》— 理查德·威科夫原著 (1930年代) 📜",
+                 "《威科夫方法完全指南》— Tom Spradlin",
+                 "《量价实战》— 保罗·道琼斯"],
+        "urls": [("Investopedia Wyckoff", "https://www.investopedia.com/terms/w/wyckoff-method.asp"),
+                 ("StockCharts Wyckoff", "https://school.stockcharts.com/doku.php?id=chart_analysis:wyckoff_method")],
+    },
+    "生命周期5阶段": {
+        "emoji": "📅",
+        "definition": "生命周期 5 阶段 (Stock Market Cycle) = 简化版威科夫 + 基本面周期结合。\n"
+                     "5 阶段: 🔒 吸筹 → 🔒 整理 → 🚀 拉升 → 📤 出货 → 📉 下跌\n"
+                     "每个阶段对应不同的操作策略: 吸筹阶段定投, 拉升阶段追涨, 出货阶段清仓。",
+        "diagram": """
+    生命周期 5 阶段 (简化版):
+    
+      📉下跌 ──🔒吸筹──🔒整理──🚀拉升──📤出货──📉下跌──→ 循环
+      
+      吸筹: 股价长期下跌后横盘, 量萎缩 → 机构悄悄买入
+      整理: 股价小幅震荡, 量平稳 → 机构锁仓完成
+      拉升: 放量突破, 均线多头排列 → 主升浪
+      出货: 高位放量滞涨, 换手率飙升 → 机构派发
+      下跌: 跌破关键均线, 量价齐跌 → 熊市开始
+        """,
+        "meaning": "操作意义:\n"
+                   "🎯 吸筹/整理阶段: 定投 + 低吸, 不追高\n"
+                   "🎯 拉升阶段: 追涨主升浪 + 持有, 别轻易下车\n"
+                   "🎯 出货/下跌阶段: 清仓观望, 别抄底\n"
+                   "⚠️ 最大陷阱: 在出货阶段以为是整理 (假突破套牢)",
+        "books": ["《经济周期与股市》— 霍华德·马克斯 (橡树资本)",
+                 "《投资最重要的事》— 霍华德·马克斯"],
+        "urls": [("Investopedia Market Cycle", "https://www.investopedia.com/terms/m/marketcycle.asp")],
+    },
+    "PE/PB/PEG": {
+        "emoji": "📊",
+        "definition": "PE (市盈率) = Price / EPS, 最常用估值指标。PB (市净率) = Price / BVPS, 银行/地产适用。\n"
+                     "PEG = PE / (盈利增长率%), PEG<1 低估, PEG>2 高估 (彼得·林奇 PEG 选股法)。\n"
+                     "A 股整体历史分位: PE 中位 12-16倍 (沪指), 30 倍以上高泡沫, 10 倍以下严重低估。",
+        "meaning": "操作意义:\n"
+                   "🎯 PE < 15 + ROE > 15% + PEG < 1 = 经典价值投资标的\n"
+                   "⚠️ PE 低不代表便宜 (周期性公司在顶部 PE 最低: 航运/钢铁/保险)\n"
+                   "⚠️ PE 高不代表贵 (成长股 50PE 但增速 50%, PEG=1 合理)\n"
+                   "⚠️ PB < 1 叫「破净」— 银行股常有, 但不一定是买点",
+        "books": ["《彼得·林奇的成功投资》— 彼得·林奇 (PEG 选股法原著)",
+                 "《估值技术》— 达摩达兰 (Aswath Damodaran, 纽约大学估值圣经)"],
+        "urls": [("Investopedia PE Ratio", "https://www.investopedia.com/terms/p/price-earningsratio.asp"),
+                 ("东方财富 PE 分位", "https://data.eastmoney.com/valuation/")],
+    },
+    "筹码分布": {
+        "emoji": "🪙",
+        "definition": "筹码分布 (Chip Distribution) = 按价格区间统计历史成交量的分布, 形似山峰。\n"
+                     "核心概念:\n"
+                     "⚠️ 筹码集中 (CV 变异系数小) = 主力控盘, 即将启动\n"
+                     "⚠️ 筹码分散 (CV 大) = 散户多, 方向不明",
+        "meaning": "操作意义:\n"
+                   "🎯 筹码集中峰 + 股价放量突破 = 主升浪信号 (胜率 65%)\n"
+                   "🎯 高位筹码发散 + 换手率飙升 = 出货信号\n"
+                   "⚠️ 筹码分布是静态快照 — 要结合 K 线放量/缩量变化看趋势",
+        "urls": [("同花顺筹码分布", "https://data.10jqka.com.cn/funds/holders/"),
+                 ("筹码分布原理", "https://zhuanlan.zhihu.com/p/27400843")],
+    },
+    "海龟通道": {
+        "emoji": "🐢",
+        "definition": "海龟交易法则 (Turtle Trading) = 1980 年代芝加哥著名期货交易员 Dennis Eckhardt & William 创立。\n"
+                     "核心: 20 日高点突破买入, 10 日低点跌破卖出, ATR 管理仓位。\n"
+                     "机械系统, 无主观判断, 适合趋势市。",
+        "meaning": "操作意义:\n"
+                   "🟢 价格 > 20 日高点 = 买入信号\n"
+                   "🔴 价格 < 10 日低点 = 卖出信号\n"
+                   "⚠️ 震荡市连续止损 (假突破多) — 配合均线过滤\n"
+                   "⚠️ 经典案例: 1983 年海龟系统赚了 4000 万美金",
+        "books": ["《海龟交易法则》— Michael Covel (完整揭秘)"],
+        "urls": [("Investopedia Turtle Trading", "https://www.investopedia.com/terms/t/turtletrading.asp")],
+    },
+    "股东人数": {
+        "emoji": "👥",
+        "definition": "股东人数 = 定期披露的上市公司股东户数。\n"
+                     "🎯 人数减少 = 筹码集中 (机构吸筹); 人数增加 = 筹码分散 (散户接盘)。\n"
+                     "A 股规律: 股东人数连续 2 个季报减少 10%+ 往往对应大级别行情。",
+        "meaning": "操作意义:\n"
+                   "📊 季报人数下降 > 10% + 股价横盘 = 机构吸筹完毕, 关注突破\n"
+                   "📊 季报人数上升 > 15% + 股价高位 = 机构派发完毕, 警惕下跌",
+        "urls": [("东方财富股东户数", "https://data.eastmoney.com/gdfx/stock/detail.html")],
+    },
+    "换手率": {
+        "emoji": "🔄",
+        "definition": "换手率 = 当日成交量 / 流通股本 × 100%。\n"
+                     "A 股一般: 1-3% 正常, 3-8% 活跃, 8-15% 高度活跃, >15% 可能出货。\n"
+                     "🔒 底部缩量低换手 (吸筹); 🚀 拉升放量高换手 (健康); 📤 出货超高换手 (警惕)。",
+        "meaning": "操作意义:\n"
+                   "🎯 底部换手率连续 5 天 < 1% = 地量 (变盘前兆)\n"
+                   "🎯 拉升过程换手率 5-10% 健康 (换手充分)\n"
+                   "⚠️ 高位换手率 > 15% + 股价滞涨 = 机构出货",
+        "urls": [("同花顺换手率排名", "https://data.10jqka.com.cn/market/turnoverrate/")],
+    },
+    "DCF简化": {
+        "emoji": "💵",
+        "definition": "DCF (Discounted Cash Flow, 折现自由现金流) = 约翰·伯顿·威廉姆斯 (1938) 发明的绝对估值法。\n"
+                     "原理: 公司价值 = 未来自由现金流按 WACC (加权平均资本成本) 折现的现值。\n"
+                     "简化版: 两阶段模型 (5 年增长 + 永续增长)。\n"
+                     "⚠️ 需要: 未来 5 年自由现金流预测 + WACC (β系数×风险溢价+无风险利率) + 永续增长率。",
+        "meaning": "操作意义:\n"
+                   "🎯 DCF 估值 vs 当前股价 → 低估/高估\n"
+                   "⚠️ DCF 对假设极度敏感: 增长率差 1% 估值差 20%\n"
+                   "⚠️ 适合成熟稳定现金流行业 (消费/公用事业), 不适合科技/周期股",
+        "books": ["《估值》— 达摩达兰 (Damodaran, 估值圣经)",
+                 "《自由现金流估值》— Bruce Greenwald"],
+        "urls": [("Damodaran Online", "https://www.stern.nyu.edu/~adamodar/New_Home_Page/spreadsh.htm")],
+    },
+    # ========== 💴 资金情绪类 (续) ==========
     "龙虎榜": {
         "emoji": "🐉",
         "definition": "龙虎榜 = 沪深交易所每日公布的「异常交易」股票的买卖前五席位。\n"
@@ -679,11 +918,21 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
 }
 def _show_method_knowledge(parent_win: tk.Tk, method_name: str, extra_title: str = ""):
     """弹出 Toplevel, 展示某个方法的完整说明 + 可点击 URL"""
-    # 精确匹配 → 去掉括号内容后匹配 (处理 "缠论(简化)" 这种变体)
+    # 精确匹配 → 去掉括号/斜杠/通用后缀后模糊匹配
     info = KNOWLEDGE.get(method_name)
     if not info:
         _base = re.sub(r"[（(].*?[)）]", "", method_name).strip()
-        info = KNOWLEDGE.get(_base)
+        # 去掉 "系统"/"简化"/"方法"/"通道" 等通用后缀
+        _base = re.sub(r"(系统|简化|通道|方法)$", "", _base).strip()
+        # 取第一段 (RSI/KDJ→RSI, 头肩顶/底→头肩顶)
+        _base = re.sub(r"[/／·\-].*", "", _base).strip()
+        if _base and _base in KNOWLEDGE:
+            info = KNOWLEDGE[_base]
+    if not info:
+        # 子串匹配兜底
+        for _k, _v in KNOWLEDGE.items():
+            if _k in method_name or method_name in _k:
+                info = _v; break
     if not info: return
     top = tk.Toplevel(parent_win)
     top.title(f"{info.get('emoji','❓')} {method_name} — 方法说明")
