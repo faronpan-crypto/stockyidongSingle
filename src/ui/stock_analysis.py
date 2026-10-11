@@ -776,7 +776,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     import webbrowser, numpy as np
 
     win = tk.Toplevel(parent_win) if parent_win else tk.Tk()
-    win.title("📊 股票分析 — 六大流派主流方法"); win.geometry("1420x900"); win.minsize(1180, 780)
+    win.title("📊 单票深度分析 — 六大流派 25+ 方法 + K线辅助线"); win.geometry("1420x900"); win.minsize(1180, 780)
     win.configure(bg="#ECEFF1")
 
     # ===== 顶栏 =====
