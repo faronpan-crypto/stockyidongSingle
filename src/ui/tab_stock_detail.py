@@ -616,10 +616,10 @@ class StockDetailMixin:
                         _vols = np.zeros(n, dtype=float)
                     sigs = calc_trade_signals(closes, opens, highs, lows, _vols)
                     _mp_cls = [
-                        ("buy", "★", "#2E7D32", "★ 买入(MA金/MACD金/布林/锤子线)"),
-                        ("add", "^", "#F57C00", "▲ 加仓(MACD强金/放量突破)"),
-                        ("sell", "v", "#C62828", "▼ 卖出(MA死/MACD死/KDJ高位)"),
-                        ("reduce", "v", "#6A1B9A", "▽ 减仓(MACD弱死/放量破位)"),
+                        ("buy", "*", "#2E7D32", "★买入(MA金/MACD金/布林/锤子线)"),
+                        ("add", "^", "#F57C00", "▲加仓(MACD强金/放量突破)"),
+                        ("sell", "v", "#C62828", "▼卖出(MA死/MACD死/KDJ高位)"),
+                        ("reduce", "D", "#6A1B9A", "▽减仓(MACD弱死/放量破位)"),
                     ]
                     for _key, _mk, _col, _lbl in _mp_cls:
                         _pts = sigs.get(_key, [])
@@ -893,8 +893,10 @@ class StockDetailMixin:
                         messagebox.showerror("错误", f"绘制失败: {ex}", parent=win)
 
             def _bind_hover(canvas, fig):
-                """canvas 绑定 mouse motion → 显示胜率 tooltip"""
+                """canvas 绑定 mouse motion → 显示胜率 tooltip + 当日数据"""
                 nonlocal hover_tt
+                # 把 _data0 提取出来供 tooltip 用
+                _kdata = kline_data
                 def _on_motion(event):
                     nonlocal hover_tt
                     try:
@@ -908,7 +910,49 @@ class StockDetailMixin:
                         sig_type, label, color = hover_bs_cache[idx]
                         bt = hover_bt_cache.get(sig_type)
                         _type_zh = {"buy":"★买入","add":"▲加仓","sell":"▼卖出","reduce":"▽减仓"}.get(sig_type, sig_type)
-                        lines = [f"🎯 {_type_zh} — {label}", ""]
+                        # ========== 📅 当日数据（日期/OHLCV/量比/量） ==========
+                        lines = []
+                        try:
+                            _df = _kdata["data"]
+                            if 0 <= idx < len(_df):
+                                _row = _df.iloc[idx]
+                                _d = str(_row.get("日期", ""))
+                                if len(_d) == 8: _d = f"{_d[:4]}-{_d[4:6]}-{_d[6:8]}"
+                                _open = float(_row.get("开盘", 0))
+                                _hi   = float(_row.get("最高", 0))
+                                _lo   = float(_row.get("最低", 0))
+                                _cls  = float(_row.get("收盘", 0))
+                                _vol  = float(_row.get("成交量", 0))
+                                _amt  = float(_row.get("成交额", 0)) if "成交额" in _df.columns else 0
+                                # 前收
+                                if idx > 0:
+                                    _prev_c = float(_df.iloc[idx-1]["收盘"])
+                                    _chg = (_cls - _prev_c) / _prev_c * 100 if _prev_c else 0
+                                else:
+                                    _chg = 0
+                                # 量比 (5日均量 / 20日均量)
+                                _vols_all = _df["成交量"].values.astype(float) if "成交量" in _df.columns else None
+                                if _vols_all is not None and idx >= 20:
+                                    _v5 = float(_vols_all[max(0,idx-4):idx+1].mean())
+                                    _v20 = float(_vols_all[max(0,idx-19):idx+1].mean())
+                                    _vr5 = _vol / _v5 if _v5 > 0 else 0
+                                    _vr20 = _vol / _v20 if _v20 > 0 else 0
+                                else:
+                                    _vr5 = _vr20 = 0
+                                # 格式化
+                                def _fmt_amt(a):
+                                    if a >= 1e8: return f"{a/1e8:.2f}亿"
+                                    elif a >= 1e4: return f"{a/1e4:.1f}万"
+                                    return f"{a:.0f}"
+                                _chg_arrow = "📈" if _chg >= 0 else "📉"
+                                _chg_col = "#F44336" if _chg >= 0 else "#4CAF50"
+                                lines.append(f"📅 {_d}  {_chg_arrow} 涨跌 {_chg:+.2f}%")
+                                lines.append(f"  开 {_open:.2f}  高 {_hi:.2f}  低 {_lo:.2f}  收 {_cls:.2f}")
+                                lines.append(f"  量 {_fmt_amt(_vol)}  额 {_fmt_amt(_amt)}  量比(5日) {_vr5:.2f}  量比(20日) {_vr20:.2f}")
+                        except Exception:
+                            pass
+                        lines.append("")
+                        lines.append(f"🎯 {_type_zh} — {label}")
                         if bt:
                             cnt, wr, avg_g, avg_l, plr = bt
                             lines.append(f"📊 历史信号: {cnt} 次")
@@ -920,10 +964,8 @@ class StockDetailMixin:
                             try:
                                 p = wr / 100.0; q = 1 - p; b = max(plr, 0.01)
                                 kelly_f = (b * p - q) / b if b > 0 else 0
-                                kelly_f = max(0, min(kelly_f, 1.0))  # 限制在 [0, 1]
-                                halving = kelly_f / 2  # 实际操作常用半凯利
-                                line_type_chinese = {"buy":"买入","add":"加仓","sell":"卖出","reduce":"减仓"}.get(sig_type, sig_type)
-                                # Kelly 评分分级
+                                kelly_f = max(0, min(kelly_f, 1.0))
+                                halving = kelly_f / 2
                                 if kelly_f >= 0.25:
                                     kelly_level = "⭐⭐⭐⭐⭐ 强下注信号"
                                 elif kelly_f >= 0.15:

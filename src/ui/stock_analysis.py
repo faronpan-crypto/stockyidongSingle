@@ -859,7 +859,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             fig.tight_layout()
             canvas = FigureCanvasTkAgg(fig, chart_inner); canvas.draw()
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-            # hover tooltip (含凯利公式)
+            # hover tooltip (含当日数据 + 凯利公式)
             hover_tt = None
             def _on_motion(event):
                 nonlocal hover_tt
@@ -872,12 +872,48 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     sig_type, label, col = _hover_cache["bs"][idx]
                     bt = _hover_cache.get("bt", {}).get(sig_type)
                     _zh = {"buy":"★买入","add":"▲加仓","sell":"▼卖出","reduce":"▽减仓"}[sig_type]
-                    lines = [f"🎯 {_zh} — {label}", ""]
+                    lines = []
+                    # ========== 📅 当日数据 ==========
+                    try:
+                        _df = _current_kline["data"] if _current_kline else None
+                        if _df is not None and 0 <= idx < len(_df):
+                            _row = _df.iloc[idx]
+                            _d = str(_row.get("日期", ""))
+                            if len(_d) == 8: _d = f"{_d[:4]}-{_d[4:6]}-{_d[6:8]}"
+                            _open = float(_row.get("开盘", 0))
+                            _hi   = float(_row.get("最高", 0))
+                            _lo   = float(_row.get("最低", 0))
+                            _cls  = float(_row.get("收盘", 0))
+                            _vol  = float(_row.get("成交量", 0))
+                            _amt  = float(_row.get("成交额", 0)) if "成交额" in _df.columns else 0
+                            if idx > 0:
+                                _prev_c = float(_df.iloc[idx-1]["收盘"])
+                                _chg = (_cls - _prev_c) / _prev_c * 100 if _prev_c else 0
+                            else:
+                                _chg = 0
+                            _vols_all = _df["成交量"].values.astype(float) if "成交量" in _df.columns else None
+                            if _vols_all is not None and idx >= 20:
+                                _v5 = float(_vols_all[max(0,idx-4):idx+1].mean())
+                                _v20 = float(_vols_all[max(0,idx-19):idx+1].mean())
+                                _vr5 = _vol / _v5 if _v5 > 0 else 0
+                                _vr20 = _vol / _v20 if _v20 > 0 else 0
+                            else:
+                                _vr5 = _vr20 = 0
+                            def _fmt_amt(a):
+                                if a >= 1e8: return f"{a/1e8:.2f}亿"
+                                elif a >= 1e4: return f"{a/1e4:.1f}万"
+                                return f"{a:.0f}"
+                            _arrow = "📈" if _chg >= 0 else "📉"
+                            lines.append(f"📅 {_d}  {_arrow} 涨跌 {_chg:+.2f}%")
+                            lines.append(f"  开 {_open:.2f}  高 {_hi:.2f}  低 {_lo:.2f}  收 {_cls:.2f}")
+                            lines.append(f"  量 {_fmt_amt(_vol)}  额 {_fmt_amt(_amt)}  量比(5日) {_vr5:.2f}  量比(20日) {_vr20:.2f}")
+                    except Exception: pass
+                    lines.append("")
+                    lines.append(f"🎯 {_zh} — {label}")
                     if bt:
                         cnt, wr, avg_g, avg_l, plr = bt
                         lines += [f"📊 历史{cnt}次", f"✅ 胜率{wr:.1f}%",
                                   f"💰 +{avg_g:.2f}%", f"💔 -{avg_l:.2f}%", f"⚖️ 盈亏比{plr:.2f}"]
-                        # 🧮 凯利
                         p = wr/100.0; q = 1-p; b = max(plr, 0.01)
                         kelly_f = max(0, min((b*p-q)/b if b>0 else 0, 1.0))
                         halving = kelly_f/2

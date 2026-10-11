@@ -56684,10 +56684,10 @@ class DapanMixin:
                     import numpy as _np; _vols = _np.zeros(n, dtype=float)
                 sigs = calc_trade_signals(closes, opens, highs, lows, _vols)
                 _mp_cls = [
-                    ("buy", "★", "#2E7D32", "★ 买入(MA金/MACD金/布林)"),
-                    ("add", "^", "#F57C00", "▲ 加仓(MACD强金/放量突破)"),
-                    ("sell", "v", "#C62828", "▼ 卖出(MA死/MACD死/KDJ高位)"),
-                    ("reduce", "v", "#6A1B9A", "▽ 减仓(MACD弱死/放量破位)"),
+                    ("buy", "*", "#2E7D32", "★买入(MA金/MACD金/布林)"),
+                    ("add", "^", "#F57C00", "▲加仓(MACD强金/放量突破)"),
+                    ("sell", "v", "#C62828", "▼卖出(MA死/MACD死/KDJ高位)"),
+                    ("reduce", "D", "#6A1B9A", "▽减仓(MACD弱死/放量破位)"),
                 ]
                 for _key, _mk, _col, _lbl in _mp_cls:
                     _pts = sigs.get(_key, [])
