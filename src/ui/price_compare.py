@@ -441,7 +441,7 @@ def fetch_all_platforms(keyword: str, platforms=None) -> Dict[str, List[Dict]]:
     如果配置了聚合 API key, 优先走合规稳定的聚合接口, 直抓 HTML 只当兜底。
     """
     if platforms is None:
-        platforms = ["淘宝/天猫", "京东", "拼多多", "盒马"]
+        platforms = ["淘宝/天猫", "京东", "拼多多", "抖音", "盒马", "唯品会", "奥乐齐", "联华"]
 
     _keys = _load_api_keys()
     has_onebound = bool(_keys.get("onebound_key") and _keys.get("onebound_secret"))
@@ -528,7 +528,7 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
     entry.bind("<Return>", lambda _e: _do_search())
 
     platforms_chk = tk.Frame(top, bg="#1A237E"); platforms_chk.pack(side=tk.LEFT, padx=8)
-    _platforms_list = ["淘宝/天猫", "京东", "拼多多", "盒马"]
+    _platforms_list = ["淘宝/天猫", "京东", "拼多多", "抖音", "盒马", "唯品会", "奥乐齐", "联华"]
     _platform_vars = {p: tk.BooleanVar(value=True) for p in _platforms_list}
     for p, v in _platform_vars.items():
         tk.Checkbutton(platforms_chk, text=p, variable=v,
@@ -622,18 +622,20 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
     tk.Button(btn_row, text=api_btn_txt, command=_open_api_settings,
               bg="#37474F", fg="white", relief=tk.FLAT, padx=8).pack(side=tk.LEFT, padx=4)
 
-    tk.Button(btn_row, text="🌐 淘宝", command=lambda: webbrowser.open(
-        f"https://s.taobao.com/search?q={kw_var.get().strip()}"),
-              bg="#FF5722", fg="white", relief=tk.FLAT, padx=8).pack(side=tk.LEFT)
-    tk.Button(btn_row, text="🌐 京东", command=lambda: webbrowser.open(
-        f"https://search.jd.com/Search?keyword={kw_var.get().strip()}"),
-              bg="#E53935", fg="white", relief=tk.FLAT, padx=8).pack(side=tk.LEFT, padx=3)
-    tk.Button(btn_row, text="🌐 拼多多", command=lambda: webbrowser.open(
-        f"https://mobile.yangkeduo.com/search_result.html?search_key={kw_var.get().strip()}"),
-              bg="#E91E63", fg="white", relief=tk.FLAT, padx=8).pack(side=tk.LEFT, padx=3)
-    tk.Button(btn_row, text="🌐 盒马", command=lambda: webbrowser.open(
-        f"https://m.hemaos.com/search?keyword={kw_var.get().strip()}"),
-              bg="#4CAF50", fg="white", relief=tk.FLAT, padx=8).pack(side=tk.LEFT, padx=3)
+    _platform_btns = [
+        ("🌐 淘宝", "#FF5722", "https://s.taobao.com/search?q="),
+        ("🌐 京东", "#E53935", "https://search.jd.com/Search?keyword="),
+        ("🌐 拼多多", "#E91E63", "https://mobile.yangkeduo.com/search_result.html?search_key="),
+        ("🌐 抖音", "#000000", "https://www.douyin.com/search/"),
+        ("🌐 盒马", "#4CAF50", "https://m.hemaos.com/search?keyword="),
+        ("🌐 唯品会", "#FF9800", "https://search.vip.com/?q="),
+        ("🌐 奥乐齐", "#3F51B5", "https://www.aldi.com.cn/search?q="),
+        ("🌐 联华", "#FFC107", "https://www.lianhuashop.com/search?keyword="),
+    ]
+    for label, color, base_url in _platform_btns:
+        tk.Button(btn_row, text=label,
+                  command=lambda u=base_url: webbrowser.open(u + webbrowser.quote(kw_var.get().strip())),
+                  bg=color, fg="white", relief=tk.FLAT, padx=8).pack(side=tk.LEFT, padx=3)
 
     # ===== 汇总栏 =====
     summary_var = tk.StringVar(value="")
@@ -736,7 +738,7 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
             _lvl = _lvl or ("bold" if line.startswith(("今天最划算", "✅", "❌", "💰", "🎯")) else None)
             # 拆 URL 加粗
             parts = _re_ai.split(r"(https?://\S+)", line)
-            _url_kw = ("淘宝", "天猫", "京东", "拼多多", "盒马", "奥乐齐", "联华", "叮咚", "唯品会", "当当", "苏宁")
+            _url_kw = ("淘宝", "天猫", "京东", "拼多多", "抖音", "盒马", "奥乐齐", "联华", "叮咚", "唯品会", "当当", "苏宁", "美团")
             for seg in parts:
                 if not seg: continue
                 if _re_ai.match(r"^https?://", seg):
@@ -792,7 +794,8 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
         # AI 兜底价位 (硬编码, 当 AI hint 和 real 都没有时用)
         _ai_fallback = {
             "淘宝/天猫": (8, 14), "京东": (8, 15), "拼多多": (5, 10),
-            "盒马": (10, 18), "奥乐齐": (4, 9), "联华": (5, 10), "叮咚": (7, 14),
+            "抖音": (6, 13), "盒马": (10, 18), "唯品会": (7, 16),
+            "奥乐齐": (4, 9), "联华": (5, 10), "叮咚": (7, 14),
         }
         # 优先级: real_prices > AI hint > hard fallback
         _effective_ranges: Dict[str, tuple] = {}
@@ -804,7 +807,7 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
             elif p in _ai_fallback:
                 _effective_ranges[p] = _ai_fallback[p]
 
-        _all_platforms = ["淘宝/天猫", "京东", "拼多多", "盒马", "奥乐齐", "联华"]
+        _all_platforms = ["淘宝/天猫", "京东", "拼多多", "抖音", "盒马", "唯品会", "奥乐齐", "联华"]
         platforms_used = [p for p in _all_platforms if p in _effective_ranges] or list(_effective_ranges.keys())
         if not platforms_used: platforms_used = list(_ai_fallback.keys())[:4]
 
@@ -816,7 +819,8 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
         fig.subplots_adjust(left=0.08, right=0.98, top=0.92, bottom=0.05, wspace=0.35, hspace=0.45)
 
         _colors = {"淘宝/天猫": "#FF5722", "京东": "#E53935", "拼多多": "#E91E63",
-                   "盒马": "#4CAF50", "奥乐齐": "#3F51B5", "联华": "#FF9800", "叮咚": "#00BCD4"}
+                   "抖音": "#000000", "盒马": "#4CAF50", "唯品会": "#FF9800",
+                   "奥乐齐": "#3F51B5", "联华": "#FFC107", "叮咚": "#00BCD4"}
 
         # --- 图1: 各平台最低价横向条形 ---
         names_bar = []; mins_bar = []; maxs_bar = []; bars_col = []
@@ -849,9 +853,10 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
 
         # --- 图3: 雷达图 (平台性价比 6 维) ---
         _radar_labels = ["价格", "品质", "物流", "品控", "售后", "覆盖"]
-        _radar_preset = {  # 预设各平台各维度 0-10
+        _radar_preset = {  # 预设各平台各维度 0-10 (价格/品质/物流/品控/售后/覆盖)
             "淘宝/天猫": [7, 7, 7, 6, 7, 9], "京东": [6, 9, 10, 9, 9, 7],
-            "拼多多": [10, 6, 6, 5, 6, 7], "盒马": [5, 9, 10, 9, 8, 5],
+            "拼多多": [10, 6, 6, 5, 6, 7], "抖音": [8, 7, 7, 6, 7, 9],
+            "盒马": [5, 9, 10, 9, 8, 5], "唯品会": [7, 8, 8, 8, 8, 5],
             "奥乐齐": [10, 7, 5, 7, 5, 4], "联华": [7, 6, 6, 6, 6, 5],
         }
         from math import pi as _pi
@@ -923,14 +928,16 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
             ))
             return
         win.after(0, lambda: _show_ai("⏳ AI 正在生成购买建议... (首次联网拉模型, 约 10-30s)"))
-        system_p = "你是中国电商比价专家, 熟悉淘宝/京东/拼多多/盒马/奥乐齐/联华/叮咚 定价。回答用中文, 紧凑简洁。"
+        system_p = "你是中国电商比价专家, 熟悉淘宝/天猫/京东/拼多多/抖音/盒马/唯品会/奥乐齐/联华/叮咚 定价。回答用中文, 紧凑简洁。"
         prompt = (f"商品「{kw}」跨平台购买建议, 请按以下结构输出 (每段 1-3 行):\n\n"
-                  f"【各平台常规价】淘宝:X-X元 | 京东:X-X元 | 拼多多:X-X元 | 盒马:X-X元 | 奥乐齐:X-X元\n\n"
+                  f"【各平台常规价】淘宝:X-X元 | 京东:X-X元 | 拼多多:X-X元 | 抖音:X-X元 | 盒马:X-X元 | 唯品会:X-X元\n\n"
                   f"【今天最划算】通货品牌→去___买 (理由:___) | 自有品牌→去___买 | 生鲜→去___买\n\n"
                   f"【直达链接】淘宝 https://s.taobao.com/search?q={kw.replace(' ','')}\n"
                   f"京东 https://search.jd.com/Search?keyword={kw.replace(' ','')}\n"
                   f"拼多多 https://mobile.yangkeduo.com/search_result.html?search_key={kw.replace(' ','')}\n"
-                  f"盒马 https://m.hemaos.com/search?keyword={kw.replace(' ','')}\n\n"
+                  f"抖音 https://www.douyin.com/search/{kw.replace(' ','')}\n"
+                  f"盒马 https://m.hemaos.com/search?keyword={kw.replace(' ','')}\n"
+                  f"唯品会 https://search.vip.com/?q={kw.replace(' ','')}\n\n"
                   f"⚠️ 注意: 【各平台常规价】里的 X-X 必须是该商品在该平台的真实常规价位区间 (单位元), "
                   f"例如「恰恰瓜子 150g」应写 淘宝:12-18元 而非 8-14元。请根据商品实际价格填写, 不要用通用占位价。")
         try:
