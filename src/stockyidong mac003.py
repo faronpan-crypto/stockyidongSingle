@@ -4999,6 +4999,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("tushare", self.show_tushare_skills_dialog, False, "tools"),
             ("📸照片风格化", self._show_photo_style_dialog, False, "tools"),
             ("💰比价", self._show_price_compare_dialog, False, "tools"),
+            ("📊股票比价", self._show_stock_compare_dialog, False, "tools"),
             # ---- 💼 持仓/预测 (tools) ----
             ("自持股监测", self._show_self_holding_monitor_popup, False, "tools"),
             ("🧬生命周期", self._show_lifecycle_popup, False, "tools"),

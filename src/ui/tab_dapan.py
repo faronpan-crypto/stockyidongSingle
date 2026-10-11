@@ -14107,6 +14107,18 @@ class DapanMixin:
             print(f"[💰比价❌] {e}", flush=True)
             _tb.print_exc()
 
+    def _show_stock_compare_dialog(self):
+        """📊 同板块股票横向对比 — lazy import"""
+        import traceback as _tb
+        print("[📊股票比价] 按钮被点击!", flush=True)
+        try:
+            from ui.stock_compare import show_stock_compare_dialog as _sc
+            ai_fn = getattr(self, 'call_ai_model', None)
+            _sc(getattr(self, 'root', None) or getattr(self, '_root', None), call_ai_fn=ai_fn)
+        except Exception as e:
+            print(f"[📊股票比价❌] {e}", flush=True)
+            _tb.print_exc()
+
     def _show_wechat_dialog(self):
         """📱 微信日报生成 — lazy import"""
         import traceback as _tb
