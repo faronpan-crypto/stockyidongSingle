@@ -126,6 +126,129 @@ def _fetch_stock_fundamentals(tsc: str) -> Dict:
     except Exception: pass
     return res
 
+def _detect_lifecycle(closes, vols) -> Tuple[str, str]:
+    """
+    生命周期阶段判断 + 简单描述
+    closes: np.array 收盘价序列 (ascending)
+    vols: np.array 成交量序列
+    返回: (阶段, emoji+描述)
+    阶段: accumulation / consolidation / breakout / distribution / decline
+    """
+    import numpy as np
+    if len(closes) < 60:
+        return ("unknown", "❓ 数据不足")
+    c = closes; v = vols
+    latest = c[-1]
+    ma20 = np.mean(c[-20:]); ma60 = np.mean(c[-60:])
+    hi60 = np.max(c[-60:]); lo60 = np.min(c[-60:])
+    # 距 60 日高点回撤
+    drawdown = (latest - hi60) / hi60 * 100
+    # 距 60 日低点涨幅
+    up_from_lo = (latest - lo60) / lo60 * 100
+    # 60 日区间内的位置 (0=底部 1=顶部)
+    pos_in_range = (latest - lo60) / max(hi60 - lo60, 0.001)
+    # 20 日涨跌幅
+    chg20 = (c[-1] / c[-20] - 1) * 100
+    # 量能: 近 5 日均量 vs 近 20 日均量 vs 近 60 日均量
+    v5 = np.mean(v[-5:]); v20 = np.mean(v[-20:]); v60 = np.mean(v[-60:])
+    vol_surge = v5 / max(v20, 1)   # >1.5 放量
+    vol_shrink = v5 / max(v60, 1)  # <0.6 缩量
+    # MA 排列
+    ma_bull = ma20 > ma60  # 多头排列
+    ma_bear = ma20 < ma60  # 空头排列
+
+    # ===== 规则判断 =====
+    # 出货: 距高点回撤 20%+ 但之前有爆量 (主力出货)
+    if drawdown < -20 and vol_surge > 1.3:
+        return ("distribution", f"📦 出货阶段 (回撤 {drawdown:.0f}%, 近期爆量 {vol_surge:.1f}x)")
+    # 下跌: 距高点回撤 25%+, MA 空头排列, 缩量或阴跌
+    if drawdown < -25 and ma_bear:
+        return ("decline", f"📉 下跌趋势 (回撤 {drawdown:.0f}%, MA空头)")
+    # 拉升: 突破 60 日新高 + 爆量 + MA 多头
+    if chg20 > 15 and pos_in_range > 0.85 and vol_surge > 1.2 and ma_bull:
+        return ("breakout", f"🚀 拉升阶段 (20日 +{chg20:.0f}%, 创新高, 量 {vol_surge:.1f}x)")
+    # 吸盘/整理: 60 日区间中位, MA 粘合, 量缩
+    if pos_in_range < 0.6 and pos_in_range > 0.2 and abs(ma20 - ma60) / latest < 0.05 and vol_shrink < 1.0:
+        return ("consolidation", f"🪨 吸盘整理 (区间中位 {pos_in_range:.0%}, 量缩)")
+    # 吸筹: 60 日低位 + 量能萎缩或温和放量 (底部吸筹)
+    if pos_in_range < 0.3 and vol_surge < 1.2:
+        return ("accumulation", f"💎 吸筹阶段 (低位 {pos_in_range:.0%}, 量 {vol_surge:.1f}x)")
+    # 默认: 根据位置推断
+    if ma_bull and pos_in_range > 0.5:
+        return ("breakout", f"🚀 主升浪 (MA多头, 区间上沿)")
+    if ma_bear:
+        return ("decline", f"📉 下跌趋势 (MA空头)")
+    return ("consolidation", f"🪨 方向不明 (MA粘合)")
+
+def _detect_elliott_wave(closes) -> str:
+    """
+    简化波浪理论识别:
+    - 在 120 日数据上找最近的拐点 (局部极值)
+    - 统计当前在上升 5 浪 (1-2-3-4-5) 还是调整 A-B-C
+    - 输出: "第 N 浪" / "调整浪 X-Y-Z" 等
+    """
+    import numpy as np
+    if len(closes) < 60: return "❓数据不足"
+    c = closes
+    # 找局部极值 (用简化算法: 滑动窗口)
+    def _find_extremes(arr, order=5):
+        """找局部 min/max"""
+        mins, maxs = [], []
+        for i in range(order, len(arr) - order):
+            if arr[i] == min(arr[i-order:i+order+1]): mins.append((i, arr[i], "L"))
+            if arr[i] == max(arr[i-order:i+order+1]): maxs.append((i, arr[i], "H"))
+        return mins, maxs
+    mins, maxs = _find_extremes(c, order=8)
+    # 取最近的 8 个拐点 (时间倒序)
+    all_pts = sorted(mins + maxs, key=lambda x: -x[0])[:9]
+    all_pts = sorted(all_pts, key=lambda x: x[0])  # 还原时间顺序
+    if len(all_pts) < 4:
+        return "❓拐点不足"
+
+    # 看最新一段的方向
+    latest_dir = "up" if c[-1] > c[-5] else "down"
+    # 计算各段涨跌幅
+    segs = []
+    for i in range(1, len(all_pts)):
+        seg_len = (all_pts[i][1] - all_pts[i-1][1]) / max(all_pts[i-1][1], 0.001) * 100
+        segs.append(seg_len)
+
+    # 简化规则:
+    # 连续上涨段 + 回调段 + 上涨段 + 回调段 + 上涨段 = 5 浪上升
+    # 连续下跌段 + 反弹段 + 下跌段 = A-B-C 调整
+    # 这里用最近 3-5 段判断
+
+    # 当前价格在最新的上涨/回调中
+    last_high = maxs[-1][1] if maxs else c[-1]
+    last_low = mins[-1][1] if mins else c[-1]
+    pct_from_high = (c[-1] - last_high) / last_high * 100
+    pct_from_low = (c[-1] - last_low) / last_low * 100
+
+    # 简化分类
+    if latest_dir == "up" and pct_from_low > 5:
+        # 向上, 数最近的上涨段数
+        up_count = 0
+        for i in range(len(all_pts)-1, 0, -1):
+            if all_pts[i][2] != all_pts[i-1][2]:  # 方向变了
+                if all_pts[i][2] == "H": up_count += 1
+        wave_n = min(up_count + 1, 5)
+        if wave_n <= 3:
+            return f"📈 主升第 {wave_n} 浪 (强势)"
+        else:
+            return f"⚠️ 第 {wave_n} 浪末端 (注意5浪顶)"
+    elif latest_dir == "down" and pct_from_high < -5:
+        # 向下, A-B-C 调整
+        dn_count = 0
+        for i in range(len(all_pts)-1, 0, -1):
+            if all_pts[i][2] != all_pts[i-1][2]:
+                if all_pts[i][2] == "L": dn_count += 1
+        letters = ["A", "B", "C", "X", "Y", "Z"]
+        letter_n = min(dn_count + 1, 6)
+        return f"📉 调整浪 {letters[letter_n-1]} (小心)"
+    else:
+        return "➡️ 横盘震荡"
+
+
 def _fetch_tech_indicators(tsc: str, days: int = 120) -> Dict:
     """技术面: MA/MACD/RSI/量比"""
     import numpy as np
@@ -172,6 +295,16 @@ def _fetch_tech_indicators(tsc: str, days: int = 120) -> Dict:
         if len(closes) >= 20:
             res["chg_5d"] = float((closes[-1] / closes[-5] - 1) * 100)
             res["chg_20d"] = float((closes[-1] / closes[-20] - 1) * 100)
+        # 生命周期阶段 + 波浪理论
+        try:
+            lc_phase, lc_desc = _detect_lifecycle(closes, vols)
+            res["lc_phase"] = lc_phase; res["lc_desc"] = lc_desc
+        except Exception as e:
+            res["lc_phase"] = "unknown"; res["lc_desc"] = f"❓ 阶段识别失败: {e}"
+        try:
+            res["wave"] = _detect_elliott_wave(closes)
+        except Exception as e:
+            res["wave"] = f"❓ 波浪识别失败: {e}"
     except Exception as e:
         print(f"[技术面] {tsc} 失败: {e}")
     return res
@@ -283,19 +416,26 @@ def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None
 
     # --- 上: Treeview ---
     top_f = tk.Frame(pw_v or win, bg="#FAFAFA")
-    cols = ("股票", "代码", "市值亿", "PE", "PB", "ROE", "换手率", "营收增速",
-            "MA20位置", "MACD", "RSI", "量比", "5日涨跌", "20日涨跌")
+    cols = ("股票", "代码", "周期阶段", "波浪", "市值亿", "PE", "PB", "ROE",
+            "换手率", "营收增速", "MA20", "MACD", "RSI", "量比", "20日涨跌")
     tv = ttk.Treeview(top_f, columns=cols, show="headings", height=10)
-    _widths = [100, 90, 80, 60, 55, 55, 65, 75, 85, 70, 55, 55, 65, 70]
+    _widths = [90, 90, 150, 120, 70, 55, 50, 55, 60, 70, 60, 60, 50, 50, 65]
     for c, w in zip(cols, _widths):
         tv.heading(c, text=c); tv.column(c, width=w, anchor="center")
     sb = ttk.Scrollbar(top_f, orient=tk.VERTICAL, command=tv.yview)
     tv.configure(yscrollcommand=sb.set)
     tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sb.pack(side=tk.RIGHT, fill=tk.Y)
-    tv.tag_configure("buy", background="#C8E6C9")     # 建议买入
-    tv.tag_configure("sell", background="#FFCDD2")    # 建议卖出
-    tv.tag_configure("hold", background="#FFF9C4")    # 建议持有
-    tv.tag_configure("reduce", background="#FFE0B2")  # 建议减仓
+    # 阶段颜色 (替代之前的 buy/hold/reduce/sell)
+    _LC_COLORS = {
+        "accumulation": "#C8E6C9",   # 💎 吸筹 浅绿
+        "consolidation": "#FFF9C4",  # 🪨 整理 浅黄
+        "breakout":     "#A5D6A7",   # 🚀 拉升 深绿
+        "distribution": "#FFCCBC",   # 📦 出货 浅橙
+        "decline":      "#EF9A9A",   # 📉 下跌 浅红
+        "unknown":      "#E0E0E0",   # ❓ 灰色
+    }
+    for phase, color in _LC_COLORS.items():
+        tv.tag_configure(phase, background=color)
 
     def _on_dblclick(_e=None):
         """双击 Treeview 行 → 弹游资心法全解"""
@@ -453,17 +593,19 @@ def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None
                 f = _fetch_stock_fundamentals(tsc)
                 t = _fetch_tech_indicators(tsc)
                 h = _fetch_holder_info(tsc)
-                action = _decide_action(f, t)
-                # 名字 (tushare 拿不到, 直接用代码)
-                results.append({"ts_code": tsc, "fund": f, "tech": t, "holder": h, "action": action})
+                results.append({"ts_code": tsc, "fund": f, "tech": t, "holder": h})
 
             threads = [threading.Thread(target=_one, args=(c,), daemon=True) for c in top_codes]
             for th in threads: th.start()
             for th in threads: th.join(timeout=8)
 
-            # 排序: 买入优先 → 持有 → 减仓 → 卖出
-            _act_order = {"buy": 0, "hold": 1, "reduce": 2, "sell": 3}
-            results.sort(key=lambda x: (_act_order.get(x["action"], 9), -((x["fund"].get("mv") or 0))))
+            # 排序: 拉升 → 吸筹 → 整理 → 出货 → 下跌 (好阶段在前)
+            _lc_order = {"breakout": 0, "accumulation": 1, "consolidation": 2,
+                         "distribution": 3, "decline": 4, "unknown": 9}
+            results.sort(key=lambda x: (
+                _lc_order.get(x["tech"].get("lc_phase", "unknown"), 9),
+                -((x["fund"].get("mv") or 0))
+            ))
 
             win.after(0, lambda: _render(results, board))
 
@@ -479,15 +621,17 @@ def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None
     def _render(results: List[Dict], board: Dict):
         nonlocal _current_compare
         _current_compare = results
-        # 提前加载股票名 (后台线程, 避免 UI 卡)
         threading.Thread(target=_load_stock_names, daemon=True).start()
         for r in results:
             f = r["fund"]; t = r["tech"]
             tsc = r["ts_code"]
-            name = _get_name(tsc)
-            r["_name"] = name  # 存到 result 里给双击用
+            name = _get_name(tsc); r["_name"] = name
+            # 周期阶段 tag (用生命周期阶段上色)
+            lc_phase = t.get("lc_phase", "unknown")
             tv.insert("", tk.END, values=(
                 name, tsc,
+                t.get("lc_desc", "❓"),        # 周期阶段 (emoji+描述)
+                t.get("wave", "❓"),             # 波浪理论
                 f"{(f.get('mv') or 0) / 10000:.1f}" if f.get("mv") else "—",
                 f"{f.get('pe'):.1f}" if f.get("pe") else "—",
                 f"{f.get('pb'):.2f}" if f.get("pb") else "—",
@@ -498,14 +642,18 @@ def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None
                 t.get("macd_trend") or "—",
                 f"{t.get('rsi'):.0f}" if t.get("rsi") else "—",
                 f"{t.get('vol_ratio'):.2f}" if t.get("vol_ratio") else "—",
-                f"{t.get('chg_5d'):.1f}%" if t.get("chg_5d") else "—",
                 f"{t.get('chg_20d'):.1f}%" if t.get("chg_20d") else "—",
-            ), tags=(r["action"],))
-        win.after(0, lambda: status_var.set(f"✅ {board['name']} 对比完成 | "
-                                            f"买入={sum(1 for r in results if r['action']=='buy')} | "
-                                            f"持有={sum(1 for r in results if r['action']=='hold')} | "
-                                            f"减仓={sum(1 for r in results if r['action']=='reduce')} | "
-                                            f"卖出={sum(1 for r in results if r['action']=='sell')}"))
+            ), tags=(lc_phase,))
+        # 统计各阶段数量
+        phase_counts = {}
+        for r in results:
+            p = r["tech"].get("lc_phase", "unknown")
+            phase_counts[p] = phase_counts.get(p, 0) + 1
+        _phase_names = {"accumulation": "💎吸筹", "consolidation": "🪨整理",
+                        "breakout": "🚀拉升", "distribution": "📦出货",
+                        "decline": "📉下跌", "unknown": "❓未知"}
+        phase_str = " | ".join(f"{_phase_names.get(k,k)}={v}" for k, v in phase_counts.items())
+        win.after(0, lambda: status_var.set(f"✅ {board['name']} 对比完成 | {phase_str}"))
         _render_chart(results)
         _do_ai_only(board_name_var.get(), results)
 
@@ -534,8 +682,11 @@ def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None
             elif t.get("rsi", 50) > 70: s -= 1
             tech_scores.append(s)
         # 雷达图标签 (买入/持有/减仓/卖出)
-        _action_color = {"buy": "#2E7D32", "hold": "#F57F17", "reduce": "#FF8F00", "sell": "#C62828"}
-        colors = [_action_color.get(r["action"], "#888") for r in results]
+        # 阶段颜色 (和 Treeview tag 一致)
+        _lc_color_map = {"accumulation": "#4CAF50", "consolidation": "#FBC02D",
+                         "breakout": "#2E7D32", "distribution": "#E64A19",
+                         "decline": "#C62828", "unknown": "#9E9E9E"}
+        colors = [_lc_color_map.get(r["tech"].get("lc_phase", "unknown"), "#888") for r in results]
 
         fig = Figure(figsize=(7.2, 5.8), dpi=92, facecolor="#E3F2FD")
         ax1 = fig.add_subplot(2, 2, 1)   # 市值
@@ -579,25 +730,26 @@ def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None
         lines2, labels2 = ax3b.get_legend_handles_labels()
         ax3a.legend(lines1 + lines2, labels1 + labels2, fontsize=8, loc="upper right")
 
-        # 图4: 操作建议散点气泡
+        # 图4: 生命周期阶段 + 波浪 汇总
         ax4.axis("off")
-        _action_text = {"buy": "🟢 买入", "hold": "🟡 持有", "reduce": "🟠 减仓", "sell": "🔴 卖出"}
+        _lc_text = {"accumulation": "💎 吸筹 (低吸区)", "consolidation": "🪨 整理 (观望)",
+                    "breakout": "🚀 拉升 (强势)", "distribution": "📦 出货 (谨慎)",
+                    "decline": "📉 下跌 (避)", "unknown": "❓ 阶段不明"}
         y_positions = [0.85, 0.70, 0.55, 0.40, 0.25, 0.10]
         for i, r in enumerate(results[:6]):
             y = y_positions[i % len(y_positions)]
             tsc = r["ts_code"].split(".")[0]
-            action = r["action"]
+            lc = r["tech"].get("lc_phase", "unknown")
+            wave = r["tech"].get("wave", "")
             mv = (r["fund"].get("mv") or 0) / 10000
-            pe = r["fund"].get("pe") or 0
-            chg20 = r["tech"].get("chg_20d") or 0
-            ax4.text(0.02, y, _action_text.get(action, "?"), fontsize=10, fontweight="bold",
-                     color=_action_color.get(action, "#888"), transform=ax4.transAxes)
-            ax4.text(0.22, y, f"{tsc}  市值{mv:.0f}亿  PE{pe:.1f}  20日{chg20:+.1f}%",
+            ax4.text(0.02, y, _lc_text.get(lc, "❓"), fontsize=10, fontweight="bold",
+                     color=_lc_color_map.get(lc, "#888"), transform=ax4.transAxes)
+            ax4.text(0.22, y, f"{tsc} | {wave} | {mv:.0f}亿",
                      fontsize=9, transform=ax4.transAxes, va="center")
         if len(results) > 6:
             ax4.text(0.02, 0.0, f"... 还有 {len(results)-6} 只, 详见左侧 Treeview",
                      fontsize=8, color="#888", transform=ax4.transAxes)
-        ax4.set_title("🎯 操作建议汇总", fontsize=10, fontweight="bold")
+        ax4.set_title("📅 生命周期阶段 + 波浪", fontsize=10, fontweight="bold")
 
         if canvas:
             try: canvas.get_tk_widget().destroy()
