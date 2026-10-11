@@ -3382,77 +3382,14 @@ class AnalysisMixin:
         except Exception as e:
             messagebox.showerror("错误", f"打开资讯AI分析窗口失败: {e}")
 
-    def _show_stock_analysis_dialog(self, stock_code, stock_name):
-        """显示股票分析弹窗(带K线和逻辑)"""
-        # 创建分析窗口
-        analysis_window = self._safe_toplevel(self.root)
-        analysis_window.title(f"股票分析 - {stock_name}({stock_code})")
-        analysis_window.geometry("1400x800")
-        analysis_window.transient(self.root)
-        # 主框架
-        main_frame = ttk.Frame(analysis_window, padding=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        # 标题
-        ttk.Label(main_frame, text=f"{stock_name}({stock_code})",
-                 font=("TkDefaultFont", 14, "bold")).pack(pady=(0, 10))
-        # K线图框架
-        kline_frame = ttk.LabelFrame(main_frame, text="日K线图(Tushare)", padding=10)
-        kline_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        # 同花顺情绪指数日线图(放在日K线图下方)
-        sentiment_frame = ttk.LabelFrame(main_frame, text="同花顺情绪指数(日线)", padding=10)
-        sentiment_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        # 逻辑显示框架
-        logic_frame = ttk.LabelFrame(main_frame, text="逻辑分析", padding=10)
-        logic_frame.pack(fill=tk.X)
-        logic_text = tk.Text(logic_frame, height=10, wrap=tk.WORD)
-        logic_text.pack(fill=tk.BOTH, expand=True)
-        logic_text.insert("1.0", "正在加载...")
-        # 在后台线程中加载K线图、同花顺情绪指数图与逻辑
-        def load_stock_analysis():
-            try:
-                # 获取日K线数据(Tushare)
-                kline_data = self._get_daily_kline_data_tushare(str(stock_code).zfill(6), days=60)
-                # 获取同花顺情绪指数日线(Tushare 优先,失败则 AKShare)
-                sentiment_data = self._get_ths_sentiment_index_daily(days=60)
-                def update_ui():
-                    if kline_data:
-                        self._draw_daily_kline_chart(kline_frame, kline_data, stock_name)
-                        last_close = float(kline_data['data']['收盘'].iloc[-1])
-                        logic_content = f"""
-股票代码: {stock_code}
-股票名称: {stock_name}
-技术指标分析:
-- 当前价格: {last_close}
-- K线周期: 日K(Tushare)
-逻辑说明:
-[此处可以添加更多分析逻辑]
-"""
-                    else:
-                        ttk.Label(kline_frame, text="无法获取日K线数据(请检查Tushare配置)",
-                                 font=("TkDefaultFont", 12), foreground="red").pack(expand=True)
-                        logic_content = f"""
-股票代码: {stock_code}
-股票名称: {stock_name}
-技术指标分析:
-- K线数据: 获取失败(请检查Tushare配置)
-- K线周期: 日K(Tushare)
-"""
-                    if sentiment_data:
-                        self._draw_sentiment_index_chart(sentiment_frame, sentiment_data)
-                    else:
-                        ttk.Label(sentiment_frame, text="无法获取同花顺情绪指数日线(Tushare 若未提供该指数则已尝试 AKShare,请检查网络)",
-                                 font=("TkDefaultFont", 12), foreground="gray").pack(expand=True)
-                    logic_text.delete("1.0", tk.END)
-                    logic_text.insert("1.0", logic_content)
-                self.root.after(0, update_ui)
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                def show_err(e=e):
-                    logic_text.delete("1.0", tk.END)
-                    logic_text.insert("1.0", f"加载失败: {e!s}")
-                self.root.after(0, show_err)
-        threading.Thread(target=load_stock_analysis, daemon=True).start()
+    def _show_stock_analysis_dialog(self, *args, **kwargs):
+        # 委托给 MRO 中下一个实现 (DapanMixin 新版)
+        for cls in type(self).__mro__:
+            if cls.__name__ == 'AnalysisMixin':
+                continue
+            if '_show_stock_analysis_dialog' in cls.__dict__:
+                return cls.__dict__['_show_stock_analysis_dialog'](self, *args, **kwargs)
+        return super()._show_stock_analysis_dialog(*args, **kwargs)
 
     def _run_etf20_analysis(self):
         """🎯 六军会师ETF月度动量轮动策略主逻辑"""
