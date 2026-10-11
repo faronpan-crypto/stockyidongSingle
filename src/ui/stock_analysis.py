@@ -889,16 +889,24 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                             ax_main.annotate(_pt[2], xy=(_pt[0], _pt[1]), xytext=(0,_off),
                                              textcoords="offset points", fontsize=5.5, color=_pt[3], ha="center", va=_va, fontweight="bold", zorder=16)
                             _hover_cache["bs"][_pt[0]] = (_k, _pt[2], _pt[3])
-                        _bt = backtest_signal(_k, sigs.get(f"{_k}_all",[]), closes)
+                        _bt = backtest_signal(_k, sigs.get(f"{_k}_all",[]), closes,
+                                              highs=highs, lows=lows)
                         if _bt: _hover_cache["bt"][_k] = _bt
                     if bt_var.get():
                         _bt_txt = []
                         for _k, _lbl in [("buy","买入"),("add","加仓"),("sell","卖出"),("reduce","减仓")]:
-                            _bt = backtest_signal(_k, sigs.get(f"{_k}_all",[]), closes)
+                            _bt = backtest_signal(_k, sigs.get(f"{_k}_all",[]), closes,
+                                                  highs=highs, lows=lows)
                             if _bt:
-                                pct = _bt[1]/100.0; q=1-pct; b=max(_bt[4], 0.01)
+                                wr = _bt["win_rate"]; plr = _bt["plr"]
+                                pct = wr/100.0; q=1-pct; b=max(plr, 0.01)
                                 kelly = max(0, min((b*pct - q)/b if b>0 else 0, 1.0))
-                                _bt_txt.append(f"{_lbl}胜率{_bt[1]:.0f}% 盈亏比{_bt[4]:.2f} 凯利{kelly*100:.0f}%")
+                                _wr5 = _bt["wr_by_window"].get(5,0)
+                                _wr10 = _bt["wr_by_window"].get(10,0)
+                                _wr20 = _bt["wr_by_window"].get(20,0)
+                                _bt_txt.append(
+                                    f"{_lbl} 止盈10%止损5% 胜率{wr:.0f}% 盈亏比{plr:.2f} "
+                                    f"凯利{kelly*100:.0f}% | 5日{_wr5:.0f}% 10日{_wr10:.0f}% 20日{_wr20:.0f}%")
                         if _bt_txt:
                             ax_main.text(0.5, 1.01, "  |  ".join(_bt_txt),
                                          transform=ax_main.transAxes, fontsize=7, color="#555",

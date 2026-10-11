@@ -56706,8 +56706,14 @@ class DapanMixin:
                 # 回测胜率文字 (标题上方)
                 _bt_parts = []
                 for _k, _lbl in [("buy","买入"),("add","加仓"),("sell","卖出"),("reduce","减仓")]:
-                    _bt = _bsig(_k, sigs.get(f"{_k}_all",[]), closes)
-                    if _bt: _bt_parts.append(f"{_lbl}: 胜率{_bt[1]:.0f}% 盈亏比{_bt[4]:.2f}")
+                    _bt = _bsig(_k, sigs.get(f"{_k}_all",[]), closes, highs=highs, lows=lows)
+                    if _bt:
+                        _wr5 = _bt["wr_by_window"].get(5,0)
+                        _wr10 = _bt["wr_by_window"].get(10,0)
+                        _wr20 = _bt["wr_by_window"].get(20,0)
+                        _bt_parts.append(
+                            f"{_lbl}: 止盈10%止损5% 胜率{_bt['win_rate']:.0f}% 盈亏比{_bt['plr']:.2f} "
+                            f"| 5日{_wr5:.0f}% 10日{_wr10:.0f}% 20日{_wr20:.0f}%")
                 if _bt_parts:
                     ax1.text(0.5, 1.01, "  |  ".join(_bt_parts),
                              transform=ax1.transAxes, fontsize=7.5, color="#333",

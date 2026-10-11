@@ -146,40 +146,127 @@ def calc_trade_signals(closes, opens, highs, lows, vols):
         "add_all": _dedup(_add), "reduce_all": _dedup(_red),
     }
 
-def backtest_signal(signal_type, signals_full, closes, forward_days=10):
+def backtest_signal(signal_type, signals_full, closes, highs=None, lows=None,
+                    stop_loss_pct=0.05, take_profit_pct=0.10, max_hold_days=20):
     """
-    回测某类信号的历史胜率 + 平均盈亏比
-    signal_type: 'buy' / 'add' / 'sell' / 'reduce'
-    signals_full: calc_trade_signals 返回的完整列表 (buy_all 等)
-    closes: 收盘价序列
-    forward_days: 向前看多少天
-    返回: (count, win_rate, avg_profit_pct, avg_loss_pct, profit_loss_ratio) 或 None
+    真·回测: 带止损止盈 + 最大持仓天数 + 多时间窗统计 (告别固定 10 天)
+
+    signal_type: 'buy'/'add'/'sell'/'reduce'
+    signals_full: [(idx, y, lbl, col, sym), ...]
+    closes/highs/lows: OHLC 序列
+    stop_loss_pct: 止损线 (默认 5%)
+    take_profit_pct: 止盈线 (默认 10%, 设 None 即不止盈)
+    max_hold_days: 最大持仓天数 (默认 20, 超过按收盘价平仓)
+
+    返回: {
+        "count": 样本数,
+        "win_rate": 胜率 %,
+        "avg_profit": 平均盈利 %,
+        "avg_loss": 平均亏损 %,
+        "plr": 盈亏比,
+        "median_ret": 收益中位数 %,
+        "best": 单笔最佳 %, "worst": 单笔最差 %,
+        "avg_hold_days": 平均持仓天数,
+        "exit_reasons": {"止盈": n, "止损": n, "超时": n},
+        "wr_by_window": {5: wr5%, 10: wr10%, 20: wr20%},  # 不同时间窗胜率
+        "ret_by_window": {5: ret5%, 10: ret10%, 20: ret20%}, # 不同时间窗平均收益
+    } 或 None
     """
     import numpy as np
     pts = signals_full
     if not pts or len(pts) < 3: return None
-    n = len(closes)
-    gains, losses = [], []
-    count = 0
-    for idx, _y, _lbl, _col, _sym in pts:
-        if idx + forward_days >= n: continue
-        entry = closes[idx]
-        # 买入类看 forward_days 后收盘价
-        if signal_type in ("buy", "add"):
-            exit_p = closes[idx + forward_days]
-            ret = (exit_p - entry) / entry * 100
-        else:  # sell/reduce 反向
-            exit_p = closes[idx + forward_days]
-            ret = (entry - exit_p) / entry * 100
-        if ret >= 0: gains.append(ret)
-        else: losses.append(abs(ret))
-        count += 1
-    if count == 0: return None
-    wr = len(gains) / count * 100
+    c_arr = np.asarray(closes, dtype=float)
+    h_arr = np.asarray(highs, dtype=float) if highs is not None else c_arr
+    l_arr = np.asarray(lows, dtype=float) if lows is not None else c_arr
+    n = len(c_arr)
+    # 方向: buy/add 做多, sell/reduce 做空
+    is_long = signal_type in ("buy", "add")
+
+    trades = []  # [(entry_idx, exit_idx, ret%, hold_days, exit_reason)]
+    # 用于固定时间窗统计 (5/10/20 天)
+    wins_w = {5: 0, 10: 0, 20: 0}; rets_w = {5: [], 10: [], 20: []}
+
+    for entry_idx, _y, _lbl, _col, _sym in pts:
+        # entry_idx 必须留够 max_hold_days
+        if entry_idx + 1 >= n: continue
+        entry_p = float(c_arr[entry_idx])
+        window_end = min(entry_idx + max_hold_days + 1, n)
+        if window_end <= entry_idx + 1: continue
+
+        # --- 固定时间窗统计 (不影响主回测, 只是并行记录) ---
+        for _w in (5, 10, 20):
+            _ei = entry_idx + _w
+            if _ei >= n: continue
+            _ep = float(c_arr[_ei])
+            if is_long: _r = (_ep - entry_p) / entry_p * 100
+            else: _r = (entry_p - _ep) / entry_p * 100
+            rets_w[_w].append(_r)
+            if _r >= 0: wins_w[_w] += 1
+
+        # --- 真实逐 bar 止损止盈 ---
+        exit_idx = None; exit_reason = None
+        for j in range(entry_idx + 1, window_end):
+            h_j = float(h_arr[j]); l_j = float(l_arr[j]); c_j = float(c_arr[j])
+            if is_long:
+                # 多头: 先看止损还是先看止盈 (通常止损先触发)
+                # 日内先探低点 → 止损; 再探高点 → 止盈
+                # 简化: 用当日 low 判断止损, high 判断止盈, 谁先到算谁
+                if stop_loss_pct and l_j <= entry_p * (1 - stop_loss_pct):
+                    exit_idx = j; exit_reason = "止损"; break
+                if take_profit_pct and h_j >= entry_p * (1 + take_profit_pct):
+                    exit_idx = j; exit_reason = "止盈"; break
+            else:
+                # 空头: 反向
+                if stop_loss_pct and h_j >= entry_p * (1 + stop_loss_pct):
+                    exit_idx = j; exit_reason = "止损"; break
+                if take_profit_pct and l_j <= entry_p * (1 - take_profit_pct):
+                    exit_idx = j; exit_reason = "止盈"; break
+        if exit_idx is None:
+            exit_idx = window_end - 1
+            exit_reason = "超时"
+        exit_p = float(c_arr[exit_idx])
+        if is_long: ret = (exit_p - entry_p) / entry_p * 100
+        else: ret = (entry_p - exit_p) / entry_p * 100
+        hold_days = exit_idx - entry_idx
+        trades.append((entry_idx, exit_idx, ret, hold_days, exit_reason))
+
+    if not trades: return None
+    rets = [t[2] for t in trades]
+    holds = [t[3] for t in trades]
+    gains = [r for r in rets if r >= 0]
+    losses = [abs(r) for r in rets if r < 0]
+    cnt = len(trades)
+    wr = len(gains) / cnt * 100
     avg_gain = float(np.mean(gains)) if gains else 0.0
-    avg_loss = float(np.mean(losses)) if losses else 0.1
+    avg_loss = float(np.mean(losses)) if losses else 0.0
     plr = avg_gain / max(avg_loss, 0.01)
-    return (count, wr, avg_gain, avg_loss, plr)
+    # 出场原因统计
+    exit_reasons = {}
+    for t in trades:
+        exit_reasons[t[4]] = exit_reasons.get(t[4], 0) + 1
+    # 时间窗胜率
+    wr_by_w = {}; ret_by_w = {}
+    for _w in (5, 10, 20):
+        if rets_w[_w]:
+            wr_by_w[_w] = wins_w[_w] / len(rets_w[_w]) * 100
+            ret_by_w[_w] = float(np.mean(rets_w[_w]))
+        else:
+            wr_by_w[_w] = 0; ret_by_w[_w] = 0.0
+
+    return {
+        "count": cnt,
+        "win_rate": wr,
+        "avg_profit": avg_gain,
+        "avg_loss": avg_loss,
+        "plr": plr,
+        "median_ret": float(np.median(rets)),
+        "best": float(max(rets)),
+        "worst": float(min(rets)),
+        "avg_hold_days": float(np.mean(holds)),
+        "exit_reasons": exit_reasons,
+        "wr_by_window": wr_by_w,
+        "ret_by_window": ret_by_w,
+    }
 
 
 class StockDetailMixin:
@@ -639,12 +726,18 @@ class StockDetailMixin:
                     handles, labels = ax1.get_legend_handles_labels()
                     _bs_legend = ax1.legend(handles[-4:], labels[-4:], loc="lower right", fontsize=7)
                     ax1.add_artist(_bs_legend)
-                    # 回测胜率 (写入 ax1 标题下方 text)
+                    # 回测胜率 (写入 ax1 标题下方 text) — 带止损止盈 + 3 时间窗
                     _bt_txt_parts = []
                     for _k, _lbl in [("buy","买入"),("add","加仓"),("sell","卖出"),("reduce","减仓")]:
-                        _bt = backtest_signal(_k, sigs.get(f"{_k}_all",[]), closes)
+                        _bt = backtest_signal(_k, sigs.get(f"{_k}_all",[]), closes,
+                                              highs=highs, lows=lows)
                         if _bt:
-                            _bt_txt_parts.append(f"{_lbl}: 胜率{_bt[1]:.0f}% 盈亏比{_bt[4]:.2f}")
+                            _wr5 = _bt["wr_by_window"].get(5, 0)
+                            _wr10 = _bt["wr_by_window"].get(10, 0)
+                            _wr20 = _bt["wr_by_window"].get(20, 0)
+                            _bt_txt_parts.append(
+                                f"{_lbl}: 止盈10%止损5% 胜率{_bt['win_rate']:.0f}% 盈亏比{_bt['plr']:.2f} "
+                                f"| 5日{_wr5:.0f}% 10日{_wr10:.0f}% 20日{_wr20:.0f}%")
                     if _bt_txt_parts:
                         ax1.text(0.5, 1.01, "  |  ".join(_bt_txt_parts),
                                  transform=ax1.transAxes, fontsize=7.5, color="#333",
@@ -839,11 +932,14 @@ class StockDetailMixin:
                                            ("sell","#C62828","▼卖出"),("reduce","#6A1B9A","▽减仓")]:
                         for _pt in _sig0.get(f"{_t}_all", []):
                             hover_bs_cache[_pt[0]] = (_t, _pt[2], _col)
-                    # 预计算回测
+                    # 预计算回测 (带止损止盈 + 多时间窗)
                     closes0 = _data0["收盘"].values.astype(float)
+                    highs0 = _data0["最高"].values.astype(float) if "最高" in _data0.columns else closes0
+                    lows0 = _data0["最低"].values.astype(float) if "最低" in _data0.columns else closes0
                     hover_bt_cache = {}
                     for _t in ("buy","add","sell","reduce"):
-                        _bt = backtest_signal(_t, _sig0.get(f"{_t}_all",[]), closes0)
+                        _bt = backtest_signal(_t, _sig0.get(f"{_t}_all",[]), closes0,
+                                              highs=highs0, lows=lows0)
                         if _bt: hover_bt_cache[_t] = _bt
                 except Exception:
                     hover_bs_cache = {}; hover_bt_cache = {}
@@ -954,13 +1050,27 @@ class StockDetailMixin:
                         lines.append("")
                         lines.append(f"🎯 {_type_zh} — {label}")
                         if bt:
-                            cnt, wr, avg_g, avg_l, plr = bt
-                            lines.append(f"📊 历史信号: {cnt} 次")
-                            lines.append(f"✅ 胜率: {wr:.1f}%")
-                            lines.append(f"💰 平均盈利: +{avg_g:.2f}%")
-                            lines.append(f"💔 平均亏损: -{avg_l:.2f}%")
-                            lines.append(f"⚖️ 盈亏比: {plr:.2f}")
-                            # 🧮 凯利公式 f* = (bp - q) / b, b=盈亏比, p=胜率, q=1-p
+                            cnt = bt["count"]; wr = bt["win_rate"]
+                            avg_g = bt["avg_profit"]; avg_l = bt["avg_loss"]; plr = bt["plr"]
+                            median_ret = bt["median_ret"]; best = bt["best"]; worst = bt["worst"]
+                            avg_hold = bt["avg_hold_days"]
+                            exit_reasons = bt["exit_reasons"]
+                            wr_by_w = bt["wr_by_window"]; ret_by_w = bt["ret_by_window"]
+                            lines.append(f"📊 历史信号: {cnt} 次 (止盈10% / 止损5% / 最长{int(avg_hold)+5}天)")
+                            lines.append(f"✅ 真实胜率: {wr:.1f}%  (逐bar止损止盈后)")
+                            lines.append(f"💰 平均盈利: +{avg_g:.2f}%  💔 平均亏损: -{avg_l:.2f}%")
+                            lines.append(f"⚖️ 盈亏比: {plr:.2f}  🧭 单笔中位收益: {median_ret:+.2f}%")
+                            lines.append(f"🏆 最佳 {best:+.1f}%  😰 最差 {worst:+.1f}%  ⏱ 平均持仓 {avg_hold:.1f}天")
+                            # 出场原因
+                            if exit_reasons:
+                                _parts = [f"{k}{v}次" for k, v in sorted(exit_reasons.items())]
+                                lines.append(f"🚪 出场: {' / '.join(_parts)}")
+                            # 多时间窗 (不用固定10天)
+                            lines.append("📐 不同时间窗(收盘价): "
+                                         f"5日胜率{wr_by_w.get(5,0):.0f}%均收{ret_by_w.get(5,0):+.1f}%  "
+                                         f"10日胜率{wr_by_w.get(10,0):.0f}%均收{ret_by_w.get(10,0):+.1f}%  "
+                                         f"20日胜率{wr_by_w.get(20,0):.0f}%均收{ret_by_w.get(20,0):+.1f}%")
+                            # 🧮 凯利公式 (用真实胜率)
                             try:
                                 p = wr / 100.0; q = 1 - p; b = max(plr, 0.01)
                                 kelly_f = (b * p - q) / b if b > 0 else 0
