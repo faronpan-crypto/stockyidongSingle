@@ -1733,10 +1733,10 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 ax_main.plot(list(range(19,len(closes))), c20+2*s20, color="#4682B4", linestyle="--", linewidth=0.8)
                 ax_main.plot(list(range(19,len(closes))), c20-2*s20, color="#4682B4", linestyle="--", linewidth=0.8)
             # 🛒 买卖点 + 胜率 + 凯利 (复用 calc_trade_signals + backtest_signal)
-            _hover_cache = {"bs": {}, "bt": {}}
+            _hover_cache = {"bs": {}, "bt": {}, "pp": {}}
             if bs_var.get() and len(closes) >= 30:
                 try:
-                    from ui.tab_stock_detail import calc_trade_signals, backtest_signal
+                    from ui.tab_stock_detail import calc_trade_signals, backtest_build_per_point_cache
                     sigs = calc_trade_signals(closes, opens, highs, lows, vols)
                     for _k, _mk, _col, _lbl in [("buy","*","#2E7D32","★买入"),("add","^","#F57C00","▲加仓"),
                                                    ("sell","v","#C62828","▼卖出"),("reduce","v","#6A1B9A","▽减仓")]:
@@ -1750,9 +1750,11 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                             ax_main.annotate(_pt[2], xy=(_pt[0], _pt[1]), xytext=(0,_off),
                                              textcoords="offset points", fontsize=5.5, color=_pt[3], ha="center", va=_va, fontweight="bold", zorder=16)
                             _hover_cache["bs"][_pt[0]] = (_k, _pt[2], _pt[3])
-                        _bt = backtest_signal(_k, sigs.get(f"{_k}_all",[]), closes,
-                                              highs=highs, lows=lows)
-                        if _bt: _hover_cache["bt"][_k] = _bt
+                        # per-point + aggregate
+                        _pp, _agg = backtest_build_per_point_cache(
+                            _k, sigs.get(f"{_k}_all",[]), closes, highs=highs, lows=lows)
+                        if _agg: _hover_cache["bt"][_k] = _agg
+                        _hover_cache["pp"].update(_pp)
                     if bt_var.get():
                         _bt_txt = []
                         for _k, _lbl in [("buy","买入"),("add","加仓"),("sell","卖出"),("reduce","减仓")]:
@@ -2030,6 +2032,23 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     except Exception: pass
                     lines.append("")
                     lines.append(f"🎯 {_zh} — {label}")
+                    # ========== 🎯 单点真实结果 (这根 K 线买入后实际发生了什么) ==========
+                    pp = _hover_cache.get("pp", {}).get(idx)
+                    if pp:
+                        _arrow = "📈" if pp["ret"] >= 0 else "📉"
+                        _reason = pp["exit_reason"]
+                        lines.append(f"━━━━ 这根K线 {_zh} 真实结果 ━━━━")
+                        lines.append(f"  入场价 {pp['entry_p']:.2f} → 出场价 {pp['exit_p']:.2f}  ({pp['hold_days']}天后)")
+                        lines.append(f"  {_arrow} 单笔收益: {pp['ret']:+.2f}%   出场方式: {_reason}")
+                        _rw = pp.get("rets_by_window", {})
+                        _win_parts = []
+                        for _w, _lbl in [(1,"1天"),(3,"3天"),(5,"5天"),(10,"10天"),(20,"20天")]:
+                            _v = _rw.get(_w)
+                            if _v is not None:
+                                _win_parts.append(f"{_lbl}{_v:+.1f}%")
+                        if _win_parts:
+                            lines.append(f"  固定时间窗: {' | '.join(_win_parts)}")
+                        lines.append(f"━━━━ 历史同类型 {_zh} 汇总 ━━━━")
                     if bt:
                         cnt = bt["count"]; wr = bt["win_rate"]
                         avg_g = bt["avg_profit"]; avg_l = bt["avg_loss"]; plr = bt["plr"]

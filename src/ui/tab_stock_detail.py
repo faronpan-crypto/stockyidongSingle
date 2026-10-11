@@ -269,6 +269,93 @@ def backtest_signal(signal_type, signals_full, closes, highs=None, lows=None,
     }
 
 
+def backtest_single_point(idx, closes, highs=None, lows=None,
+                          signal_type="buy",
+                          stop_loss_pct=0.05, take_profit_pct=0.10, max_hold_days=20):
+    """
+    单点回测: 只回测第 idx 这一个信号点后面发生了什么
+    返回 dict (entry / exit 实值 + 1/5/10/20 日收益 + 凯利用真实历史胜率参考) 或 None
+    """
+    import numpy as np
+    c_arr = np.asarray(closes, dtype=float)
+    h_arr = np.asarray(highs, dtype=float) if highs is not None else c_arr
+    l_arr = np.asarray(lows, dtype=float) if lows is not None else c_arr
+    n = len(c_arr)
+    if idx + 1 >= n: return None
+    is_long = signal_type in ("buy", "add")
+
+    entry_p = float(c_arr[idx])
+    entry_date_idx = idx
+    window_end = min(idx + max_hold_days + 1, n)
+
+    # 真实逐 bar 止损止盈 (谁先到算谁)
+    exit_idx = None; exit_reason = None
+    for j in range(idx + 1, window_end):
+        h_j = float(h_arr[j]); l_j = float(l_arr[j])
+        if is_long:
+            if stop_loss_pct and l_j <= entry_p * (1 - stop_loss_pct):
+                exit_idx = j; exit_reason = "止损"; break
+            if take_profit_pct and h_j >= entry_p * (1 + take_profit_pct):
+                exit_idx = j; exit_reason = "止盈"; break
+        else:
+            if stop_loss_pct and h_j >= entry_p * (1 + stop_loss_pct):
+                exit_idx = j; exit_reason = "止损"; break
+            if take_profit_pct and l_j <= entry_p * (1 - take_profit_pct):
+                exit_idx = j; exit_reason = "止盈"; break
+    if exit_idx is None:
+        exit_idx = window_end - 1
+        exit_reason = "超时"
+    exit_p = float(c_arr[exit_idx])
+    if is_long: ret = (exit_p - entry_p) / entry_p * 100
+    else: ret = (entry_p - exit_p) / entry_p * 100
+
+    # 固定时间窗收益 (5/10/20 日收盘价, 不管止盈止损)
+    rets_w = {}
+    for _w in (1, 3, 5, 10, 20):
+        _ei = idx + _w
+        if _ei < n:
+            _ep = float(c_arr[_ei])
+            rets_w[_w] = (_ep - entry_p) / entry_p * 100 if is_long else (entry_p - _ep) / entry_p * 100
+        else:
+            rets_w[_w] = None
+
+    # 同期统计: 用历史同类型信号, 算胜率/盈亏比 (这个点是第几笔)
+    # 简化: 返回这个点自己的真实结果 + 历史同类型 aggregate
+    return {
+        "entry_idx": idx, "entry_p": entry_p,
+        "exit_idx": exit_idx, "exit_p": exit_p,
+        "ret": float(ret),
+        "hold_days": int(exit_idx - idx),
+        "exit_reason": exit_reason,
+        "wins": 1 if ret >= 0 else 0,
+        "rets_by_window": rets_w,
+    }
+
+
+def backtest_build_per_point_cache(signal_type, signals_full, closes, highs=None, lows=None,
+                                   stop_loss_pct=0.05, take_profit_pct=0.10, max_hold_days=20):
+    """
+    按 idx→单点回测结果 dict 构建缓存, 同时返回 aggregate 统计
+    返回: (per_point_dict, aggregate_dict_or_None)
+    """
+    if not signals_full or len(signals_full) < 1: return {}, None
+    per_point = {}
+    for _pt in signals_full:
+        _idx = _pt[0]
+        _s = backtest_single_point(_idx, closes, highs=highs, lows=lows,
+                                    signal_type=signal_type,
+                                    stop_loss_pct=stop_loss_pct,
+                                    take_profit_pct=take_profit_pct,
+                                    max_hold_days=max_hold_days)
+        if _s is not None:
+            per_point[_idx] = _s
+    # 同时返回 aggregate (用于标题栏凯利计算)
+    agg = backtest_signal(signal_type, signals_full, closes, highs=highs, lows=lows,
+                          stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
+                          max_hold_days=max_hold_days)
+    return per_point, agg
+
+
 class StockDetailMixin:
     """个股详情/K线/分时/分钟"""
 
@@ -932,17 +1019,19 @@ class StockDetailMixin:
                                            ("sell","#C62828","▼卖出"),("reduce","#6A1B9A","▽减仓")]:
                         for _pt in _sig0.get(f"{_t}_all", []):
                             hover_bs_cache[_pt[0]] = (_t, _pt[2], _col)
-                    # 预计算回测 (带止损止盈 + 多时间窗)
+                    # 预计算回测 (per-point + aggregate)
                     closes0 = _data0["收盘"].values.astype(float)
                     highs0 = _data0["最高"].values.astype(float) if "最高" in _data0.columns else closes0
                     lows0 = _data0["最低"].values.astype(float) if "最低" in _data0.columns else closes0
-                    hover_bt_cache = {}
+                    hover_bt_cache = {}  # type→aggregate dict (用于凯利计算/标题)
+                    hover_pp_cache = {}  # idx→单点回测 dict (用于 per-point hover)
                     for _t in ("buy","add","sell","reduce"):
-                        _bt = backtest_signal(_t, _sig0.get(f"{_t}_all",[]), closes0,
-                                              highs=highs0, lows=lows0)
-                        if _bt: hover_bt_cache[_t] = _bt
+                        _pp, _agg = backtest_build_per_point_cache(
+                            _t, _sig0.get(f"{_t}_all",[]), closes0, highs=highs0, lows=lows0)
+                        if _agg: hover_bt_cache[_t] = _agg
+                        hover_pp_cache.update(_pp)
                 except Exception:
-                    hover_bs_cache = {}; hover_bt_cache = {}
+                    hover_bs_cache = {}; hover_bt_cache = {}; hover_pp_cache = {}
                 if main_only_var.get():
                     # 只显示主图
                     for w in chart_inner.winfo_children():
@@ -1049,6 +1138,26 @@ class StockDetailMixin:
                             pass
                         lines.append("")
                         lines.append(f"🎯 {_type_zh} — {label}")
+                        # ========== 🎯 单点真实结果 (这根 K 线买入后实际发生了什么) ==========
+                        pp = hover_pp_cache.get(idx)
+                        if pp:
+                            _is_long = sig_type in ("buy","add")
+                            _arrow = "📈" if pp["ret"] >= 0 else "📉"
+                            _reason = pp["exit_reason"]
+                            _reason_color = {"止盈":"#2E7D32","止损":"#C62828","超时":"#F57C00"}.get(_reason, "#555")
+                            lines.append(f"━━━━ 这根K线 {_type_zh} 真实结果 ━━━━")
+                            lines.append(f"  入场价 {pp['entry_p']:.2f} → 出场价 {pp['exit_p']:.2f}  ({pp['hold_days']}天后)")
+                            lines.append(f"  {_arrow} 单笔收益: {pp['ret']:+.2f}%   出场方式: {_reason}")
+                            # 固定时间窗收益 (真实)
+                            _rw = pp.get("rets_by_window", {})
+                            _win_parts = []
+                            for _w, _lbl in [(1,"1天"),(3,"3天"),(5,"5天"),(10,"10天"),(20,"20天")]:
+                                _v = _rw.get(_w)
+                                if _v is not None:
+                                    _win_parts.append(f"{_lbl}{_v:+.1f}%")
+                            if _win_parts:
+                                lines.append(f"  固定时间窗收益: {' | '.join(_win_parts)}")
+                            lines.append(f"━━━━ 历史同类型 {_type_zh} 汇总 ━━━━")
                         if bt:
                             cnt = bt["count"]; wr = bt["win_rate"]
                             avg_g = bt["avg_profit"]; avg_l = bt["avg_loss"]; plr = bt["plr"]
