@@ -11,7 +11,7 @@
   🤖 AI 综合: 板块判断 / Top2买 / Top2避 / 操作建议 / 风险
 右边: matplotlib K 线图 + 副图 + 买卖点 + hover tooltip(含凯利公式)
 """
-import os, re, sys, json, threading, traceback
+import os, re, sys, json, threading, traceback, sqlite3, math
 import webbrowser
 from typing import Dict, List, Optional, Any, Tuple
 import tkinter as tk
@@ -831,8 +831,8 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     ttk.Label(rt, text="K线图 + 指标 + 买卖点 (hover 查看胜率+凯利公式)",
               font=("", 11, "bold"), background="#FAFAFA", foreground="#1565C0").pack(side=tk.LEFT, padx=6)
     ivars = {}
-    for code, lbl in [("VOL","VOL"),("MACD","MACD"),("WR2","WR2"),("KDJ","KDJ"),("BOLL","BOLL")]:
-        ivars[code] = tk.BooleanVar(value=code in ("VOL","MACD","KDJ"))
+    for code, lbl in [("VOL","VOL"),("MACD","MACD"),("WR2","WR2"),("KDJ","KDJ"),("BOLL","BOLL"),("EMO","情绪")]:
+        ivars[code] = tk.BooleanVar(value=code in ("VOL","MACD","KDJ","EMO"))
         ttk.Checkbutton(rt, text=lbl, variable=ivars[code]).pack(side=tk.LEFT, padx=3)
     bs_var = tk.BooleanVar(value=True); bt_var = tk.BooleanVar(value=True)
     ttk.Checkbutton(rt, text="🛒买卖点", variable=bs_var).pack(side=tk.LEFT, padx=(10,3))
@@ -1379,8 +1379,101 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             _build_tab(name, ml)
         _build_ai_tab()
 
+    # ========= 情绪周期数据加载 =========
+    emo_phase_list = []   # 全局给 EMO 副图使用
+    def _load_emotion_data(n_points):
+        """从 sentiment_history SQLite 拉历史情绪, 对齐 K 线长度"""
+        import numpy as np
+        nonlocal emo_phase_list
+        emo_idx = None; emo_phase = "--"; emo_pos = 0; emo_ratio = 100; emo_wr = 0.5; emo_advice = ""
+        emo_phase_list = ["震荡"] * n_points  # 每根 K 线对应的情绪阶段
+        try:
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "stock_analysis.db")
+            if not os.path.exists(db_path): db_path = "data/stock_analysis.db"
+            conn = sqlite3.connect(db_path); cur = conn.cursor()
+            # 拉最近 200 天情绪数据 (降序)
+            cur.execute("""
+                SELECT snapshot_date, m1_today, m2_up, m2_down, m2_flat, m3_count
+                FROM sentiment_history ORDER BY id DESC LIMIT 400
+            """)
+            rows = cur.fetchall(); conn.close()
+            if not rows:
+                emo_advice = "SQLite 情绪数据空"
+                return emo_idx, emo_phase, emo_pos, emo_ratio, emo_wr, emo_advice
+            # 按日期升序
+            rows = sorted(rows, key=lambda r: r[0] or "")
+            dates = [r[0] for r in rows]
+            emo_vals = [(r[1] or 0) for r in rows]
+            ups = [r[2] or 0 for r in rows]
+            downs = [r[3] or 0 for r in rows]
+            flats = [r[4] or 0 for r in rows]
+            zts = [r[5] or 0 for r in rows]  # 涨停数
+            # 归一化情绪指数到 0-100%
+            _ev = np.array(emo_vals, dtype=float)
+            _up = np.array(ups, dtype=float); _dn = np.array(downs, dtype=float)
+            # 涨跌比 (上涨 / 总家数)
+            _pos = _up / np.maximum(_up + _dn + flats, 1) * 100  # 0-100%
+            # 情绪指数映射: -3~+3 → 0~100
+            emo_idx_raw = np.clip((_ev + 3) / 6 * 100, 0, 100)
+            # 情绪阶段判断 (6 阶段) — 基于情绪指数 + 涨跌比
+            def _phase(ev, pos, zt):
+                if ev < -1.5 and pos < 35: return "冰点"
+                if ev < -0.5 and pos < 45: return "启动"
+                if ev > 0.5 and pos > 55 and zt and zt > 50: return "高潮"
+                if ev > 0 and pos > 50: return "发酵"
+                if ev < 0 and pos < 50: return "退潮"
+                return "震荡"
+            phase_list = [_phase(_ev[i], _pos[i], zts[i]) for i in range(len(_ev))]
+            # 对齐到 K 线长度 (从末尾截断或前向填充)
+            n_emo = len(emo_idx_raw)
+            emo_idx = np.full(n_points, 50.0)
+            emo_phase_list = ["震荡"] * n_points
+            if n_emo >= n_points:
+                emo_idx = emo_idx_raw[-n_points:].tolist()
+                emo_phase_list = phase_list[-n_points:]
+                emo_pos = _pos[-1]
+            else:
+                # 前向填充
+                emo_idx[-n_emo:] = emo_idx_raw
+                emo_phase_list[-n_emo:] = phase_list
+                for i in range(n_points - n_emo):
+                    emo_phase_list[i] = phase_list[0]
+                emo_pos = _pos[-1] if n_emo else 0
+            # 当前阶段 (最后一个)
+            emo_phase = emo_phase_list[-1]
+            emo_idx = np.array(emo_idx, dtype=float)
+            # === α/β 仓位建议 ===
+            # β = 被动型 (指数基金) 始终满仓 100%
+            # α = 主动型 (个股) 根据情绪阶段调整
+            _phase_ratio = {
+                "冰点": 0,      # 0% — 冰点 100% 会反弹但不知何时, 空仓等信号
+                "启动": 25,     # 25% — 右侧启动小仓位试
+                "发酵": 70,     # 70% — 发酵加仓
+                "高潮": 100,    # 100% — 高潮满仓, 但警惕见顶
+                "退潮": 30,     # 30% — 退潮减仓避险
+                "震荡": 50,     # 50% — 震荡半仓做T
+            }
+            emo_ratio = _phase_ratio.get(emo_phase, 50)
+            # 附加判断: 涨跌比极端值修正
+            if emo_pos > 90: emo_ratio = min(emo_ratio, 80); emo_advice = "⚠️ 普涨高潮, 警惕板块轮动"
+            elif emo_pos < 15: emo_ratio = max(emo_ratio, 10); emo_advice = "❄️ 普跌冰点, 等待右侧信号"
+            # 胜率: 历史上同阶段后 5 日正收益比例
+            emo_wr = 0.5  # 默认
+            if n_emo >= 20:
+                _sub = [(_ev[i], _pos[i]) for i in range(n_emo)]
+                # 简化: 涨家数比 > 50% 视为"情绪好", 胜率高
+                emo_wr = float(np.mean([1 if _pos[i] > 50 else 0 for i in range(n_emo)]))
+            if not emo_advice:
+                emo_advice = f"当前 {emo_phase}, α仓建议 {emo_ratio}%, β仓 100%(指数)"
+            return emo_idx, emo_phase, emo_pos, emo_ratio, emo_wr, emo_advice
+        except Exception as e:
+            print(f"[情绪指标] 加载失败: {e}")
+            import traceback; traceback.print_exc()
+            emo_advice = f"情绪数据加载失败: {e}"
+            return emo_idx, emo_phase, emo_pos, emo_ratio, emo_wr, emo_advice
+
     # ========= matplotlib 重绘 =========
-    def _collect_keys(): return [c for c,_ in [("VOL",""),("MACD",""),("WR2",""),("KDJ",""),("BOLL","")] if ivars[c].get()]
+    def _collect_keys(): return [c for c,_ in [("VOL",""),("MACD",""),("WR2",""),("KDJ",""),("BOLL",""),("EMO","")] if ivars[c].get()]
 
     def _redraw_chart():
         nonlocal _hover_cache
@@ -1627,6 +1720,39 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     ax_s.plot(list(range(19,len(closes))), c20-2*s20, color="#2E7D32", linestyle="--", linewidth=0.7)
                     ax_s.legend(loc="upper left", fontsize=7); ax_s.grid(True, alpha=0.2)
                     ax_s.set_title("BOLL", fontsize=8, loc="left")
+                elif key == "EMO":
+                    # ===== 情绪周期 + α/β 仓位建议 =====
+                    emo_idx, emo_phase, emo_pos, emo_ratio, emo_wr, emo_advice = _load_emotion_data(len(closes))
+                    # 背景色块: 情绪阶段对应色带 (0-100%)
+                    _phase_colors = {
+                        "冰点": "#263238",      # 深灰 (冷)
+                        "启动": "#00695C",      # 青绿
+                        "发酵": "#2E7D32",      # 亮绿
+                        "高潮": "#C62828",      # 亮红 (热)
+                        "退潮": "#BF360C",      # 棕褐
+                        "震荡": "#F57F17",      # 亮黄
+                    }
+                    if emo_idx is not None and len(emo_idx) == len(closes):
+                        # 画色块背景 (0-100%)
+                        for i, ph in enumerate(emo_phase_list):
+                            ax_s.axvspan(i-0.4, i+0.4, ymin=0, ymax=1,
+                                         color=_phase_colors.get(ph, "#888"), alpha=0.35)
+                        # 情绪指数曲线 (标准化到 0-100%)
+                        ax_s.plot(list(range(len(closes))), emo_idx, color="#FFD600",
+                                  linewidth=1.2, label="情绪指数")
+                        # 仓位建议线
+                        ax_s.axhline(y=emo_ratio, color="#FF1744", linestyle="--",
+                                     linewidth=0.9, label=f"建议仓位 {emo_ratio:.0f}%")
+                        # 当前阶段标注
+                        _last_ph = emo_phase_list[-1] if emo_phase_list else "--"
+                        ax_s.text(0.01, 0.95, f"当前: {_last_ph}",
+                                  transform=ax_s.transAxes, fontsize=8, va="top",
+                                  bbox=dict(boxstyle="round,pad=0.2", facecolor=_phase_colors.get(_last_ph,"#888"), alpha=0.7, fc="#333"))
+                    # 标题
+                    _title = f"情绪 | {emo_phase} · 涨跌比{emo_pos:.0f} · α仓{emo_ratio:.0f}% · β仓100%"
+                    ax_s.set_title(_title, fontsize=8, loc="left")
+                    ax_s.set_ylim(-5, 105); ax_s.grid(True, alpha=0.2)
+                    ax_s.legend(loc="upper left", fontsize=7)
                 if row < ni-1: ax_s.tick_params(axis="x", labelbottom=False)
             fig.tight_layout()
             canvas = FigureCanvasTkAgg(fig, chart_inner); canvas.draw()
