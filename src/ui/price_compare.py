@@ -641,34 +641,257 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
     tk.Label(summ_f, textvariable=summary_var, bg="#FFF9C4", fg="#333",
              font=("", 10, "bold"), anchor="w").pack(fill=tk.X, padx=8, pady=4)
 
-    # ===== Treeview =====
+    # ====== 主布局: PanedWindow 嵌套 ======
+    # 上 30%: Treeview + 下 70% (左右分: AI 建议 + matplotlib 图形化比价)
+    try:
+        pw_v = tk.PanedWindow(win, orient=tk.VERTICAL, bg="#F5F5F5",
+                              sashwidth=6, sashrelief=tk.RAISED)
+        pw_v.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 6))
+        pw_h_parent = tk.Frame(pw_v, bg="#F5F5F5")
+    except Exception:
+        pw_v = None
+        pw_h_parent = tk.Frame(win, bg="#F5F5F5")
+        pw_h_parent.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 6))
+
+    # --- 上: Treeview + summary ---
+    top_container = tk.Frame(pw_v or pw_h_parent, bg="#FAFAFA")
     cols = ("平台", "商品", "价格", "最低价", "链接")
-    tv_frame = tk.Frame(win); tv_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
-    tv = ttk.Treeview(tv_frame, columns=cols, show="headings", height=18)
+    tv = ttk.Treeview(top_container, columns=cols, show="headings", height=10)
     for c, w in [("平台", 90), ("商品", 420), ("价格", 100), ("最低价", 80), ("链接", 300)]:
         tv.heading(c, text=c); tv.column(c, width=w, anchor="w")
-    sb = ttk.Scrollbar(tv_frame, orient=tk.VERTICAL, command=tv.yview)
+    sb = ttk.Scrollbar(top_container, orient=tk.VERTICAL, command=tv.yview)
     tv.configure(yscrollcommand=sb.set)
     tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sb.pack(side=tk.RIGHT, fill=tk.Y)
-    # tag 颜色
-    tv.tag_configure("min", background="#C8E6C9")   # 最低价绿
-    tv.tag_configure("max", background="#FFCDD2")   # 最高价红
+    tv.tag_configure("min", background="#C8E6C9")
+    tv.tag_configure("max", background="#FFCDD2")
 
-    # ===== AI 建议区 (Treeview 下方, 永远展开) =====
-    ai_f = tk.LabelFrame(win, text="🤖 AI 智能购买建议",
+    # --- 下 70%: 水平分 AI / 图形 ---
+    try:
+        pw_h = tk.PanedWindow(pw_h_parent, orient=tk.HORIZONTAL, bg="#F5F5F5",
+                              sashwidth=6, sashrelief=tk.RAISED)
+        pw_h.pack(fill=tk.BOTH, expand=True)
+    except Exception:
+        pw_h = None
+
+    ai_container = tk.Frame(pw_h or pw_h_parent, bg="#F5F5F5")
+    chart_container = tk.Frame(pw_h or pw_h_parent, bg="#F5F5F5")
+
+    if pw_v:
+        pw_v.add(top_container, minsize=120)
+        pw_v.add(pw_h_parent, minsize=200)
+    else:
+        top_container.pack(fill=tk.BOTH, expand=False, pady=(0, 4))
+
+    if pw_h:
+        pw_h.add(ai_container, minsize=300)
+        pw_h.add(chart_container, minsize=300)
+    else:
+        ai_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 3))
+        chart_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(3, 0))
+
+    # ===== 左: AI 建议区 =====
+    ai_f = tk.LabelFrame(ai_container, text="🤖 AI 智能购买建议",
                          bg="#FFF3E0", fg="#E65100", font=("", 10, "bold"))
-    ai_f.pack(fill=tk.X, padx=10, pady=(0, 6))
-    ai_text = tk.Text(ai_f, height=10, bg="#FFFBF2", fg="#333",
-                      font=("", 10), wrap=tk.WORD, relief=tk.FLAT, padx=10, pady=8,
-                      state=tk.DISABLED, cursor="arrow")
-    ai_text.pack(fill=tk.X, padx=6, pady=4)
+    ai_f.pack(fill=tk.BOTH, expand=True, pady=2)
+    # 字号调节
+    ai_bar = tk.Frame(ai_f, bg="#FFF3E0")
+    ai_bar.pack(fill=tk.X, padx=6, pady=(4, 0))
+    tk.Label(ai_bar, text="🔤 字体:", bg="#FFF3E0", fg="#5D4037").pack(side=tk.LEFT)
+    _ai_fsize_var = tk.IntVar(value=14)
+    def _ai_fsize_apply():
+        try:
+            ai_text.configure(font=("", int(_ai_fsize_var.get())))
+        except Exception:
+            pass
+    for delta, sym in [(-2, "A-"), (-1, "a-"), (1, "A+"), (2, "A++")]:
+        tk.Button(ai_bar, text=sym, width=3, command=lambda d=delta: (
+            _ai_fsize_var.set(max(10, min(22, int(_ai_fsize_var.get()) + d))), _ai_fsize_apply()),
+                  bg="#FFE0B2", fg="#5D4037", relief=tk.FLAT).pack(side=tk.LEFT, padx=1)
+    _fsize_spin = tk.Spinbox(ai_bar, from_=10, to=22, width=3, textvariable=_ai_fsize_var,
+                             command=_ai_fsize_apply, bg="#FFFBF2")
+    _fsize_spin.pack(side=tk.LEFT, padx=2)
+
+    # Text with url + platform bold tag
+    ai_text = tk.Text(ai_f, bg="#FFFBF2", fg="#333",
+                      font=("", 14), wrap=tk.WORD, relief=tk.FLAT, padx=10, pady=8,
+                      state=tk.DISABLED, cursor="hand2")
+    ai_text.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+    ai_text.tag_configure("url", foreground="#1976D2", font=("", 14, "underline"))
+    ai_text.tag_configure("platform", foreground="#C62828", font=("", 14, "bold"))
+    ai_text.tag_configure("header", foreground="#4527A0", font=("", 15, "bold"))
+    ai_text.tag_configure("bold", foreground="#333", font=("", 14, "bold"))
 
     def _show_ai(text: str):
-        """把 AI 返回写到 Text 区"""
+        """把 AI 返回写到 Text 区 — 智能识别加粗/链接/标题"""
+        import re as _re_ai
         ai_text.configure(state=tk.NORMAL)
         ai_text.delete("1.0", tk.END)
-        ai_text.insert(tk.END, text.strip() or "(AI 没返回内容)")
+        t = (text or "(AI 没返回内容)").strip()
+        # 逐行解析
+        for line in t.split("\n"):
+            line = line.rstrip()
+            # 判断行级样式
+            _hdr_match = _re_ai.match(r"^【(.+?)】", line)
+            _lvl = "header" if _hdr_match else None
+            _lvl = _lvl or ("bold" if line.startswith(("今天最划算", "✅", "❌", "💰", "🎯")) else None)
+            # 拆 URL 加粗
+            parts = _re_ai.split(r"(https?://\S+)", line)
+            _url_kw = ("淘宝", "天猫", "京东", "拼多多", "盒马", "奥乐齐", "联华", "叮咚", "唯品会", "当当", "苏宁")
+            for seg in parts:
+                if not seg: continue
+                if _re_ai.match(r"^https?://", seg):
+                    ai_text.insert(tk.END, seg, "url")
+                elif any(seg.strip().startswith(k) for k in _url_kw):
+                    ai_text.insert(tk.END, seg, "platform")
+                elif _lvl:
+                    ai_text.insert(tk.END, seg, _lvl)
+                else:
+                    ai_text.insert(tk.END, seg)
+            ai_text.insert(tk.END, "\n")
         ai_text.configure(state=tk.DISABLED)
+        _ai_fsize_apply()
+
+    # ===== 右: matplotlib 图形化比价 =====
+    try:
+        import matplotlib
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        from matplotlib.figure import Figure
+        matplotlib.use("TkAgg")
+        import matplotlib.pyplot as plt
+        plt.rcParams["font.sans-serif"] = ["Arial Unicode MS", "PingFang SC", "Heiti SC", "SimHei"]
+        plt.rcParams["axes.unicode_minus"] = False
+        _MPL_OK = True
+    except Exception:
+        _MPL_OK = False
+
+    chart_f = tk.LabelFrame(chart_container, text="📊 图形化比价分析",
+                            bg="#E8F5E9", fg="#2E7D32", font=("", 10, "bold"))
+    chart_f.pack(fill=tk.BOTH, expand=True, pady=2)
+
+    fig = None; canvas = None
+    _chart_placeholder = tk.Label(chart_f, text="⏳ 搜索完成后自动生成图形化比价...\n\n(价位对比条 / 差价对比 / 省钱雷达 / 最佳购买渠道)",
+                                   bg="#E8F5E9", fg="#666", font=("", 10))
+    _chart_placeholder.pack(fill=tk.BOTH, expand=True, pady=20)
+
+    def _render_chart(data_from_tree: Dict[str, List[Dict]]):
+        """把 Treeview 里的真实数据或 AI 常规价位 → matplotlib 4 小图"""
+        nonlocal fig, canvas
+        if not _MPL_OK: return
+        try:
+            _chart_placeholder.pack_forget()
+        except Exception: pass
+        # 收集真实价格 (Treeview 抓到的)
+        real_prices: Dict[str, List[float]] = {}
+        for p, items in data_from_tree.items():
+            for it in items:
+                try:
+                    pv = float(it.get("price") or 0)
+                    if pv > 0: real_prices.setdefault(p, []).append(pv)
+                except Exception: pass
+
+        # AI 兜底价位
+        _ai_fallback = {
+            "淘宝/天猫": (8, 14), "京东": (8, 15), "拼多多": (5, 10),
+            "盒马": (10, 18), "奥乐齐": (4, 9), "联华": (5, 10), "叮咚": (7, 14),
+        }
+        _all_platforms = ["淘宝/天猫", "京东", "拼多多", "盒马", "奥乐齐", "联华"]
+        platforms_used = [p for p in _all_platforms if p in data_from_tree] or list(data_from_tree.keys())
+        if not platforms_used: platforms_used = list(_ai_fallback.keys())[:4]
+
+        fig = Figure(figsize=(6.5, 5.5), dpi=92, facecolor="#E8F5E9")
+        ax1 = fig.add_subplot(2, 2, 1)   # 横向价位条形 (真实最低价)
+        ax2 = fig.add_subplot(2, 2, 2)   # 差价对比 (条形)
+        ax3 = fig.add_subplot(2, 2, 3)   # 雷达图
+        ax4 = fig.add_subplot(2, 2, 4)   # 省钱大字 + emoji
+        fig.subplots_adjust(left=0.08, right=0.98, top=0.92, bottom=0.05, wspace=0.35, hspace=0.45)
+
+        _colors = {"淘宝/天猫": "#FF5722", "京东": "#E53935", "拼多多": "#E91E63",
+                   "盒马": "#4CAF50", "奥乐齐": "#3F51B5", "联华": "#FF9800", "叮咚": "#00BCD4"}
+
+        # --- 图1: 各平台最低价横向条形 ---
+        names_bar = []; mins_bar = []; maxs_bar = []; bars_col = []
+        for p in platforms_used:
+            if p in real_prices:
+                prices = real_prices[p]
+                names_bar.append(p)
+                mins_bar.append(min(prices))
+                maxs_bar.append(max(prices))
+            else:
+                lo, hi = _ai_fallback.get(p, (5, 12))
+                names_bar.append(p)
+                mins_bar.append(lo); maxs_bar.append(hi)
+            bars_col.append(_colors.get(p, "#78909C"))
+        y_pos = range(len(names_bar))
+        ax1.barh(list(y_pos), maxs_bar, color=bars_col, alpha=0.4, label="最高价")
+        ax1.barh(list(y_pos), mins_bar, color=bars_col, alpha=0.9, label="最低价")
+        for i, (mn, mx) in enumerate(zip(mins_bar, maxs_bar)):
+            ax1.text(mn, i, f" ¥{mn:.1f}", va="center", fontsize=9, fontweight="bold")
+        ax1.set_yticks(list(y_pos)); ax1.set_yticklabels(names_bar, fontsize=9)
+        ax1.set_title("📉 各平台价位对比", fontsize=10, fontweight="bold")
+        ax1.set_xlabel("价格 (元)", fontsize=8); ax1.grid(axis="x", alpha=0.3)
+
+        # --- 图2: 差价对比 (与最低价的差距) ---
+        if mins_bar:
+            global_min = min(mins_bar)
+            diffs = [m - global_min for m in mins_bar]
+            bars2 = ax2.bar(names_bar, diffs, color=bars_col)
+            for i, d in enumerate(diffs):
+                ax2.text(i, d + 0.1, f"+¥{d:.1f}" if d > 0 else "最低",
+                         ha="center", fontsize=9, fontweight="bold",
+                         color="#2E7D32" if d == 0 else "#C62828")
+            ax2.axhline(0, color="#999", linewidth=0.5)
+            ax2.set_title("💰 差价对比 (vs 最低价)", fontsize=10, fontweight="bold")
+            ax2.set_ylabel("额外花 (元)", fontsize=8); ax2.grid(axis="y", alpha=0.3)
+            ax2.tick_params(axis="x", rotation=30, labelsize=8)
+
+        # --- 图3: 雷达图 (平台性价比 6 维) ---
+        _radar_labels = ["价格", "品质", "物流", "品控", "售后", "覆盖"]
+        _radar_preset = {  # 预设各平台各维度 0-10
+            "淘宝/天猫": [7, 7, 7, 6, 7, 9], "京东": [6, 9, 10, 9, 9, 7],
+            "拼多多": [10, 6, 6, 5, 6, 7], "盒马": [5, 9, 10, 9, 8, 5],
+            "奥乐齐": [10, 7, 5, 7, 5, 4], "联华": [7, 6, 6, 6, 6, 5],
+        }
+        from math import pi as _pi
+        n_rad = len(_radar_labels)
+        angles_rad = [_pi * 2 * i / n_rad for i in range(n_rad)] + [_pi * 2]
+        ax3_radar = fig.add_subplot(2, 2, 3, polar=True)
+        ax3_radar.set_theta_offset(_pi / 2); ax3_radar.set_theta_direction(-1)
+        for p in platforms_used[:3]:  # 最多 3 个平台同图
+            vals = _radar_preset.get(p, [5]*6)
+            vals = vals + vals[:1]
+            ax3_radar.plot(angles_rad, vals, "o-", linewidth=1.5, label=p, color=_colors.get(p))
+            ax3_radar.fill(angles_rad, vals, alpha=0.12, color=_colors.get(p))
+        ax3_radar.set_thetagrids([a * 180 / _pi for a in angles_rad[:-1]], _radar_labels, fontsize=8)
+        ax3_radar.set_ylim(0, 10)
+        ax3_radar.set_title("🎯 平台性价比雷达图", fontsize=10, fontweight="bold", pad=10)
+        ax3_radar.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1), fontsize=8)
+
+        # --- 图4: 省钱大字 ---
+        ax4.axis("off")
+        global_max = max(maxs_bar) if maxs_bar else 10
+        global_min_p = min(mins_bar) if mins_bar else 5
+        savings_amt = global_max - global_min_p
+        savings_pct = savings_amt / global_max * 100 if global_max else 0
+        best_p = names_bar[mins_bar.index(global_min_p)] if mins_bar else "—"
+        worst_p = names_bar[maxs_bar.index(global_max)] if maxs_bar else "—"
+        ax4.text(0.5, 0.9, "🎯 最佳购买渠道", ha="center", va="center",
+                 fontsize=12, fontweight="bold", transform=ax4.transAxes, color="#2E7D32")
+        ax4.text(0.5, 0.65, f"🛒 {best_p}", ha="center", va="center",
+                 fontsize=18, fontweight="bold", transform=ax4.transAxes, color="#1565C0")
+        ax4.text(0.5, 0.4, f"💸 每次省 ¥{savings_amt:.1f} ({savings_pct:.0f}%)",
+                 ha="center", va="center", fontsize=14, fontweight="bold",
+                 transform=ax4.transAxes, color="#C62828")
+        ax4.text(0.5, 0.15, f"对比平台: {worst_p} → {best_p}",
+                 ha="center", va="center", fontsize=9,
+                 transform=ax4.transAxes, color="#666")
+
+        # 嵌入 Tkinter
+        if canvas:
+            try: canvas.get_tk_widget().destroy()
+            except Exception: pass
+        canvas = FigureCanvasTkAgg(fig, master=chart_f)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
     def _fetch_ai_advice(kw: str):
         """后台线程: 调 call_ai_model 生成购买建议 (极简 prompt + 短 token 快速出)"""
@@ -754,6 +977,11 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
         else:
             summary_var.set("⚠️ 所有平台都没抓到结构化数据（反爬/风控拦截） → AI 购买建议正在并行生成中...")
         status_var.set("✅ 搜索完成 | 双击行打开商品页 | 绿色=跨平台最低价 红色=最高价")
+        # ⚡ 每次搜索都渲染图形化比价 (反爬时用预设价位兜底)
+        try:
+            _render_chart(res)
+        except Exception as _echart:
+            print(f"[比价图形] _render_chart 异常: {_echart}")
 
     # 默认自动搜一次
     win.after(200, _do_search)
