@@ -511,7 +511,8 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
 
     win = tk.Toplevel(parent_win) if parent_win else tk.Tk()
     win.title("💰 跨平台比价")
-    win.geometry("1100x780")
+    win.geometry("1200x860")
+    win.minsize(960, 720)
     win.configure(bg="#F5F5F5")
 
     # ===== 顶栏 =====
@@ -555,17 +556,23 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
             tv.delete(item)
         summary_var.set("")
 
-        def _bg():
+        def _bg_html():
             try:
                 res = fetch_all_platforms(kw, platforms=sel_p)
                 win.after(0, lambda: _render(res))
             except Exception as e:
                 win.after(0, lambda: status_var.set(f"❌ 搜索失败: {e}"))
 
-        threading.Thread(target=_bg, daemon=True).start()
+        # ⚡ 并行启动: HTML 搜索 + AI 购买建议 同时跑 (不用等反爬完)
+        threading.Thread(target=_bg_html, daemon=True).start()
+        threading.Thread(target=_fetch_ai_advice, args=(kw,), daemon=True).start()
 
     tk.Button(btn_row, text="🔍 搜索", command=_do_search, bg="#FFD54F", fg="#1A237E",
               font=("", 10, "bold"), relief=tk.FLAT, padx=14).pack(side=tk.LEFT, padx=10)
+    tk.Button(btn_row, text="🤖 AI重跑", command=lambda: threading.Thread(
+        target=_fetch_ai_advice, args=(kw_var.get().strip(),), daemon=True).start(),
+              bg="#FF9800", fg="white", relief=tk.FLAT, padx=8, font=("", 9, "bold")
+              ).pack(side=tk.LEFT, padx=2)
 
     def _open_api_settings():
         """弹窗让用户填 OneBound / TMAPI 的 key+secret"""
@@ -647,16 +654,14 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
     tv.tag_configure("min", background="#C8E6C9")   # 最低价绿
     tv.tag_configure("max", background="#FFCDD2")   # 最高价红
 
-    # ===== AI 建议区 (Treeview 下方, 可折叠) =====
-    ai_f = tk.LabelFrame(win, text="🤖 AI 智能购买建议 (所有平台反爬时自动触发)",
-                         bg="#FFF3E0", fg="#E65100", font=("", 9, "bold"))
+    # ===== AI 建议区 (Treeview 下方, 永远展开) =====
+    ai_f = tk.LabelFrame(win, text="🤖 AI 智能购买建议",
+                         bg="#FFF3E0", fg="#E65100", font=("", 10, "bold"))
     ai_f.pack(fill=tk.X, padx=10, pady=(0, 6))
-    ai_text = tk.Text(ai_f, height=6, bg="#FFFBF2", fg="#333",
-                      font=("", 9), wrap=tk.WORD, relief=tk.FLAT, padx=8, pady=6,
-                      state=tk.DISABLED)
+    ai_text = tk.Text(ai_f, height=10, bg="#FFFBF2", fg="#333",
+                      font=("", 10), wrap=tk.WORD, relief=tk.FLAT, padx=10, pady=8,
+                      state=tk.DISABLED, cursor="arrow")
     ai_text.pack(fill=tk.X, padx=6, pady=4)
-    ai_scroll = ttk.Scrollbar(ai_text, orient=tk.VERTICAL, command=ai_text.yview)
-    ai_text.configure(yscrollcommand=ai_scroll.set)
 
     def _show_ai(text: str):
         """把 AI 返回写到 Text 区"""
@@ -666,30 +671,29 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
         ai_text.configure(state=tk.DISABLED)
 
     def _fetch_ai_advice(kw: str):
-        """后台线程: 调 call_ai_model 生成购买建议"""
+        """后台线程: 调 call_ai_model 生成购买建议 (极简 prompt + 短 token 快速出)"""
         if not call_ai_fn:
             win.after(0, lambda: _show_ai(
-                "⚠️ 未配置 AI 模型 (call_ai_fn 为 None)\n"
-                "请先在程序里配置 AI 设置 (deepseek/豆包 API key)"
+                "⚠️ 未配置 AI 模型\n请先在程序 AI 设置里填 deepseek/豆包 API key"
             ))
             return
-        system_p = ("你是中国电商比价专家, 熟悉淘宝/天猫/京东/拼多多/盒马/奥乐齐/联华/叮咚买菜 等主流平台的定价策略。"
-                    "根据用户输入的商品, 给出各大平台的历史常规价位、当前最划算的购买建议、"
-                    "通货品牌 vs 自有品牌 vs 生鲜食品的不同采购场景推荐、以及各平台直达搜索链接。"
-                    "回答用中文, 结构清晰, 每行一个要点, 不要长篇大论。")
-        prompt = (f"请针对商品「{kw}」给出跨平台购买建议:\n"
-                  f"1. 淘宝/天猫 / 京东 / 拼多多 / 盒马 / 奥乐齐 / 联华 — 各平台近 3 个月常规价位区间\n"
-                  f"2. 当前最划算的采购渠道 (分: 通货品牌 vs 自有品牌 vs 生鲜 三大场景)\n"
-                  f"3. 各平台直达搜索链接 (可点击)\n"
-                  f"4. 一句话总结: 今天去哪买最省")
+        win.after(0, lambda: _show_ai("⏳ AI 正在生成购买建议... (首次联网拉模型, 约 10-30s)"))
+        system_p = "你是中国电商比价专家, 熟悉淘宝/京东/拼多多/盒马/奥乐齐/联华/叮咚 定价。回答用中文, 紧凑简洁。"
+        prompt = (f"商品「{kw}」跨平台购买建议, 请按以下结构输出 (每段 1-3 行):\n\n"
+                  f"【各平台常规价】淘宝:X-X元 | 京东:X-X元 | 拼多多:X-X元 | 盒马:X-X元 | 奥乐齐:X-X元\n\n"
+                  f"【今天最划算】通货品牌→去___买 (理由:___) | 自有品牌→去___买 | 生鲜→去___买\n\n"
+                  f"【直达链接】淘宝 https://s.taobao.com/search?q={kw.replace(' ','')}\n"
+                  f"京东 https://search.jd.com/Search?keyword={kw.replace(' ','')}\n"
+                  f"拼多多 https://mobile.yangkeduo.com/search_result.html?search_key={kw.replace(' ','')}\n"
+                  f"盒马 https://m.hemaos.com/search?keyword={kw.replace(' ','')}")
         try:
-            res = call_ai_fn(prompt, system_prompt=system_p, max_tokens=800)
+            res = call_ai_fn(prompt, system_prompt=system_p, max_tokens=400)
             if isinstance(res, str) and len(res) > 10:
                 win.after(0, lambda: _show_ai(res))
             else:
                 win.after(0, lambda: _show_ai(f"⚠️ AI 返回异常: {str(res)[:200]}"))
         except Exception as e:
-            win.after(0, lambda: _show_ai(f"⚠️ AI 调用失败: {e}"))
+            win.after(0, lambda: _show_ai(f"⚠️ AI 调用失败: {e}\n\n你也可以直接点上方 🌐 平台按钮跳转官网搜。"))
 
     def _open_link(_e=None):
         sel = tv.selection()
@@ -748,9 +752,7 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
                 f"📈 均价 {avg:.2f}"
             )
         else:
-            summary_var.set("⚠️ 所有平台都没抓到结构化数据（反爬/风控拦截） → 🤖 正在调 AI 给购买建议...")
-            # 反爬自动走 AI 兜底
-            threading.Thread(target=_fetch_ai_advice, args=(kw,), daemon=True).start()
+            summary_var.set("⚠️ 所有平台都没抓到结构化数据（反爬/风控拦截） → AI 购买建议正在并行生成中...")
         status_var.set("✅ 搜索完成 | 双击行打开商品页 | 绿色=跨平台最低价 红色=最高价")
 
     # 默认自动搜一次
