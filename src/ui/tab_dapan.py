@@ -14095,6 +14095,17 @@ class DapanMixin:
             print(f"[📸] ❌ 异常: {e}", flush=True)
             _tb.print_exc()
 
+    def _show_price_compare_dialog(self):
+        """💰 跨平台比价 — lazy import"""
+        import traceback as _tb
+        print("[💰比价] 按钮被点击!", flush=True)
+        try:
+            from ui.price_compare import show_price_compare_dialog as _spc
+            _spc(getattr(self, 'root', None) or getattr(self, '_root', None) or None)
+        except Exception as e:
+            print(f"[💰比价❌] {e}", flush=True)
+            _tb.print_exc()
+
     def _show_wechat_dialog(self):
         """📱 微信日报生成 — lazy import"""
         import traceback as _tb
