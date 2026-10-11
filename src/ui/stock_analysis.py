@@ -677,7 +677,7 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
                  ("巴菲特 2024 致股东信", "https://www.berkshirehathaway.com/letters/2024.html")],
     },
 }
-def _show_method_knowledge(parent_win: tk.Tk, method_name: str):
+def _show_method_knowledge(parent_win: tk.Tk, method_name: str, extra_title: str = ""):
     """弹出 Toplevel, 展示某个方法的完整说明 + 可点击 URL"""
     # 精确匹配 → 去掉括号内容后匹配 (处理 "缠论(简化)" 这种变体)
     info = KNOWLEDGE.get(method_name)
@@ -687,6 +687,12 @@ def _show_method_knowledge(parent_win: tk.Tk, method_name: str):
     if not info: return
     top = tk.Toplevel(parent_win)
     top.title(f"{info.get('emoji','❓')} {method_name} — 方法说明")
+    if extra_title:
+        # 弹窗顶部加一个彩色条提示 K 线叠加
+        _band = tk.Frame(top, bg="#FFF3E0", height=24)
+        _band.pack(fill=tk.X)
+        tk.Label(_band, text=f"🔍 {extra_title}", bg="#FFF3E0", fg="#E65100",
+                 font=("", 9, "bold")).pack(side=tk.LEFT, padx=10)
     top.geometry("620x560")
     top.configure(bg="#FFFDF5")
     top.attributes("-topmost", True)
@@ -1633,6 +1639,198 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         if "." in t6: return t6
         return t6 + (".SH" if t6.startswith(("6","9","5")) else ".SZ" if t6.startswith(("3","0","4")) else ".BJ")
 
+    # ========= 方法 overlay: 检测 → 画辅助线 =========
+    def _draw_method_overlay(title):
+        """清除旧 overlay → 跑 detector → 在 ax_main 画新辅助线"""
+        nonlocal _overlay_artists, _current_ax_main, _current_canvas
+        if _current_ax_main is None or _current_kline is None: return
+        ax = _current_ax_main; canvas = _current_canvas
+        data = _current_kline["data"]
+        closes = data["收盘"].values.astype(float)
+        highs = data["最高"].values.astype(float)
+        lows = data["最低"].values.astype(float)
+        n = len(closes)
+        _clear_overlays()
+        try:
+            if title in ("杯形法",) or "杯形" in title:
+                r = _detect_cup_handle(highs, lows, closes)
+                if r["found"]:
+                    # 找 cup 的左峰 / 杯底 / 右峰
+                    cup_depth = r.get("cup_depth", 0)
+                    pos_ratio = r.get("pos_ratio", 0.5)
+                    # 左峰 = 最近 120 天最高点
+                    win = min(n, 120); peak_i = int(np.argmax(highs[-win:])) + (n - win)
+                    peak_h = highs[peak_i]
+                    # 杯底 = peak 左侧 30 天最低点
+                    left_start = max(0, peak_i-30); left_seg = lows[left_start:peak_i+1]
+                    trough_i = left_start + int(np.argmin(left_seg)); trough_l = lows[trough_i]
+                    # 右峰 = 杯底之后高点
+                    right_seg = highs[trough_i:n]; right_rel = int(np.argmax(right_seg)); right_i = trough_i + right_rel; right_h = highs[right_i]
+                    # 画三条水平线
+                    _add_overlay(ax.axhline(y=peak_h, color="#F57C00", linestyle="--", linewidth=1.0, alpha=0.8, label="左峰/右峰"))
+                    _add_overlay(ax.axhline(y=trough_l, color="#2E7D32", linestyle="--", linewidth=1.0, alpha=0.8, label="杯底"))
+                    _add_overlay(ax.annotate(f"🏺杯幅{(peak_h-trough_l)/peak_h*100:.0f}%", xy=(n-1, peak_h), fontsize=8, color="#F57C00", ha="right", va="bottom", fontweight="bold"))
+                    _add_overlay(ax.annotate(f"杯底", xy=(n-1, trough_l), fontsize=7, color="#2E7D32", ha="right", va="top"))
+                    # 大标题
+                    _add_overlay(ax.text(0.02, 0.95, f"🏺 杯形法 ✅ 成立 置信度{r['confidence']}",
+                                         transform=ax.transAxes, fontsize=9, color="#F57C00", fontweight="bold",
+                                         bbox=dict(facecolor="#FFF3E0", edgecolor="#F57C00", alpha=0.9, boxstyle="round,pad=0.3")))
+                else:
+                    _add_overlay(ax.text(0.02, 0.95, f"🏺 杯形法 ❌ 未成立",
+                                         transform=ax.transAxes, fontsize=9, color="#666", fontweight="bold",
+                                         bbox=dict(facecolor="#F5F5F5", edgecolor="#CCC", alpha=0.9, boxstyle="round,pad=0.3")))
+
+            elif "头肩" in title:
+                r = _detect_head_shoulders(highs)
+                if r.get("found"):
+                    peaks, troughs_l = _detect_local_extremes(highs, order=5)
+                    p = peaks[-3:]; h1, h2, h3 = p[0][1], p[1][1], p[2][1]
+                    neckline_y = min((p[0][1]+p[2][1])/2, *[t[1] for t in troughs_l if p[0][0] < t[0] < p[2][0]]) if troughs_l else (p[0][1]+p[2][1])/2
+                    _add_overlay(ax.hlines(y=[h1,h2,h3], xmin=[p[0][0]-3,p[1][0]-3,p[2][0]-3],
+                                           xmax=[p[0][0]+3,p[1][0]+3,p[2][0]+3], colors="#C62828", linestyles="-", linewidths=2))
+                    _add_overlay(ax.annotate("左肩", xy=(p[0][0], h1), fontsize=7, color="#C62828", ha="center", va="bottom"))
+                    _add_overlay(ax.annotate("头", xy=(p[1][0], h2), fontsize=7, color="#C62828", ha="center", va="bottom"))
+                    _add_overlay(ax.annotate("右肩", xy=(p[2][0], h3), fontsize=7, color="#C62828", ha="center", va="bottom"))
+                    # 颈线
+                    _add_overlay(ax.annotate(f"颈线 {neckline_y:.2f}", xy=(n-1, neckline_y), fontsize=7, color="#1565C0", ha="right", va="bottom"))
+                    if troughs_l:
+                        t1 = [t for t in troughs_l if p[0][0] < t[0] < p[2][0]]
+                        if len(t1) >= 2:
+                            _add_overlay(ax.plot([t1[0][0], t1[-1][0]], [t1[0][1], t1[-1][1]], color="#1565C0", linestyle="--", linewidth=1.2))
+                    _add_overlay(ax.text(0.02, 0.95, f"👤 头肩顶 ✅ 颈线{neckline_y:.2f}",
+                                         transform=ax.transAxes, fontsize=9, color="#C62828", fontweight="bold",
+                                         bbox=dict(facecolor="#FFEBEE", edgecolor="#C62828", alpha=0.9, boxstyle="round,pad=0.3")))
+                else:
+                    _add_overlay(ax.text(0.02, 0.95, f"👤 头肩 ❌ 未成立",
+                                         transform=ax.transAxes, fontsize=9, color="#666", fontweight="bold",
+                                         bbox=dict(facecolor="#F5F5F5", edgecolor="#CCC", alpha=0.9, boxstyle="round,pad=0.3")))
+
+            elif "双重" in title:
+                r = _detect_double_top(highs, lows)
+                peaks, _ = _detect_local_extremes(highs, order=5)
+                troughs_l, _ = _detect_local_extremes(lows, order=5)
+                if peaks and len(peaks) >= 2:
+                    p2 = peaks[-2]; p1 = peaks[-1]
+                    _add_overlay(ax.hlines(y=[p1[1], p2[1]], xmin=[p1[0]-3,p2[0]-3], xmax=[p1[0]+3,p2[0]+3],
+                                           colors="#C62828", linestyles="-", linewidths=2))
+                    _add_overlay(ax.annotate(f"顶1 {p2[1]:.2f}", xy=(p2[0], p2[1]), fontsize=7, color="#C62828", ha="center"))
+                    _add_overlay(ax.annotate(f"顶2 {p1[1]:.2f}", xy=(p1[0], p1[1]), fontsize=7, color="#C62828", ha="center"))
+                    if r.get("found"):
+                        _add_overlay(ax.text(0.02, 0.95, f"M顶 ✅ {abs(p1[1]-p2[1])/p1[1]*100:.1f}% 差",
+                                             transform=ax.transAxes, fontsize=9, color="#C62828", fontweight="bold",
+                                             bbox=dict(facecolor="#FFEBEE", edgecolor="#C62828", alpha=0.9, boxstyle="round,pad=0.3")))
+                    else:
+                        _add_overlay(ax.text(0.02, 0.95, f"M/W ❌ 未成立",
+                                             transform=ax.transAxes, fontsize=9, color="#666",
+                                             bbox=dict(facecolor="#F5F5F5", edgecolor="#CCC", alpha=0.9, boxstyle="round,pad=0.3")))
+
+            elif "三角" in title:
+                r = _detect_triangle(highs, lows)
+                peaks, _ = _detect_local_extremes(highs, order=6)
+                _, troughs_l = _detect_local_extremes(lows, order=6)
+                if len(peaks) >= 2 and len(troughs_l) >= 2:
+                    _add_overlay(ax.plot([peaks[-2][0], peaks[-1][0]], [peaks[-2][1], peaks[-1][1]],
+                                         color="#6A1B9A", linestyle="--", linewidth=1.2, label="阻力线"))
+                    _add_overlay(ax.plot([troughs_l[-2][0], troughs_l[-1][0]], [troughs_l[-2][1], troughs_l[-1][1]],
+                                         color="#2E7D32", linestyle="--", linewidth=1.2, label="支撑线"))
+                _add_overlay(ax.text(0.02, 0.95, f"🔺 三角形 {r.get('pattern','整理')}",
+                                     transform=ax.transAxes, fontsize=9, color="#6A1B9A", fontweight="bold",
+                                     bbox=dict(facecolor="#F3E5F5", edgecolor="#6A1B9A", alpha=0.9, boxstyle="round,pad=0.3")))
+
+            elif "均线" in title or "MACD" in title or "指标" in title:
+                r = _detect_ema_trend(closes)
+                _add_overlay(ax.text(0.02, 0.95, f"📈 {r['ma_trend']}\n{r['macd']}",
+                                     transform=ax.transAxes, fontsize=8.5, color="#1565C0", fontweight="bold",
+                                     bbox=dict(facecolor="#E3F2FD", edgecolor="#1565C0", alpha=0.92, boxstyle="round,pad=0.35")))
+
+            elif "BOLL" in title or "布林" in title:
+                _add_overlay(ax.text(0.02, 0.95, f"📏 BOLL布林带 已在主图标出",
+                                     transform=ax.transAxes, fontsize=8, color="#4682B4", fontweight="bold",
+                                     bbox=dict(facecolor="#E1F5FE", edgecolor="#4682B4", alpha=0.9, boxstyle="round,pad=0.3")))
+
+            elif "缠论" in title or "结构" in title:
+                try:
+                    from ui.chanlun import analyze_chan
+                    result = analyze_chan(closes, highs, lows)
+                    zhongshus = result.get("zhongshus", [])
+                    # 画中枢 [ZD, ZG] 彩色横条
+                    for k, (zd, zg) in enumerate(zhongshus[-3:]):
+                        _add_overlay(ax.axhspan(zd, zg, color="#FFD54F", alpha=0.25, linewidth=0))
+                        _add_overlay(ax.annotate(f"中枢{len(zhongshus)-len(zhongshus[-3:])+k+1}", xy=(n-1, (zd+zg)/2),
+                                                 fontsize=7, color="#E65100", ha="right"))
+                    bis = result.get("bis", [])
+                    if len(bis) >= 2:
+                        # 笔的端点连线
+                        xs = [b[0] for b in bis if b[0] < n]
+                        ys = [b[1] for b in bis if b[0] < n]
+                        if xs: _add_overlay(ax.plot(xs, ys, color="#D84315", linewidth=1.5, alpha=0.7, label="缠论笔"))
+                    n_bs = result.get("beichi", 0); n_sig = result.get("buy_sigs", 0) + result.get("sell_sigs", 0)
+                    _add_overlay(ax.text(0.02, 0.95, f"🌀 缠论 {len(bis)}笔 {len(zhongshus)}中枢 背驰{n_bs} 买卖点{n_sig}",
+                                         transform=ax.transAxes, fontsize=8.5, color="#D84315", fontweight="bold",
+                                         bbox=dict(facecolor="#FBE9E7", edgecolor="#D84315", alpha=0.92, boxstyle="round,pad=0.35")))
+                except Exception as _e:
+                    _add_overlay(ax.text(0.02, 0.95, f"🌀 缠论检测失败: {_e}",
+                                         transform=ax.transAxes, fontsize=8, color="#C62828"))
+
+            elif "波浪" in title or "艾略特" in title:
+                # 简化: 用 60 天段内波动粗略划分 1-5 浪
+                win = min(120, n)
+                seg = closes[-win:]
+                peaks, troughs = _detect_local_extremes(seg, order=4)
+                # 最近 3 个峰
+                if peaks:
+                    for pi, ph in peaks[-3:]:
+                        _add_overlay(ax.annotate("浪顶", xy=(n-win+pi, ph), fontsize=7, color="#FF6F00", ha="center"))
+                _add_overlay(ax.text(0.02, 0.95, f"🌊 艾略特波浪 (简化版)\n1-5浪主升 / A-B-C调整",
+                                     transform=ax.transAxes, fontsize=8.5, color="#E65100", fontweight="bold",
+                                     bbox=dict(facecolor="#FFF3E0", edgecolor="#FF6F00", alpha=0.9, boxstyle="round,pad=0.35")))
+
+            elif "生命" in title or "周期" in title:
+                import numpy as np
+                _ls, _desc = _detect_lifecycle(closes, highs)  # 签名兼容
+                _lc_colors = {"accumulation": "#8D6E63", "consolidation": "#FFB74D",
+                              "breakout": "#2E7D32", "distribution": "#E65100", "decline": "#C62828",
+                              "unknown": "#999"}
+                _c = _lc_colors.get(_ls, "#999")
+                _emojis = {"accumulation":"📦", "consolidation":"🔒", "breakout":"🚀",
+                           "distribution":"📤", "decline":"📉", "unknown":"❓"}
+                _emj = _emojis.get(_ls, "❓")
+                _add_overlay(ax.text(0.02, 0.95, f"{_emj} 生命周期: {_desc}",
+                                     transform=ax.transAxes, fontsize=9, color=_c, fontweight="bold",
+                                     bbox=dict(facecolor="#FFFDE7", edgecolor=_c, alpha=0.92, boxstyle="round,pad=0.35")))
+
+            elif "RSI" in title or "KDJ" in title:
+                import numpy as np
+                # 画 RSI
+                rsi_vals = np.full(n, 50.0)
+                for i in range(14, n):
+                    seg = closes[i-14:i]
+                    up = np.sum(np.diff(seg)[np.diff(seg)>0]); dn = -np.sum(np.diff(seg)[np.diff(seg)<0])
+                    rs = up / max(dn, 0.001); rsi_vals[i] = 100 - 100/(1+rs)
+                # 仅画最后 60 天 RSI 在主图上的相对位置提示 (用 annotate)
+                _cur = rsi_vals[-1]
+                _tip = "RSI>70 超买" if _cur>70 else "RSI<30 超卖" if _cur<30 else f"RSI {_cur:.0f} 中性"
+                _col = "#C62828" if _cur>70 else "#2E7D32" if _cur<30 else "#333"
+                _add_overlay(ax.text(0.02, 0.95, f"🎯 {_tip}\n主图已画 BOLL, RSI={_cur:.0f}",
+                                     transform=ax.transAxes, fontsize=9, color=_col, fontweight="bold",
+                                     bbox=dict(facecolor="#FFF8E1", edgecolor=_col, alpha=0.92, boxstyle="round,pad=0.35")))
+
+            else:
+                _add_overlay(ax.text(0.02, 0.95, f"📌 {title} — 点左栏查看具体分析",
+                                     transform=ax.transAxes, fontsize=9, color="#555",
+                                     bbox=dict(facecolor="#F5F5F5", edgecolor="#BBB", alpha=0.9, boxstyle="round,pad=0.3")))
+        except Exception as _e:
+            _add_overlay(ax.text(0.02, 0.95, f"⚠️ {title} overlay 失败: {_e}",
+                                 transform=ax.transAxes, fontsize=8, color="#C62828"))
+        finally:
+            try: canvas.draw()
+            except Exception: pass
+
+    def _show_method_stock_dialog(parent_win, method_name):
+        """增强版: 知识弹窗 + 叠加 K 线辅助线"""
+        _draw_method_overlay(method_name)
+        _show_method_knowledge(parent_win, method_name, extra_title=f"📊 正在 K 线图上叠加 「{method_name}」 辅助线")
+
     # ========= 渲染左侧 Tab =========
     def _build_tab(tab_name, method_list):
         # 清旧
@@ -1647,16 +1845,28 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             lf = tk.LabelFrame(body, text=f"  {emoji} {title}  ", bg="#FFFFFF", fg="#4527A0",
                                font=("", 10, "bold"), relief=tk.GROOVE, bd=1)
             lf.pack(fill=tk.X, padx=6, pady=4)
-            # [?] 方法说明按钮 — 右侧挂一个小按钮
+            # [?] 方法说明按钮 — 右侧挂两个小按钮 (说明 + K线叠加)
             _kn_key = title if title in KNOWLEDGE else re.sub(r"[（(].*?[)）]", "", title).strip()
+            _header_row = tk.Frame(lf, bg="#FFFFFF"); _header_row.pack(fill=tk.X, padx=6, pady=(2,0))
+            tk.Label(_header_row, text="", bg="#FFFFFF").pack(side=tk.LEFT, fill=tk.X, expand=True)
             if _kn_key in KNOWLEDGE:
-                _header_row = tk.Frame(lf, bg="#FFFFFF"); _header_row.pack(fill=tk.X, padx=6, pady=(2,0))
-                tk.Label(_header_row, text="", bg="#FFFFFF").pack(side=tk.LEFT, fill=tk.X, expand=True)
-                _help_btn = tk.Button(_header_row, text="❓ 方法说明",
-                                      command=lambda _t=title: _show_method_knowledge(win, _t),
+                _help_btn = tk.Button(_header_row, text="❓ 说明",
+                                      command=lambda _t=title: _show_method_stock_dialog(win, _t),
                                       bg="#E8EAF6", fg="#4527A0", font=("", 8),
                                       relief=tk.FLAT, padx=8, pady=0, cursor="hand2")
-                _help_btn.pack(side=tk.RIGHT, pady=2)
+                _help_btn.pack(side=tk.RIGHT, pady=2, padx=(2,0))
+            # 🔍 在 K 线图标出按钮 (无论有没有知识都画)
+            _overlay_btn = tk.Button(_header_row, text="🔍 K线标出",
+                                     command=lambda _t=title: _draw_method_overlay(_t),
+                                     bg="#FFF3E0", fg="#E65100", font=("", 8),
+                                     relief=tk.FLAT, padx=8, pady=0, cursor="hand2")
+            _overlay_btn.pack(side=tk.RIGHT, pady=2, padx=(2,0))
+            # ❌ 清除 overlay 按钮 (统一)
+            _clear_btn = tk.Button(_header_row, text="⏹ 清除辅助线",
+                                   command=_clear_overlays,
+                                   bg="#FFEBEE", fg="#C62828", font=("", 8),
+                                   relief=tk.FLAT, padx=8, pady=0, cursor="hand2")
+            _clear_btn.pack(side=tk.LEFT, pady=2)
             tk.Label(lf, text=f"💡 {desc}", bg="#FFF8E1", fg="#666", font=("", 8), wraplength=380,
                      justify=tk.LEFT).pack(fill=tk.X, padx=6, pady=4)
             # 结果区
@@ -1692,6 +1902,24 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
     # ========= matplotlib 重绘 =========
     def _collect_keys(): return [c for c,_ in [("VOL",""),("MACD",""),("WR2",""),("KDJ",""),("BOLL",""),("EMO","")] if ivars[c].get()]
+
+    # Overlay 状态 (方法辅助线)
+    _overlay_artists = []   # matplotlib Artist 列表, 方便 .remove()
+    _current_ax_main = None
+    _current_canvas = None
+
+    def _clear_overlays():
+        """清除所有方法辅助线"""
+        nonlocal _overlay_artists
+        for a in list(_overlay_artists):
+            try: a.remove()
+            except Exception: pass
+        _overlay_artists = []
+
+    def _add_overlay(a):
+        nonlocal _overlay_artists
+        _overlay_artists.append(a)
+        return a
 
     def _redraw_chart():
         nonlocal _hover_cache
@@ -1981,6 +2209,11 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             fig.tight_layout()
             canvas = FigureCanvasTkAgg(fig, chart_inner); canvas.draw()
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            # 保存引用给 overlay 系统
+            nonlocal _current_ax_main, _current_canvas
+            _current_ax_main = ax_main
+            _current_canvas = canvas
+            _clear_overlays()  # 每次重绘清旧 overlay
             # hover tooltip (含当日数据 + 凯利公式)
             hover_tt = None
             def _on_motion(event):
