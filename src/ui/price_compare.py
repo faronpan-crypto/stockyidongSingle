@@ -107,12 +107,23 @@ def _fetch_onebound(keyword: str) -> List[Dict]:
             data = _json.loads(r)
         except Exception:
             print(f"[OneBound] JSON 解析失败: {r[:200]}"); return out
+        # 错误码处理: 4005 = key/secret错 或 接口未开通
+        if data.get("success") == 0 or data.get("error_code"):
+            _ec = data.get("error_code", "")
+            _em = data.get("error", "") or data.get("reason", "")
+            print(f"[OneBound] ❌ {_em[:120]} (code={_ec})")
+            # 关键错误码: 4005 接口未开通 / key错; 4010 无数据; 4003 额度用完
+            if _ec in ("4005", 4005) and "无权访问" in _em:
+                print("[OneBound] ⚠️ key 已验证, 但 t1j 跨平台比价接口未开通 —")
+                print("    请登 https://open.onebound.cn/ 控制台 → 接口管理 → 开通 t1j.item_search_bijia")
+                print("    或联系 QQ 3142401606 / 微信 onebound1997 开通")
+            # 不 raise, 返回空让 UI 继续走兜底
+            return out
         items = []
         if "items" in data and isinstance(data["items"], dict):
             items = data["items"].get("item", []) or []
         for it in items[:30]:
             try:
-                # OneBound 返回结构: name=平台名, title=商品名, price, pic_url, detail_url
                 pname = it.get("name", "OneBound")
                 nm = it.get("title", "") or it.get("name", "")
                 pr = it.get("price", 0)
@@ -129,7 +140,7 @@ def _fetch_onebound(keyword: str) -> List[Dict]:
                     })
             except Exception:
                 continue
-        print(f"[OneBound] 返回 {len(out)} 条")
+        print(f"[OneBound] ✅ 返回 {len(out)} 条跨平台比价数据")
     except Exception as e:
         print(f"[OneBound FAIL] {e}")
     return out
