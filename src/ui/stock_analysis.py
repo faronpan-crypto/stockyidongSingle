@@ -1585,58 +1585,74 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     ax_s.set_title("BOLL", fontsize=8, loc="left")
                 elif key == "EMO":
                     emo_data = _current_kline.get("emo") if _current_kline else None
-                    ax_s.set_ylim(0, 100)
+                    ax_s.set_ylim(-5, 110)
                     ax_s.set_yticks([0, 25, 50, 75, 100])
                     ax_s.set_yticklabels(["0","25","50","75","100"], fontsize=7)
-                    # ===== 色块 (每根 K 线对应 6 阶段颜色) =====
+                    # ===== 色块 (每根 K 线对应 6 阶段颜色, alpha 提高到 0.42 更清晰) =====
                     if emo_data:
-                        # 首页真实阶段色 (L3096-3098)
-                        _phase_colors = {"❄️":"#66BB6A","🌱":"#FFD54F","🔥":"#FF6F00",
-                                         "💥":"#EF5350","⚡":"#6A1B9A","📉":"#455A64","📊":"#6A1B9A"}
-                        # 先画纯色底色带
+                        # 首页真实阶段色
+                        _phase_colors = {"冰点":"#66BB6A","启动":"#FFD54F","发酵":"#FF6F00",
+                                         "高潮":"#EF5350","分歧":"#6A1B9A","退潮":"#455A64","震荡":"#6A1B9A"}
+                        # 画色块底色 (alpha 0.42, 更饱和)
                         for i in range(len(emo_data)):
                             _e = emo_data[i]
-                            if _e is None: continue
-                            _col = _e.get("phase_color", "#E0E0E0")
+                            if _e is None:
+                                ax_s.axvspan(i - 0.5, i + 0.5, ymin=0, ymax=1,
+                                             color="#ECEFF1", alpha=0.25, linewidth=0)
+                                continue
+                            _col = _phase_colors.get(_e.get("phase_label"), _e.get("phase_color", "#E0E0E0"))
                             ax_s.axvspan(i - 0.5, i + 0.5, ymin=0, ymax=1,
-                                         color=_col, alpha=0.28, linewidth=0)
-                        # ===== 情绪指数线 (0-100%) =====
+                                         color=_col, alpha=0.42, linewidth=0)
+                        # ===== 情绪指数线 (加粗 1.8, 红色实线) =====
                         _emo_idx_vals = [(_e["emo_index"] if _e else np.nan) for _e in emo_data]
                         ax_s.plot(list(range(len(_emo_idx_vals))), _emo_idx_vals,
-                                  color="#D32F2F", linewidth=1.3, label="情绪指数", zorder=6)
-                        # ===== α 仓位线 (黄色虚线) =====
+                                  color="#C62828", linewidth=1.8, label="情绪指数", zorder=8)
+                        # ===== 涨跌比线 (蓝色实线, 之前没有) =====
+                        _upr_vals = [(_e["up_ratio"] if _e else np.nan) for _e in emo_data]
+                        ax_s.plot(list(range(len(_upr_vals))), _upr_vals,
+                                  color="#1565C0", linewidth=1.3, linestyle="-", label="涨跌比%",
+                                  alpha=0.85, zorder=7)
+                        # ===== α 仓位线 (黄色实线加粗, 之前是虚线) =====
                         _alpha_vals = [(_e["alpha_pos"] * 100 if _e else np.nan) for _e in emo_data]
                         ax_s.plot(list(range(len(_alpha_vals))), _alpha_vals,
-                                  color="#F57F17", linewidth=1.0, linestyle="--", label="α主动仓位", zorder=5)
-                        # ===== β 仓位线 (100% 灰色点线) =====
-                        ax_s.axhline(y=100, color="#555", linestyle=":", linewidth=0.7, alpha=0.6, label="β被动=100%")
-                        # ===== 当前阶段标注 (左上角) =====
+                                  color="#E65100", linewidth=1.4, linestyle="-", label="α主动仓位", zorder=6)
+                        # ===== β 仓位线 (灰色粗点线) =====
+                        ax_s.axhline(y=100, color="#424242", linestyle=":", linewidth=1.1, alpha=0.7,
+                                     label="β被动=100%", zorder=4)
+                        # ===== 参考阈值线 (涨跌比 45/55% 用细虚线标出来) =====
+                        ax_s.axhline(y=45, color="#888", linestyle="--", linewidth=0.6,
+                                     alpha=0.35, label="涨跌比阈值")
+                        ax_s.axhline(y=55, color="#888", linestyle="--", linewidth=0.6,
+                                     alpha=0.35)
+                        # ===== 当前阶段标注 (左上角大浮框) =====
                         _latest_idx = -1
                         while _latest_idx >= -len(emo_data) and emo_data[_latest_idx] is None:
                             _latest_idx -= 1
                         if _latest_idx >= -len(emo_data) and emo_data[_latest_idx]:
                             _cur = emo_data[_latest_idx]
-                            _label = f"当前: {_cur.get('phase_emoji','')} {_cur.get('phase_label','?')} | α{_cur.get('alpha_pos',0)*100:.0f}% | β100%"
-                            ax_s.text(0.01, 0.95, _label, transform=ax_s.transAxes,
-                                      fontsize=8, color=_cur.get("phase_color","#333"),
+                            _stage = _cur.get("phase_label","?")
+                            _emoji = _cur.get("phase_emoji","")
+                            _col = _phase_colors.get(_stage, _cur.get("phase_color","#333"))
+                            _zt = _cur.get("zt", 0); _dt = _cur.get("dt", 0)
+                            _upr = _cur.get("up_ratio", 0)
+                            _emo_idx = _cur.get("emo_index", 0)
+                            _alp = _cur.get("alpha_pos", 0) * 100
+                            _label = (f"{_emoji} {_stage}  |  情绪{_emo_idx:.0f}  "
+                                      f"涨跌比{_upr:.0f}%  涨{_cur.get('m2_up',0)} 跌{_cur.get('m2_down',0)}\n"
+                                      f"涨停{_zt} 跌停{_dt}  |  α仓位{_alp:.0f}%  β100%")
+                            ax_s.text(0.01, 0.97, _label, transform=ax_s.transAxes,
+                                      fontsize=8.5, color="white",
                                       fontweight="bold", va="top",
-                                      bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
-                                                alpha=0.85, edgecolor=_cur.get("phase_color","#333")))
-                        # ===== 图例 =====
-                        ax_s.legend(loc="upper right", fontsize=7, ncol=3)
-                        ax_s.grid(True, alpha=0.15)
-                        # ===== 标题 =====
-                        _up_r = emo_data[_latest_idx].get("up_ratio", 0) if emo_data[_latest_idx] else 0
-                        _emj = emo_data[_latest_idx].get("phase_emoji","") if emo_data[_latest_idx] else ""
-                        _lbl = emo_data[_latest_idx].get("phase_label","?") if emo_data[_latest_idx] else "?"
-                        ax_s.set_title(f"情绪 | {_emj} {_lbl} | 涨跌比{_up_r:.0f}% | α仓{(_alpha_vals[_latest_idx] if emo_data[_latest_idx] else 0):.0f}% | β仓100%",
-                                       fontsize=8, loc="left")
+                                      bbox=dict(boxstyle="round,pad=0.35", facecolor=_col,
+                                                alpha=0.9, edgecolor="white", linewidth=1.2))
+                        # ===== 图例 (放右上角, 更清晰) =====
+                        ax_s.legend(loc="upper right", fontsize=7.5, framealpha=0.85,
+                                    edgecolor="#CCC", ncol=3)
                     else:
-                        # 无情绪数据时显示占位
-                        ax_s.text(0.5, 0.5, "⚠️ sentiment_history 无数据\n请先刷新大盘情绪",
-                                  transform=ax_s.transAxes, fontsize=9, color="#999", ha="center", va="center")
-                        ax_s.set_ylim(0, 100)
-                        ax_s.set_title("情绪", fontsize=8, loc="left")
+                        ax_s.text(0.5, 0.5, "无情绪数据", transform=ax_s.transAxes,
+                                  ha="center", va="center", fontsize=10, color="#888")
+                    ax_s.grid(True, alpha=0.2)
+                    ax_s.set_title("情绪", fontsize=8, loc="left")
                 if row < ni-1: ax_s.tick_params(axis="x", labelbottom=False)
             fig.tight_layout()
             canvas = FigureCanvasTkAgg(fig, chart_inner); canvas.draw()
