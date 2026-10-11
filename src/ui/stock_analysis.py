@@ -11,7 +11,7 @@
   🤖 AI 综合: 板块判断 / Top2买 / Top2避 / 操作建议 / 风险
 右边: matplotlib K 线图 + 副图 + 买卖点 + hover tooltip(含凯利公式)
 """
-import os, re, sys, json, threading, traceback, sqlite3, math
+import os, re, sys, json, threading, traceback
 import webbrowser
 from typing import Dict, List, Optional, Any, Tuple
 import tkinter as tk
@@ -770,7 +770,8 @@ def _calc_dupont(fund: Dict) -> Dict:
 
 
 # ========= UI 弹窗 =========
-def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None, auto_name=None):
+def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None, auto_name=None,
+                              holdings=None):
     import tkinter as tk
     from tkinter import ttk, messagebox
     import webbrowser, numpy as np
@@ -785,21 +786,9 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
              font=("", 13, "bold")).pack(side=tk.LEFT, padx=14, pady=9)
     tk.Label(top, text="股票:", bg="#283593", fg="white", font=("", 10)).pack(side=tk.LEFT)
     stock_var = tk.StringVar()
-    combo = ttk.Combobox(top, textvariable=stock_var, width=28, state="normal")
+    combo = ttk.Combobox(top, textvariable=stock_var, width=18, state="normal")
     combo.pack(side=tk.LEFT, padx=6)
-    # — 顶栏 3 个按钮: 🔍分析 / 📉重绘 / 🔄候选 —
-    _top_search_btn = tk.Button(top, text="🔍 分析", bg="#FFB300", fg="#1A237E",
-                                font=("", 10, "bold"), relief=tk.FLAT, padx=10,
-                                command=lambda: None)   # command 稍后 _do_search 定义后绑定
-    _top_search_btn.pack(side=tk.LEFT, padx=4)
-    _top_redraw_btn = tk.Button(top, text="📉 重绘", bg="#3949AB", fg="white",
-                                font=("", 9), relief=tk.FLAT, padx=8,
-                                command=lambda: None)   # command 稍后绑定
-    _top_redraw_btn.pack(side=tk.LEFT, padx=2)
-    _top_refresh_btn = tk.Button(top, text="🔄 候选", bg="#E3F2FD", fg="#1565C0",
-                                 font=("", 9), relief=tk.FLAT, padx=8,
-                                 command=lambda: None)   # command 稍后绑定
-    _top_refresh_btn.pack(side=tk.LEFT, padx=2)
+    ttk.Button(top, text="🔍 分析", command=lambda: None).pack(side=tk.LEFT, padx=4)
     status_var = tk.StringVar(value="⏳ 加载候选列表...")
     tk.Label(top, textvariable=status_var, bg="#283593", fg="#90A4AE",
              font=("", 8)).pack(side=tk.RIGHT, padx=14)
@@ -810,7 +799,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
     # ===== 左侧: Notebook 6 Tab =====
     left_f = tk.Frame(pw, bg="#ECEFF1")
-    pw.add(left_f, minsize=280)
+    pw.add(left_f, minsize=420)
     nb = ttk.Notebook(left_f); nb.pack(fill=tk.BOTH, expand=True)
     tabs = {
         "📈 形态": tk.Frame(nb, bg="#FFFFFF"),
@@ -826,7 +815,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
     # ===== 右侧: K 线 =====
     right_f = tk.Frame(pw, bg="#FAFAFA")
-    pw.add(right_f, minsize=420)
+    pw.add(right_f, minsize=600)
     rt = tk.Frame(right_f, bg="#FAFAFA"); rt.pack(fill=tk.X, pady=(0,4))
     ttk.Label(rt, text="K线图 + 指标 + 买卖点 (hover 查看胜率+凯利公式)",
               font=("", 11, "bold"), background="#FAFAFA", foreground="#1565C0").pack(side=tk.LEFT, padx=6)
@@ -844,189 +833,13 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                             ("fib","斐波那契",True),("gold","黄金分割",True),("zs","缠论中枢",False)]:
         aux_vars[_k] = tk.BooleanVar(value=_def)
         ttk.Checkbutton(_aux_frame, text=_lbl, variable=aux_vars[_k]).pack(side=tk.LEFT, padx=2)
-
-    # ===== 右侧内部: 顶栏(Checkbuttons) + K线图+实时行情 (水平 PanedWindow) =====
-    _right_inner = tk.PanedWindow(right_f, orient=tk.HORIZONTAL, bg="#FAFAFA", sashwidth=4)
-    _right_inner.pack(fill=tk.BOTH, expand=True)
-    # — 中间: matplotlib K 线图 (左侧大块) —
-    chart_inner = tk.Frame(_right_inner, bg="#FAFAFA")
-    _right_inner.add(chart_inner, minsize=200, width=900)  # 初始宽 900 (实际被 PanedWindow 分配)
-    # — 右侧: 实时行情竖排面板 (初始只占 ~10%) —
-    info_panel = tk.Frame(_right_inner, bg="#FFFFFF", bd=1, relief=tk.SOLID)
-    _right_inner.add(info_panel, minsize=120, width=160)  # 初始宽 160 ≈ 10-12%
-
-    # ⚠️ 启动后把分隔条移到 90% 位置 (chart_inner 占 90%, info_panel 占 10%)
-    def _set_initial_sash():
-        try:
-            _right_inner.update_idletasks()
-            _tot = _right_inner.winfo_width()
-            if _tot > 300:
-                _right_inner.sash_place(0, int(_tot * 0.88), 0)
-        except Exception: pass
-    win.after(80, _set_initial_sash)
-
-    # — info_panel 从上到下: 大字号价格 → 日期 → 指标表 (竖排) —
-    info_header = tk.Frame(info_panel, bg="#ECEFF1"); info_header.pack(fill=tk.X)
-    tk.Label(info_header, text="📊 实时行情", bg="#ECEFF1", fg="#283593",
-             font=("", 10, "bold")).pack(anchor="w", padx=8, pady=4)
-    tk.Frame(info_panel, bg="#ECEFF1", height=1).pack(fill=tk.X)
-    # 大字号价格区
-    info_big = tk.Frame(info_panel, bg="#FFFFFF"); info_big.pack(fill=tk.X, padx=10, pady=8)
-    _tk_name_label = tk.Label(info_big, text="", bg="#FFFFFF", fg="#333", font=("", 8, "bold"))
-    _tk_name_label.pack(anchor="w")
-    _tk_price_label = tk.Label(info_big, text="--", bg="#FFFFFF", fg="#C62828",
-                                font=("", 26, "bold")); _tk_price_label.pack(anchor="w")
-    _tk_chg_row = tk.Frame(info_big, bg="#FFFFFF"); _tk_chg_row.pack(anchor="w")
-    _tk_cp_lbl = tk.Label(_tk_chg_row, text="--", bg="#FFFFFF", fg="#C62828",
-                           font=("", 11, "bold")); _tk_cp_lbl.pack(side=tk.LEFT)
-    _tk_cpct_lbl = tk.Label(_tk_chg_row, text="--", bg="#FFFFFF", fg="#C62828",
-                             font=("", 11)); _tk_cpct_lbl.pack(side=tk.LEFT, padx=(6,0))
-    _tk_date_lbl = tk.Label(info_big, text="", bg="#FFFFFF", fg="#888", font=("", 8))
-    _tk_date_lbl.pack(anchor="w", pady=(2,0))
-    # 分割
-    tk.Frame(info_panel, bg="#EEEEEE", height=1).pack(fill=tk.X, padx=10, pady=4)
-    # 指标网格 (窄面板竖排 1 列)
-    info_grid = tk.Frame(info_panel, bg="#FFFFFF"); info_grid.pack(fill=tk.X, padx=8, pady=4)
-    _tk_open_var = tk.StringVar(value="--")
-    _tk_high_var = tk.StringVar(value="--")
-    _tk_low_var = tk.StringVar(value="--")
-    _tk_preclose_var = tk.StringVar(value="--")
-    _tk_vol_var = tk.StringVar(value="--")
-    _tk_amount_var = tk.StringVar(value="--")
-    _tk_turn_var = tk.StringVar(value="--")
-    _tk_amp_var = tk.StringVar(value="--")
-    _tk_pe_var = tk.StringVar(value="--")
-    _tk_mv_var = tk.StringVar(value="--")
-    _tk_pb_var = tk.StringVar(value="--")
-    _tk_vol_ratio_var = tk.StringVar(value="--")
-    def _mk_indicator(grid, row, label, var):
-        fr = tk.Frame(grid, bg="#FFFFFF"); fr.grid(row=row, column=0, sticky="ew", padx=2, pady=2)
-        tk.Label(fr, text=label, bg="#FFFFFF", fg="#888", font=("", 8)).pack(side=tk.LEFT)
-        tk.Label(fr, textvariable=var, bg="#FFFFFF", fg="#222", font=("", 9, "bold")).pack(side=tk.RIGHT)
-    _mk_indicator(info_grid, 0, "今开", _tk_open_var)
-    _mk_indicator(info_grid, 1, "最高", _tk_high_var)
-    _mk_indicator(info_grid, 2, "最低", _tk_low_var)
-    _mk_indicator(info_grid, 3, "昨收", _tk_preclose_var)
-    _mk_indicator(info_grid, 4, "成交量", _tk_vol_var)
-    _mk_indicator(info_grid, 5, "成交额", _tk_amount_var)
-    _mk_indicator(info_grid, 6, "换手率", _tk_turn_var)
-    _mk_indicator(info_grid, 7, "振幅", _tk_amp_var)
-    _mk_indicator(info_grid, 8, "PE(TTM)", _tk_pe_var)
-    _mk_indicator(info_grid, 9, "PB", _tk_pb_var)
-    _mk_indicator(info_grid, 10, "总市值", _tk_mv_var)
-    _mk_indicator(info_grid, 11, "量比", _tk_vol_ratio_var)
-    # 刷新按钮
-    _refresh_spot_btn = tk.Button(info_panel, text="🔄 实时行情", command=lambda: _refresh_realtime(),
-                                   bg="#E3F2FD", fg="#1565C0", font=("", 9), relief=tk.FLAT, padx=10, pady=4)
-    _refresh_spot_btn.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0,10))
-
-    def _refresh_realtime():
-        """异步刷新 akshare spot_em 实时行情 + 更新面板"""
-        import threading as _th
-        def _bg():
-            nonlocal _current_name
-            tsc = _current_kline.get("ts_code","") if _current_kline else ""
-            c6 = re.sub(r"\.(SH|SZ|BJ)$", "", tsc)
-            spot = None
-            try:
-                import akshare as ak
-                _s = ak.stock_zh_a_spot_em()
-                if _s is not None and len(_s) > 0:
-                    _mt = _s[_s["代码"].astype(str).str.startswith(c6)]
-                    if len(_mt) > 0: spot = _mt.iloc[0].to_dict()
-            except Exception as e:
-                print(f"[📊实时行情] spot失败: {e}")
-            win.after(0, lambda: _apply_realtime(spot))
-        _th.Thread(target=_bg, daemon=True).start()
-
-    def _apply_realtime(spot):
-        """把 akshare spot dict 应用到面板 + 更新 _current_kline 最新 bar"""
-        nonlocal _hover_cache
-        if not _current_kline: return
-        data = _current_kline["data"]
-        col_map = {}
-        if spot:
-            col_map = {"今开":"今开", "最高":"最高", "最低":"最低", "昨收":"昨收",
-                       "最新价":"最新价", "成交量":"成交量", "成交额":"成交额",
-                       "换手率":"换手率", "振幅":"振幅", "市盈率-动态":"市盈率", "市净率":"市净率",
-                       "总市值":"总市值"}
-        # 取最新 bar (kline data 的最后一行) 作为默认数据源
-        i = len(data) - 1
-        row = data.iloc[i]
-        date_str = str(row.get("日期",""))
-        o = float(row["开盘"]); h = float(row["最高"]); l = float(row["最低"]); c = float(row["收盘"])
-        vol = float(row["成交量"])
-        pre_close = float(data.iloc[i-1]["收盘"]) if i > 0 else c
-        # 涨跌
-        chg = c - pre_close; pct = chg / pre_close * 100
-        up = chg >= 0
-        fg = "#C62828" if up else "#2E7D32"
-        # spot 覆盖 (有更实时的就用实时)
-        if spot:
-            c = float(spot.get("最新价", c))
-            o = float(spot.get("今开", o)); h = float(spot.get("最高", h))
-            l = float(spot.get("最低", l)); pre_close = float(spot.get("昨收", pre_close))
-            vol = float(spot.get("成交量", vol))
-            chg = c - pre_close; pct = chg / pre_close * 100
-            up = chg >= 0; fg = "#C62828" if up else "#2E7D32"
-            date_str = date_str + " · 实时"
-        # 更新左边大字号
-        _tk_price_label.configure(fg=fg); _tk_cp_lbl.configure(fg=fg); _tk_cpct_lbl.configure(fg=fg)
-        _tk_cn_var.set(f"{c:.2f}")
-        _tk_cp_var.set(f"{'+' if chg>=0 else ''}{chg:.2f}")
-        _tk_cpct_var.set(f"{'+' if pct>=0 else ''}{pct:.2f}%")
-        _tk_name_label.configure(text=f"{_current_name} ({_current_kline.get('ts_code','')})")
-        _tk_date_lbl.configure(text=f"📅 {date_str}")
-        # 更新右区指标
-        def _fmt_vol(v):
-            v = float(v)
-            if v >= 1e8: return f"{v/1e8:.2f}亿"
-            if v >= 1e4: return f"{v/1e4:.0f}万"
-            return f"{v:.0f}"
-        _tk_open_var.set(f"{o:.2f}"); _tk_high_var.set(f"{h:.2f}")
-        _tk_low_var.set(f"{l:.2f}"); _tk_preclose_var.set(f"{pre_close:.2f}")
-        # 量额: tushare daily 单位是手 / 千元, spot_em 单位是股 / 元
-        if spot:
-            _tk_vol_var.set(f"{_fmt_vol(vol)}")
-            _tk_amount_var.set(_fmt_vol(float(spot.get("成交额",0))))
-        else:
-            _tk_vol_var.set(f"{_fmt_vol(vol*100)}")  # 手→股
-            _tk_amount_var.set(f"{_fmt_vol(float(row.get('成交额',0))*1000)}")  # 千元→元
-        # 换手率: spot 直接有, 否则从 fund 取
-        if spot and spot.get("换手率"): _tk_turn_var.set(f"{float(spot['换手率']):.2f}%")
-        elif _current_fund.get("tr") is not None: _tk_turn_var.set(f"{_current_fund['tr']:.2f}%")
-        else: _tk_turn_var.set("--")
-        # 振幅
-        amp = (h - l) / pre_close * 100 if pre_close > 0 else 0
-        _tk_amp_var.set(f"{amp:.2f}%")
-        # PE / PB
-        if spot:
-            _tk_pe_var.set(f"{float(spot.get('市盈率-动态',0)):.1f}" if spot.get("市盈率-动态") else "--")
-            _tk_pb_var.set(f"{float(spot.get('市净率',0)):.2f}" if spot.get("市净率") else "--")
-        elif _current_fund.get("pe_ttm") is not None: _tk_pe_var.set(f"{_current_fund['pe_ttm']:.1f}")
-        elif _current_fund.get("pb") is not None: _tk_pb_var.set(f"{_current_fund['pb']:.2f}")
-        else:
-            _tk_pe_var.set("--"); _tk_pb_var.set("--")
-        # 市值 (spot 是元, 转亿)
-        if spot and spot.get("总市值"):
-            _tk_mv_var.set(f"{float(spot['总市值'])/1e8:.1f}亿")
-        elif _current_fund.get("mv") is not None:
-            _tk_mv_var.set(f"{_current_fund['mv']:.0f}亿")
-        else: _tk_mv_var.set("--")
-        # 量比: 5日均量 / 20日均量 (用 kline data 自己算)
-        if len(data) >= 20:
-            v_arr = data["成交量"].values.astype(float)
-            v5 = np.mean(v_arr[-5:]) if v_arr[-5:].sum() > 0 else 1
-            v20 = np.mean(v_arr[-20:]) if v_arr[-20:].sum() > 0 else 1
-            ratio_5 = vol / v5 if v5 > 0 else 1
-            ratio_20 = vol / v20 if v20 > 0 else 1
-            _tk_vol_ratio_var.set(f"5日 {ratio_5:.2f}  20日 {ratio_20:.2f}")
-        else: _tk_vol_ratio_var.set("--")
+    chart_inner = tk.Frame(right_f, bg="#FAFAFA"); chart_inner.pack(fill=tk.BOTH, expand=True, pady=4)
 
     # ===== 状态缓存 =====
     _current_kline = None; _current_fund: Dict = {}
     _hover_cache: Dict = {"bs": {}, "bt": {}}
     _current_name = ""
+    _emo_cache: Optional[Dict] = None  #情绪数据缓存 {trade_date_str: {phase, alpha_pos, ev, up_ratio}}
 
     # ===== 方法定义: (title, emoji, 一句话说明, get_result_fn(kline_data, fund) -> list[str] or dict) =====
     METHODS = {
@@ -1379,99 +1192,6 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             _build_tab(name, ml)
         _build_ai_tab()
 
-    # ========= 情绪周期数据加载 =========
-    emo_phase_list = []   # 全局给 EMO 副图使用
-    def _load_emotion_data(n_points):
-        """从 sentiment_history SQLite 拉历史情绪, 对齐 K 线长度"""
-        import numpy as np
-        nonlocal emo_phase_list
-        emo_idx = None; emo_phase = "--"; emo_pos = 0; emo_ratio = 100; emo_wr = 0.5; emo_advice = ""
-        emo_phase_list = ["震荡"] * n_points  # 每根 K 线对应的情绪阶段
-        try:
-            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "stock_analysis.db")
-            if not os.path.exists(db_path): db_path = "data/stock_analysis.db"
-            conn = sqlite3.connect(db_path); cur = conn.cursor()
-            # 拉最近 200 天情绪数据 (降序)
-            cur.execute("""
-                SELECT snapshot_date, m1_today, m2_up, m2_down, m2_flat, m3_count
-                FROM sentiment_history ORDER BY id DESC LIMIT 400
-            """)
-            rows = cur.fetchall(); conn.close()
-            if not rows:
-                emo_advice = "SQLite 情绪数据空"
-                return emo_idx, emo_phase, emo_pos, emo_ratio, emo_wr, emo_advice
-            # 按日期升序
-            rows = sorted(rows, key=lambda r: r[0] or "")
-            dates = [r[0] for r in rows]
-            emo_vals = [(r[1] or 0) for r in rows]
-            ups = [r[2] or 0 for r in rows]
-            downs = [r[3] or 0 for r in rows]
-            flats = [r[4] or 0 for r in rows]
-            zts = [r[5] or 0 for r in rows]  # 涨停数
-            # 归一化情绪指数到 0-100%
-            _ev = np.array(emo_vals, dtype=float)
-            _up = np.array(ups, dtype=float); _dn = np.array(downs, dtype=float)
-            # 涨跌比 (上涨 / 总家数)
-            _pos = _up / np.maximum(_up + _dn + flats, 1) * 100  # 0-100%
-            # 情绪指数映射: -3~+3 → 0~100
-            emo_idx_raw = np.clip((_ev + 3) / 6 * 100, 0, 100)
-            # 情绪阶段判断 (6 阶段) — 基于情绪指数 + 涨跌比
-            def _phase(ev, pos, zt):
-                if ev < -1.5 and pos < 35: return "冰点"
-                if ev < -0.5 and pos < 45: return "启动"
-                if ev > 0.5 and pos > 55 and zt and zt > 50: return "高潮"
-                if ev > 0 and pos > 50: return "发酵"
-                if ev < 0 and pos < 50: return "退潮"
-                return "震荡"
-            phase_list = [_phase(_ev[i], _pos[i], zts[i]) for i in range(len(_ev))]
-            # 对齐到 K 线长度 (从末尾截断或前向填充)
-            n_emo = len(emo_idx_raw)
-            emo_idx = np.full(n_points, 50.0)
-            emo_phase_list = ["震荡"] * n_points
-            if n_emo >= n_points:
-                emo_idx = emo_idx_raw[-n_points:].tolist()
-                emo_phase_list = phase_list[-n_points:]
-                emo_pos = _pos[-1]
-            else:
-                # 前向填充
-                emo_idx[-n_emo:] = emo_idx_raw
-                emo_phase_list[-n_emo:] = phase_list
-                for i in range(n_points - n_emo):
-                    emo_phase_list[i] = phase_list[0]
-                emo_pos = _pos[-1] if n_emo else 0
-            # 当前阶段 (最后一个)
-            emo_phase = emo_phase_list[-1]
-            emo_idx = np.array(emo_idx, dtype=float)
-            # === α/β 仓位建议 ===
-            # β = 被动型 (指数基金) 始终满仓 100%
-            # α = 主动型 (个股) 根据情绪阶段调整
-            _phase_ratio = {
-                "冰点": 0,      # 0% — 冰点 100% 会反弹但不知何时, 空仓等信号
-                "启动": 25,     # 25% — 右侧启动小仓位试
-                "发酵": 70,     # 70% — 发酵加仓
-                "高潮": 100,    # 100% — 高潮满仓, 但警惕见顶
-                "退潮": 30,     # 30% — 退潮减仓避险
-                "震荡": 50,     # 50% — 震荡半仓做T
-            }
-            emo_ratio = _phase_ratio.get(emo_phase, 50)
-            # 附加判断: 涨跌比极端值修正
-            if emo_pos > 90: emo_ratio = min(emo_ratio, 80); emo_advice = "⚠️ 普涨高潮, 警惕板块轮动"
-            elif emo_pos < 15: emo_ratio = max(emo_ratio, 10); emo_advice = "❄️ 普跌冰点, 等待右侧信号"
-            # 胜率: 历史上同阶段后 5 日正收益比例
-            emo_wr = 0.5  # 默认
-            if n_emo >= 20:
-                _sub = [(_ev[i], _pos[i]) for i in range(n_emo)]
-                # 简化: 涨家数比 > 50% 视为"情绪好", 胜率高
-                emo_wr = float(np.mean([1 if _pos[i] > 50 else 0 for i in range(n_emo)]))
-            if not emo_advice:
-                emo_advice = f"当前 {emo_phase}, α仓建议 {emo_ratio}%, β仓 100%(指数)"
-            return emo_idx, emo_phase, emo_pos, emo_ratio, emo_wr, emo_advice
-        except Exception as e:
-            print(f"[情绪指标] 加载失败: {e}")
-            import traceback; traceback.print_exc()
-            emo_advice = f"情绪数据加载失败: {e}"
-            return emo_idx, emo_phase, emo_pos, emo_ratio, emo_wr, emo_advice
-
     # ========= matplotlib 重绘 =========
     def _collect_keys(): return [c for c,_ in [("VOL",""),("MACD",""),("WR2",""),("KDJ",""),("BOLL",""),("EMO","")] if ivars[c].get()]
 
@@ -1480,7 +1200,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         if not _current_kline: return
         sel = _collect_keys()
         if len(sel) < 2:
-            for k in ("VOL","MACD","KDJ"): ivars[k].set(True); sel = _collect_keys()
+            for k in ("VOL","MACD","KDJ","EMO"): ivars[k].set(True); sel = _collect_keys()
         for w in chart_inner.winfo_children(): w.destroy()
         try:
             import matplotlib
@@ -1642,40 +1362,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                             ax_main.text(_x_min, _zs["ZD"], f"中枢ZD={_zs['ZD']:.2f}", fontsize=6, color="#FF9800", va="top")
                 except Exception as _e:
                     pass  # 缠论辅助线失败不影响主图
-            # 默认显示最新交易日详细数据 (不用等鼠标移上去): 日期+开高低收+涨跌+量+额+换手+量比
-            try:
-                i = len(data) - 1
-                d_last = data.iloc[i]
-                _d = str(d_last.get("日期",""))
-                _o = float(d_last["开盘"]); _h = float(d_last["最高"]); _l = float(d_last["最低"])
-                _c = float(d_last["收盘"])
-                _vol = float(d_last["成交量"])
-                _pre = float(data.iloc[i-1]["收盘"]) if i > 0 else _c
-                _chg = _c - _pre; _pct = _chg / _pre * 100 if _pre > 0 else 0
-                _fg = "#C62828" if _chg >= 0 else "#2E7D32"
-                def _fv(v, mul=1):
-                    v = float(v) * mul
-                    if abs(v) >= 1e8: return f"{v/1e8:.2f}亿"
-                    if abs(v) >= 1e4: return f"{v/1e4:.0f}万"
-                    return f"{v:.0f}"
-                _amt = float(d_last.get("成交额", 0)) * 1000  # tushare daily 千元→元
-                # 量比
-                v_arr = data["成交量"].values.astype(float)
-                v5 = np.mean(v_arr[-5:]) if len(v_arr) >= 5 and v_arr[-5:].sum() > 0 else 0
-                v20 = np.mean(v_arr[-20:]) if len(v_arr) >= 20 and v_arr[-20:].sum() > 0 else 0
-                _vr5 = (_vol / v5) if v5 > 0 else 1.0
-                _vr20 = (_vol / v20) if v20 > 0 else 1.0
-                # 换手率优先 spot_em (已经在 _apply_realtime 更新面板), 退而求其次用 fund
-                _tr = _current_fund.get("tr")
-                _tr_str = f"换手{_tr:.2f}%" if _tr is not None else ""
-                title = (f"{_current_name} · {_d}  "
-                         f"收{_c:.2f} ({'+' if _chg>=0 else ''}{_chg:.2f} {'+' if _pct>=0 else ''}{_pct:.2f}%)  "
-                         f"开{_o:.2f} 高{_h:.2f} 低{_l:.2f} 昨收{_pre:.2f}  "
-                         f"量{_fv(_vol*100)} 额{_fv(_amt)} {_tr_str} "
-                         f"量比5日{_vr5:.2f}/20日{_vr20:.2f}")
-            except Exception:
-                title = f"{_current_name} - 日K线图 (hover 看胜率+凯利)"
-            ax_main.set_title(title, fontsize=10, fontweight="bold", color="#37474F")
+            ax_main.set_title(f"{_current_name} - 日K线图 (hover K线看胜率+凯利)", fontsize=11, fontweight="bold")
             ax_main.legend(loc="upper left", fontsize=7); ax_main.grid(True, alpha=0.25)
             # 副图
             for row, key in enumerate(sel, start=1):
@@ -1721,38 +1408,57 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     ax_s.legend(loc="upper left", fontsize=7); ax_s.grid(True, alpha=0.2)
                     ax_s.set_title("BOLL", fontsize=8, loc="left")
                 elif key == "EMO":
-                    # ===== 情绪周期 + α/β 仓位建议 =====
-                    emo_idx, emo_phase, emo_pos, emo_ratio, emo_wr, emo_advice = _load_emotion_data(len(closes))
-                    # 背景色块: 情绪阶段对应色带 (0-100%)
-                    _phase_colors = {
-                        "冰点": "#263238",      # 深灰 (冷)
-                        "启动": "#00695C",      # 青绿
-                        "发酵": "#2E7D32",      # 亮绿
-                        "高潮": "#C62828",      # 亮红 (热)
-                        "退潮": "#BF360C",      # 棕褐
-                        "震荡": "#F57F17",      # 亮黄
-                    }
-                    if emo_idx is not None and len(emo_idx) == len(closes):
-                        # 画色块背景 (0-100%)
-                        for i, ph in enumerate(emo_phase_list):
-                            ax_s.axvspan(i-0.4, i+0.4, ymin=0, ymax=1,
-                                         color=_phase_colors.get(ph, "#888"), alpha=0.35)
-                        # 情绪指数曲线 (标准化到 0-100%)
-                        ax_s.plot(list(range(len(closes))), emo_idx, color="#FFD600",
-                                  linewidth=1.2, label="情绪指数")
-                        # 仓位建议线
-                        ax_s.axhline(y=emo_ratio, color="#FF1744", linestyle="--",
-                                     linewidth=0.9, label=f"建议仓位 {emo_ratio:.0f}%")
-                        # 当前阶段标注
-                        _last_ph = emo_phase_list[-1] if emo_phase_list else "--"
-                        ax_s.text(0.01, 0.95, f"当前: {_last_ph}",
-                                  transform=ax_s.transAxes, fontsize=8, va="top",
-                                  bbox=dict(boxstyle="round,pad=0.2", facecolor=_phase_colors.get(_last_ph,"#888"), alpha=0.7, fc="#333"))
-                    # 标题
-                    _title = f"情绪 | {emo_phase} · 涨跌比{emo_pos:.0f} · α仓{emo_ratio:.0f}% · β仓100%"
-                    ax_s.set_title(_title, fontsize=8, loc="left")
-                    ax_s.set_ylim(-5, 105); ax_s.grid(True, alpha=0.2)
-                    ax_s.legend(loc="upper left", fontsize=7)
+                    emo_data = _current_kline.get("emo") if _current_kline else None
+                    ax_s.set_ylim(0, 100)
+                    ax_s.set_yticks([0, 25, 50, 75, 100])
+                    ax_s.set_yticklabels(["0","25","50","75","100"], fontsize=7)
+                    # ===== 色块 (每根 K 线对应 6 阶段颜色) =====
+                    if emo_data:
+                        _phase_colors = {"❄️":"#455A64","🌱":"#26A69A","🟢":"#1976D2","🔴":"#C62828","🟠":"#8D6E63","🟡":"#FBC02D"}
+                        # 先画纯色底色带
+                        for i in range(len(emo_data)):
+                            _e = emo_data[i]
+                            if _e is None: continue
+                            _col = _e.get("phase_color", "#E0E0E0")
+                            ax_s.axvspan(i - 0.5, i + 0.5, ymin=0, ymax=1,
+                                         color=_col, alpha=0.28, linewidth=0)
+                        # ===== 情绪指数线 (0-100%) =====
+                        _emo_idx_vals = [(_e["emo_index"] if _e else np.nan) for _e in emo_data]
+                        ax_s.plot(list(range(len(_emo_idx_vals))), _emo_idx_vals,
+                                  color="#D32F2F", linewidth=1.3, label="情绪指数", zorder=6)
+                        # ===== α 仓位线 (黄色虚线) =====
+                        _alpha_vals = [(_e["alpha_pos"] * 100 if _e else np.nan) for _e in emo_data]
+                        ax_s.plot(list(range(len(_alpha_vals))), _alpha_vals,
+                                  color="#F57F17", linewidth=1.0, linestyle="--", label="α主动仓位", zorder=5)
+                        # ===== β 仓位线 (100% 灰色点线) =====
+                        ax_s.axhline(y=100, color="#555", linestyle=":", linewidth=0.7, alpha=0.6, label="β被动=100%")
+                        # ===== 当前阶段标注 (左上角) =====
+                        _latest_idx = -1
+                        while _latest_idx >= -len(emo_data) and emo_data[_latest_idx] is None:
+                            _latest_idx -= 1
+                        if _latest_idx >= -len(emo_data) and emo_data[_latest_idx]:
+                            _cur = emo_data[_latest_idx]
+                            _label = f"当前: {_cur.get('phase_emoji','')} {_cur.get('phase_label','?')} | α{_cur.get('alpha_pos',0)*100:.0f}% | β100%"
+                            ax_s.text(0.01, 0.95, _label, transform=ax_s.transAxes,
+                                      fontsize=8, color=_cur.get("phase_color","#333"),
+                                      fontweight="bold", va="top",
+                                      bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
+                                                alpha=0.85, edgecolor=_cur.get("phase_color","#333")))
+                        # ===== 图例 =====
+                        ax_s.legend(loc="upper right", fontsize=7, ncol=3)
+                        ax_s.grid(True, alpha=0.15)
+                        # ===== 标题 =====
+                        _up_r = emo_data[_latest_idx].get("up_ratio", 0) if emo_data[_latest_idx] else 0
+                        _emj = emo_data[_latest_idx].get("phase_emoji","") if emo_data[_latest_idx] else ""
+                        _lbl = emo_data[_latest_idx].get("phase_label","?") if emo_data[_latest_idx] else "?"
+                        ax_s.set_title(f"情绪 | {_emj} {_lbl} | 涨跌比{_up_r:.0f}% | α仓{(_alpha_vals[_latest_idx] if emo_data[_latest_idx] else 0):.0f}% | β仓100%",
+                                       fontsize=8, loc="left")
+                    else:
+                        # 无情绪数据时显示占位
+                        ax_s.text(0.5, 0.5, "⚠️ sentiment_history 无数据\n请先刷新大盘情绪",
+                                  transform=ax_s.transAxes, fontsize=9, color="#999", ha="center", va="center")
+                        ax_s.set_ylim(0, 100)
+                        ax_s.set_title("情绪", fontsize=8, loc="left")
                 if row < ni-1: ax_s.tick_params(axis="x", labelbottom=False)
             fig.tight_layout()
             canvas = FigureCanvasTkAgg(fig, chart_inner); canvas.draw()
@@ -1864,7 +1570,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             traceback.print_exc(); messagebox.showerror("错误", f"绘图失败: {ex}", parent=win)
 
     # ========= 🔍 搜索 =========
-    def _collect_candidates():
+    def _collect_candidates(_holdings=None):
         """收集候选股票, 优先级: 持仓股 > 龙头(成交额前20) > 涨停池 > 已分析过 > 兜底"""
         # ========= 过滤函数: 停牌/ST/退市 → 跳过 =========
         def _is_bad_name(nm: str) -> bool:
@@ -1888,10 +1594,10 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         seen = set()
         result = []  # ["贵州茅台 (600519.SH)", ...]
 
-        def _add(label, tsc, tag="", skip_bad_filter=False):
-            """skip_bad_filter=True 时 (持仓股) 不过滤停牌ST — 用户主动持有的"""
+        def _add(label, tsc, tag=""):
             if not tsc or tsc in seen: return
-            if not skip_bad_filter and _is_bad_name(label): return
+            # 过滤停牌/ST/退市
+            if _is_bad_name(label): return
             seen.add(tsc)
             nm = _clean_name(label) if label else ""
             if not nm:
@@ -1901,24 +1607,15 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             if tag: nm = f"[{tag}] {nm}"
             result.append(f"{nm} ({tsc})")
 
-        # ① 持仓股 (web_data/holdings_state.json — 用户真实持仓)
-        try:
-            _hs_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                     "web_data", "holdings_state.json")
-            if os.path.exists(_hs_path):
-                with open(_hs_path) as f: _hs = json.load(f)
-                _groups = _hs.get("groups", {})
-                if isinstance(_groups, dict):
-                    for _gk, _glist in _groups.items():
-                        if not isinstance(_glist, list): continue
-                        for _item in _glist:
-                            if not isinstance(_item, dict): continue
-                            _c6 = str(_item.get("code","")).strip()
-                            _nm = str(_item.get("name","")).strip()
-                            if not _c6 or not _c6.isdigit() or len(_c6) != 6: continue
-                            _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
-                            _add(_nm, _tsc, "持仓", skip_bad_filter=True)
-        except Exception: pass
+        # ① 持仓股 (优先用调用方传入的 holdings list[(name, code6), ...])
+        _held = list(_holdings or [])
+        if _held:
+            for _nm, _c6 in _held:
+                _c6 = str(_c6).strip()
+                if not _c6.isdigit() or len(_c6) != 6: continue
+                _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
+                _add(_clean_name(str(_nm or "").strip()), _tsc, "持仓")
+            print(f"[股票分析候选] ①持仓(调用方传入) {len(_held)} → 有效 {len([x for x in _held if x[1]])}")
 
         # ② SQLite data/stock_analysis.db 已分析过的股票
         _db_paths = [
@@ -2077,12 +1774,115 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         threading.Thread(target=_bg, daemon=True).start()
 
     def _apply_data(name, kline, fund):
-        nonlocal _current_kline, _current_fund, _current_name
-        _current_name = name; _current_kline = kline; _current_fund = fund
-        _current_kline["ts_code"] = tsc   # 补 ts_code 字段给实时行情面板
+        nonlocal _current_kline, _current_fund, _current_name, _emo_cache
+        _current_name = name; _current_fund = fund
+        # ===== 拉情绪数据 =====
+        _emo_cache = _fetch_emo_dict()
+        if _emo_cache:
+            kline["emo"] = _build_emo_series(kline, _emo_cache)
+        else:
+            kline["emo"] = None
+        _current_kline = kline
         _render_all(); _redraw_chart()
-        _apply_realtime(spot=None)         # 自动填充同花顺面板 (先用 kline data)
         status_var.set(f"✅ {name}({stock_var.get().strip()}) 六大流派分析完成")
+
+
+    def _fetch_emo_dict():
+        """从 SQLite sentiment_history 拉最近 400 天情绪数据, 返回 {trade_date8: {...}}"""
+        try:
+            import sqlite3
+            _db_paths = [
+                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "data", "stock_analysis.db"),
+                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "stock_analysis.db"),
+            ]
+            for _db in _db_paths:
+                if not os.path.exists(_db): continue
+                conn = sqlite3.connect(_db); cur = conn.cursor()
+                cur.execute("""
+                    SELECT snapshot_date, m1_today, m2_up, m2_down, m2_flat, m2_total
+                    FROM sentiment_history ORDER BY id DESC LIMIT 400
+                """)
+                rows = cur.fetchall(); conn.close()
+                if not rows: continue
+                # 按日期聚合 (同一天可能多条, 取最新的一条)
+                seen = {}
+                for r in rows:
+                    _d = str(r[0] or "").replace("-", "")  # 2026-10-11 → 20261011
+                    if not _d or _d in seen: continue
+                    seen[_d] = {
+                        "ev": float(r[1]) if r[1] is not None else 0.0,
+                        "m2_up": int(r[2] or 0), "m2_down": int(r[3] or 0),
+                        "m2_flat": int(r[4] or 0), "m2_total": int(r[5] or 0),
+                    }
+                # 计算 6 阶段
+                result = {}
+                for _d, m in seen.items():
+                    total = max(m["m2_total"], 1)
+                    up_ratio = m["m2_up"] / total * 100  # 涨跌比
+                    ev = m["ev"]
+                    # ===== 6 阶段判断 =====
+                    if ev < -1.5 and up_ratio < 35:
+                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
+                            0, 0.0, "冰点", "❄️", "#455A64"
+                    elif ev < -0.5 and up_ratio < 45:
+                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
+                            1, 0.25, "启动", "🌱", "#26A69A"
+                    elif ev > 0 and up_ratio > 50:
+                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
+                            2, 0.70, "发酵", "🟢", "#1976D2"
+                    elif ev > 0.5 and up_ratio > 55 and m["m2_up"] > 2000:
+                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
+                            3, 1.00, "高潮", "🔴", "#C62828"
+                    elif ev < 0 and up_ratio < 50:
+                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
+                            4, 0.30, "退潮", "🟠", "#8D6E63"
+                    else:
+                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
+                            5, 0.50, "震荡", "🟡", "#FBC02D"
+                    # 极端值修正
+                    if up_ratio > 90: alpha_pos = min(alpha_pos, 0.80)
+                    if up_ratio < 15: alpha_pos = max(alpha_pos, 0.10)
+                    # 情绪指数线 (0-100%)
+                    emo_index = max(0, min(100, 50 + ev * 20 + (up_ratio - 50) * 0.5))
+                    result[_d] = {
+                        "phase": phase, "phase_label": phase_label, "phase_emoji": phase_emoji,
+                        "phase_color": phase_color, "alpha_pos": alpha_pos, "ev": ev,
+                        "up_ratio": up_ratio, "emo_index": emo_index,
+                    }
+                print(f"[情绪副图] 从 sentiment_history 拉到 {len(result)} 天")
+                return result
+        except Exception as _e:
+            print(f"[情绪副图] 拉 sentiment_history 失败: {_e}")
+        return None
+
+
+    def _build_emo_series(kline, emo_dict):
+        """对齐 K 线 trade_dates 到情绪数据, 返回 emo_list 与 closes 等长"""
+        if not emo_dict or not kline: return None
+        _data = kline.get("data")
+        if _data is None or "日期" not in _data.columns: return None
+        emo_list = []
+        for i in range(len(_data)):
+            _d_raw = str(_data.iloc[i]["日期"]).replace("-", "")
+            _emo = emo_dict.get(_d_raw)
+            if _emo is None:
+                # 尝试附近 ±3 天
+                _fallback = None
+                for _off in range(1, 4):
+                    import datetime as _dt
+                    try:
+                        _dt_obj = _dt.datetime.strptime(_d_raw, "%Y%m%d")
+                        for _sign in (-1, 1):
+                            _near = (_dt_obj + _dt.timedelta(days=_off*_sign)).strftime("%Y%m%d")
+                            if _near in emo_dict:
+                                _fallback = emo_dict[_near]; break
+                        if _fallback: break
+                    except Exception: pass
+                _emo = _fallback
+            emo_list.append(_emo)
+        return emo_list
 
     def _update_ai(text):
         for w in tabs["🤖 AI建议"].winfo_children(): w.destroy()
@@ -2091,20 +1891,18 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         tb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
         tb.insert("1.0", text); tb.configure(state=tk.DISABLED)
 
-    # ========= 把顶栏按钮 command 绑定到已定义的函数 =========
-    _top_search_btn.configure(command=_do_search)
-    _top_redraw_btn.configure(command=_redraw_chart)
-    def _refresh_candidates():
-        """重新收集候选 + 重新填下拉框 + 不自动分析"""
-        threading.Thread(target=lambda: (
-            combo.configure(values=_collect_candidates()),
-            status_var.set(f"✅ 候选已刷新 ({len(combo['values'])} 只)")
-        ), daemon=True).start()
-    _top_refresh_btn.configure(command=_refresh_candidates)
+    # ========= 顶栏按钮 =========
+    btn_frame = tk.Frame(top, bg="#283593"); btn_frame.pack(side=tk.LEFT, padx=4)
+    search_btn = tk.Button(btn_frame, text="🔍 分析", bg="#FFB300", fg="#1A237E",
+                           font=("", 10, "bold"), relief=tk.FLAT, padx=12, command=_do_search)
+    search_btn.pack(side=tk.LEFT)
+    refresh_chart = tk.Button(btn_frame, text="📉重绘", bg="#3949AB", fg="white",
+                              font=("", 9), relief=tk.FLAT, padx=8, command=_redraw_chart)
+    refresh_chart.pack(side=tk.LEFT, padx=4)
 
     # 初始
     def _load_candidates():
-        cands = _collect_candidates()
+        cands = _collect_candidates(holdings)
         combo.configure(values=cands)
         target = auto_code or ""
         if target:

@@ -18578,11 +18578,31 @@ class DapanMixin:
         print(f"[📊股票分析] 被调用! args={args}, kwargs={kwargs}", flush=True)
         stock_code = kwargs.get("stock_code") or (args[0] if len(args)>=1 else None)
         stock_name = kwargs.get("stock_name") or (args[1] if len(args)>=2 else None)
+        # ===== 收集持仓股 (holding_stocks + holding_stocks_2..14) =====
+        def _collect_holds():
+            _res = []
+            _seen = set()
+            for _gi in [1] + list(range(2, 15)):
+                _attr = f"holding_stocks_{_gi}" if _gi > 1 else "holding_stocks"
+                _lst = getattr(self, _attr, []) or []
+                for _h in _lst:
+                    if not _h: continue
+                    try:
+                        _nm, _c6 = _h
+                        _c6 = str(_c6).strip()
+                        if _c6.isdigit() and len(_c6) == 6 and _c6 not in _seen:
+                            _seen.add(_c6)
+                            _res.append((str(_nm or "").strip(), _c6))
+                    except Exception: pass
+            return _res
+        _holds = _collect_holds()
+        if _holds: print(f"[📊股票分析] 收集到持仓 {len(_holds)} 只: {[n for n,c in _holds[:5]]}...")
         try:
             from ui.stock_analysis import show_stock_analysis_dialog as _sa
             ai_fn = getattr(self, 'call_ai_model', None)
             win = getattr(self, 'root', None) or getattr(self, '_root', None)
-            _sa(win, call_ai_fn=ai_fn, auto_code=stock_code, auto_name=stock_name)
+            _sa(win, call_ai_fn=ai_fn, auto_code=stock_code, auto_name=stock_name,
+                holdings=_holds)
         except Exception as e:
             print(f"[📊股票分析❌] {e}", flush=True); _tb.print_exc()
         def load_stock_analysis():
