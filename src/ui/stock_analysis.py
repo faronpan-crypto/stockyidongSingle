@@ -1813,11 +1813,16 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
         # ② SQLite data/stock_analysis.db 已分析过的股票
         _db_paths = [
+            # 源码运行
             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "data", "stock_analysis.db"),
             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "stock_analysis.db"),
+            # 打包 .app 运行兜底
+            os.path.expanduser("~/Agent/stockyidong_project/data/stock_analysis.db"),
+            os.path.expanduser("~/.qclaw/stock_analysis.db"),
         ]
+        print(f"[股票分析] 候选 DB 路径: {_db_paths}")
         for _db in _db_paths:
             if not os.path.exists(_db): continue
             try:
@@ -2221,6 +2226,8 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                             "data", "stock_analysis.db"),
                 os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "stock_analysis.db"),
+                os.path.expanduser("~/Agent/stockyidong_project/data/stock_analysis.db"),
+                os.path.expanduser("~/.qclaw/stock_analysis.db"),
             ]
             for _db in _db_paths:
                 if not os.path.exists(_db): continue
