@@ -73,7 +73,11 @@ import numpy as np
 import pandas as pd
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont, ImageTk
-from wordcloud import WordCloud
+try:
+    from wordcloud import WordCloud as _WordCloudClass
+except ImportError:
+    _WordCloudClass = None  # 词云功能自动降级 (没装 wordcloud 时跳过, 不影响其他功能)
+WordCloud = _WordCloudClass  # 保持向后兼容
 
 # ==================== Phase 2 模块化导入 ====================
 from utils.suppress import *  # L97-109, 110-124, 126-136, 137-151, 153-161
