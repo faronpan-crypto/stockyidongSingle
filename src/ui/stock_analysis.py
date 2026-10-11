@@ -1459,22 +1459,38 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     lines.append("")
                     lines.append(f"🎯 {_zh} — {label}")
                     if bt:
-                        cnt, wr, avg_g, avg_l, plr = bt
-                        lines += [f"📊 历史{cnt}次", f"✅ 胜率{wr:.1f}%",
-                                  f"💰 +{avg_g:.2f}%", f"💔 -{avg_l:.2f}%", f"⚖️ 盈亏比{plr:.2f}"]
+                        cnt = bt["count"]; wr = bt["win_rate"]
+                        avg_g = bt["avg_profit"]; avg_l = bt["avg_loss"]; plr = bt["plr"]
+                        median_ret = bt["median_ret"]; best = bt["best"]; worst = bt["worst"]
+                        avg_hold = bt["avg_hold_days"]
+                        wr_by_w = bt["wr_by_window"]; ret_by_w = bt["ret_by_window"]
+                        exit_reasons = bt["exit_reasons"]
+                        lines += [
+                            f"📊 历史{cnt}次 (止盈10%/止损5%/最长{int(avg_hold)+5}天)",
+                            f"✅ 真实胜率{wr:.1f}% (逐bar止盈止损后)",
+                            f"💰 平均盈利+{avg_g:.2f}%  💔 平均亏损-{avg_l:.2f}%",
+                            f"⚖️ 盈亏比{plr:.2f}  🧭 中位收益{median_ret:+.2f}%",
+                            f"🏆 最佳{best:+.1f}% 😰 最差{worst:+.1f}% ⏱ 平均持仓{avg_hold:.1f}天"]
+                        if exit_reasons:
+                            _parts = [f"{k}{v}次" for k, v in sorted(exit_reasons.items())]
+                            lines.append(f"🚪 出场: {' / '.join(_parts)}")
+                        lines.append("📐 不同时间窗(收盘价): "
+                                     f"5日胜率{wr_by_w.get(5,0):.0f}%均收{ret_by_w.get(5,0):+.1f}%  "
+                                     f"10日胜率{wr_by_w.get(10,0):.0f}%均收{ret_by_w.get(10,0):+.1f}%  "
+                                     f"20日胜率{wr_by_w.get(20,0):.0f}%均收{ret_by_w.get(20,0):+.1f}%")
                         p = wr/100.0; q = 1-p; b = max(plr, 0.01)
                         kelly_f = max(0, min((b*p-q)/b if b>0 else 0, 1.0))
                         halving = kelly_f/2
-                        if kelly_f >= 0.25: lv = "⭐⭐⭐⭐⭐ 强下注"
+                        if kelly_f >= 0.25: lv = "⭐⭐⭐⭐⭐ 强下注信号"
                         elif kelly_f >= 0.15: lv = "⭐⭐⭐⭐ 值得下注"
                         elif kelly_f >= 0.05: lv = "⭐⭐⭐ 轻仓试单"
                         elif kelly_f > 0: lv = "⭐⭐ 观察信号"
                         else: lv = "❌ 不值得下注"
-                        lines += ["", "🧮 凯利公式:",
+                        lines += ["", "🧮 凯利公式 (Kelly Criterion):",
                                    f"   f*=(bp-q)/b=({b:.2f}×{p:.2f}-{q:.2f})/{b:.2f}",
                                    f"   ✅ 最优仓位{kelly_f*100:.1f}%  🔹半凯利{halving*100:.1f}%",
                                    f"   🎯 {lv}"]
-                    else: lines.append("⚠️ 历史信号不足")
+                    else: lines.append("⚠️ 历史信号不足 3 次")
                     text = "\n".join(lines)
                     if hover_tt is None or not hover_tt.winfo_exists():
                         hover_tt = tk.Toplevel(win); hover_tt.wm_overrideredirect(True)
