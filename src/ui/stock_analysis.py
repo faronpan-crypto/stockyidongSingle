@@ -785,9 +785,21 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
              font=("", 13, "bold")).pack(side=tk.LEFT, padx=14, pady=9)
     tk.Label(top, text="股票:", bg="#283593", fg="white", font=("", 10)).pack(side=tk.LEFT)
     stock_var = tk.StringVar()
-    combo = ttk.Combobox(top, textvariable=stock_var, width=18, state="normal")
+    combo = ttk.Combobox(top, textvariable=stock_var, width=28, state="normal")
     combo.pack(side=tk.LEFT, padx=6)
-    ttk.Button(top, text="🔍 分析", command=lambda: None).pack(side=tk.LEFT, padx=4)
+    # — 顶栏 3 个按钮: 🔍分析 / 📉重绘 / 🔄候选 —
+    _top_search_btn = tk.Button(top, text="🔍 分析", bg="#FFB300", fg="#1A237E",
+                                font=("", 10, "bold"), relief=tk.FLAT, padx=10,
+                                command=lambda: None)   # command 稍后 _do_search 定义后绑定
+    _top_search_btn.pack(side=tk.LEFT, padx=4)
+    _top_redraw_btn = tk.Button(top, text="📉 重绘", bg="#3949AB", fg="white",
+                                font=("", 9), relief=tk.FLAT, padx=8,
+                                command=lambda: None)   # command 稍后绑定
+    _top_redraw_btn.pack(side=tk.LEFT, padx=2)
+    _top_refresh_btn = tk.Button(top, text="🔄 候选", bg="#E3F2FD", fg="#1565C0",
+                                 font=("", 9), relief=tk.FLAT, padx=8,
+                                 command=lambda: None)   # command 稍后绑定
+    _top_refresh_btn.pack(side=tk.LEFT, padx=2)
     status_var = tk.StringVar(value="⏳ 加载候选列表...")
     tk.Label(top, textvariable=status_var, bg="#283593", fg="#90A4AE",
              font=("", 8)).pack(side=tk.RIGHT, padx=14)
@@ -1936,14 +1948,16 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         tb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
         tb.insert("1.0", text); tb.configure(state=tk.DISABLED)
 
-    # ========= 顶栏按钮 =========
-    btn_frame = tk.Frame(top, bg="#283593"); btn_frame.pack(side=tk.LEFT, padx=4)
-    search_btn = tk.Button(btn_frame, text="🔍 分析", bg="#FFB300", fg="#1A237E",
-                           font=("", 10, "bold"), relief=tk.FLAT, padx=12, command=_do_search)
-    search_btn.pack(side=tk.LEFT)
-    refresh_chart = tk.Button(btn_frame, text="📉重绘", bg="#3949AB", fg="white",
-                              font=("", 9), relief=tk.FLAT, padx=8, command=_redraw_chart)
-    refresh_chart.pack(side=tk.LEFT, padx=4)
+    # ========= 把顶栏按钮 command 绑定到已定义的函数 =========
+    _top_search_btn.configure(command=_do_search)
+    _top_redraw_btn.configure(command=_redraw_chart)
+    def _refresh_candidates():
+        """重新收集候选 + 重新填下拉框 + 不自动分析"""
+        threading.Thread(target=lambda: (
+            combo.configure(values=_collect_candidates()),
+            status_var.set(f"✅ 候选已刷新 ({len(combo['values'])} 只)")
+        ), daemon=True).start()
+    _top_refresh_btn.configure(command=_refresh_candidates)
 
     # 初始
     def _load_candidates():
