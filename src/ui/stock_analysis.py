@@ -388,6 +388,19 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 if bt:
                     cnt, wr, avg_g, avg_l, plr = bt
                     _lines += [f"📊 历史{cnt}次", f"✅ 胜率{wr:.1f}%", f"💰 +{avg_g:.2f}%", f"💔 -{avg_l:.2f}%", f"⚖️ 盈亏比{plr:.2f}"]
+                    # 🧮 凯利公式
+                    try:
+                        p = wr / 100.0; q = 1 - p; b = max(plr, 0.01)
+                        kelly_f = max(0, min((b*p - q)/b if b > 0 else 0, 1.0))
+                        halving = kelly_f / 2
+                        if kelly_f >= 0.25: lv = "⭐⭐⭐⭐⭐ 强下注信号"
+                        elif kelly_f >= 0.15: lv = "⭐⭐⭐⭐ 值得下注"
+                        elif kelly_f >= 0.05: lv = "⭐⭐⭐ 轻仓试单"
+                        elif kelly_f > 0: lv = "⭐⭐ 观察信号"
+                        else: lv = "❌ 不值得下注"
+                        _lines += ["", "🧮 凯利公式:", f"   f*=(bp-q)/b=({b:.2f}×{p:.2f}-{q:.2f})/{b:.2f}",
+                                   f"   ✅ 最优仓位{kelly_f*100:.1f}%  🔹半凯利{halving*100:.1f}%", f"   🎯 {lv}"]
+                    except Exception: pass
                 else: _lines.append("⚠️ 历史信号不足")
                 _text = "\n".join(_lines)
                 global _hover_tt

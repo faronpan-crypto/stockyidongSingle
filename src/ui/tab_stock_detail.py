@@ -916,6 +916,32 @@ class StockDetailMixin:
                             lines.append(f"💰 平均盈利: +{avg_g:.2f}%")
                             lines.append(f"💔 平均亏损: -{avg_l:.2f}%")
                             lines.append(f"⚖️ 盈亏比: {plr:.2f}")
+                            # 🧮 凯利公式 f* = (bp - q) / b, b=盈亏比, p=胜率, q=1-p
+                            try:
+                                p = wr / 100.0; q = 1 - p; b = max(plr, 0.01)
+                                kelly_f = (b * p - q) / b if b > 0 else 0
+                                kelly_f = max(0, min(kelly_f, 1.0))  # 限制在 [0, 1]
+                                halving = kelly_f / 2  # 实际操作常用半凯利
+                                line_type_chinese = {"buy":"买入","add":"加仓","sell":"卖出","reduce":"减仓"}.get(sig_type, sig_type)
+                                # Kelly 评分分级
+                                if kelly_f >= 0.25:
+                                    kelly_level = "⭐⭐⭐⭐⭐ 强下注信号"
+                                elif kelly_f >= 0.15:
+                                    kelly_level = "⭐⭐⭐⭐ 值得下注"
+                                elif kelly_f >= 0.05:
+                                    kelly_level = "⭐⭐⭐ 轻仓试单"
+                                elif kelly_f > 0:
+                                    kelly_level = "⭐⭐ 观察信号"
+                                else:
+                                    kelly_level = "❌ 不值得下注 (负期望)"
+                                lines.append("")
+                                lines.append(f"🧮 凯利公式 (Kelly Criterion):")
+                                lines.append(f"   f* = (bp - q)/b = ({b:.2f}×{p:.2f} - {q:.2f})/{b:.2f}")
+                                lines.append(f"   ✅ 最优仓位: {kelly_f*100:.1f}%")
+                                lines.append(f"   🔹 半凯利稳妥: {halving*100:.1f}%")
+                                lines.append(f"   🎯 {kelly_level}")
+                            except Exception:
+                                pass
                         else:
                             lines.append("⚠️ 历史信号不足 3 次")
                         text = "\n".join(lines)
