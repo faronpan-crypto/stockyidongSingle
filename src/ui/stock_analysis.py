@@ -835,6 +835,90 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         ttk.Checkbutton(_aux_frame, text=_lbl, variable=aux_vars[_k]).pack(side=tk.LEFT, padx=2)
     chart_inner = tk.Frame(right_f, bg="#FAFAFA"); chart_inner.pack(fill=tk.BOTH, expand=True, pady=4)
 
+    # ===== 最右: 情绪温度计 + 资金池 + α/β 策略 =====
+    meta_f = tk.Frame(pw, bg="#E8EAF6", width=230); meta_f.pack_propagate(False)
+    pw.add(meta_f, minsize=190)
+    meta_canvas = tk.Canvas(meta_f, bg="#E8EAF6", highlightthickness=0)
+    meta_scroll = ttk.Scrollbar(meta_f, orient=tk.VERTICAL, command=meta_canvas.yview)
+    meta_inner = tk.Frame(meta_canvas, bg="#E8EAF6")
+    meta_inner.bind("<Configure>", lambda e: meta_canvas.configure(scrollregion=meta_canvas.bbox("all")))
+    meta_canvas.create_window((0,0), window=meta_inner, anchor="nw")
+    meta_canvas.configure(yscrollcommand=meta_scroll.set)
+    meta_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    meta_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+    # 鼠标滚轮
+    def _on_meta_wheel(e): meta_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+    meta_canvas.bind_all("<MouseWheel>", _on_meta_wheel)
+
+    # --- 卡片1: 情绪温度计 ---
+    _c1 = tk.LabelFrame(meta_inner, text="🌡️ 情绪温度计", bg="#FFFFFF",
+                        fg="#283593", font=("", 10, "bold"), padx=8, pady=6)
+    _c1.pack(fill=tk.X, padx=6, pady=(8,6))
+    _thermo_canvas = tk.Canvas(_c1, width=190, height=200, bg="#FFFFFF", highlightthickness=0)
+    _thermo_canvas.pack(pady=4)
+    _emo_title_lbl = tk.Label(_c1, text="—", bg="#FFFFFF", fg="#283593",
+                              font=("", 10, "bold")); _emo_title_lbl.pack()
+    _emo_sub_lbl = tk.Label(_c1, text="", bg="#FFFFFF", fg="#555", font=("", 8))
+    _emo_sub_lbl.pack(pady=(0,2))
+
+    # --- 卡片2: 资金池 (涨跌停/涨跌比) ---
+    _c2 = tk.LabelFrame(meta_inner, text="💰 资金池", bg="#FFFFFF",
+                        fg="#283593", font=("", 10, "bold"), padx=8, pady=6)
+    _c2.pack(fill=tk.X, padx=6, pady=6)
+    _pool_canvas = tk.Canvas(_c2, width=190, height=130, bg="#FFFFFF", highlightthickness=0)
+    _pool_canvas.pack(pady=4)
+    _pool_lbl = tk.Label(_c2, text="", bg="#FFFFFF", fg="#555", font=("", 8))
+    _pool_lbl.pack()
+
+    # --- 卡片3: α/β 仓位建议 ---
+    _c3 = tk.LabelFrame(meta_inner, text="🧭 α/β 仓位策略", bg="#FFFFFF",
+                        fg="#283593", font=("", 10, "bold"), padx=8, pady=6)
+    _c3.pack(fill=tk.X, padx=6, pady=6)
+    _alpha_card = tk.Frame(_c3, bg="#FFFFFF")
+    _alpha_card.pack(fill=tk.X, pady=(2,4))
+    tk.Label(_alpha_card, text="主动型 α", bg="#FFFFFF", fg="#1565C0",
+             font=("", 9, "bold")).pack(side=tk.LEFT)
+    _alpha_var = tk.StringVar(value="—")
+    tk.Label(_alpha_card, textvariable=_alpha_var, bg="#FFFFFF", fg="#C62828",
+             font=("", 11, "bold")).pack(side=tk.RIGHT)
+    _alpha_bar = tk.Canvas(_c3, height=18, bg="#E0E0E0", highlightthickness=0)
+    _alpha_bar.pack(fill=tk.X)
+    _beta_card = tk.Frame(_c3, bg="#FFFFFF")
+    _beta_card.pack(fill=tk.X, pady=(8,4))
+    tk.Label(_beta_card, text="被动型 β (指数基金)", bg="#FFFFFF", fg="#555",
+             font=("", 9)).pack(side=tk.LEFT)
+    _beta_var = tk.StringVar(value="100% 满仓")
+    tk.Label(_beta_card, textvariable=_beta_var, bg="#FFFFFF", fg="#2E7D32",
+             font=("", 11, "bold")).pack(side=tk.RIGHT)
+    _beta_bar = tk.Canvas(_c3, height=18, bg="#E0E0E0", highlightthickness=0)
+    _beta_bar.pack(fill=tk.X)
+    _strategy_txt = tk.Label(_c3, text="", bg="#FFFFFF", fg="#333",
+                             font=("", 8), justify=tk.LEFT, wraplength=190)
+    _strategy_txt.pack(fill=tk.X, pady=(8,2))
+
+    # --- 卡片4: 6阶段参考色带 ---
+    _c4 = tk.LabelFrame(meta_inner, text="📋 6阶段速查", bg="#FFFFFF",
+                        fg="#283593", font=("", 10, "bold"), padx=8, pady=6)
+    _c4.pack(fill=tk.X, padx=6, pady=(6,8))
+    _phase_rows = [
+        ("❄️ 冰点",   "#455A64", "0%",   "ev<-1.5 & 涨跌比<35%"),
+        ("🌱 启动",   "#26A69A", "25%",  "ev<-0.5 & 涨跌比<45%"),
+        ("🟢 发酵",   "#1976D2", "70%",  "ev>0 & 涨跌比>50%"),
+        ("🔴 高潮",   "#C62828", "100%", "ev>0.5 & 涨跌比>55%+涨停多"),
+        ("🟠 退潮",   "#8D6E63", "30%",  "ev<0 & 涨跌比<50%"),
+        ("🟡 震荡",   "#FBC02D", "50%",  "其他"),
+    ]
+    for _name, _col, _pos, _cond in _phase_rows:
+        _row = tk.Frame(_c4, bg="#FFFFFF")
+        _row.pack(fill=tk.X, pady=1)
+        _dot = tk.Label(_row, text="■", fg=_col, bg="#FFFFFF", font=("", 10))
+        _dot.pack(side=tk.LEFT, padx=(0,3))
+        tk.Label(_row, text=_name, bg="#FFFFFF", fg="#333",
+                 font=("", 9)).pack(side=tk.LEFT)
+        tk.Label(_row, text=_pos, bg="#FFFFFF", fg="#C62828",
+                 font=("", 9, "bold")).pack(side=tk.RIGHT)
+
+
     # ===== 状态缓存 =====
     _current_kline = None; _current_fund: Dict = {}
     _hover_cache: Dict = {"bs": {}, "bt": {}}
@@ -1783,8 +1867,141 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         else:
             kline["emo"] = None
         _current_kline = kline
-        _render_all(); _redraw_chart()
+        _render_all(); _redraw_chart(); _draw_meta_panels()
         status_var.set(f"✅ {name}({stock_var.get().strip()}) 六大流派分析完成")
+
+
+    def _draw_meta_panels():
+        """刷新最右 4 个卡片: 温度计 + 资金池 + α/β + 速查"""
+        # ===== 取最新情绪 =====
+        latest_emo = None
+        if _emo_cache:
+            # sentiment_history 是按 id DESC 拉的, 但 key 是日期, 取最新日期
+            _latest_d = max(_emo_cache.keys()) if _emo_cache else None
+            if _latest_d: latest_emo = _emo_cache.get(_latest_d)
+
+        # ===== 温度计 Canvas =====
+        _thermo_canvas.delete("all")
+        _thermo_w, _thermo_h = 190, 200
+        if latest_emo:
+            _idx = latest_emo["emo_index"]  # 0-100
+            _phase_col = latest_emo.get("phase_color", "#FBC02D")
+            # 外框 (圆角矩形近似)
+            _thermo_canvas.create_rectangle(30, 15, 60, _thermo_h-30, width=2,
+                                             outline=_phase_col, fill="#F5F5F5")
+            # 水银柱 (自下而上)
+            _bar_top = (_thermo_h - 30) - (_thermo_h - 45) * (_idx / 100.0)
+            _thermo_canvas.create_rectangle(31, _bar_top, 59, _thermo_h-31,
+                                             fill=_phase_col, outline="")
+            # 顶部圆球
+            _thermo_canvas.create_oval(26, _thermo_h-45, 64, _thermo_h-7,
+                                        fill=_phase_col, outline=_phase_col, width=2)
+            # 刻度 (0/25/50/75/100)
+            for _tick, _lbl in [(0,"0"),(25,"25"),(50,"50"),(75,"75"),(100,"100")]:
+                _y = (_thermo_h - 30) - (_thermo_h - 45) * (_tick / 100.0)
+                _thermo_canvas.create_line(60, _y, 68, _y, fill="#888", width=1)
+                _thermo_canvas.create_text(72, _y, text=_lbl, anchor="w",
+                                            fill="#555", font=("", 8))
+            # 当前值标签
+            _thermo_canvas.create_text(120, _bar_top, text=f"{_idx:.0f}",
+                                       fill=_phase_col, font=("", 11, "bold"), anchor="w")
+            # 标题
+            _emo_title_lbl.config(text=f"{latest_emo['phase_emoji']} {latest_emo['phase_label']}",
+                                  fg=_phase_col)
+            _emo_sub_lbl.config(text=f"情绪指数 {_idx:.1f} | ev {latest_emo['ev']:+.2f} | 涨跌比 {latest_emo['up_ratio']:.0f}%")
+        else:
+            # 占位
+            _thermo_canvas.create_text(_thermo_w//2, _thermo_h//2,
+                                       text="⚠️ 情绪数据空", fill="#999", font=("", 9))
+            _emo_title_lbl.config(text="情绪数据空", fg="#999")
+            _emo_sub_lbl.config(text="请先刷新大盘情绪")
+
+        # ===== 资金池 Canvas (涨跌停 + 涨跌比) =====
+        _pool_canvas.delete("all")
+        _pool_w, _pool_h = 190, 130
+        if latest_emo:
+            _up = latest_emo.get("m2_up", 0)
+            _down = latest_emo.get("m2_down", 0)
+            _flat = latest_emo.get("m2_flat", 0)
+            _total = latest_emo.get("m2_total", _up+_down+_flat) or 1
+            # 横向堆叠条
+            _bar_x0, _bar_y, _bar_h = 10, 20, 22
+            _bar_w = _pool_w - 20
+            _pool_canvas.create_rectangle(_bar_x0, _bar_y, _bar_x0+_bar_w, _bar_y+_bar_h,
+                                          fill="#EEEEEE", outline="")
+            # 涨 (红)
+            _w_up = _bar_w * _up / _total
+            _pool_canvas.create_rectangle(_bar_x0, _bar_y, _bar_x0+_w_up, _bar_y+_bar_h,
+                                          fill="#C62828", outline="")
+            # 平 (灰)
+            _w_flat = _bar_w * _flat / _total
+            _pool_canvas.create_rectangle(_bar_x0+_w_up, _bar_y, _bar_x0+_w_up+_w_flat, _bar_y+_bar_h,
+                                          fill="#9E9E9E", outline="")
+            # 跌 (绿)
+            _w_down = _bar_w * _down / _total
+            _pool_canvas.create_rectangle(_bar_x0+_w_up+_w_flat, _bar_y,
+                                          _bar_x0+_w_up+_w_flat+_w_down, _bar_y+_bar_h,
+                                          fill="#2E7D32", outline="")
+            # 图例
+            _pool_canvas.create_text(_bar_x0+10, _bar_y+_bar_h+14, text=f"涨 {_up} ({_up/_total*100:.0f}%)",
+                                     fill="#C62828", font=("", 8), anchor="w")
+            _pool_canvas.create_text(_bar_x0+65, _bar_y+_bar_h+14, text=f"平 {_flat}",
+                                     fill="#666", font=("", 8), anchor="w")
+            _pool_canvas.create_text(_bar_x0+120, _bar_y+_bar_h+14, text=f"跌 {_down} ({_down/_total*100:.0f}%)",
+                                     fill="#2E7D32", font=("", 8), anchor="w")
+            # 底部涨跌比条 (0-100%)
+            _r_y = 75; _r_h = 12
+            _pool_canvas.create_rectangle(_bar_x0, _r_y, _bar_x0+_bar_w, _r_y+_r_h,
+                                          fill="#EEEEEE", outline="")
+            _r_ratio = min(max(latest_emo["up_ratio"] / 100.0, 0), 1)
+            _pool_canvas.create_rectangle(_bar_x0, _r_y, _bar_x0+_bar_w*_r_ratio, _r_y+_r_h,
+                                          fill="#FF9800", outline="")
+            _pool_canvas.create_text(_bar_x0+_bar_w//2, _r_y+_r_h+16,
+                                     text=f"涨跌比 {latest_emo['up_ratio']:.0f}%",
+                                     fill="#E65100", font=("", 9, "bold"))
+            # 红/绿阈值线 40/60%
+            for _th, _tx in [(0.4, "40%"), (0.6, "60%")]:
+                _tx_x = _bar_x0 + _bar_w * _th
+                _pool_canvas.create_line(_tx_x, _r_y-3, _tx_x, _r_y+_r_h+3,
+                                          fill="#555", dash=(2,2), width=1)
+                _pool_canvas.create_text(_tx_x, _r_y-6, text=_tx, fill="#555",
+                                         font=("", 7), anchor="s")
+            _pool_lbl.config(text=f"数据源 sentiment_history · {_total} 只A股")
+        else:
+            _pool_canvas.create_text(_pool_w//2, _pool_h//2,
+                                     text="⚠️ 情绪数据空", fill="#999", font=("", 9))
+            _pool_lbl.config(text="请先刷新大盘情绪")
+
+        # ===== α/β 仓位条 =====
+        if latest_emo:
+            _a = latest_emo["alpha_pos"] * 100
+            _phase = latest_emo["phase_label"]
+            _phase_col = latest_emo.get("phase_color", "#FBC02D")
+            # α 条
+            _alpha_bar.delete("all")
+            _ab_w = _alpha_bar.winfo_width() or 180
+            _alpha_bar.create_rectangle(0, 0, _ab_w * _a / 100.0, 18,
+                                        fill=_phase_col, outline="")
+            _alpha_var.config(text=f"{_a:.0f}%  ({_phase})")
+            # β 条 (永远 100%)
+            _beta_bar.delete("all")
+            _beta_bar.create_rectangle(0, 0, (_beta_bar.winfo_width() or 180), 18,
+                                       fill="#2E7D32", outline="")
+            # 策略说明
+            _tips = {
+                "冰点": "α 0% 空仓等反弹信号\nβ 也暂停定投，等情绪走出冰点",
+                "启动": "α 25% 试探性建仓龙头\nβ 正常定投，不追高",
+                "发酵": "α 70% 加主线板块 + 龙头\nβ 继续满仓持有",
+                "高潮": "α 100% 全仓但警惕普涨后分化\nβ 继续满仓，不主动减",
+                "退潮": "α 30% 仅留强势主线\nβ 继续持有不动",
+                "震荡": "α 50% 半仓波段操作\nβ 继续持有",
+            }
+            _tip = _tips.get(_phase, "")
+            _strategy_txt.config(text=f"💡 {_tip}")
+        else:
+            _alpha_bar.delete("all"); _alpha_bar.create_text(90, 10, text="情绪数据空", fill="#999")
+            _beta_bar.delete("all"); _beta_bar.create_text(90, 10, text="情绪数据空", fill="#999")
+            _alpha_var.config(text="—"); _strategy_txt.config(text="请先刷新大盘情绪数据")
 
 
     def _fetch_emo_dict():
