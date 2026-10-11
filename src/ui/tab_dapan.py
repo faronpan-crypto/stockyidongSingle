@@ -56500,7 +56500,7 @@ class DapanMixin:
             ax.legend(loc="upper left", fontsize=7)
             ax.set_title(indicator_descriptions[key], fontsize=7, loc="left", color="#666666", pad=2)
         ax.grid(True, alpha=0.3)
-    def _apply_daily_kline_ax(self, ax1, kline_data, stock_name, show_zoom_hint=True, hide_x_labels=False, show_support_resistance=True, buy_points=None):
+    def _apply_daily_kline_ax(self, ax1, kline_data, stock_name, show_zoom_hint=True, hide_x_labels=False, show_support_resistance=True, buy_points=None, show_bs_signals=True, **kwargs):
         """在给定 Axes 上绘制主图 K 线 + 均线 + 支撑/压力线。"""
         data = kline_data['data']
         ma_values = kline_data['ma_values']
@@ -56670,11 +56670,50 @@ class DapanMixin:
                         y_end = y0 + m * (x_end - x0)
                         ax1.plot([x0, x_end], [y0, y_end], color='#8B0000', linewidth=2.0, linestyle='--',
                                 label='压力线(高点连线)', alpha=0.95, zorder=6)
-        # 绘制买点竖线
-        if buy_points and len(buy_points) > 0:
-            y_min = min(lows)
-            y_max = max(highs)
-            y_range = y_max - y_min
+        # 🔔 完整 4 类买卖点 (自动计算 + 回测胜率) — 复用 tab_stock_detail 的 calc_trade_signals
+        if show_bs_signals and n >= 30:
+            try:
+                # 动态 import, 避免循环依赖
+                from ui.tab_stock_detail import calc_trade_signals, backtest_signal as _bsig
+                if "成交量" in data.columns:
+                    _vols = data["成交量"].values.astype(float)
+                else:
+                    import numpy as _np; _vols = _np.zeros(n, dtype=float)
+                sigs = calc_trade_signals(closes, opens, highs, lows, _vols)
+                _mp_cls = [
+                    ("buy", "★", "#2E7D32", "★ 买入(MA金/MACD金/布林)"),
+                    ("add", "^", "#F57C00", "▲ 加仓(MACD强金/放量突破)"),
+                    ("sell", "v", "#C62828", "▼ 卖出(MA死/MACD死/KDJ高位)"),
+                    ("reduce", "v", "#6A1B9A", "▽ 减仓(MACD弱死/放量破位)"),
+                ]
+                for _key, _mk, _col, _lbl in _mp_cls:
+                    _pts = sigs.get(_key, [])
+                    if not _pts: continue
+                    _xs = [p[0] for p in _pts]; _ys = [p[1] for p in _pts]
+                    ax1.scatter(_xs, _ys, marker=_mk, s=110, color=_col,
+                                zorder=15, edgecolors="white", linewidths=0.8, label=_lbl)
+                    for _pt in _pts:
+                        _idx_p, _y_p, _lbl_p, _col_p, _sym_p = _pt
+                        _off = -12 if _sym_p in ("★","▲") else 12
+                        _va = "top" if _sym_p in ("★","▲") else "bottom"
+                        ax1.annotate(_lbl_p, xy=(_idx_p, _y_p),
+                                     xytext=(0,_off), textcoords="offset points",
+                                     fontsize=5.5, color=_col_p, ha="center", va=_va,
+                                     fontweight="bold", zorder=16)
+                # 回测胜率文字 (标题上方)
+                _bt_parts = []
+                for _k, _lbl in [("buy","买入"),("add","加仓"),("sell","卖出"),("reduce","减仓")]:
+                    _bt = _bsig(_k, sigs.get(f"{_k}_all",[]), closes)
+                    if _bt: _bt_parts.append(f"{_lbl}: 胜率{_bt[1]:.0f}% 盈亏比{_bt[4]:.2f}")
+                if _bt_parts:
+                    ax1.text(0.5, 1.01, "  |  ".join(_bt_parts),
+                             transform=ax1.transAxes, fontsize=7.5, color="#333",
+                             ha="center", va="bottom", style="italic")
+            except Exception as _e:
+                print(f"[DapanMixin买卖点] 失败: {_e}")
+        elif buy_points and len(buy_points) > 0:
+            # 旧 buy_points 兜底
+            y_min = min(lows); y_max = max(highs); y_range = y_max - y_min
             for i, point in enumerate(buy_points):
                 idx = point['index']
                 ax1.plot([idx, idx], [y_min - y_range * 0.1, y_max + y_range * 0.1],
