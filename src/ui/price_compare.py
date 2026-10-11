@@ -1,28 +1,64 @@
 # -*- coding: utf-8 -*-
 """💰 跨平台比价 — MVP 版
 
-平台数据源:
-  淘宝/天猫  — s.taobao.com 搜索页 (HTML 正则提取 listItem)
-  京东      — search.jd.com 搜索页 (HTML regex)
-  拼多多    — mobile.yangkeduo.com 搜索页 (HTML regex)
-  盒马      — m.hemaos.com/x/pc/online/search (HTTP JSON)
-  联华/叮咚  — 无公开接口, 本期跳过
+数据源优先级:
+  L1 万邦 OneBound (t1j.item_search_bijia) — 真正跨平台统一比价 API, 覆盖淘宝/天猫/京东/拼多多/唯品会/当当/苏宁
+     注册 https://open.onebound.cn/ 免费拿 key+secret, 新用户送调用额度
+  L2 TMAPI (api.tmapi.top) — 淘宝/天猫/京东/拼多多 聚合, 有历史价接口, REST + apikey
+  L3 淘宝 TOP 官方 taobao.items.search / taobao.item.get — 需企业资质, 合规首选
+  L4 京东联盟 jd.union.open.goods.detail.query — 实名认证即可, 券后价/佣金/月销量都能拿
+  L5 本站直抓 HTML — 所有平台都有反爬/风控, 全挂时兜底用, 拿不到数据时弹窗提示用户直接点 🌐 官网跳转按钮
 
-⚠️ 所有抓取仅做"商品名+价格+图片+链接"基础提取, 不做账号登录/签名逆向。
-   若某平台反爬返回空列表 → UI 显示 "-"。
+⚠️ 盒马/叮咚/奥乐齐/联华 无任何公开接口, 只能抓包 (需 cookie+x-sign), 合规灰区。
+   本期先跳过, 用万邦 OneBound 跨平台比价接口覆盖淘宝/京东/拼多多主流电商。
 
-调用:
-    results = fetch_all_platforms("恰恰瓜子 150g")
+API Key 管理:
+  在 ~/.qclaw/price_compare_config.json 里存 key+secret, 格式:
+    {"onebound_key": "xxx", "onebound_secret": "xxx", "tmapi_key": "xxx"}
 """
 from __future__ import annotations
 import ssl as _ssl
 import re as _re
 import json as _json
+import os as _os
 import urllib.parse as _up
 from urllib.request import Request, urlopen
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional
 from html import unescape as _hunesc
+
+# ========== API Key 管理 ==========
+def _load_api_keys() -> Dict[str, str]:
+    """从本地 JSON 读取聚合 API key, 优先用户显式配置, 兜底环境变量"""
+    _home = _os.path.expanduser("~")
+    _cfg_path = _os.path.join(_home, ".qclaw", "price_compare_config.json")
+    keys: Dict[str, str] = {}
+    if _os.path.exists(_cfg_path):
+        try:
+            d = _json.load(open(_cfg_path))
+            keys.update({k: v for k, v in d.items() if v})
+        except Exception:
+            pass
+    # 环境变量兜底
+    for en, k in [("ONEBOUND_KEY", "onebound_key"),
+                   ("ONEBOUND_SECRET", "onebound_secret"),
+                   ("TMAPI_KEY", "tmapi_key")]:
+        if _os.environ.get(en):
+            keys[k] = _os.environ[en]
+    return keys
+
+def _save_api_key(name: str, val: str):
+    """写入 ~/.qclaw/price_compare_config.json"""
+    _home = _os.path.expanduser("~")
+    _cfg_dir = _os.path.join(_home, ".qclaw")
+    _cfg_path = _os.path.join(_cfg_dir, "price_compare_config.json")
+    _os.makedirs(_cfg_dir, exist_ok=True)
+    existing = {}
+    if _os.path.exists(_cfg_path):
+        try: existing = _json.load(open(_cfg_path))
+        except Exception: pass
+    existing[name] = val
+    _json.dump(existing, open(_cfg_path, "w"), ensure_ascii=False, indent=2)
 
 _CTX = _ssl._create_unverified_context()
 _HDR = {
@@ -52,6 +88,95 @@ def _get(url: str, extra_headers: Optional[Dict] = None) -> str:
                 return raw.decode("utf-8", errors="ignore")
             except Exception:
                 return raw.decode("gbk", errors="ignore")
+
+
+# ========== L1 万邦 OneBound 跨平台比价 ==========
+def _fetch_onebound(keyword: str) -> List[Dict]:
+    """t1j.item_search_bijia — 真正跨平台统一比价, 返回的 items[].name 是平台名"""
+    out: List[Dict] = []
+    keys = _load_api_keys()
+    k, s = keys.get("onebound_key", ""), keys.get("onebound_secret", "")
+    if not k or not s:
+        print("[OneBound] 未配置 onebound_key / onebound_secret, 跳过")
+        return out
+    try:
+        url = (f"https://api-gw.onebound.cn/t1j/item_search_bijia/"
+               f"?key={k}&secret={s}&q={_up.quote(keyword)}&mode=")
+        r = _get(url)
+        try:
+            data = _json.loads(r)
+        except Exception:
+            print(f"[OneBound] JSON 解析失败: {r[:200]}"); return out
+        items = []
+        if "items" in data and isinstance(data["items"], dict):
+            items = data["items"].get("item", []) or []
+        for it in items[:30]:
+            try:
+                # OneBound 返回结构: name=平台名, title=商品名, price, pic_url, detail_url
+                pname = it.get("name", "OneBound")
+                nm = it.get("title", "") or it.get("name", "")
+                pr = it.get("price", 0)
+                img = it.get("pic_url", "") or it.get("pic", "")
+                href = it.get("detail_url", "")
+                if nm and pr:
+                    out.append({
+                        "platform": pname,
+                        "name": str(nm).strip(),
+                        "price": float(pr),
+                        "price_str": f"¥{float(pr):.2f}",
+                        "image": img,
+                        "url": href,
+                    })
+            except Exception:
+                continue
+        print(f"[OneBound] 返回 {len(out)} 条")
+    except Exception as e:
+        print(f"[OneBound FAIL] {e}")
+    return out
+
+
+# ========== L2 TMAPI 聚合 ==========
+def _fetch_tmapi(keyword: str) -> List[Dict]:
+    """api.tmapi.top — 需要 apikey, 支持 taobao / jd / pdd 单独搜索"""
+    out: List[Dict] = []
+    keys = _load_api_keys()
+    ak = keys.get("tmapi_key", "")
+    if not ak:
+        print("[TMAPI] 未配置 tmapi_key, 跳过")
+        return out
+    for pname, api in [("淘宝/天猫", "taobao.item_search"),
+                       ("京东", "jd.item_search"),
+                       ("拼多多", "pdd.item_search")]:
+        try:
+            url = (f"https://api.tmapi.top/{api}"
+                   f"?apikey={ak}&q={_up.quote(keyword)}&sort=price-asc")
+            r = _get(url)
+            try:
+                data = _json.loads(r)
+            except Exception:
+                continue
+            items = data.get("items") or data.get("result") or []
+            if isinstance(items, dict): items = items.get("item", []) or []
+            for it in items[:10]:
+                try:
+                    nm = it.get("title") or it.get("name", "")
+                    pr = it.get("price") or 0
+                    img = it.get("pic_url") or it.get("img", "")
+                    href = it.get("detail_url") or it.get("url", "")
+                    if nm and pr:
+                        out.append({
+                            "platform": pname,
+                            "name": str(nm).strip(),
+                            "price": float(pr),
+                            "price_str": f"¥{float(pr):.2f}",
+                            "image": img,
+                            "url": href,
+                        })
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f"[TMAPI {pname} FAIL] {e}")
+    return out
 
 
 # ========== 淘宝 ==========
@@ -299,25 +424,56 @@ def _fetch_hema(kw: str) -> List[Dict]:
 
 # ========== 主入口 ==========
 def fetch_all_platforms(keyword: str, platforms=None) -> Dict[str, List[Dict]]:
-    """并行拉多平台, 返回 {platform_name: [item_dict, ...]}"""
+    """并行拉多平台, 返回 {platform_name: [item_dict, ...]}
+
+    数据源优先级: L1 OneBound → L2 TMAPI → L5 HTML 直抓 (兜底)
+    如果配置了聚合 API key, 优先走合规稳定的聚合接口, 直抓 HTML 只当兜底。
+    """
     if platforms is None:
         platforms = ["淘宝/天猫", "京东", "拼多多", "盒马"]
-    _fns = {
-        "淘宝/天猫": _fetch_taobao,
-        "京东": _fetch_jd,
-        "拼多多": _fetch_pdd,
-        "盒马": _fetch_hema,
-    }
+
+    _keys = _load_api_keys()
+    has_onebound = bool(_keys.get("onebound_key") and _keys.get("onebound_secret"))
+    has_tmapi = bool(_keys.get("tmapi_key"))
+
     results: Dict[str, List[Dict]] = {p: [] for p in platforms}
-    with ThreadPoolExecutor(max_workers=len(platforms)) as ex:
-        futs = {ex.submit(_fns[p], keyword): p for p in platforms if p in _fns}
-        for fut in as_completed(futs):
-            p = futs[fut]
-            try:
-                results[p] = fut.result()
-            except Exception as e:
-                print(f"[{p} 异常] {e}")
-                results[p] = []
+
+    # 有聚合 API → 直接用, 把跨平台结果映射回用户选的分组
+    if has_onebound:
+        print("[比价] 用 OneBound (L1 聚合 API)")
+        ob_items = _fetch_onebound(keyword)
+        # OneBound 返回 items[].name 就是平台名, 原样塞进去
+        for it in ob_items:
+            pname = it["platform"]
+            if pname not in results:
+                results[pname] = []
+            results[pname].append(it)
+    elif has_tmapi:
+        print("[比价] 用 TMAPI (L2 聚合 API)")
+        tm_items = _fetch_tmapi(keyword)
+        for it in tm_items:
+            pname = it["platform"]
+            if pname not in results:
+                results[pname] = []
+            results[pname].append(it)
+    else:
+        # 兜底: HTML 直抓 (大概率被反爬)
+        print("[比价] 无聚合 API key, 用 HTML 直抓兜底 (大概率反爬拦截)")
+        _fns = {
+            "淘宝/天猫": _fetch_taobao,
+            "京东": _fetch_jd,
+            "拼多多": _fetch_pdd,
+            "盒马": _fetch_hema,
+        }
+        with ThreadPoolExecutor(max_workers=len(platforms)) as ex:
+            futs = {ex.submit(_fns[p], keyword): p for p in platforms if p in _fns}
+            for fut in as_completed(futs):
+                p = futs[fut]
+                try:
+                    results[p] = fut.result()
+                except Exception as e:
+                    print(f"[{p} 异常] {e}")
+                    results[p] = []
     return results
 
 
@@ -399,6 +555,55 @@ def show_price_compare_dialog(parent_win=None):
 
     tk.Button(btn_row, text="🔍 搜索", command=_do_search, bg="#FFD54F", fg="#1A237E",
               font=("", 10, "bold"), relief=tk.FLAT, padx=14).pack(side=tk.LEFT, padx=10)
+
+    def _open_api_settings():
+        """弹窗让用户填 OneBound / TMAPI 的 key+secret"""
+        dlg = tk.Toplevel(win); dlg.title("🔑 比价 API 设置")
+        dlg.geometry("480x380"); dlg.configure(bg="#FAFAFA")
+        tk.Label(dlg, text="🔑 聚合 API Key 设置 (有一个就能用)", bg="#FAFAFA",
+                 fg="#1A237E", font=("", 11, "bold")).pack(pady=(10, 4))
+        tk.Label(dlg, text="注册后把 key+secret 填进来, 比价就能返回真实价格",
+                 bg="#FAFAFA", fg="#666", font=("", 8)).pack()
+
+        keys_now = _load_api_keys()
+
+        # OneBound 区
+        f1 = tk.LabelFrame(dlg, text="万邦 OneBound (推荐, 跨平台统一比价)", bg="#FAFAFA", fg="#1A237E")
+        f1.pack(fill=tk.X, padx=14, pady=(10, 4))
+        tk.Label(f1, text="key:", bg="#FAFAFA").grid(row=0, column=0, sticky="e", padx=4, pady=2)
+        e1k = tk.Entry(f1, width=40); e1k.grid(row=0, column=1, padx=4, pady=2)
+        e1k.insert(0, keys_now.get("onebound_key", ""))
+        tk.Label(f1, text="secret:", bg="#FAFAFA").grid(row=1, column=0, sticky="e", padx=4, pady=2)
+        e1s = tk.Entry(f1, width=40, show="•"); e1s.grid(row=1, column=1, padx=4, pady=2)
+        e1s.insert(0, keys_now.get("onebound_secret", ""))
+        tk.Label(f1, text="注册: https://open.onebound.cn/", bg="#FAFAFA", fg="#1976D2",
+                 cursor="hand2").grid(row=2, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 4))
+
+        # TMAPI 区
+        f2 = tk.LabelFrame(dlg, text="TMAPI (备选, 单平台 APIKEY)", bg="#FAFAFA", fg="#1A237E")
+        f2.pack(fill=tk.X, padx=14, pady=(4, 10))
+        tk.Label(f2, text="apikey:", bg="#FAFAFA").grid(row=0, column=0, sticky="e", padx=4, pady=2)
+        e2k = tk.Entry(f2, width=40); e2k.grid(row=0, column=1, padx=4, pady=2)
+        e2k.insert(0, keys_now.get("tmapi_key", ""))
+        tk.Label(f2, text="注册: https://api.tmapi.top/", bg="#FAFAFA", fg="#1976D2",
+                 cursor="hand2").grid(row=1, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 4))
+
+        def _save():
+            if e1k.get().strip(): _save_api_key("onebound_key", e1k.get().strip())
+            if e1s.get().strip(): _save_api_key("onebound_secret", e1s.get().strip())
+            if e2k.get().strip(): _save_api_key("tmapi_key", e2k.get().strip())
+            dlg.destroy()
+            messagebox.showinfo("保存成功", "API Key 已保存到 ~/.qclaw/price_compare_config.json\n下一次搜索自动生效")
+
+        tk.Button(dlg, text="💾 保存并关闭", command=_save, bg="#1A237E", fg="white",
+                  relief=tk.FLAT, padx=16, pady=6, font=("", 10, "bold")).pack(pady=(4, 8))
+        tk.Button(dlg, text="取消", command=dlg.destroy, bg="#ECEFF1", fg="#333",
+                  relief=tk.FLAT, padx=10).pack()
+
+    api_btn_txt = "🔑 设置API" if _load_api_keys() else "🔑 填API Key (未配置)"
+    tk.Button(btn_row, text=api_btn_txt, command=_open_api_settings,
+              bg="#37474F", fg="white", relief=tk.FLAT, padx=8).pack(side=tk.LEFT, padx=4)
+
     tk.Button(btn_row, text="🌐 淘宝", command=lambda: webbrowser.open(
         f"https://s.taobao.com/search?q={kw_var.get().strip()}"),
               bg="#FF5722", fg="white", relief=tk.FLAT, padx=8).pack(side=tk.LEFT)
