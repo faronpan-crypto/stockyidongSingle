@@ -43,20 +43,100 @@ def _load_industry_boards() -> List[Dict]:
     except Exception: return []
 
 def _load_concept_boards(limit=100) -> List[Dict]:
-    """概念板块 (取有 item_size 大小的前 limit)"""
+    """概念板块 — Tushare 限流 1次/h, 用本地 JSON 缓存 + akshare 兜底"""
+    import json, time
+    cache_path = os.path.expanduser("~/.qclaw/stock_concept_cache.json")
+    # 缓存有效期 12 小时
+    cache_ttl = 12 * 3600
+    # ① 先尝试读缓存
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r") as f:
+                _cache = json.load(f)
+            if time.time() - _cache.get("ts", 0) < cache_ttl and _cache.get("data"):
+                print(f"[股票比价] 概念板块走缓存 ({len(_cache['data'])} 个, 剩余 {int(cache_ttl - time.time()+_cache['ts'])}s)")
+                return _cache["data"][:limit]
+        except Exception: pass
+    # ② Tushare (可能限流)
     pro = _get_tushare_pro()
-    if not pro: return []
+    if pro:
+        try:
+            df = pro.concept()
+            if df is not None and len(df) > 0:
+                df = df.sort_values("item_size", ascending=False).head(limit)
+                result = [{"index_code": r["ts_code"], "name": r["name"], "type": "概念",
+                           "size": int(r["item_size"]) if r["item_size"] else 0}
+                          for _, r in df.iterrows()]
+                # 写缓存
+                try:
+                    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                    with open(cache_path, "w") as f:
+                        json.dump({"ts": time.time(), "data": result}, f)
+                except Exception: pass
+                print(f"[股票比价] 概念板块 tushare OK ({len(result)} 个)")
+                return result
+        except Exception as e:
+            print(f"[股票比价] concept() 限流/失败: {e}, 走 akshare 兜底")
+    # ③ akshare 兜底 (东方财富概念板块)
     try:
-        df = pro.concept()
-        if df is None or len(df) == 0: return []
-        df = df.sort_values("item_size", ascending=False).head(limit)
-        return [{"index_code": r["ts_code"], "name": r["name"], "type": "概念",
-                 "size": int(r["item_size"]) if r["item_size"] else 0}
-                for _, r in df.iterrows()]
-    except Exception: return []
+        import akshare as ak
+        df = ak.stock_board_concept_name_em()
+        if df is not None and len(df) > 0:
+            # 按成分股数排序取前 limit
+            col_cnt = "上涨家数" if "上涨家数" in df.columns else list(df.columns)[-1]
+            df = df.sort_values(col_cnt, ascending=False).head(limit)
+            # akshare 没 concept id, 用板块名当唯一标识
+            result = []
+            for _, r in df.iterrows():
+                _name = str(r.get("板块名称") or r.get(col_cnt) or "")
+                if not _name.strip(): continue
+                result.append({"index_code": f"AK_CONCEPT_{_name}", "name": _name,
+                               "type": "概念", "size": 0})
+            # 写缓存
+            try:
+                os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                with open(cache_path, "w") as f:
+                    json.dump({"ts": time.time(), "data": result}, f)
+            except Exception: pass
+            print(f"[股票比价] 概念板块 akshare OK ({len(result)} 个)")
+            return result
+    except Exception as e:
+        print(f"[股票比价] akshare 兜底也失败: {e}")
+    # ④ 都挂了: 返回硬编码常用概念板块 (防止空)
+    _fallback = [
+        ("创新药", "AK_CONCEPT_创新药"), ("新能源汽车", "AK_CONCEPT_新能源汽车"),
+        ("光伏", "AK_CONCEPT_光伏"), ("半导体", "AK_CONCEPT_半导体"),
+        ("人工智能", "AK_CONCEPT_人工智能"), ("军工", "AK_CONCEPT_军工"),
+        ("消费电子", "AK_CONCEPT_消费电子"), ("机器人", "AK_CONCEPT_机器人"),
+        ("算力", "AK_CONCEPT_算力"), ("低空经济", "AK_CONCEPT_低空经济"),
+    ]
+    print(f"[股票比价] 概念板块硬编码兜底 ({len(_fallback)} 个)")
+    return [{"index_code": c, "name": n, "type": "概念", "size": 0} for n, c in _fallback]
 
 def _get_board_members(index_code: str) -> List[str]:
-    """板块成分股 (申万用 index_member, 概念用 concept_detail)"""
+    """板块成分股 (申万用 index_member, 概念用 concept_detail, AK_ 伪 id 用 akshare 兜底)"""
+    # ① akshare 兜底 (AK_CONCEPT_ 开头的伪 id)
+    if index_code.startswith("AK_CONCEPT_"):
+        try:
+            import akshare as ak
+            _name = index_code.replace("AK_CONCEPT_", "")
+            df = ak.stock_board_concept_cons_em(symbol=_name)
+            if df is not None and len(df) > 0:
+                col_code = "代码" if "代码" in df.columns else list(df.columns)[0]
+                codes = df[col_code].dropna().tolist()[:200]
+                # 补 ts_code 后缀 (AK 返回的是 sh/sz 前缀代码, 去掉再补)
+                result = []
+                for c in codes:
+                    c6 = re.sub(r"^(sh|sz|bj|SH|SZ|BJ)", "", str(c))
+                    if not c6.isdigit(): continue
+                    suffix = ".SH" if c6.startswith(("6","9","5")) else ".SZ" if c6.startswith(("3","0","4")) else ".BJ"
+                    result.append(c6 + suffix)
+                print(f"[板块] akshare {_name} 成分 {len(result)} 只")
+                return result
+        except Exception as e:
+            print(f"[板块] akshare 成分失败: {e}")
+        return []
+    # ② tushare
     pro = _get_tushare_pro()
     if not pro: return []
     try:
@@ -67,7 +147,6 @@ def _get_board_members(index_code: str) -> List[str]:
         else:  # 概念
             df = pro.concept_detail(id=index_code)
             if df is None: return []
-            # concept_detail 返回成分, ts_code 列名可能不同
             for col in df.columns:
                 if "code" in col.lower() and "ts" in col.lower():
                     return df[col].dropna().tolist()
