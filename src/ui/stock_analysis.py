@@ -301,6 +301,76 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
         "books": [],
         "urls": ["https://data.eastmoney.com/rzrq.html"],
     },
+
+    # ===== 右栏独立弹窗用: 情绪周期判断逻辑 =====
+    "情绪周期判断": {
+        "emoji": "🎭",
+        "definition": "本程序的情绪周期 6 阶段判断, 100% 对齐首页 tab_dapan.py L2588-2594 的真实逻辑。\n"
+                     "不依赖任何复杂模型, 只用两个最硬核的客观指标:\n"
+                     "  1. 涨停数 (zt) — 来自 tushare daily_basic.m3_count\n"
+                     "  2. 涨跌比 (up_ratio) = 上涨家数 / (上涨+下跌)  — 来自 sentiment_history m2_up/m2_down",
+        "meaning": "6 阶段 if/elif 链 (**从上到下优先匹配**, 命中即停):\n\n"
+                   "  ① 高潮  💥  涨停≥80 & 涨跌比≥70%  →  α 50%  β 100%\n"
+                   "  ② 发酵  🔥  涨停≥40 & 涨跌比≥55%  →  α 30%  β 100%\n"
+                   "  ③ 启动  🌱  涨停≥15 & 涨跌比≥50%  →  α 15%  β 100%\n"
+                   "  ④ 冰点  ❄️  涨停<10 & 涨跌比<40%  →  α 0-10% (强制)  β 暂停\n"
+                   "  ⑤ 退潮  📉  涨跌比<45% (前面都没命中) →  α 0-10% (强制)  β 持有\n"
+                   "  ⑥ 震荡  📊  其他 (兜底)           →  α 15%  β 持有\n\n"
+                   "设计思路 (炒股养家情绪周期流):\n"
+                   "  - 涨停数是情绪最直接的温度计: 高潮日通常 ≥80 只涨停\n"
+                   "  - 涨跌比反映广度: 普涨时 >70%, 冰点时 <35%\n"
+                   "  - 两条同时满足才触发高潮/发酵, 单一信号可能是假突破\n"
+                   "  - 冰点/退潮强制 α ≤ 10% — 保命规则, 不抄下跌飞刀",
+        "books": [
+            "《市场情绪周期》— 炒股养家 (淘股吧 ID)",
+            "《情绪周期流》— 作手新一 / 赵老哥 (实战派)",
+            "《量化情绪指标构建》— 王岩/吴晓辉 (学术派)",
+        ],
+        "urls": [
+            ("淘股吧情绪周期流", "https://www.taoguba.com.cn/search?key=情绪周期"),
+            ("问财情绪周期", "https://www.iwencai.com/unifiedwap/result?w=情绪周期涨停数涨跌比"),
+        ],
+    },
+
+    # ===== 右栏独立弹窗用: α/β 仓位策略 =====
+    "α/β 仓位策略": {
+        "emoji": "🧭",
+        "definition": "α (主动型) / β (被动型) 双轨并行, 解决「择时 vs 不择时」的百年争论:\n\n"
+                     "  α (主动型) = 情绪周期驱动的动态仓位\n"
+                     "    核心假设: 情绪周期是 A 股最稳定的短期规律\n"
+                     "    方法: 冰点空仓 → 启动试探 → 发酵加仓 → 高潮满仓 → 退潮减仓\n\n"
+                     "  β (被动型) = 永远 100% 满仓指数基金\n"
+                     "    核心假设: 指数长期向上, 择时降低收益\n"
+                     "    方法: 沪深300/中证500/科创50 定投, 不管情绪\n\n"
+                     "  个人建议: 65% β 打底 + 35% α 进攻 (核心-卫星框架)\n"
+                     "    β 确保不踏空大牛市, α 提供超额收益",
+        "meaning": "α/β 双轨仓位表 (100% 对齐首页 L3017-3023 emo_pos):\n\n"
+                   "  ┌──────────┬───────────┬──────────┬────────────┐\n"
+                   "  │ 情绪阶段 │ α 主动仓位 │ β 被动   │ 操作建议   │\n"
+                   "  ├──────────┼───────────┼──────────┼────────────┤\n"
+                   "  │ ❄️ 冰点  │ 0-10%强制 │ 暂停定投 │ 空仓等反弹 │\n"
+                   "  │ 🌱 启动  │ 15%       │ 正常定投 │ 试探龙头   │\n"
+                   "  │ 🔥 发酵  │ 30%       │ 满仓     │ 加主线     │\n"
+                   "  │ 💥 高潮  │ 50%       │ 满仓     │ 警惕分化   │\n"
+                   "  │ ⚡ 分歧  │ 15%       │ 持有     │ 主线不动   │\n"
+                   "  │ 📉 退潮  │ 0-10%强制 │ 持有     │ 仅留强势   │\n"
+                   "  │ 📊 震荡  │ 15%       │ 持有     │ 轻仓波段   │\n"
+                   "  └──────────┴───────────┴──────────┴────────────┘\n\n"
+                   "关键设计原则:\n"
+                   "  1. α 高潮只给 50% 不是 100% — 高潮到退潮是猝死期, 防止最后接盘\n"
+                   "  2. α 冰点/退潮强制 ≤ 10% — 保命! 历史上冰点抄底的亏损是发酵追高的 3 倍\n"
+                   "  3. β 永远 100% — 避免因恐惧踏空大牛市 (沪深300 2014/2019/2024 都翻倍)\n"
+                   "  4. 极端修正: 涨跌比>90% 限仓 α≤80% (普涨警惕轮动), 涨跌比<15% α≥10% (冰点也不能完全空)",
+        "books": [
+            "《主动投资组合管理》— 格林诺德 (α/β 框架学术源头)",
+            "《仓位管理艺术》— 范萨普 (Van Tharp) (凯利公式实战)",
+            "《指数基金投资指南》— 银行螺丝钉 (β 被动投资)",
+        ],
+        "urls": [
+            ("α/β 框架介绍", "https://www.investopedia.com/terms/a/alpha.asp"),
+            ("凯利计算器", "https://www.learnexcel.net/learn/kelly-criterion/"),
+        ],
+    },
 }
 
 
@@ -854,6 +924,13 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     _c1 = tk.LabelFrame(meta_inner, text="🌡️ 情绪温度计", bg="#FFFFFF",
                         fg="#283593", font=("", 10, "bold"), padx=8, pady=6)
     _c1.pack(fill=tk.X, padx=6, pady=(8,6))
+    _c1_hdr = tk.Frame(_c1, bg="#FFFFFF"); _c1_hdr.pack(fill=tk.X, pady=(0,2))
+    tk.Label(_c1_hdr, text="", bg="#FFFFFF").pack(side=tk.LEFT, fill=tk.X, expand=True)
+    _h1_btn = tk.Button(_c1_hdr, text="❓ 判断逻辑",
+                        command=lambda: _show_method_knowledge(win, "情绪周期判断"),
+                        bg="#E8EAF6", fg="#4527A0", font=("", 8),
+                        relief=tk.FLAT, padx=6, pady=0, cursor="hand2")
+    _h1_btn.pack(side=tk.RIGHT)
     _thermo_canvas = tk.Canvas(_c1, width=190, height=200, bg="#FFFFFF", highlightthickness=0)
     _thermo_canvas.pack(pady=4)
     _emo_title_lbl = tk.Label(_c1, text="—", bg="#FFFFFF", fg="#283593",
@@ -865,6 +942,9 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     _c2 = tk.LabelFrame(meta_inner, text="💰 资金池", bg="#FFFFFF",
                         fg="#283593", font=("", 10, "bold"), padx=8, pady=6)
     _c2.pack(fill=tk.X, padx=6, pady=6)
+    _c2_hdr = tk.Frame(_c2, bg="#FFFFFF"); _c2_hdr.pack(fill=tk.X, pady=(0,2))
+    tk.Label(_c2_hdr, text="涨停+跌停+涨跌比 → 情绪阶段", bg="#FFFFFF", fg="#888",
+             font=("", 7)).pack(side=tk.LEFT)
     _pool_canvas = tk.Canvas(_c2, width=190, height=130, bg="#FFFFFF", highlightthickness=0)
     _pool_canvas.pack(pady=4)
     _pool_lbl = tk.Label(_c2, text="", bg="#FFFFFF", fg="#555", font=("", 8))
@@ -874,6 +954,13 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     _c3 = tk.LabelFrame(meta_inner, text="🧭 α/β 仓位策略", bg="#FFFFFF",
                         fg="#283593", font=("", 10, "bold"), padx=8, pady=6)
     _c3.pack(fill=tk.X, padx=6, pady=6)
+    _c3_hdr = tk.Frame(_c3, bg="#FFFFFF"); _c3_hdr.pack(fill=tk.X, pady=(0,2))
+    tk.Label(_c3_hdr, text="", bg="#FFFFFF").pack(side=tk.LEFT, fill=tk.X, expand=True)
+    _h3_btn = tk.Button(_c3_hdr, text="❓ 完整框架",
+                        command=lambda: _show_method_knowledge(win, "α/β 仓位策略"),
+                        bg="#E8EAF6", fg="#4527A0", font=("", 8),
+                        relief=tk.FLAT, padx=6, pady=0, cursor="hand2")
+    _h3_btn.pack(side=tk.RIGHT)
     _alpha_card = tk.Frame(_c3, bg="#FFFFFF")
     _alpha_card.pack(fill=tk.X, pady=(2,4))
     tk.Label(_alpha_card, text="主动型 α", bg="#FFFFFF", fg="#1565C0",
