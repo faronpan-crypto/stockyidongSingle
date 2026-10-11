@@ -8284,6 +8284,13 @@ class StockKeywordAnalyzerGUI:
             ("🏅贵金属", self._show_precious_metals_dialog, False, "quick"),
             ("🗓️暴涨暴跌", self._open_crash_rally_calendar, False, "quick"),
             ("📐α/β配置", self._open_alpha_beta_dialog, False, "quick"),
+            # ---- 📊 深度/横向分析 (quick) ----
+            ("🌀ETF周期", self._show_etf_cycle_dialog, False, "quick"),
+            ("📈价增量涨", self._show_price_volume_dialog, False, "quick"),
+            ("🏛️美联储分析", self._show_fed_analysis_dialog, False, "quick"),
+            ("🌏纳指日经套利", self._show_etf_holiday_dialog, False, "quick"),
+            ("📊分析深度", self._show_stock_analysis_dialog, False, "quick"),
+            ("📊比价横向", self._show_stock_compare_dialog, False, "quick"),
             # ---- 💰 资金/持仓 (quick) ----
             ("📈资金方向", self._show_capital_direction_dialog, False, "quick"),
             ("💰是否加仓", self._show_add_position_dialog, False, "quick"),
