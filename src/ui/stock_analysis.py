@@ -896,17 +896,19 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                              font=("", 8), justify=tk.LEFT, wraplength=190)
     _strategy_txt.pack(fill=tk.X, pady=(8,2))
 
-    # --- 卡片4: 6阶段参考色带 ---
-    _c4 = tk.LabelFrame(meta_inner, text="📋 6阶段速查", bg="#FFFFFF",
+    # --- 卡片4: 6阶段参考色带 (100% 对齐首页 tab_dapan.py L3096-3098) ---
+    _c4 = tk.LabelFrame(meta_inner, text="📋 情绪6阶段速查", bg="#FFFFFF",
                         fg="#283593", font=("", 10, "bold"), padx=8, pady=6)
     _c4.pack(fill=tk.X, padx=6, pady=(6,8))
+    # 首页真实阶段 + 颜色 + α仓位 (L2588-2594 + L3017-3018 + L3096-3098)
     _phase_rows = [
-        ("❄️ 冰点",   "#455A64", "0%",   "ev<-1.5 & 涨跌比<35%"),
-        ("🌱 启动",   "#26A69A", "25%",  "ev<-0.5 & 涨跌比<45%"),
-        ("🟢 发酵",   "#1976D2", "70%",  "ev>0 & 涨跌比>50%"),
-        ("🔴 高潮",   "#C62828", "100%", "ev>0.5 & 涨跌比>55%+涨停多"),
-        ("🟠 退潮",   "#8D6E63", "30%",  "ev<0 & 涨跌比<50%"),
-        ("🟡 震荡",   "#FBC02D", "50%",  "其他"),
+        ("❄️ 冰点",   "#66BB6A", "0-10%",  "zt<10 & 涨跌比<40%"),
+        ("🌱 启动",   "#FFD54F", "15%",    "zt≥15 & 涨跌比≥50%"),
+        ("🔥 发酵",   "#FF6F00", "30%",    "zt≥40 & 涨跌比≥55%"),
+        ("💥 高潮",   "#EF5350", "50%",    "zt≥80 & 涨跌比≥70%"),
+        ("⚡ 分歧",   "#6A1B9A", "15%",    "首页特殊阶段"),
+        ("📉 退潮",   "#455A64", "0-10%",  "涨跌比<45%"),
+        ("📊 震荡",   "#6A1B9A", "15%",    "其他 (首页fallback)"),
     ]
     for _name, _col, _pos, _cond in _phase_rows:
         _row = tk.Frame(_c4, bg="#FFFFFF")
@@ -917,6 +919,9 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                  font=("", 9)).pack(side=tk.LEFT)
         tk.Label(_row, text=_pos, bg="#FFFFFF", fg="#C62828",
                  font=("", 9, "bold")).pack(side=tk.RIGHT)
+        # 注释说明条件 (hover 看或直接显示)
+        tk.Label(_row, text=_cond, bg="#FFFFFF", fg="#888",
+                 font=("", 7)).pack(side=tk.RIGHT, padx=(0,4))
 
 
     # ===== 状态缓存 =====
@@ -1498,7 +1503,9 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     ax_s.set_yticklabels(["0","25","50","75","100"], fontsize=7)
                     # ===== 色块 (每根 K 线对应 6 阶段颜色) =====
                     if emo_data:
-                        _phase_colors = {"❄️":"#455A64","🌱":"#26A69A","🟢":"#1976D2","🔴":"#C62828","🟠":"#8D6E63","🟡":"#FBC02D"}
+                        # 首页真实阶段色 (L3096-3098)
+                        _phase_colors = {"❄️":"#66BB6A","🌱":"#FFD54F","🔥":"#FF6F00",
+                                         "💥":"#EF5350","⚡":"#6A1B9A","📉":"#455A64","📊":"#6A1B9A"}
                         # 先画纯色底色带
                         for i in range(len(emo_data)):
                             _e = emo_data[i]
@@ -1908,7 +1915,9 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             # 标题
             _emo_title_lbl.config(text=f"{latest_emo['phase_emoji']} {latest_emo['phase_label']}",
                                   fg=_phase_col)
-            _emo_sub_lbl.config(text=f"情绪指数 {_idx:.1f} | ev {latest_emo['ev']:+.2f} | 涨跌比 {latest_emo['up_ratio']:.0f}%")
+            _emo_sub_lbl.config(
+                text=f"情绪指数 {_idx:.1f} | 涨跌比 {latest_emo['up_ratio']:.0f}% "
+                     f"涨停 {latest_emo.get('zt',0)} | 跌停 {latest_emo.get('dt',0)}")
         else:
             # 占位
             _thermo_canvas.create_text(_thermo_w//2, _thermo_h//2,
@@ -1966,7 +1975,8 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                                           fill="#555", dash=(2,2), width=1)
                 _pool_canvas.create_text(_tx_x, _r_y-6, text=_tx, fill="#555",
                                          font=("", 7), anchor="s")
-            _pool_lbl.config(text=f"数据源 sentiment_history · {_total} 只A股")
+            _pool_lbl.config(text=f"数据源 sentiment_history · {_total}只A股 · "
+                                  f"涨停{latest_emo.get('zt',0)} / 跌停{latest_emo.get('dt',0)}")
         else:
             _pool_canvas.create_text(_pool_w//2, _pool_h//2,
                                      text="⚠️ 情绪数据空", fill="#999", font=("", 9))
@@ -1988,13 +1998,15 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             _beta_bar.create_rectangle(0, 0, (_beta_bar.winfo_width() or 180), 18,
                                        fill="#2E7D32", outline="")
             # 策略说明
+            # 策略说明 —— 对齐首页 α仓位 (L3017-3018)
             _tips = {
-                "冰点": "α 0% 空仓等反弹信号\nβ 也暂停定投，等情绪走出冰点",
-                "启动": "α 25% 试探性建仓龙头\nβ 正常定投，不追高",
-                "发酵": "α 70% 加主线板块 + 龙头\nβ 继续满仓持有",
-                "高潮": "α 100% 全仓但警惕普涨后分化\nβ 继续满仓，不主动减",
-                "退潮": "α 30% 仅留强势主线\nβ 继续持有不动",
-                "震荡": "α 50% 半仓波段操作\nβ 继续持有",
+                "冰点": "α 0-10% (强制) 空仓等反弹信号\nβ 也暂停定投，等情绪走出冰点",
+                "启动": "α 15% 试探性建仓龙头\nβ 正常定投，不追高",
+                "发酵": "α 30% 主线板块 + 龙头\nβ 继续满仓持有",
+                "高潮": "α 50% 但警惕普涨后分化\nβ 继续满仓，不主动减",
+                "分歧": "α 15% 主线不动，其余观望\nβ 继续持有不动",
+                "退潮": "α 0-10% (强制) 仅留强势\nβ 继续持有不动",
+                "震荡": "α 15% 轻仓波段\nβ 继续持有",
             }
             _tip = _tips.get(_phase, "")
             _strategy_txt.config(text=f"💡 {_tip}")
@@ -2005,7 +2017,20 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
 
     def _fetch_emo_dict():
-        """从 SQLite sentiment_history 拉最近 400 天情绪数据, 返回 {trade_date8: {...}}"""
+        """从 SQLite sentiment_history 拉最近 400 天情绪数据, 返回 {trade_date8: {...}}
+
+        阶段判断 100% 对齐首页 tab_dapan.py L2588-2594 的真实逻辑:
+          if zt>=80 and up_ratio>=0.7:  高潮
+          elif zt>=40 and up_ratio>=0.55: 发酵
+          elif zt>=15 and up_ratio>=0.5:   启动
+          elif zt<10 and up_ratio<0.4:    冰点
+          elif up_ratio<0.45:             退潮
+          else:                           震荡
+
+        颜色/Emoji/α仓位 100% 对齐 L3017-3018 + L3058-3059 + L3096-3098:
+          emo_pos = {"冰点":0, "启动":15, "发酵":30, "高潮":50, "分歧":15, "退潮":0}.get(stage, 15)
+          冰点/退潮 强制 ≤ 10%
+        """
         try:
             import sqlite3
             _db_paths = [
@@ -2018,7 +2043,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 if not os.path.exists(_db): continue
                 conn = sqlite3.connect(_db); cur = conn.cursor()
                 cur.execute("""
-                    SELECT snapshot_date, m1_today, m2_up, m2_down, m2_flat, m2_total
+                    SELECT snapshot_date, m2_up, m2_down, m2_flat, m2_total, m3_count, m4_count
                     FROM sentiment_history ORDER BY id DESC LIMIT 400
                 """)
                 rows = cur.fetchall(); conn.close()
@@ -2029,46 +2054,63 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     _d = str(r[0] or "").replace("-", "")  # 2026-10-11 → 20261011
                     if not _d or _d in seen: continue
                     seen[_d] = {
-                        "ev": float(r[1]) if r[1] is not None else 0.0,
-                        "m2_up": int(r[2] or 0), "m2_down": int(r[3] or 0),
-                        "m2_flat": int(r[4] or 0), "m2_total": int(r[5] or 0),
+                        "m2_up": int(r[1] or 0), "m2_down": int(r[2] or 0),
+                        "m2_flat": int(r[3] or 0), "m2_total": int(r[4] or 0),
+                        "zt": int(r[5] or 0),  # m3_count = 涨停数
+                        "dt": int(r[6] or 0),  # m4_count = 跌停数
                     }
-                # 计算 6 阶段
+                # ===== 阶段/颜色/Emoji/α仓位 —— 完全对齐首页 tab_dapan.py =====
+                _STAGE_COLORS = {"冰点": "#66BB6A", "启动": "#FFD54F", "发酵": "#FF6F00",
+                                 "高潮": "#EF5350", "分歧": "#6A1B9A", "退潮": "#455A64"}
+                _STAGE_EMOJI  = {"冰点": "❄️", "启动": "🌱", "发酵": "🔥",
+                                 "高潮": "💥", "分歧": "⚡", "退潮": "📉"}
+                _EMO_POS      = {"冰点": 0, "启动": 15, "发酵": 30, "高潮": 50,
+                                 "分歧": 15, "退潮": 0}
                 result = {}
                 for _d, m in seen.items():
                     total = max(m["m2_total"], 1)
-                    up_ratio = m["m2_up"] / total * 100  # 涨跌比
-                    ev = m["ev"]
-                    # ===== 6 阶段判断 =====
-                    if ev < -1.5 and up_ratio < 35:
-                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
-                            0, 0.0, "冰点", "❄️", "#455A64"
-                    elif ev < -0.5 and up_ratio < 45:
-                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
-                            1, 0.25, "启动", "🌱", "#26A69A"
-                    elif ev > 0 and up_ratio > 50:
-                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
-                            2, 0.70, "发酵", "🟢", "#1976D2"
-                    elif ev > 0.5 and up_ratio > 55 and m["m2_up"] > 2000:
-                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
-                            3, 1.00, "高潮", "🔴", "#C62828"
-                    elif ev < 0 and up_ratio < 50:
-                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
-                            4, 0.30, "退潮", "🟠", "#8D6E63"
+                    up_ratio = m["m2_up"] / total  # 0.0 - 1.0 (首页用比例, 不是百分比!)
+                    zt = m["zt"]  # 涨停数
+                    dt = m["dt"]  # 跌停数
+                    # ===== 首页真实阶段判断 (L2588-2594) =====
+                    if zt >= 80 and up_ratio >= 0.7:
+                        stage = "高潮"
+                    elif zt >= 40 and up_ratio >= 0.55:
+                        stage = "发酵"
+                    elif zt >= 15 and up_ratio >= 0.5:
+                        stage = "启动"
+                    elif zt < 10 and up_ratio < 0.4:
+                        stage = "冰点"
+                    elif up_ratio < 0.45:
+                        stage = "退潮"
                     else:
-                        phase, alpha_pos, phase_label, phase_emoji, phase_color = \
-                            5, 0.50, "震荡", "🟡", "#FBC02D"
-                    # 极端值修正
-                    if up_ratio > 90: alpha_pos = min(alpha_pos, 0.80)
-                    if up_ratio < 15: alpha_pos = max(alpha_pos, 0.10)
-                    # 情绪指数线 (0-100%)
-                    emo_index = max(0, min(100, 50 + ev * 20 + (up_ratio - 50) * 0.5))
+                        stage = "震荡"  # 首页 fallback 用震荡
+                    # 震荡 用 分歧 的副色 (首页 L3096 stages 里没有震荡, 用分歧色)
+                    phase_color = _STAGE_COLORS.get(stage, _STAGE_COLORS["分歧"])
+                    phase_emoji = _STAGE_EMOJI.get(stage, "📊")
+                    # ===== α 仓位 (首页 L3017-3018 emo_pos 基础值 + L3022-3023 冰点/退潮强制≤10%) =====
+                    alpha_pos = _EMO_POS.get(stage, 15)
+                    if stage in ("冰点", "退潮"):
+                        alpha_pos = min(alpha_pos, 10)  # 冰点/退潮 强制 ≤ 10%
+                    # 极端值修正 (涨跌比 > 90% 限仓, < 15% 最低)
+                    up_ratio_pct = up_ratio * 100
+                    if up_ratio > 0.9: alpha_pos = min(alpha_pos, 80)
+                    if up_ratio < 0.15: alpha_pos = max(alpha_pos, 10)
+                    # 情绪指数线 (0-100%, 简单加权: 涨跌比 + 涨停密度)
+                    emo_index = max(0, min(100, up_ratio_pct * 0.6 + min(zt, 100) * 0.4))
                     result[_d] = {
-                        "phase": phase, "phase_label": phase_label, "phase_emoji": phase_emoji,
-                        "phase_color": phase_color, "alpha_pos": alpha_pos, "ev": ev,
-                        "up_ratio": up_ratio, "emo_index": emo_index,
+                        "stage": stage,  # 和首页一致的阶段名
+                        "phase_label": stage,  # 兼容旧字段
+                        "phase_emoji": phase_emoji,
+                        "phase_color": phase_color,
+                        "alpha_pos": alpha_pos / 100.0,
+                        "up_ratio": up_ratio_pct,
+                        "emo_index": emo_index,
+                        "zt": zt, "dt": dt,
+                        "m2_up": m["m2_up"], "m2_down": m["m2_down"],
+                        "m2_flat": m["m2_flat"], "m2_total": m["m2_total"],
                     }
-                print(f"[情绪副图] 从 sentiment_history 拉到 {len(result)} 天")
+                print(f"[情绪副图] 从 sentiment_history 拉到 {len(result)} 天 (对齐首页阶段判断)")
                 return result
         except Exception as _e:
             print(f"[情绪副图] 拉 sentiment_history 失败: {_e}")
