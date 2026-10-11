@@ -12,7 +12,358 @@
 右边: matplotlib K 线图 + 副图 + 买卖点 + hover tooltip(含凯利公式)
 """
 import os, re, sys, json, threading, traceback
+import webbrowser
 from typing import Dict, List, Optional, Any, Tuple
+import tkinter as tk
+from tkinter import ttk
+
+
+# ============================================================
+# 📚 KNOWLEDGE: 每个方法的完整说明 ([?] 按钮弹出内容)
+# ============================================================
+KNOWLEDGE: Dict[str, Dict[str, Any]] = {
+    "杯形法": {
+        "emoji": "🏺",
+        "definition": "杯形法 (Cup & Handle) 由威廉·欧奈尔 (William O'Neil) 在《笑傲股市》中推广。\n"
+                     "形态分两部分:\n"
+                     "1. 杯 (Cup): 前期高点回撤 25%-55% 形成类似 U 形的圆弧底 (不是 V 形尖底);\n"
+                     "2. 柄 (Handle): 杯底右侧小幅回落 (通常 <15%) 形成旗杆状下沿, 然后放量突破杯口高点。",
+        "meaning": "杯形法 = 经典中长线强势启动信号:\n"
+                   "- 底部圆弧 = 吸筹充分, 抛压消化;\n"
+                   "- 右侧放量突破 = 主力启动, 目标涨幅 ≈ 杯深 × 2;\n"
+                   "- 买点: 柄部放量突破杯口高点时 (不是抄底);\n"
+                   "- 失效: 假突破 (收盘回落杯口下方)。",
+        "books": ["《笑傲股市》— 威廉·欧奈尔", "《欧奈尔选股法》— 詹姆斯·欧奈尔"],
+        "urls": ["https://www.investopedia.com/terms/c/cupandhandle.asp",
+                 "https://school.stockcharts.com/doku.php?id=chart_analysis:cup_and_handle"],
+    },
+    "头肩顶/底": {
+        "emoji": "👤",
+        "definition": "头肩顶 (Head & Shoulders Top) = 经典见顶反转形态: 一个主峰 (头) + 两个次峰 (左肩+右肩) 递减排列。"
+                     "颈线 (Neckline) = 两个肩部低点连线。头肩底 = 镜像的见底信号。",
+        "meaning": "头肩顶 = 强烈见顶信号:\n"
+                   "- 右肩 < 头 < 左肩 (高点递减), 多方力量逐步衰竭;\n"
+                   "- 颈线被跌破 = 确认见顶, 目标跌幅 = 头 − 颈线 的垂直距离;\n"
+                   "- 量能: 左肩量最大, 头次之, 右肩最小 (量价背离)。",
+        "books": ["《日本蜡烛图技术》— 史蒂夫·尼森", "《技术分析》— 约翰·墨菲"],
+        "urls": ["https://www.investopedia.com/terms/h/head-shoulders.asp"],
+    },
+    "双重顶/底": {
+        "emoji": "M",
+        "definition": "双重顶 (Double Top / M顶) = 两个价位相近 (≤5%) 的高点间隔 ≥15 天形成的见顶形态。"
+                     "双重底 (Double Bottom / W底) = 两个相近低点形成的见底形态。中间谷值连线 = 颈线。",
+        "meaning": "双重顶 = 见顶, 双重底 = 见底:\n"
+                   "- 颈线突破 = 信号确认, 目标幅度 = 峰谷差值 (翻倍测量);\n"
+                   "- 第二顶/底量通常比第一顶/底小 (量价背离);\n"
+                   "- 间隔太短 (<15 天) 不算双顶, 只是盘整。",
+        "books": ["《技术分析》— 约翰·墨菲"],
+        "urls": ["https://www.investopedia.com/terms/d/doubletop.asp"],
+    },
+    "三角形": {
+        "emoji": "🔺",
+        "definition": "三角形 (Triangle) = 两条收敛趋势线围成的形态:\n"
+                      "- 对称三角形: 两条线同时收敛 (中继形态, 延续方向概率 ~70%);\n"
+                      "- 上升三角形: 上沿平, 下沿上倾 (看涨);\n"
+                      "- 下降三角形: 下沿平, 上沿下倾 (看跌);\n"
+                      "- 扩张三角形 (喇叭口): 波动加剧, 多空混战。",
+        "meaning": "三角形 = 方向选择前的蓄势:\n"
+                   "- 突破方向通常延续原趋势;\n"
+                   "- 突破点选在三角形 3/4 位置最好 (太早是假突破);\n"
+                   "- 目标 = 三角形最宽处的垂直距离; 突破时需放量。",
+        "books": ["《技术分析》— 约翰·墨菲"],
+        "urls": ["https://school.stockcharts.com/doku.php?id=chart_analysis:triangles"],
+    },
+    "旗形/楔形": {
+        "emoji": "🚩",
+        "definition": "旗形 = 大涨/大跌后 (旗杆), 斜向窄幅整理 (≤4 周, 幅度 ≤6%) 形成的长方形。"
+                     "楔形 = 类似旗形, 但两条线收敛 (像三角形但倾斜方向与原趋势相反)。\n"
+                     "上升旗形 (看涨中继): 旗杆向上 + 旗面小幅下倾;"
+                     "下降旗形 (看跌中继): 旗杆向下 + 旗面小幅上倾。",
+        "meaning": "旗形/楔形 = 经典中继形态 (整理后继续原趋势):\n"
+                   "- 突破方向 80% 延续旗杆方向;\n"
+                   "- 目标幅度 = 旗杆幅度 (等幅测量);\n"
+                   "- 旗面整理超过 4 周会变成反转形态, 需警惕。",
+        "books": ["《技术分析》— 约翰·墨菲"],
+        "urls": ["https://school.stockcharts.com/doku.php?id=chart_analysis:flags_pennants_and_wedges"],
+    },
+    "酒田蜡烛图": {
+        "emoji": "🕯️",
+        "definition": "酒田蜡烛图 (Sakata) = 日本德川幕府时代酒田米商本间宗久 (Munehisa Homma) 发明的 K 线形态分析,"
+                     "1990 年由史蒂夫·尼森 (Steve Nison) 引入西方。"
+                     "层次: 单根 (锤子线/射击之星/十字星) → 双根 (吞没/乌云盖顶) → 三根 (启明星/黄昏星)。",
+        "meaning": "酒田 = K 线行为分析的基石:\n"
+                   "- 单根 K 线只反映当天多空博弈, 需结合位置 (关键位/支撑阻力) 判断;\n"
+                   "- 三根组合强于双根, 双根强于单根;\n"
+                   "- 必须配合成交量;\n"
+                   "- 射击之星/锤子线 = 当日冲高回落/下探回升, 是潜在反转预警。",
+        "books": ["《日本蜡烛图技术》— 史蒂夫·尼森 (必读经典)",
+                  "《K 线形态大全》— 史蒂夫·尼森"],
+        "urls": ["https://school.stockcharts.com/doku.php?id=chart_analysis:introduction_to_candlesticks"],
+    },
+    "均线系统/MACD": {
+        "emoji": "📈",
+        "definition": "均线 (MA) = N 日收盘价算术平均, 反映趋势方向。"
+                      "MACD = 12 日 EMA − 26 日 EMA (DIF), DIF 做 9 日 EMA (DEA), 柱 = 2×(DIF−DEA)。",
+        "meaning": "均线 + MACD = 最核心的趋势跟踪:\n"
+                   "- 多头排列 (MA5>10>20>60) = 主升浪, 持股;\n"
+                   "- MACD 金叉/死叉 = 转折点 (零轴下金叉信号更强);\n"
+                   "- MACD 顶/底背驰 = 价格创新高/低但动能减弱 → 趋势即将反转。",
+        "books": ["《MACD 实战》— 阿佩尔 (MACD 发明人)"],
+        "urls": ["https://www.investopedia.com/terms/m/macd.asp"],
+    },
+    "BOLL布林带": {
+        "emoji": "📏",
+        "definition": "布林带 (Bollinger Bands) = 约翰·布林格发明。"
+                      "中轨 = 20 日 MA, 上下轨 = 中轨 ± 2×标准差。"
+                      "带宽 = (上−下)/中, B 值 = (现价−下轨)/(上−下轨)。",
+        "meaning": "布林带 = 趋势 + 波动双指标:\n"
+                   "- 触及上/下轨 = 短期超买/超卖 (震荡市有效);\n"
+                   "- 带宽收窄 (Squeeze) = 变盘前兆;\n"
+                   "- 强趋势市价格可沿上/下轨运行很久 (不能轻易抄顶抄底)。",
+        "books": ["《布林带实战》— 约翰·布林格"],
+        "urls": ["https://www.investopedia.com/terms/b/bollingerbands.asp"],
+    },
+    "RSI/KDJ/WR": {
+        "emoji": "🎯",
+        "definition": "三类经典震荡指标:\n"
+                      "- RSI (14日): 0-100, >70 超买, <30 超卖;\n"
+                      "- KDJ: K/D/J 线, J=3K−2D, 金叉/死叉信号;\n"
+                      "- WR (威廉): −100 超卖, 0 超买。",
+        "meaning": "震荡指标 = 短期超买超卖 + 背离:\n"
+                   "- 顶/底背驰 = 趋势反转信号 (价格创新高但 RSI 没创新高);\n"
+                   "- 强趋势市这些指标会长期钝化 (不能单独用);\n"
+                   "- 配合 MACD/缠论中枢使用效果好。",
+        "books": ["《技术分析》— 约翰·墨菲"],
+        "urls": ["https://www.investopedia.com/terms/r/rsi.asp"],
+    },
+    "筹码分布": {
+        "emoji": "🪙",
+        "definition": "筹码分布 = 把历史成交量按价格区间堆积, 形成筹码峰。"
+                      "核心: 获利比例 / 平均成本 / 密集峰集中度 (CV)。",
+        "meaning": "筹码 = 判断持仓成本结构:\n"
+                   "- 高度集中 + 获利盘少 = 主力吸筹完毕;\n"
+                   "- 发散 + 获利盘多 = 高位派发中;\n"
+                   "- 突破密集峰上沿 = 主升浪启动 (上方抛压轻)。",
+        "books": ["《筹码分布》— 陈浩", "《筹码实战分析》— 王凯"],
+        "urls": ["https://baike.baidu.com/item/筹码分布"],
+    },
+    "海龟通道": {
+        "emoji": "🐢",
+        "definition": "海龟交易法则 (Turtle) = 1983 年理查德·丹尼斯公开:\n"
+                      "- 入场: 突破 20 日高/低 (一单元), 再加 55 日 (最多 4 层);\n"
+                      "- 止损: 2 × ATR (平均真实波幅);\n"
+                      "- 出场: 跌破 10 日 (短) 或 20 日 (长);\n"
+                      "- 单位仓位 = (账户×1%) / (20×ATR)。",
+        "meaning": "海龟 = 经典机械化趋势跟踪:\n"
+                   "- 胜率 ~40% 但盈亏比 3:1+, 长期正期望;\n"
+                   "- 核心: 严格止损 + 让利润奔跑;\n"
+                   "- 缺点: 震荡市来回打脸 (需要大级别过滤)。",
+        "books": ["《海龟交易法则》— 柯蒂斯·费思 (Way of the Turtle)"],
+        "urls": ["https://www.investopedia.com/terms/t/turtletrading.asp"],
+    },
+    "缠论": {
+        "emoji": "🌀",
+        "definition": "缠论 = 博客主「缠中说禅」(2006-2008) 发表的完整走势分析体系,"
+                      "从底层到上层:\n"
+                      "  1. 包含处理 → 2. 分型 → 3. 笔 → 4. 中枢 [ZG,ZD] →\n"
+                      "  5. 背驰 (价格新高/低但 MACD 动能衰减) →\n"
+                      "  6. 6 类买卖点 (一买/二买/三买 + 一卖/二卖/三卖)",
+        "meaning": "缠论 = 目前 A 股最完整的结构化分析体系:\n"
+                   "- 一买/一卖 = 趋势背驰后的反转点 (风险最低);\n"
+                   "- 三买 = 中枢上方回踩不进中枢 (强势中继); 三卖反之;\n"
+                   "- 中枢 = 多空博弈区, 价格离开中枢即为趋势启动。",
+        "books": ["《缠论》原博客 108 课 — 缠中说禅 (免费可查)",
+                  "《缠论解析》— 白云", "《缠论图解》— 先锋"],
+        "urls": ["https://baike.baidu.com/item/缠论"],
+    },
+    "艾略特波浪": {
+        "emoji": "🌊",
+        "definition": "艾略特波浪 = 拉尔夫·艾略特 (1930s):\n"
+                      "- 完整周期 = 上升 5 浪 (1-2-3-4-5) + 调整 3 浪 (A-B-C);\n"
+                      "- 主升浪 (3 浪) 不能是最短;\n"
+                      "- 2 浪不跌破 1 浪起点, 4 浪不进入 1 浪区间;\n"
+                      "- 斐波那契关系: 回撤 0.382/0.5/0.618, 扩展 1.618/2.618。",
+        "meaning": "波浪 = 预测大级别周期位置:\n"
+                   "- 识别当前处于第几浪, 决定战略方向;\n"
+                   "- 5 浪常伴随 MACD 顶背驰 (见顶信号);\n"
+                   "- C 浪通常等于 A 浪跌幅或 1.618 倍;\n"
+                   "- 主观成分大, 建议结合缠论/MACD 验证。",
+        "books": ["《波浪原理》— 拉尔夫·艾略特 (原著)",
+                  "《艾略特波浪理论》— 普莱切特 (最权威解读)"],
+        "urls": ["https://www.investopedia.com/terms/e/elliottwavetheory.asp"],
+    },
+    "江恩理论": {
+        "emoji": "📐",
+        "definition": "江恩 (W.D. Gann, 1878-1955): 用数学几何研究价格时间关系:\n"
+                      "- 角度线: 1×1 (45°平衡线), 2×1 (26.25°下跌支撑), 1×2 (63.75°上涨阻力);\n"
+                      "- 时间周期: 7/30/360 天及其等分 (45/90/180/270);\n"
+                      "- 价格分割: 1/8/1/4/1/3/3/8/1/2/5/8/2/3/3/4/7/8。",
+        "meaning": "江恩 = 时间与价格对称分析:\n"
+                   "- 45°线是最重要的趋势线;\n"
+                   "- 价格回撤常落在 1/2/1/3/2/3 位置;\n"
+                   "- 部分内容带神秘主义色彩, 实证效果有争议。",
+        "books": ["《江恩华尔街 45 年》— 威廉·江恩"],
+        "urls": ["https://www.investopedia.com/terms/g/gannline.asp"],
+    },
+    "威科夫吸筹派发": {
+        "emoji": "📦",
+        "definition": "威科夫 (Richard Wyckoff, 1873-1934): 观察主力行为:\n"
+                      "- 吸筹区 (Accumulation): 低位横盘 + 下跌缩量上涨放量, Spring 弹簧底是最后一跌;\n"
+                      "- 派发区 (Distribution): 高位震荡 + 上涨缩量下跌放量, UTAD 是最后一冲;",
+        "meaning": "威科夫 = 量价关系经典:\n"
+                   "- Spring = 最好买点, UTAD = 最好卖点;\n"
+                   "- 配合 OBV/VWAP 使用效果更好。",
+        "books": ["《威科夫操盘法》— 汤姆·塞茨", "《量价分析》— 安娜·库林"],
+        "urls": ["https://www.investopedia.com/terms/w/wyckoffmethod.asp"],
+    },
+    "生命周期5阶段": {
+        "emoji": "📅",
+        "definition": "股票生命周期 = 5 阶段:\n"
+                      "  1. 吸筹 (Accumulation) — 低位横盘, OBV 上行股价不动\n"
+                      "  2. 整理 (Consolidation) — 小幅上涨后再横盘, 洗盘\n"
+                      "  3. 拉升 (Breakout / Markup) — 放量突破, 主升浪\n"
+                      "  4. 派发 (Distribution) — 高位震荡, 量价背离\n"
+                      "  5. 下跌 (Decline / Markdown) — 均线空头排列",
+        "meaning": "生命周期 = 战略定仓位:\n"
+                   "- 吸筹 = 左侧轻仓, 拉升 = 右侧满仓, 派发 = 减仓, 下跌 = 空仓;\n"
+                   "- 是缠论中枢+MACD+量价的综合框架。",
+        "books": ["《股票大作手回忆录》— 杰西·利弗莫尔 (思想源头)"],
+        "urls": [],
+    },
+    "PE/PB/PEG": {
+        "emoji": "📊",
+        "definition": "三大经典估值:\n"
+                      "- PE = 市值/净利润 (TTM, 静态), 动态 PE 用预测净利润;\n"
+                      "- PB = 市值/净资产 (银行/周期股更适用);\n"
+                      "- PEG = PE/净利润增长率(%), 理想值 = 1。",
+        "meaning": "PE/PB/PEG = 判断贵贱:\n"
+                   "- PE 分位数 <20% = 便宜, >80% = 贵;\n"
+                   "- PEG <1 被低估, >2 被高估;\n"
+                   "- 但高成长公司 PE 可以很高 (不能只看 PE)。",
+        "books": ["《聪明的投资者》— 本杰明·格雷厄姆", "《估值的艺术》— 尼古拉斯·斯密德林"],
+        "urls": ["https://www.investopedia.com/terms/p/pe.asp"],
+    },
+    "杜邦ROE拆解": {
+        "emoji": "🔬",
+        "definition": "杜邦 = 把 ROE 拆解为:\n"
+                      "  ROE = 净利率 × 资产周转率 × 权益乘数\n"
+                      "核心: 找出 ROE 高的来源 — 是赚钱能力? 运营效率? 还是杠杆?",
+        "meaning": "杜邦 = 拆解 ROE 质量:\n"
+                   "- 净利率高 = 品牌/定价权 (消费/医药);\n"
+                   "- 周转率高 = 运营效率 (零售);\n"
+                   "- 乘数高 = 高杠杆 (警惕, 周期见顶后崩塌);\n"
+                   "- 健康 ROE = 净利率+周转率双高, 乘数适中。",
+        "books": ["《财务报表分析与股票估值》— 郭永清"],
+        "urls": ["https://www.investopedia.com/terms/d/dupontanalysis.asp"],
+    },
+    "段永平6维": {
+        "emoji": "👤",
+        "definition": "段永平 (步步高/OPPO/网易/苹果投资人) 的选股六维:\n"
+                      "  好行业 → 好公司 → 好价格 → 好产品 → 好机制 → 好治理",
+        "meaning": "段永平 = A 股/港股最接地气的价值投资框架:\n"
+                   "- 行业是天花板, 管理层是根本 (一票否决);\n"
+                   "- 好价格是安全边际, 再好公司买贵了也亏钱;\n"
+                   "- 产品/机制/治理 = 护城河的具体体现。",
+        "books": ["《段永平投资问答录》— 雪球整理", "《价值投资实战手册》— 唐朝"],
+        "urls": ["https://xueqiu.com/tag/zqyw"],
+    },
+    "北向资金": {
+        "emoji": "🌐",
+        "definition": "北向资金 = 通过沪股通 + 深股通从香港买入 A 股的外资。"
+                      "每日: 净流入额 (亿元) + 十大成交股, 累计持仓超 1.5 万亿。",
+        "meaning": "北向 = 聪明钱信号:\n"
+                   "- 持续净流入 = 外资看好 A 股;\n"
+                   "- 大幅净流出 = 短期风险 (通常比内资先知先觉);\n"
+                   "- 外资集中买入的行业/个股常有超额收益。",
+        "books": [],
+        "urls": ["https://www.wallstreetcn.com/northmoney"],
+    },
+    "龙虎榜": {
+        "emoji": "🐉",
+        "definition": "龙虎榜 = 沪深交易所每日异动股买卖前五席位。"
+                      "上榜条件: 涨跌幅 ±9% / 换手 ≥20% / 连续涨停。"
+                      "席位: 机构专用 / 游资营业部 / 沪港通专用。",
+        "meaning": "龙虎榜 = 捕捉短线强势股 + 机构动向:\n"
+                   "- 机构净买入 = 中长线看好;\n"
+                   "- 知名游资 (赵老哥/章盟主) = 短线信号;\n"
+                   "- 欢乐海岸等一日游席位 = 次日大概率低开。",
+        "books": [],
+        "urls": ["https://data.eastmoney.com/stock/lhb.html"],
+    },
+    "融资融券": {
+        "emoji": "📈",
+        "definition": "融资融券 = 借钱买股 (融资) / 借券卖股 (融券)。"
+                      "A 股融资余额超 1.5 万亿, 是重要的市场杠杆情绪指标。",
+        "meaning": "融资余额 = 市场杠杆情绪:\n"
+                   "- 持续上升 + 爆量 = 看多情绪到顶 (历史顶部特征);\n"
+                   "- 持续下降 + 去杠杆 = 见底信号;\n"
+                   "- 融资余额/流通市值 ≥4% 警惕。",
+        "books": [],
+        "urls": ["https://data.eastmoney.com/rzrq.html"],
+    },
+}
+
+
+# ========= 点击按钮弹出方法说明窗 =========
+def _show_method_knowledge(parent_win: tk.Tk, method_name: str):
+    """弹出 Toplevel, 展示某个方法的完整说明 + 可点击 URL"""
+    # 精确匹配 → 去掉括号内容后匹配 (处理 "缠论(简化)" 这种变体)
+    info = KNOWLEDGE.get(method_name)
+    if not info:
+        _base = re.sub(r"[（(].*?[)）]", "", method_name).strip()
+        info = KNOWLEDGE.get(_base)
+    if not info: return
+    top = tk.Toplevel(parent_win)
+    top.title(f"{info.get('emoji','❓')} {method_name} — 方法说明")
+    top.geometry("620x560")
+    top.configure(bg="#FFFDF5")
+    top.attributes("-topmost", True)
+
+    header = tk.Frame(top, bg="#FFFDF5"); header.pack(fill=tk.X, padx=14, pady=(12, 4))
+    tk.Label(header, text=f"{info.get('emoji','')} {method_name}", bg="#FFFDF5",
+             fg="#4527A0", font=("", 14, "bold")).pack(anchor="w")
+    sep = tk.Frame(top, bg="#E8EAF6", height=1); sep.pack(fill=tk.X, padx=14)
+
+    body_frame = tk.Frame(top, bg="#FFFDF5"); body_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=10)
+    sb = ttk.Scrollbar(body_frame, orient=tk.VERTICAL)
+    sb.pack(side=tk.RIGHT, fill=tk.Y)
+    txt = tk.Text(body_frame, bg="#FFFDF5", fg="#333", font=("", 10), wrap=tk.WORD,
+                  relief=tk.FLAT, yscrollcommand=sb.set, padx=4, pady=4)
+    txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    sb.configure(command=txt.yview)
+
+    def _add_section(title, content, section_color="#4527A0"):
+        txt.insert("end", f"\n{title}\n", "title")
+        txt.insert("end", f"{content}\n", "body")
+
+    _add_section("📖 定义", info.get("definition", ""), "#4527A0")
+    _add_section("🎯 操作意义", info.get("meaning", ""), "#2E7D32")
+
+    if info.get("books"):
+        _add_section("📚 推荐书籍",
+                     "\n".join(f"  • {b}" for b in info["books"]), "#6A1B9A")
+    if info.get("urls"):
+        txt.insert("end", "\n🌐 参考网站 (点击可打开):\n", "title")
+        for u in info["urls"]:
+            tag = f"url_{hash(u) % 1000000}"
+            txt.insert("end", f"  🔗 {u}\n", tag)
+            txt.tag_config(tag, foreground="#1565C0", underline=True)
+            txt.tag_bind(tag, "<Button-1>", lambda _e, url=u: webbrowser.open(url))
+
+    # 样式
+    txt.tag_config("title", font=("", 11, "bold"), foreground="#4527A0", spacing3=4)
+    txt.tag_config("body", font=("", 10), foreground="#333", lmargin1=8, lmargin2=8, spacing1=2)
+    txt.configure(state=tk.NORMAL)  # 保持 NORMAL 以便 URL 可点击
+    # 拦截按键防止误编辑
+    for _ev in ("<Key>", "<BackSpace>", "<Delete>", "<Ctrl-a>", "<Ctrl-v>", "<Ctrl-x>"):
+        txt.bind(_ev, lambda _e: "break")
+
+    # 关闭按钮
+    close_btn = tk.Button(top, text="关闭", command=top.destroy,
+                          bg="#4527A0", fg="white", font=("", 10),
+                          relief=tk.FLAT, padx=20, pady=4)
+    close_btn.pack(pady=(0, 10))
+    txt.see("1.0")
 
 
 # ========= 数据获取 =========
@@ -796,6 +1147,14 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             lf = tk.LabelFrame(body, text=f"  {emoji} {title}  ", bg="#FFFFFF", fg="#4527A0",
                                font=("", 10, "bold"), relief=tk.GROOVE, bd=1)
             lf.pack(fill=tk.X, padx=6, pady=4)
+            # [?] 方法说明按钮 — 右侧挂一个小按钮
+            _kn_key = title if title in KNOWLEDGE else re.sub(r"[（(].*?[)）]", "", title).strip()
+            if _kn_key in KNOWLEDGE:
+                _help_btn = tk.Button(lf, text="❓", command=lambda _t=title: _show_method_knowledge(win, _t),
+                                      bg="#FFFFFF", fg="#4527A0", font=("", 9, "bold"),
+                                      relief=tk.FLAT, padx=6, pady=0, cursor="hand2")
+                # place 在 LabelFrame 右上角 (标题栏区域)
+                _help_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-6, y=-2)
             tk.Label(lf, text=f"💡 {desc}", bg="#FFF8E1", fg="#666", font=("", 8), wraplength=380,
                      justify=tk.LEFT).pack(fill=tk.X, padx=6, pady=4)
             # 结果区
