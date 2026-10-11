@@ -774,7 +774,7 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
     _chart_placeholder.pack(fill=tk.BOTH, expand=True, pady=20)
 
     def _render_chart(data_from_tree: Dict[str, List[Dict]]):
-        """把 Treeview 里的真实数据或 AI 常规价位 → matplotlib 4 小图"""
+        """把 Treeview 真实数据 / AI 价位 hint / 兜底价位 → matplotlib 4 小图"""
         nonlocal fig, canvas
         if not _MPL_OK: return
         try:
@@ -789,13 +789,23 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
                     if pv > 0: real_prices.setdefault(p, []).append(pv)
                 except Exception: pass
 
-        # AI 兜底价位
+        # AI 兜底价位 (硬编码, 当 AI hint 和 real 都没有时用)
         _ai_fallback = {
             "淘宝/天猫": (8, 14), "京东": (8, 15), "拼多多": (5, 10),
             "盒马": (10, 18), "奥乐齐": (4, 9), "联华": (5, 10), "叮咚": (7, 14),
         }
+        # 优先级: real_prices > AI hint > hard fallback
+        _effective_ranges: Dict[str, tuple] = {}
+        for p in list(_ai_fallback.keys()) + list(_current_ai_hint.keys()):
+            if p in real_prices and real_prices[p]:
+                _effective_ranges[p] = (min(real_prices[p]), max(real_prices[p]))
+            elif p in _current_ai_hint:
+                _effective_ranges[p] = _current_ai_hint[p]
+            elif p in _ai_fallback:
+                _effective_ranges[p] = _ai_fallback[p]
+
         _all_platforms = ["淘宝/天猫", "京东", "拼多多", "盒马", "奥乐齐", "联华"]
-        platforms_used = [p for p in _all_platforms if p in data_from_tree] or list(data_from_tree.keys())
+        platforms_used = [p for p in _all_platforms if p in _effective_ranges] or list(_effective_ranges.keys())
         if not platforms_used: platforms_used = list(_ai_fallback.keys())[:4]
 
         fig = Figure(figsize=(6.5, 5.5), dpi=92, facecolor="#E8F5E9")
@@ -811,15 +821,8 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
         # --- 图1: 各平台最低价横向条形 ---
         names_bar = []; mins_bar = []; maxs_bar = []; bars_col = []
         for p in platforms_used:
-            if p in real_prices:
-                prices = real_prices[p]
-                names_bar.append(p)
-                mins_bar.append(min(prices))
-                maxs_bar.append(max(prices))
-            else:
-                lo, hi = _ai_fallback.get(p, (5, 12))
-                names_bar.append(p)
-                mins_bar.append(lo); maxs_bar.append(hi)
+            lo, hi = _effective_ranges.get(p, (5, 12))
+            names_bar.append(p); mins_bar.append(lo); maxs_bar.append(hi)
             bars_col.append(_colors.get(p, "#78909C"))
         y_pos = range(len(names_bar))
         ax1.barh(list(y_pos), maxs_bar, color=bars_col, alpha=0.4, label="最高价")
@@ -893,8 +896,27 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
+    def _parse_price_ranges_from_ai(text: str) -> Dict[str, tuple]:
+        """从 AI 返回里解析各平台价位区间 (可失败, 失败返回空 dict)"""
+        import re as _pr
+        _res: Dict[str, tuple] = {}
+        # 匹配 "淘宝:X-Y元" 或 "淘宝:X至Y元" 或 "淘宝 ￥X-Y"
+        _pat = r"(淘宝|天猫|京东|拼多多|盒马|奥乐齐|联华|叮咚|唯品会|当当|苏宁)\s*[:：]?\s*[￥¥]?\s*(\d+(?:\.\d+)?)\s*[-~至到]\s*[￥¥]?\s*(\d+(?:\.\d+)?)元?"
+        for m in _pr.finditer(_pat, text):
+            pname = m.group(1).replace("天猫", "淘宝/天猫")
+            try:
+                lo, hi = float(m.group(2)), float(m.group(3))
+                if 0.5 <= lo <= hi <= 9999:
+                    _res[pname] = (lo, hi)
+            except Exception: pass
+        return _res
+
+    # 让 _render_chart 能被 AI 结果触发 — 把当前 price_hint 存在闭包里
+    _current_ai_hint: Dict[str, tuple] = {}
+
     def _fetch_ai_advice(kw: str):
-        """后台线程: 调 call_ai_model 生成购买建议 (极简 prompt + 短 token 快速出)"""
+        """后台线程: 调 call_ai_model 生成购买建议 + 解析价位区间给 matplotlib"""
+        nonlocal _current_ai_hint
         if not call_ai_fn:
             win.after(0, lambda: _show_ai(
                 "⚠️ 未配置 AI 模型\n请先在程序 AI 设置里填 deepseek/豆包 API key"
@@ -908,11 +930,16 @@ def show_price_compare_dialog(parent_win=None, call_ai_fn=None):
                   f"【直达链接】淘宝 https://s.taobao.com/search?q={kw.replace(' ','')}\n"
                   f"京东 https://search.jd.com/Search?keyword={kw.replace(' ','')}\n"
                   f"拼多多 https://mobile.yangkeduo.com/search_result.html?search_key={kw.replace(' ','')}\n"
-                  f"盒马 https://m.hemaos.com/search?keyword={kw.replace(' ','')}")
+                  f"盒马 https://m.hemaos.com/search?keyword={kw.replace(' ','')}\n\n"
+                  f"⚠️ 注意: 【各平台常规价】里的 X-X 必须是该商品在该平台的真实常规价位区间 (单位元), "
+                  f"例如「恰恰瓜子 150g」应写 淘宝:12-18元 而非 8-14元。请根据商品实际价格填写, 不要用通用占位价。")
         try:
-            res = call_ai_fn(prompt, system_prompt=system_p, max_tokens=400)
+            res = call_ai_fn(prompt, system_prompt=system_p, max_tokens=500)
             if isinstance(res, str) and len(res) > 10:
+                _current_ai_hint = _parse_price_ranges_from_ai(res)
                 win.after(0, lambda: _show_ai(res))
+                # AI 返回后立刻重绘 matplotlib (用 AI 给的真实价位, 图会随商品变化)
+                win.after(0, lambda: _render_chart({}))  # 传空让 AI hint 覆盖兜底
             else:
                 win.after(0, lambda: _show_ai(f"⚠️ AI 返回异常: {str(res)[:200]}"))
         except Exception as e:
