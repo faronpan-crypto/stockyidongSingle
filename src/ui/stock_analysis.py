@@ -474,6 +474,13 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     bs_var = tk.BooleanVar(value=True); bt_var = tk.BooleanVar(value=True)
     ttk.Checkbutton(rt, text="🛒买卖点", variable=bs_var).pack(side=tk.LEFT, padx=(10,3))
     ttk.Checkbutton(rt, text="💡胜率+凯利", variable=bt_var).pack(side=tk.LEFT, padx=3)
+    # ===== 辅助线 =====
+    _aux_frame = tk.Frame(rt, bg=rt.cget("background")); _aux_frame.pack(side=tk.LEFT, padx=(12,0))
+    aux_vars = {}
+    for _k, _lbl, _def in [("sr","支撑阻力",True),("gann","江恩",False),
+                            ("fib","斐波那契",True),("gold","黄金分割",True),("zs","缠论中枢",False)]:
+        aux_vars[_k] = tk.BooleanVar(value=_def)
+        ttk.Checkbutton(_aux_frame, text=_lbl, variable=aux_vars[_k]).pack(side=tk.LEFT, padx=2)
     chart_inner = tk.Frame(right_f, bg="#FAFAFA"); chart_inner.pack(fill=tk.BOTH, expand=True, pady=4)
 
     # ===== 状态缓存 =====
@@ -897,11 +904,93 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                                          transform=ax_main.transAxes, fontsize=7, color="#555",
                                          ha="center", va="bottom", style="italic")
                 except Exception as _e: print(f"[买卖点] {_e}")
-            # 支撑/压力
-            piv_lo = [i for i in range(1,len(lows)-1) if lows[i]<=lows[i-1] and lows[i]<=lows[i+1]]
-            piv_hi = [i for i in range(1,len(highs)-1) if highs[i]>=highs[i-1] and highs[i]>=highs[i+1]]
-            for i in piv_lo[-3:]: ax_main.axhline(y=lows[i], color="#006400", linestyle="--", alpha=0.5, linewidth=0.8)
-            for i in piv_hi[-3:]: ax_main.axhline(y=highs[i], color="#8B0000", linestyle="--", alpha=0.5, linewidth=0.8)
+            # ========= 🧭 辅助线 (支撑阻力 + 江恩 + 斐波那契 + 黄金 + 缠论中枢) =========
+            h_all = highs.astype(float); l_all = lows.astype(float); c_all = closes.astype(float)
+            # 当前可视范围 (取最近 120 根)
+            _win = min(120, len(c_all)); h_view = h_all[-_win:]; l_view = l_all[-_win:]
+            _hi = float(np.max(h_view)); _lo = float(np.min(l_view)); _cur = float(c_all[-1])
+            _amp = _hi - _lo
+            # --- 1. 支撑阻力 (pivot) ---
+            if aux_vars.get("sr", tk.BooleanVar).get():
+                piv_lo = [i for i in range(1,len(lows)-1) if lows[i]<=lows[i-1] and lows[i]<=lows[i+1]]
+                piv_hi = [i for i in range(1,len(highs)-1) if highs[i]>=highs[i-1] and highs[i]>=highs[i+1]]
+                for i in piv_lo[-4:]:
+                    ax_main.axhline(y=lows[i], color="#2E7D32", linestyle="--", alpha=0.55, linewidth=0.8, label="支撑" if i==piv_lo[-4] else "")
+                    ax_main.annotate(f"S{lows[i]:.2f}", xy=(len(c_all)-1, lows[i]), fontsize=6, color="#2E7D32", ha="right", va="bottom")
+                for i in piv_hi[-4:]:
+                    ax_main.axhline(y=highs[i], color="#C62828", linestyle="--", alpha=0.55, linewidth=0.8, label="阻力" if i==piv_hi[-4] else "")
+                    ax_main.annotate(f"R{highs[i]:.2f}", xy=(len(c_all)-1, highs[i]), fontsize=6, color="#C62828", ha="right", va="bottom")
+            # --- 2. 江恩 8 分位 ---
+            if aux_vars.get("gann", tk.BooleanVar).get() and _amp > 0:
+                for _r in [0.125, 0.25, 0.333, 0.5, 0.667, 0.75, 0.875]:
+                    _gp = _lo + _amp * _r
+                    ax_main.axhline(y=_gp, color="#6A1B9A", linestyle=":", alpha=0.35, linewidth=0.7)
+                    # 标注
+                    ax_main.annotate(f"江恩{_r:.3f}={_gp:.2f}", xy=(len(c_all)-1, _gp), fontsize=5.5, color="#6A1B9A", ha="right")
+            # --- 3. 斐波那契回撤 (基于最近一轮高低点) ---
+            if aux_vars.get("fib", tk.BooleanVar).get() and _amp > 0:
+                # 向上趋势回撤: 从阶段底 → 阶段高, 回撤 23.6/38.2/50/61.8/78.6
+                _fib_levels = [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
+                # 找最近 120 根里的阶段高低 (取最大回撤段)
+                _w = h_view - l_view
+                # 用最大的 10 日振幅来判定
+                _max_seg = None; _max_amp = 0
+                for _a in range(len(h_view)):
+                    for _b in range(_a+10, len(h_view)):
+                        _seg_amp = abs(h_view[_b] - l_view[_a])
+                        if _seg_amp > _max_amp:
+                            _max_amp = _seg_amp; _max_seg = (_a, _b, l_view[_a], h_view[_b])  # 底→高
+                        _seg_amp2 = abs(l_view[_b] - h_view[_a])
+                        if _seg_amp2 > _max_amp:
+                            _max_amp = _seg_amp2; _max_seg = (_a, _b, h_view[_a], l_view[_b])  # 高→底
+                if _max_seg and _max_amp > _amp * 0.3:
+                    _, _, _fib_lo, _fib_hi = _max_seg
+                    _fib_dir = "up" if _fib_hi > _fib_lo else "down"
+                    _fib_amp = abs(_fib_hi - _fib_lo)
+                    for _lv in _fib_levels:
+                        if _fib_dir == "up":
+                            _fp = _fib_lo + _fib_amp * _lv
+                        else:
+                            _fp = _fib_hi - _fib_amp * _lv
+                        _col = "#E65100" if _lv in (0.382, 0.5, 0.618) else "#FB8C00"
+                        _style = "-" if _lv in (0.382, 0.5, 0.618) else ":"
+                        ax_main.axhline(y=_fp, color=_col, linestyle=_style, alpha=0.45, linewidth=0.8)
+                        ax_main.annotate(f"F{_lv*100:.1f}%={_fp:.2f}", xy=(len(c_all)-1, _fp), fontsize=5, color=_col, ha="right")
+            # --- 4. 黄金分割 (当前价相对于区间高低) ---
+            if aux_vars.get("gold", tk.BooleanVar).get() and _amp > 0:
+                # 黄金分割扩展位 (上涨): 0.618 / 1.0 / 1.618 / 2.618
+                # 黄金分割回撤位 (下跌): 0.382 / 0.5 / 0.618
+                for _ratio, _tag, _col, _style in [
+                    (0.382, "G38.2%", "#FF8F00", "--"),
+                    (0.5,   "G50%",   "#F57C00", "-"),
+                    (0.618, "G61.8%", "#E65100", "-"),
+                    (1.0,   "G100%",  "#BF360C", "--"),
+                    (1.618, "G161.8%","#880E4F", ":"),
+                ]:
+                    _gp = _lo + _amp * _ratio
+                    ax_main.axhline(y=_gp, color=_col, linestyle=_style, alpha=0.4, linewidth=0.7)
+                    ax_main.annotate(f"{_tag}={_gp:.2f}", xy=(0, _gp), fontsize=5.5, color=_col, va="bottom")
+            # --- 5. 缠论中枢 (水平带) ---
+            if aux_vars.get("zs", tk.BooleanVar).get() and len(c_all) >= 60:
+                try:
+                    from ui.chanlun import analyze_chan
+                    _chan = analyze_chan(None, h_all, l_all, c_all)
+                    if _chan.get("ok") and _chan.get("zhongshus"):
+                        # 只画最近 3 个中枢
+                        for _idx, _zs in enumerate(_chan["zhongshus"][-3:]):
+                            _bar_h = _zs["ZG"] - _zs["ZD"]
+                            # 用 axhspan 画中枢带
+                            ax_main.axhspan(_zs["ZD"], _zs["ZG"], alpha=0.15,
+                                            color=["#FF9800","#9C27B0","#00BCD4"][_idx % 3])
+                            # 中枢上下沿标注
+                            _x_min = _zs["start_idx"]
+                            _x_max = min(_zs["end_idx"], len(c_all)-1)
+                            ax_main.plot([_x_min, _x_max], [_zs["ZG"], _zs["ZG"]], color="#FF9800", linewidth=0.8, linestyle="-", alpha=0.6)
+                            ax_main.plot([_x_min, _x_max], [_zs["ZD"], _zs["ZD"]], color="#FF9800", linewidth=0.8, linestyle="-", alpha=0.6)
+                            ax_main.text(_x_min, _zs["ZG"], f"中枢ZG={_zs['ZG']:.2f}", fontsize=6, color="#FF9800", va="bottom")
+                            ax_main.text(_x_min, _zs["ZD"], f"中枢ZD={_zs['ZD']:.2f}", fontsize=6, color="#FF9800", va="top")
+                except Exception as _e:
+                    pass  # 缠论辅助线失败不影响主图
             ax_main.set_title(f"{_current_name} - 日K线图 (hover K线看胜率+凯利)", fontsize=11, fontweight="bold")
             ax_main.legend(loc="upper left", fontsize=7); ax_main.grid(True, alpha=0.25)
             # 副图
@@ -1044,29 +1133,42 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     # ========= 🔍 搜索 =========
     def _collect_candidates():
         """收集候选股票, 优先级: 持仓股 > 龙头(成交额前20) > 涨停池 > 已分析过 > 兜底"""
+        # ========= 过滤函数: 停牌/ST/退市 → 跳过 =========
+        def _is_bad_name(nm: str) -> bool:
+            if not nm: return True
+            nm2 = str(nm).upper()
+            # 停牌标识: [停] (停) 停 ST *ST 退 N D
+            bad_words = ["停", "ST", "退", "N", "XD", "DR"]
+            for bw in bad_words:
+                if bw in nm2: return True
+            return False
+        def _clean_name(nm: str) -> str:
+            """清洗名称: 去掉 [停] (停) ST 等多余标识"""
+            if not nm: return ""
+            # [停] 或 (停) 或 ST 前
+            nm = re.sub(r"[\[\(]?[停ST退N][\]\)]?", "", str(nm))
+            # *ST
+            nm = re.sub(r"\*?ST\*?", "", nm, flags=re.IGNORECASE)
+            return nm.strip()
+
+        # ========= 候选收集 =========
         seen = set()
-        result = []  # ["紫薇股份 (002300.SZ)", ...]
-        mp = _load_name_code_map()
-        nc_map = mp.get("nc", {})   # ts_code -> name
-        cn_map = mp.get("cn", {})   # name -> ts_code
+        result = []  # ["贵州茅台 (600519.SH)", ...]
 
         def _add(label, tsc, tag=""):
             if not tsc or tsc in seen: return
+            # 过滤停牌/ST/退市
+            if _is_bad_name(label): return
             seen.add(tsc)
-            nm = nc_map.get(tsc, "")
+            nm = _clean_name(label) if label else ""
             if not nm:
-                # 从 tsc 拆 code6 反向查 (tsc 形如 002300.SZ)
-                code6 = tsc.split(".")[0]
-                for _n, _t in cn_map.items():
-                    if _t == tsc: nm = _n; break
-            if tag: label = f"[{tag}] {label}"
-            result.append(f"{label} ({tsc})" if label != tsc and label else tsc)
+                nc_map = _load_name_code_map().get("nc", {})
+                nm = nc_map.get(tsc, "")
+            if not nm: nm = tsc
+            if tag: nm = f"[{tag}] {nm}"
+            result.append(f"{nm} ({tsc})")
 
-        # ① 持仓股 (来自 self.holding_stocks — 但无 self 时跳过)
-        # 改从 web_data/holdings_state.json + SQLite stock_data 表里的历史分析股票名 + akshare 龙头
-        # 由于本函数无 self, 只能读磁盘 + 网络
-
-        # ② SQLite stock_analysis.db 已分析过的股票 (最稳定)
+        # ① SQLite data/stock_analysis.db 已分析过的股票
         _db_paths = [
             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "data", "stock_analysis.db"),
@@ -1083,37 +1185,39 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     ("market_codes", "code", "name"),
                 ]:
                     try:
-                        cur.execute(f"SELECT {_code_col}, {_name_col} FROM {_tbl} LIMIT 50")
+                        cur.execute(f"SELECT {_code_col}, {_name_col} FROM {_tbl} LIMIT 80")
                         for row in cur.fetchall():
                             _c6 = str(row[0]).strip()
                             if not _c6 or not _c6.isdigit() or len(_c6) != 6: continue
-                            _nm = str(row[1] or "").strip()
+                            _nm = _clean_name(str(row[1] or "").strip())
                             _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
-                            _add(_nm or _tsc, _tsc, "历")
+                            _add(_nm or _tsc, _tsc, "历史")
                     except Exception: pass
                 conn.close()
             except Exception: pass
 
-        # ③ akshare 龙头 (成交额前 20)
+        # ② akshare 龙头 (成交额前 30, 过滤停牌)
         try:
             import akshare as ak
             _spot = ak.stock_zh_a_spot_em()
             if _spot is not None and len(_spot) > 0:
-                # 成交额列
-                _amt_col = "成交额" if "成交额" in _spot.columns else None
-                if _amt_col:
-                    _spot2 = _spot.sort_values(_amt_col, ascending=False).head(20)
-                else:
-                    _spot2 = _spot.head(20)
-                for _, r in _spot2.iterrows():
-                    _c6 = str(r.get("代码", "")).strip()
-                    _nm = str(r.get("名称", "")).strip()
-                    if not _c6.isdigit() or len(_c6) != 6: continue
-                    _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
-                    _add(_nm, _tsc, "龙")
+                # 先过滤掉停牌/ST/退市
+                _spot = _spot[~_spot["名称"].astype(str).apply(_is_bad_name)]
+                if len(_spot) > 0:
+                    _amt_col = "成交额" if "成交额" in _spot.columns else None
+                    if _amt_col:
+                        _spot2 = _spot.sort_values(_amt_col, ascending=False).head(30)
+                    else:
+                        _spot2 = _spot.head(30)
+                    for _, r in _spot2.iterrows():
+                        _c6 = str(r.get("代码", "")).strip()
+                        _nm = _clean_name(str(r.get("名称", "")).strip())
+                        if not _c6.isdigit() or len(_c6) != 6: continue
+                        _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
+                        _add(_nm, _tsc, "龙头")
         except Exception: pass
 
-        # ④ akshare 涨停池 (交易日才有, 非交易日跳过)
+        # ③ akshare 涨停池 (交易日才有, 过滤停牌标识)
         try:
             import akshare as ak; from datetime import datetime
             _zt = ak.stock_zt_pool_em(date=datetime.now().strftime("%Y%m%d"))
@@ -1122,13 +1226,13 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 _name_col = "名称" if "名称" in _zt.columns else None
                 for _, r in _zt.head(30).iterrows():
                     _c6 = str(r[_code_col]).strip()
-                    _nm = str(r[_name_col]).strip() if _name_col else ""
+                    _nm = _clean_name(str(r[_name_col]).strip()) if _name_col else ""
                     if not _c6.isdigit() or len(_c6) != 6: continue
                     _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
-                    _add(_nm or _tsc, _tsc, "停")
+                    _add(_nm or _tsc, _tsc, "涨停")
         except Exception: pass
 
-        # 兜底: 至少给 10 只常用龙头
+        # ④ 兜底: 15 只常用龙头 (不依赖网络)
         if len(result) < 30:
             for _tsc, _nm in [
                 ("600519.SH","贵州茅台"),("000858.SZ","五粮液"),("601318.SH","中国平安"),
@@ -1137,7 +1241,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 ("601888.SH","中国中免"),("002415.SZ","海康威视"),("601012.SH","隆基绿能"),
                 ("300059.SZ","东方财富"),("002475.SZ","立讯精密"),("600030.SH","中信证券"),
             ]:
-                _add(_nm, _tsc, "常")
+                _add(_nm, _tsc, "常用")
 
         print(f"[股票分析候选] 共 {len(result)} 只")
         return result[:200]
