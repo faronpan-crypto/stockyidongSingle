@@ -4490,14 +4490,11 @@ class HotMixin:
                             new_data["price"] = _rd.get("price")
                             new_data["turnover"] = _rd.get("turnover")
                             break
-                    # ⚡ 最简单修: 停掉当前弹窗 → 直接调完整自动流程
+                    # ⚡ 不改当前弹窗 → 直接开一个新弹窗, 两个并排可对比
                     # self._open_hotmoney_single_dialog(auto_code=...) 会走完整的
                     #   tushare daily → daily_basic → 情绪引擎 → 7位游资评分 → 完整弹窗
-                    # 不复用当前这个半成品 _bg_calc (缺 daily_basic / akshare 降级 / 机构票分析)
-                    try: top.destroy()
-                    except Exception: pass
-                    # after(50) 让 old Toplevel 先销毁, 再开新的
-                    self.root.after(50, lambda: self._open_hotmoney_single_dialog(
+                    # 不 destroy 当前 top → 用户可同时看多只股票的游资心法
+                    self.root.after(0, lambda: self._open_hotmoney_single_dialog(
                         auto_code=target_code, auto_name=target_name or target_code))
                     return
 
