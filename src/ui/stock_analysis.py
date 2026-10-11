@@ -771,7 +771,7 @@ def _calc_dupont(fund: Dict) -> Dict:
 
 # ========= UI 弹窗 =========
 def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None, auto_name=None,
-                              holdings=None):
+                              holdings=None, dapan_data=None):
     import tkinter as tk
     from tkinter import ttk, messagebox
     import webbrowser, numpy as np
@@ -1865,10 +1865,10 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         threading.Thread(target=_bg, daemon=True).start()
 
     def _apply_data(name, kline, fund):
-        nonlocal _current_kline, _current_fund, _current_name, _emo_cache
+        nonlocal _current_kline, _current_fund, _emo_cache
         _current_name = name; _current_fund = fund
-        # ===== 拉情绪数据 =====
-        _emo_cache = _fetch_emo_dict()
+        # ===== 拉情绪数据: 优先主程序传入的 dapan_data.trend10, 没有再 fallback sentiment_history =====
+        _emo_cache = _fetch_emo_dict(dapan_data)
         if _emo_cache:
             kline["emo"] = _build_emo_series(kline, _emo_cache)
         else:
@@ -2016,21 +2016,101 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             _alpha_var.config(text="—"); _strategy_txt.config(text="请先刷新大盘情绪数据")
 
 
-    def _fetch_emo_dict():
-        """从 SQLite sentiment_history 拉最近 400 天情绪数据, 返回 {trade_date8: {...}}
+    def _fetch_emo_dict(_dapan_data=None):
+        """从主程序传入的 dapan_data 构建情绪字典 {trade_date8: {...}}
 
-        阶段判断 100% 对齐首页 tab_dapan.py L2588-2594 的真实逻辑:
-          if zt>=80 and up_ratio>=0.7:  高潮
-          elif zt>=40 and up_ratio>=0.55: 发酵
-          elif zt>=15 and up_ratio>=0.5:   启动
-          elif zt<10 and up_ratio<0.4:    冰点
-          elif up_ratio<0.45:             退潮
-          else:                           震荡
+        优先级:
+          ① _dapan_data.trend10 (主程序大盘分析拉好的, 含 zt/up/dn/dt) — 当前日 100% 对齐首页 emo.stage
+          ② sentiment_history SQLite (更早的历史, 首页没拉但表里有)
 
-        颜色/Emoji/α仓位 100% 对齐 L3017-3018 + L3058-3059 + L3096-3098:
-          emo_pos = {"冰点":0, "启动":15, "发酵":30, "高潮":50, "分歧":15, "退潮":0}.get(stage, 15)
-          冰点/退潮 强制 ≤ 10%
+        阶段判断 100% 对齐首页 tab_dapan.py L2588-2594:
+          zt≥80 & 涨跌比≥0.7 → 高潮
+          zt≥40 & 涨跌比≥0.55 → 发酵
+          zt≥15 & 涨跌比≥0.5  → 启动
+          zt<10 & 涨跌比<0.4  → 冰点
+          涨跌比<0.45         → 退潮
+          其他                 → 震荡
         """
+        _STAGE_COLORS = {"冰点": "#66BB6A", "启动": "#FFD54F", "发酵": "#FF6F00",
+                         "高潮": "#EF5350", "分歧": "#6A1B9A", "退潮": "#455A64", "震荡": "#6A1B9A"}
+        _STAGE_EMOJI  = {"冰点": "❄️", "启动": "🌱", "发酵": "🔥",
+                         "高潮": "💥", "分歧": "⚡", "退潮": "📉", "震荡": "📊"}
+        _EMO_POS      = {"冰点": 0, "启动": 15, "发酵": 30, "高潮": 50,
+                         "分歧": 15, "退潮": 0, "震荡": 15}
+
+        def _calc_stage(zt, up, dn):
+            """首页 L2588-2594 真实阶段判断"""
+            total = up + dn
+            if total == 0:
+                return "震荡", 50.0, 0.5
+            up_ratio = up / total  # 0.0 - 1.0 (首页用比例!)
+            if zt >= 80 and up_ratio >= 0.7:
+                stage = "高潮"
+            elif zt >= 40 and up_ratio >= 0.55:
+                stage = "发酵"
+            elif zt >= 15 and up_ratio >= 0.5:
+                stage = "启动"
+            elif zt < 10 and up_ratio < 0.4:
+                stage = "冰点"
+            elif up_ratio < 0.45:
+                stage = "退潮"
+            else:
+                stage = "震荡"
+            return stage, up_ratio * 100, up_ratio
+
+        def _make_entry(stage, up_ratio_pct, up_ratio, zt, dt, up, dn, flat=0, total=None):
+            """统一的 emo_dict 条目"""
+            phase_color = _STAGE_COLORS.get(stage, "#6A1B9A")
+            phase_emoji = _STAGE_EMOJI.get(stage, "📊")
+            alpha_pos = _EMO_POS.get(stage, 15)
+            if stage in ("冰点", "退潮"):
+                alpha_pos = min(alpha_pos, 10)
+            if up_ratio > 0.9: alpha_pos = min(alpha_pos, 80)
+            if up_ratio < 0.15: alpha_pos = max(alpha_pos, 10)
+            emo_index = max(0, min(100, up_ratio_pct * 0.6 + min(zt, 100) * 0.4))
+            return {
+                "stage": stage, "phase_label": stage,
+                "phase_emoji": phase_emoji, "phase_color": phase_color,
+                "alpha_pos": alpha_pos / 100.0,
+                "up_ratio": up_ratio_pct, "emo_index": emo_index,
+                "zt": zt, "dt": dt,
+                "m2_up": up, "m2_down": dn, "m2_flat": flat,
+                "m2_total": total or (up + dn + flat),
+            }
+
+        result = {}
+
+        # ===== ① 主程序 trend10 (最近 25 天) =====
+        _trend_count = 0
+        if _dapan_data:
+            trend10 = _dapan_data.get("trend10", [])
+            emo_now = _dapan_data.get("emo", {})
+            for _t in trend10:
+                _fd = str(_t.get("full_date", "")).replace("-", "")
+                if not _fd: continue
+                _zt = int(_t.get("zt", 0) or 0)
+                _up = int(_t.get("up", 0) or 0)
+                _dn = int(_t.get("dn", 0) or 0)
+                _dt = int(_t.get("dt", 0) or 0)
+                _stage, _ur_pct, _ur = _calc_stage(_zt, _up, _dn)
+                result[_fd] = _make_entry(_stage, _ur_pct, _ur, _zt, _dt, _up, _dn)
+                _trend_count += 1
+            # 当前日: 100% 用主程序 emo.stage (首页大盘直接显示的那个)
+            if emo_now and trend10:
+                _cur_fd = trend10[-1].get("full_date", "").replace("-", "")
+                if _cur_fd and emo_now.get("stage"):
+                    _up2 = int(emo_now.get("up", 0) or 0)
+                    _dn2 = int(emo_now.get("dn", 0) or 0)
+                    _zt2 = int(emo_now.get("zt", 0) or 0)
+                    _dt2 = int(emo_now.get("dt", 0) or 0)
+                    _upr2_pct = (_up2 / max(_up2+_dn2, 1)) * 100
+                    _upr2 = _up2 / max(_up2+_dn2, 1)
+                    result[_cur_fd] = _make_entry(emo_now["stage"], _upr2_pct, _upr2,
+                                                  _zt2, _dt2, _up2, _dn2)
+                    print(f"[情绪副图] 🔥 当前日强制用主程序 emo.stage = {emo_now['stage']}")
+        print(f"[情绪副图] ①主程序 trend10 提供 {_trend_count} 天")
+
+        # ===== ② sentiment_history SQLite (更早的历史) =====
         try:
             import sqlite3
             _db_paths = [
@@ -2048,73 +2128,24 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 """)
                 rows = cur.fetchall(); conn.close()
                 if not rows: continue
-                # 按日期聚合 (同一天可能多条, 取最新的一条)
-                seen = {}
+                _sql_count = 0
                 for r in rows:
-                    _d = str(r[0] or "").replace("-", "")  # 2026-10-11 → 20261011
-                    if not _d or _d in seen: continue
-                    seen[_d] = {
-                        "m2_up": int(r[1] or 0), "m2_down": int(r[2] or 0),
-                        "m2_flat": int(r[3] or 0), "m2_total": int(r[4] or 0),
-                        "zt": int(r[5] or 0),  # m3_count = 涨停数
-                        "dt": int(r[6] or 0),  # m4_count = 跌停数
-                    }
-                # ===== 阶段/颜色/Emoji/α仓位 —— 完全对齐首页 tab_dapan.py =====
-                _STAGE_COLORS = {"冰点": "#66BB6A", "启动": "#FFD54F", "发酵": "#FF6F00",
-                                 "高潮": "#EF5350", "分歧": "#6A1B9A", "退潮": "#455A64"}
-                _STAGE_EMOJI  = {"冰点": "❄️", "启动": "🌱", "发酵": "🔥",
-                                 "高潮": "💥", "分歧": "⚡", "退潮": "📉"}
-                _EMO_POS      = {"冰点": 0, "启动": 15, "发酵": 30, "高潮": 50,
-                                 "分歧": 15, "退潮": 0}
-                result = {}
-                for _d, m in seen.items():
-                    total = max(m["m2_total"], 1)
-                    up_ratio = m["m2_up"] / total  # 0.0 - 1.0 (首页用比例, 不是百分比!)
-                    zt = m["zt"]  # 涨停数
-                    dt = m["dt"]  # 跌停数
-                    # ===== 首页真实阶段判断 (L2588-2594) =====
-                    if zt >= 80 and up_ratio >= 0.7:
-                        stage = "高潮"
-                    elif zt >= 40 and up_ratio >= 0.55:
-                        stage = "发酵"
-                    elif zt >= 15 and up_ratio >= 0.5:
-                        stage = "启动"
-                    elif zt < 10 and up_ratio < 0.4:
-                        stage = "冰点"
-                    elif up_ratio < 0.45:
-                        stage = "退潮"
-                    else:
-                        stage = "震荡"  # 首页 fallback 用震荡
-                    # 震荡 用 分歧 的副色 (首页 L3096 stages 里没有震荡, 用分歧色)
-                    phase_color = _STAGE_COLORS.get(stage, _STAGE_COLORS["分歧"])
-                    phase_emoji = _STAGE_EMOJI.get(stage, "📊")
-                    # ===== α 仓位 (首页 L3017-3018 emo_pos 基础值 + L3022-3023 冰点/退潮强制≤10%) =====
-                    alpha_pos = _EMO_POS.get(stage, 15)
-                    if stage in ("冰点", "退潮"):
-                        alpha_pos = min(alpha_pos, 10)  # 冰点/退潮 强制 ≤ 10%
-                    # 极端值修正 (涨跌比 > 90% 限仓, < 15% 最低)
-                    up_ratio_pct = up_ratio * 100
-                    if up_ratio > 0.9: alpha_pos = min(alpha_pos, 80)
-                    if up_ratio < 0.15: alpha_pos = max(alpha_pos, 10)
-                    # 情绪指数线 (0-100%, 简单加权: 涨跌比 + 涨停密度)
-                    emo_index = max(0, min(100, up_ratio_pct * 0.6 + min(zt, 100) * 0.4))
-                    result[_d] = {
-                        "stage": stage,  # 和首页一致的阶段名
-                        "phase_label": stage,  # 兼容旧字段
-                        "phase_emoji": phase_emoji,
-                        "phase_color": phase_color,
-                        "alpha_pos": alpha_pos / 100.0,
-                        "up_ratio": up_ratio_pct,
-                        "emo_index": emo_index,
-                        "zt": zt, "dt": dt,
-                        "m2_up": m["m2_up"], "m2_down": m["m2_down"],
-                        "m2_flat": m["m2_flat"], "m2_total": m["m2_total"],
-                    }
-                print(f"[情绪副图] 从 sentiment_history 拉到 {len(result)} 天 (对齐首页阶段判断)")
-                return result
+                    _d = str(r[0] or "").replace("-", "")
+                    if not _d or _d in result: continue  # 主程序 trend10 已有就跳过
+                    _up = int(r[1] or 0); _dn = int(r[2] or 0)
+                    _flat = int(r[3] or 0); _tot = int(r[4] or 0)
+                    _zt = int(r[5] or 0); _dt = int(r[6] or 0)
+                    _stage, _ur_pct, _ur = _calc_stage(_zt, _up, _dn)
+                    result[_d] = _make_entry(_stage, _ur_pct, _ur, _zt, _dt, _up, _dn, _flat, _tot)
+                    _sql_count += 1
+                if _sql_count:
+                    print(f"[情绪副图] ②SQLite sentiment_history 补 {_sql_count} 天")
+                break
         except Exception as _e:
-            print(f"[情绪副图] 拉 sentiment_history 失败: {_e}")
-        return None
+            print(f"[情绪副图] SQLite fallback 失败: {_e}")
+
+        print(f"[情绪副图] 总计 {len(result)} 天 (主程序 trend10 + SQLite 补历史)")
+        return result if result else None
 
 
     def _build_emo_series(kline, emo_dict):

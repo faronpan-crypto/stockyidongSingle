@@ -18597,12 +18597,14 @@ class DapanMixin:
             return _res
         _holds = _collect_holds()
         if _holds: print(f"[📊股票分析] 收集到持仓 {len(_holds)} 只: {[n for n,c in _holds[:5]]}...")
+        # 主程序已经算好的情绪/αβ/阶段数据 — 直接传给弹窗 (不重复查库)
+        _dapan_data = getattr(self, "_dapan_full_data", None) or {}
         try:
             from ui.stock_analysis import show_stock_analysis_dialog as _sa
             ai_fn = getattr(self, 'call_ai_model', None)
             win = getattr(self, 'root', None) or getattr(self, '_root', None)
             _sa(win, call_ai_fn=ai_fn, auto_code=stock_code, auto_name=stock_name,
-                holdings=_holds)
+                holdings=_holds, dapan_data=_dapan_data)
         except Exception as e:
             print(f"[📊股票分析❌] {e}", flush=True); _tb.print_exc()
         def load_stock_analysis():
