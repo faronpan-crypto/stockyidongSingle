@@ -1733,10 +1733,10 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         seen = set()
         result = []  # ["贵州茅台 (600519.SH)", ...]
 
-        def _add(label, tsc, tag=""):
+        def _add(label, tsc, tag="", skip_bad_filter=False):
+            """skip_bad_filter=True 时 (持仓股) 不过滤停牌ST — 用户主动持有的"""
             if not tsc or tsc in seen: return
-            # 过滤停牌/ST/退市
-            if _is_bad_name(label): return
+            if not skip_bad_filter and _is_bad_name(label): return
             seen.add(tsc)
             nm = _clean_name(label) if label else ""
             if not nm:
@@ -1752,15 +1752,17 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                                      "web_data", "holdings_state.json")
             if os.path.exists(_hs_path):
                 with open(_hs_path) as f: _hs = json.load(f)
-                for _g in _hs.get("groups", []):
-                    if not isinstance(_g, list): continue
-                    for _item in _g:
-                        if isinstance(_item, dict):
+                _groups = _hs.get("groups", {})
+                if isinstance(_groups, dict):
+                    for _gk, _glist in _groups.items():
+                        if not isinstance(_glist, list): continue
+                        for _item in _glist:
+                            if not isinstance(_item, dict): continue
                             _c6 = str(_item.get("code","")).strip()
                             _nm = str(_item.get("name","")).strip()
                             if not _c6 or not _c6.isdigit() or len(_c6) != 6: continue
                             _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
-                            _add(_nm, _tsc, "持仓")
+                            _add(_nm, _tsc, "持仓", skip_bad_filter=True)
         except Exception: pass
 
         # ② SQLite data/stock_analysis.db 已分析过的股票
