@@ -203,9 +203,36 @@ def _fetch_holder_info(tsc: str) -> Dict:
     return res
 
 
+# 全局缓存: ts_code → name
+_NAME_CACHE: Dict[str, str] = {}
+_NAME_CACHE_LOADED = False
+
+def _load_stock_names():
+    """一次性加载全 A 股 ts_code → name 到内存 (tushare stock_basic)"""
+    global _NAME_CACHE_LOADED, _NAME_CACHE
+    if _NAME_CACHE_LOADED: return
+    pro = _get_tushare_pro()
+    if not pro: return
+    try:
+        df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,name")
+        if df is not None and len(df) > 0:
+            for _, r in df.iterrows():
+                _NAME_CACHE[r["ts_code"]] = r["name"]
+            _NAME_CACHE_LOADED = True
+            print(f"[股票名] 加载 {len(_NAME_CACHE)} 只")
+    except Exception as e:
+        print(f"[股票名] stock_basic 失败: {e}")
+
+def _get_name(tsc: str) -> str:
+    if not _NAME_CACHE_LOADED: _load_stock_names()
+    return _NAME_CACHE.get(tsc, tsc.split(".")[0])
+
+
 # ========== UI 弹窗 ==========
-def show_stock_compare_dialog(parent_win=None, call_ai_fn=None):
-    """📊 股票比价弹窗 — 板块选择 → 并行拉基本面/技术面/情绪面 → 图形化对比"""
+def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None):
+    """📊 股票比价弹窗
+    hotmoney_fn: 双击行时的回调 hotmoney_fn(parent_win, auto_code, auto_name)
+                  默认 None, 不弹游资心法"""
     import tkinter as tk
     from tkinter import ttk, messagebox
     import threading
@@ -269,6 +296,21 @@ def show_stock_compare_dialog(parent_win=None, call_ai_fn=None):
     tv.tag_configure("sell", background="#FFCDD2")    # 建议卖出
     tv.tag_configure("hold", background="#FFF9C4")    # 建议持有
     tv.tag_configure("reduce", background="#FFE0B2")  # 建议减仓
+
+    def _on_dblclick(_e=None):
+        """双击 Treeview 行 → 弹游资心法全解"""
+        sel = tv.selection()
+        if not sel or not hotmoney_fn: return
+        idx = tv.index(sel[0])
+        if idx < 0 or idx >= len(_current_compare): return
+        r = _current_compare[idx]
+        sc = r["ts_code"].split(".")[0]
+        sn = r.get("_name") or sc
+        try:
+            hotmoney_fn(parent_win, auto_code=sc, auto_name=sn)
+        except Exception as _e2:
+            print(f"[股票比价→游资心法] 双击调用失败: {_e2}")
+    tv.bind("<Double-1>", _on_dblclick)
 
     if pw_v:
         pw_v.add(top_f, minsize=120)
@@ -437,13 +479,15 @@ def show_stock_compare_dialog(parent_win=None, call_ai_fn=None):
     def _render(results: List[Dict], board: Dict):
         nonlocal _current_compare
         _current_compare = results
-        _names_map = {}
+        # 提前加载股票名 (后台线程, 避免 UI 卡)
+        threading.Thread(target=_load_stock_names, daemon=True).start()
         for r in results:
             f = r["fund"]; t = r["tech"]
             tsc = r["ts_code"]
-            code6 = tsc.split(".")[0]
+            name = _get_name(tsc)
+            r["_name"] = name  # 存到 result 里给双击用
             tv.insert("", tk.END, values=(
-                _names_map.get(code6, code6), tsc,
+                name, tsc,
                 f"{(f.get('mv') or 0) / 10000:.1f}" if f.get("mv") else "—",
                 f"{f.get('pe'):.1f}" if f.get("pe") else "—",
                 f"{f.get('pb'):.2f}" if f.get("pb") else "—",
