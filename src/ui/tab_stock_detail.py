@@ -37,6 +37,151 @@ import hashlib
 from urllib.parse import urljoin
 import sqlite3
 
+# ===== 模块级: 买卖点计算 + 回测 (供 K 线弹窗复用) =====
+def calc_trade_signals(closes, opens, highs, lows, vols):
+    """
+    计算完整 4 类买卖点信号
+    返回: {
+        'buy':   [(idx, y, label, color, symbol), ...]  # ★ 买入
+        'add':   [(idx, y, label, color, symbol), ...]  # ▲ 加仓
+        'sell':  [(idx, y, label, color, symbol), ...]  # ▼ 卖出
+        'reduce': [(idx, y, label, color, symbol), ...] # ▽ 减仓
+    }
+    """
+    import numpy as np
+    _nan = np.nan
+    n = len(closes)
+    if n < 30: return {"buy": [], "add": [], "sell": [], "reduce": []}
+
+    # MA
+    def _ma(a, p):
+        r = np.full(len(a), _nan); 
+        if len(a) >= p:
+            cumsum = np.cumsum(np.insert(a, 0, 0))
+            r[p-1:] = (cumsum[p:] - cumsum[:-p]) / p
+        return r
+    m5 = _ma(closes.astype(float), 5); m10 = _ma(closes.astype(float), 10)
+    m20 = _ma(closes.astype(float), 20)
+    # MACD DIF / DEA (EMA)
+    def _ema(a, w):
+        r = np.empty_like(a); r[0] = a[0]; k = 2/(w+1)
+        for i in range(1, len(a)): r[i] = a[i]*k + r[i-1]*(1-k)
+        return r
+    ema12 = _ema(closes.astype(float), 12); ema26 = _ema(closes.astype(float), 26)
+    dif = ema12 - ema26; dea = _ema(dif, 9)
+    # KDJ K/D
+    k_arr = np.full(n, 50.0); d_arr = np.full(n, 50.0)
+    for i in range(9, n):
+        rv = max(highs[i-8:i+1]) - min(lows[i-8:i+1])
+        rsv = (closes[i] - min(lows[i-8:i+1])) / max(rv, 0.001) * 100
+        k_arr[i] = k_arr[i-1]*2/3 + rsv*1/3
+        d_arr[i] = d_arr[i-1]*2/3 + k_arr[i]*1/3
+    # BOLL
+    boll_up = np.full(n, _nan); boll_lo = np.full(n, _nan)
+    for i in range(19, n):
+        seg = closes[i-19:i+1].astype(float)
+        ma20v = np.mean(seg); stdev = np.std(seg)
+        boll_up[i] = ma20v + 2*stdev; boll_lo[i] = ma20v - 2*stdev
+
+    _buy, _sell, _add, _red = [], [], [], []
+    # 1. MA5×MA10 金叉死叉
+    for i in range(1, n):
+        if _nan in (m5[i], m10[i], m5[i-1], m10[i-1]): continue
+        if m5[i-1] < m10[i-1] and m5[i] >= m10[i]:
+            _buy.append((i, lows[i]*0.97, "MA金", "#2E7D32", "★"))
+        elif m5[i-1] > m10[i-1] and m5[i] <= m10[i]:
+            _sell.append((i, highs[i]*1.03, "MA死", "#C62828", "▼"))
+    # 2. MACD DIF×DEA
+    for i in range(1, n):
+        if dif[i-1] < dea[i-1] and dif[i] >= dea[i]:
+            if dif[i] < 0: _buy.append((i, lows[i]*0.96, "MACD金", "#1565C0", "★"))
+            else: _add.append((i, lows[i]*0.95, "MACD金(强)", "#FF9800", "▲"))
+        elif dif[i-1] > dea[i-1] and dif[i] <= dea[i]:
+            if dif[i] > 0: _sell.append((i, highs[i]*1.04, "MACD死", "#B71C1C", "▼"))
+            else: _red.append((i, highs[i]*1.05, "MACD死(弱)", "#6A1B9A", "▽"))
+    # 3. KDJ 低位金叉 / 高位死叉
+    for i in range(1, n):
+        if k_arr[i-1] < d_arr[i-1] and k_arr[i] >= d_arr[i]:
+            if k_arr[i] < 30: _buy.append((i, lows[i]*0.95, "KDJ金(低)", "#388E3C", "★"))
+        elif k_arr[i-1] > d_arr[i-1] and k_arr[i] <= d_arr[i]:
+            if k_arr[i] > 70: _sell.append((i, highs[i]*1.05, "KDJ死(高)", "#D32F2F", "▼"))
+    # 4. BOLL 反弹 / 回落
+    for i in range(1, n):
+        if _nan in (boll_up[i], boll_lo[i]): continue
+        if closes[i-1] <= boll_lo[i-1] and closes[i] > boll_lo[i] and closes[i] > opens[i]:
+            _buy.append((i, lows[i]*0.96, "布林反弹", "#00796B", "★"))
+        elif closes[i-1] >= boll_up[i-1] and closes[i] < boll_up[i] and closes[i] < opens[i]:
+            _sell.append((i, highs[i]*1.04, "布林回落", "#BF360C", "▼"))
+    # 5. 放量突破前高 / 跌破前低 (20日窗口)
+    vol_ma20 = np.full(n, 0.0)
+    for i in range(19, n):
+        vol_ma20[i] = np.mean(vols[i-19:i+1].astype(float))
+    for i in range(20, n):
+        prev_hi = max(highs[i-20:i]); prev_lo = min(lows[i-20:i])
+        if closes[i] > prev_hi and vols[i] > vol_ma20[i]*1.5:
+            if not any(abs(p[0]-i)<3 for p in _add):
+                _add.append((i, lows[i]*0.93, "放量突破", "#F57C00", "▲"))
+        if closes[i] < prev_lo and vols[i] > vol_ma20[i]*1.5:
+            if not any(abs(p[0]-i)<3 for p in _red):
+                _red.append((i, highs[i]*1.07, "放量破位", "#4A148C", "▽"))
+
+    def _dedup(pts):
+        best = {}
+        for idx, y, lbl, col, sym in pts:
+            if idx not in best: best[idx] = (y, lbl, col, sym)
+            elif y < best[idx][0]: best[idx] = (y, lbl, col, sym)
+        return [(idx, best[idx][0], best[idx][1], best[idx][2], best[idx][3])
+                for idx in sorted(best.keys())]
+    for k in (_buy, _sell, _add, _red):
+        k = _dedup(k)
+    # 只保留近 80 根 (避免密集)
+    _cut = max(0, n - 120)
+    return {
+        "buy":    [p for p in _buy if p[0] >= _cut],
+        "sell":   [p for p in _sell if p[0] >= _cut],
+        "add":    [p for p in _add if p[0] >= _cut],
+        "reduce": [p for p in _red if p[0] >= _cut],
+        # 完整历史 (不截断) 供回测
+        "buy_all": _dedup(_buy), "sell_all": _dedup(_sell),
+        "add_all": _dedup(_add), "reduce_all": _dedup(_red),
+    }
+
+def backtest_signal(signal_type, signals_full, closes, forward_days=10):
+    """
+    回测某类信号的历史胜率 + 平均盈亏比
+    signal_type: 'buy' / 'add' / 'sell' / 'reduce'
+    signals_full: calc_trade_signals 返回的完整列表 (buy_all 等)
+    closes: 收盘价序列
+    forward_days: 向前看多少天
+    返回: (count, win_rate, avg_profit_pct, avg_loss_pct, profit_loss_ratio) 或 None
+    """
+    import numpy as np
+    pts = signals_full
+    if not pts or len(pts) < 3: return None
+    n = len(closes)
+    gains, losses = [], []
+    count = 0
+    for idx, _y, _lbl, _col, _sym in pts:
+        if idx + forward_days >= n: continue
+        entry = closes[idx]
+        # 买入类看 forward_days 后收盘价
+        if signal_type in ("buy", "add"):
+            exit_p = closes[idx + forward_days]
+            ret = (exit_p - entry) / entry * 100
+        else:  # sell/reduce 反向
+            exit_p = closes[idx + forward_days]
+            ret = (entry - exit_p) / entry * 100
+        if ret >= 0: gains.append(ret)
+        else: losses.append(abs(ret))
+        count += 1
+    if count == 0: return None
+    wr = len(gains) / count * 100
+    avg_gain = float(np.mean(gains)) if gains else 0.0
+    avg_loss = float(np.mean(losses)) if losses else 0.1
+    plr = avg_gain / max(avg_loss, 0.01)
+    return (count, wr, avg_gain, avg_loss, plr)
+
+
 class StockDetailMixin:
     """个股详情/K线/分时/分钟"""
 
@@ -290,7 +435,7 @@ class StockDetailMixin:
         dates_list = pd.to_datetime(df['date']).dt.strftime('%Y%m%d').tolist()
         return {'data': data, 'ma_values': ma_values, 'dates': dates_list, 'trade_dates': dates_list}
 
-    def _apply_daily_kline_ax(self, ax1, kline_data, stock_name, show_zoom_hint=True, hide_x_labels=False, show_support_resistance=True, buy_points=None):
+    def _apply_daily_kline_ax(self, ax1, kline_data, stock_name, show_zoom_hint=True, hide_x_labels=False, show_support_resistance=True, show_bs_signals=True):
         """在给定 Axes 上绘制主图 K 线 + 均线 + 支撑/压力线。"""
         data = kline_data['data']
         ma_values = kline_data['ma_values']
@@ -460,17 +605,52 @@ class StockDetailMixin:
                         y_end = y0 + m * (x_end - x0)
                         ax1.plot([x0, x_end], [y0, y_end], color='#8B0000', linewidth=2.0, linestyle='--',
                                 label='压力线(高点连线)', alpha=0.95, zorder=6)
-        # 绘制买点竖线
-        if buy_points and len(buy_points) > 0:
-            y_min = min(lows)
-            y_max = max(highs)
-            y_range = y_max - y_min
-            for i, point in enumerate(buy_points):
-                idx = point['index']
-                ax1.plot([idx, idx], [y_min - y_range * 0.1, y_max + y_range * 0.1],
-                        color='#FFD700', linewidth=2.0, linestyle='-.', alpha=0.8, zorder=7)
-                ax1.text(idx, y_max + y_range * 0.05, f'买{i+1}', fontsize=8,
-                        color='#FFD700', ha='center', rotation=90)
+        # 🔔 完整 4 类买卖点 (自动计算 + 回测胜率)
+        if show_bs_signals:
+            try:
+                import numpy as _np
+                if n >= 30:
+                    if "成交量" in data.columns:
+                        _vols = data["成交量"].values.astype(float)
+                    else:
+                        _vols = np.zeros(n, dtype=float)
+                    sigs = calc_trade_signals(closes, opens, highs, lows, _vols)
+                    _mp_cls = [
+                        ("buy", "★", "#2E7D32", "★ 买入(MA金/MACD金/布林/锤子线)"),
+                        ("add", "^", "#F57C00", "▲ 加仓(MACD强金/放量突破)"),
+                        ("sell", "v", "#C62828", "▼ 卖出(MA死/MACD死/KDJ高位)"),
+                        ("reduce", "v", "#6A1B9A", "▽ 减仓(MACD弱死/放量破位)"),
+                    ]
+                    for _key, _mk, _col, _lbl in _mp_cls:
+                        _pts = sigs.get(_key, [])
+                        if not _pts: continue
+                        _xs = [p[0] for p in _pts]; _ys = [p[1] for p in _pts]
+                        ax1.scatter(_xs, _ys, marker=_mk, s=110, color=_col,
+                                    zorder=15, edgecolors="white", linewidths=0.8, label=_lbl)
+                        for _pt in _pts:
+                            _idx_p, _y_p, _lbl_p, _col_p, _sym_p = _pt
+                            _off = -12 if _sym_p in ("★","▲") else 12
+                            _va = "top" if _sym_p in ("★","▲") else "bottom"
+                            ax1.annotate(_lbl_p, xy=(_idx_p, _y_p),
+                                         xytext=(0,_off), textcoords="offset points",
+                                         fontsize=5.5, color=_col_p, ha="center", va=_va,
+                                         fontweight="bold", zorder=16)
+                    # 图例 (合并)
+                    handles, labels = ax1.get_legend_handles_labels()
+                    _bs_legend = ax1.legend(handles[-4:], labels[-4:], loc="lower right", fontsize=7)
+                    ax1.add_artist(_bs_legend)
+                    # 回测胜率 (写入 ax1 标题下方 text)
+                    _bt_txt_parts = []
+                    for _k, _lbl in [("buy","买入"),("add","加仓"),("sell","卖出"),("reduce","减仓")]:
+                        _bt = backtest_signal(_k, sigs.get(f"{_k}_all",[]), closes)
+                        if _bt:
+                            _bt_txt_parts.append(f"{_lbl}: 胜率{_bt[1]:.0f}% 盈亏比{_bt[4]:.2f}")
+                    if _bt_txt_parts:
+                        ax1.text(0.5, 1.01, "  |  ".join(_bt_txt_parts),
+                                 transform=ax1.transAxes, fontsize=7.5, color="#333",
+                                 ha="center", va="bottom", style="italic")
+            except Exception as _e:
+                print(f"[买卖点] 绘制失败: {_e}")
         _hint = " 双击图表可放大" if show_zoom_hint else ""
         ax1.set_title(f"{stock_name} - 日K线图(Tushare){_hint}", fontsize=12, fontweight='bold')
         ax1.set_ylabel("价格", fontsize=10)
@@ -629,55 +809,139 @@ class StockDetailMixin:
                 ivars[code] = tk.BooleanVar(value=code in ("VOL", "MACD", "KDJ"))
             for code, lbl in opt_specs:
                 ttk.Checkbutton(top, text=lbl, variable=ivars[code]).pack(side=tk.LEFT, padx=3)
+            # 🛒 买卖点 + 💡胜率提示
+            show_bs_var = tk.BooleanVar(value=True)
+            show_bt_var = tk.BooleanVar(value=True)
+            ttk.Checkbutton(top, text="🛒买卖点", variable=show_bs_var).pack(side=tk.LEFT, padx=(10,3))
+            ttk.Checkbutton(top, text="💡胜率提示", variable=show_bt_var).pack(side=tk.LEFT, padx=3)
             chart_inner = None
             status_var = tk.StringVar(value="")
+            # hover tooltip 浮动窗口
+            hover_tt = None  # Toplevel ref
+            hover_bs_cache = {}  # {idx: (sig_type, label, color)} 缓存
+            hover_bt_cache = {}  # {sig_type: backtest_result} 缓存
+
             def _collect_keys():
                 return [c for c, _ in opt_specs if ivars[c].get()]
+
             def redraw():
+                nonlocal hover_bs_cache, hover_bt_cache
+                # 预计算 signals 供 tooltip 用
+                try:
+                    _data0 = kline_data["data"]
+                    _sig0 = calc_trade_signals(
+                        _data0["收盘"].values, _data0["开盘"].values,
+                        _data0["最高"].values, _data0["最低"].values,
+                        _data0["成交量"].values.astype(float) if "成交量" in _data0.columns else np.zeros(len(_data0)))
+                    # 建 idx→(type,label,color) 查找表
+                    hover_bs_cache = {}
+                    for _t, _col, _lbl in [("buy","#2E7D32","★买入"),("add","#F57C00","▲加仓"),
+                                           ("sell","#C62828","▼卖出"),("reduce","#6A1B9A","▽减仓")]:
+                        for _pt in _sig0.get(f"{_t}_all", []):
+                            hover_bs_cache[_pt[0]] = (_t, _pt[2], _col)
+                    # 预计算回测
+                    closes0 = _data0["收盘"].values.astype(float)
+                    hover_bt_cache = {}
+                    for _t in ("buy","add","sell","reduce"):
+                        _bt = backtest_signal(_t, _sig0.get(f"{_t}_all",[]), closes0)
+                        if _bt: hover_bt_cache[_t] = _bt
+                except Exception:
+                    hover_bs_cache = {}; hover_bt_cache = {}
                 if main_only_var.get():
                     # 只显示主图
                     for w in chart_inner.winfo_children():
                         w.destroy()
                     try:
+                        original_apply2 = self._apply_daily_kline_ax
+                        def temp_apply2(ax1, kline_data, stock_name, show_zoom_hint=True, hide_x_labels=False, show_support_resistance=True):
+                            return original_apply2(ax1, kline_data, stock_name, show_zoom_hint, hide_x_labels,
+                                                   show_support_resistance=show_support_resistance_var.get(),
+                                                   show_bs_signals=show_bs_var.get())
+                        self._apply_daily_kline_ax = temp_apply2
                         fig = self._build_daily_kline_figure(kline_data, stock_name, figsize=(14, 9), show_support_resistance=show_support_resistance_var.get())
+                        self._apply_daily_kline_ax = original_apply2
                         canvas = FigureCanvasTkAgg(fig, chart_inner)
                         canvas.draw()
                         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-                        status_var.set("当前显示:只显示主图")
+                        status_var.set("当前显示:只显示主图 | 买卖点开" if show_bs_var.get() else "当前显示:只显示主图")
+                        _bind_hover(canvas, fig)
                     except Exception as ex:
                         messagebox.showerror("错误", f"绘制失败: {ex}", parent=win)
                 else:
                     # 显示主图+副图
                     sel = _collect_keys()
                     if len(sel) < 2 or len(sel) > 4:
-                        messagebox.showwarning(
-                            "提示",
-                            "请勾选 2~4 个副图指标(VOL、MACD、WR(2)、KDJ、BOLL)。",
-                            parent=win,
-                        )
-                        return
+                        messagebox.showwarning("提示", "请勾选 2~4 个副图指标。", parent=win); return
                     for w in chart_inner.winfo_children():
                         w.destroy()
                     try:
-                        # 临时修改_apply_daily_kline_ax的调用,添加show_support_resistance参数
-                        # 由于_build_daily_kline_zoom_figure没有参数,我们需要在内部修改
-                        # 这里使用一个临时变量来传递参数
                         original_apply = self._apply_daily_kline_ax
                         def temp_apply(ax1, kline_data, stock_name, show_zoom_hint=True, hide_x_labels=False, show_support_resistance=True):
-                            return original_apply(ax1, kline_data, stock_name, show_zoom_hint, hide_x_labels, show_support_resistance=show_support_resistance_var.get())
+                            return original_apply(ax1, kline_data, stock_name, show_zoom_hint, hide_x_labels,
+                                                  show_support_resistance=show_support_resistance_var.get(),
+                                                  show_bs_signals=show_bs_var.get())
                         self._apply_daily_kline_ax = temp_apply
                         fig = self._build_daily_kline_zoom_figure(kline_data, stock_name, sel)
+                        self._apply_daily_kline_ax = original_apply
                         canvas = FigureCanvasTkAgg(fig, chart_inner)
                         canvas.draw()
                         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-                        status_var.set(f"当前副图:{' + '.join(sel)}")
-                        # 恢复原始函数
-                        self._apply_daily_kline_ax = original_apply
+                        status_var.set(f"副图:{' + '.join(sel)} | 买卖点开" if show_bs_var.get() else f"副图:{' + '.join(sel)}")
+                        _bind_hover(canvas, fig)
                     except Exception as ex:
-                        # 恢复原始函数
-                        if hasattr(self, '_apply_daily_kline_ax'):
-                            self._apply_daily_kline_ax = original_apply
+                        if hasattr(self, '_apply_daily_kline_ax'): self._apply_daily_kline_ax = original_apply
                         messagebox.showerror("错误", f"绘制失败: {ex}", parent=win)
+
+            def _bind_hover(canvas, fig):
+                """canvas 绑定 mouse motion → 显示胜率 tooltip"""
+                nonlocal hover_tt
+                def _on_motion(event):
+                    nonlocal hover_tt
+                    if not show_bt_var.get():
+                        if hover_tt: hover_tt.destroy(); hover_tt = None; return
+                    if event.inaxes is None or event.xdata is None:
+                        if hover_tt: hover_tt.destroy(); hover_tt = None; return
+                    idx = int(round(event.xdata))
+                    if idx not in hover_bs_cache:
+                        if hover_tt: hover_tt.destroy(); hover_tt = None; return
+                    sig_type, label, color = hover_bs_cache[idx]
+                    bt = hover_bt_cache.get(sig_type)
+                    # 构造 tooltip 文本
+                    _type_zh = {"buy":"★买入","add":"▲加仓","sell":"▼卖出","reduce":"▽减仓"}.get(sig_type, sig_type)
+                    lines = [f"🎯 {_type_zh} — {label}", ""]
+                    if bt:
+                        cnt, wr, avg_g, avg_l, plr = bt
+                        lines.append(f"📊 历史信号: {cnt} 次")
+                        lines.append(f"✅ 胜率: {wr:.1f}%")
+                        lines.append(f"💰 平均盈利: +{avg_g:.2f}%")
+                        lines.append(f"💔 平均亏损: -{avg_l:.2f}%")
+                        lines.append(f"⚖️ 盈亏比: {plr:.2f}")
+                    else:
+                        lines.append("⚠️ 历史信号不足 3 次")
+                    text = "\n".join(lines)
+                    # 创建/更新 tooltip 窗口
+                    if hover_tt is None or not hover_tt.winfo_exists():
+                        hover_tt = tk.Toplevel(win)
+                        hover_tt.wm_overrideredirect(True)
+                        hover_tt.attributes("-topmost", True)
+                        hover_tt.configure(bg="#263238")
+                        tk.Label(hover_tt, text=text, bg="#263238", fg="#FFFFFF",
+                                 font=("", 10, "bold"), padx=10, pady=6, justify=tk.LEFT).pack()
+                    else:
+                        for w in hover_tt.winfo_children(): w.destroy()
+                        tk.Label(hover_tt, text=text, bg="#263238", fg="#FFFFFF",
+                                 font=("", 10, "bold"), padx=10, pady=6, justify=tk.LEFT).pack()
+                    # 定位 (跟随鼠标, 避免超出屏幕)
+                    mx = win.winfo_pointerx(); my = win.winfo_pointery()
+                    hover_tt.geometry(f"+{mx+15}+{my+15}")
+                canvas.mpl_connect("motion_notify_event", _on_motion)
+                # 离开时隐藏
+                def _on_leave(event):
+                    nonlocal hover_tt
+                    if hover_tt: hover_tt.destroy(); hover_tt = None
+                canvas.mpl_connect("axes_leave_event", _on_leave)
+            # 首次 redraw
+            win.after(100, redraw)
             ttk.Button(top, text="应用", command=redraw).pack(side=tk.LEFT, padx=(10, 4))
             current_stock_data = {'kline_data': kline_data, 'stock_name': stock_name}
             def calculate_kelly():
