@@ -845,14 +845,38 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         aux_vars[_k] = tk.BooleanVar(value=_def)
         ttk.Checkbutton(_aux_frame, text=_lbl, variable=aux_vars[_k]).pack(side=tk.LEFT, padx=2)
 
-    # ===== 同花顺风格实时数据面板 (最新价+涨跌+开高低收+量额+换手+PE+市值+量比) =====
-    info_panel = tk.Frame(right_f, bg="#FFFFFF", bd=1, relief=tk.SOLID)
-    info_panel.pack(fill=tk.X, pady=(2,4), padx=2)
-    # — 左区: 最新价 + 涨跌额 + 涨跌幅 (大字号 红绿色) —
-    info_left = tk.Frame(info_panel, bg="#FFFFFF"); info_left.pack(side=tk.LEFT, padx=(12,14), pady=6)
-    _tk_cn_var = tk.StringVar(value="--")   # 最新价
-    _tk_cp_var = tk.StringVar(value="--")   # 涨跌额
-    _tk_cpct_var = tk.StringVar(value="--") # 涨跌幅%
+    # ===== 右侧内部: 顶栏(Checkbuttons) + K线图+实时行情 (水平 PanedWindow) =====
+    _right_inner = tk.PanedWindow(right_f, orient=tk.HORIZONTAL, bg="#FAFAFA", sashwidth=4)
+    _right_inner.pack(fill=tk.BOTH, expand=True)
+    # — 中间: matplotlib K 线图 (左侧大块) —
+    chart_inner = tk.Frame(_right_inner, bg="#FAFAFA")
+    _right_inner.add(chart_inner, minsize=500)
+    # — 右侧: 实时行情竖排面板 —
+    info_panel = tk.Frame(_right_inner, bg="#FFFFFF", bd=1, relief=tk.SOLID, width=260)
+    _right_inner.add(info_panel, minsize=240)
+
+    # — info_panel 从上到下: 大字号价格 → 日期 → 指标表 (竖排) —
+    info_header = tk.Frame(info_panel, bg="#ECEFF1"); info_header.pack(fill=tk.X)
+    tk.Label(info_header, text="📊 实时行情", bg="#ECEFF1", fg="#283593",
+             font=("", 10, "bold")).pack(anchor="w", padx=8, pady=4)
+    tk.Frame(info_panel, bg="#ECEFF1", height=1).pack(fill=tk.X)
+    # 大字号价格区
+    info_big = tk.Frame(info_panel, bg="#FFFFFF"); info_big.pack(fill=tk.X, padx=10, pady=8)
+    _tk_name_label = tk.Label(info_big, text="", bg="#FFFFFF", fg="#333", font=("", 8, "bold"))
+    _tk_name_label.pack(anchor="w")
+    _tk_price_label = tk.Label(info_big, text="--", bg="#FFFFFF", fg="#C62828",
+                                font=("", 26, "bold")); _tk_price_label.pack(anchor="w")
+    _tk_chg_row = tk.Frame(info_big, bg="#FFFFFF"); _tk_chg_row.pack(anchor="w")
+    _tk_cp_lbl = tk.Label(_tk_chg_row, text="--", bg="#FFFFFF", fg="#C62828",
+                           font=("", 11, "bold")); _tk_cp_lbl.pack(side=tk.LEFT)
+    _tk_cpct_lbl = tk.Label(_tk_chg_row, text="--", bg="#FFFFFF", fg="#C62828",
+                             font=("", 11)); _tk_cpct_lbl.pack(side=tk.LEFT, padx=(6,0))
+    _tk_date_lbl = tk.Label(info_big, text="", bg="#FFFFFF", fg="#888", font=("", 8))
+    _tk_date_lbl.pack(anchor="w", pady=(2,0))
+    # 分割
+    tk.Frame(info_panel, bg="#EEEEEE", height=1).pack(fill=tk.X, padx=10, pady=4)
+    # 指标网格 (竖排 2 列 × 7 行)
+    info_grid = tk.Frame(info_panel, bg="#FFFFFF"); info_grid.pack(fill=tk.X, padx=10, pady=4)
     _tk_open_var = tk.StringVar(value="今开 --")
     _tk_high_var = tk.StringVar(value="最高 --")
     _tk_low_var = tk.StringVar(value="最低 --")
@@ -865,42 +889,29 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     _tk_mv_var = tk.StringVar(value="市值 --")
     _tk_pb_var = tk.StringVar(value="PB --")
     _tk_vol_ratio_var = tk.StringVar(value="量比 --")
-    _tk_name_label = tk.Label(info_left, text="", bg="#FFFFFF", fg="#333", font=("", 9, "bold"))
-    _tk_name_label.pack(anchor="w")
-    _tk_price_label = tk.Label(info_left, textvariable=_tk_cn_var, bg="#FFFFFF", fg="#C62828",
-                                font=("", 22, "bold")); _tk_price_label.pack(anchor="w")
-    _tk_chg_row = tk.Frame(info_left, bg="#FFFFFF"); _tk_chg_row.pack(anchor="w")
-    _tk_cp_lbl = tk.Label(_tk_chg_row, textvariable=_tk_cp_var, bg="#FFFFFF", fg="#C62828",
-                           font=("", 11, "bold")); _tk_cp_lbl.pack(side=tk.LEFT)
-    _tk_cpct_lbl = tk.Label(_tk_chg_row, textvariable=_tk_cpct_var, bg="#FFFFFF", fg="#C62828",
-                             font=("", 11)); _tk_cpct_lbl.pack(side=tk.LEFT, padx=(8,0))
-    _tk_date_lbl = tk.Label(info_left, text="", bg="#FFFFFF", fg="#888", font=("", 8))
-    _tk_date_lbl.pack(anchor="w")
-    # — 右区: 三列 × 4 个指标 —
-    info_right = tk.Frame(info_panel, bg="#FFFFFF"); info_right.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=6, padx=(0,8))
-    def _mk_indicator(parent, row, col, label, var, desc=""):
-        fr = tk.Frame(parent, bg="#FFFFFF"); fr.grid(row=row, column=col, sticky="w", padx=10, pady=2)
+    def _mk_indicator(grid, row, col, label, var):
+        fr = tk.Frame(grid, bg="#FFFFFF")
+        fr.grid(row=row, column=col, sticky="w", padx=6, pady=3)
         tk.Label(fr, text=label, bg="#FFFFFF", fg="#888", font=("", 8)).pack(anchor="w")
-        tk.Label(fr, textvariable=var, bg="#FFFFFF", fg="#333", font=("", 10, "bold")).pack(anchor="w")
-    info_r1 = tk.Frame(info_right, bg="#FFFFFF"); info_r1.pack(fill=tk.X)
-    _mk_indicator(info_r1, 0, 0, "今开", _tk_open_var)
-    _mk_indicator(info_r1, 0, 1, "最高", _tk_high_var)
-    _mk_indicator(info_r1, 0, 2, "最低", _tk_low_var)
-    _mk_indicator(info_r1, 0, 3, "昨收", _tk_preclose_var)
-    info_r2 = tk.Frame(info_right, bg="#FFFFFF"); info_r2.pack(fill=tk.X)
-    _mk_indicator(info_r2, 0, 0, "成交量", _tk_vol_var)
-    _mk_indicator(info_r2, 0, 1, "成交额", _tk_amount_var)
-    _mk_indicator(info_r2, 0, 2, "换手率", _tk_turn_var)
-    _mk_indicator(info_r2, 0, 3, "振幅", _tk_amp_var)
-    info_r3 = tk.Frame(info_right, bg="#FFFFFF"); info_r3.pack(fill=tk.X)
-    _mk_indicator(info_r3, 0, 0, "PE(TTM)", _tk_pe_var)
-    _mk_indicator(info_r3, 0, 1, "PB", _tk_pb_var)
-    _mk_indicator(info_r3, 0, 2, "总市值", _tk_mv_var)
-    _mk_indicator(info_r3, 0, 3, "量比(5/20)", _tk_vol_ratio_var)
-    # — 刷新按钮: 右侧最右边 —
-    _refresh_spot_btn = tk.Button(info_right, text="🔄 实时行情", command=lambda: _refresh_realtime(),
-                                   bg="#E3F2FD", fg="#1565C0", font=("", 9), relief=tk.FLAT, padx=8)
-    _refresh_spot_btn.pack(side=tk.RIGHT, pady=4)
+        tk.Label(fr, textvariable=var, bg="#FFFFFF", fg="#222", font=("", 10, "bold")).pack(anchor="w")
+    # 左列
+    _mk_indicator(info_grid, 0, 0, "今开", _tk_open_var)
+    _mk_indicator(info_grid, 1, 0, "最高", _tk_high_var)
+    _mk_indicator(info_grid, 2, 0, "最低", _tk_low_var)
+    _mk_indicator(info_grid, 3, 0, "昨收", _tk_preclose_var)
+    _mk_indicator(info_grid, 4, 0, "换手率", _tk_turn_var)
+    _mk_indicator(info_grid, 5, 0, "振幅", _tk_amp_var)
+    _mk_indicator(info_grid, 6, 0, "总市值", _tk_mv_var)
+    # 右列
+    _mk_indicator(info_grid, 0, 1, "成交量", _tk_vol_var)
+    _mk_indicator(info_grid, 1, 1, "成交额", _tk_amount_var)
+    _mk_indicator(info_grid, 2, 1, "PE(TTM)", _tk_pe_var)
+    _mk_indicator(info_grid, 3, 1, "PB", _tk_pb_var)
+    _mk_indicator(info_grid, 4, 1, "量比", _tk_vol_ratio_var)
+    # 刷新按钮
+    _refresh_spot_btn = tk.Button(info_panel, text="🔄 实时行情", command=lambda: _refresh_realtime(),
+                                   bg="#E3F2FD", fg="#1565C0", font=("", 9), relief=tk.FLAT, padx=10, pady=4)
+    _refresh_spot_btn.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0,10))
 
     def _refresh_realtime():
         """异步刷新 akshare spot_em 实时行情 + 更新面板"""
@@ -1004,7 +1015,6 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             ratio_20 = vol / v20 if v20 > 0 else 1
             _tk_vol_ratio_var.set(f"5日 {ratio_5:.2f}  20日 {ratio_20:.2f}")
         else: _tk_vol_ratio_var.set("--")
-    chart_inner = tk.Frame(right_f, bg="#FAFAFA"); chart_inner.pack(fill=tk.BOTH, expand=True, pady=4)
 
     # ===== 状态缓存 =====
     _current_kline = None; _current_fund: Dict = {}
