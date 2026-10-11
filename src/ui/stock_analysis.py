@@ -608,18 +608,15 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
     def _fmt_chan(kd):
         _, c, h, l, _ = _get_ohlcv(kd) or (None,None,None,None,None)
-        if c is None or len(c) < 60: return ["⚠️ 缠论简化需60日K线"]
-        # 简化: 分型 (处理包含关系后)
-        peaks, troughs = _detect_local_extremes(h, order=3)
-        peaks_l, troughs_l = _detect_local_extremes(l, order=3)
-        n_peak = len(peaks); n_trough = len(troughs_l)
-        # 中枢: 找 3 笔重叠 (简化版)
-        last3_troughs = troughs_l[-3:] if len(troughs_l) >= 3 else troughs_l
-        last3_peaks = peaks[-3:] if len(peaks) >= 3 else peaks
-        if len(last3_troughs) >= 3 and len(last3_peaks) >= 3:
-            zg = max(t[1] for t in last3_troughs); zd = min(p[1] for p in last3_peaks)
-            if zg < zd: return [f"🌀 中枢 [{zd:.1f}, {zg:.1f}]", f"笔数: {n_peak+n_trough} 中枢形成"]
-        return [f"🌀 当前笔 {n_peak+n_trough} 个分型", "中枢未成型 (简化版, 完整版需缠论标准包含处理)"]
+        if c is None or len(c) < 60: return ["⚠️ 缠论需 60 日以上 K 线"]
+        try:
+            from ui.chanlun import analyze_chan, format_chan_report
+            result = analyze_chan(None, h, l, c)
+            return format_chan_report(result)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return [f"缠论分析出错: {e}"]
 
     def _fmt_wave(kd):
         closes = _get_closes(kd)
