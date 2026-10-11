@@ -14122,6 +14122,17 @@ class DapanMixin:
             print(f"[📊股票比价❌] {e}", flush=True)
             _tb.print_exc()
 
+    def _show_stock_analysis_dialog(self):
+        """📊 股票分析 — 左侧主流方法 + 右侧纯 K 线图, lazy import"""
+        import traceback as _tb
+        print("[📊股票分析] 按钮被点击!", flush=True)
+        try:
+            from ui.stock_analysis import show_stock_analysis_dialog as _sa
+            ai_fn = getattr(self, 'call_ai_model', None)
+            _sa(getattr(self, 'root', None) or getattr(self, '_root', None), call_ai_fn=ai_fn)
+        except Exception as e:
+            print(f"[📊股票分析❌] {e}", flush=True); _tb.print_exc()
+
     def _show_wechat_dialog(self):
         """📱 微信日报生成 — lazy import"""
         import traceback as _tb
