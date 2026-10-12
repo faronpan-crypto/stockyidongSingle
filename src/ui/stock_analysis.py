@@ -11,7 +11,7 @@
   🤖 AI 综合: 板块判断 / Top2买 / Top2避 / 操作建议 / 风险
 右边: matplotlib K 线图 + 副图 + 买卖点 + hover tooltip(含凯利公式)
 """
-import os, re, sys, json, threading, traceback
+import os, re, sys, json, threading, traceback, subprocess, webbrowser, tkinter.messagebox
 import webbrowser
 from typing import Dict, List, Optional, Any, Tuple
 import tkinter as tk
@@ -1106,13 +1106,135 @@ def _show_method_knowledge(parent_win: tk.Tk, method_name: str, extra_title: str
             _w.bind("<Button-1>", lambda _e, u=url: webbrowser.open(u))
             _w.bind("<Double-Button-1>", lambda _e, u=url: webbrowser.open(u))
 
-    def _book_row(parent, text):
-        f = tk.Frame(parent, bg="#FFFFFF"); f.pack(fill=tk.X, anchor="w", pady=1)
-        tk.Label(f, text="📘", bg="#FFFFFF", fg="#6A1B9A",
-                 font=("", _font_size.get())).pack(side=tk.LEFT)
-        tk.Label(f, text=text, bg="#FFFFFF", fg="#333",
-                 font=("", _font_size.get()), wraplength=700,
-                 justify="left", anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X)
+    # ========= 书库索引 (只构建一次, 存模块级缓存) =========
+    _BOOK_INDEX = None  # {关键字小写: "/Users/xx/Downloads/笑傲股市.pdf"}
+    _BOOK_INDEX_TS = 0
+
+    def _build_book_index():
+        """扫描本地常见书库目录, 构建 关键字→文件路径 索引 (结果缓存 5 分钟)"""
+        nonlocal _BOOK_INDEX, _BOOK_INDEX_TS
+        import time as _t
+        if _BOOK_INDEX and _t.time() - _BOOK_INDEX_TS < 300:
+            return _BOOK_INDEX
+        _BOOK_INDEX = {}
+        # 常见书库路径 (用户可以手动放到这里)
+        _LIBRARY_PATHS = [
+            os.path.expanduser("~/Downloads"),
+            os.path.expanduser("~/Documents"),
+            os.path.expanduser("~/Desktop"),
+            os.path.expanduser("~/Books"),
+            os.path.expanduser("~/Library/Mobile Documents/com~apple~Books/Documents"),
+            os.path.expanduser("~/.qclaw/books"),  # 程序内建
+        ]
+        _exts = (".pdf", ".epub", ".mobi", ".djvu")
+        for _p in _LIBRARY_PATHS:
+            if not os.path.isdir(_p): continue
+            try:
+                for _root, _dirs, _files in os.walk(_p):
+                    _depth = _root.replace(_p, "").count(os.sep)
+                    if _depth > 2: _dirs[:] = []; continue
+                    for _fn in _files:
+                        if not _fn.lower().endswith(_exts): continue
+                        _key = os.path.splitext(_fn)[0].lower()
+                        _key = _key.replace("【电子书】","").strip()
+                        if len(_key) < 2: continue
+                        _BOOK_INDEX[_key] = os.path.join(_root, _fn)
+            except Exception: continue
+        _BOOK_INDEX_TS = _t.time()
+        return _BOOK_INDEX
+
+    def _refresh_index():
+        """右键菜单调用的重新扫描 — 强制重建"""
+        nonlocal _BOOK_INDEX, _BOOK_INDEX_TS
+        _BOOK_INDEX_TS = 0  # 强制过期
+        _build_book_index()
+        # 刷新卡片 (全局重建)
+        _apply_fonts(_font_size.get())
+
+    def _find_local_book(book_text):
+        """从 '《笑傲股市》— 欧奈尔' 这种描述里提取关键字, 匹配本地文件"""
+        _idx = _build_book_index()
+        # 提取中文书名: 书名在 《》 或 "—" 之前
+        _name = book_text
+        import re as _re
+        m = _re.search(r"[《\u201c\"](.+?)[》\u201d\"]", _name)
+        if m: _name = m.group(1)
+        else:
+            _name = _name.split("—")[0].split("-")[0].split("—")[0].strip()
+        _name = _name.strip().lower()
+        if len(_name) < 2: return None
+        # 1. 精确匹配 (文件名里包含书名)
+        for _k, _p in _idx.items():
+            if _name in _k or _k in _name:
+                return _p
+        # 2. 拆分关键字匹配 (取书名前 2-4 个字)
+        _subs = [_name[:3], _name[:2], _name]
+        for _s in _subs:
+            for _k, _p in _idx.items():
+                if _s and _s in _k: return _p
+        return None
+
+    def _open_local_book(path):
+        """用 macOS 默认阅读器打开本地书"""
+        try:
+            subprocess.Popen(["open", path])
+            return True
+        except Exception as e:
+            tk.messagebox.showerror("打开失败", f"无法打开文件:\n{path}\n\n{e}")
+            return False
+
+    def _book_row(parent, book_text):
+        """一行推荐书籍 — 如果本地有则加 ✅, 双击行打开"""
+        _path = _find_local_book(book_text)
+        f = tk.Frame(parent, bg="#FFFFFF", cursor="hand2")
+        f.pack(fill=tk.X, anchor="w", pady=2)
+
+        # 图标: 本地有=✅📖, 没有=📘
+        _icon = "✅📖" if _path else "📘"
+        _color = "#2E7D32" if _path else "#6A1B9A"
+        lbl_ic = tk.Label(f, text=_icon, bg="#FFFFFF", fg=_color,
+                          font=("", _font_size.get(), "bold"))
+        lbl_ic.pack(side=tk.LEFT)
+
+        # 书名 (双击打开 / 右键打开所在目录)
+        lbl = tk.Label(f, text=book_text, bg="#FFFFFF",
+                       fg="#2E7D32" if _path else "#333",
+                       font=("", _font_size.get(), "underline" if _path else ""),
+                       wraplength=660, justify="left", anchor="w")
+        lbl.pack(side=tk.LEFT, padx=4, fill=tk.X)
+
+        # 本地标记
+        if _path:
+            _base = os.path.basename(os.path.dirname(_path)) + "/" + os.path.basename(_path)
+            lbl2 = tk.Label(f, text=f"← 本地已有 ({_base})", bg="#FFFFFF",
+                            fg="#1565C0", font=("", max(8, _font_size.get()-1)))
+            lbl2.pack(side=tk.RIGHT, padx=6)
+        else:
+            lbl2 = tk.Label(f, text="(放入 ~/Downloads 或 ~/Books 可关联)", bg="#FFFFFF",
+                            fg="#BDBDBD", font=("", max(8, _font_size.get()-1)))
+            lbl2.pack(side=tk.RIGHT, padx=6)
+
+        # 所有子控件绑定双击打开 (如果本地有)
+        for _w in (f, lbl, lbl_ic):
+            if _path:
+                _w.bind("<Double-Button-1>", lambda _e, p=_path: _open_local_book(p))
+                _w.bind("<Button-1>", lambda _e, p=_path: _open_local_book(p))  # 单击也行
+            # 右键菜单: 打开 / 打开所在目录 / 重新扫描书库
+            def _rm(e, p=_path):
+                m = tk.Menu(top, tearoff=0)
+                if p:
+                    m.add_command(label=f"📖 打开: {os.path.basename(p)}",
+                                  command=lambda: _open_local_book(p))
+                    m.add_command(label="📂 在 Finder 中显示",
+                                  command=lambda: subprocess.Popen(["open", "-R", p]))
+                    m.add_separator()
+                m.add_command(label="🔄 重新扫描本地书库",
+                              command=lambda: _refresh_index())
+                m.add_command(label="📂 打开书库文件夹 (~/Books)",
+                              command=lambda: os.makedirs(os.path.expanduser("~/Books"), exist_ok=True) or subprocess.Popen(["open", os.path.expanduser("~/Books")]))
+                try: m.tk_popup(e.x_root, e.y_root)
+                finally: m.grab_release()
+            _w.bind("<Button-3>", _rm)
 
     def _diagram_box(parent, text):
         """等宽字体 ASCII 图"""
