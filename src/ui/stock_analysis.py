@@ -1000,100 +1000,185 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
     },
 }
 def _show_method_knowledge(parent_win: tk.Tk, method_name: str, extra_title: str = ""):
-    """弹出 Toplevel, 展示某个方法的完整说明 + 可点击 URL"""
-    # 精确匹配 → 去掉括号/斜杠/通用后缀后模糊匹配
+    """弹出 Toplevel, 展示某个方法的完整说明 + 可双击 URL + 字体缩放 + 分区卡片布局"""
     info = KNOWLEDGE.get(method_name)
     if not info:
         _base = re.sub(r"[（(].*?[)）]", "", method_name).strip()
-        # 去掉 "系统"/"简化"/"方法"/"通道" 等通用后缀
         _base = re.sub(r"(系统|简化|通道|方法)$", "", _base).strip()
-        # 取第一段 (RSI/KDJ→RSI, 头肩顶/底→头肩顶)
         _base = re.sub(r"[/／·\-].*", "", _base).strip()
         if _base and _base in KNOWLEDGE:
             info = KNOWLEDGE[_base]
     if not info:
-        # 子串匹配兜底
         for _k, _v in KNOWLEDGE.items():
             if _k in method_name or method_name in _k:
                 info = _v; break
     if not info: return
+
     top = tk.Toplevel(parent_win)
     top.title(f"{info.get('emoji','❓')} {method_name} — 方法说明")
-    if extra_title:
-        # 弹窗顶部加一个彩色条提示 K 线叠加
-        _band = tk.Frame(top, bg="#FFF3E0", height=24)
-        _band.pack(fill=tk.X)
-        tk.Label(_band, text=f"🔍 {extra_title}", bg="#FFF3E0", fg="#E65100",
-                 font=("", 9, "bold")).pack(side=tk.LEFT, padx=10)
-    top.geometry("620x560")
-    top.configure(bg="#FFFDF5")
+    top.geometry("780x660")
+    top.minsize(700, 580)
+    top.configure(bg="#ECEFF1")
     top.attributes("-topmost", True)
 
-    header = tk.Frame(top, bg="#FFFDF5"); header.pack(fill=tk.X, padx=14, pady=(12, 4))
-    tk.Label(header, text=f"{info.get('emoji','')} {method_name}", bg="#FFFDF5",
-             fg="#4527A0", font=("", 14, "bold")).pack(anchor="w")
-    sep = tk.Frame(top, bg="#E8EAF6", height=1); sep.pack(fill=tk.X, padx=14)
+    # ========= 顶栏 =========
+    _top = tk.Frame(top, bg="#3949AB"); _top.pack(fill=tk.X)
+    tk.Label(_top, text=f"{info.get('emoji','')} {method_name} — 方法说明",
+             bg="#3949AB", fg="white", font=("", 13, "bold")).pack(side=tk.LEFT, padx=14, pady=8)
+    if extra_title:
+        tk.Label(_top, text=f"🔍 {extra_title}", bg="#3949AB", fg="#FFD54F",
+                 font=("", 9, "bold")).pack(side=tk.LEFT, padx=10)
 
-    body_frame = tk.Frame(top, bg="#FFFDF5"); body_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=10)
-    sb = ttk.Scrollbar(body_frame, orient=tk.VERTICAL)
-    sb.pack(side=tk.RIGHT, fill=tk.Y)
-    txt = tk.Text(body_frame, bg="#FFFDF5", fg="#333", font=("", 10), wrap=tk.WORD,
-                  relief=tk.FLAT, yscrollcommand=sb.set, padx=4, pady=4)
-    txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    sb.configure(command=txt.yview)
+    # ========= 字体缩放控件 =========
+    _ctrl = tk.Frame(top, bg="#ECEFF1"); _ctrl.pack(fill=tk.X, padx=10, pady=(6, 2))
+    tk.Label(_ctrl, text="🔤 字体:", bg="#ECEFF1", fg="#4527A0",
+             font=("", 9, "bold")).pack(side=tk.LEFT)
+    _font_size = tk.IntVar(value=11)  # 基础字号
+    _font_scale_var = tk.DoubleVar(value=1.0)
+    _size_label = tk.Label(_ctrl, text="11", bg="#ECEFF1", fg="#4527A0", font=("", 10))
+    _size_label.pack(side=tk.LEFT, padx=(4, 6))
+    def _zoom(delta):
+        cur = _font_size.get() + delta
+        cur = max(8, min(20, cur)); _font_size.set(cur)
+        _size_label.config(text=str(cur))
+        _apply_fonts(cur)
+    tk.Button(_ctrl, text="A-", command=lambda: _zoom(-1),
+              relief=tk.FLAT, bg="#CFD8DC", fg="#37474F", font=("", 9),
+              padx=8, cursor="hand2").pack(side=tk.LEFT)
+    tk.Button(_ctrl, text="A+", command=lambda: _zoom(1),
+              relief=tk.FLAT, bg="#CFD8DC", fg="#37474F", font=("", 10, "bold"),
+              padx=8, cursor="hand2").pack(side=tk.LEFT, padx=2)
+    tk.Button(_ctrl, text="重置", command=lambda: _font_size.set(11) or _size_label.config(text="11") or _apply_fonts(11),
+              relief=tk.FLAT, bg="#CFD8DC", fg="#37474F", font=("", 9),
+              padx=6, cursor="hand2").pack(side=tk.LEFT, padx=4)
+    # 关闭
+    tk.Button(_ctrl, text="关闭 ✕", command=top.destroy,
+              relief=tk.FLAT, bg="#EF5350", fg="white", font=("", 10, "bold"),
+              padx=14, cursor="hand2").pack(side=tk.RIGHT)
 
-    def _add_section(title, content, section_color="#4527A0"):
-        txt.insert("end", f"\n{title}\n", "title")
-        txt.insert("end", f"{content}\n", "body")
+    # ========= 主体: Canvas + Scrollbar + 内部可滚动 Frame (放置各个卡片) =========
+    _outer = tk.Frame(top, bg="#ECEFF1"); _outer.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 8))
+    _canvas = tk.Canvas(_outer, bg="#ECEFF1", highlightthickness=0)
+    _vsb = ttk.Scrollbar(_outer, orient="vertical", command=_canvas.yview)
+    _canvas.configure(yscrollcommand=_vsb.set)
+    _canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    _vsb.pack(side=tk.RIGHT, fill=tk.Y)
+    _inner = tk.Frame(_canvas, bg="#ECEFF1")
+    _canvas.create_window((0, 0), window=_inner, anchor="nw")
+    _inner.bind("<Configure>", lambda _e: _canvas.configure(scrollregion=_canvas.bbox("all")))
+    # 鼠标滚轮
+    def _on_mw(_e): _canvas.yview_scroll(int(-1 * (_e.delta / 120)), "units")
+    _canvas.bind_all("<MouseWheel>", _on_mw)
 
-    _add_section("📖 定义", info.get("definition", ""), "#4527A0")
+    # ====== 卡片构建函数 ======
+    def _card(parent, title, emoji, color="#4527A0", icon_bg="#E8EAF6"):
+        """建一个带彩色标题栏的卡片"""
+        f = tk.Frame(parent, bg="#FFFFFF", relief=tk.FLAT, bd=1,
+                     highlightbackground="#E0E0E0", highlightthickness=1)
+        f.pack(fill=tk.X, pady=(0, 8))
+        bar = tk.Frame(f, bg=color); bar.pack(fill=tk.X)
+        tk.Label(bar, text=f" {emoji} {title}", bg=color, fg="white",
+                 font=("", 11, "bold")).pack(anchor="w", padx=10, pady=5)
+        body = tk.Frame(f, bg="#FFFFFF"); body.pack(fill=tk.X, padx=14, pady=(8, 10))
+        return body
 
-    if info.get("diagram"):
-        # ASCII 示意图 — 等宽字体
-        _section_label = "\n📐 示意图\n"
-        txt.insert("end", _section_label, "title")
-        _diag_tag = f"diag_{id(info) % 1000000}"
-        txt.insert("end", info["diagram"] + "\n", _diag_tag)
-        txt.tag_config(_diag_tag, font=("Menlo", 9), foreground="#555",
-                       background="#F5F0FF", lmargin1=12, lmargin2=12, spacing1=2)
+    def _body_label(parent, text, size_offset=0, color="#333"):
+        lbl = tk.Label(parent, text=text, bg="#FFFFFF", fg=color,
+                       font=("", _font_size.get()+size_offset),
+                       justify="left", wraplength=720, anchor="w")
+        lbl.pack(fill=tk.X, anchor="w")
+        return lbl
 
-    _add_section("🎯 操作意义", info.get("meaning", ""), "#2E7D32")
+    def _url_row(parent, label, url):
+        """一行可点击 URL (双击打开, 同时单击也可以)"""
+        f = tk.Frame(parent, bg="#FFFFFF"); f.pack(fill=tk.X, anchor="w", pady=1)
+        tk.Label(f, text="🔗", bg="#FFFFFF", fg="#1565C0",
+                 font=("", _font_size.get())).pack(side=tk.LEFT)
+        lbl = tk.Label(f, text=f"{label}", bg="#FFFFFF", fg="#1565C0",
+                       font=("", _font_size.get(), "underline"),
+                       cursor="hand2", anchor="w")
+        lbl.pack(side=tk.LEFT)
+        lbl2 = tk.Label(f, text=f" ← {url}", bg="#FFFFFF", fg="#90A4AE",
+                        font=("", max(8, _font_size.get()-1)),
+                        anchor="w")
+        lbl2.pack(side=tk.LEFT)
+        for _w in (lbl, lbl2, f):
+            _w.bind("<Button-1>", lambda _e, u=url: webbrowser.open(u))
+            _w.bind("<Double-Button-1>", lambda _e, u=url: webbrowser.open(u))
 
-    if info.get("example"):
-        _add_section("📌 真实案例", info["example"], "#1565C0")
+    def _book_row(parent, text):
+        f = tk.Frame(parent, bg="#FFFFFF"); f.pack(fill=tk.X, anchor="w", pady=1)
+        tk.Label(f, text="📘", bg="#FFFFFF", fg="#6A1B9A",
+                 font=("", _font_size.get())).pack(side=tk.LEFT)
+        tk.Label(f, text=text, bg="#FFFFFF", fg="#333",
+                 font=("", _font_size.get()), wraplength=700,
+                 justify="left", anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X)
 
-    if info.get("books"):
-        _add_section("📚 推荐书籍",
-                     "\n".join(f"  • {b}" for b in info["books"]), "#6A1B9A")
-    if info.get("urls"):
-        txt.insert("end", "\n🌐 参考网站 (点击可打开):\n", "title")
-        for u in info["urls"]:
-            # 支持 (label, url) tuple 或纯 url string
-            if isinstance(u, tuple) and len(u) == 2:
-                _label, _url = u
-                _display = f"🔗 {_label} → {_url}"
-            else:
-                _url = str(u)
-                _display = f"🔗 {_url}"
-            tag = f"url_{hash(_url) % 1000000}"
-            txt.insert("end", f"  {_display}\n", tag)
-            txt.tag_config(tag, foreground="#1565C0", underline=True)
-            txt.tag_bind(tag, "<Button-1>", lambda _e, url=_url: webbrowser.open(url))
+    def _diagram_box(parent, text):
+        """等宽字体 ASCII 图"""
+        frame = tk.Frame(parent, bg="#F5F0FF", highlightbackground="#D1C4E9",
+                         highlightthickness=1); frame.pack(fill=tk.X, pady=4)
+        tk.Label(frame, text=text, bg="#F5F0FF", fg="#555",
+                 font=("Menlo", max(8, _font_size.get()-2)),
+                 justify="left", anchor="w", padx=10, pady=8).pack(fill=tk.X)
 
-    # 样式
-    txt.tag_config("title", font=("", 11, "bold"), foreground="#4527A0", spacing3=4)
-    txt.tag_config("body", font=("", 10), foreground="#333", lmargin1=8, lmargin2=8, spacing1=2)
-    txt.configure(state=tk.NORMAL)  # 保持 NORMAL 以便 URL 可点击
-    # 拦截按键防止误编辑
-    for _ev in ("<Key>", "<BackSpace>", "<Delete>", "<Ctrl-a>", "<Ctrl-v>", "<Ctrl-x>"):
-        txt.bind(_ev, lambda _e: "break")
+    def _section_sep(parent, text):
+        f = tk.Frame(parent, bg="#ECEFF1"); f.pack(fill=tk.X, pady=(4, 4))
+        tk.Frame(f, bg="#C5CAE9", height=1).pack(side=tk.LEFT, fill=tk.X, expand=True, pady=6)
+        tk.Label(f, text=f"  {text}  ", bg="#ECEFF1", fg="#7986CB",
+                 font=("", max(8, _font_size.get()-1))).pack(side=tk.LEFT, padx=4)
+        tk.Frame(f, bg="#C5CAE9", height=1).pack(side=tk.LEFT, fill=tk.X, expand=True, pady=6)
 
-    # 关闭按钮
-    close_btn = tk.Button(top, text="关闭", command=top.destroy,
-                          bg="#4527A0", fg="white", font=("", 10),
-                          relief=tk.FLAT, padx=20, pady=4)
-    close_btn.pack(pady=(0, 10))
-    txt.see("1.0")
+    def _apply_fonts(base_size):
+        """字号变化时全局更新 — 重建卡片 (简单做法: 清掉重建)"""
+        for w in _inner.winfo_children(): w.destroy()
+        _build_all()
+
+    # ====== 内容构建 ======
+    def _build_all():
+        # 定义卡片 (最顶部, 全宽)
+        _body_label(_inner, info.get("definition", ""), size_offset=0, color="#424242").pack(fill=tk.X, pady=(0, 4))
+
+        # 网格: 左操作意义 + 右案例 (并排)
+        _mid = tk.Frame(_inner, bg="#ECEFF1"); _mid.pack(fill=tk.X, pady=4)
+        left_col = tk.Frame(_mid, bg="#ECEFF1"); left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
+        right_col = tk.Frame(_mid, bg="#ECEFF1"); right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
+
+        # 🎯 操作意义 卡 (左)
+        c1 = _card(left_col, "操作意义", "🎯", "#2E7D32", "#E8F5E9")
+        _body_label(c1, info.get("meaning", ""), color="#1B5E20")
+
+        # 📌 真实案例 卡 (右)
+        c2 = _card(right_col, "真实案例", "📌", "#1565C0", "#E3F2FD")
+        if info.get("example"):
+            _body_label(c2, info["example"], color="#0D47A1")
+        else:
+            tk.Label(c2, text="(暂无案例)", bg="#FFFFFF", fg="#9E9E9E",
+                     font=("", _font_size.get())).pack(anchor="w")
+
+        # 📐 ASCII 示意图 (独立卡, 全宽)
+        if info.get("diagram"):
+            c3 = _card(_inner, "ASCII 示意图", "📐", "#6A1B9A", "#F3E5F5")
+            _diagram_box(c3, info["diagram"])
+
+        # 📚 推荐书籍 卡 (全宽)
+        if info.get("books"):
+            c4 = _card(_inner, "推荐书籍", "📚", "#AD1457", "#FCE4EC")
+            for b in info["books"]: _book_row(c4, b)
+
+        # 🌐 参考网站 卡 (全宽, URL 可双击/单击)
+        if info.get("urls"):
+            c5 = _card(_inner, "参考网站 (单击/双击打开)", "🌐", "#00695C", "#E0F2F1")
+            for u in info["urls"]:
+                if isinstance(u, tuple) and len(u) == 2:
+                    _url_row(c5, u[0], u[1])
+                else:
+                    _url_row(c5, str(u), str(u))
+
+    _build_all()
+
+    top.bind("<Configure>", lambda _e: _canvas.configure(scrollregion=_canvas.bbox("all")))
+    top.focus_force()
 
 
 # ========= 数据获取 =========
