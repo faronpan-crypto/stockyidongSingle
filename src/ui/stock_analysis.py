@@ -2909,6 +2909,15 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 if row < ni-1: ax_s.tick_params(axis="x", labelbottom=False)
             fig.tight_layout()
             canvas = FigureCanvasTkAgg(fig, chart_inner); canvas.draw()
+            # matplotlib 自带导航工具栏 — 有「全部(Home) / 局部(十字平移) / 放大镜(框选缩放) / 前进后退 / 保存」
+            try:
+                from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
+                # NavigationToolbar2Tk 构造会 pack 自己到 parent, 单独放一行在 canvas 上方
+                _toolbar_frame = tk.Frame(chart_inner, bg="#FAFAFA")
+                _toolbar_frame.pack(side=tk.TOP, fill=tk.X)
+                toolbar = NavigationToolbar2Tk(canvas, _toolbar_frame)
+                toolbar.update()
+            except Exception: pass  # 某些环境可能缺 backend
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
             # 保存引用给 overlay 系统
             nonlocal _current_ax_main, _current_canvas
