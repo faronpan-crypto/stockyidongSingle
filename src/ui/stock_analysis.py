@@ -1516,8 +1516,13 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
              font=("", 13, "bold")).pack(side=tk.LEFT, padx=14, pady=9)
     tk.Label(top, text="股票:", bg="#283593", fg="white", font=("", 10)).pack(side=tk.LEFT)
     stock_var = tk.StringVar()
-    combo = ttk.Combobox(top, textvariable=stock_var, width=18, state="normal")
-    combo.pack(side=tk.LEFT, padx=6)
+    combo = ttk.Combobox(top, textvariable=stock_var, width=22, state="normal")
+    combo.pack(side=tk.LEFT, padx=(6,2))
+    # 🔄 刷新候选按钮 (点了才联网)
+    refresh_btn = tk.Button(top, text="🔄", bg="#FFB300", fg="#1A237E",
+                             font=("", 10), relief=tk.FLAT, padx=6, cursor="hand2",
+                             command=lambda: None)  # _on_refresh 后面定义, 先占位
+    refresh_btn.pack(side=tk.LEFT, padx=(0,6))
     ttk.Button(top, text="🔍 分析", command=lambda: None).pack(side=tk.LEFT, padx=4)
     status_var = tk.StringVar(value="⏳ 加载候选列表...")
     tk.Label(top, textvariable=status_var, bg="#283593", fg="#90A4AE",
@@ -2670,8 +2675,37 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             traceback.print_exc(); messagebox.showerror("错误", f"绘图失败: {ex}", parent=win)
 
     # ========= 🔍 搜索 =========
-    def _collect_candidates(_holdings=None):
-        """收集候选股票, 优先级: 持仓股 > 龙头(成交额前20) > 涨停池 > 已分析过 > 兜底"""
+    _CACHE_PATH = os.path.expanduser("~/.qclaw/stock_analysis_candidates.json")
+    _CACHE_TTL = 3600  # 1 小时
+    import time as _time
+    _cached_values = []  # 当前内存里的候选列表
+    _cached_holdings = []  # 当前内存里的 holdings
+
+    def _load_cache():
+        """读本地 JSON 缓存"""
+        try:
+            if os.path.exists(_CACHE_PATH):
+                import json as _j
+                with open(_CACHE_PATH) as f:
+                    _c = _j.load(f)
+                if _time.time() - _c.get("ts", 0) < _CACHE_TTL:
+                    return _c.get("data", [])
+        except Exception: pass
+        return None
+
+    def _save_cache(data):
+        try:
+            os.makedirs(os.path.dirname(_CACHE_PATH), exist_ok=True)
+            import json as _j
+            with open(_CACHE_PATH, "w") as f:
+                _j.dump({"ts": _time.time(), "data": data}, f)
+        except Exception: pass
+
+    def _collect_candidates(_holdings=None, _online=False):
+        """收集候选股票。
+        _online=False: 仅本地/缓存 (秒出) — SQLite + 持仓 + tushare 缓存 + 硬编码
+        _online=True: 额外联网拉 akshare spot_em/涨停池 (可能慢)
+        """
         # ========= 过滤函数: 停牌/ST/退市 → 跳过 =========
         def _is_bad_name(nm: str) -> bool:
             if not nm: return True
@@ -2764,40 +2798,41 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     _add(_nm, cn_map[_nm], "龙头")
         except Exception: pass
 
-        # ④ akshare 龙头 (成交额前 30, 过滤停牌)
-        try:
-            import akshare as ak
-            _spot = ak.stock_zh_a_spot_em()
-            if _spot is not None and len(_spot) > 0:
-                _spot = _spot[~_spot["名称"].astype(str).apply(_is_bad_name)]
-                if len(_spot) > 0:
-                    _amt_col = "成交额" if "成交额" in _spot.columns else None
-                    if _amt_col:
-                        _spot2 = _spot.sort_values(_amt_col, ascending=False).head(25)
-                    else:
-                        _spot2 = _spot.head(25)
-                    for _, r in _spot2.iterrows():
-                        _c6 = str(r.get("代码", "")).strip()
-                        _nm = _clean_name(str(r.get("名称", "")).strip())
+        # ④ akshare 龙头 (成交额前 30, 过滤停牌) — 仅刷新时才联网拉
+        if _online:
+            try:
+                import akshare as ak
+                _spot = ak.stock_zh_a_spot_em()
+                if _spot is not None and len(_spot) > 0:
+                    _spot = _spot[~_spot["名称"].astype(str).apply(_is_bad_name)]
+                    if len(_spot) > 0:
+                        _amt_col = "成交额" if "成交额" in _spot.columns else None
+                        if _amt_col:
+                            _spot2 = _spot.sort_values(_amt_col, ascending=False).head(25)
+                        else:
+                            _spot2 = _spot.head(25)
+                        for _, r in _spot2.iterrows():
+                            _c6 = str(r.get("代码", "")).strip()
+                            _nm = _clean_name(str(r.get("名称", "")).strip())
+                            if not _c6.isdigit() or len(_c6) != 6: continue
+                            _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
+                            _add(_nm, _tsc, "热门")
+            except Exception: pass
+
+            # ⑤ akshare 涨停池 — 仅刷新时才联网拉
+            try:
+                import akshare as ak; from datetime import datetime
+                _zt = ak.stock_zt_pool_em(date=datetime.now().strftime("%Y%m%d"))
+                if _zt is not None and len(_zt) > 0:
+                    _code_col = "代码" if "代码" in _zt.columns else list(_zt.columns)[0]
+                    _name_col = "名称" if "名称" in _zt.columns else None
+                    for _, r in _zt.head(30).iterrows():
+                        _c6 = str(r[_code_col]).strip()
+                        _nm = _clean_name(str(r[_name_col]).strip()) if _name_col else ""
                         if not _c6.isdigit() or len(_c6) != 6: continue
                         _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
-                        _add(_nm, _tsc, "热门")
-        except Exception: pass
-
-        # ⑤ akshare 涨停池
-        try:
-            import akshare as ak; from datetime import datetime
-            _zt = ak.stock_zt_pool_em(date=datetime.now().strftime("%Y%m%d"))
-            if _zt is not None and len(_zt) > 0:
-                _code_col = "代码" if "代码" in _zt.columns else list(_zt.columns)[0]
-                _name_col = "名称" if "名称" in _zt.columns else None
-                for _, r in _zt.head(30).iterrows():
-                    _c6 = str(r[_code_col]).strip()
-                    _nm = _clean_name(str(r[_name_col]).strip()) if _name_col else ""
-                    if not _c6.isdigit() or len(_c6) != 6: continue
-                    _tsc = _c6 + (".SH" if _c6.startswith(("6","9","5")) else ".SZ" if _c6.startswith(("3","0","4")) else ".BJ")
-                    _add(_nm or _tsc, _tsc, "涨停")
-        except Exception: pass
+                        _add(_nm or _tsc, _tsc, "涨停")
+            except Exception: pass
 
         # 兜底: 常用龙头 (无网络也能出)
         if len(result) < 30:
@@ -3206,18 +3241,62 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                               font=("", 9), relief=tk.FLAT, padx=8, command=_redraw_chart)
     refresh_chart.pack(side=tk.LEFT, padx=4)
 
-    # 初始
-    def _load_candidates():
-        cands = _collect_candidates(holdings)
+    # 🔄 刷新候选按钮
+    def _on_refresh():
+        nonlocal _cached_values
+        status_var.set("⏳ 正在刷新候选 (联网拉龙头/涨停/最新持仓)...")
+        refresh_btn.config(state="disabled")
+        def _bg():
+            try:
+                # 联网拉最新 akshare + 持仓
+                _new_cands = _collect_candidates(holdings, _online=True)
+                # 更新持仓 (从调用方传进来的 holdings, 或者重新抓)
+                win.after(0, lambda: _apply_new(_new_cands))
+            except Exception as e:
+                win.after(0, lambda: status_var.set(f"⚠️ 刷新失败: {e}"))
+                win.after(0, lambda: refresh_btn.config(state="normal"))
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _apply_new(cands):
+        nonlocal _cached_values
         combo.configure(values=cands)
+        _cached_values = cands
+        _save_cache(cands)
+        if cands: combo.set(cands[0])
+        status_var.set(f"🔄 刷新完成: {len(cands)} 只")
+        refresh_btn.config(state="normal")
+
+    # 初始加载: 优先读缓存 → 缓存过期/空则 fast 本地 (全部不联网, 秒出)
+    def _load_candidates():
+        nonlocal _cached_values
+        # 1. 内存缓存
+        if _cached_values and len(_cached_values) > 0:
+            combo.configure(values=_cached_values)
+            status_var.set(f"✅ 候选 {len(_cached_values)} 只 (内存)"); return
+        # 2. 本地 JSON 缓存 (1h TTL)
+        _cache = _load_cache()
+        if _cache and len(_cache) > 20:
+            combo.configure(values=_cache)
+            _cached_values = _cache
+            status_var.set(f"✅ 候选 {len(_cache)} 只 (本地缓存, 1h 有效)"); return
+        # 3. fast 模式 (纯本地: 持仓+SQLite+龙头+兜底)
+        _fast = _collect_candidates(holdings, _online=False)
+        combo.configure(values=_fast)
+        _cached_values = _fast
+        _save_cache(_fast)
         target = auto_code or ""
         if target:
             t6 = re.sub(r"^(sh|sz|bj|SH|SZ|BJ)", "", target); combo.set(t6)
             status_var.set(f"🎯 自动加载: {auto_name or t6}"); win.after(300, _do_search)
-        elif cands:
-            combo.set(cands[0]); status_var.set(f"✅ 候选 {len(cands)} 只")
+        elif _fast:
+            combo.set(_fast[0]); status_var.set(f"✅ 候选 {len(_fast)} 只 (本地, 点🔄刷新得实时龙头/涨停)")
         else: status_var.set("⚠️ 未找到候选股")
-    threading.Thread(target=_load_candidates, daemon=True).start()
+
+    # 同步调 — fast 模式不联网, 秒出
+    _load_candidates()
+
+    # ======== 顶栏按钮区重组: 下拉框 + 🔄刷新 + 🔍 + 📉重绘 ========
+    refresh_btn.config(command=_on_refresh)
 
     win.bind("<Return>", lambda e: _do_search())
     win.mainloop()
