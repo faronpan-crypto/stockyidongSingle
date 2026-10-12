@@ -1111,28 +1111,46 @@ def _show_method_knowledge(parent_win: tk.Tk, method_name: str, extra_title: str
     _BOOK_INDEX_TS = 0
 
     def _build_book_index():
-        """扫描本地常见书库目录, 构建 关键字→文件路径 索引 (结果缓存 5 分钟)"""
+        """扫描本地常见书库目录 + Spotlight 兜底, 构建 关键字→文件路径 索引 (结果缓存 5 分钟)"""
         nonlocal _BOOK_INDEX, _BOOK_INDEX_TS
         import time as _t
         if _BOOK_INDEX and _t.time() - _BOOK_INDEX_TS < 300:
             return _BOOK_INDEX
         _BOOK_INDEX = {}
-        # 常见书库路径 (用户可以手动放到这里)
+        _exts = (".pdf", ".epub", ".mobi", ".djvu")
+
+        # 1) 固定本地路径 (深度放宽到 4 层, 覆盖 iCloud 同步深路径)
         _LIBRARY_PATHS = [
             os.path.expanduser("~/Downloads"),
             os.path.expanduser("~/Documents"),
             os.path.expanduser("~/Desktop"),
             os.path.expanduser("~/Books"),
+            os.path.expanduser("~/.qclaw/books"),
+            # iCloud Drive (com~apple~Books / iBooks)
             os.path.expanduser("~/Library/Mobile Documents/com~apple~Books/Documents"),
-            os.path.expanduser("~/.qclaw/books"),  # 程序内建
+            os.path.expanduser("~/Library/Mobile Documents/iCloud~com~apple~iBooks/Documents"),
+            # Apple Books 容器 (部分 macOS 版本)
+            os.path.expanduser("~/Library/Containers/com.apple.BKAgentService/Data/Documents"),
+            os.path.expanduser("~/Library/Group Containers/group.com.apple.iBooks"),
+            os.path.expanduser("~/Library/Group Containers/group.com.apple.BKAgentService"),
+            # Apple Books 备份/本地缓存
+            os.path.expanduser("~/Library/Application Support/Apple Books"),
+            # iCloud Drive 根目录 (递归所有容器)
+            os.path.expanduser("~/Library/Mobile Documents"),
+            # CloudStorage 第三方同步 (ShellFish/Dropbox 等)
+            os.path.expanduser("~/Library/CloudStorage"),
+            # 邮件附件下载
+            os.path.expanduser("~/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"),
         ]
-        _exts = (".pdf", ".epub", ".mobi", ".djvu")
+        _skip_dirs = {"node_modules", ".git", ".Trash", "Cache", "Caches", "tmp", "temp"}
         for _p in _LIBRARY_PATHS:
             if not os.path.isdir(_p): continue
             try:
                 for _root, _dirs, _files in os.walk(_p):
+                    # 剪枝: 跳过无关目录
+                    _dirs[:] = [d for d in _dirs if d not in _skip_dirs and not d.startswith(".")]
                     _depth = _root.replace(_p, "").count(os.sep)
-                    if _depth > 2: _dirs[:] = []; continue
+                    if _depth > 4: _dirs[:] = []; continue
                     for _fn in _files:
                         if not _fn.lower().endswith(_exts): continue
                         _key = os.path.splitext(_fn)[0].lower()
@@ -1140,6 +1158,36 @@ def _show_method_knowledge(parent_win: tk.Tk, method_name: str, extra_title: str
                         if len(_key) < 2: continue
                         _BOOK_INDEX[_key] = os.path.join(_root, _fn)
             except Exception: continue
+
+        # 2) Spotlight mdfind 兜底 — 覆盖 ~/Library 全区域 (含微信/邮件/CloudStorage 深层)
+        try:
+            import subprocess as _sp
+            _ql = (
+                "kMDItemFSName == '*.pdf' || kMDItemFSName == '*.epub' || "
+                "kMDItemFSName == '*.mobi' || kMDItemFSName == '*.djvu'"
+            )
+            _res = _sp.run(
+                ["mdfind", "-onlyin", os.path.expanduser("~/Library"), _ql],
+                capture_output=True, text=True, timeout=15,
+            )
+            _noise_kw = ("发票", "订单", "手册", "清单", "活动", "注单", "手册",
+                         "通讯", "工商", "注销", "主题展示", "星巴克", "三菱重工",
+                         "上海往返高铁", "投研盘前", "滴水湖")
+            for _line in (_res.stdout or "").splitlines():
+                _fp = _line.strip()
+                if not _fp or not os.path.isfile(_fp): continue
+                _fn = os.path.basename(_fp)
+                _low = _fn.lower()
+                if not _low.endswith(_exts): continue
+                # 跳过明显的垃圾文件
+                if any(n in _fn for n in _noise_kw): continue
+                # 跳过微信 xwechat 文件 (太杂)
+                if "xwechat" in _fp.lower() and os.path.getsize(_fp) < 500 * 1024: continue
+                _key = os.path.splitext(_fn)[0].lower().replace("【电子书】","").strip()
+                if len(_key) < 2: continue
+                _BOOK_INDEX[_key] = _fp
+        except Exception: pass  # Spotlight 失败不影响主流程
+
         _BOOK_INDEX_TS = _t.time()
         return _BOOK_INDEX
 
