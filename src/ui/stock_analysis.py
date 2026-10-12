@@ -2436,11 +2436,13 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     ax_s.bar(list(range(len(vols))), vols, color=["red" if closes[i]>=opens[i] else "green" for i in range(len(vols))], alpha=0.7)
                     ax_s.set_title("VOL", fontsize=8, loc="left"); ax_s.grid(True, alpha=0.2)
                 elif key == "MACD":
-                    def _ema(a, w):
-                        r = np.empty_like(a); r[0]=a[0]; k=2/(w+1)
-                        for i in range(1,len(a)): r[i]=a[i]*k+r[i-1]*(1-k); return r
-                    ema12 = _ema(closes.astype(float), 12); ema26 = _ema(closes.astype(float), 26)
-                    dif = ema12 - ema26; dea = _ema(dif, 9); macd = (dif-dea)*2
+                    # 用 pandas ewm (span=w, adjust=False) — 和同花顺/通达信等所有软件一致
+                    _s = pd.Series(closes.astype(float))
+                    ema12 = _s.ewm(span=12, adjust=False).mean().values
+                    ema26 = _s.ewm(span=26, adjust=False).mean().values
+                    dif = ema12 - ema26
+                    dea = pd.Series(dif).ewm(span=9, adjust=False).mean().values
+                    macd = (dif-dea)*2
                     ax_s.bar(list(range(len(closes))), macd, color=["red" if v>=0 else "green" for v in macd], alpha=0.7)
                     ax_s.plot(list(range(len(closes))), dif, color="#1976D2", label="DIF", linewidth=0.9)
                     ax_s.plot(list(range(len(closes))), dea, color="#FF9800", label="DEA", linewidth=0.9)

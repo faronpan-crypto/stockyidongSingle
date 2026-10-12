@@ -62,13 +62,22 @@ def calc_trade_signals(closes, opens, highs, lows, vols):
         return r
     m5 = _ma(closes.astype(float), 5); m10 = _ma(closes.astype(float), 10)
     m20 = _ma(closes.astype(float), 20)
-    # MACD DIF / DEA (EMA)
-    def _ema(a, w):
-        r = np.empty_like(a); r[0] = a[0]; k = 2/(w+1)
-        for i in range(1, len(a)): r[i] = a[i]*k + r[i-1]*(1-k)
-        return r
-    ema12 = _ema(closes.astype(float), 12); ema26 = _ema(closes.astype(float), 26)
-    dif = ema12 - ema26; dea = _ema(dif, 9)
+    # MACD DIF / DEA — 用 pandas ewm, 避免自写 _ema 在某些情况下崩 (float16 / empty_like 未定义行为)
+    try:
+        import pandas as _pd
+        _s = _pd.Series(closes.astype(float))
+        ema12 = _s.ewm(span=12, adjust=False).mean().values
+        ema26 = _s.ewm(span=26, adjust=False).mean().values
+        dif = ema12 - ema26
+        dea = _pd.Series(dif).ewm(span=9, adjust=False).mean().values
+    except Exception:
+        # fallback: 自写版本 (偶尔会崩, 但保底)
+        def _ema(a, w):
+            r = np.empty_like(a, dtype=np.float64); r[0] = a[0]; k = 2/(w+1)
+            for i in range(1, len(a)): r[i] = a[i]*k + r[i-1]*(1-k)
+            return r
+        ema12 = _ema(closes.astype(float), 12); ema26 = _ema(closes.astype(float), 26)
+        dif = ema12 - ema26; dea = _ema(dif, 9)
     # KDJ K/D
     k_arr = np.full(n, 50.0); d_arr = np.full(n, 50.0)
     for i in range(9, n):
