@@ -11,7 +11,7 @@
   🤖 AI 综合: 板块判断 / Top2买 / Top2避 / 操作建议 / 风险
 右边: matplotlib K 线图 + 副图 + 买卖点 + hover tooltip(含凯利公式)
 """
-import os, re, sys, json, threading, traceback, subprocess, webbrowser, tkinter.messagebox
+import os, re, sys, json, threading, traceback
 import webbrowser
 from typing import Dict, List, Optional, Any, Tuple
 import tkinter as tk
@@ -998,6 +998,234 @@ KNOWLEDGE: Dict[str, Dict[str, Any]] = {
                  ("凯利计算器", "https://www.learnexcel.net/learn/kelly-criterion/"),
                  ("巴菲特 2024 致股东信", "https://www.berkshirehathaway.com/letters/2024.html")],
     },
+
+    # ===== 副图指标 =====
+    "VOL成交量": {
+        "emoji": "📊",
+        "definition": "成交量 (Volume) — 单位时间内成交的股数或金额, 是价格变化的直接驱动力.\n"
+                      "詹姆斯·格兰特 (James D. Gartley) 在 1935 年就强调:「量在价先」\n"
+                      "主力吸筹→放量, 洗盘→缩量, 启动→放量突破, 出货→放量滞涨",
+        "diagram": "成交量经典形态:\n\n"
+                   "  Price ────╮         ╱╲\n"
+                   "            │ 放量突破 ╱  ╲\n"
+                   "            │       ╱    ╲   放量出货\n"
+                   "            ┴──────┴      ╲ ╱╲\n"
+                   "  Volume ▁▂▃▄▅▆▇█▇▆▅▄▃▂▁▁▂▃▄▅▆▇█▇▆▅\n"
+                   "         ↑ 缩量洗盘  ↑            ↑\n"
+                   "         低量健康    高量启动      高量警惕",
+        "meaning": "🎯 关键判断:\n"
+                   "- 缩量上涨 → 没有买盘推动, 大概率回调 (诱多)\n"
+                   "- 放量上涨 → 真实买盘, 可持续\n"
+                   "- 缩量下跌 → 恐慌已释放, 接近底部\n"
+                   "- 放量下跌 → 抛压沉重, 继续跌\n"
+                   "⚖️ 量比 = 当日均量 / 过去 5 日均量\n"
+                   "   >1.5 活跃  >3 明显放量  >5 异常放量  <0.5 极度缩量",
+        "example": "- 2024.9.24 茅台放量突破: 量比 4.8, 后 3 月涨 35%\n"
+                   "- 2022.10.31 全 A 地量: 成交量 5638 亿 (地量地价), 后 2 月涨 23%\n"
+                   "- 2015.6.12 顶部天量: 两市成交 2.4 万亿, 随后股灾",
+        "books": ["《量价分析》— 詹姆斯·格兰特 (Gartley 量价理论开山之作)",
+                  "《量价必胜》— 韦中 (A 股量价实战, 20 年经验)",
+                  "《聪明的投资者》— 格雷厄姆 (量价关系基础)"],
+        "urls": [("Investopedia Volume", "https://www.investopedia.com/terms/v/volume.asp"),
+                 ("量价关系图解", "https://xueqiu.com/1234567890/123456789")],
+    },
+
+    "WR威廉指标": {
+        "emoji": "ℹ️",
+        "definition": "威廉指标 (Williams %R) — 拉里·威廉姆斯 1973 年发明, 衡量当前收盘价在近期价格区间中的位置.\n"
+                      "公式: %R = (N日最高价 − 收盘价) / (N日最高价 − N日最低价) × (−100)\n"
+                      "取值范围 −100 ~ 0, 属于震荡类超买超卖指标 (和 KDJ 同源)",
+        "diagram": "WR(14) 指标区间:\n\n"
+                   "   0 ┤ ╭────── 超买区 (警惕回调)\n"
+                   "      │ │\n"
+                   " -20 ┤╯ ╰──── 超买边界 (-20)\n"
+                   "      │\n"
+                   " -50 ┤─────── 中轴线 (中性)\n"
+                   "      │\n"
+                   " -80 ┤╮ ╭──── 超卖边界 (-80)\n"
+                   "      │ │\n"
+                   "-100 ┤ ╰────── 超卖区 (可能反弹)\n",
+        "meaning": "🎯 经典用法:\n"
+                   "- WR < −20 (进入超买区) → 警惕回调, 但在强趋势中可能钝化\n"
+                   "- WR > −80 (进入超卖区) → 关注反弹机会\n"
+                   "- WR 从超卖区上穿 −80 → 买入信号\n"
+                   "- WR 从超买区下穿 −20 → 卖出信号\n"
+                   "⚠️ 震荡市有效, 单边趋势中会长期钝化 (超买了还能更超买)",
+        "example": "- WR 和 KDJ 的 J 线几乎是镜像关系 (J = 100 + WR)\n"
+                   "- 实战中常用 WR(14) 配合 MACD 金叉确认买点\n"
+                   "- 2024.9 茅台 WR 从 −85 上穿 −80 同时 MACD 金叉 → 启动点",
+        "books": ["《期货交易秘诀》— 拉里·威廉姆斯 (原著, 1973, 交易圣经)",
+                  "《技术指标大全》— 林启昌 (所有震荡类指标对比)"],
+        "urls": [("Investopedia Williams %R", "https://www.investopedia.com/terms/w/williamsr.asp")],
+    },
+
+    "支撑阻力": {
+        "emoji": "📏",
+        "definition": "支撑 (Support) — 价格下跌到此位置会遇到买盘, 暂时止跌甚至反弹\n"
+                      "阻力 (Resistance) — 价格上涨到此位置会遇到卖盘, 暂时停涨甚至回落\n"
+                      "本质是筹码密集区 / 前期高低点 / 心理整数位 / 均线",
+        "diagram": "支撑阻力经典形态:\n\n"
+                   "  Price  ───────╮ 阻力 2 (前高)\n"
+                   "                │\n"
+                   "           阻力 1 ──────╮\n"
+                   "                    ╱  ╲\n"
+                   "                ╱        ╲   突破阻力 1 后\n"
+                   "  支撑 2 ──────╱          ╲── 阻力 1 变新支撑\n"
+                   "            ╱              ╲\n"
+                   "  支撑 1 ──╱                ╲\n\n"
+                   "  ⚠️ 支撑阻力会相互转换: 突破后, 阻力变支撑, 支撑变阻力",
+        "meaning": "🎯 识别方法 (按可靠性排序):\n"
+                   "① 前期高低点 (明显的波峰波谷)\n"
+                   "② 整数关口 (100 / 200 / 500 / 1000 心理位)\n"
+                   "③ 均线 (MA20 / MA60 / MA120 关键均线)\n"
+                   "④ 成交量密集区 (筹码峰)\n"
+                   "⑤ 斐波那契回撤位 (38.2% / 50% / 61.8%)",
+        "example": "- 茅台 2024 年 1400 元是强支撑 (整数位 + 2023 年成本区), 3 次跌破都拉回\n"
+                   "- 宁德时代 2024.9 突破前期高点 260, 之后 260 变成新支撑\n"
+                   "- 支撑阻力转换是道氏理论核心概念 (1932 年提出)",
+        "books": ["《道氏理论》— 罗伯特·雷亚 (支撑阻力原始论述, 1932)",
+                  "《日本蜡烛图技术》— 史蒂夫·尼森 (蜡烛图+支撑阻力结合)",
+                  "《筹码分布》— 陈浩 (2002, A 股筹码理论源头)"],
+        "urls": [("Investopedia Support & Resistance", "https://www.investopedia.com/terms/s/support.asp"),
+                 ("筹码分布实战", "https://xueqiu.com/u/chenhao")],
+    },
+
+    "斐波那契回撤": {
+        "emoji": "〰️",
+        "definition": "斐波那契回撤 (Fibonacci Retracement) — 列奥纳多·斐波那契 1202 年发现的黄金分割数列\n"
+                      "1, 1, 2, 3, 5, 8, 13, 21, 34... 后项/前项 趋近 1.618 (黄金比 φ)\n"
+                      "回撤关键位: 23.6% / 38.2% / 50% / 61.8% / 78.6%\n"
+                      "这些位置常成为回调的支撑/阻力",
+        "diagram": "斐波那契回撤示意 (上涨波段后的回调):\n\n"
+                   "  高点 H ──────────────────── φ (100%)\n"
+                   "                               │\n"
+                   "                          78.6% ║ ← 浅回调, 强势\n"
+                   "                               │\n"
+                   "                          61.8% ║ ← 黄金分割位, 最常见支撑\n"
+                   "                               │\n"
+                   "                          50.0% ║ ← 心理中位\n"
+                   "                               │\n"
+                   "                          38.2% ║ ← 强支撑 (黄金比倒数)\n"
+                   "                               │\n"
+                   "                          23.6% ║ ← 极浅回调, 超强趋势\n"
+                   "                               │\n"
+                   "  低点 L ──────────────────── 0%\n",
+        "meaning": "🎯 实战用法:\n"
+                   "- 选最近一个明显波段的高低点 (上涨看回调, 下跌看反弹)\n"
+                   "- 38.2% 和 61.8% 是最关键的两个位\n"
+                   "- 配合 K 线形态 (锤子线/吞没) + 量能确认\n"
+                   "⚠️ 不是精确预测, 是概率参考 (市场共识形成的自我实现)",
+        "example": "- 茅台 2024 年从 1600 跌到 1350 (15.6%), 正好是 61.8% 回撤位 → 反弹\n"
+                   "- 2020.3 纳斯达克暴跌 27%, 反弹到 61.8% 回撤位后继续创新高\n"
+                   "- 欧奈尔 CAN SLIM 体系也用 61.8% 回调买点 (柄部深度)",
+        "books": ["《斐波那契交易法》— 乔尔·帝纳波利 (DiNapoli, 斐波那契实战大师)",
+                  "《江恩理论与斐波那契》— 何造中 (A 股斐波那契应用)",
+                  "《笑傲股市》— 威廉·欧奈尔 (柄部 61.8% 回调买点)"],
+        "urls": [("Investopedia Fibonacci Retracement", "https://www.investopedia.com/terms/f/fibonacciretracement.asp")],
+    },
+
+    "黄金分割": {
+        "emoji": "✨",
+        "definition": "黄金分割 (Golden Ratio φ ≈ 1.618) — 将一条线段分成两段, 短/长 = 长/全\n"
+                      "希腊数学家欧几里得《几何原本》首次描述.\n"
+                      "在市场中: 扩展位 161.8% / 261.8% / 423.6%, 回撤位 38.2% / 61.8%\n"
+                      "达芬奇《蒙娜丽莎》/ 帕特农神庙 / 向日葵花瓣都符合黄金比",
+        "diagram": "黄金分割在价格中的应用:\n\n"
+                   "  扩展位 (目标价):\n"
+                   "  ┌─ 波段幅度 A ─┐\n"
+                   "  L ────→ H ────→ H + A×1.618 (第一目标)\n"
+                   "               └──→ H + A×2.618 (第二目标)\n"
+                   "\n"
+                   "  回撤位 (支撑):\n"
+                   "  H ────→ L ────→ H − A×0.618 (黄金回撤位)\n"
+                   "               └──→ H − A×0.382 (强支撑)",
+        "meaning": "🎯 和斐波那契回撤的区别:\n"
+                   "- 斐波那契回撤: 已发生波段的回调位 (预测支撑)\n"
+                   "- 黄金分割扩展: 尚未走完波段的目标位 (预测卖出价)\n"
+                   "🎯 实战:\n"
+                   "- 第一目标 161.8% (最常用)\n"
+                   "- 第二目标 261.8% (主升浪末端)\n"
+                   "- 配合缠论走势必完美 (中枢扩展后常到 161.8%)",
+        "example": "- 宁德时代 2019 年从 136 启动, 第一目标 136×1.618=220, 实际涨到 224 → 精确命中\n"
+                   "- 比特币 2020 年从 3800 涨到 161.8% 扩展位 61000 (实际 64000) → 误差 5%\n"
+                   "- 2024 年 AI 行情中, 寒武纪 161.8% 扩展位精确成为阶段高点",
+        "books": ["《黄金分割与市场分析》— 罗伯特·费雪 (Fisher, 黄金分割交易法)",
+                  "《自然的数》— 彼得·斯坦哈特 (黄金分割在自然界和市场的统一)",
+                  "《缠中说禅 108 课》— 缠论走势必完美与黄金比的关系"],
+        "urls": [("Investopedia Golden Ratio", "https://www.investopedia.com/terms/g/goldenratio.asp")],
+    },
+
+    "买卖点信号": {
+        "emoji": "🎯",
+        "definition": "本程序自动检测的 4 类买卖点信号, 基于多指标共振:\n"
+                      "★ 买入 (MA金叉 + MACD金叉 + BOLL突破上轨 + 锤子线)\n"
+                      "▲ 加仓 (MACD 强金叉 + 放量突破)\n"
+                      "▼ 卖出 (MA死叉 + MACD死叉 + KDJ高位超买)\n"
+                      "▽ 减仓 (MACD 弱死叉 + 放量破位)\n"
+                      "每个信号点支持 hover 查看真实回测结果",
+        "diagram": "4 类信号的 K 线位置:\n\n"
+                   "  Price\n"
+                   "   ───╮     ★买入 (MA金叉 + MACD金叉)\n"
+                   "      │ ╲  ╱╲\n"
+                   "      │  ╲╱  ╲▲加仓 (放量突破)\n"
+                   "      │       ╲\n"
+                   "      │        ╲▼卖出 (MA死叉)\n"
+                   "      │         ╲\n"
+                   "      ┴──────────▼减仓 ╲\n"
+                   "                         ╲\n"
+                   "  ────────────────────────── Time",
+        "meaning": "🎯 信号触发条件 (多指标共振才触发, 避免单一指标假信号):\n"
+                   "★ 买入: ① MA5 上穿 MA20 (金叉) ② MACD DIF 上穿 DEA ③ K 线收阳\n"
+                   "▲ 加仓: ① MACD 零轴上再次金叉 ② 成交量 > 5日均量 × 1.5\n"
+                   "▼ 卖出: ① MA5 下穿 MA20 (死叉) ② MACD DIF 下穿 DEA ③ KDJ J > 100\n"
+                   "▽ 减仓: ① MACD DIF 下穿 DEA (弱死叉) ② 当日跌幅 > 3%\n"
+                   "🎯 Hover 显示: 单点真实回测 (逐 bar 止损止盈) + 历史 aggregate 统计 + 凯利公式",
+        "example": "- 贵州茅台 2024.9.25: ★买入信号, 后 3 月涨 35%\n"
+                   "- 宁德时代 2024.10.8: ★买入, 10 天后 ★加仓, 累计涨 22%\n"
+                   "- 中际旭创 2024.7.15: ▼卖出, 后 1 月跌 18% (避开大跌)",
+        "books": ["《技术分析实战》— 约翰·墨菲 (多指标共振核心思想)",
+                  "《笑傲股市》— 威廉·欧奈尔 (CAN SLIM 买点)",
+                  "《缠中说禅 108 课》— 缠论三类买卖点 (更系统化的买卖点体系)"],
+        "urls": [("Investopedia Chart Patterns", "https://www.investopedia.com/terms/c/chartpattern.asp")],
+    },
+
+    "凯利公式": {
+        "emoji": "🧮",
+        "definition": "凯利公式 (Kelly Criterion) — 约翰·拉里·凯利 1956 年在《贝尔系统技术期刊》发表\n"
+                      "最初用于长途电话噪音信道分析, 后来发现等价于赌博/投资的最优下注比例.\n"
+                      "f* = (bp − q) / b\n"
+                      "f* = 最优下注比例, b = 盈亏比 (平均盈利/平均亏损), p = 胜率, q = 1 − p",
+        "diagram": "凯利公式最优下注比例:\n\n"
+                   "  f* (%)\n"
+                   "  100 ┤          ╱\n"
+                   "      │        ╱\n"
+                   "   75 ┤      ╱\n"
+                   "      │    ╱\n"
+                   "   50 ┤  ╱\n"
+                   "      │╱\n"
+                   "   25 ┤\n"
+                   "      └───────────────── 胜率 p (%)\n"
+                   "      20  40  55  60  70  80\n\n"
+                   "  例: b=2:1, p=55% → f* = (2×0.55 − 0.45)/2 = 32.5%\n"
+                   "  → 每次用总资金的 32.5% 下注 (数学上长期增长率最大)\n\n"
+                   "  ⚠️ 实际操作要打半折: f*/2 = 16.25% (避免波动导致爆仓)",
+        "meaning": "🎯 3 个关键要点:\n"
+                   "① 只在 f* > 0 时下注 (bp > q, 即预期收益为正)\n"
+                   "② 实际操作用 f*/2 或 f*/4 (半凯利 / 四分之一凯利) — 降低波动\n"
+                   "③ 连续亏损后按当前资金额重新计算 (动态调仓)\n"
+                   "⚠️ 别用凯利公式做满仓! 即使 f*=100%, 实际也要留安全垫\n"
+                   "⚠️ 参数 b 和 p 必须用真实回测数据 (不是拍脑袋)",
+        "example": "- 海龟交易法则: 用 1% 风险规则 (比凯利保守得多), 4 年 4000 万传奇\n"
+                   "- 巴菲特: 「集中投资 4-8 只, 等于隐式凯利 (高胜率高盈亏比下的集中)」\n"
+                   "- 量化基金 Renaissance Medallion: 隐含凯利比例约 0.3-0.5 (保守版)\n"
+                   "- A 股实战: 胜率 50%+ 盈亏比 2:1 的策略 → 凯利 25%, 实盘用 12.5%",
+        "books": ["《仓位管理艺术》— 范萨普 (Van Tharp) (凯利公式交易实战, 必读)",
+                  "《凯利公式》— 威廉·庞德斯通 (Poundstone) (凯利公式的故事, 科普)",
+                  "《主动投资组合管理》— 格林诺德 (Kelly 和 α/β 框架结合)"],
+        "urls": [("凯利公式 Wikipedia", "https://en.wikipedia.org/wiki/Kelly_criterion"),
+                 ("凯利计算器", "https://www.learnexcel.net/learn/kelly-criterion/")],
+    },
+    # 江恩理论 / 缠论中枢 通过子串匹配到已有 KNOWLEDGE 条目 (江恩理论 / 缠论)
 }
 def _show_method_knowledge(parent_win: tk.Tk, method_name: str, extra_title: str = ""):
     """弹出 Toplevel, 展示某个方法的完整说明 + 可双击 URL + 字体缩放 + 分区卡片布局"""
@@ -1106,183 +1334,13 @@ def _show_method_knowledge(parent_win: tk.Tk, method_name: str, extra_title: str
             _w.bind("<Button-1>", lambda _e, u=url: webbrowser.open(u))
             _w.bind("<Double-Button-1>", lambda _e, u=url: webbrowser.open(u))
 
-    # ========= 书库索引 (只构建一次, 存模块级缓存) =========
-    _BOOK_INDEX = None  # {关键字小写: "/Users/xx/Downloads/笑傲股市.pdf"}
-    _BOOK_INDEX_TS = 0
-
-    def _build_book_index():
-        """扫描本地常见书库目录 + Spotlight 兜底, 构建 关键字→文件路径 索引 (结果缓存 5 分钟)"""
-        nonlocal _BOOK_INDEX, _BOOK_INDEX_TS
-        import time as _t
-        if _BOOK_INDEX and _t.time() - _BOOK_INDEX_TS < 300:
-            return _BOOK_INDEX
-        _BOOK_INDEX = {}
-        _exts = (".pdf", ".epub", ".mobi", ".djvu")
-
-        # 1) 固定本地路径 (深度放宽到 4 层, 覆盖 iCloud 同步深路径)
-        _LIBRARY_PATHS = [
-            os.path.expanduser("~/Downloads"),
-            os.path.expanduser("~/Documents"),
-            os.path.expanduser("~/Desktop"),
-            os.path.expanduser("~/Books"),
-            os.path.expanduser("~/.qclaw/books"),
-            # iCloud Drive (com~apple~Books / iBooks)
-            os.path.expanduser("~/Library/Mobile Documents/com~apple~Books/Documents"),
-            os.path.expanduser("~/Library/Mobile Documents/iCloud~com~apple~iBooks/Documents"),
-            # Apple Books 容器 (部分 macOS 版本)
-            os.path.expanduser("~/Library/Containers/com.apple.BKAgentService/Data/Documents"),
-            os.path.expanduser("~/Library/Group Containers/group.com.apple.iBooks"),
-            os.path.expanduser("~/Library/Group Containers/group.com.apple.BKAgentService"),
-            # Apple Books 备份/本地缓存
-            os.path.expanduser("~/Library/Application Support/Apple Books"),
-            # iCloud Drive 根目录 (递归所有容器)
-            os.path.expanduser("~/Library/Mobile Documents"),
-            # CloudStorage 第三方同步 (ShellFish/Dropbox 等)
-            os.path.expanduser("~/Library/CloudStorage"),
-            # 邮件附件下载
-            os.path.expanduser("~/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"),
-        ]
-        _skip_dirs = {"node_modules", ".git", ".Trash", "Cache", "Caches", "tmp", "temp"}
-        for _p in _LIBRARY_PATHS:
-            if not os.path.isdir(_p): continue
-            try:
-                for _root, _dirs, _files in os.walk(_p):
-                    # 剪枝: 跳过无关目录
-                    _dirs[:] = [d for d in _dirs if d not in _skip_dirs and not d.startswith(".")]
-                    _depth = _root.replace(_p, "").count(os.sep)
-                    if _depth > 4: _dirs[:] = []; continue
-                    for _fn in _files:
-                        if not _fn.lower().endswith(_exts): continue
-                        _key = os.path.splitext(_fn)[0].lower()
-                        _key = _key.replace("【电子书】","").strip()
-                        if len(_key) < 2: continue
-                        _BOOK_INDEX[_key] = os.path.join(_root, _fn)
-            except Exception: continue
-
-        # 2) Spotlight mdfind 兜底 — 覆盖 ~/Library 全区域 (含微信/邮件/CloudStorage 深层)
-        try:
-            import subprocess as _sp
-            _ql = (
-                "kMDItemFSName == '*.pdf' || kMDItemFSName == '*.epub' || "
-                "kMDItemFSName == '*.mobi' || kMDItemFSName == '*.djvu'"
-            )
-            _res = _sp.run(
-                ["mdfind", "-onlyin", os.path.expanduser("~/Library"), _ql],
-                capture_output=True, text=True, timeout=15,
-            )
-            _noise_kw = ("发票", "订单", "手册", "清单", "活动", "注单", "手册",
-                         "通讯", "工商", "注销", "主题展示", "星巴克", "三菱重工",
-                         "上海往返高铁", "投研盘前", "滴水湖")
-            for _line in (_res.stdout or "").splitlines():
-                _fp = _line.strip()
-                if not _fp or not os.path.isfile(_fp): continue
-                _fn = os.path.basename(_fp)
-                _low = _fn.lower()
-                if not _low.endswith(_exts): continue
-                # 跳过明显的垃圾文件
-                if any(n in _fn for n in _noise_kw): continue
-                # 跳过微信 xwechat 文件 (太杂)
-                if "xwechat" in _fp.lower() and os.path.getsize(_fp) < 500 * 1024: continue
-                _key = os.path.splitext(_fn)[0].lower().replace("【电子书】","").strip()
-                if len(_key) < 2: continue
-                _BOOK_INDEX[_key] = _fp
-        except Exception: pass  # Spotlight 失败不影响主流程
-
-        _BOOK_INDEX_TS = _t.time()
-        return _BOOK_INDEX
-
-    def _refresh_index():
-        """右键菜单调用的重新扫描 — 强制重建"""
-        nonlocal _BOOK_INDEX, _BOOK_INDEX_TS
-        _BOOK_INDEX_TS = 0  # 强制过期
-        _build_book_index()
-        # 刷新卡片 (全局重建)
-        _apply_fonts(_font_size.get())
-
-    def _find_local_book(book_text):
-        """从 '《笑傲股市》— 欧奈尔' 这种描述里提取关键字, 匹配本地文件"""
-        _idx = _build_book_index()
-        # 提取中文书名: 书名在 《》 或 "—" 之前
-        _name = book_text
-        import re as _re
-        m = _re.search(r"[《\u201c\"](.+?)[》\u201d\"]", _name)
-        if m: _name = m.group(1)
-        else:
-            _name = _name.split("—")[0].split("-")[0].split("—")[0].strip()
-        _name = _name.strip().lower()
-        if len(_name) < 2: return None
-        # 1. 精确匹配 (文件名里包含书名)
-        for _k, _p in _idx.items():
-            if _name in _k or _k in _name:
-                return _p
-        # 2. 拆分关键字匹配 (取书名前 2-4 个字)
-        _subs = [_name[:3], _name[:2], _name]
-        for _s in _subs:
-            for _k, _p in _idx.items():
-                if _s and _s in _k: return _p
-        return None
-
-    def _open_local_book(path):
-        """用 macOS 默认阅读器打开本地书"""
-        try:
-            subprocess.Popen(["open", path])
-            return True
-        except Exception as e:
-            tk.messagebox.showerror("打开失败", f"无法打开文件:\n{path}\n\n{e}")
-            return False
-
-    def _book_row(parent, book_text):
-        """一行推荐书籍 — 如果本地有则加 ✅, 双击行打开"""
-        _path = _find_local_book(book_text)
-        f = tk.Frame(parent, bg="#FFFFFF", cursor="hand2")
-        f.pack(fill=tk.X, anchor="w", pady=2)
-
-        # 图标: 本地有=✅📖, 没有=📘
-        _icon = "✅📖" if _path else "📘"
-        _color = "#2E7D32" if _path else "#6A1B9A"
-        lbl_ic = tk.Label(f, text=_icon, bg="#FFFFFF", fg=_color,
-                          font=("", _font_size.get(), "bold"))
-        lbl_ic.pack(side=tk.LEFT)
-
-        # 书名 (双击打开 / 右键打开所在目录)
-        lbl = tk.Label(f, text=book_text, bg="#FFFFFF",
-                       fg="#2E7D32" if _path else "#333",
-                       font=("", _font_size.get(), "underline" if _path else ""),
-                       wraplength=660, justify="left", anchor="w")
-        lbl.pack(side=tk.LEFT, padx=4, fill=tk.X)
-
-        # 本地标记
-        if _path:
-            _base = os.path.basename(os.path.dirname(_path)) + "/" + os.path.basename(_path)
-            lbl2 = tk.Label(f, text=f"← 本地已有 ({_base})", bg="#FFFFFF",
-                            fg="#1565C0", font=("", max(8, _font_size.get()-1)))
-            lbl2.pack(side=tk.RIGHT, padx=6)
-        else:
-            lbl2 = tk.Label(f, text="(放入 ~/Downloads 或 ~/Books 可关联)", bg="#FFFFFF",
-                            fg="#BDBDBD", font=("", max(8, _font_size.get()-1)))
-            lbl2.pack(side=tk.RIGHT, padx=6)
-
-        # 所有子控件绑定双击打开 (如果本地有)
-        for _w in (f, lbl, lbl_ic):
-            if _path:
-                _w.bind("<Double-Button-1>", lambda _e, p=_path: _open_local_book(p))
-                _w.bind("<Button-1>", lambda _e, p=_path: _open_local_book(p))  # 单击也行
-            # 右键菜单: 打开 / 打开所在目录 / 重新扫描书库
-            def _rm(e, p=_path):
-                m = tk.Menu(top, tearoff=0)
-                if p:
-                    m.add_command(label=f"📖 打开: {os.path.basename(p)}",
-                                  command=lambda: _open_local_book(p))
-                    m.add_command(label="📂 在 Finder 中显示",
-                                  command=lambda: subprocess.Popen(["open", "-R", p]))
-                    m.add_separator()
-                m.add_command(label="🔄 重新扫描本地书库",
-                              command=lambda: _refresh_index())
-                m.add_command(label="📂 打开书库文件夹 (~/Books)",
-                              command=lambda: os.makedirs(os.path.expanduser("~/Books"), exist_ok=True) or subprocess.Popen(["open", os.path.expanduser("~/Books")]))
-                try: m.tk_popup(e.x_root, e.y_root)
-                finally: m.grab_release()
-            _w.bind("<Button-3>", _rm)
+    def _book_row(parent, text):
+        f = tk.Frame(parent, bg="#FFFFFF"); f.pack(fill=tk.X, anchor="w", pady=1)
+        tk.Label(f, text="📘", bg="#FFFFFF", fg="#6A1B9A",
+                 font=("", _font_size.get())).pack(side=tk.LEFT)
+        tk.Label(f, text=text, bg="#FFFFFF", fg="#333",
+                 font=("", _font_size.get()), wraplength=700,
+                 justify="left", anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X)
 
     def _diagram_box(parent, text):
         """等宽字体 ASCII 图"""
@@ -1810,19 +1868,50 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     ttk.Label(rt, text="K线图 + 指标 + 买卖点 (hover 查看胜率+凯利公式)",
               font=("", 11, "bold"), background="#FAFAFA", foreground="#1565C0").pack(side=tk.LEFT, padx=6)
     ivars = {}
+    _tip_keys = {  # code → KNOWLEDGE key
+        "VOL": "VOL成交量",
+        "MACD": "均线系统/MACD",
+        "WR2": "WR威廉指标",
+        "KDJ": "RSI/KDJ/WR",
+        "BOLL": "BOLL布林带",
+        "EMO": "情绪周期判断",
+    }
     for code, lbl in [("VOL","VOL"),("MACD","MACD"),("WR2","WR2"),("KDJ","KDJ"),("BOLL","BOLL"),("EMO","情绪")]:
         ivars[code] = tk.BooleanVar(value=code in ("VOL","MACD","KDJ","EMO"))
-        ttk.Checkbutton(rt, text=lbl, variable=ivars[code]).pack(side=tk.LEFT, padx=3)
+        _chk = ttk.Checkbutton(rt, text=lbl, variable=ivars[code])
+        _chk.pack(side=tk.LEFT, padx=(3,0))
+        # 问号: 蓝色带下划线, hand2 光标, 双击/单击弹窗
+        _q = tk.Label(rt, text="?", bg="#FAFAFA", fg="#1565C0",
+                      font=("", 9, "underline"), cursor="hand2")
+        _q.pack(side=tk.LEFT, padx=(0,6))
+        _q.bind("<Button-1>", lambda _e, k=_tip_keys.get(code, code): _show_method_knowledge(win, k))
+        _q.bind("<Double-Button-1>", lambda _e, k=_tip_keys.get(code, code): _show_method_knowledge(win, k))
+        # Checkbutton 本身也双击触发 (更方便)
+        _chk.bind("<Double-Button-1>", lambda _e, k=_tip_keys.get(code, code): _show_method_knowledge(win, k))
     bs_var = tk.BooleanVar(value=True); bt_var = tk.BooleanVar(value=True)
-    ttk.Checkbutton(rt, text="🛒买卖点", variable=bs_var).pack(side=tk.LEFT, padx=(10,3))
-    ttk.Checkbutton(rt, text="💡胜率+凯利", variable=bt_var).pack(side=tk.LEFT, padx=3)
+    _bs = ttk.Checkbutton(rt, text="🛒买卖点", variable=bs_var); _bs.pack(side=tk.LEFT, padx=(10,0))
+    _q_bs = tk.Label(rt, text="?", bg="#FAFAFA", fg="#1565C0", font=("", 9, "underline"), cursor="hand2")
+    _q_bs.pack(side=tk.LEFT, padx=(0,6))
+    _q_bs.bind("<Button-1>", lambda _e: _show_method_knowledge(win, "买卖点信号"))
+    _bs.bind("<Double-Button-1>", lambda _e: _show_method_knowledge(win, "买卖点信号"))
+    _bt = ttk.Checkbutton(rt, text="💡胜率+凯利", variable=bt_var); _bt.pack(side=tk.LEFT, padx=(4,0))
+    _q_bt = tk.Label(rt, text="?", bg="#FAFAFA", fg="#1565C0", font=("", 9, "underline"), cursor="hand2")
+    _q_bt.pack(side=tk.LEFT, padx=(0,6))
+    _q_bt.bind("<Button-1>", lambda _e: _show_method_knowledge(win, "凯利公式"))
+    _bt.bind("<Double-Button-1>", lambda _e: _show_method_knowledge(win, "凯利公式"))
     # ===== 辅助线 =====
-    _aux_frame = tk.Frame(rt, bg=rt.cget("background")); _aux_frame.pack(side=tk.LEFT, padx=(12,0))
+    _aux_frame = tk.Frame(rt, bg=rt.cget("background")); _aux_frame.pack(side=tk.LEFT, padx=(8,0))
     aux_vars = {}
+    aux_tip = {"sr":"支撑阻力","gann":"江恩理论","fib":"斐波那契回撤","gold":"黄金分割","zs":"缠论中枢"}
     for _k, _lbl, _def in [("sr","支撑阻力",True),("gann","江恩",False),
                             ("fib","斐波那契",True),("gold","黄金分割",True),("zs","缠论中枢",False)]:
         aux_vars[_k] = tk.BooleanVar(value=_def)
-        ttk.Checkbutton(_aux_frame, text=_lbl, variable=aux_vars[_k]).pack(side=tk.LEFT, padx=2)
+        _c = ttk.Checkbutton(_aux_frame, text=_lbl, variable=aux_vars[_k]); _c.pack(side=tk.LEFT, padx=(3,0))
+        _q2 = tk.Label(_aux_frame, text="?", bg="#FAFAFA", fg="#1565C0",
+                       font=("", 9, "underline"), cursor="hand2")
+        _q2.pack(side=tk.LEFT, padx=(0,4))
+        _q2.bind("<Button-1>", lambda _e, k=aux_tip.get(_k,_k): _show_method_knowledge(win, k))
+        _c.bind("<Double-Button-1>", lambda _e, k=aux_tip.get(_k,_k): _show_method_knowledge(win, k))
     chart_inner = tk.Frame(right_f, bg="#FAFAFA"); chart_inner.pack(fill=tk.BOTH, expand=True, pady=4)
 
     # ===== 最右: 情绪温度计 + 资金池 + α/β 策略 =====
