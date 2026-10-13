@@ -3840,9 +3840,6 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 _sum_lbl.config(text=_one_line, fg="#333")
                 # 保存完整文本 (外层已声明 nonlocal _sum_full_cache)
                 _sum_full_cache = _full_sum_text
-                # 更新弹窗的 textvariable
-                _show_sum_popup_full = _show_sum_popup
-                # popup 每次打开重新读 _sum_full_cache 最新值, 已在函数里处理
             except Exception as _e:
                 import traceback; traceback.print_exc()
                 _sum_lbl.config(text=f"— 概况异常: {_e}", fg="#C62828")
