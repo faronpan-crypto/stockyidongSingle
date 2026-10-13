@@ -3263,6 +3263,33 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     ax_s.grid(True, alpha=0.2)
                     ax_s.set_title("情绪", fontsize=8, loc="left")
                 if row < ni-1: ax_s.tick_params(axis="x", labelbottom=False)
+            # ========= X 轴日期标签 (底部副图显示) =========
+            try:
+                import matplotlib.dates as mdates
+                _dates_str = kline.get("trade_dates", [])
+                # 取最后一行 (ni-1) 做日期 tick, 所有副图 sharex 共享
+                _last_ax = fig.axes[-1] if fig.axes else ax_main
+                _total = len(closes)
+                if _total >= 20:
+                    # 每 ~20 根 K 线打一个日期标签
+                    _step = max(1, _total // 8)
+                    _tick_positions = list(range(0, _total, _step))
+                    if _total - 1 not in _tick_positions:
+                        _tick_positions.append(_total - 1)
+                    _tick_labels = []
+                    for _p in _tick_positions:
+                        if _p < len(_dates_str):
+                            _d = str(_dates_str[_p])
+                            if len(_d) == 8: _d = f"{_d[4:6]}-{_d[6:8]}"
+                            _tick_labels.append(_d)
+                        else:
+                            _tick_labels.append("")
+                    _last_ax.set_xticks(_tick_positions)
+                    _last_ax.set_xticklabels(_tick_labels, fontsize=7, rotation=30, ha="right")
+                    # 隐藏上层副图 x 标签 (已经在 subplot 循环里做了 row < ni-1)
+                    ax_main.tick_params(axis="x", labelbottom=False)
+            except Exception as _e:
+                print(f"[X轴日期] {_e}")
             fig.tight_layout()
             canvas = FigureCanvasTkAgg(fig, chart_inner); canvas.draw()
             # matplotlib 自带导航工具栏 — 有「全部(Home) / 局部(十字平移) / 放大镜(框选缩放) / 前进后退 / 保存」
