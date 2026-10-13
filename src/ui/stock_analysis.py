@@ -3797,7 +3797,8 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     _v5 = float(_vols_all[-5:].mean())
                     _v20 = float(_vols_all[-20:].mean())
                     _vr5 = _vol / _v5 if _v5 > 0 else 0
-                    _lines.append(f"量比: 5日 {_vr5:.2f} / 20日 {_v20 and _vol/_v20 if _v20>0 else 0:.2f}")
+                    _vr20 = _vol / _v20 if _v20 > 0 else 0
+                    _lines.append(f"量比: 5日 {_vr5:.2f} / 20日 {_vr20:.2f}")
                 # 换手率
                 _tr = _fund_now.get("turnover_rate")
                 if _tr is not None: _lines.append(f"换手率: {_tr:.2f}%")
@@ -3837,15 +3838,14 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 if len(_one_line) > 80:
                     _one_line = _one_line[:77] + "..."
                 _sum_lbl.config(text=_one_line, fg="#333")
-                # 保存完整文本到闭包, 让弹窗能读取
-                nonlocal _sum_full_cache
+                # 保存完整文本 (外层已声明 nonlocal _sum_full_cache)
                 _sum_full_cache = _full_sum_text
                 # 更新弹窗的 textvariable
                 _show_sum_popup_full = _show_sum_popup
                 # popup 每次打开重新读 _sum_full_cache 最新值, 已在函数里处理
             except Exception as _e:
-                print(f"[概况条] {_e}")
-                _sum_lbl.config(text="— 概况数据异常", fg="#C62828")
+                import traceback; traceback.print_exc()
+                _sum_lbl.config(text=f"— 概况异常: {_e}", fg="#C62828")
                 _sum_full_cache = ""
         else:
             _sum_lbl.config(text="请先选择股票", fg="#888")
