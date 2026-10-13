@@ -2025,38 +2025,6 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     def _on_meta_wheel(e): meta_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
     meta_canvas.bind_all("<MouseWheel>", _on_meta_wheel)
 
-    # --- 卡片0: 股票概况 (基本信息 + 当日行情 + 估值 + 明日预测) ---
-    _c0 = tk.LabelFrame(meta_inner, text="📊 股票概况", bg="#FFFFFF",
-                        fg="#1A237E", font=("", 10, "bold"), padx=8, pady=6)
-    _c0.pack(fill=tk.X, padx=6, pady=(8,6))
-    # 顶部: 名称 + 代码
-    _c0_hdr = tk.Frame(_c0, bg="#FFFFFF"); _c0_hdr.pack(fill=tk.X, pady=(0,3))
-    _c0_name_lbl = tk.Label(_c0_hdr, text="", bg="#FFFFFF", fg="#1A237E",
-                            font=("", 12, "bold")); _c0_name_lbl.pack(side=tk.LEFT)
-    _c0_code_lbl = tk.Label(_c0_hdr, text="", bg="#FFFFFF", fg="#666",
-                            font=("", 9)); _c0_code_lbl.pack(side=tk.LEFT, padx=(6,0))
-    # 当日行情 (大字)
-    _c0_price_row = tk.Frame(_c0, bg="#FFFFFF"); _c0_price_row.pack(fill=tk.X, pady=(2,2))
-    _c0_price_lbl = tk.Label(_c0_price_row, text="—", bg="#FFFFFF", fg="#333",
-                             font=("", 22, "bold")); _c0_price_lbl.pack(side=tk.LEFT)
-    _c0_chg_lbl = tk.Label(_c0_price_row, text="", bg="#FFFFFF", fg="#C62828",
-                           font=("", 12, "bold")); _c0_chg_lbl.pack(side=tk.LEFT, padx=(8,0))
-    # 行情小标签
-    _c0_quote_lbl = tk.Label(_c0, text="", bg="#FFFFFF", fg="#555", font=("", 8),
-                             justify=tk.LEFT); _c0_quote_lbl.pack(fill=tk.X, pady=2)
-    # 估值/基本面
-    _c0_fund_lbl = tk.Label(_c0, text="", bg="#FFFFFF", fg="#555", font=("", 8),
-                            justify=tk.LEFT); _c0_fund_lbl.pack(fill=tk.X, pady=2)
-    # 明日预测
-    _c0_fcst_sep = tk.Frame(_c0, bg="#E0E0E0", height=1); _c0_fcst_sep.pack(fill=tk.X, pady=(4,3))
-    _c0_fcst_row = tk.Frame(_c0, bg="#FFFFFF"); _c0_fcst_row.pack(fill=tk.X)
-    tk.Label(_c0_fcst_row, text="🎯 明日预测", bg="#FFFFFF", fg="#1A237E",
-             font=("", 9, "bold")).pack(side=tk.LEFT)
-    _c0_fcst_lbl = tk.Label(_c0_fcst_row, text="—", bg="#FFFFFF", fg="#666",
-                            font=("", 14, "bold")); _c0_fcst_lbl.pack(side=tk.RIGHT)
-    _c0_fcst_detail = tk.Label(_c0, text="", bg="#FFFFFF", fg="#888", font=("", 7),
-                               justify=tk.LEFT, wraplength=200); _c0_fcst_detail.pack(fill=tk.X, pady=(1,0))
-
     # --- 卡片1: 情绪温度计 ---
     _c1 = tk.LabelFrame(meta_inner, text="🌡️ 情绪温度计", bg="#FFFFFF",
                         fg="#283593", font=("", 10, "bold"), padx=8, pady=6)
@@ -3778,7 +3746,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         threading.Thread(target=_bg, daemon=True).start()
 
     def _apply_data(name, kline, fund):
-        nonlocal _current_kline, _current_fund, _emo_cache
+        nonlocal _current_kline, _current_fund, _emo_cache, _current_name
         _current_name = name; _current_fund = fund
         # ===== 拉情绪数据: 优先主程序传入的 dapan_data.trend10, 没有再 fallback sentiment_history =====
         _emo_cache = _fetch_emo_dict(dapan_data)
