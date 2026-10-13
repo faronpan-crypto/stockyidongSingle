@@ -2121,6 +2121,9 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     _hover_cache: Dict = {"bs": {}, "bt": {}}
     _sum_full_cache = ""  # 概况完整文本, 点击弹窗显示
     _current_name = ""
+    _current_tsc_cache = ""  # 当前股票 ts_code, 用于龙虎榜查询
+    _latest_close = 0.0
+    _latest_chg_tag = ""
     _emo_cache: Optional[Dict] = None  #情绪数据缓存 {trade_date_str: {phase, alpha_pos, ev, up_ratio}}
 
     # ===== 方法定义: (title, emoji, 一句话说明, get_result_fn(kline_data, fund) -> list[str] or dict) =====
@@ -2671,6 +2674,169 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         ai_text.insert("1.0", "⏳ 点击「🔍 分析」后自动生成 AI 综合操盘建议...")
         ai_text.configure(state=tk.DISABLED)
         return ai_text
+
+    # ========= 📊 技术形态配对: 金叉→死叉 作为一对 =========
+    def _cross_pairs(kline, indicator="MACD", max_pairs=8):
+        """
+        indicator: "MACD" 或 "KDJ"
+        返回: [{"start_idx": i, "start_date": str, "start_close": float,
+                "end_idx": j, "end_date": str, "end_close": float,
+                "return_pct": float, "days": int, "phase": str}, ...]
+        phase: "金叉→死叉" (多头段) / "死叉→金叉" (空头段)
+        """
+        import numpy as np, pandas as _pd
+        closes = kline["data"]["收盘"].values.astype(float)
+        opens = kline["data"]["开盘"].values.astype(float)
+        highs = kline["data"]["最高"].values.astype(float)
+        lows = kline["data"]["最低"].values.astype(float)
+        trade_dates = kline.get("trade_dates", [])
+        n = len(closes)
+        if n < 30: return []
+
+        # --- 计算 DIF/DEA 和 K/D ---
+        _s = _pd.Series(closes)
+        ema12 = _s.ewm(span=12, adjust=False).mean().values
+        ema26 = _s.ewm(span=26, adjust=False).mean().values
+        dif = ema12 - ema26
+        dea = _pd.Series(dif).ewm(span=9, adjust=False).mean().values
+        k_arr = np.full(n, 50.0); d_arr = np.full(n, 50.0)
+        for i in range(9, n):
+            rv = max(highs[i-8:i+1]) - min(lows[i-8:i+1])
+            rsv = (closes[i] - min(lows[i-8:i+1])) / max(rv, 0.001) * 100
+            k_arr[i] = k_arr[i-1]*2/3 + rsv*1/3
+            d_arr[i] = d_arr[i-1]*2/3 + k_arr[i]*1/3
+
+        # --- 收集所有交叉点 ---
+        if indicator == "MACD":
+            cross_list = []
+            for i in range(1, n):
+                if dif[i-1] <= dea[i-1] and dif[i] > dea[i]:
+                    cross_list.append(("GOLD", i))
+                elif dif[i-1] >= dea[i-1] and dif[i] < dea[i]:
+                    cross_list.append(("DEAD", i))
+        else:  # KDJ
+            cross_list = []
+            for i in range(1, n):
+                if k_arr[i-1] <= d_arr[i-1] and k_arr[i] > d_arr[i]:
+                    cross_list.append(("GOLD", i))
+                elif k_arr[i-1] >= d_arr[i-1] and k_arr[i] < d_arr[i]:
+                    cross_list.append(("DEAD", i))
+
+        # --- 配对: GOLD→DEAD 为一对 (多头), DEAD→GOLD 为一对 (空头) ---
+        pairs = []
+        i = 0
+        while i < len(cross_list) - 1:
+            t1, idx1 = cross_list[i]
+            t2, idx2 = cross_list[i+1]
+            if idx2 <= idx1 + 1:  # 排除连续同 bar 假信号
+                i += 1; continue
+            c1 = float(closes[idx1]); c2 = float(closes[idx2])
+            pct = (c2 - c1) / c1 * 100
+            d1 = str(trade_dates[idx1]) if idx1 < len(trade_dates) else ""
+            d2 = str(trade_dates[idx2]) if idx2 < len(trade_dates) else ""
+            if len(d1) == 8: d1 = f"{d1[:4]}-{d1[4:6]}-{d1[6:8]}"
+            if len(d2) == 8: d2 = f"{d2[:4]}-{d2[4:6]}-{d2[6:8]}"
+            days = idx2 - idx1
+            pairs.append({
+                "start_idx": idx1, "start_date": d1, "start_close": c1,
+                "end_idx": idx2, "end_date": d2, "end_close": c2,
+                "return_pct": pct, "days": days,
+                "phase": f"{t1=='GOLD' and '金叉' or '死叉'}→{t2=='DEAD' and '死叉' or '金叉'}",
+                "is_long": t1 == "GOLD",
+            })
+            i += 2
+
+        # --- 统计汇总 ---
+        long_pairs = [p for p in pairs if p["is_long"]]
+        short_pairs = [p for p in pairs if not p["is_long"]]
+        def _stat(ps):
+            if not ps: return {}
+            rets = [p["return_pct"] for p in ps]
+            wins = [r for r in rets if r > 0]
+            return {
+                "count": len(ps),
+                "win_rate": len(wins)/len(ps)*100,
+                "avg_ret": sum(rets)/len(rets),
+                "max_ret": max(rets), "min_ret": min(rets),
+                "avg_days": sum(p["days"] for p in ps)/len(ps),
+            }
+
+        recent = pairs[-max_pairs:] if pairs else []
+        return {"pairs": recent, "long_stat": _stat(long_pairs),
+                "short_stat": _stat(short_pairs), "total_count": len(pairs)}
+
+    # ========= 🏛️ 龙虎榜后 3 日涨跌幅 =========
+    def _lhb_after3(ts_code, kline):
+        """查本地 lhb_records 表, 返回该股票上榜后 1/3/5 日涨跌幅统计"""
+        import sqlite3, os, pandas as _pd
+        db_path = os.path.expanduser("~/.stockyidong.db")
+        alt_paths = [
+            db_path,
+            "/Users/faronpan/Agent/stockyidong_project/stock_analysis.db",
+            "/Users/faronpan/Agent/stockyidong_project/src/data/stock_analysis.db",
+            os.path.expanduser("~/.qclaw/stock_analysis.db"),
+        ]
+        found_db = None
+        for _p in alt_paths:
+            if os.path.exists(_p):
+                try:
+                    _conn = sqlite3.connect(_p)
+                    _conn.execute("SELECT COUNT(*) FROM lhb_records LIMIT 1").fetchone()
+                    _conn.close()
+                    found_db = _p; break
+                except Exception: pass
+        if not found_db: return {"records": [], "stat": None}
+
+        code6 = ts_code.split(".")[0]
+        try:
+            conn = sqlite3.connect(found_db)
+            q = "SELECT trade_date, name, close, pct_change, reason, net_amount FROM lhb_records WHERE ts_code=? OR ts_code LIKE ? ORDER BY trade_date DESC LIMIT 20"
+            rows = conn.execute(q, (ts_code, f"%{code6}%")).fetchall()
+            conn.close()
+        except Exception: return {"records": [], "stat": None}
+
+        if not rows: return {"records": [], "stat": None}
+        # 准备 K 线日期映射
+        trade_dates = kline.get("trade_dates", [])
+        closes_all = kline["data"]["收盘"].values.astype(float)
+        date_close_map = {}
+        for _i, _d in enumerate(trade_dates):
+            _ds = str(_d)
+            if len(_ds) == 8: date_close_map[_ds] = float(closes_all[_i])
+
+        results = []
+        for trade_date, name, close, pct, reason, net in rows:
+            _td = str(trade_date)
+            if len(_td) == 8:
+                _td_s = f"{_td[:4]}-{_td[4:6]}-{_td[6:8]}"
+            else:
+                _td_s = _td
+            base_close = date_close_map.get(_td) or date_close_map.get(_td.replace("-",""))
+            rec = {"date": _td_s, "reason": reason or "", "net": net,
+                   "base_close": base_close, "after1": None, "after3": None, "after5": None}
+            if base_close:
+                for offset, key in [(1, "after1"), (3, "after3"), (5, "after5")]:
+                    # 找到 trade_date 在 trade_dates 里的位置, 往后 offset 根
+                    for _j, _d2 in enumerate(trade_dates):
+                        if str(_d2) == _td:
+                            _target = _j + offset
+                            if _target < len(closes_all):
+                                _c = float(closes_all[_target])
+                                rec[key] = round((_c - base_close) / base_close * 100, 2)
+                            break
+            results.append(rec)
+        # 汇总统计
+        valid3 = [r["after3"] for r in results if r["after3"] is not None]
+        stat = None
+        if valid3:
+            wins3 = [v for v in valid3 if v > 0]
+            stat = {
+                "count3": len(valid3),
+                "win_rate3": len(wins3)/len(valid3)*100,
+                "avg3": sum(valid3)/len(valid3),
+                "max3": max(valid3), "min3": min(valid3),
+            }
+        return {"records": results, "stat": stat, "db": found_db}
 
     # ========= 🎯 明日涨跌预测 (多因子投票) =========
     def _predict_tomorrow(kline):
@@ -3746,8 +3912,12 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         threading.Thread(target=_bg, daemon=True).start()
 
     def _apply_data(name, kline, fund):
-        nonlocal _current_kline, _current_fund, _emo_cache, _current_name
+        nonlocal _current_kline, _current_fund, _emo_cache, _current_name, _current_tsc_cache
         _current_name = name; _current_fund = fund
+        # 解析 ts_code (从 stock_var 或传入上下文)
+        raw_now = stock_var.get().strip()
+        _tsc_now = _resolve_code(raw_now) if raw_now else ""
+        if _tsc_now: _current_tsc_cache = _tsc_now
         # ===== 拉情绪数据: 优先主程序传入的 dapan_data.trend10, 没有再 fallback sentiment_history =====
         _emo_cache = _fetch_emo_dict(dapan_data)
         if _emo_cache:
@@ -3761,11 +3931,12 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
     def _draw_meta_panels():
         """刷新最右 3 个卡片: 温度计 + 资金池 + α/β + 速查, 以及 K 线图上方概况条"""
-        nonlocal _sum_full_cache
+        nonlocal _sum_full_cache, _latest_close, _latest_chg_tag, _current_tsc_cache
         print(f"[概况调试] _draw_meta_panels called, _current_name='{_current_name}', kline={'OK' if _current_kline else 'None'}")
 
         # ===================== 📊 K 线图上方概况条 =====================
         _full_sum_text = ""  # 完整文本, 点击弹窗显示
+        _latest_for_popup = None; _chg_tag_for_popup = ""
         if _current_kline and _current_name:
             try:
                 _df = _current_kline["data"]
@@ -3838,8 +4009,16 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 if len(_one_line) > 80:
                     _one_line = _one_line[:77] + "..."
                 _sum_lbl.config(text=_one_line, fg="#333")
-                # 保存完整文本 (外层已声明 nonlocal _sum_full_cache)
+                # 保存完整文本 + 弹窗需要的缓存 (外层已声明 nonlocal)
                 _sum_full_cache = _full_sum_text
+                _latest_for_popup = _latest
+                _chg_tag_for_popup = _chg_tag
+                _latest_close = _close
+                _latest_chg_tag = _chg_tag
+                if not _current_tsc_cache:
+                    # fallback: 从 stock_var 重新解析
+                    try: _current_tsc_cache = _resolve_code(stock_var.get().strip()) or ""
+                    except Exception: pass
             except Exception as _e:
                 import traceback; traceback.print_exc()
                 _sum_lbl.config(text=f"— 概况异常: {_e}", fg="#C62828")
@@ -3853,15 +4032,133 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             except Exception: pass
         def _show_popup(_e=None):
             if not _current_kline: return
-            _pwin = tk.Toplevel(win); _pwin.title(f"📊 {_current_name or ''} 完整概况")
-            _pwin.geometry("620x520"); _pwin.configure(bg="#FAFAFA")
-            tk.Label(_pwin, text=f"📊 {_current_name or ''}", bg="#FAFAFA",
-                     fg="#1A237E", font=("", 14, "bold")).pack(pady=(12, 8))
-            _txt = tk.Text(_pwin, bg="#FAFAFA", fg="#333", font=("", 10),
-                           wrap="word", height=22, padx=12, pady=8)
-            _txt.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
-            _txt.insert("1.0", _sum_full_cache or "暂无数据")
-            _txt.configure(state="disabled")
+            _pwin = tk.Toplevel(win); _pwin.title(f"📊 {_current_name or ''} 四大维度分析")
+            _pwin.geometry("780x680"); _pwin.configure(bg="#FAFAFA")
+            _pwin.transient(win)
+            # 顶部标题
+            _top = tk.Frame(_pwin, bg="#1A237E"); _top.pack(fill=tk.X)
+            tk.Label(_top, text=f"📊 {_current_name or ''}  完整分析报告", bg="#1A237E",
+                     fg="white", font=("", 14, "bold")).pack(side=tk.LEFT, padx=16, pady=10)
+            tk.Label(_top, text=f"📅 {str(_current_kline['data'].iloc[-1].get('日期',''))[:8]}", bg="#1A237E",
+                     fg="#90CAF9", font=("", 10)).pack(side=tk.RIGHT, padx=16)
+            # Canvas + Scrollbar (内容太长可以滚动)
+            from tkinter import Canvas as _Cv; from tkinter import ttk as _ttk
+            _canvas = _Cv(_pwin, bg="#FAFAFA", highlightthickness=0)
+            _sb = _ttk.Scrollbar(_pwin, orient="vertical", command=_canvas.yview)
+            _canvas.configure(yscrollcommand=_sb.set)
+            _sb.pack(side=tk.RIGHT, fill=tk.Y)
+            _canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=8, pady=8)
+            _inner = tk.Frame(_canvas, bg="#FAFAFA")
+            _canvas.create_window((0,0), window=_inner, anchor="nw")
+            _inner.bind("<Configure>", lambda e: _canvas.configure(scrollregion=_canvas.bbox("all")))
+            def _mouse_wheel(_ev): _canvas.yview_scroll(int(-1*(_ev.delta/120)), "units")
+            _canvas.bind_all("<MouseWheel>", _mouse_wheel)
+
+            def _mk_section(parent, title, color, emoji):
+                _lf = tk.LabelFrame(parent, text=f"{emoji}  {title}", bg="#FFFFFF",
+                                    fg=color, font=("", 10, "bold"), padx=10, pady=8)
+                _lf.pack(fill=tk.X, pady=(0,8))
+                return _lf
+
+            # ===== 🅰️ 基本面 =====
+            _sec_a = _mk_section(_inner, "基本面", "#1565C0", "🅰️")
+            if _current_fund:
+                for _k, _v, _fmt, _tag in [
+                    ("pe_ttm", "PE TTM", lambda x: f"{x:.1f}", lambda x: "(低估)" if x<15 else "(偏高)" if x>40 else "(合理)"),
+                    ("pb", "PB", lambda x: f"{x:.2f}", lambda x: "(破净)" if x<1 else ""),
+                    ("total_mv", "总市值", lambda x: f"{x/1e4:.1f}亿", None),
+                    ("roe_dt", "ROE", lambda x: f"{x:.1f}%", None),
+                    ("gross_margin", "毛利率", lambda x: f"{x:.1f}%", None),
+                    ("revenue_yoy", "营收增速", lambda x: f"{x:+.1f}%", None),
+                    ("n_income_yoy", "净利增速", lambda x: f"{x:+.1f}%", None),
+                    ("turnover_rate", "换手率", lambda x: f"{x:.2f}%", None),
+                ]:
+                    _vv = _current_fund.get(_k)
+                    if _vv is None: continue
+                    _txt2 = f"{_v}: {_fmt(float(_vv))}"
+                    if _tag: _txt2 += _tag(float(_vv))
+                    tk.Label(_sec_a, text=_txt2, bg="#FFFFFF", fg="#333",
+                             font=("", 10), anchor="w").pack(fill=tk.X, pady=1)
+            else:
+                tk.Label(_sec_a, text="⚠️ 基本面数据未加载 (tushare熔断 + akshare兜底也失败)",
+                         bg="#FFFFFF", fg="#C62828", font=("", 10)).pack(anchor="w")
+
+            # ===== 🅱️ 技术面: MACD/KDJ 配对 =====
+            _sec_b = _mk_section(_inner, "技术面 (金叉→死叉配对回测)", "#C62828", "🅱️")
+            tk.Label(_sec_b, text=f"最新价: {_latest_close:.2f}  今日涨跌: {_latest_chg_tag}",
+                     bg="#FFFFFF", fg="#333", font=("", 10)).pack(anchor="w", pady=(0,4))
+            for _ind in ["MACD", "KDJ"]:
+                _pairs_info = _cross_pairs(_current_kline, indicator=_ind, max_pairs=6)
+                _head = tk.Label(_sec_b, text=f"─── {_ind} 交叉配对 ───", bg="#FFFFFF",
+                                 fg="#1A237E", font=("", 10, "bold")); _head.pack(anchor="w", pady=(6,2))
+                # 汇总统计
+                if _pairs_info.get("long_stat"):
+                    _ls = _pairs_info["long_stat"]
+                    tk.Label(_sec_b, text=f"多头段(金→死): {_ls['count']}次 | 胜率 {_ls['win_rate']:.0f}% | 均收益 {_ls['avg_ret']:+.2f}% | 均持有 {_ls['avg_days']:.1f}日",
+                             bg="#FFFFFF", fg="#2E7D32", font=("", 9)).pack(anchor="w")
+                if _pairs_info.get("short_stat"):
+                    _ss = _pairs_info["short_stat"]
+                    tk.Label(_sec_b, text=f"空头段(死→金): {_ss['count']}次 | 胜率 {_ss['win_rate']:.0f}% | 均收益 {_ss['avg_ret']:+.2f}% | 均持有 {_ss['avg_days']:.1f}日",
+                             bg="#FFFFFF", fg="#616161", font=("", 9)).pack(anchor="w")
+                # 最近几对明细
+                for _p in _pairs_info.get("pairs", [])[:4]:
+                    _col = "#2E7D32" if _p["return_pct"] > 0 else "#C62828"
+                    _sign = "+" if _p["return_pct"] >= 0 else ""
+                    _phase_tag = "🟢" if _p["is_long"] else "⚫"
+                    tk.Label(_sec_b,
+                             text=f"{_phase_tag} {_p['phase']}: {_p['start_date']}({_p['start_close']:.2f}) → {_p['end_date']}({_p['end_close']:.2f}) | {_sign}{_p['return_pct']:.2f}% | {_p['days']}日",
+                             bg="#FFFFFF", fg=_col, font=("", 9)).pack(anchor="w", padx=10)
+
+            # ===== 🅲️ 资金面: 龙虎榜后 3 日 =====
+            _sec_c = _mk_section(_inner, "资金面 (龙虎榜后 3 日表现)", "#FF6F00", "🅲️")
+            try:
+                _lhb = _lhb_after3(_current_tsc_cache, _current_kline)
+            except Exception as _e:
+                _lhb = {"records": [], "stat": None}
+            if _lhb.get("stat"):
+                _st = _lhb["stat"]
+                tk.Label(_sec_c,
+                         text=f"📈 上榜后3日: {_st['count3']}次 | 胜率 {_st['win_rate3']:.0f}% | 均涨 {_st['avg3']:+.2f}% | 最高 {_st['max3']:+.2f}% | 最低 {_st['min3']:+.2f}%",
+                         bg="#FFFFFF", fg="#1565C0", font=("", 10, "bold")).pack(anchor="w", pady=(0,4))
+            if _lhb.get("records"):
+                for _r in _lhb["records"][:6]:
+                    _a1 = f"{_r['after1']:+.2f}%" if _r.get("after1") is not None else "—"
+                    _a3 = f"{_r['after3']:+.2f}%" if _r.get("after3") is not None else "—"
+                    _a5 = f"{_r['after5']:+.2f}%" if _r.get("after5") is not None else "—"
+                    tk.Label(_sec_c,
+                             text=f"• {_r['date']}  {_r['reason'][:12] if _r['reason'] else '—'} | 后1日 {_a1} | 后3日 {_a3} | 后5日 {_a5}",
+                             bg="#FFFFFF", fg="#333", font=("", 9)).pack(anchor="w", padx=6)
+            else:
+                tk.Label(_sec_c, text="⚠️ 本地龙虎榜数据库无该股票记录",
+                         bg="#FFFFFF", fg="#888", font=("", 10)).pack(anchor="w")
+
+            # ===== 🅳️ 情绪面 + 明日预测 =====
+            _sec_d = _mk_section(_inner, "情绪面 + 明日预测", "#6A1B9A", "🅳️")
+            _v2, _d2 = _predict_tomorrow(_current_kline)
+            if _v2 > 0.5: _fcst_text = "📈 看涨"; _fcst_col = "#C62828"
+            elif _v2 < -0.5: _fcst_text = "📉 看跌"; _fcst_col = "#2E7D32"
+            else: _fcst_text = "➡️ 震荡"; _fcst_col = "#616161"
+            tk.Label(_sec_d, text=f"🎯 明日预测:  {_fcst_text}  (分数 {_v2:+.2f})",
+                     bg="#FFFFFF", fg=_fcst_col, font=("", 12, "bold")).pack(anchor="w", pady=(0,4))
+            if _d2:
+                # 用 Text 显示因子明细 (多行, 自动换行)
+                _ft = tk.Text(_sec_d, bg="#F3E5F5", fg="#333", font=("", 9),
+                              wrap="word", height=5, padx=8, pady=6)
+                _ft.pack(fill=tk.X)
+                _ft.insert("1.0", _d2)
+                _ft.configure(state="disabled")
+            # 情绪阶段
+            if _emo_cache:
+                _ed = max(_emo_cache.keys())
+                _emo = _emo_cache.get(_ed, {})
+                _ph = _emo.get("phase", "—")
+                _alpha = _emo.get("alpha_pos", 0)
+                tk.Label(_sec_d, text=f"市场情绪: {_ed} = {_ph}  α仓位建议 {_alpha:.0f}%",
+                         bg="#FFFFFF", fg="#6A1B9A", font=("", 10)).pack(anchor="w", pady=(4,0))
+
+            # 关闭按钮
+            tk.Button(_pwin, text="关闭", bg="#1A237E", fg="white",
+                      font=("", 10), command=_pwin.destroy).pack(pady=8)
         for _w in (_sum_bar, _sum_title, _sum_lbl):
             _w.bind("<Button-1>", _show_popup)
         # ===================== 取最新情绪 =====================
