@@ -1457,23 +1457,64 @@ def _fetch_kline_data(ts_code: str, days: int = 180) -> Optional[Dict]:
 def _fetch_fundamentals(ts_code: str) -> Dict:
     import numpy as np
     fund = {}
+    # --- 1. tushare daily_basic (优先) ---
     try:
         import tushare as ts
         token = os.environ.get("TUSHARE_TOKEN", "")
-        if not token: return fund
-        ts.set_token(token); pro = ts.pro_api()
-        db = pro.daily_basic(ts_code=ts_code, limit=1,
-                             fields="turnover_rate,pe_ttm,pb,total_mv,circ_mv")
-        if db is not None and len(db) > 0:
-            r = db.iloc[0]
-            for k in ["pe_ttm","pb","total_mv","circ_mv","turnover_rate"]:
-                fund[k] = float(r[k]) if r.get(k) and not str(r.get(k)).startswith(".") else None
-        fi = pro.fina_indicator(ts_code=ts_code, limit=2,
-                                fields="roe,roe_dt,revenue_yoy,n_income_yoy,gross_margin")
-        if fi is not None and len(fi) > 0:
-            for k in ["roe","roe_dt","revenue_yoy","n_income_yoy","gross_margin"]:
-                fund[k] = float(fi.iloc[0][k]) if fi.iloc[0].get(k) else None
-    except Exception as e: print(f"[基本面] {e}")
+        if token:
+            ts.set_token(token); pro = ts.pro_api()
+            db = pro.daily_basic(ts_code=ts_code, limit=1,
+                                 fields="turnover_rate,pe_ttm,pb,total_mv,circ_mv")
+            if db is not None and len(db) > 0:
+                r = db.iloc[0]
+                for k in ["pe_ttm","pb","total_mv","circ_mv","turnover_rate"]:
+                    fund[k] = float(r[k]) if r.get(k) and not str(r.get(k)).startswith(".") else None
+            fi = pro.fina_indicator(ts_code=ts_code, limit=2,
+                                    fields="roe,roe_dt,revenue_yoy,n_income_yoy,gross_margin")
+            if fi is not None and len(fi) > 0:
+                for k in ["roe","roe_dt","revenue_yoy","n_income_yoy","gross_margin"]:
+                    fund[k] = float(fi.iloc[0][k]) if fi.iloc[0].get(k) else None
+    except Exception as e: print(f"[基本面 tushare] {e}")
+    # --- 2. akshare 兜底 (tushare 熔断/限流时补数据) ---
+    if not fund.get("turnover_rate") or not fund.get("pe_ttm") or not fund.get("total_mv"):
+        try:
+            import akshare as ak
+            code6 = ts_code.split(".")[0]
+            # 2a. 换手率: 实时行情
+            if not fund.get("turnover_rate"):
+                try:
+                    _spot = ak.stock_zh_a_spot_em()
+                    if _spot is not None and len(_spot) > 0:
+                        _row = _spot[_spot["代码"].astype(str).str.startswith(code6[:3])]
+                        _r2 = _row[_row["代码"].astype(str) == code6] if len(_row) > 0 else None
+                        if _r2 is not None and len(_r2) > 0:
+                            for _col in ("换手率", "成交额"):
+                                if _col in _r2.columns:
+                                    _v = _r2.iloc[0].get(_col)
+                                    if _v is not None:
+                                        if _col == "换手率": fund["turnover_rate"] = float(_v)
+                                        elif _col == "成交额" and not fund.get("amount"):
+                                            fund["_ak_amount"] = float(_v)
+                except Exception: pass
+            # 2b. PE/PB/市值: 估值指标接口
+            if not fund.get("pe_ttm") or not fund.get("total_mv"):
+                try:
+                    _lg = ak.stock_a_lg_indicator(symbol=code6)
+                    if _lg is not None and len(_lg) > 0:
+                        _r3 = _lg.iloc[-1]  # 取最新一行
+                        # akshare 返回: trade_date, pe, pe_ttm, pb, ps, dv_ttm, total_mv
+                        for _ak_col, _fund_key in [
+                            ("pe_ttm", "pe_ttm"), ("pe", "pe_lyr"),
+                            ("pb", "pb"), ("ps", "ps_ttm"),
+                            ("total_mv", "total_mv"), ("circ_mv", "circ_mv"),
+                        ]:
+                            if _ak_col in _lg.columns and not fund.get(_fund_key):
+                                _v2 = _r3.get(_ak_col)
+                                if _v2 is not None and str(_v2) not in ("", "nan", "-"):
+                                    try: fund[_fund_key] = float(_v2)
+                                    except Exception: pass
+                except Exception: pass
+        except Exception as e: print(f"[基本面 akshare 兜底] {e}")
     return fund
 
 
@@ -1945,6 +1986,28 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         _q2.pack(side=tk.LEFT, padx=(0,4))
         _q2.bind("<Button-1>", lambda _e, k=aux_tip.get(_k,_k): _show_method_knowledge(win, k))
         _c.bind("<Double-Button-1>", lambda _e, k=aux_tip.get(_k,_k): _show_method_knowledge(win, k))
+    # --- 第三行: 📊 股票概况条 (K 线图上方) ---
+    _sum_bar = tk.Frame(right_f, bg="#FFFDE7", highlightbackground="#FBC02D",
+                        highlightthickness=1, cursor="hand2")
+    _sum_bar.pack(fill=tk.X, pady=(0,3))
+    _sum_title = tk.Label(_sum_bar, text="📊 概况:", bg="#FFFDE7", fg="#F57F17",
+                          font=("", 9, "bold"))
+    _sum_title.pack(side=tk.LEFT, padx=(6,4), pady=3)
+    _sum_lbl = tk.Label(_sum_bar, text="请先选择股票", bg="#FFFDE7", fg="#333",
+                        font=("", 9), anchor="w", justify=tk.LEFT)
+    _sum_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,6), pady=3)
+    # 点击弹出完整详情弹窗 (每次切换股票后由 _draw_meta_panels 重新绑定最新内容)
+    def _show_sum_popup_init(_e=None):
+        if not _current_kline: return
+        _pwin = tk.Toplevel(win); _pwin.title(f"📊 {_current_name or ''} 完整概况")
+        _pwin.geometry("600x480"); _pwin.configure(bg="#FAFAFA")
+        tk.Label(_pwin, text=f"📊 {_current_name or ''}", bg="#FAFAFA",
+                 fg="#1A237E", font=("", 14, "bold")).pack(pady=(12,6))
+        tk.Label(_pwin, textvariable=tk.StringVar(value=_sum_lbl.cget("text")),
+                 bg="#FAFAFA", fg="#333", font=("", 10), justify=tk.LEFT, wraplength=560).pack(padx=16, anchor="w")
+    for _w in (_sum_bar, _sum_title, _sum_lbl):
+        _w.bind("<Button-1>", _show_sum_popup_init)
+
     chart_inner = tk.Frame(right_f, bg="#FAFAFA"); chart_inner.pack(fill=tk.BOTH, expand=True, pady=4)
 
     # ===== 最右: 情绪温度计 + 资金池 + α/β 策略 =====
@@ -2088,6 +2151,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     # ===== 状态缓存 =====
     _current_kline = None; _current_fund: Dict = {}
     _hover_cache: Dict = {"bs": {}, "bt": {}}
+    _sum_full_cache = ""  # 概况完整文本, 点击弹窗显示
     _current_name = ""
     _emo_cache: Optional[Dict] = None  #情绪数据缓存 {trade_date_str: {phase, alpha_pos, ev, up_ratio}}
 
@@ -3728,9 +3792,11 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
 
     def _draw_meta_panels():
-        """刷新最右 4 个卡片: 概况 + 温度计 + 资金池 + α/β + 速查"""
+        """刷新最右 3 个卡片: 温度计 + 资金池 + α/β + 速查, 以及 K 线图上方概况条"""
+        nonlocal _sum_full_cache
 
-        # ===================== 📊 卡片0: 股票概况 =====================
+        # ===================== 📊 K 线图上方概况条 =====================
+        _full_sum_text = ""  # 完整文本, 点击弹窗显示
         if _current_kline and _current_name:
             try:
                 _df = _current_kline["data"]
@@ -3745,85 +3811,93 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 _amt = float(_latest["成交额"]) if "成交额" in _latest.index else 0
                 _d = str(_latest.get("日期", ""))
                 if len(_d) == 8: _d = f"{_d[:4]}-{_d[4:6]}-{_d[6:8]}"
-                # --- 名称 + 代码 ---
-                _tsc = ""
-                for _c, _ts in _all_metrics: pass  # 占位, 直接从搜索结果传过来的全局变量拿不到, 跳过
-                # 从 _current_kline 里取 trade_dates 推断代码 (其实拿不到, 用 _current_name 凑合)
-                _c0_name_lbl.config(text=f"{_current_name}")
-                # --- 价格大字 ---
-                _c0_price_lbl.config(text=f"{_close:.2f}")
-                _chg_col = "#C62828" if _chg_pct >= 0 else "#2E7D32"
-                _c0_chg_lbl.config(text=f"{_chg_pct:+.2f}%", fg=_chg_col)
-                # --- 行情小标签 ---
                 def _fmt_amt(a):
                     if a >= 1e8: return f"{a/1e8:.2f}亿"
                     elif a >= 1e4: return f"{a/1e4:.1f}万"
                     return f"{a:.0f}"
-                _quote_parts = [
-                    f"📅 {_d}",
-                    f"开 {_open:.2f} 高 {_high:.2f} 低 {_low:.2f}",
-                    f"量 {_fmt_amt(_vol)} 额 {_fmt_amt(_amt)}",
-                ]
-                # 换手率 (fundamental)
                 _fund_now = _current_fund or {}
-                _tr = _fund_now.get("turnover_rate")
-                if _tr is not None:
-                    _quote_parts.append(f"换手 {_tr:.2f}%")
-                # 量比 (5日均量)
+                # --- 构造完整文本 ---
+                _lines = [f"股票: {_current_name}  |  日期: {_d}"]
+                _chg_tag = f"+{_chg_pct:.2f}%" if _chg_pct >= 0 else f"{_chg_pct:.2f}%"
+                _chg_col = "#C62828" if _chg_pct >= 0 else "#2E7D32"
+                _lines.append(f"最新价: {_close:.2f}  ({_chg_tag})  开: {_open:.2f}  高: {_high:.2f}  低: {_low:.2f}")
+                _lines.append(f"成交量: {_fmt_amt(_vol)}  |  成交额: {_fmt_amt(_amt)}")
+                # 量比
                 _vols_all = _df["成交量"].values.astype(float) if "成交量" in _df.columns else None
                 if _vols_all is not None and len(_vols_all) >= 20:
                     _v5 = float(_vols_all[-5:].mean())
                     _v20 = float(_vols_all[-20:].mean())
                     _vr5 = _vol / _v5 if _v5 > 0 else 0
-                    _quote_parts.append(f"量比5日 {_vr5:.2f}")
-                _c0_quote_lbl.config(text="  |  ".join(_quote_parts))
-                # --- 估值/基本面 ---
-                _fund_parts = []
-                _pe = _fund_now.get("pe_ttm")
-                _pb = _fund_now.get("pb")
+                    _lines.append(f"量比: 5日 {_vr5:.2f} / 20日 {_v20 and _vol/_v20 if _v20>0 else 0:.2f}")
+                # 换手率
+                _tr = _fund_now.get("turnover_rate")
+                if _tr is not None: _lines.append(f"换手率: {_tr:.2f}%")
+                # 估值
+                _pe = _fund_now.get("pe_ttm"); _pb = _fund_now.get("pb")
                 _mv = _fund_now.get("total_mv")
                 if _pe is not None:
                     _pe_tag = f"PE TTM {_pe:.1f}"
                     if _pe < 15: _pe_tag += " (低估)"
                     elif _pe > 40: _pe_tag += " (偏高)"
-                    _fund_parts.append(_pe_tag)
+                    _lines.append(_pe_tag)
                 if _pb is not None:
                     _pb_tag = f"PB {_pb:.2f}"
                     if _pb < 1: _pb_tag += " (破净)"
-                    _fund_parts.append(_pb_tag)
-                if _mv is not None:
-                    _fund_parts.append(f"总市值 {_mv/1e4:.1f}亿")
+                    _lines.append(_pb_tag)
+                if _mv is not None: _lines.append(f"总市值 {_mv/1e4:.1f}亿")
                 _roe = _fund_now.get("roe") or _fund_now.get("roe_dt")
-                if _roe is not None:
-                    _fund_parts.append(f"ROE {_roe:.1f}%")
+                if _roe is not None: _lines.append(f"ROE {_roe:.1f}%")
                 _rev_yoy = _fund_now.get("revenue_yoy")
-                if _rev_yoy is not None:
-                    _fund_parts.append(f"营收 {_rev_yoy:+.1f}%")
+                if _rev_yoy is not None: _lines.append(f"营收 {_rev_yoy:+.1f}%")
                 _ni_yoy = _fund_now.get("n_income_yoy")
-                if _ni_yoy is not None:
-                    _fund_parts.append(f"净利 {_ni_yoy:+.1f}%")
-                if _fund_parts:
-                    _c0_fund_lbl.config(text="  |  ".join(_fund_parts))
-                else:
-                    _c0_fund_lbl.config(text="基本面数据待加载 (tushare daily_basic)")
-
-                # --- 🎯 明日预测 (多因子投票) ---
+                if _ni_yoy is not None: _lines.append(f"净利 {_ni_yoy:+.1f}%")
+                # 预测
                 _vote, _detail = _predict_tomorrow(_current_kline)
-                if _vote > 0.5:
-                    _c0_fcst_lbl.config(text="📈 看涨", fg="#C62828")
-                elif _vote < -0.5:
-                    _c0_fcst_lbl.config(text="📉 看跌", fg="#2E7D32")
-                else:
-                    _c0_fcst_lbl.config(text="➡️ 震荡", fg="#616161")
-                _c0_fcst_detail.config(text=_detail)
+                if _vote > 0.5: _fcst_txt = "📈 看涨"
+                elif _vote < -0.5: _fcst_txt = "📉 看跌"
+                else: _fcst_txt = "➡️ 震荡"
+                _lines.append(f"🎯 明日预测: {_fcst_txt}")
+                if _detail: _lines.append(f"  因子: {_detail}")
+                _full_sum_text = "\n".join(_lines)
+                # --- 单行截断显示 (给 _sum_lbl) ---
+                _one_line = f"{_current_name} | {_close:.2f}({_chg_tag}) | PE {_pe or '-':>6} | PB {_pb or '-':>5}"
+                if _mv is not None:
+                    _one_line += f" | 市值 {_mv/1e4:.1f}亿"
+                _one_line += f" | 🎯{_fcst_txt}"
+                # 长度超过 ~80 字符截断加 ...
+                if len(_one_line) > 80:
+                    _one_line = _one_line[:77] + "..."
+                _sum_lbl.config(text=_one_line, fg="#333")
+                # 保存完整文本到闭包, 让弹窗能读取
+                nonlocal _sum_full_cache
+                _sum_full_cache = _full_sum_text
+                # 更新弹窗的 textvariable
+                _show_sum_popup_full = _show_sum_popup
+                # popup 每次打开重新读 _sum_full_cache 最新值, 已在函数里处理
             except Exception as _e:
-                print(f"[概况卡片] {_e}")
-                _c0_price_lbl.config(text="—")
-                _c0_quote_lbl.config(text="")
-                _c0_fund_lbl.config(text="")
-                _c0_fcst_lbl.config(text="—", fg="#666")
-                _c0_fcst_detail.config(text="")
-
+                print(f"[概况条] {_e}")
+                _sum_lbl.config(text="— 概况数据异常", fg="#C62828")
+                _sum_full_cache = ""
+        else:
+            _sum_lbl.config(text="请先选择股票", fg="#888")
+            _sum_full_cache = ""
+        # 重新绑定弹窗 (确保每次打开都显示最新 _sum_full_cache)
+        for _w in (_sum_bar, _sum_title, _sum_lbl):
+            try: _w.unbind("<Button-1>")
+            except Exception: pass
+        def _show_popup(_e=None):
+            if not _current_kline: return
+            _pwin = tk.Toplevel(win); _pwin.title(f"📊 {_current_name or ''} 完整概况")
+            _pwin.geometry("620x520"); _pwin.configure(bg="#FAFAFA")
+            tk.Label(_pwin, text=f"📊 {_current_name or ''}", bg="#FAFAFA",
+                     fg="#1A237E", font=("", 14, "bold")).pack(pady=(12, 8))
+            _txt = tk.Text(_pwin, bg="#FAFAFA", fg="#333", font=("", 10),
+                           wrap="word", height=22, padx=12, pady=8)
+            _txt.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+            _txt.insert("1.0", _sum_full_cache or "暂无数据")
+            _txt.configure(state="disabled")
+        for _w in (_sum_bar, _sum_title, _sum_lbl):
+            _w.bind("<Button-1>", _show_popup)
         # ===================== 取最新情绪 =====================
         latest_emo = None
         if _emo_cache:
