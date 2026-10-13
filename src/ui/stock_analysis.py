@@ -2722,13 +2722,16 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 elif k_arr[i-1] >= d_arr[i-1] and k_arr[i] < d_arr[i]:
                     cross_list.append(("DEAD", i))
 
-        # --- 配对: GOLD→DEAD 为一对 (多头), DEAD→GOLD 为一对 (空头) ---
+        # --- 只配对: GOLD→DEAD (金叉买入 → 死叉卖出) 作为完整交易段 ---
         pairs = []
         i = 0
         while i < len(cross_list) - 1:
             t1, idx1 = cross_list[i]
             t2, idx2 = cross_list[i+1]
             if idx2 <= idx1 + 1:  # 排除连续同 bar 假信号
+                i += 1; continue
+            if t1 != "GOLD" or t2 != "DEAD":
+                # 不是 金叉→死叉 这一对, 跳过, 看下一个交叉点
                 i += 1; continue
             c1 = float(closes[idx1]); c2 = float(closes[idx2])
             pct = (c2 - c1) / c1 * 100
@@ -2737,33 +2740,48 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             if len(d1) == 8: d1 = f"{d1[:4]}-{d1[4:6]}-{d1[6:8]}"
             if len(d2) == 8: d2 = f"{d2[:4]}-{d2[4:6]}-{d2[6:8]}"
             days = idx2 - idx1
+            # 期间最高价 (金叉到死叉之间的 peak) — 最理想止盈
+            _seg_hi = float(max(highs[idx1:idx2+1]))
+            _peak_ret = (_seg_hi - c1) / c1 * 100  # 理论最高收益
+            # 持有期间的最大回撤
+            _seg_lows = lows[idx1:idx2+1]
+            _running_min = c1
+            _max_dd = 0.0
+            for _lv in _seg_lows:
+                if _lv < _running_min:
+                    _dd = (c1 - _lv) / c1 * 100
+                    if _dd > _max_dd: _max_dd = _dd
+                    _running_min = _lv
             pairs.append({
                 "start_idx": idx1, "start_date": d1, "start_close": c1,
                 "end_idx": idx2, "end_date": d2, "end_close": c2,
                 "return_pct": pct, "days": days,
-                "phase": f"{t1=='GOLD' and '金叉' or '死叉'}→{t2=='DEAD' and '死叉' or '金叉'}",
-                "is_long": t1 == "GOLD",
+                "peak_high": _seg_hi, "peak_ret": _peak_ret,
+                "max_drawdown": _max_dd,
             })
-            i += 2
+            i += 2  # 跳过已配对的两个点
 
-        # --- 统计汇总 ---
-        long_pairs = [p for p in pairs if p["is_long"]]
-        short_pairs = [p for p in pairs if not p["is_long"]]
+        # --- 统计汇总 (全部为金叉→死叉多头段) ---
         def _stat(ps):
             if not ps: return {}
             rets = [p["return_pct"] for p in ps]
+            peak_rets = [p["peak_ret"] for p in ps]
+            dds = [p["max_drawdown"] for p in ps]
             wins = [r for r in rets if r > 0]
             return {
                 "count": len(ps),
                 "win_rate": len(wins)/len(ps)*100,
                 "avg_ret": sum(rets)/len(rets),
                 "max_ret": max(rets), "min_ret": min(rets),
+                "avg_peak": sum(peak_rets)/len(peak_rets),  # 理论最高收益均
+                "max_peak": max(peak_rets),
+                "avg_dd": sum(dds)/len(dds),  # 均最大回撤
+                "max_dd": max(dds),
                 "avg_days": sum(p["days"] for p in ps)/len(ps),
             }
 
         recent = pairs[-max_pairs:] if pairs else []
-        return {"pairs": recent, "long_stat": _stat(long_pairs),
-                "short_stat": _stat(short_pairs), "total_count": len(pairs)}
+        return {"pairs": recent, "stat": _stat(pairs), "total_count": len(pairs)}
 
     # ========= 🏛️ 龙虎榜后 3 日涨跌幅 =========
     def _lhb_after3(ts_code, kline):
@@ -4089,24 +4107,24 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                      bg="#FFFFFF", fg="#333", font=("", 10)).pack(anchor="w", pady=(0,4))
             for _ind in ["MACD", "KDJ"]:
                 _pairs_info = _cross_pairs(_current_kline, indicator=_ind, max_pairs=6)
-                _head = tk.Label(_sec_b, text=f"─── {_ind} 交叉配对 ───", bg="#FFFFFF",
+                _head = tk.Label(_sec_b, text=f"─── {_ind} 金叉→死叉 配对 ───", bg="#FFFFFF",
                                  fg="#1A237E", font=("", 10, "bold")); _head.pack(anchor="w", pady=(6,2))
                 # 汇总统计
-                if _pairs_info.get("long_stat"):
-                    _ls = _pairs_info["long_stat"]
-                    tk.Label(_sec_b, text=f"多头段(金→死): {_ls['count']}次 | 胜率 {_ls['win_rate']:.0f}% | 均收益 {_ls['avg_ret']:+.2f}% | 均持有 {_ls['avg_days']:.1f}日",
-                             bg="#FFFFFF", fg="#2E7D32", font=("", 9)).pack(anchor="w")
-                if _pairs_info.get("short_stat"):
-                    _ss = _pairs_info["short_stat"]
-                    tk.Label(_sec_b, text=f"空头段(死→金): {_ss['count']}次 | 胜率 {_ss['win_rate']:.0f}% | 均收益 {_ss['avg_ret']:+.2f}% | 均持有 {_ss['avg_days']:.1f}日",
+                if _pairs_info.get("stat"):
+                    _st = _pairs_info["stat"]
+                    tk.Label(_sec_b,
+                             text=f"共 {_st['count']} 次 | 胜率 {_st['win_rate']:.0f}% | 均收益 {_st['avg_ret']:+.2f}% | 均持有 {_st['avg_days']:.1f}日",
+                             bg="#FFFFFF", fg="#2E7D32", font=("", 10)).pack(anchor="w")
+                    tk.Label(_sec_b,
+                             text=f"理论最佳: 均峰值 +{_st['avg_peak']:.2f}% / 最高 +{_st['max_peak']:.2f}% | 均最大回撤 {_st['avg_dd']:.2f}% / 最大 {_st['max_dd']:.2f}%",
                              bg="#FFFFFF", fg="#616161", font=("", 9)).pack(anchor="w")
                 # 最近几对明细
-                for _p in _pairs_info.get("pairs", [])[:4]:
+                for _p in _pairs_info.get("pairs", [])[:5]:
                     _col = "#2E7D32" if _p["return_pct"] > 0 else "#C62828"
                     _sign = "+" if _p["return_pct"] >= 0 else ""
-                    _phase_tag = "🟢" if _p["is_long"] else "⚫"
+                    _dd_sign = "+" if _p["peak_ret"] >= 0 else ""
                     tk.Label(_sec_b,
-                             text=f"{_phase_tag} {_p['phase']}: {_p['start_date']}({_p['start_close']:.2f}) → {_p['end_date']}({_p['end_close']:.2f}) | {_sign}{_p['return_pct']:.2f}% | {_p['days']}日",
+                             text=f"🟢 金叉 {_p['start_date']}({_p['start_close']:.2f}) → 死叉 {_p['end_date']}({_p['end_close']:.2f}) | 收益 {_sign}{_p['return_pct']:.2f}% | 峰值 {_dd_sign}{_p['peak_ret']:.2f}% | 回撤 {_p['max_drawdown']:.2f}% | {_p['days']}日",
                              bg="#FFFFFF", fg=_col, font=("", 9)).pack(anchor="w", padx=10)
 
             # ===== 🅲️ 资金面: 龙虎榜后 3 日 =====
