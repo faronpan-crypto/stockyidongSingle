@@ -2926,7 +2926,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             _hover_cache = {"bs": {}, "bt": {}, "pp": {}, "gc": {}, "dc": {}}
             if bs_var.get() and len(closes) >= 30:
                 try:
-                    from ui.tab_stock_detail import calc_trade_signals, backtest_build_per_point_cache
+                    from ui.tab_stock_detail import calc_trade_signals, backtest_build_per_point_cache, backtest_signal
                     sigs = calc_trade_signals(closes, opens, highs, lows, vols)
                     for _k, _mk, _col, _lbl in [("buy","*","#2E7D32","★买入"),("add","^","#F57C00","▲加仓"),
                                                    ("sell","v","#C62828","▼卖出"),("reduce","v","#6A1B9A","▽减仓")]:
@@ -3330,7 +3330,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
             # ========= X 轴日期标签 (底部副图显示) =========
             try:
                 import matplotlib.dates as mdates
-                _dates_str = kline.get("trade_dates", [])
+                _dates_str = _current_kline.get("trade_dates", [])
                 # 取最后一行 (ni-1) 做日期 tick, 所有副图 sharex 共享
                 _last_ax = fig.axes[-1] if fig.axes else ax_main
                 _total = len(closes)
