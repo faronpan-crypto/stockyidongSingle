@@ -1892,19 +1892,32 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         "KDJ": "RSI/KDJ/WR",
         "BOLL": "BOLL布林带",
         "EMO": "情绪周期判断",
+        "RSI": "RSI/KDJ/WR",
+        "CCI": "CCI顺势指标",
+        "OBV": "OBV能量潮",
+        "ATR": "ATR真实波幅",
+        "SAR": "SAR抛物线",
     }
-    for code, lbl in [("VOL","VOL"),("MACD","MACD"),("WR2","WR2"),("KDJ","KDJ"),("BOLL","BOLL"),("EMO","情绪")]:
+    # 全部可选副图指标 (最多选 5 个, 在 _redraw_chart 里做上限限制)
+    _all_metrics = [
+        ("VOL","VOL"),("MACD","MACD"),("KDJ","KDJ"),("RSI","RSI"),("WR2","WR2"),
+        ("BOLL","BOLL"),("CCI","CCI"),("OBV","OBV"),("ATR","ATR"),("SAR","SAR"),
+        ("EMO","情绪"),
+    ]
+    for code, lbl in _all_metrics:
         ivars[code] = tk.BooleanVar(value=code in ("VOL","MACD","KDJ","EMO"))
         _chk = ttk.Checkbutton(rt, text=lbl, variable=ivars[code])
         _chk.pack(side=tk.LEFT, padx=(3,0))
         # 问号: 蓝色带下划线, hand2 光标, 双击/单击弹窗
-        _q = tk.Label(rt, text="?", bg="#FAFAFA", fg="#1565C0",
-                      font=("", 9, "underline"), cursor="hand2")
-        _q.pack(side=tk.LEFT, padx=(0,6))
-        _q.bind("<Button-1>", lambda _e, k=_tip_keys.get(code, code): _show_method_knowledge(win, k))
-        _q.bind("<Double-Button-1>", lambda _e, k=_tip_keys.get(code, code): _show_method_knowledge(win, k))
-        # Checkbutton 本身也双击触发 (更方便)
-        _chk.bind("<Double-Button-1>", lambda _e, k=_tip_keys.get(code, code): _show_method_knowledge(win, k))
+        _tip_key = _tip_keys.get(code)
+        _has_tip = bool(_tip_key)
+        if _has_tip:
+            _q = tk.Label(rt, text="?", bg="#FAFAFA", fg="#1565C0",
+                          font=("", 9, "underline"), cursor="hand2")
+            _q.pack(side=tk.LEFT, padx=(0,6))
+            _q.bind("<Button-1>", lambda _e, k=_tip_key: _show_method_knowledge(win, k))
+            _q.bind("<Double-Button-1>", lambda _e, k=_tip_key: _show_method_knowledge(win, k))
+            _chk.bind("<Double-Button-1>", lambda _e, k=_tip_key: _show_method_knowledge(win, k))
     bs_var = tk.BooleanVar(value=True); bt_var = tk.BooleanVar(value=True)
     _bs = ttk.Checkbutton(rt, text="🛒买卖点", variable=bs_var); _bs.pack(side=tk.LEFT, padx=(10,0))
     _q_bs = tk.Label(rt, text="?", bg="#FAFAFA", fg="#1565C0", font=("", 9, "underline"), cursor="hand2")
@@ -2599,7 +2612,9 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         _build_ai_tab()
 
     # ========= matplotlib 重绘 =========
-    def _collect_keys(): return [c for c,_ in [("VOL",""),("MACD",""),("WR2",""),("KDJ",""),("BOLL",""),("EMO","")] if ivars[c].get()]
+    def _collect_keys():
+        _all = [c for c,_ in _all_metrics if ivars[c].get()]
+        return _all  # 数量上限 5 在 _redraw_chart 里强制
 
     # Overlay 状态 (方法辅助线)
     _overlay_artists = []   # matplotlib Artist 列表, 方便 .remove()
@@ -2623,8 +2638,16 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         nonlocal _hover_cache
         if not _current_kline: return
         sel = _collect_keys()
+        # 副图数量上限 5 个 (主图固定 K 线+指标, 附图最多 5 个)
+        if len(sel) > 5:
+            sel = sel[:5]
+            # 多出来的自动取消勾选
+            for c,_ in _all_metrics:
+                if c not in sel and ivars[c].get():
+                    ivars[c].set(False)
         if len(sel) < 2:
             for k in ("VOL","MACD","KDJ","EMO"): ivars[k].set(True); sel = _collect_keys()
+            if len(sel) > 5: sel = sel[:5]
         for w in chart_inner.winfo_children(): w.destroy()
         try:
             import matplotlib
@@ -2659,7 +2682,8 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                 ax_main.plot(list(range(19,len(closes))), c20+2*s20, color="#4682B4", linestyle="--", linewidth=0.8)
                 ax_main.plot(list(range(19,len(closes))), c20-2*s20, color="#4682B4", linestyle="--", linewidth=0.8)
             # 🛒 买卖点 + 胜率 + 凯利 (复用 calc_trade_signals + backtest_signal)
-            _hover_cache = {"bs": {}, "bt": {}, "pp": {}}
+            # gc=Golden Cross 金叉 (买入信号), dc=Death Cross 死叉 (卖出信号)
+            _hover_cache = {"bs": {}, "bt": {}, "pp": {}, "gc": {}, "dc": {}}
             if bs_var.get() and len(closes) >= 30:
                 try:
                     from ui.tab_stock_detail import calc_trade_signals, backtest_build_per_point_cache
@@ -2808,6 +2832,32 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     ax_s.bar(list(range(len(closes))), macd, color=["red" if v>=0 else "green" for v in macd], alpha=0.7)
                     ax_s.plot(list(range(len(closes))), dif, color="#1976D2", label="DIF", linewidth=0.9)
                     ax_s.plot(list(range(len(closes))), dea, color="#FF9800", label="DEA", linewidth=0.9)
+                    # ===== MACD 金叉死叉 (DIF 与 DEA 交叉) =====
+                    _macd_gc, _macd_dc = [], []
+                    for _i in range(1, len(closes)):
+                        if dif[_i-1] <= dea[_i-1] and dif[_i] > dea[_i]:
+                            _macd_gc.append(_i)
+                            _hover_cache["gc"][_i] = "MACD金叉"
+                        elif dif[_i-1] >= dea[_i-1] and dif[_i] < dea[_i]:
+                            _macd_dc.append(_i)
+                            _hover_cache["dc"][_i] = "MACD死叉"
+                    if _macd_gc:
+                        ax_s.scatter(_macd_gc, [dif[_i] for _i in _macd_gc],
+                                     marker="*", s=80, color="#2E7D32", zorder=12, edgecolors="white", linewidths=0.6, label="MACD金叉")
+                        # 主图 K 线 annotate 文字 "MACD金叉"
+                        for _i in _macd_gc:
+                            ax_main.annotate("MACD金叉", xy=(_i, lows[_i]),
+                                             xytext=(0, -18), textcoords="offset points",
+                                             fontsize=5.5, color="#2E7D32", fontweight="bold",
+                                             ha="center", va="top", zorder=17)
+                    if _macd_dc:
+                        ax_s.scatter(_macd_dc, [dif[_i] for _i in _macd_dc],
+                                     marker="v", s=70, color="#C62828", zorder=12, edgecolors="white", linewidths=0.6, label="MACD死叉")
+                        for _i in _macd_dc:
+                            ax_main.annotate("MACD死叉", xy=(_i, highs[_i]),
+                                             xytext=(0, 14), textcoords="offset points",
+                                             fontsize=5.5, color="#C62828", fontweight="bold",
+                                             ha="center", va="bottom", zorder=17)
                     ax_s.legend(loc="upper left", fontsize=7); ax_s.grid(True, alpha=0.2)
                     ax_s.set_title("MACD", fontsize=8, loc="left")
                 elif key == "KDJ":
@@ -2820,6 +2870,31 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     ax_s.plot(list(range(len(closes))), kd_d, color="#FF9800", label="D", linewidth=0.9)
                     ax_s.axhline(y=70, color="gray", linestyle="--", alpha=0.5, linewidth=0.7)
                     ax_s.axhline(y=30, color="gray", linestyle="--", alpha=0.5, linewidth=0.7)
+                    # ===== KDJ 金叉死叉 (K 与 D 交叉) =====
+                    _kdj_gc, _kdj_dc = [], []
+                    for _i in range(1, len(closes)):
+                        if kd_k[_i-1] <= kd_d[_i-1] and kd_k[_i] > kd_d[_i]:
+                            _kdj_gc.append(_i)
+                            _hover_cache["gc"][_i] = _hover_cache["gc"].get(_i, "") + " KDJ金叉"
+                        elif kd_k[_i-1] >= kd_d[_i-1] and kd_k[_i] < kd_d[_i]:
+                            _kdj_dc.append(_i)
+                            _hover_cache["dc"][_i] = _hover_cache["dc"].get(_i, "") + " KDJ死叉"
+                    if _kdj_gc:
+                        ax_s.scatter(_kdj_gc, [kd_k[_i] for _i in _kdj_gc],
+                                     marker="*", s=80, color="#2E7D32", zorder=12, edgecolors="white", linewidths=0.6, label="KDJ金叉")
+                        for _i in _kdj_gc:
+                            ax_main.annotate("KDJ金叉", xy=(_i, lows[_i]),
+                                             xytext=(0, -10), textcoords="offset points",
+                                             fontsize=5.5, color="#1B5E20", fontweight="bold",
+                                             ha="center", va="top", zorder=17)
+                    if _kdj_dc:
+                        ax_s.scatter(_kdj_dc, [kd_k[_i] for _i in _kdj_dc],
+                                     marker="v", s=70, color="#C62828", zorder=12, edgecolors="white", linewidths=0.6, label="KDJ死叉")
+                        for _i in _kdj_dc:
+                            ax_main.annotate("KDJ死叉", xy=(_i, highs[_i]),
+                                             xytext=(0, 8), textcoords="offset points",
+                                             fontsize=5.5, color="#B71C1C", fontweight="bold",
+                                             ha="center", va="bottom", zorder=17)
                     ax_s.legend(loc="upper left", fontsize=7); ax_s.grid(True, alpha=0.2)
                     ax_s.set_title("KDJ", fontsize=8, loc="left")
                 elif key == "WR2":
@@ -2836,6 +2911,111 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     ax_s.plot(list(range(19,len(closes))), c20-2*s20, color="#2E7D32", linestyle="--", linewidth=0.7)
                     ax_s.legend(loc="upper left", fontsize=7); ax_s.grid(True, alpha=0.2)
                     ax_s.set_title("BOLL", fontsize=8, loc="left")
+                elif key == "RSI":
+                    # RSI(14) — Wilder 标准: 平均涨幅 / (平均涨幅 + 平均跌幅) × 100
+                    _rsi_pd = 14
+                    _rsi = np.full(len(closes), 50.0)
+                    for i in range(_rsi_pd, len(closes)):
+                        _up = [max(0, closes[j]-closes[j-1]) for j in range(i-_rsi_pd+1, i+1)]
+                        _dn = [max(0, closes[j-1]-closes[j]) for j in range(i-_rsi_pd+1, i+1)]
+                        _avg_up = sum(_up) / _rsi_pd
+                        _avg_dn = sum(_dn) / _rsi_pd
+                        _rs = _avg_up / max(_avg_dn, 0.0001)
+                        _rsi[i] = 100 - 100/(1+_rs)
+                    ax_s.plot(list(range(len(closes))), _rsi, color="#6A1B9A", linewidth=1.1, label="RSI(14)")
+                    ax_s.axhline(y=70, color="#C62828", linestyle="--", alpha=0.5, linewidth=0.7)
+                    ax_s.axhline(y=30, color="#2E7D32", linestyle="--", alpha=0.5, linewidth=0.7)
+                    ax_s.axhline(y=50, color="gray", linestyle=":", alpha=0.4, linewidth=0.6)
+                    ax_s.set_ylim(0, 100); ax_s.grid(True, alpha=0.2)
+                    ax_s.set_title("RSI(14)", fontsize=8, loc="left")
+                elif key == "CCI":
+                    # CCI(14) — (TP - SMA(TP)) / (0.015 * MeanDev)
+                    _cci_pd = 14
+                    _tp = (highs.astype(float) + lows.astype(float) + closes.astype(float)) / 3
+                    _cci = np.full(len(closes), 0.0)
+                    for i in range(_cci_pd, len(closes)):
+                        _win_tp = _tp[i-_cci_pd+1:i+1]
+                        _sma = _win_tp.mean()
+                        _md = np.abs(_win_tp - _sma).mean()
+                        _cci[i] = (_tp[i] - _sma) / max(0.015 * _md, 0.0001)
+                    ax_s.plot(list(range(len(closes))), _cci, color="#00838F", linewidth=1.1, label="CCI(14)")
+                    ax_s.axhline(y=100, color="#C62828", linestyle="--", alpha=0.5, linewidth=0.7)
+                    ax_s.axhline(y=-100, color="#2E7D32", linestyle="--", alpha=0.5, linewidth=0.7)
+                    ax_s.axhline(y=0, color="gray", linestyle=":", alpha=0.4, linewidth=0.6)
+                    ax_s.grid(True, alpha=0.2)
+                    ax_s.set_title("CCI(14)", fontsize=8, loc="left")
+                elif key == "OBV":
+                    # OBV (On-Balance Volume) — 量价能量潮
+                    _obv = np.zeros(len(closes))
+                    for i in range(1, len(closes)):
+                        if closes[i] > closes[i-1]:
+                            _obv[i] = _obv[i-1] + vols[i]
+                        elif closes[i] < closes[i-1]:
+                            _obv[i] = _obv[i-1] - vols[i]
+                        else:
+                            _obv[i] = _obv[i-1]
+                    ax_s.plot(list(range(len(closes))), _obv, color="#37474F", linewidth=1.0, label="OBV")
+                    # OBV 的 MA20 辅助
+                    if len(closes) >= 20:
+                        _obv_ma = np.convolve(_obv, np.ones(20)/20, mode="valid")
+                        ax_s.plot(list(range(19, len(closes))), _obv_ma, color="#FF9800", linewidth=0.8, label="OBV_MA20")
+                    ax_s.legend(loc="upper left", fontsize=7); ax_s.grid(True, alpha=0.2)
+                    ax_s.set_title("OBV", fontsize=8, loc="left")
+                elif key == "ATR":
+                    # ATR(14) — Average True Range, 衡量波动率
+                    _atr_pd = 14
+                    _tr = np.zeros(len(closes))
+                    _tr[0] = highs[0] - lows[0]
+                    for i in range(1, len(closes)):
+                        _tr[i] = max(highs[i]-lows[i],
+                                     abs(highs[i]-closes[i-1]),
+                                     abs(lows[i]-closes[i-1]))
+                    _atr = np.full(len(closes), 0.0)
+                    for i in range(_atr_pd-1, len(closes)):
+                        _atr[i] = _tr[i-_atr_pd+1:i+1].mean()
+                    ax_s.plot(list(range(len(closes))), _atr, color="#795548", linewidth=1.1, label="ATR(14)")
+                    ax_s.grid(True, alpha=0.2)
+                    ax_s.set_title("ATR(14)", fontsize=8, loc="left")
+                elif key == "SAR":
+                    # SAR (Parabolic Stop-And-Reverse) — 抛物线止损, 趋势跟踪
+                    _sar = np.zeros(len(closes))
+                    _trend = 1  # 1=上涨, -1=下跌
+                    _af = 0.02  # 加速因子
+                    _max_af = 0.2
+                    _ep = float(highs[0]) if _trend == 1 else float(lows[0])  # 极端价格
+                    _sar[0] = float(lows[0]) if _trend == 1 else float(highs[0])
+                    for i in range(1, len(closes)):
+                        # SAR 递推: SAR_prev + AF * (EP - SAR_prev)
+                        _sar[i] = _sar[i-1] + _af * (_ep - _sar[i-1])
+                        # 计算当前 AF
+                        if _trend == 1:
+                            if highs[i] > _ep:
+                                _ep = highs[i]
+                                _af = min(_af + 0.02, _max_af)
+                            # 上涨 SAR 不能 >= 前两根 K 线的最低价
+                            if i >= 2:
+                                _sar[i] = min(_sar[i], lows[i-1], lows[i-2])
+                            # 反转条件: SAR >= 当前最低价
+                            if _sar[i] >= lows[i]:
+                                _trend = -1
+                                _sar[i] = _ep  # 反转后 SAR 取原 EP
+                                _ep = float(lows[i])
+                                _af = 0.02
+                        else:
+                            if lows[i] < _ep:
+                                _ep = lows[i]
+                                _af = min(_af + 0.02, _max_af)
+                            if i >= 2:
+                                _sar[i] = max(_sar[i], highs[i-1], highs[i-2])
+                            if _sar[i] <= highs[i]:
+                                _trend = 1
+                                _sar[i] = _ep
+                                _ep = float(highs[i])
+                                _af = 0.02
+                    ax_s.plot(list(range(len(closes))), closes.astype(float), color="#1976D2", linewidth=0.7, label="收盘")
+                    ax_s.scatter(list(range(len(closes))), _sar, marker=".", s=22, color="#E65100", zorder=10, label="SAR", linewidths=0)
+                    ax_s.legend(loc="upper left", fontsize=7); ax_s.grid(True, alpha=0.2)
+                    ax_s.set_title("SAR抛物线", fontsize=8, loc="left")
                 elif key == "EMO":
                     emo_data = _current_kline.get("emo") if _current_kline else None
                     ax_s.set_ylim(-5, 110)
@@ -2932,13 +3112,21 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                     if not bt_var.get() or event.inaxes is None or event.xdata is None:
                         if hover_tt: hover_tt.destroy(); hover_tt = None; return
                     idx = int(round(event.xdata))
-                    if idx not in _hover_cache.get("bs", {}):
+                    # 触发条件: 鼠标悬停到 买卖点 / 金叉 / 死叉 的 K 线上都弹 tooltip
+                    _has_bs = idx in _hover_cache.get("bs", {})
+                    _has_gc = idx in _hover_cache.get("gc", {})
+                    _has_dc = idx in _hover_cache.get("dc", {})
+                    if not _has_bs and not _has_gc and not _has_dc:
                         if hover_tt: hover_tt.destroy(); hover_tt = None; return
-                    sig_type, label, col = _hover_cache["bs"][idx]
-                    bt = _hover_cache.get("bt", {}).get(sig_type)
-                    _zh = {"buy":"★买入","add":"▲加仓","sell":"▼卖出","reduce":"▽减仓"}[sig_type]
+                    sig_type = label = col = bt = pp = None
+                    _zh = ""
+                    if _has_bs:
+                        sig_type, label, col = _hover_cache["bs"][idx]
+                        bt = _hover_cache.get("bt", {}).get(sig_type)
+                        _zh = {"buy":"★买入","add":"▲加仓","sell":"▼卖出","reduce":"▽减仓"}[sig_type]
+                        pp = _hover_cache.get("pp", {}).get(idx)
                     lines = []
-                    # ========== 📅 当日数据 ==========
+                    # ========== 📅 当日数据 (所有 tooltip 都显示) ==========
                     try:
                         _df = _current_kline["data"] if _current_kline else None
                         if _df is not None and 0 <= idx < len(_df):
@@ -2973,58 +3161,77 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                             lines.append(f"  开 {_open:.2f}  高 {_hi:.2f}  低 {_lo:.2f}  收 {_cls:.2f}")
                             lines.append(f"  量 {_fmt_amt(_vol)}  额 {_fmt_amt(_amt)}  量比(5日) {_vr5:.2f}  量比(20日) {_vr20:.2f}")
                     except Exception: pass
+                    # ========== 🟢🔴 金叉死叉指标信号 ==========
+                    _sig_tags = []
+                    if _has_gc: _sig_tags.append(f"🟢{_hover_cache['gc'][idx].strip()} (买入信号)")
+                    if _has_dc: _sig_tags.append(f"🔴{_hover_cache['dc'][idx].strip()} (卖出信号)")
+                    if _sig_tags:
+                        lines.append("")
+                        lines.append("━━━ 指标交叉信号 ━━━")
+                        for _t in _sig_tags: lines.append(f"  {_t}")
+                        # 交叉信号的简短说明
+                        if _has_gc:
+                            _gc_name = _hover_cache['gc'][idx].strip()
+                            lines.append(f"  💡 {_gc_name}: 上穿 0 轴/信号线, 动能从弱转强, 短线看涨信号")
+                        if _has_dc:
+                            _dc_name = _hover_cache['dc'][idx].strip()
+                            lines.append(f"  ⚠️ {_dc_name}: 下穿 0 轴/信号线, 动能从强转弱, 短线看跌信号")
                     lines.append("")
-                    lines.append(f"🎯 {_zh} — {label}")
+                    # ========== 🎯 买卖点 ==========
+                    if _zh:
+                        lines.append(f"🎯 {_zh} — {label}")
+                    else:
+                        lines.append("🎯 指标交叉信号点")
                     # ========== 🎯 单点真实结果 (这根 K 线买入后实际发生了什么) ==========
-                    pp = _hover_cache.get("pp", {}).get(idx)
-                    if pp:
-                        _arrow = "📈" if pp["ret"] >= 0 else "📉"
-                        _reason = pp["exit_reason"]
-                        lines.append(f"━━━━ 这根K线 {_zh} 真实结果 ━━━━")
-                        lines.append(f"  入场价 {pp['entry_p']:.2f} → 出场价 {pp['exit_p']:.2f}  ({pp['hold_days']}天后)")
-                        lines.append(f"  {_arrow} 单笔收益: {pp['ret']:+.2f}%   出场方式: {_reason}")
-                        _rw = pp.get("rets_by_window", {})
-                        _win_parts = []
-                        for _w, _lbl in [(1,"1天"),(3,"3天"),(5,"5天"),(10,"10天"),(20,"20天")]:
-                            _v = _rw.get(_w)
-                            if _v is not None:
-                                _win_parts.append(f"{_lbl}{_v:+.1f}%")
-                        if _win_parts:
-                            lines.append(f"  固定时间窗: {' | '.join(_win_parts)}")
-                        lines.append(f"━━━━ 历史同类型 {_zh} 汇总 ━━━━")
-                    if bt:
-                        cnt = bt["count"]; wr = bt["win_rate"]
-                        avg_g = bt["avg_profit"]; avg_l = bt["avg_loss"]; plr = bt["plr"]
-                        median_ret = bt["median_ret"]; best = bt["best"]; worst = bt["worst"]
-                        avg_hold = bt["avg_hold_days"]
-                        wr_by_w = bt["wr_by_window"]; ret_by_w = bt["ret_by_window"]
-                        exit_reasons = bt["exit_reasons"]
-                        lines += [
-                            f"📊 历史{cnt}次 (止盈10%/止损5%/最长{int(avg_hold)+5}天)",
-                            f"✅ 真实胜率{wr:.1f}% (逐bar止盈止损后)",
-                            f"💰 平均盈利+{avg_g:.2f}%  💔 平均亏损-{avg_l:.2f}%",
-                            f"⚖️ 盈亏比{plr:.2f}  🧭 中位收益{median_ret:+.2f}%",
-                            f"🏆 最佳{best:+.1f}% 😰 最差{worst:+.1f}% ⏱ 平均持仓{avg_hold:.1f}天"]
-                        if exit_reasons:
-                            _parts = [f"{k}{v}次" for k, v in sorted(exit_reasons.items())]
-                            lines.append(f"🚪 出场: {' / '.join(_parts)}")
-                        lines.append("📐 不同时间窗(收盘价): "
-                                     f"5日胜率{wr_by_w.get(5,0):.0f}%均收{ret_by_w.get(5,0):+.1f}%  "
-                                     f"10日胜率{wr_by_w.get(10,0):.0f}%均收{ret_by_w.get(10,0):+.1f}%  "
-                                     f"20日胜率{wr_by_w.get(20,0):.0f}%均收{ret_by_w.get(20,0):+.1f}%")
-                        p = wr/100.0; q = 1-p; b = max(plr, 0.01)
-                        kelly_f = max(0, min((b*p-q)/b if b>0 else 0, 1.0))
-                        halving = kelly_f/2
-                        if kelly_f >= 0.25: lv = "⭐⭐⭐⭐⭐ 强下注信号"
-                        elif kelly_f >= 0.15: lv = "⭐⭐⭐⭐ 值得下注"
-                        elif kelly_f >= 0.05: lv = "⭐⭐⭐ 轻仓试单"
-                        elif kelly_f > 0: lv = "⭐⭐ 观察信号"
-                        else: lv = "❌ 不值得下注"
-                        lines += ["", "🧮 凯利公式 (Kelly Criterion):",
-                                   f"   f*=(bp-q)/b=({b:.2f}×{p:.2f}-{q:.2f})/{b:.2f}",
-                                   f"   ✅ 最优仓位{kelly_f*100:.1f}%  🔹半凯利{halving*100:.1f}%",
-                                   f"   🎯 {lv}"]
-                    else: lines.append("⚠️ 历史信号不足 3 次")
+                    if _has_bs:
+                        if pp:
+                            _arrow = "📈" if pp["ret"] >= 0 else "📉"
+                            _reason = pp["exit_reason"]
+                            lines.append(f"━━━━ 这根K线 {_zh} 真实结果 ━━━━")
+                            lines.append(f"  入场价 {pp['entry_p']:.2f} → 出场价 {pp['exit_p']:.2f}  ({pp['hold_days']}天后)")
+                            lines.append(f"  {_arrow} 单笔收益: {pp['ret']:+.2f}%   出场方式: {_reason}")
+                            _rw = pp.get("rets_by_window", {})
+                            _win_parts = []
+                            for _w, _lbl in [(1,"1天"),(3,"3天"),(5,"5天"),(10,"10天"),(20,"20天")]:
+                                _v = _rw.get(_w)
+                                if _v is not None:
+                                    _win_parts.append(f"{_lbl}{_v:+.1f}%")
+                            if _win_parts:
+                                lines.append(f"  固定时间窗: {' | '.join(_win_parts)}")
+                            lines.append(f"━━━━ 历史同类型 {_zh} 汇总 ━━━━")
+                        if bt:
+                            cnt = bt["count"]; wr = bt["win_rate"]
+                            avg_g = bt["avg_profit"]; avg_l = bt["avg_loss"]; plr = bt["plr"]
+                            median_ret = bt["median_ret"]; best = bt["best"]; worst = bt["worst"]
+                            avg_hold = bt["avg_hold_days"]
+                            wr_by_w = bt["wr_by_window"]; ret_by_w = bt["ret_by_window"]
+                            exit_reasons = bt["exit_reasons"]
+                            lines += [
+                                f"📊 历史{cnt}次 (止盈10%/止损5%/最长{int(avg_hold)+5}天)",
+                                f"✅ 真实胜率{wr:.1f}% (逐bar止盈止损后)",
+                                f"💰 平均盈利+{avg_g:.2f}%  💔 平均亏损-{avg_l:.2f}%",
+                                f"⚖️ 盈亏比{plr:.2f}  🧭 中位收益{median_ret:+.2f}%",
+                                f"🏆 最佳{best:+.1f}% 😰 最差{worst:+.1f}% ⏱ 平均持仓{avg_hold:.1f}天"]
+                            if exit_reasons:
+                                _parts = [f"{k}{v}次" for k, v in sorted(exit_reasons.items())]
+                                lines.append(f"🚪 出场: {' / '.join(_parts)}")
+                            lines.append("📐 不同时间窗(收盘价): "
+                                         f"5日胜率{wr_by_w.get(5,0):.0f}%均收{ret_by_w.get(5,0):+.1f}%  "
+                                         f"10日胜率{wr_by_w.get(10,0):.0f}%均收{ret_by_w.get(10,0):+.1f}%  "
+                                         f"20日胜率{wr_by_w.get(20,0):.0f}%均收{ret_by_w.get(20,0):+.1f}%")
+                            p = wr/100.0; q = 1-p; b = max(plr, 0.01)
+                            kelly_f = max(0, min((b*p-q)/b if b>0 else 0, 1.0))
+                            halving = kelly_f/2
+                            if kelly_f >= 0.25: lv = "⭐⭐⭐⭐⭐ 强下注信号"
+                            elif kelly_f >= 0.15: lv = "⭐⭐⭐⭐ 值得下注"
+                            elif kelly_f >= 0.05: lv = "⭐⭐⭐ 轻仓试单"
+                            elif kelly_f > 0: lv = "⭐⭐ 观察信号"
+                            else: lv = "❌ 不值得下注"
+                            lines += ["", "🧮 凯利公式 (Kelly Criterion):",
+                                       f"   f*=(bp-q)/b=({b:.2f}×{p:.2f}-{q:.2f})/{b:.2f}",
+                                       f"   ✅ 最优仓位{kelly_f*100:.1f}%  🔹半凯利{halving*100:.1f}%",
+                                       f"   🎯 {lv}"]
+                        elif _has_bs: lines.append("⚠️ 历史信号不足 3 次")
                     text = "\n".join(lines)
                     if hover_tt is None or not hover_tt.winfo_exists():
                         hover_tt = tk.Toplevel(win); hover_tt.wm_overrideredirect(True)
