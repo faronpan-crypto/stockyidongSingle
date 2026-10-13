@@ -1987,15 +1987,15 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         _q2.bind("<Button-1>", lambda _e, k=aux_tip.get(_k,_k): _show_method_knowledge(win, k))
         _c.bind("<Double-Button-1>", lambda _e, k=aux_tip.get(_k,_k): _show_method_knowledge(win, k))
     # --- 第三行: 📊 股票概况条 (K 线图上方) ---
-    _sum_bar = tk.Frame(right_f, bg="#FFFDE7", highlightbackground="#FBC02D",
-                        highlightthickness=1, cursor="hand2")
-    _sum_bar.pack(fill=tk.X, pady=(0,3))
-    _sum_title = tk.Label(_sum_bar, text="📊 概况:", bg="#FFFDE7", fg="#F57F17",
-                          font=("", 9, "bold"))
-    _sum_title.pack(side=tk.LEFT, padx=(6,4), pady=3)
-    _sum_lbl = tk.Label(_sum_bar, text="请先选择股票", bg="#FFFDE7", fg="#333",
-                        font=("", 9), anchor="w", justify=tk.LEFT)
-    _sum_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,6), pady=3)
+    _sum_bar = tk.Frame(right_f, bg="#FFFDE7", highlightbackground="#F57F17",
+                        highlightthickness=2, cursor="hand2")
+    _sum_bar.pack(fill=tk.X, pady=(0,3), ipady=2)
+    _sum_title = tk.Label(_sum_bar, text="📊 股票概况", bg="#F57F17", fg="#FFFFFF",
+                          font=("", 9, "bold"), padx=6)
+    _sum_title.pack(side=tk.LEFT, padx=(0,4), pady=2)
+    _sum_lbl = tk.Label(_sum_bar, text="请先选择股票后自动显示概况 + 明日预测", bg="#FFFDE7",
+                        fg="#333", font=("", 9, "bold"), anchor="w", justify=tk.LEFT)
+    _sum_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,6), pady=2)
     # 点击弹出完整详情弹窗 (每次切换股票后由 _draw_meta_panels 重新绑定最新内容)
     def _show_sum_popup_init(_e=None):
         if not _current_kline: return
