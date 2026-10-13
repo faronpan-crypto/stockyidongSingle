@@ -1962,6 +1962,38 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     def _on_meta_wheel(e): meta_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
     meta_canvas.bind_all("<MouseWheel>", _on_meta_wheel)
 
+    # --- 卡片0: 股票概况 (基本信息 + 当日行情 + 估值 + 明日预测) ---
+    _c0 = tk.LabelFrame(meta_inner, text="📊 股票概况", bg="#FFFFFF",
+                        fg="#1A237E", font=("", 10, "bold"), padx=8, pady=6)
+    _c0.pack(fill=tk.X, padx=6, pady=(8,6))
+    # 顶部: 名称 + 代码
+    _c0_hdr = tk.Frame(_c0, bg="#FFFFFF"); _c0_hdr.pack(fill=tk.X, pady=(0,3))
+    _c0_name_lbl = tk.Label(_c0_hdr, text="", bg="#FFFFFF", fg="#1A237E",
+                            font=("", 12, "bold")); _c0_name_lbl.pack(side=tk.LEFT)
+    _c0_code_lbl = tk.Label(_c0_hdr, text="", bg="#FFFFFF", fg="#666",
+                            font=("", 9)); _c0_code_lbl.pack(side=tk.LEFT, padx=(6,0))
+    # 当日行情 (大字)
+    _c0_price_row = tk.Frame(_c0, bg="#FFFFFF"); _c0_price_row.pack(fill=tk.X, pady=(2,2))
+    _c0_price_lbl = tk.Label(_c0_price_row, text="—", bg="#FFFFFF", fg="#333",
+                             font=("", 22, "bold")); _c0_price_lbl.pack(side=tk.LEFT)
+    _c0_chg_lbl = tk.Label(_c0_price_row, text="", bg="#FFFFFF", fg="#C62828",
+                           font=("", 12, "bold")); _c0_chg_lbl.pack(side=tk.LEFT, padx=(8,0))
+    # 行情小标签
+    _c0_quote_lbl = tk.Label(_c0, text="", bg="#FFFFFF", fg="#555", font=("", 8),
+                             justify=tk.LEFT); _c0_quote_lbl.pack(fill=tk.X, pady=2)
+    # 估值/基本面
+    _c0_fund_lbl = tk.Label(_c0, text="", bg="#FFFFFF", fg="#555", font=("", 8),
+                            justify=tk.LEFT); _c0_fund_lbl.pack(fill=tk.X, pady=2)
+    # 明日预测
+    _c0_fcst_sep = tk.Frame(_c0, bg="#E0E0E0", height=1); _c0_fcst_sep.pack(fill=tk.X, pady=(4,3))
+    _c0_fcst_row = tk.Frame(_c0, bg="#FFFFFF"); _c0_fcst_row.pack(fill=tk.X)
+    tk.Label(_c0_fcst_row, text="🎯 明日预测", bg="#FFFFFF", fg="#1A237E",
+             font=("", 9, "bold")).pack(side=tk.LEFT)
+    _c0_fcst_lbl = tk.Label(_c0_fcst_row, text="—", bg="#FFFFFF", fg="#666",
+                            font=("", 14, "bold")); _c0_fcst_lbl.pack(side=tk.RIGHT)
+    _c0_fcst_detail = tk.Label(_c0, text="", bg="#FFFFFF", fg="#888", font=("", 7),
+                               justify=tk.LEFT, wraplength=200); _c0_fcst_detail.pack(fill=tk.X, pady=(1,0))
+
     # --- 卡片1: 情绪温度计 ---
     _c1 = tk.LabelFrame(meta_inner, text="🌡️ 情绪温度计", bg="#FFFFFF",
                         fg="#283593", font=("", 10, "bold"), padx=8, pady=6)
@@ -2607,6 +2639,147 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
         ai_text.insert("1.0", "⏳ 点击「🔍 分析」后自动生成 AI 综合操盘建议...")
         ai_text.configure(state=tk.DISABLED)
         return ai_text
+
+    # ========= 🎯 明日涨跌预测 (多因子投票) =========
+    def _predict_tomorrow(kline):
+        """
+        多因子投票预测明日方向:
+          MA排列 + MACD方向 + KDJ金叉/死叉 + RSI超买超卖 + 量价配合 + 近期动量 + 波动率
+        返回: (vote: -3~+3 实数, detail: str)
+        """
+        try:
+            import numpy as np
+            closes = kline["data"]["收盘"].values.astype(float)
+            opens = kline["data"]["开盘"].values.astype(float)
+            highs = kline["data"]["最高"].values.astype(float)
+            lows = kline["data"]["最低"].values.astype(float)
+            vols = kline["data"]["成交量"].values.astype(float)
+            n = len(closes)
+            if n < 60: return (0.0, "数据不足 60 根 K 线")
+            _votes = []  # [(vote_tag, +1/0/-1, reason)]
+
+            # --- 1. MA 均线排列 ---
+            ma_vals = kline.get("ma_values", {})
+            ma5 = ma_vals.get("ma5"); ma10 = ma_vals.get("ma10"); ma20 = ma_vals.get("ma20")
+            ma_latest = []
+            for _ma in [ma5, ma10, ma20]:
+                if _ma: ma_latest.append(float(_ma[-1]))
+            if len(ma_latest) == 3:
+                if ma_latest[0] > ma_latest[1] > ma_latest[2]:
+                    _votes.append(("MA多头排列", +1, "MA5>MA10>MA20"))
+                elif ma_latest[0] < ma_latest[1] < ma_latest[2]:
+                    _votes.append(("MA空头排列", -1, "MA5<MA10<MA20"))
+                else:
+                    _votes.append(("MA交叉震荡", 0, "均线交织"))
+            # 收盘价 vs MA20
+            if ma20 and len(ma20) >= 1:
+                if closes[-1] > float(ma20[-1]):
+                    _votes.append(("站上MA20", +1, f"收{closes[-1]:.2f}>MA20={float(ma20[-1]):.2f}"))
+                else:
+                    _votes.append(("跌破MA20", -1, f"收{closes[-1]:.2f}<MA20={float(ma20[-1]):.2f}"))
+
+            # --- 2. MACD (DIF vs DEA + 金叉/死叉) ---
+            import pandas as _pd
+            _s = _pd.Series(closes)
+            ema12 = _s.ewm(span=12, adjust=False).mean().values
+            ema26 = _s.ewm(span=26, adjust=False).mean().values
+            dif = ema12 - ema26
+            dea = _pd.Series(dif).ewm(span=9, adjust=False).mean().values
+            macd_hist = (dif - dea) * 2
+            # DIF vs DEA 方向
+            if dif[-1] > dea[-1]:
+                _votes.append(("MACD多头", +1, f"DIF{dif[-1]:.3f}>DEA{dea[-1]:.3f}"))
+            else:
+                _votes.append(("MACD空头", -1, f"DIF{dif[-1]:.3f}<DEA{dea[-1]:.3f}"))
+            # 金叉/死叉 (最近 3 根 K 线内发生)
+            for _i in range(max(1, n-3), n):
+                if dif[_i-1] <= dea[_i-1] and dif[_i] > dea[_i]:
+                    _votes.append(("MACD金叉", +1, f"第{_i}根DIF上穿DEA"))
+                    break
+                elif dif[_i-1] >= dea[_i-1] and dif[_i] < dea[_i]:
+                    _votes.append(("MACD死叉", -1, f"第{_i}根DIF下穿DEA"))
+                    break
+            # MACD 柱状图放大/缩小
+            if len(macd_hist) >= 2:
+                if macd_hist[-1] > macd_hist[-2] and macd_hist[-1] > 0:
+                    _votes.append(("MACD柱放大红", +0.5, "红柱放大"))
+                elif macd_hist[-1] < macd_hist[-2] and macd_hist[-1] < 0:
+                    _votes.append(("MACD柱放大绿", -0.5, "绿柱放大"))
+
+            # --- 3. KDJ ---
+            kd_k = np.full(n, 50.0); kd_d = np.full(n, 50.0)
+            for _i in range(9, n):
+                rv = max(highs[_i-8:_i+1]) - min(lows[_i-8:_i+1])
+                rsv = (closes[_i] - min(lows[_i-8:_i+1])) / max(rv, 0.001) * 100
+                kd_k[_i] = kd_k[_i-1]*2/3 + rsv*1/3
+                kd_d[_i] = kd_d[_i-1]*2/3 + kd_k[_i]*1/3
+            # KDJ 超买超卖
+            if kd_k[-1] > 80 and kd_d[-1] > 80:
+                _votes.append(("KDJ超买区", -1, f"K={kd_k[-1]:.0f}>80"))
+            elif kd_k[-1] < 20 and kd_d[-1] < 20:
+                _votes.append(("KDJ超卖区", +1, f"K={kd_k[-1]:.0f}<20"))
+            # 金叉死叉 (最近 3 根)
+            for _i in range(max(1, n-3), n):
+                if kd_k[_i-1] <= kd_d[_i-1] and kd_k[_i] > kd_d[_i]:
+                    _votes.append(("KDJ金叉", +1, f"K上穿D (K={kd_k[_i]:.0f})"))
+                    break
+                elif kd_k[_i-1] >= kd_d[_i-1] and kd_k[_i] < kd_d[_i]:
+                    _votes.append(("KDJ死叉", -1, f"K下穿D (K={kd_k[_i]:.0f})"))
+                    break
+
+            # --- 4. RSI(14) ---
+            _rsi_pd = 14; _rsi = 50.0
+            if n >= _rsi_pd + 1:
+                _up = [max(0, closes[j]-closes[j-1]) for j in range(n-_rsi_pd, n)]
+                _dn = [max(0, closes[j-1]-closes[j]) for j in range(n-_rsi_pd, n)]
+                _rs = sum(_up)/_rsi_pd / max(sum(_dn)/_rsi_pd, 0.0001)
+                _rsi = 100 - 100/(1+_rs)
+                if _rsi > 70: _votes.append(("RSI超买", -1, f"RSI={_rsi:.0f}>70"))
+                elif _rsi < 30: _votes.append(("RSI超卖", +1, f"RSI={_rsi:.0f}<30"))
+                else:
+                    if _rsi > 50: _votes.append(("RSI偏强", +0.5, f"RSI={_rsi:.0f}>50"))
+                    elif _rsi < 50: _votes.append(("RSI偏弱", -0.5, f"RSI={_rsi:.0f}<50"))
+
+            # --- 5. 量价配合 ---
+            if n >= 20:
+                _vol_ma20 = float(vols[-20:].mean())
+                _v_ratio = vols[-1] / max(_vol_ma20, 0.001)
+                _chg_1d = (closes[-1] - closes[-2]) / closes[-2] * 100
+                if _v_ratio > 1.5 and _chg_1d > 0:
+                    _votes.append(("放量上涨", +1, f"量比{_v_ratio:.1f} + 涨{_chg_1d:+.1f}%"))
+                elif _v_ratio > 1.5 and _chg_1d < 0:
+                    _votes.append(("放量下跌", -1, f"量比{_v_ratio:.1f} + 跌{_chg_1d:+.1f}%"))
+                elif _v_ratio < 0.7 and _chg_1d > 0:
+                    _votes.append(("缩量上涨", +0.5, f"量比{_v_ratio:.1f} + 涨{_chg_1d:+.1f}%"))
+
+            # --- 6. 近期动量 (5日/10日累计涨跌) ---
+            if n >= 10:
+                _m5 = (closes[-1] - closes[-6]) / closes[-6] * 100
+                _m10 = (closes[-1] - closes[-11]) / closes[-11] * 100
+                if _m5 > 3 and _m10 > 5:
+                    _votes.append(("短期动量强", +1, f"5日{_m5:+.1f}% 10日{_m10:+.1f}%"))
+                elif _m5 < -3 and _m10 < -5:
+                    _votes.append(("短期动量弱", -1, f"5日{_m5:+.1f}% 10日{_m10:+.1f}%"))
+                else:
+                    _votes.append(("动量中性", 0, f"5日{_m5:+.1f}% 10日{_m10:+.1f}%"))
+
+            # --- 汇总 ---
+            if not _votes: return (0.0, "因子不足")
+            _total = sum(v for _, v, _ in _votes)
+            # 归一化到 -3 ~ +3
+            _max_possible = len(_votes)
+            _vote_norm = _total / max(_max_possible, 1) * 3
+            # 生成 detail: 列出所有因子
+            _up = [(t, r) for t, v, r in _votes if v > 0]
+            _down = [(t, r) for t, v, r in _votes if v < 0]
+            _neu = [(t, r) for t, v, r in _votes if v == 0]
+            _parts = [f"📈看涨因子 {len(_up)}项: " + ", ".join(t for t,_ in _up)] if _up else []
+            _parts.append(f"📉看跌因子 {len(_down)}项: " + ", ".join(t for t,_ in _down)) if _down else None
+            _parts = _parts + ([f"⚖️中性 {len(_neu)}项"] if _neu else [])
+            _parts.append(f"投票总计 {_total:+.1f} (归一化 {_vote_norm:+.1f})")
+            return (float(_vote_norm), " | ".join(_parts))
+        except Exception as _e:
+            return (0.0, f"预测异常: {_e}")
 
     # ========= 渲染所有 Tab =========
     def _render_all():
@@ -3528,8 +3701,103 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
 
 
     def _draw_meta_panels():
-        """刷新最右 4 个卡片: 温度计 + 资金池 + α/β + 速查"""
-        # ===== 取最新情绪 =====
+        """刷新最右 4 个卡片: 概况 + 温度计 + 资金池 + α/β + 速查"""
+
+        # ===================== 📊 卡片0: 股票概况 =====================
+        if _current_kline and _current_name:
+            try:
+                _df = _current_kline["data"]
+                _latest = _df.iloc[-1]
+                _prev = _df.iloc[-2] if len(_df) >= 2 else _latest
+                _close = float(_latest["收盘"])
+                _prev_close = float(_prev["收盘"])
+                _chg_pct = (_close - _prev_close) / _prev_close * 100
+                _high = float(_latest["最高"]); _low = float(_latest["最低"])
+                _open = float(_latest["开盘"])
+                _vol = float(_latest["成交量"])
+                _amt = float(_latest["成交额"]) if "成交额" in _latest.index else 0
+                _d = str(_latest.get("日期", ""))
+                if len(_d) == 8: _d = f"{_d[:4]}-{_d[4:6]}-{_d[6:8]}"
+                # --- 名称 + 代码 ---
+                _tsc = ""
+                for _c, _ts in _all_metrics: pass  # 占位, 直接从搜索结果传过来的全局变量拿不到, 跳过
+                # 从 _current_kline 里取 trade_dates 推断代码 (其实拿不到, 用 _current_name 凑合)
+                _c0_name_lbl.config(text=f"{_current_name}")
+                # --- 价格大字 ---
+                _c0_price_lbl.config(text=f"{_close:.2f}")
+                _chg_col = "#C62828" if _chg_pct >= 0 else "#2E7D32"
+                _c0_chg_lbl.config(text=f"{_chg_pct:+.2f}%", fg=_chg_col)
+                # --- 行情小标签 ---
+                def _fmt_amt(a):
+                    if a >= 1e8: return f"{a/1e8:.2f}亿"
+                    elif a >= 1e4: return f"{a/1e4:.1f}万"
+                    return f"{a:.0f}"
+                _quote_parts = [
+                    f"📅 {_d}",
+                    f"开 {_open:.2f} 高 {_high:.2f} 低 {_low:.2f}",
+                    f"量 {_fmt_amt(_vol)} 额 {_fmt_amt(_amt)}",
+                ]
+                # 换手率 (fundamental)
+                _fund_now = _current_fund or {}
+                _tr = _fund_now.get("turnover_rate")
+                if _tr is not None:
+                    _quote_parts.append(f"换手 {_tr:.2f}%")
+                # 量比 (5日均量)
+                _vols_all = _df["成交量"].values.astype(float) if "成交量" in _df.columns else None
+                if _vols_all is not None and len(_vols_all) >= 20:
+                    _v5 = float(_vols_all[-5:].mean())
+                    _v20 = float(_vols_all[-20:].mean())
+                    _vr5 = _vol / _v5 if _v5 > 0 else 0
+                    _quote_parts.append(f"量比5日 {_vr5:.2f}")
+                _c0_quote_lbl.config(text="  |  ".join(_quote_parts))
+                # --- 估值/基本面 ---
+                _fund_parts = []
+                _pe = _fund_now.get("pe_ttm")
+                _pb = _fund_now.get("pb")
+                _mv = _fund_now.get("total_mv")
+                if _pe is not None:
+                    _pe_tag = f"PE TTM {_pe:.1f}"
+                    if _pe < 15: _pe_tag += " (低估)"
+                    elif _pe > 40: _pe_tag += " (偏高)"
+                    _fund_parts.append(_pe_tag)
+                if _pb is not None:
+                    _pb_tag = f"PB {_pb:.2f}"
+                    if _pb < 1: _pb_tag += " (破净)"
+                    _fund_parts.append(_pb_tag)
+                if _mv is not None:
+                    _fund_parts.append(f"总市值 {_mv/1e4:.1f}亿")
+                _roe = _fund_now.get("roe") or _fund_now.get("roe_dt")
+                if _roe is not None:
+                    _fund_parts.append(f"ROE {_roe:.1f}%")
+                _rev_yoy = _fund_now.get("revenue_yoy")
+                if _rev_yoy is not None:
+                    _fund_parts.append(f"营收 {_rev_yoy:+.1f}%")
+                _ni_yoy = _fund_now.get("n_income_yoy")
+                if _ni_yoy is not None:
+                    _fund_parts.append(f"净利 {_ni_yoy:+.1f}%")
+                if _fund_parts:
+                    _c0_fund_lbl.config(text="  |  ".join(_fund_parts))
+                else:
+                    _c0_fund_lbl.config(text="基本面数据待加载 (tushare daily_basic)")
+
+                # --- 🎯 明日预测 (多因子投票) ---
+                _vote, _detail = _predict_tomorrow(_current_kline)
+                if _vote > 0.5:
+                    _c0_fcst_lbl.config(text="📈 看涨", fg="#C62828")
+                elif _vote < -0.5:
+                    _c0_fcst_lbl.config(text="📉 看跌", fg="#2E7D32")
+                else:
+                    _c0_fcst_lbl.config(text="➡️ 震荡", fg="#616161")
+                _c0_fcst_detail.config(text=_detail)
+            except Exception as _e:
+                print(f"[概况卡片] {_e}")
+                _c0_price_lbl.config(text="—")
+                _c0_quote_lbl.config(text="")
+                _c0_fund_lbl.config(text="")
+                _c0_fcst_lbl.config(text="—", fg="#666")
+                _c0_fcst_detail.config(text="")
+
+        # ===================== 取最新情绪 =====================
         latest_emo = None
         if _emo_cache:
             # sentiment_history 是按 id DESC 拉的, 但 key 是日期, 取最新日期
