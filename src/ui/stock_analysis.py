@@ -1881,8 +1881,9 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     # ===== 右侧: K 线 =====
     right_f = tk.Frame(pw, bg="#FAFAFA")
     pw.add(right_f, minsize=600)
-    rt = tk.Frame(right_f, bg="#FAFAFA"); rt.pack(fill=tk.X, pady=(0,4))
-    ttk.Label(rt, text="K线图 + 指标 + 买卖点 (hover 查看胜率+凯利公式)",
+    # --- 第一行: 标题 + 11 个指标 Checkbutton ---
+    rt1 = tk.Frame(right_f, bg="#FAFAFA"); rt1.pack(fill=tk.X, pady=(0,2))
+    ttk.Label(rt1, text="K线图 + 指标 + 买卖点 (hover 查看胜率+凯利公式)",
               font=("", 11, "bold"), background="#FAFAFA", foreground="#1565C0").pack(side=tk.LEFT, padx=6)
     ivars = {}
     _tip_keys = {  # code → KNOWLEDGE key
@@ -1906,38 +1907,40 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     ]
     for code, lbl in _all_metrics:
         ivars[code] = tk.BooleanVar(value=code in ("VOL","MACD","KDJ","EMO"))
-        _chk = ttk.Checkbutton(rt, text=lbl, variable=ivars[code])
+        _chk = ttk.Checkbutton(rt1, text=lbl, variable=ivars[code])
         _chk.pack(side=tk.LEFT, padx=(3,0))
         # 问号: 蓝色带下划线, hand2 光标, 双击/单击弹窗
         _tip_key = _tip_keys.get(code)
         _has_tip = bool(_tip_key)
         if _has_tip:
-            _q = tk.Label(rt, text="?", bg="#FAFAFA", fg="#1565C0",
+            _q = tk.Label(rt1, text="?", bg="#FAFAFA", fg="#1565C0",
                           font=("", 9, "underline"), cursor="hand2")
-            _q.pack(side=tk.LEFT, padx=(0,6))
+            _q.pack(side=tk.LEFT, padx=(0,4))
             _q.bind("<Button-1>", lambda _e, k=_tip_key: _show_method_knowledge(win, k))
             _q.bind("<Double-Button-1>", lambda _e, k=_tip_key: _show_method_knowledge(win, k))
             _chk.bind("<Double-Button-1>", lambda _e, k=_tip_key: _show_method_knowledge(win, k))
+    # --- 第二行: 买卖点 + 胜率凯利 + 辅助线 ---
+    rt2 = tk.Frame(right_f, bg="#FAFAFA"); rt2.pack(fill=tk.X, pady=(0,4))
     bs_var = tk.BooleanVar(value=True); bt_var = tk.BooleanVar(value=True)
-    _bs = ttk.Checkbutton(rt, text="🛒买卖点", variable=bs_var); _bs.pack(side=tk.LEFT, padx=(10,0))
-    _q_bs = tk.Label(rt, text="?", bg="#FAFAFA", fg="#1565C0", font=("", 9, "underline"), cursor="hand2")
+    _bs = ttk.Checkbutton(rt2, text="🛒买卖点", variable=bs_var); _bs.pack(side=tk.LEFT, padx=(6,0))
+    _q_bs = tk.Label(rt2, text="?", bg="#FAFAFA", fg="#1565C0", font=("", 9, "underline"), cursor="hand2")
     _q_bs.pack(side=tk.LEFT, padx=(0,6))
     _q_bs.bind("<Button-1>", lambda _e: _show_method_knowledge(win, "买卖点信号"))
     _bs.bind("<Double-Button-1>", lambda _e: _show_method_knowledge(win, "买卖点信号"))
-    _bt = ttk.Checkbutton(rt, text="💡胜率+凯利", variable=bt_var); _bt.pack(side=tk.LEFT, padx=(4,0))
-    _q_bt = tk.Label(rt, text="?", bg="#FAFAFA", fg="#1565C0", font=("", 9, "underline"), cursor="hand2")
-    _q_bt.pack(side=tk.LEFT, padx=(0,6))
+    _bt = ttk.Checkbutton(rt2, text="💡胜率+凯利", variable=bt_var); _bt.pack(side=tk.LEFT, padx=(4,0))
+    _q_bt = tk.Label(rt2, text="?", bg="#FAFAFA", fg="#1565C0", font=("", 9, "underline"), cursor="hand2")
+    _q_bt.pack(side=tk.LEFT, padx=(0,10))
     _q_bt.bind("<Button-1>", lambda _e: _show_method_knowledge(win, "凯利公式"))
     _bt.bind("<Double-Button-1>", lambda _e: _show_method_knowledge(win, "凯利公式"))
     # ===== 辅助线 =====
-    _aux_frame = tk.Frame(rt, bg=rt.cget("background")); _aux_frame.pack(side=tk.LEFT, padx=(8,0))
+    ttk.Label(rt2, text="辅助线:", background="#FAFAFA", foreground="#333").pack(side=tk.LEFT, padx=(6,0))
     aux_vars = {}
     aux_tip = {"sr":"支撑阻力","gann":"江恩理论","fib":"斐波那契回撤","gold":"黄金分割","zs":"缠论中枢"}
     for _k, _lbl, _def in [("sr","支撑阻力",True),("gann","江恩",False),
                             ("fib","斐波那契",True),("gold","黄金分割",True),("zs","缠论中枢",False)]:
         aux_vars[_k] = tk.BooleanVar(value=_def)
-        _c = ttk.Checkbutton(_aux_frame, text=_lbl, variable=aux_vars[_k]); _c.pack(side=tk.LEFT, padx=(3,0))
-        _q2 = tk.Label(_aux_frame, text="?", bg="#FAFAFA", fg="#1565C0",
+        _c = ttk.Checkbutton(rt2, text=_lbl, variable=aux_vars[_k]); _c.pack(side=tk.LEFT, padx=(3,0))
+        _q2 = tk.Label(rt2, text="?", bg="#FAFAFA", fg="#1565C0",
                        font=("", 9, "underline"), cursor="hand2")
         _q2.pack(side=tk.LEFT, padx=(0,4))
         _q2.bind("<Button-1>", lambda _e, k=aux_tip.get(_k,_k): _show_method_knowledge(win, k))
@@ -3232,15 +3235,32 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                                        f"   ✅ 最优仓位{kelly_f*100:.1f}%  🔹半凯利{halving*100:.1f}%",
                                        f"   🎯 {lv}"]
                         elif _has_bs: lines.append("⚠️ 历史信号不足 3 次")
+                    # ========== 🎨 买卖方向判断 (决定 tooltip 配色) ==========
+                    _is_buy = False; _is_sell = False
+                    if _has_bs:
+                        if sig_type in ("buy", "add"): _is_buy = True
+                        elif sig_type in ("sell", "reduce"): _is_sell = True
+                    if _has_gc: _is_buy = True
+                    if _has_dc: _is_sell = True
+                    # 配色方案: 买入=红框+淡黄, 卖出=黑框+淡绿
+                    if _is_buy:
+                        _border_bg = "#C62828"; _inner_bg = "#FFFDE7"; _text_fg = "#1A1A1A"
+                    elif _is_sell:
+                        _border_bg = "#212121"; _inner_bg = "#E8F5E9"; _text_fg = "#1A1A1A"
+                    else:
+                        _border_bg = "#263238"; _inner_bg = "#37474F"; _text_fg = "#FFFFFF"
                     text = "\n".join(lines)
                     if hover_tt is None or not hover_tt.winfo_exists():
                         hover_tt = tk.Toplevel(win); hover_tt.wm_overrideredirect(True)
-                        hover_tt.attributes("-topmost", True); hover_tt.configure(bg="#263238")
-                        tk.Label(hover_tt, text=text, bg="#263238", fg="#FFF",
+                        hover_tt.attributes("-topmost", True); hover_tt.configure(bg=_border_bg)
+                        _inner_f = tk.Frame(hover_tt, bg=_inner_bg); _inner_f.pack(padx=3, pady=3, fill=tk.BOTH, expand=True)
+                        tk.Label(_inner_f, text=text, bg=_inner_bg, fg=_text_fg,
                                  font=("", 10, "bold"), padx=10, pady=6, justify=tk.LEFT).pack()
                     else:
+                        hover_tt.configure(bg=_border_bg)
                         for w in hover_tt.winfo_children(): w.destroy()
-                        tk.Label(hover_tt, text=text, bg="#263238", fg="#FFF",
+                        _inner_f = tk.Frame(hover_tt, bg=_inner_bg); _inner_f.pack(padx=3, pady=3, fill=tk.BOTH, expand=True)
+                        tk.Label(_inner_f, text=text, bg=_inner_bg, fg=_text_fg,
                                  font=("", 10, "bold"), padx=10, pady=6, justify=tk.LEFT).pack()
                     mx = win.winfo_pointerx(); my = win.winfo_pointery()
                     hover_tt.geometry(f"+{mx+15}+{my+15}")
