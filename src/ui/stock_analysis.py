@@ -3794,6 +3794,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     def _draw_meta_panels():
         """刷新最右 3 个卡片: 温度计 + 资金池 + α/β + 速查, 以及 K 线图上方概况条"""
         nonlocal _sum_full_cache
+        print(f"[概况调试] _draw_meta_panels called, _current_name='{_current_name}', kline={'OK' if _current_kline else 'None'}")
 
         # ===================== 📊 K 线图上方概况条 =====================
         _full_sum_text = ""  # 完整文本, 点击弹窗显示
@@ -4268,6 +4269,7 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
     refresh_btn.config(command=_on_refresh)
 
     win.bind("<Return>", lambda e: _do_search())
+    combo.bind("<<ComboboxSelected>>", lambda e: _do_search())  # 下拉选了直接触发搜索
     win.mainloop()
 
 
