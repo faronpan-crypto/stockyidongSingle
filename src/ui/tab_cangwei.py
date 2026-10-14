@@ -2131,19 +2131,15 @@ class CangweiMixin:
                                 popup._update_display()
                             except:
                                 pass
-                # 🆕 统一更新持仓股监控窗口小框标题 (只在持仓检测完成后做一次)
+                # 🆕 统一更新持仓股监控窗口小框标题 (只更新标题后缀, 技术信号已在 update_chart 画完)
                 try:
                     mw = getattr(self, 'holding_stock_monitor_window', None)
                     if mw is not None:
                         cws = getattr(mw, 'chart_widgets', [])
                         for ci in cws:
                             try:
-                                _kd = self._get_daily_kline_data_tushare(
-                                    str(ci['stock_code']).zfill(6), days=120)
-                                if not _kd: continue
-                                sig = self._compute_cross_bias_signals(_kd)
-                                ci['tech_sig'] = sig  # 缓存
-                                # 更新标题后缀
+                                sig = ci.get('tech_sig')
+                                if not sig: continue
                                 _parts = []
                                 if sig.get("M"): _parts.append(f"M{sig['M']}")
                                 if sig.get("K"): _parts.append(f"K{sig['K']}")
@@ -2156,28 +2152,6 @@ class CangweiMixin:
                                 _orig = ci['frame'].cget("text")
                                 _base = _orig.split(" | ")[0] if " | " in _orig else _orig
                                 ci['frame'].config(text=f"{_base}{_suffix}")
-                                # 🆕 直接在现有 K 线图上叠加信号文字 (不重画 K 线, 省时间)
-                                try:
-                                    ax = ci.get('ax'); canvas = ci.get('canvas')
-                                    if ax is not None and canvas is not None and sig is not None:
-                                        _sl = []
-                                        if sig.get("M"): _sl.append(f"MACD: {sig['M']}叉")
-                                        if sig.get("K"): _sl.append(f"KDJ: {sig['K']}叉")
-                                        if sig.get("bias"): _sl.append(f"BIAS: {sig['bias']}({sig.get('bias_val',0):.1f}%)")
-                                        if sig.get("chip_pct") is not None and abs(sig["chip_pct"]) >= 8:
-                                            _sl.append(f"筹码偏离: {sig['chip_pct']:+.1f}%")
-                                        # 先清掉旧的右上角 text (找带 'chip_pct' label 的 text, 或者简单全部清了重画)
-                                        for _t in ax.texts:
-                                            try: _t.remove()
-                                            except Exception: pass
-                                        if _sl:
-                                            ax.text(0.98, 0.97, "\n".join(_sl), transform=ax.transAxes,
-                                                    fontsize=6, ha="right", va="top",
-                                                    bbox=dict(boxstyle="round,pad=0.3", fc="#FFFDE7", ec="#1A237E", alpha=0.92),
-                                                    color="#1A237E", fontweight="bold")
-                                        canvas.draw_idle()
-                                except Exception as _e:
-                                    print(f"[持仓监控] 叠加信号文字失败: {_e}")
                             except Exception:
                                 pass
                 except Exception:
@@ -4349,22 +4323,23 @@ class CangweiMixin:
                         ax.set_ylabel('价格', fontsize=6)
                         ax.legend(loc='upper left', fontsize=5)
                         ax.grid(True, alpha=0.3)
-                        # 🆕 右上角空白处画技术信号 (持仓检测后有值才画)
-                        _sig = chart_info.get('tech_sig')
-                        if _sig:
+                        # 🆕 右上角空白处画技术信号 — 画完 K 线立刻算好, 不等检测按钮
+                        try:
+                            _sig = self._compute_cross_bias_signals(kline_data)
+                            chart_info['tech_sig'] = _sig
                             _sig_lines = []
                             if _sig.get("M"): _sig_lines.append(f"MACD: {_sig['M']}叉")
                             if _sig.get("K"): _sig_lines.append(f"KDJ: {_sig['K']}叉")
-                            if _sig.get("bias"): _sig_lines.append(f"BIAS: {_sig['bias']}(+{_sig.get('bias_val',0):.1f}%)")
+                            if _sig.get("bias"): _sig_lines.append(f"BIAS: {_sig['bias']}({_sig.get('bias_val',0):.1f}%)")
                             if _sig.get("chip_pct") is not None and abs(_sig["chip_pct"]) >= 8:
                                 _sig_lines.append(f"筹码偏离: {_sig['chip_pct']:+.1f}%")
                             if _sig_lines:
-                                _sig_text = "\n".join(_sig_lines)
-                                # 用 axes coordinates (1=右, 1=上), horizontal/vertical alignment 右对齐顶对齐
-                                ax.text(0.98, 0.97, _sig_text, transform=ax.transAxes,
+                                ax.text(0.98, 0.97, "\n".join(_sig_lines), transform=ax.transAxes,
                                         fontsize=6, ha="right", va="top",
                                         bbox=dict(boxstyle="round,pad=0.3", fc="#FFFDE7", ec="#1A237E", alpha=0.92),
                                         color="#1A237E", fontweight="bold")
+                        except Exception:
+                            pass
                         step = max(1, len(trade_dates) // 8)
                         ax.set_xticks(dates[::step])
                         ax.set_xticklabels([_fmt_date(trade_dates[i]) if i < len(trade_dates) else str(i) for i in dates[::step]], rotation=45, ha='right', fontsize=5)
