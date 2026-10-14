@@ -1887,8 +1887,17 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
              font=("", 13, "bold")).pack(side=tk.LEFT, padx=14, pady=9)
     tk.Label(top, text="股票:", bg="#283593", fg="white", font=("", 10)).pack(side=tk.LEFT)
     stock_var = tk.StringVar()
-    combo = ttk.Combobox(top, textvariable=stock_var, width=22, state="normal")
+    combo = ttk.Combobox(top, textvariable=stock_var, width=28, height=20, state="normal")
     combo.pack(side=tk.LEFT, padx=(6,2))
+    # popup 弹出时自动加宽到 480px, 一次显示 20 行
+    def _widen_popup():
+        try:
+            _lb = combo.tk.call("ttk::combobox::PopdownWindow", str(combo))
+            combo.tk.call("$lb.f.l configure", "-width", 40)
+            combo.tk.call("wm", "geometry", _lb, "480x420+%d+%d" % (
+                combo.winfo_rootx(), combo.winfo_rooty() + combo.winfo_height()))
+        except Exception: pass
+    combo.configure(postcommand=_widen_popup)
     # 🔄 刷新候选按钮 (点了才联网)
     refresh_btn = tk.Button(top, text="🔄", bg="#FFB300", fg="#1A237E",
                              font=("", 10), relief=tk.FLAT, padx=6, cursor="hand2",
