@@ -2131,31 +2131,7 @@ class CangweiMixin:
                                 popup._update_display()
                             except:
                                 pass
-                # 🆕 统一更新持仓股监控窗口小框标题 (只更新标题后缀, 技术信号已在 update_chart 画完)
-                try:
-                    mw = getattr(self, 'holding_stock_monitor_window', None)
-                    if mw is not None:
-                        cws = getattr(mw, 'chart_widgets', [])
-                        for ci in cws:
-                            try:
-                                sig = ci.get('tech_sig')
-                                if not sig: continue
-                                _parts = []
-                                if sig.get("M"): _parts.append(f"M{sig['M']}")
-                                if sig.get("K"): _parts.append(f"K{sig['K']}")
-                                if sig.get("bias"): _parts.append(f"bias{sig['bias']}")
-                                if sig.get("chip_pct") is not None:
-                                    _cp = sig["chip_pct"]
-                                    if abs(_cp) >= 8.0 or sig.get("chip_sig"):
-                                        _parts.append(f"筹码{_cp:+.1f}%")
-                                _suffix = " | " + " ".join(_parts) if _parts else ""
-                                _orig = ci['frame'].cget("text")
-                                _base = _orig.split(" | ")[0] if " | " in _orig else _orig
-                                ci['frame'].config(text=f"{_base}{_suffix}")
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+            self.root.after(1000, final_update)
         thread = threading.Thread(target=check_thread, daemon=True)
         thread.start()
 
@@ -4323,7 +4299,7 @@ class CangweiMixin:
                         ax.set_ylabel('价格', fontsize=6)
                         ax.legend(loc='upper left', fontsize=5)
                         ax.grid(True, alpha=0.3)
-                        # 🆕 右上角空白处画技术信号 — 画完 K 线立刻算好, 不等检测按钮
+                        # 🆕 右上角空白处画技术信号 — 画完 K 线立刻算好
                         try:
                             _sig = self._compute_cross_bias_signals(kline_data)
                             chart_info['tech_sig'] = _sig
@@ -4338,6 +4314,24 @@ class CangweiMixin:
                                         fontsize=6, ha="right", va="top",
                                         bbox=dict(boxstyle="round,pad=0.3", fc="#FFFDE7", ec="#1A237E", alpha=0.92),
                                         color="#1A237E", fontweight="bold")
+                            # 🆕 切主线程更新小框标题后缀 (Tkinter UI 必须主线程)
+                            def _upd_title(_ci=chart_info, _sg=_sig):
+                                try:
+                                    _p = []
+                                    if _sg.get("M"): _p.append(f"M{_sg['M']}")
+                                    if _sg.get("K"): _p.append(f"K{_sg['K']}")
+                                    if _sg.get("bias"): _p.append(f"bias{_sg['bias']}")
+                                    if _sg.get("chip_pct") is not None:
+                                        _cp2 = _sg["chip_pct"]
+                                        if abs(_cp2) >= 8.0 or _sg.get("chip_sig"):
+                                            _p.append(f"筹码{_cp2:+.1f}%")
+                                    if _p:
+                                        _orig = _ci['frame'].cget("text")
+                                        _base = _orig.split(" | ")[0] if " | " in _orig else _orig
+                                        _ci['frame'].config(text=f"{_base} | {' '.join(_p)}")
+                                except Exception:
+                                    pass
+                            self.root.after(0, _upd_title)
                         except Exception:
                             pass
                         step = max(1, len(trade_dates) // 8)
