@@ -2122,7 +2122,7 @@ class CangweiMixin:
                         time.sleep(1)
                     except Exception as e:
                         print(f"检测持仓股 {stock_name} 失败: {e}")
-            # 检测完成后,再次更新所有弹出窗口
+            # 检测完成后,再次更新所有弹出窗口 + 🆕 统一更新持仓股监控小框标题
             def final_update():
                 if hasattr(self, '_history_holdings_popup_windows'):
                     for popup in self._history_holdings_popup_windows:
@@ -2131,6 +2131,33 @@ class CangweiMixin:
                                 popup._update_display()
                             except:
                                 pass
+                # 🆕 统一更新持仓股监控窗口小框标题 (只在持仓检测完成后做一次)
+                try:
+                    mw = getattr(self, 'holding_stock_monitor_window', None)
+                    if mw is not None:
+                        cws = getattr(mw, 'chart_widgets', [])
+                        for ci in cws:
+                            try:
+                                _kd = self._get_daily_kline_data_tushare(
+                                    str(ci['stock_code']).zfill(6), days=120)
+                                if not _kd: continue
+                                sig = self._compute_cross_bias_signals(_kd)
+                                _parts = []
+                                if sig.get("M"): _parts.append(f"M{sig['M']}")
+                                if sig.get("K"): _parts.append(f"K{sig['K']}")
+                                if sig.get("bias"): _parts.append(f"bias{sig['bias']}")
+                                if sig.get("chip_pct") is not None:
+                                    _cp = sig["chip_pct"]
+                                    if abs(_cp) >= 8.0 or sig.get("chip_sig"):
+                                        _parts.append(f"筹码{_cp:+.1f}%")
+                                _suffix = " | " + " ".join(_parts) if _parts else ""
+                                _orig = ci['frame'].cget("text")
+                                _base = _orig.split(" | ")[0] if " | " in _orig else _orig
+                                ci['frame'].config(text=f"{_base}{_suffix}")
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
             self.root.after(1000, final_update)  # 延迟1秒后更新,确保所有检测完成
         thread = threading.Thread(target=check_thread, daemon=True)
         thread.start()
@@ -4145,27 +4172,6 @@ class CangweiMixin:
                         n = len(closes)
                         dates = list(range(n))
                         current_price = float(closes[-1]) if n else 0
-                        # 🆕 MACD/KDJ 金叉死叉 + BIAS 乖离 + 筹码成本 (直接复用 kline_data, 不额外联网)
-                        sig = self._compute_cross_bias_signals(kline_data)
-                        _sig_parts = []
-                        if sig.get("M"): _sig_parts.append(f"M{sig['M']}")
-                        if sig.get("K"): _sig_parts.append(f"K{sig['K']}")
-                        if sig.get("bias"): _sig_parts.append(f"bias{sig['bias']}")
-                        # 🆕 筹码成本: 只在偏离较大或有警示时才追加 (避免标题太挤)
-                        if sig.get("chip_pct") is not None:
-                            _cp = sig["chip_pct"]
-                            if abs(_cp) >= 8.0 or sig.get("chip_sig"):
-                                _tag = sig.get("chip_sig", "")
-                                _sig_parts.append(f"筹码{_cp:+.1f}%{_tag and '⚠️'+_tag or ''}")
-                        _sig_str = " | " + " ".join(_sig_parts) if _sig_parts else ""
-                        # 更新该小框的 LabelFrame 标题, 附加技术信号
-                        try:
-                            _orig = chart_info['frame'].cget("text")
-                            # 去掉旧的 | M金 K死 bias... 后缀再拼接
-                            _base = _orig.split(" | ")[0] if " | " in _orig else _orig
-                            chart_info['frame'].config(text=f"{_base}{_sig_str}")
-                        except Exception:
-                            pass
                         # 排序键:日K下 1日线=昨日收盘,5日线=5日均,10日线=10日均
                         sort_key = (3, 0)
                         above_ma1 = False
