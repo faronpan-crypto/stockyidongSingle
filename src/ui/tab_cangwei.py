@@ -1946,12 +1946,13 @@ class CangweiMixin:
     # 技术信号辅助: MACD/KDJ 金叉死叉 + BIAS 乖离率 (只看最后 2-3 bar)
     # ==============================================================
     def _compute_cross_bias_signals(self, kline_data):
-        """输入 _get_daily_kline_data_tushare 返回值, 返回 {'M': '金'/'死'/None, 'K': '金'/'死'/None, 'bias': '正乖'/'负乖'/None, 'bias_val': float}"""
+        """输入 _get_daily_kline_data_tushare 返回值, 返回 {'M': '金'/'死'/None, 'K': '金'/'死'/None, 'bias': '正乖'/'负乖'/None, 'bias_val': float, 'chip_cost': float, 'chip_pct': float, 'chip_sig': '太贵'/'太便宜'/None}"""
         try:
             import numpy as np, pandas as _pd
             df = kline_data.get("data") if isinstance(kline_data, dict) else None
             if df is None or len(df) < 30:
-                return {"M": None, "K": None, "bias": None, "bias_val": None}
+                return {"M": None, "K": None, "bias": None, "bias_val": None,
+                        "chip_cost": None, "chip_pct": None, "chip_sig": None}
             closes = df["收盘"].values.astype(float)
             highs = df["最高"].values.astype(float)
             lows = df["最低"].values.astype(float)
@@ -1975,6 +1976,30 @@ class CangweiMixin:
                 bias6 = (closes[-1] - ma6) / ma6 * 100
             else:
                 bias6 = 0.0
+            # --- 🆕 筹码成本 (最近 60 天换手率加权平均收盘价) ---
+            # 逻辑: 每天换手率越高 → 当天筹码交换越充分 → 权重越大
+            # 没有换手率数据时 fallback 到简单 60 日均价
+            chip_cost = None
+            turnovers = None
+            if "换手率" in df.columns:
+                try: turnovers = df["换手率"].values.astype(float)
+                except Exception: turnovers = None
+            window = min(60, n)
+            if turnovers is not None and len(turnovers) == n:
+                _wt = turnovers[-window:].copy()
+                _wt = np.where(np.isnan(_wt) | (_wt <= 0), 0.5, _wt)  # NaN/0 兜底 0.5
+                _w_sum = _wt.sum()
+                if _w_sum > 0:
+                    chip_cost = float(np.average(closes[-window:], weights=_wt))
+            if chip_cost is None:  # fallback: 简单均价
+                chip_cost = float(closes[-window:].mean())
+            cur_price = float(closes[-1])
+            chip_pct = round((cur_price - chip_cost) / chip_cost * 100, 2) if chip_cost > 0 else None
+            # 警示阈值: 贵 >15% (明显高估), 便宜 < -20% (超跌但可能有雷)
+            chip_sig = None
+            if chip_pct is not None:
+                if chip_pct >= 15.0: chip_sig = "太贵"
+                elif chip_pct <= -20.0: chip_sig = "太便宜"
             # --- 判断最后 2 bar 是否金叉/死叉 ---
             macd_sig = None
             if n >= 2:
@@ -1986,13 +2011,13 @@ class CangweiMixin:
                 elif kk[-2] >= dd[-2] and kk[-1] < dd[-1]: kdj_sig = "死"
             # --- BIAS 乖离判定 ---
             bias_sig = None
-            # 主板 ±8% / 创业板科创板 ±20% / 北交所 ±30% 统一用 ±7% 作为宽松阈值
-            # 极端情况用 ±10%
             if bias6 >= 7.0: bias_sig = "正乖"
             elif bias6 <= -7.0: bias_sig = "负乖"
-            return {"M": macd_sig, "K": kdj_sig, "bias": bias_sig, "bias_val": round(bias6, 2)}
+            return {"M": macd_sig, "K": kdj_sig, "bias": bias_sig, "bias_val": round(bias6, 2),
+                    "chip_cost": round(chip_cost, 2), "chip_pct": chip_pct, "chip_sig": chip_sig}
         except Exception as _e:
-            return {"M": None, "K": None, "bias": None, "bias_val": None}
+            return {"M": None, "K": None, "bias": None, "bias_val": None,
+                    "chip_cost": None, "chip_pct": None, "chip_sig": None}
 
 
     def _check_holdings(self, group_index=1, max_count=None):
@@ -4120,12 +4145,18 @@ class CangweiMixin:
                         n = len(closes)
                         dates = list(range(n))
                         current_price = float(closes[-1]) if n else 0
-                        # 🆕 MACD/KDJ 金叉死叉 + BIAS 乖离 (直接复用 kline_data, 不额外联网)
+                        # 🆕 MACD/KDJ 金叉死叉 + BIAS 乖离 + 筹码成本 (直接复用 kline_data, 不额外联网)
                         sig = self._compute_cross_bias_signals(kline_data)
                         _sig_parts = []
                         if sig.get("M"): _sig_parts.append(f"M{sig['M']}")
                         if sig.get("K"): _sig_parts.append(f"K{sig['K']}")
                         if sig.get("bias"): _sig_parts.append(f"bias{sig['bias']}")
+                        # 🆕 筹码成本: 只在偏离较大或有警示时才追加 (避免标题太挤)
+                        if sig.get("chip_pct") is not None:
+                            _cp = sig["chip_pct"]
+                            if abs(_cp) >= 8.0 or sig.get("chip_sig"):
+                                _tag = sig.get("chip_sig", "")
+                                _sig_parts.append(f"筹码{_cp:+.1f}%{_tag and '⚠️'+_tag or ''}")
                         _sig_str = " | " + " ".join(_sig_parts) if _sig_parts else ""
                         # 更新该小框的 LabelFrame 标题, 附加技术信号
                         try:
