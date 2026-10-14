@@ -4096,67 +4096,82 @@ class CangweiMixin:
                     'tech_sig': None,  # 🆕 持仓检测后填充
                 }
                 chart_widgets.append(chart_info)
-                # 🆕 鼠标移入小框 → 弹 tooltip 显示技术信号详情
-                _hover_win = [None]  # 用 list 包一层, 闭包里能改
+                # 🆕 鼠标 hover 小框 → 弹 tooltip 显示技术信号详情
+                _hover_win = [None, 0]  # [window, last_update_ts]
+                def _build_tooltip_text(_ci):
+                    sig = _ci.get('tech_sig')
+                    if not sig:
+                        return f"{_ci['stock_name']} ({_ci['stock_code']})\n⚠️ 请先点持仓 Tab 的「检测」按钮加载信号"
+                    _lines = [f"📊 {_ci['stock_name']} ({_ci['stock_code']}) 技术信号", "─"*28]
+                    if sig.get("M"):
+                        _lines.append(f"MACD: {sig['M']}叉 → {'🟢金叉买入' if sig['M']=='金' else '🔴死叉卖出'}")
+                    if sig.get("K"):
+                        _lines.append(f"KDJ: {sig['K']}叉 → {'🟢短期看涨' if sig['K']=='金' else '🔴短期看跌'}")
+                    if sig.get("bias"):
+                        _v = sig.get("bias_val", 0)
+                        _lines.append(f"BIAS(6): {_v:+.2f}% → {'📈注意回调' if sig['bias']=='正乖' else '📉可能超跌'}")
+                    _cc = sig.get("chip_cost"); _cp = sig.get("chip_pct")
+                    if _cc is not None:
+                        _lines.append(f"筹码成本: {_cc:.2f}")
+                        if _cp is not None:
+                            if _cp >= 15: _emo = "⚠️太贵"
+                            elif _cp <= -20: _emo = "⚠️太便宜(可能有雷)"
+                            elif abs(_cp) >= 8: _emo = "⚠️偏离较大"
+                            else: _emo = "✅合理"
+                            _lines.append(f"现价偏离筹码成本: {_cp:+.2f}% → {_emo}")
+                    if len(_lines) <= 2:
+                        _lines.append("✅ 当前无明确信号")
+                    return "\n".join(_lines)
                 def _show_hover(_ci=chart_info, _hw=_hover_win):
+                    # 节流: 每 200ms 最多创建一次
+                    import time as _t
+                    _now = _t.time()
+                    if _now - _hw[1] < 0.2: return
+                    _hw[1] = _now
                     try:
-                        if _hw[0] and _hw[0].winfo_exists(): _hw[0].destroy()
-                        sig = _ci.get('tech_sig')
-                        if not sig:
-                            _txt = f"{_ci['stock_name']} ({_ci['stock_code']})\n⚠️ 请先点击持仓 Tab 的「检测」按钮加载技术信号"
-                        else:
-                            _lines = [f"📊 {_ci['stock_name']} ({_ci['stock_code']}) 技术信号"]
-                            _lines.append("─" * 30)
-                            if sig.get("M"):
-                                _tag = "🟢金叉买入信号" if sig["M"] == "金" else "🔴死叉卖出信号"
-                                _lines.append(f"MACD: {sig['M']}叉 → {_tag}")
-                            if sig.get("K"):
-                                _tag = "🟢超卖区上穿, 短期看涨" if sig["K"] == "金" else "🔴超买区下穿, 短期看跌"
-                                _lines.append(f"KDJ: {sig['K']}叉 → {_tag}")
-                            if sig.get("bias"):
-                                _v = sig.get("bias_val", 0)
-                                if sig["bias"] == "正乖":
-                                    _lines.append(f"BIAS(6): +{_v:.2f}% → 📈 偏离 MA6 太远, 注意回调")
-                                else:
-                                    _lines.append(f"BIAS(6): {_v:.2f}% → 📉 跌破 MA6 太多, 可能超跌")
-                            _cc = sig.get("chip_cost")
-                            _cp = sig.get("chip_pct")
-                            if _cc is not None:
-                                _lines.append(f"筹码成本: {_cc:.2f}  (60天换手率加权均价)")
-                                if _cp is not None:
-                                    if _cp >= 15: _emo = "⚠️ 太贵! 明显高估, 追高风险大"
-                                    elif _cp >= 8: _emo = "⚠️ 偏贵, 有一定泡沫"
-                                    elif _cp <= -20: _emo = "⚠️ 太便宜! 超跌但可能有雷"
-                                    elif _cp <= -8: _emo = "⚠️ 偏便宜, 有一定安全边际"
-                                    else: _emo = "✅ 在合理区间"
-                                    _lines.append(f"现价偏离筹码成本: {_cp:+.2f}% → {_emo}")
-                            # 如果完全没信号
-                            if not sig.get("M") and not sig.get("K") and not sig.get("bias") and (sig.get("chip_pct") is None or abs(sig["chip_pct"]) < 8):
-                                _lines.append("✅ 当前无明确 MACD/KDJ 金叉死叉信号")
-                            _txt = "\n".join(_lines)
-                        # 创建 tooltip 窗口 (Toplevel, 无边框, 跟随鼠标)
-                        _hw[0] = tk.Toplevel(self.root)
-                        _hw[0].overrideredirect(True)  # 无边框
+                        if _hw[0] and _hw[0].winfo_exists(): _hw[0].destroy(); _hw[0] = None
+                        _txt = _build_tooltip_text(_ci)
+                        # parent 用 chart_frame 的顶层窗口 (即持仓股监控窗口), 保证 tooltip 在其之上
+                        _parent = chart_frame.winfo_toplevel()
+                        _hw[0] = tk.Toplevel(_parent)
+                        _hw[0].transient(_parent)  # 永远在 parent 窗口之前
+                        try: _hw[0].overrideredirect(True)
+                        except Exception: pass
                         _hw[0].configure(bg="#1A237E")
                         tk.Label(_hw[0], text=_txt, bg="#FFFDE7", fg="#1A237E",
                                  font=("", 10), justify="left", padx=10, pady=8,
                                  anchor="w").pack()
-                        # 定位到鼠标右上角
                         _hw[0].update_idletasks()
                         _mx = chart_frame.winfo_pointerx()
                         _my = chart_frame.winfo_pointery()
-                        _hw[0].geometry(f"+{_mx+15}+{_my+15}")
-                    except Exception:
-                        pass
+                        # 防止 tooltip 超出屏幕底部, 自动向上偏移
+                        _scr_h = _hw[0].winfo_screenheight()
+                        _tw = _hw[0].winfo_reqwidth()
+                        _th = _hw[0].winfo_reqheight()
+                        _gx = min(_mx + 15, _hw[0].winfo_screenwidth() - _tw - 10)
+                        _gy = _my + 15
+                        if _gy + _th > _scr_h: _gy = _my - _th - 10
+                        _hw[0].geometry(f"+{_gx}+{_gy}")
+                        _hw[0].lift()
+                    except Exception as _e:
+                        print(f"[hover tooltip] 异常: {_e}")
                 def _hide_hover(_hw=_hover_win):
                     try:
                         if _hw[0] and _hw[0].winfo_exists(): _hw[0].destroy()
+                        _hw[0] = None
                     except Exception:
                         pass
-                chart_frame.bind("<Enter>", _show_hover)
-                chart_frame.bind("<Leave>", _hide_hover)
-                canvas_widget.get_tk_widget().bind("<Enter>", _show_hover)
-                canvas_widget.get_tk_widget().bind("<Leave>", _hide_hover)
+                def _on_motion(_event, _ci=chart_info):
+                    """鼠标在 canvas 上移动 → 触发 tooltip"""
+                    _show_hover(_ci)
+                def _on_leave(_event, _hw=_hover_win):
+                    _hide_hover(_hw)
+                # matplotlib canvas 是主要鼠标接收者
+                _cw = canvas_widget.get_tk_widget()
+                _cw.bind("<Motion>", _on_motion)
+                _cw.bind("<Leave>", _on_leave)
+                chart_frame.bind("<Enter>", lambda _e, _ci=chart_info: _show_hover(_ci))
+                chart_frame.bind("<Leave>", _on_leave)
             except ImportError:
                 error_label = tk.Label(chart_frame, text="matplotlib未安装",
                                      font=("TkDefaultFont", 11), fg="red")
