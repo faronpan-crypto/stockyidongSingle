@@ -1942,6 +1942,58 @@ class CangweiMixin:
             print(error_msg)
             messagebox.showerror("错误", f"打开持仓历史股管理窗口失败: {e}", parent=self.root)
 
+    # ==============================================================
+    # 技术信号辅助: MACD/KDJ 金叉死叉 + BIAS 乖离率 (只看最后 2-3 bar)
+    # ==============================================================
+    def _compute_cross_bias_signals(self, kline_data):
+        """输入 _get_daily_kline_data_tushare 返回值, 返回 {'M': '金'/'死'/None, 'K': '金'/'死'/None, 'bias': '正乖'/'负乖'/None, 'bias_val': float}"""
+        try:
+            import numpy as np, pandas as _pd
+            df = kline_data.get("data") if isinstance(kline_data, dict) else None
+            if df is None or len(df) < 30:
+                return {"M": None, "K": None, "bias": None, "bias_val": None}
+            closes = df["收盘"].values.astype(float)
+            highs = df["最高"].values.astype(float)
+            lows = df["最低"].values.astype(float)
+            n = len(closes)
+            # --- MACD DIF/DEA ---
+            _s = _pd.Series(closes)
+            ema12 = _s.ewm(span=12, adjust=False).mean().values
+            ema26 = _s.ewm(span=26, adjust=False).mean().values
+            dif = ema12 - ema26
+            dea = _pd.Series(dif).ewm(span=9, adjust=False).mean().values
+            # --- KDJ K/D ---
+            kk = np.full(n, 50.0); dd = np.full(n, 50.0)
+            for i in range(9, n):
+                rng = max(highs[i-8:i+1]) - min(lows[i-8:i+1])
+                rsv = (closes[i] - min(lows[i-8:i+1])) / max(rng, 0.001) * 100
+                kk[i] = kk[i-1]*2/3 + rsv*1/3
+                dd[i] = dd[i-1]*2/3 + kk[i]*1/3
+            # --- BIAS(6) ---
+            if n >= 6:
+                ma6 = closes[-6:].mean()
+                bias6 = (closes[-1] - ma6) / ma6 * 100
+            else:
+                bias6 = 0.0
+            # --- 判断最后 2 bar 是否金叉/死叉 ---
+            macd_sig = None
+            if n >= 2:
+                if dif[-2] <= dea[-2] and dif[-1] > dea[-1]: macd_sig = "金"
+                elif dif[-2] >= dea[-2] and dif[-1] < dea[-1]: macd_sig = "死"
+            kdj_sig = None
+            if n >= 2:
+                if kk[-2] <= dd[-2] and kk[-1] > dd[-1]: kdj_sig = "金"
+                elif kk[-2] >= dd[-2] and kk[-1] < dd[-1]: kdj_sig = "死"
+            # --- BIAS 乖离判定 ---
+            bias_sig = None
+            # 主板 ±8% / 创业板科创板 ±20% / 北交所 ±30% 统一用 ±7% 作为宽松阈值
+            # 极端情况用 ±10%
+            if bias6 >= 7.0: bias_sig = "正乖"
+            elif bias6 <= -7.0: bias_sig = "负乖"
+            return {"M": macd_sig, "K": kdj_sig, "bias": bias_sig, "bias_val": round(bias6, 2)}
+        except Exception as _e:
+            return {"M": None, "K": None, "bias": None, "bias_val": None}
+
 
     def _check_holdings(self, group_index=1, max_count=None):
         """检测持仓股:三维一体(均线/凯利/资金)+ 黄金/压力支撑/五星,以及与「信号」同源的日K收盘1日上穿 ▲。"""
@@ -2000,6 +2052,13 @@ class CangweiMixin:
                                 new_high = bool(self._check_new_high(stock_code))
                             except Exception:
                                 pass
+                            # 🆕 MACD/KDJ 金叉死叉 + BIAS 乖离
+                            tech_signals = {"M": None, "K": None, "bias": None, "bias_val": None}
+                            try:
+                                _kd = self._get_daily_kline_data_tushare(str(stock_code).zfill(6), days=120)
+                                tech_signals = self._compute_cross_bias_signals(_kd)
+                            except Exception:
+                                pass
                             # 存储凯利公式结果
                             holding_kelly_results[i] = {
                                 'ratio': kelly_result['kelly_ratio'],
@@ -2012,6 +2071,7 @@ class CangweiMixin:
                                 'red_star_signal': red_star,
                                 'ma1_close_tri': ma1_tri,
                                 'new_high': new_high,
+                                'tech_signals': tech_signals,  # 🆕
                             }
                             # 在主线程中更新UI(传入当日涨跌幅,显示在按钮右侧)
                             def update_ui(idx=i, result=can_open, name=stock_name, code=stock_code, score=market_score, gidx=group_index, pct=daily_change_pct):
@@ -4060,6 +4120,21 @@ class CangweiMixin:
                         n = len(closes)
                         dates = list(range(n))
                         current_price = float(closes[-1]) if n else 0
+                        # 🆕 MACD/KDJ 金叉死叉 + BIAS 乖离 (直接复用 kline_data, 不额外联网)
+                        sig = self._compute_cross_bias_signals(kline_data)
+                        _sig_parts = []
+                        if sig.get("M"): _sig_parts.append(f"M{sig['M']}")
+                        if sig.get("K"): _sig_parts.append(f"K{sig['K']}")
+                        if sig.get("bias"): _sig_parts.append(f"bias{sig['bias']}")
+                        _sig_str = " | " + " ".join(_sig_parts) if _sig_parts else ""
+                        # 更新该小框的 LabelFrame 标题, 附加技术信号
+                        try:
+                            _orig = chart_info['frame'].cget("text")
+                            # 去掉旧的 | M金 K死 bias... 后缀再拼接
+                            _base = _orig.split(" | ")[0] if " | " in _orig else _orig
+                            chart_info['frame'].config(text=f"{_base}{_sig_str}")
+                        except Exception:
+                            pass
                         # 排序键:日K下 1日线=昨日收盘,5日线=5日均,10日线=10日均
                         sort_key = (3, 0)
                         above_ma1 = False
