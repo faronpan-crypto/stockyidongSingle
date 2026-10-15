@@ -587,6 +587,7 @@ def show_speculator_watch(root=None, app=None):
         _refresh_status(win)
         _load_orderbook(win)
         _refresh_futures(win)
+        _load_limitup_dropdown(win)
         print("[👁️看盘] ✅ 本地数据全部填充完成!", flush=True)
     except Exception as e:
         print(f"[👁️看盘❌] 填充异常: {e}\n{traceback.format_exc()}", flush=True)
@@ -600,6 +601,41 @@ def show_speculator_watch(root=None, app=None):
         except Exception: pass
     threading.Thread(target=_bg, daemon=True).start()
     return win
+
+
+def _load_limitup_dropdown(win):
+    """加载今日涨停股到搜索框下拉 (从 tushare daily 缓存 + stock_basic)"""
+    try:
+        daily = _TUSHARE_DAILY_CACHE.get("data")
+        sb = _TUSHARE_SB_CACHE.get("data")
+        if daily is None or sb is None:
+            daily = _get_tushare_daily_today()
+            sb = _get_tushare_stock_basic()
+        if daily is None or sb is None:
+            win._ob_cb["values"] = []
+            win._ob_codes.set("")
+            return
+
+        # 涨停 = 涨跌幅 >= 9.5% (A股主板 10%, 创业板/科创板 20%, 保守取 9.5)
+        zt = daily[daily["pct_chg"] >= 9.5].sort_values("pct_chg", ascending=False)
+        merged = zt.merge(sb, on="ts_code", how="left") if len(zt) > 0 else zt
+
+        # 构造下拉列表: 名称(代码) 格式
+        items = []
+        for _, row in merged.iterrows():
+            name = row.get("name", "") or ""
+            ts_code = row.get("ts_code", "") or ""
+            pct = row.get("pct_chg", 0)
+            # 清洗代码: 000001.SZ → 000001
+            code6 = ts_code.split(".")[0] if "." in ts_code else ts_code
+            items.append(f"{name}({code6}) +{pct:.1f}%")
+
+        win._ob_cb["values"] = items[:80]  # 最多 80 条
+        if items:
+            print(f"[👁️看盘] ✅ 涨停下拉 {len(items)} 只, 示例: {items[0]}")
+    except Exception as e:
+        print(f"[👁️看盘] 涨停下拉加载失败: {e}")
+        win._ob_cb["values"] = []
 
 
 def _build_block_grid(parent, win, col=0):
@@ -836,7 +872,13 @@ def _build_orderbook(parent, win, col=1):
     # 顶部: 搜索 + 档位
     top = tk.Frame(frm, bg="#1E1E1E"); top.pack(fill=tk.X, pady=(2, 4))
     tk.Label(top, text="🔍 搜索:", bg="#1E1E1E", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT)
-    win._ob_entry = tk.Entry(top, width=12); win._ob_entry.pack(side=tk.LEFT, padx=2)
+    # Combobox: 可手动输入 + 下拉今日涨停股
+    win._ob_codes = tk.StringVar()
+    win._ob_cb = ttk.Combobox(top, textvariable=win._ob_codes, width=22,
+                              values=[], state="normal")
+    win._ob_cb.pack(side=tk.LEFT, padx=2)
+    win._ob_cb.bind("<<ComboboxSelected>>", lambda _e: _load_orderbook(win))
+    win._ob_cb.bind("<Return>", lambda _e: _load_orderbook(win))
     tk.Button(top, text="查", command=lambda: _load_orderbook(win)).pack(side=tk.LEFT)
 
     win._ob_level = tk.StringVar(value="5档")
