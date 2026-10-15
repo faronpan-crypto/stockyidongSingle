@@ -34,15 +34,25 @@ _AK_BLOCK_CACHE = {"time": 0, "data": None}
 
 
 def _find_db_path():
-    """找 sentiment_history 所在的 SQLite 文件"""
+    """找 sentiment_history 所在的 SQLite 文件 — 真实路径 data/stock_analysis.db"""
+    here = os.path.dirname(os.path.abspath(__file__))  # src/ui
+    project_root = os.path.dirname(os.path.dirname(here))  # 项目根
     candidates = [
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "stock_analysis.db"),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stock_analysis.db"),
+        os.path.join(project_root, "data", "stock_analysis.db"),
+        os.path.join(project_root, "stock_analysis.db"),
         os.path.expanduser("~/.qclaw/stock_analysis.db"),
     ]
     for p in candidates:
         if os.path.exists(p):
-            return p
+            # 验证 sentiment_history 表存在
+            try:
+                import sqlite3 as _sql
+                _c = _sql.connect(p); _cur = _c.cursor()
+                _cur.execute("SELECT count(*) FROM sentiment_history"); _cur.fetchone(); _c.close()
+                print(f"[👁️看盘] ✅ DB={p}")
+                return p
+            except Exception:
+                pass
     return candidates[0]
 
 
@@ -610,7 +620,7 @@ def _refresh_volume(win):
     c2.create_text(hs_px // 2, 28, text=f"沪深300 {hs300:+.2f}%", fill="#FFF", font=("", 9, "bold"))
     c2.create_text(hs_px + kc_px // 2, 28, text=f"科创50 {kc30:+.2f}%", fill="#FFF", font=("", 9, "bold"))
     # 状态字
-    status = "💡 创业板领跌" if kc30 < hs30 else "💡 沪深300领跌"
+    status = "💡 创业板领跌" if kc30 < hs300 else "💡 沪深300领跌"
     c2.create_text(W2 // 2, 52, text=status, fill="#FFD54F", font=("", 8))
 
     # —— 板块增量榜 Treeview ——
@@ -756,6 +766,37 @@ def _refresh_cycle(win):
     }
     title, body = desc[stage_idx]
     win._cycle_text.config(text=f"📌 当前处于: {title}\n{body}")
+
+
+def _build_status_panel(parent, win, col=2):
+    """⑥ 状态判定三状态灯 — 盘中机会/状态机会/主升期"""
+    frm = tk.LabelFrame(parent, text="⑥ 状态判定 (盘中机会/状态机会/主升期)",
+                        bg="#1E1E1E", fg="#90CAF9", font=("", 10, "bold"), padx=4, pady=4)
+    frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
+    parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
+
+    states = [("🎯 盘中机会", "#66BB6A", "盘中异动/脉冲/量能异常"),
+              ("✅ 状态机会", "#FFD54F", "形态突破/周期确认/资金持续流入"),
+              ("🔥 主升期 / ⚠️ 正常", "#EF5350", "主升期运行 / 进入正常震荡")]
+
+    win._status_cards = []
+    for title, color, desc in states:
+        card = tk.Frame(frm, bg="#2A2A2A", padx=8, pady=6)
+        card.pack(fill=tk.X, pady=3, padx=2)
+        head = tk.Frame(card, bg="#2A2A2A"); head.pack(fill=tk.X)
+        light = tk.Label(head, text="⚫", fg="#757575", bg="#2A2A2A", font=("", 14))
+        light.pack(side=tk.LEFT)
+        tk.Label(head, text=title, bg="#2A2A2A", fg=color,
+                 font=("", 10, "bold")).pack(side=tk.LEFT, padx=6)
+        lbl = tk.Label(card, text=desc, bg="#2A2A2A", fg="#BDBDBD",
+                       font=("", 8), wraplength=420, justify=tk.LEFT)
+        lbl.pack(anchor=tk.W)
+        win._status_cards.append((light, card, title))
+
+    win._status_msg = tk.Label(frm, text="💡 实时刷新中...", bg="#1E1E1E",
+                                fg="#E0E0E0", font=("", 9, "italic"),
+                                wraplength=420, justify=tk.LEFT)
+    win._status_msg.pack(fill=tk.X, pady=(6, 0), padx=4)
 
 
 def _refresh_status(win):
