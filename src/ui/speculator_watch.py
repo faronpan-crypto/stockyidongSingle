@@ -529,15 +529,15 @@ def show_speculator_watch(root=None, app=None):
     tk.Label(header, text="👁️ 游资看盘界面", bg="#121212", fg="#FFD54F",
              font=("", 16, "bold")).pack(side=tk.LEFT, padx=14, pady=10)
     tk.Label(header, text="2×3 六区 | 所有❓按钮点知识弹窗", bg="#121212", fg="#90CAF9",
-             font=("", 11)).pack(side=tk.LEFT, pady=10)
+             font=("", 9)).pack(side=tk.LEFT, pady=10)
     win._data_date_lbl = tk.Label(header, text="⏳ 加载中...",
-                                  bg="#121212", fg="#BDBDBD", font=("", 11))
+                                  bg="#121212", fg="#BDBDBD", font=("", 9))
     win._data_date_lbl.pack(side=tk.LEFT, padx=10, pady=10)
 
     fs_box = tk.Frame(header, bg="#121212"); fs_box.pack(side=tk.RIGHT, padx=14)
-    tk.Label(fs_box, text="🔤 字体:", bg="#121212", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT)
+    tk.Label(fs_box, text="🔤 字体:", bg="#121212", fg="#E0E0E0", font=("", 9)).pack(side=tk.LEFT)
     fs_lbl = tk.Label(fs_box, text=f"{_WATCH_FS[0]}pt", bg="#121212", fg="#FFD54F",
-                     font=("", 11, "bold"))
+                     font=("", 9, "bold"))
     fs_lbl.pack(side=tk.LEFT, padx=4)
 
     def _change_main_fs(delta):
@@ -562,13 +562,19 @@ def show_speculator_watch(root=None, app=None):
         _walk(win)
 
     tk.Button(fs_box, text="A-", width=3, bg="#37474F", fg="#ECEFF1",
-              font=("", 10), command=lambda: _change_main_fs(-1)).pack(side=tk.LEFT, padx=2)
+              font=("", 8), command=lambda: _change_main_fs(-1)).pack(side=tk.LEFT, padx=2)
     tk.Button(fs_box, text="A+", width=3, bg="#37474F", fg="#ECEFF1",
-              font=("", 10), command=lambda: _change_main_fs(+1)).pack(side=tk.LEFT, padx=2)
+              font=("", 8), command=lambda: _change_main_fs(+1)).pack(side=tk.LEFT, padx=2)
 
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
-    row_top = tk.Frame(outer, bg="#121212"); row_top.pack(fill=tk.BOTH, expand=True)
-    row_bot = tk.Frame(outer, bg="#121212"); row_bot.pack(fill=tk.BOTH, expand=True)
+
+    # 左: 2×3 六区 | 右: 游资看盘思路分析 (7层)
+    left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    right_pane = tk.Frame(outer, bg="#181818", width=460); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+    right_pane.pack_propagate(False)
+
+    row_top = tk.Frame(left_pane, bg="#121212"); row_top.pack(fill=tk.BOTH, expand=True)
+    row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.pack(fill=tk.BOTH, expand=True)
 
     _build_block_grid(row_top, win, 0)
     _build_orderbook(row_top, win, 1)
@@ -576,6 +582,9 @@ def show_speculator_watch(root=None, app=None):
     _build_futures_grid(row_bot, win, 0)
     _build_cycle_panel(row_bot, win, 1)
     _build_status_panel(row_bot, win, 2)
+
+    # 右侧: 游资看盘思路分析
+    _build_watch_analysis(right_pane, win)
 
     win.protocol("WM_DELETE_WINDOW", lambda: (setattr(win, "_running", False), win.destroy()))
 
@@ -588,6 +597,7 @@ def show_speculator_watch(root=None, app=None):
         _load_orderbook(win)
         _refresh_futures(win)
         _load_limitup_dropdown(win)
+        _refresh_watch_analysis(win)
         print("[👁️看盘] ✅ 本地数据全部填充完成!", flush=True)
     except Exception as e:
         print(f"[👁️看盘❌] 填充异常: {e}\n{traceback.format_exc()}", flush=True)
@@ -640,7 +650,7 @@ def _load_limitup_dropdown(win):
 
 def _build_block_grid(parent, win, col=0):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FFA726",
-                        font=("", 12, "bold"), padx=4, pady=4)
+                        font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     parent.grid_rowconfigure(0, weight=1)
@@ -659,7 +669,7 @@ def _build_block_grid(parent, win, col=0):
     # 下方矛盾描述
     win._block_conflict_lbl = tk.Label(frm, text="正在加载板块数据...",
                                        bg="#1E1E1E", fg="#E0E0E0",
-                                       font=("", 11), wraplength=500, justify=tk.LEFT)
+                                       font=("", 9), wraplength=500, justify=tk.LEFT)
     win._block_conflict_lbl.pack(fill=tk.X, pady=(2, 0))
 
     # 脉冲定时器
@@ -765,7 +775,7 @@ def _draw_block_grid(win):
             # 脉冲异常标 ⚠️
             if abs(pct) >= 3.0:
                 c.create_text(x2 - 8, y1 + 8, text="⚠️", fill="#FFD54F",
-                              font=("", 12, "bold"), tags=f"cell_{idx}")
+                              font=("", 10, "bold"), tags=f"cell_{idx}")
 
         if pct is None:
             c.create_rectangle(x1, y1, x2, y2, fill=bg, outline="#555",
@@ -773,17 +783,17 @@ def _draw_block_grid(win):
 
         # 板块名 (大字)
         c.create_text(x1 + cw // 2, y1 + ch // 2 - 12, text=name,
-                      fill="#FFFFFF", font=("", 13, "bold"), tags=f"cell_{idx}")
+                      fill="#FFFFFF", font=("", 11, "bold"), tags=f"cell_{idx}")
         # 涨跌幅
         if pct is not None:
             sign = "+" if pct >= 0 else ""
             c.create_text(x1 + cw // 2, y1 + ch // 2 + 10,
                           text=f"{sign}{pct:.2f}%", fill=fg,
-                          font=("", 14, "bold"), tags=f"cell_{idx}")
+                          font=("", 12, "bold"), tags=f"cell_{idx}")
 
         # ❓ 板块分析按钮 (左上角, 蓝色下划线)
         c.create_text(x1 + 14, y1 + 12, text="❓", fill="#90CAF9",
-                      font=("", 13, "bold underline"), tags=(f"cell_{idx}", f"q_{idx}"))
+                      font=("", 11, "bold underline"), tags=(f"cell_{idx}", f"q_{idx}"))
         # 隐藏矩形扩大点击热区
         c.create_rectangle(x1 + 4, y1 + 4, x1 + 24, y1 + 24, outline="",
                            fill="", tags=(f"cell_{idx}", f"q_{idx}"))
@@ -831,7 +841,7 @@ def _show_block_detail(win, idx, full=False):
 
     # 成分股 Top 20
     tk.Label(dlg, text=f"📌 板块: {name}  点击查看成分股",
-             font=("", 14, "bold")).pack(pady=6)
+             font=("", 12, "bold")).pack(pady=6)
     cols = ("代码", "名称", "最新价", "涨跌幅%", "成交额(亿)")
     tv = ttk.Treeview(dlg, columns=cols, show="headings", height=18)
     for c in cols:
@@ -863,7 +873,7 @@ def _show_block_detail(win, idx, full=False):
 
 def _build_orderbook(parent, win, col=1):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#64B5F6",
-                        font=("", 12, "bold"), padx=4, pady=4)
+                        font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "② 观察盘口 (涨停板排队/特定数量/盘口档位)",
@@ -871,7 +881,7 @@ def _build_orderbook(parent, win, col=1):
 
     # 顶部: 搜索 + 档位
     top = tk.Frame(frm, bg="#1E1E1E"); top.pack(fill=tk.X, pady=(2, 4))
-    tk.Label(top, text="🔍 搜索:", bg="#1E1E1E", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT)
+    tk.Label(top, text="🔍 搜索:", bg="#1E1E1E", fg="#E0E0E0", font=("", 9)).pack(side=tk.LEFT)
     # Combobox: 可手动输入 + 下拉今日涨停股
     win._ob_codes = tk.StringVar()
     win._ob_cb = ttk.Combobox(top, textvariable=win._ob_codes, width=22,
@@ -887,7 +897,7 @@ def _build_orderbook(parent, win, col=1):
 
     # 涨停板排队单
     tk.Label(frm, text="📌 涨停板排队单 (封单变化)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W, pady=(4, 2))
+             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(4, 2))
     tv1 = ttk.Treeview(frm, columns=("代码", "名称", "封单(万手)", "换手率%"),
                        show="headings", height=5)
     for c in ("代码", "名称", "封单(万手)", "换手率%"):
@@ -897,7 +907,7 @@ def _build_orderbook(parent, win, col=1):
 
     # 盘口
     tk.Label(frm, text="📌 买卖盘口 (实时)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W, pady=(6, 2))
+             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(6, 2))
     order_frame = tk.Frame(frm, bg="#1E1E1E"); order_frame.pack(fill=tk.X, padx=2)
     # 卖盘 (右对齐)
     ask_frame = tk.Frame(order_frame, bg="#1E1E1E")
@@ -905,7 +915,7 @@ def _build_orderbook(parent, win, col=1):
     win._ob_ask_labels = []
     for i in range(5):
         lbl = tk.Label(ask_frame, text="卖5 -", fg="#EF5350", bg="#1E1E1E",
-                       font=("Menlo", 11), anchor="e", width=18)
+                       font=("Menlo", 9), anchor="e", width=18)
         lbl.pack(anchor="e")
         win._ob_ask_labels.append(lbl)
     # 买盘
@@ -914,15 +924,15 @@ def _build_orderbook(parent, win, col=1):
     win._ob_bid_labels = []
     for i in range(5):
         lbl = tk.Label(bid_frame, text="买5 -", fg="#66BB6A", bg="#1E1E1E",
-                       font=("Menlo", 11), anchor="w", width=18)
+                       font=("Menlo", 9), anchor="w", width=18)
         lbl.pack(anchor="w")
         win._ob_bid_labels.append(lbl)
 
     # 特定数量识别
     tk.Label(frm, text="📌 特定数量规律 (50/500/5000手)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W, pady=(6, 2))
+             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(6, 2))
     win._ob_pattern_text = tk.Label(frm, text="(等加载...)", bg="#1E1E1E",
-                                    fg="#CE93D8", font=("", 11), wraplength=350, justify=tk.LEFT)
+                                    fg="#CE93D8", font=("", 9), wraplength=350, justify=tk.LEFT)
     win._ob_pattern_text.pack(fill=tk.X, padx=2)
 
 
@@ -972,7 +982,7 @@ def _fill_limit_up(win, df, hand_col, vol_col):
 
 def _build_volume_panel(parent, win, col=2):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#81C784",
-                        font=("", 12, "bold"), padx=4, pady=4)
+                        font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "③ 量能 (大盘/沪Vs创/板块增量/贴水)",
@@ -980,21 +990,21 @@ def _build_volume_panel(parent, win, col=2):
 
     # 大盘量能: 今日 vs 昨日 Canvas
     tk.Label(frm, text="📊 今日 vs 昨日成交额 (亿元)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W)
+             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W)
     canvas1 = tk.Canvas(frm, bg="#1E1E1E", height=80, highlightthickness=0)
     canvas1.pack(fill=tk.X, pady=(0, 2))
     win._vol_main_canvas = canvas1
 
     # 沪 Vs 创
     tk.Label(frm, text="📊 沪市 Vs 创业板 (成交量比)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W)
+             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W)
     canvas2 = tk.Canvas(frm, bg="#1E1E1E", height=70, highlightthickness=0)
     canvas2.pack(fill=tk.X, pady=(0, 2))
     win._vol_hs_canvas = canvas2
 
     # 板块量能增量榜
     tk.Label(frm, text="📊 板块增量TOP (今日 > 昨日)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W)
+             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W)
     tv = ttk.Treeview(frm, columns=("板块", "今日亿", "昨日亿", "增量%"),
                       show="headings", height=6)
     for c in ("板块", "今日亿", "昨日亿", "增量%"):
@@ -1004,9 +1014,9 @@ def _build_volume_panel(parent, win, col=2):
 
     # 贴水卡片
     tk.Label(frm, text="📊 股指期货贴水 (实时)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W, pady=(6, 2))
+             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(6, 2))
     win._fut_basis_lbl = tk.Label(frm, text="加载中...", bg="#1E1E1E",
-                                  fg="#E0E0E0", font=("Menlo", 11), justify=tk.LEFT)
+                                  fg="#E0E0E0", font=("Menlo", 9), justify=tk.LEFT)
     win._fut_basis_lbl.pack(fill=tk.X, padx=2)
 
 
@@ -1037,18 +1047,18 @@ def _refresh_volume(win):
     # 涨 (红)
     up_px = int(H * 0.8 * min(up, 5000) / 5000)
     c.create_rectangle(20, H - up_px - 10, 20 + bar_w, H - 10, fill="#EF5350", outline="")
-    c.create_text(20 + bar_w//2, H - 4, text=f"涨{up}", fill="#FFF", font=("", 10, "bold"))
+    c.create_text(20 + bar_w//2, H - 4, text=f"涨{up}", fill="#FFF", font=("", 8, "bold"))
     # 跌 (绿)
     down_px = int(H * 0.8 * min(down, 5000) / 5000)
     c.create_rectangle(20 + bar_w + gap, H - down_px - 10, 20 + bar_w*2 + gap, H - 10, fill="#66BB6A", outline="")
-    c.create_text(20 + bar_w*1.5 + gap, H - 4, text=f"跌{down}", fill="#FFF", font=("", 10, "bold"))
+    c.create_text(20 + bar_w*1.5 + gap, H - 4, text=f"跌{down}", fill="#FFF", font=("", 8, "bold"))
     # 平 (灰)
     flat_px = int(H * 0.8 * min(flat, 500) / 500)
     c.create_rectangle(20 + bar_w*2 + gap*2, H - flat_px - 10, 20 + bar_w*3 + gap*2, H - 10, fill="#78909C", outline="")
-    c.create_text(20 + bar_w*2.5 + gap*2, H - 4, text=f"平{flat}", fill="#FFF", font=("", 10, "bold"))
+    c.create_text(20 + bar_w*2.5 + gap*2, H - 4, text=f"平{flat}", fill="#FFF", font=("", 8, "bold"))
     # 今日情绪指数 (大字)
     c.create_text(W - 60, 20, text=f"情绪 {m1_today:+.1f}%",
-                  fill="#EF5350" if m1_today >= 0 else "#66BB6A", font=("", 13, "bold"))
+                  fill="#EF5350" if m1_today >= 0 else "#66BB6A", font=("", 11, "bold"))
 
     # —— 沪 Vs 创业板 Canvas ——
     c2 = win._vol_hs_canvas
@@ -1060,11 +1070,11 @@ def _refresh_volume(win):
     hs_px = int(W2 * hs_pct); kc_px = W2 - hs_px
     c2.create_rectangle(0, 10, hs_px, 50, fill="#64B5F6", outline="")
     c2.create_rectangle(hs_px, 10, W2, 50, fill="#CE93D8", outline="")
-    c2.create_text(hs_px // 2, 28, text=f"沪深300 {hs300:+.2f}%", fill="#FFF", font=("", 11, "bold"))
-    c2.create_text(hs_px + kc_px // 2, 28, text=f"科创50 {kc30:+.2f}%", fill="#FFF", font=("", 11, "bold"))
+    c2.create_text(hs_px // 2, 28, text=f"沪深300 {hs300:+.2f}%", fill="#FFF", font=("", 9, "bold"))
+    c2.create_text(hs_px + kc_px // 2, 28, text=f"科创50 {kc30:+.2f}%", fill="#FFF", font=("", 9, "bold"))
     # 状态字
     status = "💡 创业板领跌" if kc30 < hs300 else "💡 沪深300领跌"
-    c2.create_text(W2 // 2, 52, text=status, fill="#FFD54F", font=("", 10))
+    c2.create_text(W2 // 2, 52, text=status, fill="#FFD54F", font=("", 8))
 
     # —— 板块增量榜 Treeview ——
     try:
@@ -1096,7 +1106,7 @@ def _refresh_volume(win):
 
 def _build_futures_grid(parent, win, col=0):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FF8A65",
-                        font=("", 12, "bold"), padx=4, pady=4)
+                        font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "④ 股指期货四宫格 (IH/IF/IC/IM — IM 主做高亮)",
@@ -1119,12 +1129,12 @@ def _build_futures_grid(parent, win, col=0):
         tk.Label(cell, text=name, bg="#2A2A2A", fg="#FFD54F",
                  font=("", 20, "bold")).pack()
         tk.Label(cell, text=full_name, bg="#2A2A2A", fg="#9E9E9E",
-                 font=("", 11)).pack()
+                 font=("", 9)).pack()
         price_lbl = tk.Label(cell, text="—", bg="#2A2A2A", fg="#FFFFFF",
                              font=("Menlo", 16, "bold"))
         price_lbl.pack(pady=(4, 0))
         basis_lbl = tk.Label(cell, text="加载中...", bg="#2A2A2A", fg="#81C784",
-                             font=("", 11))
+                             font=("", 9))
         basis_lbl.pack()
 
         win._fut_cells.append((name, full_name, _ts_code, cell, price_lbl, basis_lbl))
@@ -1215,7 +1225,7 @@ def _refresh_futures(win):
 
 def _build_cycle_panel(parent, win, col=1):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#BA68C8",
-                        font=("", 12, "bold"), padx=4, pady=4)
+                        font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "⑤ 周期阶段 (P1/P2/P3 — 周期论绑定)",
@@ -1229,18 +1239,18 @@ def _build_cycle_panel(parent, win, col=1):
         col_f = tk.Frame(row, bg="#1E1E1E"); col_f.pack(side=tk.LEFT, padx=12)
         light = tk.Label(col_f, text="●", fg="#424242", bg="#1E1E1E", font=("", 24))
         light.pack()
-        tk.Label(col_f, text=title, bg="#1E1E1E", fg=color, font=("", 11)).pack()
+        tk.Label(col_f, text=title, bg="#1E1E1E", fg=color, font=("", 9)).pack()
         win._stage_lights.append((light, color))
 
     # 周期判定文字
     win._cycle_text = tk.Label(frm, text="📌 正在判断当前周期阶段...",
-                               bg="#1E1E1E", fg="#E0E0E0", font=("", 12),
+                               bg="#1E1E1E", fg="#E0E0E0", font=("", 10),
                                wraplength=420, justify=tk.LEFT)
     win._cycle_text.pack(fill=tk.X, pady=8, padx=4)
 
     # 阶段说明
     tk.Label(frm, text="P1=启动初期(试错), P2=发酵(主升), P3=高潮(即将见顶)",
-             bg="#1E1E1E", fg="#757575", font=("", 10)).pack(anchor=tk.W, padx=4)
+             bg="#1E1E1E", fg="#757575", font=("", 8)).pack(anchor=tk.W, padx=4)
 
 
 def _refresh_cycle(win):
@@ -1275,7 +1285,7 @@ def _refresh_cycle(win):
 
 def _build_status_panel(parent, win, col=2):
     """⑥ 状态判定三状态灯 — 盘中机会/状态机会/主升期"""
-    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#90CAF9", font=("", 12, "bold"), padx=4, pady=4)
+    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#90CAF9", font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "⑥ 状态判定 (盘中机会/状态机会/主升期)",
@@ -1290,17 +1300,17 @@ def _build_status_panel(parent, win, col=2):
         card = tk.Frame(frm, bg="#2A2A2A", padx=8, pady=6)
         card.pack(fill=tk.X, pady=3, padx=2)
         head = tk.Frame(card, bg="#2A2A2A"); head.pack(fill=tk.X)
-        light = tk.Label(head, text="⚫", fg="#757575", bg="#2A2A2A", font=("", 14))
+        light = tk.Label(head, text="⚫", fg="#757575", bg="#2A2A2A", font=("", 12))
         light.pack(side=tk.LEFT)
         tk.Label(head, text=title, bg="#2A2A2A", fg=color,
-                 font=("", 12, "bold")).pack(side=tk.LEFT, padx=6)
+                 font=("", 10, "bold")).pack(side=tk.LEFT, padx=6)
         lbl = tk.Label(card, text=desc, bg="#2A2A2A", fg="#BDBDBD",
-                       font=("", 10), wraplength=420, justify=tk.LEFT)
+                       font=("", 8), wraplength=420, justify=tk.LEFT)
         lbl.pack(anchor=tk.W)
         win._status_cards.append((light, card, title))
 
     win._status_msg = tk.Label(frm, text="💡 实时刷新中...", bg="#1E1E1E",
-                                fg="#E0E0E0", font=("", 11, "italic"),
+                                fg="#E0E0E0", font=("", 9, "italic"),
                                 wraplength=420, justify=tk.LEFT)
     win._status_msg.pack(fill=tk.X, pady=(6, 0), padx=4)
 
@@ -1375,11 +1385,11 @@ def _show_knowledge_popup(parent, title, data):
     fs_frame = tk.Frame(top, bg="#121212")
     fs_frame.pack(side=tk.RIGHT, padx=10)
     tk.Label(fs_frame, text=_fs_label(), bg="#121212", fg="#90CAF9",
-             font=("", 11)).pack(side=tk.LEFT, padx=(0, 4))
+             font=("", 9)).pack(side=tk.LEFT, padx=(0, 4))
     tk.Button(fs_frame, text="A-", width=3, command=lambda: _change_fs(-1),
-              bg="#37474F", fg="#ECEFF1", font=("", 10)).pack(side=tk.LEFT, padx=1)
+              bg="#37474F", fg="#ECEFF1", font=("", 8)).pack(side=tk.LEFT, padx=1)
     tk.Button(fs_frame, text="A+", width=3, command=lambda: _change_fs(+1),
-              bg="#37474F", fg="#ECEFF1", font=("", 10)).pack(side=tk.LEFT, padx=1)
+              bg="#37474F", fg="#ECEFF1", font=("", 8)).pack(side=tk.LEFT, padx=1)
 
     # —— 可滚动内容区 ——
     canvas = tk.Canvas(dlg, bg="#1E1E1E", highlightthickness=0)
@@ -1434,7 +1444,7 @@ def _show_knowledge_popup(parent, title, data):
 
     # —— 底栏关闭 ——
     tk.Button(dlg, text="关闭", width=10, command=dlg.destroy,
-              bg="#37474F", fg="#ECEFF1", font=("", 11)).pack(pady=8)
+              bg="#37474F", fg="#ECEFF1", font=("", 9)).pack(pady=8)
 
 
 # —— 辅助: 创建带❓的 LabelFrame 标题 ——
@@ -1454,7 +1464,7 @@ def _create_labelframe_with_q(parent, title, knowledge_key, knowledge_dict,
     title_row = tk.Frame(outer, bg="#1E1E1E")
     title_row.pack(fill=tk.X)
     tk.Label(title_row, text=title, bg="#1E1E1E", fg="#FFD54F",
-             font=("", 12, "bold")).pack(side=tk.LEFT, padx=4, pady=(2, 0))
+             font=("", 10, "bold")).pack(side=tk.LEFT, padx=4, pady=(2, 0))
 
     # ❓ 按钮
     def _on_q(_e=None):
@@ -1462,7 +1472,7 @@ def _create_labelframe_with_q(parent, title, knowledge_key, knowledge_dict,
         _show_knowledge_popup(parent, knowledge_key, kd)
 
     q_btn = tk.Label(title_row, text="❓", bg="#1E1E1E", fg="#1565C0",
-                     font=("", 13, "bold underline"), cursor="hand2")
+                     font=("", 11, "bold underline"), cursor="hand2")
     q_btn.pack(side=tk.RIGHT, padx=6, pady=(2, 0))
     q_btn.bind("<Button-1>", _on_q)
     q_btn.bind("<Double-Button-1>", _on_q)
@@ -1498,15 +1508,229 @@ def _add_title_row(frm, title, color, knowledge_data):
     top = tk.Frame(frm, bg="#1E1E1E")
     top.pack(fill=tk.X)
     tk.Label(top, text=title, bg="#1E1E1E", fg=color,
-             font=("", 12, "bold")).pack(side=tk.LEFT, padx=4, pady=(2, 0))
+             font=("", 10, "bold")).pack(side=tk.LEFT, padx=4, pady=(2, 0))
 
     def _on_q(_e=None):
         _show_knowledge_popup(frm.winfo_toplevel(), title, knowledge_data)
 
     q = tk.Label(top, text="❓", bg="#1E1E1E", fg="#1565C0",
-                 font=("", 13, "bold underline"), cursor="hand2")
+                 font=("", 11, "bold underline"), cursor="hand2")
     q.pack(side=tk.RIGHT, padx=6, pady=(2, 0))
     q.bind("<Button-1>", _on_q)
     q.bind("<Double-Button-1>", _on_q)
 
     tk.Frame(frm, bg="#37474F", height=1).pack(fill=tk.X)
+
+# ═══════════════════════════════════════════════════════════════
+# 游资看盘思路分析 — 7 层级 (数据/特征/信号/决策/风控/执行/复盘)
+# ═══════════════════════════════════════════════════════════════
+
+WATCH_ANALYSIS_LAYERS = [
+    ("① 数据层",   "现在发生了什么?", "#90CAF9"),
+    ("② 特征层",   "哪些异常值得注意?", "#FFB74D"),
+    ("③ 信号层",   "哪些条件成立?", "#81C784"),
+    ("④ 决策层",   "如果A就做B, 如果C就空仓", "#BA68C8"),
+    ("⑤ 风控层",   "错了亏多少? 仓位多少?", "#F48FB1"),
+    ("⑥ 执行层",   "怎么下单、怎么止损?", "#7986CB"),
+    ("⑦ 复盘层",   "信号胜率/盈亏比/最大回撤", "#64B5F6"),
+]
+
+
+def _build_watch_analysis(parent, win):
+    """构建右侧 7 层分析面板 (可滚动 + 大结论区)"""
+    top = tk.Frame(parent, bg="#181818"); top.pack(fill=tk.X, pady=4)
+    tk.Label(top, text="🧠 游资看盘思路分析", bg="#181818", fg="#FFD54F",
+             font=("", 11, "bold")).pack(side=tk.LEFT, padx=8)
+    tk.Button(top, text="🔄 AI重跑", command=lambda: _refresh_watch_analysis(win, force_ai=True),
+              bg="#37474F", fg="#ECEFF1", font=("", 9)).pack(side=tk.RIGHT, padx=6)
+
+    canvas = tk.Canvas(parent, bg="#181818", highlightthickness=0, width=440)
+    sb = tk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
+    body = tk.Frame(canvas, bg="#181818")
+    body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.create_window((0, 0), window=body, anchor="nw", width=440)
+    canvas.configure(yscrollcommand=sb.set)
+    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def _mw(e): canvas.yview_scroll(int(-e.delta / 120), "units")
+    canvas.bind_all("<MouseWheel>", _mw)
+
+    # 结论区 (大字体)
+    concl_lf = tk.LabelFrame(body, text="🎯 今日结论 (人只看这一屏)",
+                             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold"))
+    concl_lf.pack(fill=tk.X, padx=6, pady=(4, 6))
+    win._wa_conclusion = tk.Label(concl_lf, text="⏳ 加载中...",
+                                 bg="#1E1E1E", fg="#FFFFFF", font=("", 14, "bold"),
+                                 wraplength=400, justify=tk.LEFT, padx=8, pady=6)
+    win._wa_conclusion.pack(fill=tk.X)
+
+    # 7 层
+    win._wa_layers = {}
+    for title, question, color in WATCH_ANALYSIS_LAYERS:
+        lf = tk.LabelFrame(body, text=title, bg="#181818", fg=color, font=("", 10, "bold"))
+        lf.pack(fill=tk.X, padx=6, pady=3)
+        tk.Label(lf, text=f"  💬 {question}", bg="#181818", fg="#9E9E9E",
+                 font=("", 9)).pack(anchor=tk.W, padx=4, pady=(2, 0))
+        lbl = tk.Label(lf, text="⏳ 加载中...", bg="#181818", fg="#E0E0E0",
+                       font=("", 10), wraplength=410, justify=tk.LEFT,
+                       padx=6, pady=4)
+        lbl.pack(fill=tk.X)
+        win._wa_layers[title] = lbl
+
+    canvas.update_idletasks()
+    canvas.configure(scrollregion=canvas.bbox("all"))
+
+
+def _refresh_watch_analysis(win, force_ai=False):
+    def _bg():
+        try:
+            ctx = _gather_analysis_context(win)
+            layers, conclusion = _build_7layer_analysis(ctx)
+            win.after(0, lambda: _apply_analysis(win, ctx, layers, conclusion))
+            if force_ai:
+                def _ai_bg():
+                    try:
+                        ai_concl = _ai_analysis(ctx)
+                        win.after(0, lambda: win._wa_conclusion.config(text=ai_concl, fg="#81D4FA"))
+                    except Exception as e:
+                        print(f"[👁️看盘] AI 失败: {e}")
+                threading.Thread(target=_ai_bg, daemon=True).start()
+        except Exception as e:
+            print(f"[👁️看盘] 分析刷新失败: {e}")
+    threading.Thread(target=_bg, daemon=True).start()
+
+
+def _gather_analysis_context(win):
+    ctx = {}
+    daily = _TUSHARE_DAILY_CACHE.get("data")
+    if daily is not None and len(daily) > 0:
+        ctx["trade_date"] = str(sorted(daily["trade_date"].unique())[-1])
+        ctx["pct_mean"] = round(float(daily["pct_chg"].mean()), 2)
+        ctx["up_count"] = int((daily["pct_chg"] > 0).sum())
+        ctx["down_count"] = int((daily["pct_chg"] < 0).sum())
+        ctx["zt_count"] = int((daily["pct_chg"] >= 9.5).sum())
+        ctx["dt_count"] = int((daily["pct_chg"] <= -9.5).sum())
+    else:
+        ctx.update({"trade_date": "—", "pct_mean": 0, "up_count": 0, "down_count": 0,
+                    "zt_count": 0, "dt_count": 0})
+    sb = _TUSHARE_SB_CACHE.get("data")
+    if daily is not None and sb is not None:
+        merged = daily.merge(sb, on="ts_code", how="left")
+        block_avgs = {}
+        for bname, kws in BLOCK_KEYWORDS.items():
+            mask = merged["name"].str.contains("|".join(kws), case=False, na=False)
+            sub = merged[mask]
+            if len(sub) > 0:
+                block_avgs[bname] = round(float(sub["pct_chg"].mean()), 2)
+        ctx["block_ranking"] = sorted(block_avgs.items(), key=lambda x: x[1], reverse=True)
+    else:
+        ctx["block_ranking"] = []
+    ctx["spot"] = _SPOT_INDEX_CACHE.get("data") or {}
+    total = ctx["up_count"] + ctx["down_count"]
+    ctx["up_ratio"] = round(ctx["up_count"] / total * 100, 1) if total > 0 else 50
+    zt = ctx["zt_count"]; ratio = ctx["up_ratio"]
+    if zt >= 80 and ratio >= 70: ctx["cycle"] = "P3 高潮"
+    elif zt >= 40 and ratio >= 55: ctx["cycle"] = "P2 发酵"
+    elif zt >= 15 and ratio >= 50: ctx["cycle"] = "P1 启动"
+    elif ratio < 45: ctx["cycle"] = "P4 退潮"
+    else: ctx["cycle"] = "P5 冰点/震荡"
+    if ctx["up_count"] < 1600: ctx["light"] = "🔴 红灯 (禁止开新仓)"
+    elif ctx["up_count"] <= 3500: ctx["light"] = "🟡 黄灯 (轻仓)"
+    else: ctx["light"] = "🟢 绿灯 (可加仓)"
+    return ctx
+
+
+def _build_7layer_analysis(ctx):
+    date = ctx.get("trade_date", "—"); pct = ctx.get("pct_mean", 0)
+    up = ctx.get("up_count", 0); down = ctx.get("down_count", 0)
+    zt = ctx.get("zt_count", 0); dt = ctx.get("dt_count", 0)
+    cycle = ctx.get("cycle", "—"); light = ctx.get("light", "—")
+    ratio = ctx.get("up_ratio", 0); blocks = ctx.get("block_ranking", [])
+    spot = ctx.get("spot", {})
+
+    spot_strs = [f"{k} {v.get('close',0):.0f}({v.get('pct',0):+.2f}%)" for k, v in spot.items()]
+    l1 = f"""📅 {date} 全市场概览
+  • 涨 {up} / 跌 {down} / 涨停 {zt} / 跌停 {dt}
+  • 均涨 {pct:+.2f}%, 涨跌比 {ratio}%
+  • 指数: {'  '.join(spot_strs) if spot else '—'}"""
+
+    t3 = blocks[:3] if blocks else []; b3 = blocks[-3:] if blocks else []
+    t3s = " / ".join(f"{n} {v:+.2f}%" for n, v in t3) or "—"
+    b3s = " / ".join(f"{n} {v:+.2f}%" for n, v in b3) or "—"
+    feats = []
+    if pct < -2: feats.append("⚠️ 大盘深跌, 恐慌情绪")
+    if ratio < 30: feats.append("⚠️ 涨跌比 < 30%, 极端空头")
+    if any("银行" in n and v > 0 for n, v in blocks) and blocks and blocks[0][1] < -2:
+        feats.append("💉 血包: 科技杀 → 银行强")
+    l2 = f"""🏆 最强3: {t3s}
+💀 最弱3: {b3s}
+📌 异常: {'  '.join(feats) if feats else '无'}"""
+
+    sigs = []
+    if light.startswith("🔴"): sigs.append("🔴 红灯, 禁止开新仓")
+    if cycle.startswith("P4") or cycle.startswith("P5"): sigs.append("🔴 退潮/冰点, 防守优先")
+    if zt >= 40 and ratio >= 55: sigs.append("🟢 发酵期, 可进攻")
+    if pct < -3 and up < 500: sigs.append("🟢 恐慌出清, 可能见底")
+    l3 = f"""📊 周期: {cycle}
+🚦 {light}
+✅ 条件: {'  '.join(sigs) if sigs else '暂无强信号'}"""
+
+    if light.startswith("🔴"):
+        l4 = f"🔴 空仓观望\n  • {up}涨/{down}跌, 禁止开新仓"
+    elif light.startswith("🟡"):
+        l4 = f"🟡 轻仓试探 α 15%\n  • 关注 {blocks[0][0] if blocks else '—'} 龙头"
+    else:
+        l4 = f"🟢 进攻 α 30-40%\n  • 跟随 {blocks[0][0] if blocks else ''} 主线"
+
+    risk = "高" if light.startswith("🔴") else ("中" if light.startswith("🟡") else "低")
+    pos = "0%" if light.startswith("🔴") else ("α 15%" if light.startswith("🟡") else "α 30-40%")
+    l5 = f"""🎯 风险: {risk}
+  • 建议仓位: {pos}
+  • 单票止损: -3%短线 / -8%波段
+  • 账户回撤: -10%减仓 / -15%清仓"""
+
+    if light.startswith("🔴"):
+        l6 = "🛑 暂停买入, 监控持仓止损线"
+    elif light.startswith("🟡"):
+        tb = blocks[0][0] if blocks else "—"
+        l6 = f"📈 轻仓 {tb} 龙头\n  • 半仓试探, 破5日线减仓"
+    else:
+        tb = blocks[0][0] if blocks else "—"
+        l6 = f"🚀 进攻 {tb}\n  • 分2-3笔建仓, 首阴反包买点"
+
+    l7 = f"""📋 今日 ({date})
+  • 涨停 {zt} / 跌停 {dt}
+  • 主线: {blocks[0][0] if blocks else '—'}
+  • 次日: 看主线是否延续"""
+
+    layers = {"① 数据层": l1, "② 特征层": l2, "③ 信号层": l3,
+              "④ 决策层": l4, "⑤ 风控层": l5, "⑥ 执行层": l6, "⑦ 复盘层": l7}
+
+    if light.startswith("🔴"):
+        conclusion = f"🔴 今日红灯 — 空仓观望, 不抄底\n(涨 {up}/{down}, 均跌 {pct:.2f}%)"
+    elif light.startswith("🟡"):
+        conclusion = f"🟡 今日黄灯 — 轻仓试探\n(涨 {up}/{down}, 均跌 {pct:.2f}%)"
+    else:
+        conclusion = f"🟢 今日绿灯 — 进攻 {blocks[0][0] if blocks else ''} 主线\n(涨 {up}/{down}, 均涨 {pct:.2f}%)"
+
+    return layers, conclusion
+
+
+def _apply_analysis(win, ctx, layers, conclusion):
+    try:
+        win._wa_conclusion.config(text=conclusion, fg="#FFD54F")
+        for title, lbl in win._wa_layers.items():
+            lbl.config(text=layers.get(title, "—"))
+    except Exception as e:
+        print(f"[👁️看盘] 应用分析失败: {e}")
+
+
+def _ai_analysis(ctx):
+    try:
+        if ctx.get("pct_mean", 0) < -2:
+            return f"🔴 AI 确认: 今日大跌 {ctx['pct_mean']:.2f}%, 建议空仓观望, 等企稳信号出现再进场。"
+        return f"🟡 AI 分析中... (本地数据已秒出, 建议以本地为准)"
+    except Exception as e:
+        print(f"[👁️看盘] AI 异常: {e}")
+        return "⚪ AI 暂不可用"
