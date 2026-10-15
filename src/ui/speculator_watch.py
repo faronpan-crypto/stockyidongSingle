@@ -8,8 +8,21 @@ from tkinter import ttk, messagebox
 import threading, time, os, json, traceback, random
 from datetime import datetime, timedelta
 
-# —— 固定板块清单 (对应 v3 文档) ——
-FIXED_BLOCKS = ["券商", "银行", "CPO", "半导体", "短剧", "电池", "国资", "煤炭", "电力"]
+# —— 板块关键词 → 行业映射 (用于 daily 接口聚合) ——
+BLOCK_KEYWORDS = {
+    "券商": ["证券", "券商", "投行"],
+    "银行": ["银行", "农商"],
+    "CPO": ["光模块", "CPO", "光电", "光通信"],
+    "半导体": ["半导体", "芯片", "集成电路", "国产芯片"],
+    "AI": ["人工智能", "AI", "智能", "计算机应用", "软件"],
+    "电池": ["电池", "锂电", "新能源", "储能"],
+    "煤炭": ["煤炭", "煤业"],
+    "电力": ["电力", "火电", "水电", "发电"],
+    "医疗": ["医药", "医疗", "生物制药", "化学制药"],
+}
+
+# —— 固定板块清单 ——
+FIXED_BLOCKS = list(BLOCK_KEYWORDS.keys())
 
 # —— 股指期货四宫格 (IH/IF/IC/IM) ——
 FUT_NAMES = [("IH", "上证50", 2800), ("IF", "沪深300", 4000),
@@ -17,27 +30,29 @@ FUT_NAMES = [("IH", "上证50", 2800), ("IF", "沪深300", 4000),
 
 # —— 种子数据 (akshare/tushare 都挂时用, 保证界面秒出不空) ——
 SEED_BLOCK_META = {
-    "券商":     {"pct": 0.85, "reason": "牛市早期先见底"},
-    "银行":     {"pct": -0.32, "reason": "红利防守, 科技杀时走强"},
-    "CPO":      {"pct": -2.15, "reason": "机构重仓主杀"},
-    "半导体":   {"pct": 0.92, "reason": "机构持仓少, 尝试筑底"},
-    "短剧":     {"pct": 3.28, "reason": "当前主线"},
-    "电池":     {"pct": 1.76, "reason": "从科技漂移, 血包关系"},
-    "国资":     {"pct": 0.55, "reason": "红利防御"},
-    "煤炭":     {"pct": -0.18, "reason": "高分红"},
-    "电力":     {"pct": 0.72, "reason": "电力改革预期"},
+    "券商":     {"pct": 0.32, "reason": "今日红盘! 后置情绪板块, 主流走完最后轮动"},
+    "银行":     {"pct": -1.09, "reason": "相对抗跌, 红利防守"},
+    "CPO":      {"pct": -4.00, "reason": "机构重仓主杀"},
+    "半导体":   {"pct": -3.65, "reason": "领跌, 国产替代预期降温"},
+    "AI":       {"pct": -2.50, "reason": "科技主线分化"},
+    "电池":     {"pct": -2.45, "reason": "从科技漂移血包"},
+    "煤炭":     {"pct": -4.48, "reason": "最惨板块, 高分红预期落空"},
+    "电力":     {"pct": -2.72, "reason": "绿电改革预期"},
+    "医疗":     {"pct": -2.00, "reason": "医药集采担忧"},
 }
 
 # —— AKShare 接口缓存 (板块/实时行情) ——
 _AK_SPOT_CACHE = {"time": 0, "data": None}
 _AK_BLOCK_CACHE = {"time": 0, "data": None}
 _TUSHARE_DAILY_CACHE = {"time": 0, "data": None}
+_TUSHARE_SB_CACHE = {"time": 0, "data": None}
+_BLOCK_PCT_CACHE = {"time": 0, "data": None}
 
 
 def _get_tushare_daily_today():
     """tushare 今日全市场行情 (daily 接口) — 纯本地 + 联网一次"""
     now = time.time()
-    if _TUSHARE_DAILY_CACHE["data"] and (now - _TUSHARE_DAILY_CACHE["time"] < 300):
+    if _TUSHARE_DAILY_CACHE["data"] and (now - _TUSHARE_DAILY_CACHE["time"] < 3600):
         return _TUSHARE_DAILY_CACHE["data"]
     try:
         import tushare as ts
@@ -45,18 +60,14 @@ def _get_tushare_daily_today():
         if not TOKEN: return None
         ts.set_token(TOKEN)
         pro = ts.pro_api()
-        # 今日日期: 如果非交易日, 取最近一个交易日
         today = datetime.now().strftime("%Y%m%d")
         d = pro.daily(trade_date=today)
         if d is None or len(d) == 0:
-            # 往前找最近交易日
             for i in range(1, 7):
                 from datetime import timedelta
                 td = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
                 d = pro.daily(trade_date=td)
-                if d is not None and len(d) > 0:
-                    print(f"[👁️看盘] tushare daily 取到 {td} ({len(d)} 只)")
-                    break
+                if d is not None and len(d) > 0: break
         if d is not None and len(d) > 0:
             _TUSHARE_DAILY_CACHE["data"] = d
             _TUSHARE_DAILY_CACHE["time"] = now
@@ -67,38 +78,58 @@ def _get_tushare_daily_today():
     return None
 
 
-# —— 板块关键词 → 行业映射 (用于 daily 接口聚合) ——
-# 行业按 tushare industry 分类 + 常见概念关键词
-BLOCK_KEYWORDS = {
-    "券商": ["证券", "券商", "投行"],
-    "银行": ["银行", "农商"],
-    "CPO": ["光模块", "CPO", "光电", "光通信"],
-    "半导体": ["半导体", "芯片", "集成电路", "国产芯片"],
-    "短剧": ["传媒", "影视", "短剧", "娱乐"],
-    "电池": ["电池", "锂电", "新能源", "储能"],
-    "国资": ["国企", "央企", "国资", "国资委"],
-    "煤炭": ["煤炭", "煤业"],
-    "电力": ["电力", "火电", "水电", "发电"],
-}
-
-
-def _compute_block_pct_from_daily(daily_df):
-    """tushare stock_basic + daily → 板块平均涨跌幅"""
-    if daily_df is None or len(daily_df) == 0: return None
+def _get_tushare_stock_basic():
+    """tushare stock_basic — name+industry, 日级缓存"""
+    now = time.time()
+    if _TUSHARE_SB_CACHE["data"] and (now - _TUSHARE_SB_CACHE["time"] < 86400):
+        return _TUSHARE_SB_CACHE["data"]
     try:
         import tushare as ts
         TOKEN = os.environ.get("TUSHARE_TOKEN", "")
         if not TOKEN: return None
         ts.set_token(TOKEN); pro = ts.pro_api()
-        # stock_basic 有 name + industry — 只调一次, 主程序启动时已缓存
         sb = pro.stock_basic(list_status="L", fields="ts_code,name,industry")
-        if sb is None or len(sb) == 0: return None
-        merged = daily_df.merge(sb, on="ts_code", how="inner")
+        if sb is not None and len(sb) > 0:
+            _TUSHARE_SB_CACHE["data"] = sb
+            _TUSHARE_SB_CACHE["time"] = now
+            print(f"[👁️看盘] ✅ tushare stock_basic 缓存 {len(sb)} 只")
+            return sb
+    except Exception as e:
+        print(f"[👁️看盘] tushare stock_basic 失败: {e}")
+    return None
+
+
+# —— 板块关键词 → 行业映射 (用于 daily 接口聚合) ——
+BLOCK_KEYWORDS = {
+    "券商": ["证券", "券商", "投行"],
+    "银行": ["银行", "农商"],
+    "CPO": ["光模块", "CPO", "光电", "光通信"],
+    "半导体": ["半导体", "芯片", "集成电路", "国产芯片"],
+    "AI": ["人工智能", "AI", "智能", "计算机应用", "软件"],
+    "电池": ["电池", "锂电", "新能源", "储能"],
+    "煤炭": ["煤炭", "煤业"],
+    "电力": ["电力", "火电", "水电", "发电"],
+    "医疗": ["医药", "医疗", "生物制药", "化学制药"],
+}
+
+
+def _compute_block_pct_from_cache():
+    """用已缓存的 daily + stock_basic 做板块聚合, 结果再缓存 10 分钟"""
+    now = time.time()
+    if _BLOCK_PCT_CACHE["data"] and (now - _BLOCK_PCT_CACHE["time"] < 600):
+        return _BLOCK_PCT_CACHE["data"]
+
+    daily = _get_tushare_daily_today()
+    sb = _get_tushare_stock_basic()
+    if daily is None or sb is None:
+        return None
+
+    try:
+        merged = daily.merge(sb, on="ts_code", how="inner")
         if len(merged) == 0: return None
 
         result = {}
-        for fix_name in FIXED_BLOCKS:
-            patterns = BLOCK_KEYWORDS.get(fix_name, [fix_name])
+        for fix_name, patterns in BLOCK_KEYWORDS.items():
             mask = None
             for pat in patterns:
                 idx = merged["name"].astype(str).str.contains(pat, na=False) | \
@@ -106,15 +137,15 @@ def _compute_block_pct_from_daily(daily_df):
                 mask = idx if mask is None else (mask | idx)
             if mask is not None and mask.sum() >= 2:
                 sub = merged[mask]
-                result[fix_name] = (float(sub["pct_chg"].mean()), len(sub))
+                result[fix_name] = (float(sub["pct_chg"].mean()), int(mask.sum()))
             else:
                 result[fix_name] = None
-        print(f"[👁️看盘] ✅ 板块聚合完成 ({len([v for v in result.values() if v])}/{len(FIXED_BLOCKS)})")
-        for k, v in result.items():
-            if v: print(f"  {k}: {v[0]:+.2f}% (n={v[1]})")
+
+        _BLOCK_PCT_CACHE["data"] = result
+        _BLOCK_PCT_CACHE["time"] = now
         return result
     except Exception as e:
-        print(f"[👁️看盘] 板块聚合异常: {e}")
+        print(f"[👁️看盘] 聚合异常: {e}")
         return None
 
 
@@ -329,52 +360,29 @@ def _build_block_grid(parent, win, col=0):
 
 
 def _refresh_all_blocks(win):
-    """刷新九宫格 — tushare daily 聚合 → akshare → 种子兜底"""
+    """刷新九宫格 — tushare daily+stock_basic 聚合 → 种子兜底"""
     matched_any = False
 
-    # ① tushare daily + 行业关键词聚合 (最靠谱)
-    daily = _get_tushare_daily_today()
-    if daily is not None and "pct_chg" in daily.columns:
-        result = _compute_block_pct_from_daily(daily)
-        if result:
-            for i, fix_name in enumerate(FIXED_BLOCKS):
-                val = result.get(fix_name)
-                if val and val[0] is not None:
-                    win._block_meta[i][1] = val[0]
-                    matched_any = True
-                    win._block_meta[i][5] = val[1]  # 匹配到的个股数
-                else:
-                    win._block_meta[i][1] = None
-            if matched_any:
-                print("[👁️看盘] ✅ 板块九宫格来自 tushare daily 聚合")
+    # ① tushare daily + stock_basic 关键词聚合 (最靠谱, 今天已验证)
+    result = _compute_block_pct_from_cache()
+    if result:
+        for i, fix_name in enumerate(FIXED_BLOCKS):
+            val = result.get(fix_name)
+            if val and val[0] is not None:
+                win._block_meta[i][1] = val[0]
+                win._block_meta[i][5] = val[1]
+                matched_any = True
+            else:
+                win._block_meta[i][1] = None
+        if matched_any:
+            print(f"[👁️看盘] ✅ 九宫格真实数据 ({len([v for v in result.values() if v])}/{len(FIXED_BLOCKS)} 板块)")
 
-    # ② akshare concept 板块排行 (失败概率高, 做补充)
+    # ② 种子兜底 (用今日真实数据做种子, 避免乱填)
     if not matched_any:
-        df = _get_ak_blocks()
-        if df is not None:
-            name_col = None
-            for c in df.columns:
-                if "名称" in str(c) or "板块" in str(c): name_col = c; break
-            pct_col = None
-            for c in df.columns:
-                if "涨跌幅" in str(c): pct_col = c; break
-            if name_col and pct_col:
-                names = df[name_col].astype(str).tolist()
-                pcts = df[pct_col].astype(float).tolist()
-                for i, (fix_name, meta) in enumerate(zip(FIXED_BLOCKS, win._block_meta)):
-                    kws = BLOCK_KEYWORDS.get(fix_name, [fix_name])
-                    for kw in kws:
-                        hit = next((pcts[j] for j, n in enumerate(names) if kw in n), None)
-                        if hit is not None:
-                            meta[1] = hit; matched_any = True; break
-
-    # ③ 种子兜底
-    if not matched_any:
-        print(f"[👁️看盘] 🌱 板块数据全走种子兜底")
+        print(f"[👁️看盘] 🌱 九宫格走种子兜底")
         for i, fix_name in enumerate(FIXED_BLOCKS):
             if fix_name in SEED_BLOCK_META:
-                jitter = (random.random() - 0.5) * 1.0
-                win._block_meta[i][1] = SEED_BLOCK_META[fix_name]["pct"] + jitter
+                win._block_meta[i][1] = SEED_BLOCK_META[fix_name]["pct"]
             else:
                 win._block_meta[i][1] = None
 
