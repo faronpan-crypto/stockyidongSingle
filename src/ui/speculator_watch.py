@@ -11,6 +11,10 @@ from datetime import datetime, timedelta
 # —— 固定板块清单 (对应 v3 文档) ——
 FIXED_BLOCKS = ["券商", "银行", "CPO", "半导体", "短剧", "电池", "国资", "煤炭", "电力"]
 
+# —— 股指期货四宫格 (IH/IF/IC/IM) ——
+FUT_NAMES = [("IH", "上证50", 2800), ("IF", "沪深300", 4000),
+             ("IC", "中证500", 5600), ("IM", "中证1000", 6500)]
+
 # —— 种子数据 (akshare/tushare 都挂时用, 保证界面秒出不空) ——
 SEED_BLOCK_META = {
     "券商":     {"pct": 0.85, "reason": "牛市早期先见底"},
