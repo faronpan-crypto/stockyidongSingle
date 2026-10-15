@@ -345,8 +345,8 @@ def _build_block_grid(parent, win, col=0):
     canvas.pack(fill=tk.BOTH, expand=True)
     win._block_canvas = canvas
 
-    # 每格元数据: [板块名, 涨跌幅, 净流入, 是否锁定, 是否脉冲中]
-    win._block_meta = [[name, None, None, True, False] for name in FIXED_BLOCKS]
+    # 每格元数据: [板块名, 涨跌幅, 净流入, 是否锁定, 是否脉冲中, 匹配个股数]
+    win._block_meta = [[name, None, None, True, False, None] for name in FIXED_BLOCKS]
     win._block_cells = []  # [(x1,y1,x2,y2), 板块名]
 
     # 下方矛盾描述
