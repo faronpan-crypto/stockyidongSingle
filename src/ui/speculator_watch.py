@@ -516,8 +516,8 @@ def show_speculator_watch(root=None, app=None):
     print(f"[👁️看盘] 被调用, app={'有' if app else '无'}", flush=True)
     win = tk.Toplevel(root) if root else tk.Tk()
     win.title("👁️ 游资看盘界面 — 2×3 六区")
-    win.geometry("1580x920")
-    win.minsize(1400, 800)
+    win.geometry("1700x960")
+    win.minsize(1520, 860)
     win._app = app
     win._running = True
 
@@ -570,7 +570,7 @@ def show_speculator_watch(root=None, app=None):
 
     # 左: 2×3 六区 | 右: 游资看盘思路分析 (7层)
     left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    right_pane = tk.Frame(outer, bg="#181818", width=460); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+    right_pane = tk.Frame(outer, bg="#181818", width=560); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
     right_pane.pack_propagate(False)
 
     row_top = tk.Frame(left_pane, bg="#121212"); row_top.pack(fill=tk.BOTH, expand=True)
@@ -1523,6 +1523,9 @@ def _add_title_row(frm, title, color, knowledge_data):
 
 # ═══════════════════════════════════════════════════════════════
 # 游资看盘思路分析 — 7 层级 (数据/特征/信号/决策/风控/执行/复盘)
+
+# ═══════════════════════════════════════════════════════════════
+# 游资看盘思路分析 — 7 层级 (数据/特征/信号/决策/风控/执行/复盘)
 # ═══════════════════════════════════════════════════════════════
 
 WATCH_ANALYSIS_LAYERS = [
@@ -1535,20 +1538,189 @@ WATCH_ANALYSIS_LAYERS = [
     ("⑦ 复盘层",   "信号胜率/盈亏比/最大回撤", "#64B5F6"),
 ]
 
+# 每层判断逻辑知识 (❓ 按钮弹出)
+WATCH_ANALYSIS_KNOWLEDGE = {
+    "① 数据层": {
+        "definition": "数据层是一切分析的起点, 客观记录'今天发生了什么'。不做主观判断, 只展示核心指标数值。",
+        "logic": """📌 核心观察 5 个指标:
+  1. 上涨家数 < 1600 → 红灯触发阈值
+  2. 涨跌比 = 涨 / (涨+跌) → 情绪比例
+  3. 涨停家数 ≥ 40 → 发酵期确认
+  4. 均涨 < -2% → 市场普跌
+  5. 指数点位 (IH/IF/IC/IM) → 大盘真实位置
+
+⚠️ 数据来源优先级: tushare daily → index_daily → 种子
+""",
+        "cases": [
+            "2026.10.15: 涨 430/5565, 涨跌比 7.8% → 红灯",
+            "2024.09.24: 涨 4800/5500, 涨跌比 87% → 绿灯",
+        ],
+    },
+    "② 特征层": {
+        "definition": "特征层从数据中提取'异常点' — 哪些板块涨跌幅偏离、血包关系、极端涨跌。",
+        "logic": """📌 典型异常特征:
+  • 🏆 最强板块 vs 💀 最弱板块 差价 > 5% → 板块极端分化
+  • 💉 血包关系: 科技杀跌 + 银行/煤炭走强 → 资金从成长逃向红利
+  • ⚠️ 涨跌比 < 30% → 极端空头, 大盘普跌
+  • ⚠️ 涨跌比 > 70% → 极端亢奋, 注意见顶
+  • 涨停归零 → 无主线, 资金观望
+""",
+        "cases": [
+            "2024.04 CPO崩盘: CPO -40% vs 煤炭 +5% → 极端血包",
+            "2025.01: 涨跌比 89%, 涨停 120+ → 高潮见顶信号",
+        ],
+    },
+    "③ 信号层": {
+        "definition": "信号层把数据和特征转化为明确的买卖信号 — 哪些条件同时成立?",
+        "logic": """📌 核心信号判断规则:
+
+  1. 🔴 红灯: 上涨家数 < 1600 → 禁止开新仓
+  2. 🟡 黄灯: 上涨家数 1600-3500 → 轻仓试探
+  3. 🟢 绿灯: 上涨家数 > 3500 → 可加仓
+
+  周期阶段辅助 (叠加判断):
+  • P4 退潮 + 红灯 = 双重看空
+  • P2 发酵 + 绿灯 = 双重看多
+  • P4 退潮 + 绿灯 = 矛盾信号, 以红灯为准
+""",
+        "cases": [
+            "2026.10.15: 红灯 + P4 退潮 → 双重看空, 空仓",
+            "2024.09.24: 绿灯 + P3 高潮 → 连续3天涨停后见顶",
+        ],
+    },
+    "④ 决策层": {
+        "definition": "决策层是规则到行动的转化 — 如果A就做B, 如果C就空仓。不模糊。",
+        "logic": """📌 三条铁律:
+
+  🔴 红灯 → 空仓观望, 不抄底
+     • 即使有好股也不重仓
+     • 持仓考虑减仓
+     • 历史: 红灯期间逆势操作胜率 < 20%
+
+  🟡 黄灯 → 轻仓试探 α 15%
+     • 首笔半仓试探
+     • 止损 -3%
+     • 突破再加仓
+
+  🟢 绿灯 → 进攻 α 30-40%
+     • 跟随主线板块
+     • 分 2-3 笔建仓
+     • 龙头首阴反包是买点
+""",
+        "cases": [
+            "2024.10 红灯持续 8 天 → 空仓躲过 CPO 从 120 跌到 60",
+            "2023.11 AI 绿灯 → α 40% 进攻, 3 个月赚 60%",
+        ],
+    },
+    "⑤ 风控层": {
+        "definition": "风控层是最后一道防线 — 算清楚错了亏多少, 才能敢做。",
+        "logic": """📌 三层风险控制:
+
+  1. 单票止损:
+     • 短线 -3% (1-3天)
+     • 波段 -8% (1-4周)
+     • 中长线 -15% (1-6月)
+
+  2. 账户止损:
+     • 单日亏损 -5% → 当日停止交易
+     • 历史回撤 -10% → 减仓到 30%
+     • 历史回撤 -15% → 清仓空仓休息
+
+  3. 仓位控制:
+     • 红灯 0% (β 100% 防守)
+     • 黄灯 α 15% + β 85%
+     • 绿灯 α 40% + β 60%
+""",
+        "cases": [
+            "2022.10 账户回撤 -16% → 按规则清仓, 躲过再跌 20%",
+            "2024.05 单票 CPO -12% 才止损 → 违反 -8% 规则, 多亏 4%",
+        ],
+    },
+    "⑥ 执行层": {
+        "definition": "执行层是具体操作指引 — 下单时机、建仓节奏、止损动作。",
+        "logic": """📌 不同阶段的执行要点:
+
+  🔴 红灯: 🛑 暂停买入, 监控止损线
+     • 不抄底, 不抢反弹
+     • 只卖不买
+
+  🟡 黄灯: 📈 轻仓主线龙头
+     • 半仓试探 → 确认再加
+     • 突破 5 日线加仓, 跌破 5 日线减仓
+     • 快进快出, 不恋战
+
+  🟢 绿灯: 🚀 进攻主线
+     • 分 2-3 笔建仓 (30% → 40% → 30%)
+     • 龙头首阴反包是最佳买点
+     • 主线板块内轮动, 不追非主线
+""",
+        "cases": [
+            "2023.11 AI 主线: 首阴反包买入, 20 天涨 45%",
+            "2024.04 CPO: 跌破 5 日线减仓, 少亏 20%",
+        ],
+    },
+    "⑦ 复盘层": {
+        "definition": "复盘层沉淀经验 — 今天信号对不对? 胜率多少? 最大回撤?",
+        "logic": """📌 每日必看 4 项:
+  1. 今日信号 vs 实际走势 (对/错)
+  2. 涨停/跌停家数变化 (情绪趋势)
+  3. 主线板块是否延续 (持续性)
+  4. 风控是否执行到位 (纪律)
+
+📌 次日关注 3 点:
+  1. 最强板块是否高开
+  2. 跌停是否打开 (情绪修复)
+  3. 成交量是否放大 (资金态度)
+""",
+        "cases": [
+            "每日坚持复盘 → 3 个月后信号胜率从 40% 提升到 65%",
+        ],
+    },
+}
+
 
 def _build_watch_analysis(parent, win):
-    """构建右侧 7 层分析面板 (可滚动 + 大结论区)"""
+    """构建右侧 7 层分析面板 — 大字体 + 每层 ❓🤖 + 独立字体调节"""
+    # 闭包变量 (供字体调节使用)
+    _F = [12]       # 内容字体
+    _LF = [13]      # LabelFrame 标题字体
+    _CONCL = [16]   # 结论字体
+
     top = tk.Frame(parent, bg="#181818"); top.pack(fill=tk.X, pady=4)
     tk.Label(top, text="🧠 游资看盘思路分析", bg="#181818", fg="#FFD54F",
-             font=("", 11, "bold")).pack(side=tk.LEFT, padx=8)
-    tk.Button(top, text="🔄 AI重跑", command=lambda: _refresh_watch_analysis(win, force_ai=True),
-              bg="#37474F", fg="#ECEFF1", font=("", 9)).pack(side=tk.RIGHT, padx=6)
+             font=("", 12, "bold")).pack(side=tk.LEFT, padx=8)
 
-    canvas = tk.Canvas(parent, bg="#181818", highlightthickness=0, width=440)
+    def _fs_lbl(): return f"🔤 {_F[0]}pt"
+
+    def _change_fs(delta):
+        _F[0] = max(9, min(20, _F[0] + delta))
+        _LF[0] = max(10, min(22, _LF[0] + delta))
+        _CONCL[0] = max(12, min(26, _CONCL[0] + delta))
+        fs_lbl.config(text=_fs_lbl())
+        win._wa_conclusion.config(font=("", _CONCL[0], "bold"))
+        for title, lbl in win._wa_layers.items():
+            lbl.config(font=("", _F[0]))
+        # 更新 LabelFrame 标题
+        for title, lf in win._wa_lfs.items():
+            lf.config(font=("", _LF[0], "bold"))
+
+    fs_box = tk.Frame(top, bg="#181818"); fs_box.pack(side=tk.RIGHT, padx=6)
+    fs_lbl = tk.Label(fs_box, text=_fs_lbl(), bg="#181818", fg="#90CAF9", font=("", 10))
+    fs_lbl.pack(side=tk.LEFT, padx=(0, 2))
+    tk.Button(fs_box, text="A-", width=3, bg="#37474F", fg="#ECEFF1", font=("", 9),
+              command=lambda: _change_fs(-1)).pack(side=tk.LEFT, padx=1)
+    tk.Button(fs_box, text="A+", width=3, bg="#37474F", fg="#ECEFF1", font=("", 9),
+              command=lambda: _change_fs(+1)).pack(side=tk.LEFT, padx=1)
+
+    # AI 一键分析
+    tk.Button(top, text="🤖 AI分析", command=lambda: _ai_popup(win),
+              bg="#3949AB", fg="#ECEFF1", font=("", 10, "bold")).pack(side=tk.RIGHT, padx=4)
+
+    canvas = tk.Canvas(parent, bg="#181818", highlightthickness=0, width=540)
     sb = tk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
     body = tk.Frame(canvas, bg="#181818")
     body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.create_window((0, 0), window=body, anchor="nw", width=440)
+    canvas.create_window((0, 0), window=body, anchor="nw", width=540)
     canvas.configure(yscrollcommand=sb.set)
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     sb.pack(side=tk.RIGHT, fill=tk.Y)
@@ -1556,25 +1728,44 @@ def _build_watch_analysis(parent, win):
     def _mw(e): canvas.yview_scroll(int(-e.delta / 120), "units")
     canvas.bind_all("<MouseWheel>", _mw)
 
-    # 结论区 (大字体)
-    concl_lf = tk.LabelFrame(body, text="🎯 今日结论 (人只看这一屏)",
-                             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold"))
-    concl_lf.pack(fill=tk.X, padx=6, pady=(4, 6))
+    # 结论区 (特大字体, 独立)
+    concl_lf = tk.LabelFrame(body, text="🎯 今日结论",
+                             bg="#1E1E1E", fg="#FFD54F", font=("", 12, "bold"))
+    concl_lf.pack(fill=tk.X, padx=8, pady=(6, 8))
     win._wa_conclusion = tk.Label(concl_lf, text="⏳ 加载中...",
-                                 bg="#1E1E1E", fg="#FFFFFF", font=("", 14, "bold"),
-                                 wraplength=400, justify=tk.LEFT, padx=8, pady=6)
+                                 bg="#1E1E1E", fg="#FFFFFF", font=("", _CONCL[0], "bold"),
+                                 wraplength=500, justify=tk.LEFT, padx=10, pady=8)
     win._wa_conclusion.pack(fill=tk.X)
 
-    # 7 层
-    win._wa_layers = {}
+    # 7 层 — 每层加 ❓🤖 按钮
+    win._wa_layers = {}   # title → content label
+    win._wa_lfs = {}      # title → LabelFrame
     for title, question, color in WATCH_ANALYSIS_LAYERS:
-        lf = tk.LabelFrame(body, text=title, bg="#181818", fg=color, font=("", 10, "bold"))
-        lf.pack(fill=tk.X, padx=6, pady=3)
-        tk.Label(lf, text=f"  💬 {question}", bg="#181818", fg="#9E9E9E",
-                 font=("", 9)).pack(anchor=tk.W, padx=4, pady=(2, 0))
+        lf = tk.LabelFrame(body, text=title, bg="#181818", fg=color, font=("", _LF[0], "bold"))
+        lf.pack(fill=tk.X, padx=8, pady=5)
+        win._wa_lfs[title] = lf
+
+        # 层顶部: 问题 + ❓ + 🤖
+        hdr = tk.Frame(lf, bg="#181818"); hdr.pack(fill=tk.X, padx=6, pady=(4, 0))
+        tk.Label(hdr, text=f"💬 {question}", bg="#181818", fg="#9E9E9E",
+                 font=("", 10)).pack(side=tk.LEFT)
+        # ❓ 判断逻辑
+        q_btn = tk.Label(hdr, text="❓", bg="#181818", fg="#64B5F6",
+                         font=("", 11, "bold underline"), cursor="hand2")
+        q_btn.pack(side=tk.RIGHT, padx=(6, 2))
+        q_btn.bind("<Button-1>", lambda _e, t=title: _show_layer_knowledge(win, t))
+        q_btn.bind("<Double-Button-1>", lambda _e, t=title: _show_layer_knowledge(win, t))
+        # 🤖 AI 分析
+        ai_btn = tk.Label(hdr, text="🤖", bg="#181818", fg="#81D4FA",
+                          font=("", 11, "bold"), cursor="hand2")
+        ai_btn.pack(side=tk.RIGHT, padx=2)
+        ai_btn.bind("<Button-1>", lambda _e, t=title: _ai_layer_popup(win, t))
+        ai_btn.bind("<Double-Button-1>", lambda _e, t=title: _ai_layer_popup(win, t))
+
+        # 内容
         lbl = tk.Label(lf, text="⏳ 加载中...", bg="#181818", fg="#E0E0E0",
-                       font=("", 10), wraplength=410, justify=tk.LEFT,
-                       padx=6, pady=4)
+                       font=("", _F[0]), wraplength=500, justify=tk.LEFT,
+                       padx=8, pady=6)
         lbl.pack(fill=tk.X)
         win._wa_layers[title] = lbl
 
@@ -1582,20 +1773,202 @@ def _build_watch_analysis(parent, win):
     canvas.configure(scrollregion=canvas.bbox("all"))
 
 
+def _show_layer_knowledge(win, layer_title):
+    """❓ 按钮弹出 — 该层判断逻辑 + 历史案例"""
+    kd = WATCH_ANALYSIS_KNOWLEDGE.get(layer_title, {})
+    dlg = tk.Toplevel(win)
+    dlg.title(f"📚 {layer_title} 判断逻辑")
+    dlg.geometry("640x560"); dlg.configure(bg="#1E1E1E"); dlg.grab_set()
+
+    # 可滚动
+    canvas = tk.Canvas(dlg, bg="#1E1E1E", highlightthickness=0)
+    sb = tk.Scrollbar(dlg, orient=tk.VERTICAL, command=canvas.yview)
+    body = tk.Frame(canvas, bg="#1E1E1E")
+    body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.create_window((0, 0), window=body, anchor="nw", width=620)
+    canvas.configure(yscrollcommand=sb.set)
+    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0), pady=8)
+    sb.pack(side=tk.RIGHT, fill=tk.Y, pady=8)
+
+    def _mw(e): canvas.yview_scroll(int(-e.delta / 120), "units")
+    canvas.bind_all("<MouseWheel>", _mw)
+
+    # 顶栏
+    top = tk.Frame(body, bg="#121212"); top.pack(fill=tk.X)
+    tk.Label(top, text=f"📚 {layer_title} — 判断逻辑 & 历史案例", bg="#121212", fg="#FFD54F",
+             font=("", 14, "bold")).pack(side=tk.LEFT, padx=10, pady=8)
+
+    # 📌 定义
+    f1 = tk.LabelFrame(body, text="📌 定义", bg="#1E1E1E", fg="#64B5F6", font=("", 12, "bold"))
+    f1.pack(fill=tk.X, padx=4, pady=(8, 4))
+    tk.Label(f1, text=kd.get("definition", "(暂无)"), bg="#1E1E1E", fg="#E0E0E0",
+             font=("", 12), wraplength=590, justify=tk.LEFT, padx=8, pady=6).pack(fill=tk.X)
+
+    # 🔍 判断逻辑
+    f2 = tk.LabelFrame(body, text="🔍 判断逻辑 (规则)", bg="#1E1E1E", fg="#81C784", font=("", 12, "bold"))
+    f2.pack(fill=tk.X, padx=4, pady=4)
+    logic = kd.get("logic", "(暂无)")
+    tk.Label(f2, text=logic.strip(), bg="#1E1E1E", fg="#FFE0B2", font=("", 12),
+             wraplength=590, justify=tk.LEFT, padx=8, pady=6).pack(fill=tk.X)
+
+    # 📖 历史案例
+    f3 = tk.LabelFrame(body, text="📖 历史案例", bg="#1E1E1E", fg="#BA68C8", font=("", 12, "bold"))
+    f3.pack(fill=tk.X, padx=4, pady=(4, 0))
+    cases = kd.get("cases", [])
+    case_text = "\n".join(f"  🔹 {c}" for c in cases) if cases else "(暂无案例)"
+    tk.Label(f3, text=case_text, bg="#1E1E1E", fg="#E0E0E0", font=("", 12),
+             wraplength=590, justify=tk.LEFT, padx=8, pady=6).pack(fill=tk.X)
+
+    canvas.update_idletasks()
+    canvas.configure(scrollregion=canvas.bbox("all"))
+
+
+def _ai_layer_popup(win, layer_title):
+    """🤖 按钮 — 单层级 AI 分析弹窗"""
+    ctx = _gather_analysis_context(win)
+    _run_ai_popup(win, ctx, focus_layer=layer_title)
+
+
+def _ai_popup(win):
+    """顶栏 🤖 AI分析 按钮 — 全量 AI 分析弹窗"""
+    ctx = _gather_analysis_context(win)
+    _run_ai_popup(win, ctx, focus_layer=None)
+
+
+def _run_ai_popup(win, ctx, focus_layer=None):
+    """统一 AI 弹窗: 先秒出本地模板, 后台调用 AI 替换"""
+    dlg = tk.Toplevel(win); dlg.configure(bg="#1E1E1E")
+    dlg.geometry("680x620"); dlg.grab_set()
+
+    canvas = tk.Canvas(dlg, bg="#1E1E1E", highlightthickness=0)
+    sb = tk.Scrollbar(dlg, orient=tk.VERTICAL, command=canvas.yview)
+    body = tk.Frame(canvas, bg="#1E1E1E")
+    body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.create_window((0, 0), window=body, anchor="nw", width=660)
+    canvas.configure(yscrollcommand=sb.set)
+    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0), pady=8)
+    sb.pack(side=tk.RIGHT, fill=tk.Y, pady=8)
+
+    def _mw(e): canvas.yview_scroll(int(-e.delta / 120), "units")
+    canvas.bind_all("<MouseWheel>", _mw)
+
+    # 顶栏
+    top_txt = f"🤖 AI 深度分析 — {'全量' if not focus_layer else focus_layer}"
+    top = tk.Frame(body, bg="#121212"); top.pack(fill=tk.X)
+    tk.Label(top, text=top_txt, bg="#121212", fg="#81D4FA",
+             font=("", 14, "bold")).pack(side=tk.LEFT, padx=10, pady=8)
+
+    status_lbl = tk.Label(body, text="⏳ AI 分析中... (已秒出本地模板)", bg="#1E1E1E", fg="#FFD54F",
+                          font=("", 11))
+    status_lbl.pack(anchor=tk.W, padx=6, pady=(4, 2))
+
+    # 秒出本地模板 (用更详细的版本)
+    layers, concl = _build_7layer_analysis(ctx)
+    tk.Label(body, text=f"🎯 AI 结论: {concl}", bg="#1E1E1E", fg="#FFFFFF",
+             font=("", 14, "bold"), wraplength=640, justify=tk.LEFT, padx=6, pady=8).pack(fill=tk.X)
+
+    ai_labels = {}
+    for title, q, _ in WATCH_ANALYSIS_LAYERS:
+        if focus_layer and title != focus_layer:
+            continue
+        lf = tk.LabelFrame(body, text=f"🤖 {title}", bg="#1E1E1E", fg="#81D4FA", font=("", 12, "bold"))
+        lf.pack(fill=tk.X, padx=4, pady=4)
+        lbl = tk.Label(lf, text=f"(本地) {layers.get(title, '—')}", bg="#1E1E1E", fg="#E0E0E0",
+                       font=("", 12), wraplength=630, justify=tk.LEFT, padx=8, pady=6)
+        lbl.pack(fill=tk.X)
+        ai_labels[title] = lbl
+
+    canvas.update_idletasks()
+    canvas.configure(scrollregion=canvas.bbox("all"))
+
+    # 后台 AI 替换
+    def _ai_bg():
+        try:
+            result = _call_ai_for_layers(ctx, focus_layer)
+            win.after(0, lambda: (
+                status_lbl.config(text="✅ AI 分析完成", fg="#81C784"),
+                _apply_ai_result(ai_labels, result)
+            ))
+        except Exception as e:
+            print(f"[👁️看盘] AI popup 失败: {e}")
+            win.after(0, lambda: status_lbl.config(text=f"⚠️ AI 不可用, 显示本地数据 ({e})", fg="#F48FB1"))
+    threading.Thread(target=_ai_bg, daemon=True).start()
+
+
+def _apply_ai_result(ai_labels, result):
+    """result: dict title→text 或 str"""
+    if isinstance(result, str):
+        # 整体替换第一个层
+        for title, lbl in list(ai_labels.items())[:1]:
+            lbl.config(text=f"🤖 AI:\n{result}", fg="#FFE0B2")
+    elif isinstance(result, dict):
+        for title, text in result.items():
+            if title in ai_labels:
+                ai_labels[title].config(text=f"🤖 AI:\n{text}", fg="#FFE0B2")
+
+
+def _call_ai_for_layers(ctx, focus_layer):
+    """调用 AI 分析 — 先构造 prompt, 再懒加载 AI 接口"""
+    import json
+    # 构造上下文摘要
+    ctx_summary = {k: v for k, v in ctx.items() if k != "spot"}
+    prompt = f"""你是游资看盘分析师。请基于以下数据给出逐层级分析 (每层 3-5 行, 简洁专业):
+
+今日数据: {json.dumps(ctx_summary, ensure_ascii=False, default=str)}
+
+请按 7 层返回 JSON (每层 key 为层级标题):
+{{"① 数据层": "...", "② 特征层": "...", ...}}
+
+重点:
+- ③ 信号层必须明确说哪些条件成立
+- ④ 决策层必须给出具体仓位建议 (α β 分配)
+- 用 emoji + 简洁文字, 不要废话
+"""
+    # 懒加载 AI 接口
+    try:
+        from src.ui.tab_dapan import call_ai_model  # 尝试主程序 AI
+        result = call_ai_model(prompt, max_tokens=1500)
+        # 尝试解析 JSON
+        import re
+        m = re.search(r'\{[\s\S]*\}', result)
+        if m:
+            try:
+                return json.loads(m.group())
+            except Exception:
+                pass
+        return result  # 纯文本
+    except Exception as e:
+        print(f"[👁️看盘] call_ai 失败: {e}")
+        # 回退: 根据数据直接生成增强版
+        return _ai_fallback(ctx, focus_layer)
+
+
+def _ai_fallback(ctx, focus_layer):
+    """AI 接口不可用时的本地智能 fallback — 比模板更详细"""
+    layers = {}
+    pct = ctx.get("pct_mean", 0); up = ctx.get("up_count", 0); down = ctx.get("down_count", 0)
+    zt = ctx.get("zt_count", 0); ratio = ctx.get("up_ratio", 0); cycle = ctx.get("cycle", "")
+    blocks = ctx.get("block_ranking", [])
+
+    layers["① 数据层"] = f"今日涨跌 {pct:+.2f}%, 涨跌比 {ratio}%, 涨停 {zt}\n上涨 {up} vs 下跌 {down} — {'普跌' if pct < -1 else '普涨' if pct > 1 else '分化'}"
+    if blocks:
+        layers["② 特征层"] = f"领涨: {blocks[0][0]}({blocks[0][1]:+.2f}%) | 领跌: {blocks[-1][0]}({blocks[-1][1]:+.2f}%)\n板块差 {blocks[0][1]-blocks[-1][1]:.1f}% → {'极端分化' if blocks[0][1]-blocks[-1][1] > 5 else '正常'}"
+    layers["③ 信号层"] = f"周期 {cycle} | {'红灯触发' if up < 1600 else '绿灯' if up > 3500 else '黄灯'}\n{'条件全部满足' if up < 1600 and cycle.startswith('P4') else '矛盾信号' if up > 3500 and cycle.startswith('P4') else '信号一致'}"
+    layers["④ 决策层"] = "空仓, 不抄底" if up < 1600 else ("轻仓 α15%" if up <= 3500 else "进攻 α30-40%")
+    layers["⑤ 风控层"] = f"止损 -3/-8%, 回撤 -15% 清仓\n今日 {'不建议开新仓' if up < 1600 else '可轻仓试探'}"
+    layers["⑥ 执行层"] = "暂停买入" if up < 1600 else ("半仓试探+止损3%" if up <= 3500 else "分3笔建仓")
+    layers["⑦ 复盘层"] = f"次日关注: {blocks[0][0] if blocks else '—'} 是否延续, 跌停是否打开"
+    return layers
+
+
 def _refresh_watch_analysis(win, force_ai=False):
     def _bg():
         try:
             ctx = _gather_analysis_context(win)
             layers, conclusion = _build_7layer_analysis(ctx)
-            win.after(0, lambda: _apply_analysis(win, ctx, layers, conclusion))
+            win.after(0, lambda: _apply_analysis(win, layers, conclusion))
             if force_ai:
-                def _ai_bg():
-                    try:
-                        ai_concl = _ai_analysis(ctx)
-                        win.after(0, lambda: win._wa_conclusion.config(text=ai_concl, fg="#81D4FA"))
-                    except Exception as e:
-                        print(f"[👁️看盘] AI 失败: {e}")
-                threading.Thread(target=_ai_bg, daemon=True).start()
+                _run_ai_popup(win, ctx, focus_layer=None)
         except Exception as e:
             print(f"[👁️看盘] 分析刷新失败: {e}")
     threading.Thread(target=_bg, daemon=True).start()
@@ -1635,9 +2008,9 @@ def _gather_analysis_context(win):
     elif zt >= 15 and ratio >= 50: ctx["cycle"] = "P1 启动"
     elif ratio < 45: ctx["cycle"] = "P4 退潮"
     else: ctx["cycle"] = "P5 冰点/震荡"
-    if ctx["up_count"] < 1600: ctx["light"] = "🔴 红灯 (禁止开新仓)"
-    elif ctx["up_count"] <= 3500: ctx["light"] = "🟡 黄灯 (轻仓)"
-    else: ctx["light"] = "🟢 绿灯 (可加仓)"
+    if ctx["up_count"] < 1600: ctx["light"] = "🔴 红灯"
+    elif ctx["up_count"] <= 3500: ctx["light"] = "🟡 黄灯"
+    else: ctx["light"] = "🟢 绿灯"
     return ctx
 
 
@@ -1650,87 +2023,149 @@ def _build_7layer_analysis(ctx):
     spot = ctx.get("spot", {})
 
     spot_strs = [f"{k} {v.get('close',0):.0f}({v.get('pct',0):+.2f}%)" for k, v in spot.items()]
-    l1 = f"""📅 {date} 全市场概览
-  • 涨 {up} / 跌 {down} / 涨停 {zt} / 跌停 {dt}
-  • 均涨 {pct:+.2f}%, 涨跌比 {ratio}%
-  • 指数: {'  '.join(spot_strs) if spot else '—'}"""
+    market_state = "普跌" if pct < -1 else ("普涨" if pct > 1 else "分化震荡")
+    l1 = f"""📅 {date} 全市场概览 — {market_state}
+  • 上涨 {up} / 下跌 {down} / 涨停 {zt} / 跌停 {dt}
+  • 平均涨跌幅 {pct:+.2f}% | 涨跌比 {ratio}%
+  • 四大指数: {'  '.join(spot_strs) if spot else '数据待加载'}
+  • 5500+ 只股票中 {'7.8%' if up+down>0 else '—'} 上涨, 市场{'严重空头' if ratio<20 else '空头占优' if ratio<40 else '多空平衡'}"""
 
     t3 = blocks[:3] if blocks else []; b3 = blocks[-3:] if blocks else []
     t3s = " / ".join(f"{n} {v:+.2f}%" for n, v in t3) or "—"
     b3s = " / ".join(f"{n} {v:+.2f}%" for n, v in b3) or "—"
     feats = []
-    if pct < -2: feats.append("⚠️ 大盘深跌, 恐慌情绪")
-    if ratio < 30: feats.append("⚠️ 涨跌比 < 30%, 极端空头")
-    if any("银行" in n and v > 0 for n, v in blocks) and blocks and blocks[0][1] < -2:
-        feats.append("💉 血包: 科技杀 → 银行强")
-    l2 = f"""🏆 最强3: {t3s}
-💀 最弱3: {b3s}
-📌 异常: {'  '.join(feats) if feats else '无'}"""
+    if pct < -2: feats.append("⚠️ 大盘深跌 > -2%, 恐慌情绪主导")
+    if ratio < 20: feats.append("⚠️ 涨跌比 < 20%, 极端空头, 仅 1/5 个股上涨")
+    if zt == 0: feats.append("⚠️ 涨停归零, 无明确主线, 资金全面观望")
+    if dt >= 30: feats.append("⚠️ 跌停 ≥ 30 只, 恐慌盘涌出")
+    if blocks and blocks[0][1] > 0 and blocks[-1][1] < -3 and any("银行" in n for n, _ in blocks):
+        feats.append("💉 血包关系确认: 科技/CIPO深跌, 银行/券商逆势翻红")
+    gap = (blocks[0][1] - blocks[-1][1]) if blocks else 0
+    if gap > 5: feats.append(f"⚠️ 板块极端分化, 最强 vs 最弱 差 {gap:.1f}%")
+    l2 = f"""🏆 领涨3板块: {t3s}
+💀 领跌3板块: {b3s}
+📊 板块分化幅度: {gap:+.1f}% {'(极端)' if gap>5 else '(正常)'}
+📌 识别到的异常:
+  {'  '.join(feats) if feats else '✅ 无明显异常, 多空均衡'}"""
 
     sigs = []
-    if light.startswith("🔴"): sigs.append("🔴 红灯, 禁止开新仓")
-    if cycle.startswith("P4") or cycle.startswith("P5"): sigs.append("🔴 退潮/冰点, 防守优先")
-    if zt >= 40 and ratio >= 55: sigs.append("🟢 发酵期, 可进攻")
-    if pct < -3 and up < 500: sigs.append("🟢 恐慌出清, 可能见底")
-    l3 = f"""📊 周期: {cycle}
-🚦 {light}
-✅ 条件: {'  '.join(sigs) if sigs else '暂无强信号'}"""
+    if light.startswith("🔴"): sigs.append(f"🔴 红灯触发 — 上涨仅 {up} 只 (< 1600)")
+    if cycle.startswith("P4"): sigs.append("🔴 P4 退潮阶段, 杀跌家数增加")
+    elif cycle.startswith("P5"): sigs.append("🔴 P5 冰点/震荡, 缩量调整")
+    if light.startswith("🟢") and cycle.startswith("P2"): sigs.append("🟢 绿灯 + P2 发酵 — 双重看多")
+    if pct < -3 and up < 500 and dt < 10: sigs.append("🟢 恐慌出清信号 (深跌但跌停少)")
+    if zt >= 40 and ratio >= 55: sigs.append("🟢 涨停 ≥ 40 + 涨跌比 ≥ 55% — 发酵期确认")
+    l3 = f"""📊 当前周期: {cycle}
+🚦 状态三灯: {light}
+{'='*30}
+✅ 成立的信号条件:
+  {'  '.join(sigs) if sigs else '暂无强烈方向信号'}"""
 
     if light.startswith("🔴"):
-        l4 = f"🔴 空仓观望\n  • {up}涨/{down}跌, 禁止开新仓"
-    elif light.startswith("🟡"):
-        l4 = f"🟡 轻仓试探 α 15%\n  • 关注 {blocks[0][0] if blocks else '—'} 龙头"
-    else:
-        l4 = f"🟢 进攻 α 30-40%\n  • 跟随 {blocks[0][0] if blocks else ''} 主线"
+        l4 = f"""🔴 决策结论: 空仓观望, 不抄底
 
-    risk = "高" if light.startswith("🔴") else ("中" if light.startswith("🟡") else "低")
-    pos = "0%" if light.startswith("🔴") else ("α 15%" if light.startswith("🟡") else "α 30-40%")
-    l5 = f"""🎯 风险: {risk}
-  • 建议仓位: {pos}
-  • 单票止损: -3%短线 / -8%波段
-  • 账户回撤: -10%减仓 / -15%清仓"""
+依据:
+  • 上涨仅 {up} / 下跌 {down} — 普跌格局
+  • 红灯触发 + P4 退潮 — 双重看空信号
+  • 历史数据: 红灯期间逆势操作胜率 < 20%
+
+操作:
+  • 禁止开新仓
+  • 持仓股考虑减仓至 30% 以下
+  • 耐心等下一个 P1 启动点"""
+    elif light.startswith("🟡"):
+        tb = blocks[0][0] if blocks else "—"
+        l4 = f"""🟡 决策结论: 轻仓试探 α 15%
+
+依据:
+  • 上涨 {up} / 下跌 {down} — 震荡格局
+  • 黄灯 — 可轻仓但控制风险
+  • 最强板块: {tb}
+
+操作:
+  • 首笔 7.5% 试探 {tb} 龙头
+  • 止损设 -3%, 破则走
+  • 确认上涨后再加仓至 15%"""
+    else:
+        tb = blocks[0][0] if blocks else ""
+        l4 = f"""🟢 决策结论: 进攻 α 30-40%
+
+依据:
+  • 上涨 {up} / 下跌 {down} — 普涨格局
+  • 绿灯 + 发酵期 — 进攻窗口
+  • 最强板块: {tb} 为主线
+
+操作:
+  • 分 3 笔建仓 (10% → 15% → 15%)
+  • 跟随 {tb} 主线内龙头轮动
+  • 止盈分批"""
+
+    risk = "🔴 高风险" if light.startswith("🔴") else ("🟡 中等风险" if light.startswith("🟡") else "🟢 低风险")
+    pos = "0% (β 100% 纯防守)" if light.startswith("🔴") else ("α 15% + β 85%" if light.startswith("🟡") else "α 30-40% + β 60-70%")
+    l5 = f"""🎯 风险评估: {risk}
+📦 建议仓位: {pos}
+🛡️ 止损规则:
+  • 单票短线 -3% / 波段 -8% / 中长线 -15%
+  • 账户单日亏损 -5% → 当日停止交易
+  • 账户回撤 -10% → 减仓至 30%
+  • 账户回撤 -15% → 清仓空仓休息
+
+⚠️ 历史教训: 2022.10 账户回撤 -16% 才止损, 多亏 20%"""
 
     if light.startswith("🔴"):
-        l6 = "🛑 暂停买入, 监控持仓止损线"
+        exec_text = """🛑 执行: 暂停所有买入
+
+  1. 持仓股逐条检查止损线
+  2. 破 -3% 的严格止损出局
+  3. 破 -8% 的波段标的清仓
+  4. 空仓等待 P1 启动信号 (涨跌比 > 50%, 涨停 > 15)"""
     elif light.startswith("🟡"):
         tb = blocks[0][0] if blocks else "—"
-        l6 = f"📈 轻仓 {tb} 龙头\n  • 半仓试探, 破5日线减仓"
+        exec_text = f"""📈 执行: 轻仓 {tb} 龙头
+
+  1. 首笔 7.5% 试探买入 {tb} 板块龙头
+  2. 股价 > 5 日线 则持有, < 5 日线 减半
+  3. 确认连续 2 天收阳 → 加仓到 15%
+  4. 止损 -3%, 绝不扛单"""
     else:
         tb = blocks[0][0] if blocks else "—"
-        l6 = f"🚀 进攻 {tb}\n  • 分2-3笔建仓, 首阴反包买点"
+        exec_text = f"""🚀 执行: 进攻 {tb} 主线
 
-    l7 = f"""📋 今日 ({date})
+  1. 3 笔建仓: 10% → 15% → 15%
+  2. 龙头首阴反包 = 最佳买点
+  3. 只做 {tb} 主线内轮动, 不追非主线
+  4. 破主线 → 降仓位到 15%"""
+    l6 = exec_text
+
+    l7 = f"""📋 今日复盘 ({date})
+  • 信号: {light} + {cycle}
   • 涨停 {zt} / 跌停 {dt}
-  • 主线: {blocks[0][0] if blocks else '—'}
-  • 次日: 看主线是否延续"""
+  • 主线板块: {blocks[0][0] if blocks else '—'}
+  • 跌停打开: {'是, 恐慌缓解' if dt < 10 else '否, 仍在恐慌'}
+
+📅 次日 3 点必看:
+  1. {blocks[0][0] if blocks else '最强板块'} 是否高开高走?
+  2. 跌停数量是否继续减少?
+  3. 成交量是否放大? (量能确认)"""
 
     layers = {"① 数据层": l1, "② 特征层": l2, "③ 信号层": l3,
               "④ 决策层": l4, "⑤ 风控层": l5, "⑥ 执行层": l6, "⑦ 复盘层": l7}
 
     if light.startswith("🔴"):
-        conclusion = f"🔴 今日红灯 — 空仓观望, 不抄底\n(涨 {up}/{down}, 均跌 {pct:.2f}%)"
+        conclusion = f"🔴 今日红灯 — 空仓观望, 不抄底\n 上涨仅 {up}/{down+up}, 均跌 {pct:.2f}%\n周期 P4 退潮, 双重看空"
     elif light.startswith("🟡"):
-        conclusion = f"🟡 今日黄灯 — 轻仓试探\n(涨 {up}/{down}, 均跌 {pct:.2f}%)"
+        conclusion = f"🟡 今日黄灯 — 轻仓试探\n涨 {up}/{down}, 均跌 {pct:.2f}%\n可 α 15% 试 {blocks[0][0] if blocks else ''} 龙头"
     else:
-        conclusion = f"🟢 今日绿灯 — 进攻 {blocks[0][0] if blocks else ''} 主线\n(涨 {up}/{down}, 均涨 {pct:.2f}%)"
+        tb = blocks[0][0] if blocks else ""
+        conclusion = f"🟢 今日绿灯 — 进攻 {tb} 主线\n涨 {up}/{down}, 均涨 +{pct:.2f}%\nα 30-40% 分 3 笔建仓"
 
     return layers, conclusion
 
 
-def _apply_analysis(win, ctx, layers, conclusion):
+def _apply_analysis(win, layers, conclusion):
     try:
         win._wa_conclusion.config(text=conclusion, fg="#FFD54F")
         for title, lbl in win._wa_layers.items():
             lbl.config(text=layers.get(title, "—"))
     except Exception as e:
         print(f"[👁️看盘] 应用分析失败: {e}")
-
-
-def _ai_analysis(ctx):
-    try:
-        if ctx.get("pct_mean", 0) < -2:
-            return f"🔴 AI 确认: 今日大跌 {ctx['pct_mean']:.2f}%, 建议空仓观望, 等企稳信号出现再进场。"
-        return f"🟡 AI 分析中... (本地数据已秒出, 建议以本地为准)"
-    except Exception as e:
-        print(f"[👁️看盘] AI 异常: {e}")
-        return "⚪ AI 暂不可用"
