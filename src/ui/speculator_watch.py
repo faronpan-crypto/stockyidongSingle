@@ -28,6 +28,227 @@ FIXED_BLOCKS = list(BLOCK_KEYWORDS.keys())
 FUT_NAMES = [("IH", "上证50", 2800), ("IF", "沪深300", 4000),
              ("IC", "中证500", 5600), ("IM", "中证1000", 6500)]
 
+# —— 板块九宫格分析知识 (硬编码, 不联网) ——
+BLOCK_KNOWLEDGE = {
+    "券商": {
+        "definition": "券商板块是大盘的后置情绪板块, 也是牛熊周期的领先指标。牛市初期, 指数还没见底时券商可能先见底; 指数还没见顶时券商可能先见顶。",
+        "logic": """
+🔴 红盘 (pct >= 0): 后置情绪轮动信号
+   - 主流板块走完后, 资金无处可去, 最后落实到券商板块
+   - 券商分时冲高, 往往是股指期货放空的信号 (情绪高潮末端)
+🟢 绿盘 (pct < 0): 市场谨慎, 资金不愿承担beta风险
+⚠️ 与大盘血包关系: 券商绿盘 + 大盘绿盘 = 共振杀; 券商红盘 + 大盘绿盘 = 情绪反抽
+""",
+        "cases": [
+            "2015.06 股灾前: 券商在4月中旬率先见顶, 比指数见顶早2个月",
+            "2019.01 牛市起点: 券商在1月初放量涨停, 是牛熊反转的第一个明确信号",
+            "2024.09 政策救市: 9.24下午券商集体涨停, 随后一周大盘涨15%",
+        ],
+    },
+    "银行": {
+        "definition": "银行板块是通缩/经济下行环境下的红利防守板块。当市场有明确主线时银行被抛弃; 当市场恐慌、无主线时银行成为资金避风港。",
+        "logic": """
+🔴 红盘 (pct >= 0): 市场防御情绪升温
+   - 科技/成长杀跌时银行反骨走强 (血包关系)
+   - 红利指数 (银行为主) 往往在熊市中创出新高
+🟢 绿盘 (pct < 0): 市场风险偏好上升, 资金从防守转向进攻
+⚠️ 判断意义: 银行红盘持续3天以上 + 科技绿盘 = 市场进入防守模式
+""",
+        "cases": [
+            "2022 全年: 大盘持续下跌, 但招商银行(600036)逆势涨了15%",
+            "2024.10 科技熊市: 10月初银行/煤炭/电力反而创了阶段新高",
+            "2018 贸易战: 银行指数全年跌2%, 上证指数跌30%, 相对收益28%",
+        ],
+    },
+    "CPO": {
+        "definition": "CPO (共封装光学) 是AI算力的核心瓶颈板块。机构重仓、拥挤度高。在AI行情中, CPO是机构资金进出的首选标的。",
+        "logic": """
+🟢 绿盘 (pct < 0): 机构出货信号
+   - 机构持仓集中的板块杀跌往往比游资主导的板块更惨烈
+   - 机构从拥挤度高的CPO出货, 转向拥挤度低的方向 (如国产半导体)
+🔴 红盘 (pct >= 0): AI主线行情确认
+   - CPO红盘持续 + 成交量放大 = AI主升浪
+⚠️ 血包关系: CPO ↓ 往往伴随国产半导体 ↓ (机构一起杀科技)
+""",
+        "cases": [
+            "2024.04 CPO崩盘: 光模块龙头中际旭创从150跌到60, 3个月跌60%",
+            "2023.11 AI启动: CPO板块连续3天涨停, 是AI行情的第一个确认信号",
+        ],
+    },
+    "半导体": {
+        "definition": "半导体板块覆盖国产替代主线, 机构持仓相对分散。半导体行情通常跟随科技大方向, 但个股分化大。",
+        "logic": """
+🔴 红盘: 科技主线确认, 资金回流芯片
+🟢 绿盘: 科技调整, 注意国产半导体是否比CPO抗跌 (机构持仓少的板块先筑底)
+⚠️ 血包关系: 半导体 ↓ + 银行/煤炭 ↑ = 明显的血包, 资金从成长逃去红利
+""",
+        "cases": [
+            "2019 半导体牛市: 全年涨120%, 是全年最强主线",
+            "2024.09 半导体反弹: 政策救市后半导体连续涨停, 带领科技反弹",
+        ],
+    },
+    "AI": {
+        "definition": "AI (人工智能) 是最近2年的核心主线, 覆盖计算机应用、软件、大模型、机器人等多个分支。",
+        "logic": """
+🔴 红盘: AI主线延续, 注意是哪个分支领涨
+🟢 绿盘: AI短期过热后的回调, 注意是否缩量 (良性) 还是放量 (见顶)
+⚠️ 子轮动: CPO跌 → 国产半导体跌 → AI应用跌 (机构依次出货)
+""",
+        "cases": [
+            "2023.11 AI大行情: chatgpt概念启动, AI板块3个月涨80%",
+            "2024.09 机器人行情: AI应用分支机器人连续涨停",
+        ],
+    },
+    "电池": {
+        "definition": "电池 (锂电池/储能) 是新能源主线的核心。近年机构从拥挤的科技漂移到电池, 形成血包关系。",
+        "logic": """
+🔴 红盘: 机构资金从科技漂移到电池, 血包关系确认
+🟢 绿盘: 电池调整, 注意是否缩量
+⚠️ 血包关系: 电池 ↑ + 科技 ↓ = 机构资金轮动, 典型的跷跷板
+""",
+        "cases": [
+            "2022.07 新能源崩盘: 电池龙头宁德时代从380跌到180, 半年跌53%",
+            "2024.10 电池反抽: 科技持续杀时电池资金回流, 形成明显血包",
+        ],
+    },
+    "煤炭": {
+        "definition": "煤炭是高分红板块, 与电力、化工等周期股同属资源周期。在熊市中分红板块抗跌, 在牛市中弹性最差。",
+        "logic": """
+🟢 深绿 (pct < -3%): 最惨板块, 市场情绪极端悲观, 连分红防御都扛不住
+🟡 浅绿/红盘: 防御板块抗跌, 说明市场有一定承接
+⚠️ 判断意义: 煤炭大跌往往暗示市场处于恐慌末期
+""",
+        "cases": [
+            "2022.10 煤炭崩盘: 动力煤期货从1500跌到800, 煤炭股连续跌停",
+            "2021.12 煤炭见顶: 发改委限价, 煤炭板块连续3个跌停",
+        ],
+    },
+    "电力": {
+        "definition": "电力板块属于红利周期, 与煤炭高度相关 (煤电联动)。是通缩环境下的防守配置。",
+        "logic": """
+🔴 红盘: 红利防御确认, 煤电联动走强
+🟢 绿盘: 跟随周期调整, 注意是否缩量
+""",
+        "cases": [
+            "2024.10 电力创新高: 长江电力从27涨到35, 通缩环境下逆势",
+        ],
+    },
+    "医疗": {
+        "definition": "医疗 (医药/医疗服务) 在熊市中通常最抗跌 (人口老龄化逻辑), 在牛市中弹性最差。",
+        "logic": """
+🟢 浅绿 (pct > -1%): 最抗跌, 防守板块确认
+🔴 红盘: 市场情绪改善, 医药开始反弹
+⚠️ 判断意义: 医疗涨意味着市场从防守转向进攻
+""",
+        "cases": [
+            "2022 全年: 医药指数跌幅只有大盘的1/3, 最抗跌的板块",
+            "2024.09 医药反弹: 政策救市后医药从底部反弹25%",
+        ],
+    },
+}
+
+# —— 观察盘口知识 ——
+ORDERBOOK_KNOWLEDGE = {
+    "definition": "观察盘口 (OrderBook) 是游资看盘的核心入口。盘口数据包含买卖五档/十档挂单、封单量、撤单速度等, 直接反映多空双方的即时意图。",
+    "logic": """
+🔴 封单大 + 不卖单 = 涨停坚决, 次日高开概率大
+🟢 封单小 + 卖单持续砸 = 涨停不坚决, 炸板风险高
+🟡 买一到买五挂单厚 + 卖一到卖五薄 = 多头防守强, 回调有限
+⚠️ 关键信号:
+  - 封单突然大幅减少 = 主力撤单诱多, 要炸板
+  - 卖单连续出现大单砸盘 = 机构出货
+  - 涨停反复开板回封 = 分歧大, 次日溢价低
+""",
+    "cases": [
+        "2024.09.24 救市涨停潮: 券商股封单普遍 > 100万手, 次日集体高开5%+",
+        "2024.04 CPO炸板: 中际旭创涨停后封单从30万手骤减到2万手, 随后炸板大跌8%",
+        "2023.11 AI涨停: 鸿博股份连续7个一字涨停, 封单始终稳定, 游资接力明显",
+    ],
+}
+
+# —— 量能分析知识 ——
+VOLUME_KNOWLEDGE = {
+    "definition": "量能 (成交量/成交额) 是周期论的核心指标。量能反映市场的'预期强度': 当价格领先、人们从低预期转向高预期时, 会放量; 当高预期落空时, 会缩量。",
+    "logic": """
+🔴 放量上涨 = 量价齐升 → 预期强化, 行情可延续
+🟡 缩量上涨 = 高预期弱现实 → 明日看低, 追量结束
+🟢 放量下跌 = 恐慌出清 → 可能见底 (下跌初期放量是恐慌盘)
+🔵 缩量下跌 = 跌势未完 → 还得跌, 恐慌盘未出清
+
+⚠️ 关键: 量能必须结合价格位置判断
+  - 高位放量下跌 = 见顶
+  - 低位放量下跌 = 恐慌出清, 可能见底
+""",
+    "cases": [
+        "2015.06 股灾: 见顶日放量下跌2万亿, 随后连续3天缩量下跌 = 跌势未完",
+        "2019.01 底部: 连续3天放量上涨, 恐慌盘出清后量能扩张 = 行情启动",
+        "2024.04 CPO崩盘: 放量连续跌停, 机构出货确认 = 见顶",
+    ],
+}
+
+# —— 股指期货知识 ——
+FUTURES_KNOWLEDGE = {
+    "definition": "股指期货 (IH/IF/IC/IM) 是市场情绪的前瞻指标。期货合约价格与现货指数之间的差 (基差/贴水) 反映市场对未来方向的预期。",
+    "logic": """
+🔴 升水 (期货 > 现货): 市场看多, 愿意为未来更高的价格支付溢价
+🟢 贴水 (期货 < 现货): 市场看空, 愿意以折价卖出对冲
+⚠️ 贴水 > 1% 是异常信号:
+   - 期货贴水突变 > 1%: 资金恐慌做空, 大盘可能跳水
+   - 持续贴水 > 1%: 空头主导, 多头反攻失败
+
+IH = 上证50 (大盘蓝筹)
+IF = 沪深300 (中盘)
+IC = 中证500 (小盘)
+IM = 中证1000 (微盘, 波动最大, 游资最爱)
+""",
+    "cases": [
+        "2022.10 期货贴水: IM连续3天贴水>2%, 随后大盘反弹20%",
+        "2024.04 期货升水: AI行情中IC升水1%, 多头情绪极强, 随后行情延续",
+    ],
+}
+
+# —— 周期阶段知识 ——
+CYCLE_KNOWLEDGE = {
+    "definition": "周期论将市场分为P1-P5五个阶段, 每个阶段对应不同的操作策略。核心是理解'预期与现实的关系'。",
+    "logic": """
+P1 启动 (冰点): 涨停家数<10, 涨跌比<40%, 市场绝望
+   → 策略: 低仓位试探性买入 (α 15%)
+P2 发酵 (启动→高潮): 涨停增加, 涨跌比改善, 龙头出现
+   → 策略: 加仓进攻 (α 30-40%)
+P3 高潮 (涨停≥80, 涨跌比≥70%): 情绪极端亢奋
+   → 策略: 减仓止盈, 警惕见顶
+P4 退潮: 涨跌比<45%, 杀跌家数增加
+   → 策略: 防守为主, α 0-10%
+P5 冰点/震荡: 涨跌比<40%, 缩量调整
+   → 策略: 空仓观望, 等下一个启动点
+""",
+    "cases": [
+        "2024.09 P1→P2: 9.24政策救市, 当天从冰点直接跳涨到高潮, 随后一周涨15%",
+        "2024.04 P3→P4: CPO见顶后连续退潮, 从高潮跌到冰点用了3周",
+    ],
+}
+
+# —— 状态三灯知识 ——
+STATUS_KNOWLEDGE = {
+    "definition": "状态三灯是周期论的操作指引, 红/黄/绿分别对应不同的仓位策略。",
+    "logic": """
+🔴 红灯 (Red): 禁止开新仓
+   - 触发条件: 上涨家数 < 1600 (约1/3)
+   - 含义: 市场普遍下跌, 保护本金第一
+🟡 黄灯 (Yellow): 可以开新仓, 但控制仓位
+   - 触发条件: 上涨家数 1600-3500
+   - 含义: 震荡市, 轻仓试探
+🟢 绿灯 (Green): 可以加仓进攻
+   - 触发条件: 上涨家数 > 3500 (约2/3)
+   - 含义: 上涨家数占优, 趋势确认
+⚠️ 实战: 红灯期间即使有好的个股也不要重仓
+""",
+    "cases": [
+        "2024.10 红灯持续: 10.15大跌日上涨家数只有430, 触发红灯, 当天禁止开新仓",
+        "2024.09 绿灯确认: 9.24后连续3天上涨家数>4000, 绿灯开启, 可以加仓",
+    ],
+}
+
 # —— 种子数据 (akshare/tushare 都挂时用, 保证界面秒出不空) ——
 SEED_BLOCK_META = {
     "券商":     {"pct": 0.32, "reason": "今日红盘! 后置情绪板块, 主流走完最后轮动"},
@@ -333,12 +554,13 @@ def show_speculator_watch(root=None, app=None):
 
 
 def _build_block_grid(parent, win, col=0):
-    frm = tk.LabelFrame(parent, text="① 板块九宫格 (点击展开/长按详情/⚠️异动>3%)",
-                        bg="#1E1E1E", fg="#FFA726",
+    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FFA726",
                         font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     parent.grid_rowconfigure(0, weight=1)
+    _add_title_row(frm, "① 板块九宫格 (点击展开/长按详情/⚠️异动>3%)",
+                   "#FFA726", BLOCK_GRID_KNOWLEDGE)
 
     # 9 格 Canvas
     canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=320)
@@ -465,13 +687,26 @@ def _draw_block_grid(win):
                           text=f"{sign}{pct:.2f}%", fill=fg,
                           font=("", 12, "bold"), tags=f"cell_{idx}")
 
+        # ❓ 板块分析按钮 (左上角, 蓝色下划线)
+        c.create_text(x1 + 14, y1 + 12, text="❓", fill="#90CAF9",
+                      font=("", 11, "bold, underline"), tags=(f"cell_{idx}", f"q_{idx}"))
+        # 隐藏矩形扩大点击热区
+        c.create_rectangle(x1 + 4, y1 + 4, x1 + 24, y1 + 24, outline="",
+                           fill="", tags=(f"cell_{idx}", f"q_{idx}"))
+
         win._block_cells.append(((x1, y1, x2, y2), idx))
 
     # 点击绑定 (每格)
     def _on_click(event):
         for (x1, y1, x2, y2), idx in win._block_cells:
             if x1 <= event.x <= x2 and y1 <= event.y <= y2:
-                _show_block_detail(win, idx)
+                # ❓ 热区 (左上角 20×20) → 弹知识弹窗
+                if x1 + 4 <= event.x <= x1 + 24 and y1 + 4 <= event.y <= y1 + 24:
+                    name = win._block_meta[idx][0]
+                    kd = BLOCK_KNOWLEDGE.get(name, {"definition": "(暂无该板块的分析知识)"})
+                    _show_knowledge_popup(win, name, kd)
+                else:
+                    _show_block_detail(win, idx)
                 return
     c.bind("<Button-1>", _on_click)
     c.bind("<Button-3>", lambda e: _show_block_detail(win, -1, full=True))  # 右键详情
@@ -533,11 +768,12 @@ def _show_block_detail(win, idx, full=False):
 # ═══════════════════════════════════════════════════════════════
 
 def _build_orderbook(parent, win, col=1):
-    frm = tk.LabelFrame(parent, text="② 观察盘口 (涨停板排队/特定数量/盘口档位)",
-                        bg="#1E1E1E", fg="#64B5F6",
+    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#64B5F6",
                         font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
+    _add_title_row(frm, "② 观察盘口 (涨停板排队/特定数量/盘口档位)",
+                   "#64B5F6", ORDERBOOK_KNOWLEDGE)
 
     # 顶部: 搜索 + 档位
     top = tk.Frame(frm, bg="#1E1E1E"); top.pack(fill=tk.X, pady=(2, 4))
@@ -635,11 +871,12 @@ def _fill_limit_up(win, df, hand_col, vol_col):
 # ═══════════════════════════════════════════════════════════════
 
 def _build_volume_panel(parent, win, col=2):
-    frm = tk.LabelFrame(parent, text="③ 量能 (大盘/沪Vs创/板块增量/贴水)",
-                        bg="#1E1E1E", fg="#81C784",
+    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#81C784",
                         font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
+    _add_title_row(frm, "③ 量能 (大盘/沪Vs创/板块增量/贴水)",
+                   "#81C784", VOLUME_KNOWLEDGE)
 
     # 大盘量能: 今日 vs 昨日 Canvas
     tk.Label(frm, text="📊 今日 vs 昨日成交额 (亿元)",
@@ -758,11 +995,12 @@ def _refresh_volume(win):
 
 
 def _build_futures_grid(parent, win, col=0):
-    frm = tk.LabelFrame(parent, text="④ 股指期货四宫格 (IH/IF/IC/IM — IM 主做高亮)",
-                        bg="#1E1E1E", fg="#FF8A65",
+    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FF8A65",
                         font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
+    _add_title_row(frm, "④ 股指期货四宫格 (IH/IF/IC/IM — IM 主做高亮)",
+                   "#FF8A65", FUTURES_KNOWLEDGE)
 
     grid = tk.Frame(frm, bg="#1E1E1E"); grid.pack(fill=tk.BOTH, expand=True)
     win._fut_cells = []
@@ -816,11 +1054,12 @@ def _refresh_futures(win):
 # ═══════════════════════════════════════════════════════════════
 
 def _build_cycle_panel(parent, win, col=1):
-    frm = tk.LabelFrame(parent, text="⑤ 周期阶段 (P1/P2/P3 — 周期论绑定)",
-                        bg="#1E1E1E", fg="#BA68C8",
+    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#BA68C8",
                         font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
+    _add_title_row(frm, "⑤ 周期阶段 (P1/P2/P3 — 周期论绑定)",
+                   "#BA68C8", CYCLE_KNOWLEDGE)
 
     # 三阶段状态灯
     row = tk.Frame(frm, bg="#1E1E1E"); row.pack(pady=8)
@@ -876,10 +1115,11 @@ def _refresh_cycle(win):
 
 def _build_status_panel(parent, win, col=2):
     """⑥ 状态判定三状态灯 — 盘中机会/状态机会/主升期"""
-    frm = tk.LabelFrame(parent, text="⑥ 状态判定 (盘中机会/状态机会/主升期)",
-                        bg="#1E1E1E", fg="#90CAF9", font=("", 10, "bold"), padx=4, pady=4)
+    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#90CAF9", font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
+    _add_title_row(frm, "⑥ 状态判定 (盘中机会/状态机会/主升期)",
+                   "#90CAF9", STATUS_KNOWLEDGE)
 
     states = [("🎯 盘中机会", "#66BB6A", "盘中异动/脉冲/量能异常"),
               ("✅ 状态机会", "#FFD54F", "形态突破/周期确认/资金持续流入"),
@@ -941,3 +1181,135 @@ def _refresh_status(win):
     win._status_msg.config(text=msg)
 
 
+
+# —— 统一知识弹窗 ——
+def _show_knowledge_popup(parent, title, data):
+    """弹出分析知识弹窗 (定义 + 判断逻辑 + 历史案例)
+    
+    Args:
+        parent: 父窗口
+        title: 弹窗标题
+        data: dict with keys 'definition', 'logic', 'cases'
+    """
+    try:
+        import webbrowser as _wb
+    except ImportError:
+        _wb = None
+
+    dlg = tk.Toplevel(parent)
+    dlg.title(f"📚 {title} — 周期论分析")
+    dlg.geometry("620x560")
+    dlg.configure(bg="#1E1E1E")
+    dlg.grab_set()
+
+    # 顶栏
+    top = tk.Frame(dlg, bg="#121212"); top.pack(fill=tk.X)
+    tk.Label(top, text=f"📚 {title}", bg="#121212", fg="#FFD54F",
+             font=("", 13, "bold")).pack(side=tk.LEFT, padx=10, pady=8)
+
+    # 内容区
+    body = tk.Frame(dlg, bg="#1E1E1E"); body.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+    # ① 定义
+    f1 = tk.LabelFrame(body, text="📌 定义", bg="#1E1E1E", fg="#64B5F6",
+                       font=("", 10, "bold"))
+    f1.pack(fill=tk.X, pady=(0, 4))
+    tk.Label(f1, text=data.get("definition", "(暂无)"), bg="#1E1E1E",
+             fg="#E0E0E0", font=("", 10), wraplength=580, justify=tk.LEFT,
+             padx=6, pady=4).pack(fill=tk.X)
+
+    # ② 判断逻辑
+    f2 = tk.LabelFrame(body, text="🔍 判断逻辑", bg="#1E1E1E", fg="#81C784",
+                       font=("", 10, "bold"))
+    f2.pack(fill=tk.X, pady=4)
+    logic_text = data.get("logic", "").strip() if isinstance(data.get("logic"), str) else ""
+    tk.Label(f2, text=logic_text, bg="#1E1E1E", fg="#FFE0B2", font=("", 10),
+             wraplength=580, justify=tk.LEFT, padx=6, pady=4).pack(fill=tk.X)
+
+    # ③ 历史案例
+    f3 = tk.LabelFrame(body, text="📖 历史案例", bg="#1E1E1E", fg="#BA68C8",
+                       font=("", 10, "bold"))
+    f3.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+    cases = data.get("cases", [])
+    case_text = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(cases)) if cases else "(暂无)"
+    tk.Label(f3, text=case_text, bg="#1E1E1E", fg="#E0E0E0", font=("", 10),
+             wraplength=580, justify=tk.LEFT, padx=6, pady=4).pack(fill=tk.BOTH, expand=True)
+
+    # 底栏关闭
+    tk.Button(dlg, text="关闭", width=8, command=dlg.destroy,
+              bg="#37474F", fg="#ECEFF1").pack(pady=6)
+
+
+# —— 辅助: 创建带❓的 LabelFrame 标题 ——
+def _create_labelframe_with_q(parent, title, knowledge_key, knowledge_dict,
+                              row=0, col=0, sticky="nsew"):
+    """创建一个带❓按钮的 LabelFrame 容器
+    
+    Returns:
+        (frame, label_frame) — frame 是外层容器, label_frame 是 LabelFrame
+    """
+    outer = tk.Frame(parent, bg="#121212")
+    outer.grid(row=row, column=col, sticky=sticky, padx=3, pady=3)
+    parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
+    parent.grid_rowconfigure(row, weight=1)
+
+    # 标题行 (LabelFrame 不能直接加按钮到标题, 所以自己画)
+    title_row = tk.Frame(outer, bg="#1E1E1E")
+    title_row.pack(fill=tk.X)
+    tk.Label(title_row, text=title, bg="#1E1E1E", fg="#FFD54F",
+             font=("", 10, "bold")).pack(side=tk.LEFT, padx=4, pady=(2, 0))
+
+    # ❓ 按钮
+    def _on_q(_e=None):
+        kd = knowledge_dict.get(knowledge_key) or {}
+        _show_knowledge_popup(parent, knowledge_key, kd)
+
+    q_btn = tk.Label(title_row, text="❓", bg="#1E1E1E", fg="#1565C0",
+                     font=("", 11, "bold, underline"), cursor="hand2")
+    q_btn.pack(side=tk.RIGHT, padx=6, pady=(2, 0))
+    q_btn.bind("<Button-1>", _on_q)
+    q_btn.bind("<Double-Button-1>", _on_q)
+
+    # 分隔线
+    tk.Frame(outer, bg="#37474F", height=1).pack(fill=tk.X)
+
+    return outer
+
+
+# —— 板块九宫格整体轮动知识 ——
+BLOCK_GRID_KNOWLEDGE = {
+    "definition": "板块九宫格同时监控 9 个核心板块的实时涨跌, 用于判断市场的'血包关系'和资金轮动方向。血包关系指两个板块之间的负相关: 一个涨, 另一个跌, 资金从一方流向另一方。",
+    "logic": """
+🔴 单一板块红盘 (其他绿): 板块脉冲, 可能是单日行情
+🟡 2-3 个板块红盘: 有主线行情, 关注领涨板块的持续性
+🟢 全部绿盘: 普跌, 保护本金
+⚠️ 关键血包关系:
+  - 科技 (CPO/半导体/AI) ↔ 红利 (银行/煤炭/电力) — 最经典的跷跷板
+  - 科技 ↔ 新能源 (电池) — 机构在成长板块内部轮动
+  - 券商 ↔ 大盘 — 券商是后置指标, 红盘往往是情绪高潮末端
+""",
+    "cases": [
+        "2024.10 血包: 科技持续杀跌, 银行/煤炭/电力持续创新高, 典型的成长→红利资金迁移",
+        "2024.04 机构出货: CPO先崩 → 半导体跟跌 → AI应用补跌, 机构依次从拥挤度高的板块撤退",
+        "2023.11 AI行情: CPO/半导体/AI 三个板块同时涨停, 科技主线确认, 行情延续3个月",
+    ],
+}
+
+
+def _add_title_row(frm, title, color, knowledge_data):
+    """给已去掉 text= 的 LabelFrame 在内部顶部加自定义标题行 + ❓ 按钮"""
+    top = tk.Frame(frm, bg="#1E1E1E")
+    top.pack(fill=tk.X)
+    tk.Label(top, text=title, bg="#1E1E1E", fg=color,
+             font=("", 10, "bold")).pack(side=tk.LEFT, padx=4, pady=(2, 0))
+
+    def _on_q(_e=None):
+        _show_knowledge_popup(frm.winfo_toplevel(), title, knowledge_data)
+
+    q = tk.Label(top, text="❓", bg="#1E1E1E", fg="#1565C0",
+                 font=("", 11, "bold, underline"), cursor="hand2")
+    q.pack(side=tk.RIGHT, padx=6, pady=(2, 0))
+    q.bind("<Button-1>", _on_q)
+    q.bind("<Double-Button-1>", _on_q)
+
+    tk.Frame(frm, bg="#37474F", height=1).pack(fill=tk.X)
