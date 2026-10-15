@@ -4249,6 +4249,7 @@ class CangweiMixin:
                             and ma5 > ma10 > ma20
                             and current_price > ma10
                         )
+                        print(f"[持仓监控] {stock_name} pass_filter={pass_filter} price={current_price:.2f} ma5={ma5} ma10={ma10} ma20={ma20}")
                         if not pass_filter:
                             return  # 不符合条件直接不显示,不绘制任何内容
                         # 靠近5/10/20日线检测(距离≤3%)
@@ -4303,6 +4304,7 @@ class CangweiMixin:
                         try:
                             _sig = self._compute_cross_bias_signals(kline_data)
                             chart_info['tech_sig'] = _sig
+                            print(f"[持仓监控] {stock_name} sig={_sig}")
                             _sig_lines = []
                             if _sig.get("M"): _sig_lines.append(f"MACD: {_sig['M']}叉")
                             if _sig.get("K"): _sig_lines.append(f"KDJ: {_sig['K']}叉")

@@ -4727,6 +4727,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("K线图", 6, self.show_kline_dialog),
             ("📊分析深度", 8, self._show_stock_analysis_dialog),
             ("📊比价横向", 8, self._show_stock_compare_dialog),
+            ("👁️看盘", 7, self._show_speculator_watch),
         ]:
             ttk.Button(toolbar_row2, text=txt, width=w, command=cmd).pack(side=tk.LEFT, padx=(0, tp))
         # 快速爬取/文本控制标签页控件框(共用一块区域,可以切换)
