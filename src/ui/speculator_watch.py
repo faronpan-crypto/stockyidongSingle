@@ -689,7 +689,7 @@ def _draw_block_grid(win):
 
         # ❓ 板块分析按钮 (左上角, 蓝色下划线)
         c.create_text(x1 + 14, y1 + 12, text="❓", fill="#90CAF9",
-                      font=("", 11, "bold, underline"), tags=(f"cell_{idx}", f"q_{idx}"))
+                      font=("", 11, "bold underline"), tags=(f"cell_{idx}", f"q_{idx}"))
         # 隐藏矩形扩大点击热区
         c.create_rectangle(x1 + 4, y1 + 4, x1 + 24, y1 + 24, outline="",
                            fill="", tags=(f"cell_{idx}", f"q_{idx}"))
@@ -1265,7 +1265,7 @@ def _create_labelframe_with_q(parent, title, knowledge_key, knowledge_dict,
         _show_knowledge_popup(parent, knowledge_key, kd)
 
     q_btn = tk.Label(title_row, text="❓", bg="#1E1E1E", fg="#1565C0",
-                     font=("", 11, "bold, underline"), cursor="hand2")
+                     font=("", 11, "bold underline"), cursor="hand2")
     q_btn.pack(side=tk.RIGHT, padx=6, pady=(2, 0))
     q_btn.bind("<Button-1>", _on_q)
     q_btn.bind("<Double-Button-1>", _on_q)
@@ -1307,7 +1307,7 @@ def _add_title_row(frm, title, color, knowledge_data):
         _show_knowledge_popup(frm.winfo_toplevel(), title, knowledge_data)
 
     q = tk.Label(top, text="❓", bg="#1E1E1E", fg="#1565C0",
-                 font=("", 11, "bold, underline"), cursor="hand2")
+                 font=("", 11, "bold underline"), cursor="hand2")
     q.pack(side=tk.RIGHT, padx=6, pady=(2, 0))
     q.bind("<Button-1>", _on_q)
     q.bind("<Double-Button-1>", _on_q)
