@@ -14139,7 +14139,7 @@ class DapanMixin:
         print("[👁️看盘] 按钮被点击!", flush=True)
         try:
             from ui.speculator_watch import show_speculator_watch as _sw
-            _sw(getattr(self, 'root', None) or getattr(self, '_root', None))
+            _sw(getattr(self, 'root', None) or getattr(self, '_root', None), app=self)
         except Exception as e:
             print(f"[👁️看盘❌] {e}", flush=True); _tb.print_exc()
 

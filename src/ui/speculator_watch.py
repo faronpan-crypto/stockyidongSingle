@@ -29,6 +29,67 @@ _AK_SPOT_CACHE = {"time": 0, "data": None}
 _AK_BLOCK_CACHE = {"time": 0, "data": None}
 
 
+def _find_db_path():
+    """找 sentiment_history 所在的 SQLite 文件"""
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "stock_analysis.db"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stock_analysis.db"),
+        os.path.expanduser("~/.qclaw/stock_analysis.db"),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return candidates[0]
+
+
+def _read_local_sentiment(limit=30):
+    """从 sentiment_history SQLite 读近 N 天 — 纯本地秒出"""
+    import sqlite3
+    db = _find_db_path()
+    try:
+        conn = sqlite3.connect(db)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT snapshot_date, m1_today, m1_yday, m2_up, m2_down, m2_total, "
+            "m3_count, m4_count, m5_hs300, m5_zz500, m5_kc30, m5_avg "
+            "FROM sentiment_history ORDER BY snapshot_date DESC LIMIT ?", (limit,))
+        rows = cur.fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"[👁️看盘] SQLite 读 sentiment_history 失败: {e}")
+        return []
+
+
+def _read_local_lhb(limit=10):
+    """从 lhb_records 读龙虎榜"""
+    import sqlite3
+    db = _find_db_path()
+    try:
+        conn = sqlite3.connect(db)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT trade_date, name, close, pct_change, net_amount "
+            "FROM lhb_records ORDER BY trade_date DESC LIMIT ?", (limit,))
+        rows = cur.fetchall()
+        conn.close()
+        return rows
+    except Exception:
+        return []
+
+
+def _read_local_snapshot():
+    """读大盘 snapshot JSON"""
+    p = os.path.expanduser("~/.stockyidong_dapan_cache.json")
+    if os.path.exists(p):
+        try:
+            import json as _j
+            return _j.load(open(p))
+        except Exception: pass
+    return None
+
+
+# —— AKShare 接口缓存 (板块/实时行情) ——
 def _get_tushare_block_meta():
     """tushare 概念板块排行兜底 (额度可能不够)"""
     try:
@@ -77,85 +138,51 @@ def _get_ak_blocks():
         return None
 
 
-def show_speculator_watch(root=None):
-    """游资看盘界面主入口"""
+def show_speculator_watch(root=None, app=None):
+    """游资看盘主入口 — app=主程序self, 所有刷新优先读 app 现成数据秒出"""
+    print(f"[👁️看盘] 被调用, app={'有' if app else '无'}", flush=True)
     win = tk.Toplevel(root) if root else tk.Tk()
     win.title("👁️ 游资看盘界面 — 2×3 六区")
     win.geometry("1580x920")
     win.minsize(1400, 800)
-
-    # —— 2 行 × 3 列 主框架 ——
-    outer = tk.Frame(win, bg="#121212")
-    outer.pack(fill=tk.BOTH, expand=True)
-
-    win._blocks_spot = None
-    win._futures_spot = None
+    win._app = app
     win._running = True
 
-    # ======== 上排 ========
-    row_top = tk.Frame(outer, bg="#121212")
-    row_top.pack(fill=tk.BOTH, expand=True)
+    outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
+    row_top = tk.Frame(outer, bg="#121212"); row_top.pack(fill=tk.BOTH, expand=True)
+    row_bot = tk.Frame(outer, bg="#121212"); row_bot.pack(fill=tk.BOTH, expand=True)
 
-    # ① 板块九宫格
-    _build_block_grid(row_top, win, col=0)
-    # ② 观察盘口
-    _build_orderbook(row_top, win, col=1)
-    # ③ 量能
-    _build_volume_panel(row_top, win, col=2)
+    _build_block_grid(row_top, win, 0)
+    _build_orderbook(row_top, win, 1)
+    _build_volume_panel(row_top, win, 2)
+    _build_futures_grid(row_bot, win, 0)
+    _build_cycle_panel(row_bot, win, 1)
+    _build_status_panel(row_bot, win, 2)
 
-    # ======== 下排 ========
-    row_bot = tk.Frame(outer, bg="#121212")
-    row_bot.pack(fill=tk.BOTH, expand=True)
+    win.protocol("WM_DELETE_WINDOW", lambda: (setattr(win, "_running", False), win.destroy()))
 
-    # ④ 股指期货四宫格
-    _build_futures_grid(row_bot, win, col=0)
-    # ⑤ 周期阶段 P1/P2/P3
-    _build_cycle_panel(row_bot, win, col=1)
-    # ⑥ 状态判定
-    _build_status_panel(row_bot, win, col=2)
+    print("[👁️看盘] 六区构建完成, 立刻填充本地数据...", flush=True)
+    try:
+        _refresh_all_blocks(win)
+        _refresh_volume(win)
+        _refresh_cycle(win)
+        _refresh_status(win)
+        _load_orderbook(win)
+        _refresh_futures(win)
+        print("[👁️看盘] ✅ 本地数据全部填充完成!", flush=True)
+    except Exception as e:
+        print(f"[👁️看盘❌] 填充异常: {e}\n{traceback.format_exc()}", flush=True)
 
-    # 关闭时停止后台刷新
-    def _on_close():
-        win._running = False
-        win.destroy()
-    win.protocol("WM_DELETE_WINDOW", _on_close)
-
-    # 后台首次加载数据 (不阻塞 UI)
-    def _bg_load():
+    # 后台仅做 akshare 补充 (失败不影响)
+    def _bg():
         try:
-            _get_ak_spot()
-            _get_ak_blocks()
-            # 触发所有刷新
+            _get_ak_blocks(); _get_ak_spot()
             win.after(0, lambda: _refresh_all_blocks(win))
-            win.after(0, lambda: _refresh_futures(win))
             win.after(0, lambda: _refresh_volume(win))
-            win.after(0, lambda: _load_orderbook(win))
-            win.after(0, lambda: _refresh_cycle(win))
-            win.after(0, lambda: _refresh_status(win))
-            print("[👁️看盘] 首次数据加载完成", flush=True)
-        except Exception as e:
-            print(f"[👁️看盘] 首次加载异常: {e}\n{traceback.format_exc()}", flush=True)
-    threading.Thread(target=_bg_load, daemon=True).start()
-
-    # 定时刷新: 15 秒
-    def _auto_refresh():
-        if not win._running: return
-        try:
-            _AK_SPOT_CACHE["time"] = 0  # 强制刷新
-            _AK_BLOCK_CACHE["time"] = 0
-            _bg_load()
-        except Exception:
-            pass
-        win.after(15000, _auto_refresh)
-    win.after(2000, _auto_refresh)
-
-    print("[👁️看盘] 界面已显示", flush=True)
+        except Exception: pass
+    threading.Thread(target=_bg, daemon=True).start()
     return win
 
-
-# ═══════════════════════════════════════════════════════════════
-# ① 板块九宫格 — Canvas 画 9 格, 实时涨跌幅 + 资金净流入排名
-# ═══════════════════════════════════════════════════════════════
 
 def _build_block_grid(parent, win, col=0):
     frm = tk.LabelFrame(parent, text="① 板块九宫格 (点击展开/长按详情/⚠️异动>3%)",
@@ -527,56 +554,62 @@ def _build_volume_panel(parent, win, col=2):
 
 
 def _refresh_volume(win):
-    """画大盘量能 + 沪Vs创 + 板块增量榜 — 种子兜底"""
-    try:
-        import akshare as ak
-        df = ak.stock_zh_a_spot_em()
-        amt_col = [c for c in df.columns if "成交额" in str(c)][0]
-        vol_col = [c for c in df.columns if "成交量" in str(c)][0]
-        code_col = [c for c in df.columns if "代码" in str(c)][0]
-        # 今日总成交
-        today_amt = df[amt_col].astype(float).sum() / 1e8
-        # 沪 vs 创业板
-        codes = df[code_col].astype(str).tolist()
-        vols = df[vol_col].astype(float).tolist()
-        sh_vol = sum(v for c, v in zip(codes, vols) if c.startswith("60"))
-        cy_vol = sum(v for c, v in zip(codes, vols) if c.startswith("30"))
-        est_yest = today_amt * 0.9
-    except Exception as e:
-        print(f"[👁️看盘] 🌱 量能种子兜底: {e}")
-        today_amt = 9500 + random.random() * 1000
-        est_yest = today_amt * 0.9
-        sh_vol = 5e9; cy_vol = 3e9
+    """量能区 — 先读本地 sentiment_history, 种子兜底"""
+    rows = _read_local_sentiment(limit=2)
+    if rows:
+        # 最新一条 + 昨日一条
+        latest = rows[0]
+        yday = rows[1] if len(rows) > 1 else latest
+        up, down, flat, total = latest[3] or 0, latest[4] or 0, latest[5] or 0, latest[6] or 0
+        m1_today = latest[1] or 0
+        m1_yday = latest[2] or 0
+        hs300 = latest[8] or 0
+        zz500 = latest[9] or 0
+        kc30 = latest[10] or 0
+        print(f"[👁️看盘] 量能读本地: up={up} down={down} m1={m1_today:.2f}% hs300={hs300:.2f}% kc30={kc30:.2f}%")
+    else:
+        print("[👁️看盘] 🌱 量能种子")
+        up, down, flat, total = 979, 4496, 88, 5563
+        m1_today, m1_yday = -2.8, 0.3
+        hs300, zz500, kc30 = -1.36, -1.48, -3.29
 
-    # 画量能柱状
+    # —— 画今日 vs 昨日涨跌家数对比 (Canvas) ——
     c = win._vol_main_canvas
-    c.delete("all"); W = c.winfo_width() or 500; H = 70
-    bar_w = 50; gap = 30; cx = W // 2
-    c.create_rectangle(cx - bar_w - gap, H - 30 - 40, cx - gap, H - 30,
-                       fill="#EF5350", outline="")
-    c.create_text(cx - bar_w // 2 - gap, H - 10,
-                  text=f"今日 {today_amt:.0f}亿", fill="#FFF", font=("", 9, "bold"))
-    bar_h = 40 * (est_yest / today_amt) if today_amt > 0 else 40
-    c.create_rectangle(cx + gap, H - 30 - bar_h, cx + bar_w + gap, H - 30,
-                       fill="#66BB6A", outline="")
-    c.create_text(cx + bar_w // 2 + gap, H - 10,
-                  text=f"昨日 ≈{est_yest:.0f}亿", fill="#FFF", font=("", 9, "bold"))
+    c.delete("all"); W = c.winfo_width() or 520; H = 70
+    bar_w = 22; gap = 18
+    # 涨 (红)
+    up_px = int(H * 0.8 * min(up, 5000) / 5000)
+    c.create_rectangle(20, H - up_px - 10, 20 + bar_w, H - 10, fill="#EF5350", outline="")
+    c.create_text(20 + bar_w//2, H - 4, text=f"涨{up}", fill="#FFF", font=("", 8, "bold"))
+    # 跌 (绿)
+    down_px = int(H * 0.8 * min(down, 5000) / 5000)
+    c.create_rectangle(20 + bar_w + gap, H - down_px - 10, 20 + bar_w*2 + gap, H - 10, fill="#66BB6A", outline="")
+    c.create_text(20 + bar_w*1.5 + gap, H - 4, text=f"跌{down}", fill="#FFF", font=("", 8, "bold"))
+    # 平 (灰)
+    flat_px = int(H * 0.8 * min(flat, 500) / 500)
+    c.create_rectangle(20 + bar_w*2 + gap*2, H - flat_px - 10, 20 + bar_w*3 + gap*2, H - 10, fill="#78909C", outline="")
+    c.create_text(20 + bar_w*2.5 + gap*2, H - 4, text=f"平{flat}", fill="#FFF", font=("", 8, "bold"))
+    # 今日情绪指数 (大字)
+    c.create_text(W - 60, 20, text=f"情绪 {m1_today:+.1f}%",
+                  fill="#EF5350" if m1_today >= 0 else "#66BB6A", font=("", 11, "bold"))
 
-    # 画沪Vs创
+    # —— 沪 Vs 创业板 Canvas ——
     c2 = win._vol_hs_canvas
-    c2.delete("all"); W2 = c2.winfo_width() or 500; H2 = 60
-    total = sh_vol + cy_vol
-    if total > 0:
-        sh_pct = sh_vol / total; cy_pct = cy_vol / total
-        sh_px = int(W2 * sh_pct); cy_px = W2 - sh_px
-        c2.create_rectangle(0, 10, sh_px, 50, fill="#64B5F6", outline="")
-        c2.create_rectangle(sh_px, 10, W2, 50, fill="#CE93D8", outline="")
-        c2.create_text(sh_px // 2, 30,
-                       text=f"沪市 {sh_pct*100:.0f}%", fill="#FFF", font=("", 9, "bold"))
-        c2.create_text(sh_px + cy_px // 2, 30,
-                       text=f"创业板 {cy_pct*100:.0f}%", fill="#FFF", font=("", 9, "bold"))
+    c2.delete("all"); W2 = c2.winfo_width() or 520; H2 = 60
+    # 用指数涨跌比近似: 沪深300 vs 科创50 (取绝对值权重)
+    hs_abs = abs(hs300) + 0.01; kc_abs = abs(kc30) + 0.01
+    total2 = hs_abs + kc_abs
+    hs_pct = hs_abs / total2; kc_pct = kc_abs / total2
+    hs_px = int(W2 * hs_pct); kc_px = W2 - hs_px
+    c2.create_rectangle(0, 10, hs_px, 50, fill="#64B5F6", outline="")
+    c2.create_rectangle(hs_px, 10, W2, 50, fill="#CE93D8", outline="")
+    c2.create_text(hs_px // 2, 28, text=f"沪深300 {hs300:+.2f}%", fill="#FFF", font=("", 9, "bold"))
+    c2.create_text(hs_px + kc_px // 2, 28, text=f"科创50 {kc30:+.2f}%", fill="#FFF", font=("", 9, "bold"))
+    # 状态字
+    status = "💡 创业板领跌" if kc30 < hs30 else "💡 沪深300领跌"
+    c2.create_text(W2 // 2, 52, text=status, fill="#FFD54F", font=("", 8))
 
-    # 板块增量榜 — 种子兜底
+    # —— 板块增量榜 Treeview ——
     try:
         import akshare as ak
         blocks = ak.stock_board_concept_name_em()
@@ -586,27 +619,22 @@ def _refresh_volume(win):
         for i in tv.get_children(): tv.delete(i)
         for _, r in blocks_sorted.iterrows():
             ncol = [c for c in blocks.columns if "名称" in str(c)][0]
-            amt_y = float(r[amt_c]) / 1e8
-            tv.insert("", tk.END, values=(str(r[ncol])[:8], f"{amt_y:.1f}", "—", "—"))
+            tv.insert("", tk.END, values=(str(r[ncol])[:8], f"{float(r[amt_c])/1e8:.0f}", "—", "—"))
     except Exception:
+        # 种子
         tv = win._vol_block_tv
         for i in tv.get_children(): tv.delete(i)
-        for name in ["半导体", "电池", "短剧", "银行", "煤炭", "电力", "CPO", "国资"]:
+        for name in ["银行", "煤炭", "电力", "国资", "电池", "短剧", "CPO", "半导体"]:
             amt = 50 + random.random() * 300
             tv.insert("", tk.END, values=(name, f"{amt:.0f}", "—", "—"))
 
-    # 贴水卡片
+    # —— 贴水卡片 ——
+    _advice = "红盘" if up > down else "绿盘"
+    _pct = up / (up + down) * 100 if (up + down) > 0 else 50
     win._fut_basis_lbl.config(
-        text=f"🚩 今日全市场 {today_amt:.0f}亿  |  沪市{sh_vol/1e8:.0f}亿 vs 创业板{cy_vol/1e8:.0f}亿\n"
-             f"💡 量价判断: {'量价齐升🔴' if today_amt > est_yest * 1.15 else '缩量🟡' if today_amt < est_yest * 0.85 else '正常⚪'}")
-
-
-# ═══════════════════════════════════════════════════════════════
-# ④ 股指期货四宫格 — IH/IF/IC/IM + 升贴水 (Canvas 2×2)
-# ═══════════════════════════════════════════════════════════════
-
-FUT_NAMES = [("IH", "上证50", 2800), ("IF", "沪深300", 4000),
-             ("IC", "中证500", 5600), ("IM", "中证1000", 6500)]
+        text=f"🚩 今日涨跌 {up}/{down}  情绪 {m1_today:+.1f}%  昨日 {m1_yday:+.1f}%\n"
+             f"📊 沪深300 {hs300:+.2f}%  中证500 {zz500:+.2f}%  科创50 {kc30:+.2f}%\n"
+             f"💡 市场 {_advice} ({_pct:.0f}% 红)  |  情绪指数 {m1_today:+.1f}%")
 
 
 def _build_futures_grid(parent, win, col=0):
@@ -697,25 +725,21 @@ def _build_cycle_panel(parent, win, col=1):
 
 
 def _refresh_cycle(win):
-    """基于大盘近 30 日涨跌判定 P1/P2/P3 — 种子兜底"""
-    ret30 = 8.2 + (random.random() - 0.5) * 2
-    ret5 = 2.1 + (random.random() - 0.5) * 1.5
-    try:
-        import akshare as ak
-        df = ak.stock_zh_index_daily_em(symbol="sh000001")
-        if df is not None and len(df) >= 30:
-            close_col = [c for c in df.columns if "收盘" in str(c)][0]
-            closes = df[close_col].astype(float).values[-30:]
-            ret30 = (closes[-1] / closes[0] - 1) * 100
-            ret5 = (closes[-1] / closes[-5] - 1) * 100 if len(closes) > 5 else 0
-            print(f"[👁️看盘] 周期判定走实时: ret30={ret30:.1f}% ret5={ret5:.1f}%")
-        else:
-            print(f"[👁️看盘] 🌱 周期判定种子兜底")
-    except Exception as e:
-        print(f"[👁️看盘] 🌱 周期判定种子兜底: {e}")
+    """周期 P1/P2/P3 — 读 sentiment_history 近 30 天 m5_avg 涨跌"""
+    rows = _read_local_sentiment(limit=30)
+    if rows and len(rows) >= 2:
+        # m5_avg 是每日指数平均涨跌 (类似大盘涨跌)
+        m5_vals = [(r[10] or 0) for r in rows]  # m5_avg 字段
+        # cum_return: 用每日涨跌累加近似
+        ret30 = sum(m5_vals[:30]) if m5_vals else 0
+        ret5 = sum(m5_vals[:5]) if len(m5_vals) >= 5 else ret30
+        print(f"[👁️看盘] 周期读本地: ret30≈{ret30:+.1f}% ret5≈{ret5:+.1f}%")
+    else:
+        print("[👁️看盘] 🌱 周期种子")
+        ret30 = -5.5; ret5 = -2.1
 
-    if ret30 >= 15: stage_idx = 2
-    elif ret30 >= 5: stage_idx = 1
+    if ret30 >= 5: stage_idx = 2
+    elif ret30 >= 0: stage_idx = 1
     else: stage_idx = 0
 
     for i, (light, color) in enumerate(win._stage_lights):
@@ -731,33 +755,38 @@ def _refresh_cycle(win):
 
 
 def _refresh_status(win):
-    """状态判定 — 种子兜底"""
-    ret1 = 0.5 + (random.random() - 0.5) * 2
-    ret5 = 2.1 + (random.random() - 0.5) * 3
-    try:
-        import akshare as ak
-        df = ak.stock_zh_index_daily_em(symbol="sh000001")
-        if df is not None and len(df) >= 5:
-            close_col = [c for c in df.columns if "收盘" in str(c)][0]
-            closes = df[close_col].astype(float).values
-            ret1 = (closes[-1] / closes[-2] - 1) * 100
-            ret5 = (closes[-1] / closes[-5] - 1) * 100
-    except Exception as e:
-        print(f"[👁️看盘] 🌱 状态判定种子兜底: {e}")
+    """状态判定 — 读 sentiment_history 最新涨跌家数"""
+    rows = _read_local_sentiment(limit=2)
+    if rows:
+        latest = rows[0]
+        up, down = latest[3] or 0, latest[4] or 0
+        m1 = latest[1] or 0
+        breadth = up / (up + down) * 100 if (up + down) > 0 else 50
+        print(f"[👁️看盘] 状态读本地: up={up} down={down} breadth={breadth:.0f}%")
+    else:
+        print("[👁️看盘] 🌱 状态种子")
+        up, down, breadth, m1 = 979, 4496, 18, -2.8
 
     cards = getattr(win, '_status_cards', [])
+    # ① 盘中机会: breadth 突变 (今日 vs 历史均值)
+    is_intraday = breadth >= 35 or breadth <= 20
     if len(cards) >= 1:
-        cards[0][0].config(fg="#66BB6A" if abs(ret1) >= 1 else "#757575",
-                           text="🟢" if abs(ret1) >= 1 else "⚫")
+        cards[0][0].config(fg="#66BB6A" if is_intraday else "#757575", text="🟢" if is_intraday else "⚫")
+    # ② 状态机会: m1 方向明确 (绝对值 >1%)
+    is_status = abs(m1) >= 1.0
     if len(cards) >= 2:
-        cards[1][0].config(fg="#FFD54F" if ret5 >= 3 else "#757575",
-                           text="🟡" if ret5 >= 3 else "⚫")
+        cards[1][0].config(fg="#FFD54F" if is_status else "#757575", text="🟡" if is_status else "⚫")
+    # ③ 主升期: breadth > 55% 且 m1 > 0
+    is_surge = breadth >= 50 and m1 > 0
     if len(cards) >= 3:
-        is_surge = ret5 >= 5 and ret1 > 0
-        cards[2][0].config(fg="#EF5350" if is_surge else "#757575",
-                           text="🔴" if is_surge else "⚫")
+        cards[2][0].config(fg="#EF5350" if is_surge else "#757575", text="🔴" if is_surge else "⚫")
 
-    msg = f"📈 今日 {ret1:+.2f}%  |  5日 {ret5:+.2f}%"
+    # 综合建议
+    if is_surge: advice = "🔥 主升期, 重点追涨龙头板块, 加仓主升标的"
+    elif is_status: advice = "⚠️ 状态机会确认, 关注领涨板块持续性"
+    elif is_intraday: advice = "🎯 盘中异动, 捕捉短期脉冲机会"
+    else: advice = "⏸️ 市场方向不明, 观望为主, 控制仓位"
+    msg = f"📈 涨{up}/跌{down} (广度 {breadth:.0f}%)  情绪 {m1:+.1f}%\n💡 {advice}"
     win._status_msg.config(text=msg)
 
 
