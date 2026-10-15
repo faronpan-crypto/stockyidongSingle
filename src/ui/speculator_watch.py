@@ -517,6 +517,48 @@ def show_speculator_watch(root=None, app=None):
     win._app = app
     win._running = True
 
+    # —— 主窗口顶栏: 标题 + 字体调节 ——
+    _WATCH_FS = [11]  # 内容字号基准, 可全局调节
+    win._WATCH_FS = _WATCH_FS  # 存到 win 供各模块读
+
+    header = tk.Frame(win, bg="#121212"); header.pack(fill=tk.X)
+    tk.Label(header, text="👁️ 游资看盘界面", bg="#121212", fg="#FFD54F",
+             font=("", 16, "bold")).pack(side=tk.LEFT, padx=14, pady=10)
+    tk.Label(header, text="2×3 六区 | 所有❓按钮点知识弹窗", bg="#121212", fg="#90CAF9",
+             font=("", 11)).pack(side=tk.LEFT, pady=10)
+
+    fs_box = tk.Frame(header, bg="#121212"); fs_box.pack(side=tk.RIGHT, padx=14)
+    tk.Label(fs_box, text="🔤 字体:", bg="#121212", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT)
+    fs_lbl = tk.Label(fs_box, text=f"{_WATCH_FS[0]}pt", bg="#121212", fg="#FFD54F",
+                     font=("", 11, "bold"))
+    fs_lbl.pack(side=tk.LEFT, padx=4)
+
+    def _change_main_fs(delta):
+        _WATCH_FS[0] = max(8, min(18, _WATCH_FS[0] + delta))
+        fs_lbl.config(text=f"{_WATCH_FS[0]}pt")
+        # 递归更新所有 widget 的 font (跳过 Canvas/Menu)
+        def _walk(w):
+            try:
+                conf = w.configure()
+                if "font" in conf:
+                    cur = w.cget("font")
+                    try:
+                        sz = int(cur[1])
+                        # 保持 style, 只改 size
+                        w.config(font=(cur[0], _WATCH_FS[0], *cur[2:]) if len(cur) > 2 else (cur[0], _WATCH_FS[0]))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            for c in w.winfo_children():
+                _walk(c)
+        _walk(win)
+
+    tk.Button(fs_box, text="A-", width=3, bg="#37474F", fg="#ECEFF1",
+              font=("", 10), command=lambda: _change_main_fs(-1)).pack(side=tk.LEFT, padx=2)
+    tk.Button(fs_box, text="A+", width=3, bg="#37474F", fg="#ECEFF1",
+              font=("", 10), command=lambda: _change_main_fs(+1)).pack(side=tk.LEFT, padx=2)
+
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
     row_top = tk.Frame(outer, bg="#121212"); row_top.pack(fill=tk.BOTH, expand=True)
     row_bot = tk.Frame(outer, bg="#121212"); row_bot.pack(fill=tk.BOTH, expand=True)
@@ -555,7 +597,7 @@ def show_speculator_watch(root=None, app=None):
 
 def _build_block_grid(parent, win, col=0):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FFA726",
-                        font=("", 10, "bold"), padx=4, pady=4)
+                        font=("", 12, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     parent.grid_rowconfigure(0, weight=1)
@@ -574,7 +616,7 @@ def _build_block_grid(parent, win, col=0):
     # 下方矛盾描述
     win._block_conflict_lbl = tk.Label(frm, text="正在加载板块数据...",
                                        bg="#1E1E1E", fg="#E0E0E0",
-                                       font=("", 9), wraplength=500, justify=tk.LEFT)
+                                       font=("", 11), wraplength=500, justify=tk.LEFT)
     win._block_conflict_lbl.pack(fill=tk.X, pady=(2, 0))
 
     # 脉冲定时器
@@ -671,7 +713,7 @@ def _draw_block_grid(win):
             # 脉冲异常标 ⚠️
             if abs(pct) >= 3.0:
                 c.create_text(x2 - 8, y1 + 8, text="⚠️", fill="#FFD54F",
-                              font=("", 10, "bold"), tags=f"cell_{idx}")
+                              font=("", 12, "bold"), tags=f"cell_{idx}")
 
         if pct is None:
             c.create_rectangle(x1, y1, x2, y2, fill=bg, outline="#555",
@@ -679,17 +721,17 @@ def _draw_block_grid(win):
 
         # 板块名 (大字)
         c.create_text(x1 + cw // 2, y1 + ch // 2 - 12, text=name,
-                      fill="#FFFFFF", font=("", 11, "bold"), tags=f"cell_{idx}")
+                      fill="#FFFFFF", font=("", 13, "bold"), tags=f"cell_{idx}")
         # 涨跌幅
         if pct is not None:
             sign = "+" if pct >= 0 else ""
             c.create_text(x1 + cw // 2, y1 + ch // 2 + 10,
                           text=f"{sign}{pct:.2f}%", fill=fg,
-                          font=("", 12, "bold"), tags=f"cell_{idx}")
+                          font=("", 14, "bold"), tags=f"cell_{idx}")
 
         # ❓ 板块分析按钮 (左上角, 蓝色下划线)
         c.create_text(x1 + 14, y1 + 12, text="❓", fill="#90CAF9",
-                      font=("", 11, "bold underline"), tags=(f"cell_{idx}", f"q_{idx}"))
+                      font=("", 13, "bold underline"), tags=(f"cell_{idx}", f"q_{idx}"))
         # 隐藏矩形扩大点击热区
         c.create_rectangle(x1 + 4, y1 + 4, x1 + 24, y1 + 24, outline="",
                            fill="", tags=(f"cell_{idx}", f"q_{idx}"))
@@ -737,7 +779,7 @@ def _show_block_detail(win, idx, full=False):
 
     # 成分股 Top 20
     tk.Label(dlg, text=f"📌 板块: {name}  点击查看成分股",
-             font=("", 12, "bold")).pack(pady=6)
+             font=("", 14, "bold")).pack(pady=6)
     cols = ("代码", "名称", "最新价", "涨跌幅%", "成交额(亿)")
     tv = ttk.Treeview(dlg, columns=cols, show="headings", height=18)
     for c in cols:
@@ -769,7 +811,7 @@ def _show_block_detail(win, idx, full=False):
 
 def _build_orderbook(parent, win, col=1):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#64B5F6",
-                        font=("", 10, "bold"), padx=4, pady=4)
+                        font=("", 12, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "② 观察盘口 (涨停板排队/特定数量/盘口档位)",
@@ -777,7 +819,7 @@ def _build_orderbook(parent, win, col=1):
 
     # 顶部: 搜索 + 档位
     top = tk.Frame(frm, bg="#1E1E1E"); top.pack(fill=tk.X, pady=(2, 4))
-    tk.Label(top, text="🔍 搜索:", bg="#1E1E1E", fg="#E0E0E0", font=("", 9)).pack(side=tk.LEFT)
+    tk.Label(top, text="🔍 搜索:", bg="#1E1E1E", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT)
     win._ob_entry = tk.Entry(top, width=12); win._ob_entry.pack(side=tk.LEFT, padx=2)
     tk.Button(top, text="查", command=lambda: _load_orderbook(win)).pack(side=tk.LEFT)
 
@@ -787,7 +829,7 @@ def _build_orderbook(parent, win, col=1):
 
     # 涨停板排队单
     tk.Label(frm, text="📌 涨停板排队单 (封单变化)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(4, 2))
+             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W, pady=(4, 2))
     tv1 = ttk.Treeview(frm, columns=("代码", "名称", "封单(万手)", "换手率%"),
                        show="headings", height=5)
     for c in ("代码", "名称", "封单(万手)", "换手率%"):
@@ -797,7 +839,7 @@ def _build_orderbook(parent, win, col=1):
 
     # 盘口
     tk.Label(frm, text="📌 买卖盘口 (实时)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(6, 2))
+             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W, pady=(6, 2))
     order_frame = tk.Frame(frm, bg="#1E1E1E"); order_frame.pack(fill=tk.X, padx=2)
     # 卖盘 (右对齐)
     ask_frame = tk.Frame(order_frame, bg="#1E1E1E")
@@ -805,7 +847,7 @@ def _build_orderbook(parent, win, col=1):
     win._ob_ask_labels = []
     for i in range(5):
         lbl = tk.Label(ask_frame, text="卖5 -", fg="#EF5350", bg="#1E1E1E",
-                       font=("Menlo", 9), anchor="e", width=18)
+                       font=("Menlo", 11), anchor="e", width=18)
         lbl.pack(anchor="e")
         win._ob_ask_labels.append(lbl)
     # 买盘
@@ -814,15 +856,15 @@ def _build_orderbook(parent, win, col=1):
     win._ob_bid_labels = []
     for i in range(5):
         lbl = tk.Label(bid_frame, text="买5 -", fg="#66BB6A", bg="#1E1E1E",
-                       font=("Menlo", 9), anchor="w", width=18)
+                       font=("Menlo", 11), anchor="w", width=18)
         lbl.pack(anchor="w")
         win._ob_bid_labels.append(lbl)
 
     # 特定数量识别
     tk.Label(frm, text="📌 特定数量规律 (50/500/5000手)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(6, 2))
+             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W, pady=(6, 2))
     win._ob_pattern_text = tk.Label(frm, text="(等加载...)", bg="#1E1E1E",
-                                    fg="#CE93D8", font=("", 9), wraplength=350, justify=tk.LEFT)
+                                    fg="#CE93D8", font=("", 11), wraplength=350, justify=tk.LEFT)
     win._ob_pattern_text.pack(fill=tk.X, padx=2)
 
 
@@ -872,7 +914,7 @@ def _fill_limit_up(win, df, hand_col, vol_col):
 
 def _build_volume_panel(parent, win, col=2):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#81C784",
-                        font=("", 10, "bold"), padx=4, pady=4)
+                        font=("", 12, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "③ 量能 (大盘/沪Vs创/板块增量/贴水)",
@@ -880,21 +922,21 @@ def _build_volume_panel(parent, win, col=2):
 
     # 大盘量能: 今日 vs 昨日 Canvas
     tk.Label(frm, text="📊 今日 vs 昨日成交额 (亿元)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W)
+             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W)
     canvas1 = tk.Canvas(frm, bg="#1E1E1E", height=80, highlightthickness=0)
     canvas1.pack(fill=tk.X, pady=(0, 2))
     win._vol_main_canvas = canvas1
 
     # 沪 Vs 创
     tk.Label(frm, text="📊 沪市 Vs 创业板 (成交量比)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W)
+             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W)
     canvas2 = tk.Canvas(frm, bg="#1E1E1E", height=70, highlightthickness=0)
     canvas2.pack(fill=tk.X, pady=(0, 2))
     win._vol_hs_canvas = canvas2
 
     # 板块量能增量榜
     tk.Label(frm, text="📊 板块增量TOP (今日 > 昨日)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W)
+             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W)
     tv = ttk.Treeview(frm, columns=("板块", "今日亿", "昨日亿", "增量%"),
                       show="headings", height=6)
     for c in ("板块", "今日亿", "昨日亿", "增量%"):
@@ -904,9 +946,9 @@ def _build_volume_panel(parent, win, col=2):
 
     # 贴水卡片
     tk.Label(frm, text="📊 股指期货贴水 (实时)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(6, 2))
+             bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(anchor=tk.W, pady=(6, 2))
     win._fut_basis_lbl = tk.Label(frm, text="加载中...", bg="#1E1E1E",
-                                  fg="#E0E0E0", font=("Menlo", 9), justify=tk.LEFT)
+                                  fg="#E0E0E0", font=("Menlo", 11), justify=tk.LEFT)
     win._fut_basis_lbl.pack(fill=tk.X, padx=2)
 
 
@@ -937,18 +979,18 @@ def _refresh_volume(win):
     # 涨 (红)
     up_px = int(H * 0.8 * min(up, 5000) / 5000)
     c.create_rectangle(20, H - up_px - 10, 20 + bar_w, H - 10, fill="#EF5350", outline="")
-    c.create_text(20 + bar_w//2, H - 4, text=f"涨{up}", fill="#FFF", font=("", 8, "bold"))
+    c.create_text(20 + bar_w//2, H - 4, text=f"涨{up}", fill="#FFF", font=("", 10, "bold"))
     # 跌 (绿)
     down_px = int(H * 0.8 * min(down, 5000) / 5000)
     c.create_rectangle(20 + bar_w + gap, H - down_px - 10, 20 + bar_w*2 + gap, H - 10, fill="#66BB6A", outline="")
-    c.create_text(20 + bar_w*1.5 + gap, H - 4, text=f"跌{down}", fill="#FFF", font=("", 8, "bold"))
+    c.create_text(20 + bar_w*1.5 + gap, H - 4, text=f"跌{down}", fill="#FFF", font=("", 10, "bold"))
     # 平 (灰)
     flat_px = int(H * 0.8 * min(flat, 500) / 500)
     c.create_rectangle(20 + bar_w*2 + gap*2, H - flat_px - 10, 20 + bar_w*3 + gap*2, H - 10, fill="#78909C", outline="")
-    c.create_text(20 + bar_w*2.5 + gap*2, H - 4, text=f"平{flat}", fill="#FFF", font=("", 8, "bold"))
+    c.create_text(20 + bar_w*2.5 + gap*2, H - 4, text=f"平{flat}", fill="#FFF", font=("", 10, "bold"))
     # 今日情绪指数 (大字)
     c.create_text(W - 60, 20, text=f"情绪 {m1_today:+.1f}%",
-                  fill="#EF5350" if m1_today >= 0 else "#66BB6A", font=("", 11, "bold"))
+                  fill="#EF5350" if m1_today >= 0 else "#66BB6A", font=("", 13, "bold"))
 
     # —— 沪 Vs 创业板 Canvas ——
     c2 = win._vol_hs_canvas
@@ -960,11 +1002,11 @@ def _refresh_volume(win):
     hs_px = int(W2 * hs_pct); kc_px = W2 - hs_px
     c2.create_rectangle(0, 10, hs_px, 50, fill="#64B5F6", outline="")
     c2.create_rectangle(hs_px, 10, W2, 50, fill="#CE93D8", outline="")
-    c2.create_text(hs_px // 2, 28, text=f"沪深300 {hs300:+.2f}%", fill="#FFF", font=("", 9, "bold"))
-    c2.create_text(hs_px + kc_px // 2, 28, text=f"科创50 {kc30:+.2f}%", fill="#FFF", font=("", 9, "bold"))
+    c2.create_text(hs_px // 2, 28, text=f"沪深300 {hs300:+.2f}%", fill="#FFF", font=("", 11, "bold"))
+    c2.create_text(hs_px + kc_px // 2, 28, text=f"科创50 {kc30:+.2f}%", fill="#FFF", font=("", 11, "bold"))
     # 状态字
     status = "💡 创业板领跌" if kc30 < hs300 else "💡 沪深300领跌"
-    c2.create_text(W2 // 2, 52, text=status, fill="#FFD54F", font=("", 8))
+    c2.create_text(W2 // 2, 52, text=status, fill="#FFD54F", font=("", 10))
 
     # —— 板块增量榜 Treeview ——
     try:
@@ -996,7 +1038,7 @@ def _refresh_volume(win):
 
 def _build_futures_grid(parent, win, col=0):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FF8A65",
-                        font=("", 10, "bold"), padx=4, pady=4)
+                        font=("", 12, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "④ 股指期货四宫格 (IH/IF/IC/IM — IM 主做高亮)",
@@ -1019,12 +1061,12 @@ def _build_futures_grid(parent, win, col=0):
         tk.Label(cell, text=name, bg="#2A2A2A", fg="#FFD54F",
                  font=("", 20, "bold")).pack()
         tk.Label(cell, text=full_name, bg="#2A2A2A", fg="#9E9E9E",
-                 font=("", 9)).pack()
+                 font=("", 11)).pack()
         price_lbl = tk.Label(cell, text="—", bg="#2A2A2A", fg="#FFFFFF",
                              font=("Menlo", 16, "bold"))
         price_lbl.pack(pady=(4, 0))
         basis_lbl = tk.Label(cell, text="升贴水 —", bg="#2A2A2A", fg="#81C784",
-                             font=("", 9))
+                             font=("", 11))
         basis_lbl.pack()
 
         win._fut_cells.append((name, full_name, ref_val, cell, price_lbl, basis_lbl))
@@ -1055,7 +1097,7 @@ def _refresh_futures(win):
 
 def _build_cycle_panel(parent, win, col=1):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#BA68C8",
-                        font=("", 10, "bold"), padx=4, pady=4)
+                        font=("", 12, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "⑤ 周期阶段 (P1/P2/P3 — 周期论绑定)",
@@ -1069,18 +1111,18 @@ def _build_cycle_panel(parent, win, col=1):
         col_f = tk.Frame(row, bg="#1E1E1E"); col_f.pack(side=tk.LEFT, padx=12)
         light = tk.Label(col_f, text="●", fg="#424242", bg="#1E1E1E", font=("", 24))
         light.pack()
-        tk.Label(col_f, text=title, bg="#1E1E1E", fg=color, font=("", 9)).pack()
+        tk.Label(col_f, text=title, bg="#1E1E1E", fg=color, font=("", 11)).pack()
         win._stage_lights.append((light, color))
 
     # 周期判定文字
     win._cycle_text = tk.Label(frm, text="📌 正在判断当前周期阶段...",
-                               bg="#1E1E1E", fg="#E0E0E0", font=("", 10),
+                               bg="#1E1E1E", fg="#E0E0E0", font=("", 12),
                                wraplength=420, justify=tk.LEFT)
     win._cycle_text.pack(fill=tk.X, pady=8, padx=4)
 
     # 阶段说明
     tk.Label(frm, text="P1=启动初期(试错), P2=发酵(主升), P3=高潮(即将见顶)",
-             bg="#1E1E1E", fg="#757575", font=("", 8)).pack(anchor=tk.W, padx=4)
+             bg="#1E1E1E", fg="#757575", font=("", 10)).pack(anchor=tk.W, padx=4)
 
 
 def _refresh_cycle(win):
@@ -1115,7 +1157,7 @@ def _refresh_cycle(win):
 
 def _build_status_panel(parent, win, col=2):
     """⑥ 状态判定三状态灯 — 盘中机会/状态机会/主升期"""
-    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#90CAF9", font=("", 10, "bold"), padx=4, pady=4)
+    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#90CAF9", font=("", 12, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "⑥ 状态判定 (盘中机会/状态机会/主升期)",
@@ -1133,14 +1175,14 @@ def _build_status_panel(parent, win, col=2):
         light = tk.Label(head, text="⚫", fg="#757575", bg="#2A2A2A", font=("", 14))
         light.pack(side=tk.LEFT)
         tk.Label(head, text=title, bg="#2A2A2A", fg=color,
-                 font=("", 10, "bold")).pack(side=tk.LEFT, padx=6)
+                 font=("", 12, "bold")).pack(side=tk.LEFT, padx=6)
         lbl = tk.Label(card, text=desc, bg="#2A2A2A", fg="#BDBDBD",
-                       font=("", 8), wraplength=420, justify=tk.LEFT)
+                       font=("", 10), wraplength=420, justify=tk.LEFT)
         lbl.pack(anchor=tk.W)
         win._status_cards.append((light, card, title))
 
     win._status_msg = tk.Label(frm, text="💡 实时刷新中...", bg="#1E1E1E",
-                                fg="#E0E0E0", font=("", 9, "italic"),
+                                fg="#E0E0E0", font=("", 11, "italic"),
                                 wraplength=420, justify=tk.LEFT)
     win._status_msg.pack(fill=tk.X, pady=(6, 0), padx=4)
 
@@ -1184,60 +1226,97 @@ def _refresh_status(win):
 
 # —— 统一知识弹窗 ——
 def _show_knowledge_popup(parent, title, data):
-    """弹出分析知识弹窗 (定义 + 判断逻辑 + 历史案例)
-    
-    Args:
-        parent: 父窗口
-        title: 弹窗标题
-        data: dict with keys 'definition', 'logic', 'cases'
-    """
-    try:
-        import webbrowser as _wb
-    except ImportError:
-        _wb = None
+    """弹出分析知识弹窗 (定义 + 判断逻辑 + 历史案例 + 字体调节 + 可滚动)"""
+    KN_FS = [13]  # 当前内容字号 (列表用于闭包可变)
+    KN_TITLE_FS = [17]  # 顶栏标题字号
+    KN_LF_FS = [14]  # LabelFrame 标题字号
 
     dlg = tk.Toplevel(parent)
     dlg.title(f"📚 {title} — 周期论分析")
-    dlg.geometry("620x560")
+    dlg.geometry("720x620")
     dlg.configure(bg="#1E1E1E")
+    dlg.minsize(560, 440)
     dlg.grab_set()
 
-    # 顶栏
+    # —— 顶栏: 标题 + 字体调节 ——
     top = tk.Frame(dlg, bg="#121212"); top.pack(fill=tk.X)
-    tk.Label(top, text=f"📚 {title}", bg="#121212", fg="#FFD54F",
-             font=("", 13, "bold")).pack(side=tk.LEFT, padx=10, pady=8)
+    title_lbl = tk.Label(top, text=f"📚 {title}", bg="#121212", fg="#FFD54F",
+                         font=("", KN_TITLE_FS[0], "bold"))
+    title_lbl.pack(side=tk.LEFT, padx=10, pady=8)
 
-    # 内容区
-    body = tk.Frame(dlg, bg="#1E1E1E"); body.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+    # 字体调节
+    def _fs_label(): return f"🔤 {KN_FS[0]}pt"
 
-    # ① 定义
-    f1 = tk.LabelFrame(body, text="📌 定义", bg="#1E1E1E", fg="#64B5F6",
-                       font=("", 10, "bold"))
-    f1.pack(fill=tk.X, pady=(0, 4))
-    tk.Label(f1, text=data.get("definition", "(暂无)"), bg="#1E1E1E",
-             fg="#E0E0E0", font=("", 10), wraplength=580, justify=tk.LEFT,
-             padx=6, pady=4).pack(fill=tk.X)
+    def _change_fs(delta):
+        KN_FS[0] = max(10, min(22, KN_FS[0] + delta))
+        KN_LF_FS[0] = max(11, min(24, KN_LF_FS[0] + delta))
+        KN_TITLE_FS[0] = max(13, min(28, KN_TITLE_FS[0] + delta))
+        title_lbl.config(font=("", KN_TITLE_FS[0], "bold"))
+        _rebuild()
 
-    # ② 判断逻辑
-    f2 = tk.LabelFrame(body, text="🔍 判断逻辑", bg="#1E1E1E", fg="#81C784",
-                       font=("", 10, "bold"))
-    f2.pack(fill=tk.X, pady=4)
-    logic_text = data.get("logic", "").strip() if isinstance(data.get("logic"), str) else ""
-    tk.Label(f2, text=logic_text, bg="#1E1E1E", fg="#FFE0B2", font=("", 10),
-             wraplength=580, justify=tk.LEFT, padx=6, pady=4).pack(fill=tk.X)
+    fs_frame = tk.Frame(top, bg="#121212")
+    fs_frame.pack(side=tk.RIGHT, padx=10)
+    tk.Label(fs_frame, text=_fs_label(), bg="#121212", fg="#90CAF9",
+             font=("", 11)).pack(side=tk.LEFT, padx=(0, 4))
+    tk.Button(fs_frame, text="A-", width=3, command=lambda: _change_fs(-1),
+              bg="#37474F", fg="#ECEFF1", font=("", 10)).pack(side=tk.LEFT, padx=1)
+    tk.Button(fs_frame, text="A+", width=3, command=lambda: _change_fs(+1),
+              bg="#37474F", fg="#ECEFF1", font=("", 10)).pack(side=tk.LEFT, padx=1)
 
-    # ③ 历史案例
-    f3 = tk.LabelFrame(body, text="📖 历史案例", bg="#1E1E1E", fg="#BA68C8",
-                       font=("", 10, "bold"))
-    f3.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
-    cases = data.get("cases", [])
-    case_text = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(cases)) if cases else "(暂无)"
-    tk.Label(f3, text=case_text, bg="#1E1E1E", fg="#E0E0E0", font=("", 10),
-             wraplength=580, justify=tk.LEFT, padx=6, pady=4).pack(fill=tk.BOTH, expand=True)
+    # —— 可滚动内容区 ——
+    canvas = tk.Canvas(dlg, bg="#1E1E1E", highlightthickness=0)
+    sb = tk.Scrollbar(dlg, orient=tk.VERTICAL, command=canvas.yview)
+    body = tk.Frame(canvas, bg="#1E1E1E")
+    body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.create_window((0, 0), window=body, anchor="nw")
+    canvas.configure(yscrollcommand=sb.set)
+    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0), pady=4)
+    sb.pack(side=tk.RIGHT, fill=tk.Y, pady=4)
 
-    # 底栏关闭
-    tk.Button(dlg, text="关闭", width=8, command=dlg.destroy,
-              bg="#37474F", fg="#ECEFF1").pack(pady=6)
+    # 鼠标滚轮
+    def _on_mousewheel(e):
+        canvas.yview_scroll(int(-e.delta / 120), "units")
+    canvas.bind_all("<MouseWheel>", _on_mousewheel)
+    dlg.protocol("WM_DELETE_WINDOW", lambda: (canvas.unbind_all("<MouseWheel>"), dlg.destroy()))
+
+    # —— 构建内容的闭包 ——
+    def _rebuild():
+        for w in body.winfo_children():
+            w.destroy()
+        fs = KN_FS[0]; lf_fs = KN_LF_FS[0]
+        wraplen = 660
+
+        f1 = tk.LabelFrame(body, text="📌 定义", bg="#1E1E1E", fg="#64B5F6",
+                           font=("", lf_fs, "bold"))
+        f1.pack(fill=tk.X, pady=(0, 6), padx=4)
+        tk.Label(f1, text=data.get("definition", "(暂无)"), bg="#1E1E1E",
+                 fg="#E0E0E0", font=("", fs), wraplength=wraplen, justify=tk.LEFT,
+                 padx=8, pady=6).pack(fill=tk.X)
+
+        f2 = tk.LabelFrame(body, text="🔍 判断逻辑", bg="#1E1E1E", fg="#81C784",
+                           font=("", lf_fs, "bold"))
+        f2.pack(fill=tk.X, pady=6, padx=4)
+        logic_text = data.get("logic", "").strip() if isinstance(data.get("logic"), str) else ""
+        tk.Label(f2, text=logic_text, bg="#1E1E1E", fg="#FFE0B2", font=("", fs),
+                 wraplength=wraplen, justify=tk.LEFT, padx=8, pady=6).pack(fill=tk.X)
+
+        f3 = tk.LabelFrame(body, text="📖 历史案例", bg="#1E1E1E", fg="#BA68C8",
+                           font=("", lf_fs, "bold"))
+        f3.pack(fill=tk.X, pady=(6, 4), padx=4)
+        cases = data.get("cases", [])
+        case_text = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(cases)) if cases else "(暂无)"
+        tk.Label(f3, text=case_text, bg="#1E1E1E", fg="#E0E0E0", font=("", fs),
+                 wraplength=wraplen, justify=tk.LEFT, padx=8, pady=6).pack(fill=tk.X)
+
+        # 更新 scrollregion
+        canvas.update_idletasks()
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+    _rebuild()
+
+    # —— 底栏关闭 ——
+    tk.Button(dlg, text="关闭", width=10, command=dlg.destroy,
+              bg="#37474F", fg="#ECEFF1", font=("", 11)).pack(pady=8)
 
 
 # —— 辅助: 创建带❓的 LabelFrame 标题 ——
@@ -1257,7 +1336,7 @@ def _create_labelframe_with_q(parent, title, knowledge_key, knowledge_dict,
     title_row = tk.Frame(outer, bg="#1E1E1E")
     title_row.pack(fill=tk.X)
     tk.Label(title_row, text=title, bg="#1E1E1E", fg="#FFD54F",
-             font=("", 10, "bold")).pack(side=tk.LEFT, padx=4, pady=(2, 0))
+             font=("", 12, "bold")).pack(side=tk.LEFT, padx=4, pady=(2, 0))
 
     # ❓ 按钮
     def _on_q(_e=None):
@@ -1265,7 +1344,7 @@ def _create_labelframe_with_q(parent, title, knowledge_key, knowledge_dict,
         _show_knowledge_popup(parent, knowledge_key, kd)
 
     q_btn = tk.Label(title_row, text="❓", bg="#1E1E1E", fg="#1565C0",
-                     font=("", 11, "bold underline"), cursor="hand2")
+                     font=("", 13, "bold underline"), cursor="hand2")
     q_btn.pack(side=tk.RIGHT, padx=6, pady=(2, 0))
     q_btn.bind("<Button-1>", _on_q)
     q_btn.bind("<Double-Button-1>", _on_q)
@@ -1301,13 +1380,13 @@ def _add_title_row(frm, title, color, knowledge_data):
     top = tk.Frame(frm, bg="#1E1E1E")
     top.pack(fill=tk.X)
     tk.Label(top, text=title, bg="#1E1E1E", fg=color,
-             font=("", 10, "bold")).pack(side=tk.LEFT, padx=4, pady=(2, 0))
+             font=("", 12, "bold")).pack(side=tk.LEFT, padx=4, pady=(2, 0))
 
     def _on_q(_e=None):
         _show_knowledge_popup(frm.winfo_toplevel(), title, knowledge_data)
 
     q = tk.Label(top, text="❓", bg="#1E1E1E", fg="#1565C0",
-                 font=("", 11, "bold underline"), cursor="hand2")
+                 font=("", 13, "bold underline"), cursor="hand2")
     q.pack(side=tk.RIGHT, padx=6, pady=(2, 0))
     q.bind("<Button-1>", _on_q)
     q.bind("<Double-Button-1>", _on_q)
