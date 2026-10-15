@@ -25,8 +25,11 @@ BLOCK_KEYWORDS = {
 FIXED_BLOCKS = list(BLOCK_KEYWORDS.keys())
 
 # —— 股指期货四宫格 (IH/IF/IC/IM) ——
-FUT_NAMES = [("IH", "上证50", 2800), ("IF", "沪深300", 4000),
-             ("IC", "中证500", 5600), ("IM", "中证1000", 6500)]
+# ref_val 在运行时从 tushare index_daily 动态获取现货, 不再硬编码
+FUT_NAMES = [("IH", "上证50", "000016.SH"),
+             ("IF", "沪深300", "000300.SH"),
+             ("IC", "中证500", "000905.SH"),
+             ("IM", "中证1000", "000852.SH")]
 
 # —— 板块九宫格分析知识 (硬编码, 不联网) ——
 BLOCK_KNOWLEDGE = {
@@ -268,6 +271,7 @@ _AK_BLOCK_CACHE = {"time": 0, "data": None}
 _TUSHARE_DAILY_CACHE = {"time": 0, "data": None}
 _TUSHARE_SB_CACHE = {"time": 0, "data": None}
 _BLOCK_PCT_CACHE = {"time": 0, "data": None}
+_SPOT_INDEX_CACHE = {"time": 0, "data": None}
 
 
 def _get_tushare_daily_today():
@@ -526,6 +530,9 @@ def show_speculator_watch(root=None, app=None):
              font=("", 16, "bold")).pack(side=tk.LEFT, padx=14, pady=10)
     tk.Label(header, text="2×3 六区 | 所有❓按钮点知识弹窗", bg="#121212", fg="#90CAF9",
              font=("", 11)).pack(side=tk.LEFT, pady=10)
+    win._data_date_lbl = tk.Label(header, text="⏳ 加载中...",
+                                  bg="#121212", fg="#BDBDBD", font=("", 11))
+    win._data_date_lbl.pack(side=tk.LEFT, padx=10, pady=10)
 
     fs_box = tk.Frame(header, bg="#121212"); fs_box.pack(side=tk.RIGHT, padx=14)
     tk.Label(fs_box, text="🔤 字体:", bg="#121212", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT)
@@ -640,6 +647,15 @@ def _refresh_all_blocks(win):
                 win._block_meta[i][1] = None
         if matched_any:
             print(f"[👁️看盘] ✅ 九宫格真实数据 ({len([v for v in result.values() if v])}/{len(FIXED_BLOCKS)} 板块)")
+            # 更新顶部数据日期 (从 tushare daily 缓存)
+            dc = _TUSHARE_DAILY_CACHE.get("data")
+            if dc is not None and len(dc) > 0:
+                trade_dates = sorted(dc["trade_date"].unique())
+                latest = trade_dates[-1]
+                pct_mean = dc["pct_chg"].mean()
+                win._data_date_lbl.config(
+                    text=f"📅 {latest} | 全市场均值 {pct_mean:+.2f}% | 涨 {(dc['pct_chg']>0).sum()}/{len(dc)}",
+                    fg="#66BB6A" if pct_mean >= 0 else "#EF5350")
 
     # ② 种子兜底 (用今日真实数据做种子, 避免乱填)
     if not matched_any:
@@ -1053,7 +1069,7 @@ def _build_futures_grid(parent, win, col=0):
         cell.grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
         grid.grid_rowconfigure(r, weight=1); grid.grid_columnconfigure(c, weight=1)
 
-        name, full_name, ref_val = FUT_NAMES[i]
+        name, full_name, _ts_code = FUT_NAMES[i]
         # IM 默认高亮
         hc = "#FF6D00" if name == "IM" else "#424242"
         cell.config(highlightbackground=hc, highlightcolor=hc)
@@ -1065,30 +1081,90 @@ def _build_futures_grid(parent, win, col=0):
         price_lbl = tk.Label(cell, text="—", bg="#2A2A2A", fg="#FFFFFF",
                              font=("Menlo", 16, "bold"))
         price_lbl.pack(pady=(4, 0))
-        basis_lbl = tk.Label(cell, text="升贴水 —", bg="#2A2A2A", fg="#81C784",
+        basis_lbl = tk.Label(cell, text="加载中...", bg="#2A2A2A", fg="#81C784",
                              font=("", 11))
         basis_lbl.pack()
 
-        win._fut_cells.append((name, full_name, ref_val, cell, price_lbl, basis_lbl))
+        win._fut_cells.append((name, full_name, _ts_code, cell, price_lbl, basis_lbl))
+
+
+def _get_spot_index_cache():
+    """从 tushare index_daily 拉四大现货指数 (IH/IF/IC/IM 对应) — 日级缓存"""
+    now = time.time()
+    if _SPOT_INDEX_CACHE["data"] and (now - _SPOT_INDEX_CACHE["time"] < 300):
+        return _SPOT_INDEX_CACHE["data"]
+    try:
+        import tushare as ts
+        TOKEN = os.environ.get("TUSHARE_TOKEN", "")
+        if not TOKEN: return None
+        ts.set_token(TOKEN); pro = ts.pro_api()
+        today = datetime.now().strftime("%Y%m%d")
+        result = {}
+        for fut_code, name, ts_code in FUT_NAMES:
+            df = pro.index_daily(ts_code=ts_code, start_date=(datetime.now()-timedelta(days=7)).strftime("%Y%m%d"),
+                                 end_date=today)
+            if df is not None and len(df) > 0:
+                df = df.sort_values("trade_date")
+                row = df.iloc[-1]
+                result[fut_code] = {"close": float(row["close"]),
+                                    "pct": float(row.get("pct_chg", 0)),
+                                    "trade_date": str(row["trade_date"])}
+        if result:
+            _SPOT_INDEX_CACHE["data"] = result
+            _SPOT_INDEX_CACHE["time"] = now
+            # 统一取最大日期作为数据日期
+            dates = {v["trade_date"] for v in result.values()}
+            print(f"[👁️看盘] ✅ 现货指数 {dates}, 数据: { {k: round(v['close'],1) for k,v in result.items()} }")
+        return result or None
+    except Exception as e:
+        print(f"[👁️看盘] 现货指数获取失败: {e}")
+        return None
 
 
 def _refresh_futures(win):
-    """刷新四宫格价格 (用近似计算: 按参考价 + 小波动模拟)"""
-    try:
-        import random
-        for name, full_name, ref_val, cell, price_lbl, basis_lbl in win._fut_cells:
-            # 模拟实时价格 (±2% 波动)
-            jitter = (random.random() - 0.5) * 0.04
-            px = int(ref_val * (1 + jitter))
-            # 升贴水 (假设现货=ref_val, 期货=px)
-            basis = px - ref_val
-            basis_pct = basis / ref_val * 100
-            sign = "+" if basis >= 0 else ""
-            price_lbl.config(text=f"{px}")
-            fg = "#66BB6A" if basis < 0 else "#EF5350"  # 贴水=绿, 升水=红
-            basis_lbl.config(text=f"升贴水 {sign}{basis} ({sign}{basis_pct:.2f}%)", fg=fg)
-    except Exception as e:
-        print(f"[👁️看盘] 期指刷新异常: {e}")
+    """刷新四宫格 — 显示现货指数 + 今日涨跌, 期货拿不到则标注"""
+    spot = _get_spot_index_cache()
+
+    # 更新数据日期标签
+    if spot:
+        dates = sorted({v["trade_date"] for v in spot.values()})
+        win._data_date_lbl.config(text=f"📅 数据日期: {dates[-1]} (tushare index_daily)")
+    else:
+        win._data_date_lbl.config(text="⚠️ 实时接口无响应, 数据可能过时")
+
+    if spot:
+        for i, (name, full_name, _ts_code) in enumerate(FUT_NAMES):
+            cell = win._fut_cells[i][3]  # cell frame
+            price_lbl = win._fut_cells[i][4]
+            basis_lbl = win._fut_cells[i][5]
+            sd = spot.get(name)
+            if sd:
+                close = sd["close"]
+                pct = sd["pct"]
+                price_lbl.config(text=f"{close:.0f}")
+                fg = "#EF5350" if pct >= 0 else "#66BB6A"
+                sign = "+" if pct >= 0 else ""
+                basis_lbl.config(text=f"现货 {sign}{pct:.2f}%", fg=fg)
+                # 额外高亮 IM 今日涨跌
+                if name == "IM":
+                    try:
+                        cell.config(highlightbackground="#FF6D00", highlightcolor="#FF6D00")
+                    except Exception:
+                        pass
+            else:
+                price_lbl.config(text="—")
+                basis_lbl.config(text="无数据", fg="#757575")
+    else:
+        # 种子数据 — 基于 2026-10-15 真实数据
+        seed = {"IH": (2765, -0.42), "IF": (4166, -1.23), "IC": (6769, -3.02), "IM": (6678, -3.28)}
+        for i, (name, full_name, _ts_code) in enumerate(FUT_NAMES):
+            price_lbl = win._fut_cells[i][4]
+            basis_lbl = win._fut_cells[i][5]
+            close, pct = seed.get(name, (0, 0))
+            price_lbl.config(text=f"{close:.0f}")
+            fg = "#EF5350" if pct >= 0 else "#66BB6A"
+            sign = "+" if pct >= 0 else ""
+            basis_lbl.config(text=f"现货 {sign}{pct:.2f}% (种子)", fg=fg)
 
 
 # ═══════════════════════════════════════════════════════════════
