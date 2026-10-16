@@ -1204,6 +1204,37 @@ def _show_minute_kline_dialog(parent_root, app=None):
     tk.Label(top, text="均线: MA5/10/20/60", bg=_BG_TOOLBAR, fg=_FG_BLUE,
              font=("", 10, "bold")).pack(side=tk.LEFT, padx=(12, 6), pady=10)
 
+    # ── 指标开关区 ──
+    ind_row = tk.Frame(top, bg=_BG_TOOLBAR); ind_row.pack(side=tk.LEFT, padx=(4, 0), pady=10)
+    tk.Label(ind_row, text="指标:", bg=_BG_TOOLBAR, fg=_FG_GOLD, font=("", 9)).pack(side=tk.LEFT)
+
+    _apply_cb = lambda: _do_load()  # Checkbutton 改状态自动重绘
+
+    # BOLL 布林 (主图叠加, 20日, 2倍标准差)
+    boll_var = tk.BooleanVar(value=False)
+    tk.Checkbutton(ind_row, text="BOLL", variable=boll_var, bg=_BG_TOOLBAR,
+                   fg="#4FC3F7", selectcolor=_BG_PANEL, activebackground=_BG_TOOLBAR,
+                   activeforeground="#4FC3F7", font=("", 9, "bold"), cursor="hand2",
+                   command=_apply_cb).pack(side=tk.LEFT, padx=2)
+    # MACD (副图, 12/26/9)
+    macd_var = tk.BooleanVar(value=False)
+    tk.Checkbutton(ind_row, text="MACD", variable=macd_var, bg=_BG_TOOLBAR,
+                   fg="#FFD54F", selectcolor=_BG_PANEL, activebackground=_BG_TOOLBAR,
+                   activeforeground="#FFD54F", font=("", 9, "bold"), cursor="hand2",
+                   command=_apply_cb).pack(side=tk.LEFT, padx=2)
+    # RSI (副图, 14)
+    rsi_var = tk.BooleanVar(value=False)
+    tk.Checkbutton(ind_row, text="RSI", variable=rsi_var, bg=_BG_TOOLBAR,
+                   fg="#AB47BC", selectcolor=_BG_PANEL, activebackground=_BG_TOOLBAR,
+                   activeforeground="#AB47BC", font=("", 9, "bold"), cursor="hand2",
+                   command=_apply_cb).pack(side=tk.LEFT, padx=2)
+    # KDJ (副图, 9/3/3)
+    kdj_var = tk.BooleanVar(value=False)
+    tk.Checkbutton(ind_row, text="KDJ", variable=kdj_var, bg=_BG_TOOLBAR,
+                   fg="#FF7043", selectcolor=_BG_PANEL, activebackground=_BG_TOOLBAR,
+                   activeforeground="#FF7043", font=("", 9, "bold"), cursor="hand2",
+                   command=_apply_cb).pack(side=tk.LEFT, padx=2)
+
     status_lbl = tk.Label(top, text="⏳ 选择标的后点🔍加载", bg=_BG_TOOLBAR, fg=_FG_DIM,
                           font=("", 9))
     status_lbl.pack(side=tk.RIGHT, padx=10, pady=10)
@@ -1294,6 +1325,7 @@ def _show_minute_kline_dialog(parent_root, app=None):
         v = _np.array([float(d["volume"]) for d in data])
 
         # MA 计算
+        import pandas as pd
         ma5 = _ma(c, 5); ma10 = _ma(c, 10); ma20 = _ma(c, 20); ma60 = _ma(c, 60)
 
         # ── 清旧图 ──
@@ -1304,10 +1336,81 @@ def _show_minute_kline_dialog(parent_root, app=None):
             try: canvas.toolbar.destroy()
             except Exception: pass
 
-        # 上: K线图 (70%)
-        ax = fig.add_axes([0.06, 0.26, 0.88, 0.65], facecolor=_BG_PANEL)
-        # 下: 成交量 (15%)
-        axv = fig.add_axes([0.06, 0.08, 0.88, 0.15], sharex=ax, facecolor=_BG_PANEL)
+        # ── 指标计算 ──
+        def _ema(arr, n):
+            return _np.array(pd.Series(arr).ewm(span=n, adjust=False).mean().tolist())
+
+        def _boll(closes, n=20, k=2):
+            mid = _np.full_like(closes, _np.nan, dtype=float)
+            up = _np.full_like(closes, _np.nan, dtype=float)
+            dn = _np.full_like(closes, _np.nan, dtype=float)
+            arr = pd.Series(closes)
+            mid[n - 1:] = arr.rolling(n).mean().iloc[n - 1:].values
+            std = arr.rolling(n).std().iloc[n - 1:].values
+            up[n - 1:] = mid[n - 1:] + k * std
+            dn[n - 1:] = mid[n - 1:] - k * std
+            return mid, up, dn
+
+        def _macd(closes):
+            ema12 = _ema(closes, 12)
+            ema26 = _ema(closes, 26)
+            dif = ema12 - ema26
+            dea = _ema(dif, 9)
+            hist = (dif - dea) * 2
+            return dif, dea, hist
+
+        def _rsi(closes, n=14):
+            delta = _np.diff(closes)
+            gain = _np.where(delta > 0, delta, 0)
+            loss = _np.where(delta < 0, -delta, 0)
+            rs = _np.full_like(gain, _np.nan, dtype=float)
+            for i in range(n, len(gain)):
+                avg_gain = gain[i - n:i].mean()
+                avg_loss = loss[i - n:i].mean()
+                rs[i] = 100 - 100 / (1 + avg_gain / avg_loss) if avg_loss != 0 else 100
+            rsi_full = _np.full_like(closes, _np.nan, dtype=float)
+            rsi_full[1:] = rs
+            return rsi_full
+
+        def _kdj(high, low, close, n=9, m=3):
+            hh = pd.Series(high).rolling(n).max().values
+            ll = pd.Series(low).rolling(n).min().values
+            rsv = (close - ll) / (hh - ll + 1e-9) * 100
+            rsv[:n - 1] = _np.nan
+            k = _ema(rsv, m)
+            d = _ema(k, m)
+            j = 3 * k - 2 * d
+            return k, d, j
+
+        # 需要的指标列表
+        has_boll = boll_var.get()
+        has_macd = macd_var.get()
+        has_rsi = rsi_var.get()
+        has_kdj = kdj_var.get()
+        # 量能始终显示
+        n_sub = 1 + int(has_macd) + int(has_rsi) + int(has_kdj)  # 成交量 + 3 可选
+
+        # ── 动态布局 ──
+        fig_axes = []
+        sub_h = 0.70 / (n_sub + 1)  # K线 70% + n_sub 个副图均分剩余
+        kline_h = 1 - sub_h * n_sub - 0.06
+        ax = fig.add_axes([0.06, 1 - kline_h - 0.04, 0.88, kline_h], facecolor=_BG_PANEL)
+        fig_axes.append(ax)
+        _last_ax = ax
+        _bottom = 1 - kline_h - 0.06
+        _next_bottom = _bottom
+        sub_indices = []
+        if has_macd: sub_indices.append("macd")
+        sub_indices.append("vol")  # 量能始终有
+        if has_rsi: sub_indices.append("rsi")
+        if has_kdj: sub_indices.append("kdj")
+        for idx, sub_name in enumerate(sub_indices):
+            h = sub_h - 0.015
+            b = _next_bottom - h - 0.015
+            sub = fig.add_axes([0.06, b, 0.88, h], sharex=ax, facecolor=_BG_PANEL)
+            _next_bottom = b
+            fig_axes.append((sub, sub_name))
+        _last_ax = ax
 
         x = _np.arange(len(times))
         # 蜡烛图简化版 (涨跌着色)
@@ -1328,6 +1431,23 @@ def _show_minute_kline_dialog(parent_root, app=None):
         ax.plot(x, ma10, color="#42A5F5", lw=1.2, label="MA10")
         ax.plot(x, ma20, color="#AB47BC", lw=1.2, label="MA20")
         ax.plot(x, ma60, color="#EF9A9A", lw=1.5, label="MA60")
+
+        # BOLL 布林叠加 (20, 2)
+        if has_boll:
+            boll_mid, boll_up, boll_dn = _boll(c, 20, 2)
+            ax.plot(x, boll_up, color="#4FC3F7", lw=0.8, ls="--", label="BOLL上")
+            ax.plot(x, boll_mid, color="#4FC3F7", lw=0.8, label="BOLL中")
+            ax.plot(x, boll_dn, color="#4FC3F7", lw=0.8, ls="--", label="BOLL下")
+            ax.fill_between(x, boll_up, boll_dn, color="#4FC3F7", alpha=0.06)
+            # 上穿下轨 🟢 / 下穿上轨 🔴 (做T信号)
+            for i in range(21, len(c)):
+                if _np.isnan(boll_dn[i]) or _np.isnan(boll_up[i]): continue
+                # 下轨上穿 = 低吸
+                if c[i-1] < boll_dn[i-1] and c[i] >= boll_dn[i]:
+                    ax.scatter([x[i]], [c[i] * 0.996], marker="^", s=60, color="#00BCD4", zorder=10)
+                # 上轨下穿 = 高抛
+                if c[i-1] > boll_up[i-1] and c[i] <= boll_up[i]:
+                    ax.scatter([x[i]], [c[i] * 1.004], marker="v", s=60, color="#FF8A65", zorder=10)
 
         # ═══════════════════════════════════════════════
         # 🎯 MA60 上穿/下穿 检测 — 游资做T核心信号
@@ -1391,16 +1511,59 @@ def _show_minute_kline_dialog(parent_root, app=None):
         ax.set_xticks(x[::step])
         ax.set_xticklabels([t.strftime("%H:%M") for t in times[::step]], rotation=30, fontsize=7)
 
-        # 成交量
-        colors = ["#EF5350" if c[i] >= o[i] else "#66BB6A" for i in range(len(times))]
-        axv.bar(x, v, color=colors, width=0.7)
-        axv.set_facecolor(_BG_PANEL)
-        axv.tick_params(colors=_FG_DIM, labelsize=7)
-        for spine in axv.spines.values(): spine.set_color(_FG_DIM)
-        axv.grid(True, alpha=0.15, color=_FG_DIM)
-        axv.set_ylabel("量", color=_FG_DIM, fontsize=8, rotation=0, labelpad=16)
+        # ── 动态副图渲染 ──
+        for sub, sub_name in fig_axes[1:]:  # 跳过主图 ax = fig_axes[0]
+            if sub_name == "vol":
+                # 成交量
+                colors = ["#EF5350" if c[i] >= o[i] else "#66BB6A" for i in range(len(times))]
+                sub.bar(x, v, color=colors, width=0.6)
+                sub.set_ylabel("量", color=_FG_DIM, fontsize=8, rotation=0, labelpad=14)
 
-        fig.subplots_adjust(top=0.92, bottom=0.18, left=0.08, right=0.94, hspace=0.05)
+            elif sub_name == "macd":
+                dif, dea, hist = _macd(c)
+                pos = hist >= 0
+                sub.bar(x[pos], hist[pos], color="#EF5350", width=0.6, label="hist+")
+                sub.bar(x[~pos], hist[~pos], color="#66BB6A", width=0.6, label="hist-")
+                sub.plot(x, dif, color="#FFD54F", lw=0.9, label="DIF")
+                sub.plot(x, dea, color="#4FC3F7", lw=0.9, label="DEA")
+                sub.axhline(0, color=_FG_DIM, lw=0.4, ls="--")
+                sub.set_ylabel("MACD", color=_FG_GOLD, fontsize=8, rotation=0, labelpad=20)
+                sub.legend(loc="upper left", fontsize=6, facecolor=_BG_PANEL,
+                           edgecolor=_FG_DIM, labelcolor=_FG_DIM, ncol=3, framealpha=0.8)
+
+            elif sub_name == "rsi":
+                rsi = _rsi(c, 14)
+                sub.plot(x, rsi, color="#AB47BC", lw=1.2, label="RSI14")
+                sub.axhline(70, color="#EF5350", lw=0.6, ls="--", alpha=0.7)
+                sub.axhline(30, color="#66BB6A", lw=0.6, ls="--", alpha=0.7)
+                sub.axhline(50, color=_FG_DIM, lw=0.4, ls="--", alpha=0.5)
+                # 超买超卖做T标记
+                for i in range(15, len(rsi)):
+                    if rsi[i-1] > 70 and rsi[i] < 70:
+                        sub.scatter([x[i]], [rsi[i]], color="#EF5350", s=25, zorder=10, marker="v")
+                    elif rsi[i-1] < 30 and rsi[i] > 30:
+                        sub.scatter([x[i]], [rsi[i]], color="#66BB6A", s=25, zorder=10, marker="^")
+                sub.set_ylim(0, 100)
+                sub.set_ylabel("RSI", color="#AB47BC", fontsize=8, rotation=0, labelpad=16)
+
+            elif sub_name == "kdj":
+                k, d, j = _kdj(h, l, c, 9, 3)
+                sub.plot(x, k, color="#FF7043", lw=1.0, label="K")
+                sub.plot(x, d, color="#42A5F5", lw=1.0, label="D")
+                sub.plot(x, j, color="#AB47BC", lw=0.9, label="J", ls="--")
+                sub.axhline(80, color="#EF5350", lw=0.5, ls="--", alpha=0.7)
+                sub.axhline(20, color="#66BB6A", lw=0.5, ls="--", alpha=0.7)
+                sub.set_ylabel("KDJ", color="#FF7043", fontsize=8, rotation=0, labelpad=18)
+                sub.legend(loc="upper left", fontsize=6, facecolor=_BG_PANEL,
+                           edgecolor=_FG_DIM, labelcolor=_FG_DIM, ncol=3, framealpha=0.8)
+
+            # 统一样式
+            sub.set_facecolor(_BG_PANEL)
+            sub.tick_params(colors=_FG_DIM, labelsize=7)
+            for spine in sub.spines.values(): spine.set_color(_FG_DIM)
+            sub.grid(True, alpha=0.12, color=_FG_DIM)
+
+        fig.subplots_adjust(top=0.94, bottom=0.04, left=0.08, right=0.94, hspace=0.2)
 
         canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
         canvas.draw()
