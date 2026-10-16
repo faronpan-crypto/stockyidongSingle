@@ -2555,18 +2555,19 @@ def _build_leak_panel(parent, win):
               foreground=[("selected", "#FFFFFF")])
     nb.configure(style="Leak.TNotebook")
 
-    tabs = [("📰 资讯股", "#64B5F6", "news"),
-            ("🔥 强势票", "#FFD54F", "strong"),
-            ("📉 超跌票", "#EF5350", "drop")]
+    # tabs: (title, color, key, cols)
+    tabs = [("📰 资讯股", "#64B5F6", "news", ("代码", "名称", "涨幅%", "成交额", "备注")),
+            ("🔥 强势票", "#FFD54F", "strong", ("代码", "名称", "涨幅%", "成交额", "备注")),
+            ("📉 超跌票", "#EF5350", "drop", ("代码", "名称", "涨幅%", "成交额", "8日回撤")),
+            ("🛡️ 支撑位", "#AED581", "support", ("代码", "名称", "现价", "10日支撑", "20日支撑", "60日支撑"))]
 
     win._leak_tvs = {}
-    for title, color, key in tabs:
+    for title, color, key, cols in tabs:
         tab = tk.Frame(nb, bg="#000000"); nb.add(tab, text=title)
 
-        cols = ("代码", "名称", "涨幅%", "成交额", "备注")
         tv = ttk.Treeview(tab, columns=cols, show="headings", height=6, style="Leak.Treeview")
         for c in cols:
-            tv.heading(c, text=c); tv.column(c, width=100, anchor=tk.CENTER)
+            tv.heading(c, text=c); tv.column(c, width=95, anchor=tk.CENTER)
         tv.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
         # 单击 → 日K线, 双击 → 游资心法
@@ -2744,7 +2745,7 @@ def _load_leak_data(win):
     def _bg():
         try:
             # 准备数据
-            data = {"news": [], "strong": [], "drop": []}
+            data = {"news": [], "strong": [], "drop": [], "support": []}
             pro = None  # 先声明, 各模块复用
             try:
                 import tushare as ts
@@ -2892,6 +2893,84 @@ def _load_leak_data(win):
                                              f"8日最高{high8:.1f}→回撤 {dd:+.1f}%"))
             except Exception as e:
                 print(f"[捡漏] 超跌票失败: {e}")
+
+            # ④ 支撑位分析 (资讯股+强势票, 计算 MA10/20/60 支撑)
+            try:
+                # 候选集: 资讯股 + 强势票 + 龙头, unique
+                candi = set()
+                for row in data.get("news", []):
+                    if row and row[0]: candi.add(row[0])
+                for row in data.get("strong", []):
+                    if row and row[0]: candi.add(row[0])
+                for code in ["600519", "300750", "002594", "601318", "300059",
+                             "600036", "601012", "000001", "600276", "300124"]:
+                    candi.add(code)
+                candi = list(candi)[:40]
+                print(f"[支撑] 候选集 {len(candi)} 只")
+
+                for code in candi:
+                    try:
+                        # 拉 120 日历史 K 线 (start_date/end_date 批量拉)
+                        tc = code + ".SZ" if code.startswith("3") or code.startswith("0") or code.startswith("2") else code + ".SH"
+                        kd = None
+                        if pro is not None:
+                            end = datetime.now().strftime("%Y%m%d")
+                            start = (datetime.now() - timedelta(days=180)).strftime("%Y%m%d")
+                            try:
+                                kd = pro.daily(ts_code=tc, start_date=start, end_date=end)
+                            except Exception: kd = None
+                        if kd is None or len(kd) < 60:
+                            continue
+
+                        # 按日期升序排
+                        kd = kd.sort_values("trade_date").reset_index(drop=True)
+                        close = kd["close"].astype(float)
+                        n = len(close)
+                        if n < 60: continue
+
+                        # 算 MA
+                        ma10 = close.rolling(10).mean().iloc[-1]
+                        ma20 = close.rolling(20).mean().iloc[-1]
+                        ma60 = close.rolling(60).mean().iloc[-1]
+                        cur = float(close.iloc[-1])
+
+                        # 均线斜率 (近5天变化率)
+                        ma10_slope = (close.rolling(10).mean().iloc[-1] - close.rolling(10).mean().iloc[-6]) / close.rolling(10).mean().iloc[-6]
+                        ma20_slope = (close.rolling(20).mean().iloc[-1] - close.rolling(20).mean().iloc[-6]) / close.rolling(20).mean().iloc[-6] if n >= 66 else 0
+                        ma60_slope = (close.rolling(60).mean().iloc[-1] - close.rolling(60).mean().iloc[-6]) / close.rolling(60).mean().iloc[-6] if n >= 66 else 0
+
+                        # 支撑判断: 斜率向上 + 股价靠近 (±3%)
+                        def _tag(ma_val, slope, cur_price, n_label):
+                            if ma_val != ma_val: return "—"  # NaN
+                            dist = (cur_price - ma_val) / ma_val * 100  # %偏离
+                            slope_up = slope > 0.0001  # 略向上
+                            near = abs(dist) < 3.0  # 靠近 ±3%
+                            if slope_up and near:
+                                return f"✅{ma_val:.1f}"
+                            elif slope_up and not near and dist > 0:
+                                return f"🟢{ma_val:.1f}"  # 向上但在均线上方
+                            elif near and not slope_up:
+                                return f"🟡{ma_val:.1f}"  # 靠近但没向上
+                            else:
+                                return f"—{ma_val:.1f}"
+
+                        s10 = _tag(ma10, ma10_slope, cur, "10")
+                        s20 = _tag(ma20, ma20_slope, cur, "20")
+                        s60 = _tag(ma60, ma60_slope, cur, "60")
+
+                        # 至少有一个有效支撑才进列表
+                        if "✅" in s10 or "✅" in s20 or "✅" in s60 or "🟢" in s10+s20+s60:
+                            name = "—"
+                            if _TUSHARE_SB_CACHE.get("data") is not None:
+                                c2 = _TUSHARE_SB_CACHE["data"]
+                                cm = c2[c2["ts_code"].str.startswith(code)]
+                                if len(cm) > 0: name = str(cm.iloc[0]["name"])
+                            data["support"].append((code, name, f"{cur:.2f}", s10, s20, s60))
+                    except Exception: continue
+
+                print(f"[👁️看盘] ✅ 支撑位分析: {len(data['support'])} 只")
+            except Exception as e:
+                print(f"[捡漏] 支撑位失败: {e}")
 
             # 更新 UI + 写缓存
             def _apply():
