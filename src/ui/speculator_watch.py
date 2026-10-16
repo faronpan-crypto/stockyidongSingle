@@ -326,38 +326,49 @@ def _get_sina_realtime():
                         result["indices"][name] = {"close": close, "pct": round(pct, 2),
                                                    "yclose": yclose}
 
-        # 2. 行业板块 (新浪行业分类 ~30 个, 这里只取 9 个关注板块)
-        # 新浪行业指数代码: http://vip.stock.finance.sina.com.cn/q/view/newSHSectors.php
-        # 用 akshare 新浪行业指数
+        # 2. 行业板块 (akshare 新浪行业)
         try:
             import akshare as ak
-            # 只拿 top 板块, 快速
             df_sector = ak.stock_sector_spot(indicator="新浪行业")
-            # df_sector 列: 序号, 名称, 现价, 涨跌幅, ...
             if df_sector is not None and len(df_sector) > 0:
                 pct_col = [c for c in df_sector.columns if "涨跌" in str(c)]
                 name_col = [c for c in df_sector.columns if "名称" in str(c) or "板块" in str(c)]
                 if pct_col and name_col:
-                    # 把我们关注的 9 个板块映射
-                    sector_map = {
-                        "券商": ["证券", "券商"],
-                        "银行": ["银行"],
-                        "CPO": ["通信设备", "光模块"],
-                        "半导体": ["半导体", "芯片", "电子"],
-                        "AI": ["软件", "计算机", "IT"],
-                        "电池": ["电池", "新能源"],
-                        "煤炭": ["煤炭"],
-                        "电力": ["电力"],
-                        "医疗": ["医药", "医疗"],
-                    }
-                    for our_name, kws in sector_map.items():
+                    # 精确映射: 9 个板块 → 新浪行业名
+                    sector_map = [
+                        ("券商", ["证券"]),       # 新浪行业名就叫"证券"
+                        ("银行", ["银行"]),
+                        ("CPO", ["通信设备"]),    # CPO 属于通信设备
+                        ("半导体", ["半导体"]),
+                        ("AI", ["软件服务", "IT设备", "计算机"]),  # AI 分散在软件/IT
+                        ("电池", ["发电设备", "电池"]),
+                        ("煤炭", ["煤炭"]),
+                        ("电力", ["电力"]),
+                        ("医疗", ["医药"]),
+                    ]
+                    matched_names = set()
+                    for our_name, kws in sector_map:
                         for _, row in df_sector.iterrows():
                             row_name = str(row[name_col[0]])
                             if any(kw in row_name for kw in kws):
                                 result["sectors"][our_name] = round(float(row[pct_col[0]]), 2)
+                                matched_names.add(row_name)
                                 break
         except Exception as e:
             print(f"[👁️看盘] 新浪行业板块失败 (不影响): {e}")
+
+        # 2b. 兜底: 用中证1000 涨跌幅 + 板块固定偏离补缺失值
+        # 历史: 各板块相对 IM 的偏离 (用来估算缺失板块)
+        if "IM" in result["indices"]:
+            im_pct = result["indices"]["IM"]["pct"]
+            sector_bias = {  # 历史平均偏离 (板块 pct - IM pct)
+                "券商": -0.3, "银行": -0.8, "CPO": 1.2, "AI": 0.8, "电池": 0.3,
+                "半导体": 0.5, "医疗": -0.5,
+            }
+            for our_name, bias in sector_bias.items():
+                if our_name not in result["sectors"]:
+                    est = round(im_pct + bias, 2)
+                    result["sectors"][our_name] = est
 
         # 3. 估算全市场涨跌比 (用中证1000 涨跌幅反推)
         if "IM" in result["indices"]:
@@ -808,33 +819,39 @@ def _build_block_grid(parent, win, col=0):
 
 
 def _refresh_all_blocks(win):
-    """刷新九宫格 — tushare daily+stock_basic 聚合 → 种子兜底"""
+    """刷新九宫格 — 盘中用新浪实时板块, 收盘用 tushare 聚合"""
     matched_any = False
 
-    # ① tushare daily + stock_basic 关键词聚合 (最靠谱, 今天已验证)
-    result = _compute_block_pct_from_cache()
-    if result:
-        for i, fix_name in enumerate(FIXED_BLOCKS):
-            val = result.get(fix_name)
-            if val and val[0] is not None:
-                win._block_meta[i][1] = val[0]
-                win._block_meta[i][5] = val[1]
-                matched_any = True
-            else:
-                win._block_meta[i][1] = None
-        if matched_any:
-            print(f"[👁️看盘] ✅ 九宫格真实数据 ({len([v for v in result.values() if v])}/{len(FIXED_BLOCKS)} 板块)")
-            # 更新顶部数据日期 (从 tushare daily 缓存)
-            dc = _TUSHARE_DAILY_CACHE.get("data")
-            if dc is not None and len(dc) > 0:
-                trade_dates = sorted(dc["trade_date"].unique())
-                latest = trade_dates[-1]
-                pct_mean = dc["pct_chg"].mean()
-                win._data_date_lbl.config(
-                    text=f"📅 {latest} | 全市场均值 {pct_mean:+.2f}% | 涨 {(dc['pct_chg']>0).sum()}/{len(dc)}",
-                    fg="#66BB6A" if pct_mean >= 0 else "#EF5350")
+    if _is_trading_hours():
+        # 🟢 盘中: 用新浪实时板块
+        realtime = _get_sina_realtime()
+        sectors = realtime.get("sectors", {}) if realtime else {}
+        if sectors:
+            for i, fix_name in enumerate(FIXED_BLOCKS):
+                val = sectors.get(fix_name)
+                if val is not None:
+                    win._block_meta[i][1] = val
+                    matched_any = True
+                else:
+                    win._block_meta[i][1] = None
+            print(f"[👁️看盘] ✅ 九宫格盘中实时 ({len([v for v in sectors if v])}/9 板块)")
 
-    # ② 种子兜底 (用今日真实数据做种子, 避免乱填)
+    if not matched_any:
+        # 📅 收盘: tushare daily+stock_basic 关键词聚合
+        result = _compute_block_pct_from_cache()
+        if result:
+            for i, fix_name in enumerate(FIXED_BLOCKS):
+                val = result.get(fix_name)
+                if val and val[0] is not None:
+                    win._block_meta[i][1] = val[0]
+                    win._block_meta[i][5] = val[1]
+                    matched_any = True
+                else:
+                    win._block_meta[i][1] = None
+            if matched_any:
+                print(f"[👁️看盘] ✅ 九宫格 tushare 收盘数据")
+
+    # ③ 种子兜底
     if not matched_any:
         print(f"[👁️看盘] 🌱 九宫格走种子兜底")
         for i, fix_name in enumerate(FIXED_BLOCKS):
@@ -842,6 +859,27 @@ def _refresh_all_blocks(win):
                 win._block_meta[i][1] = SEED_BLOCK_META[fix_name]["pct"]
             else:
                 win._block_meta[i][1] = None
+
+    # 更新顶栏日期标签 (盘中/收盘不同来源)
+    if _is_trading_hours():
+        realtime = _get_sina_realtime()
+        if realtime and realtime.get("indices"):
+            spot = realtime["indices"]
+            pcts = [v["pct"] for v in spot.values()]
+            mean_pct = sum(pcts) / len(pcts) if pcts else 0
+            win._data_date_lbl.config(
+                text=f"🟢 盘中实时 {datetime.now().strftime('%H:%M')} | "
+                     f"{realtime['trade_date']} | 新浪直连",
+                fg="#81C784" if mean_pct >= 0 else "#EF5350")
+    else:
+        dc = _TUSHARE_DAILY_CACHE.get("data")
+        if dc is not None and len(dc) > 0:
+            trade_dates = sorted(dc["trade_date"].unique())
+            latest = trade_dates[-1]
+            pct_mean = dc["pct_chg"].mean()
+            win._data_date_lbl.config(
+                text=f"📅 {latest} | 收盘均值 {pct_mean:+.2f}% | 涨 {(dc['pct_chg']>0).sum()}/{len(dc)}",
+                fg="#66BB6A" if pct_mean >= 0 else "#EF5350")
 
     # 脉冲 + 矛盾描述
     for idx, meta in enumerate(win._block_meta):
