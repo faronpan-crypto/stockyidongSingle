@@ -450,8 +450,9 @@ def _show_swing_knowledge(parent, title, def_text, logic_text, cases_list):
 
 
 # ── 主入口 ──
-def show_high_low_swing(parent):
-    """🎯 高抛低吸 (做T专区) 弹窗入口, 返回 Toplevel"""
+def show_high_low_swing(parent, app=None):
+    """🎯 高抛低吸 (做T专区) — 不联网, Lazy import. 
+    app: 主程序实例, 用于从持仓 tab 拿真实持仓股列表"""
     win = tk.Toplevel(parent)
     win.title("🎯 高抛低吸 (做T专区)")
     win.geometry("1280x820")
@@ -489,7 +490,7 @@ def show_high_low_swing(parent):
         print("[📈1minK] 按钮被点击!", flush=True)
         import traceback
         try:
-            _show_minute_kline_dialog(parent)
+            _show_minute_kline_dialog(parent, app=app)
             print("[📈1minK] 弹窗已创建", flush=True)
         except Exception as e:
             print(f"[📈1minK❌] {e}", flush=True); traceback.print_exc()
@@ -611,26 +612,56 @@ def show_high_low_swing(parent):
     for v in ["大盘", "板块", "持仓股"]:
         ttk.Radiobutton(obj_row, text=v, value=v, variable=obj_var).pack(side=tk.LEFT, padx=2)
     tk.Label(cond, text="持仓:", bg=_BG_PANEL, fg=_FG_DIM, font=("", 9)).grid(row=3, column=0, sticky="w", padx=(0, 2))
-    _holding_list = ["贵州茅台 600519", "中国平安 601318", "宁德时代 300750",
-                     "比亚迪 002594", "招商银行 600036", "五粮液 000858",
-                     "寒武纪 688256", "中芯国际 688981", "美的集团 000333",
-                     "药明康德 603259", "隆基绿能 601012", "大金重工 002487"]
-    try:
-        import sqlite3 as _sql, os as _os
-        for _db_cand in [
-            _os.path.expanduser("~/stockyidong_project/data/stock_analysis.db"),
-            _os.path.expanduser("~/Agent/stockyidong_project/data/stock_analysis.db"),
-        ]:
-            if _os.path.exists(_db_cand):
-                c = _sql.connect(_db_cand).cursor()
+    # ── 持仓股: 优先从 app 持仓 tab 拿, 兜底 SQLite + 硬编码 ──
+    _holding_list = []
+    _used_app_holdings = False
+    if app is not None:
+        try:
+            # 遍历持仓组 1-5, 收集所有持仓股
+            for _gi in range(1, 6):
                 try:
-                    c.execute("SELECT name || ' ' || ts_code FROM stock_analysis LIMIT 20")
-                    for r in c.fetchall():
-                        if r and r[0] not in _holding_list:
-                            _holding_list.insert(0, r[0])
+                    stocks, _, _, _ = app._get_holding_group_data(_gi)
+                    for _s in (stocks or []):
+                        # _s 可能是 (name, code, pos) 或 (name, code)
+                        if isinstance(_s, (list, tuple)) and len(_s) >= 2:
+                            _hn, _hc = str(_s[0]), str(_s[1])
+                            # 新浪代码转换
+                            _ex = _hc.split(".")[-1] if "." in _hc else ""
+                            _ex_map = {"SH": "sh", "SZ": "sz", "BJ": "bj", "sh": "sh", "sz": "sz", "bj": "bj"}
+                            _pure = _hc.split(".")[0].replace("SH", "").replace("SZ", "").replace("BJ", "")
+                            _sina = _ex_map.get(_ex, "sh") + (_pure if _pure else _hc)
+                            _label = f"{_hn} {_sina}"
+                            if _label not in _holding_list:
+                                _holding_list.append(_label)
+                    _used_app_holdings = True
                 except Exception: pass
-                c.close(); break
-    except Exception: pass
+            if _holding_list:
+                print(f"[🎯高抛低吸] ✅ 从持仓 tab 拿到 {len(_holding_list)} 只持仓股")
+        except Exception as e:
+            print(f"[🎯高抛低吸] 持仓 tab 读取失败: {e}")
+
+    # 兜底: SQLite + 硬编码
+    if not _holding_list:
+        _holding_list = ["贵州茅台 sh600519", "中国平安 sh601318", "宁德时代 sz300750",
+                         "比亚迪 sz002594", "招商银行 sh600036", "五粮液 sz000858",
+                         "寒武纪 sh688256", "中芯国际 sh688981", "美的集团 sz000333",
+                         "药明康德 sh603259", "隆基绿能 sh601012", "大金重工 sz002487"]
+        try:
+            import sqlite3 as _sql, os as _os
+            for _db_cand in [
+                _os.path.expanduser("~/stockyidong_project/data/stock_analysis.db"),
+                _os.path.expanduser("~/Agent/stockyidong_project/data/stock_analysis.db"),
+            ]:
+                if _os.path.exists(_db_cand):
+                    c = _sql.connect(_db_cand).cursor()
+                    try:
+                        c.execute("SELECT name || ' ' || CASE WHEN ts_code LIKE '%.SH' THEN 'sh'||replace(ts_code,'.SH','') WHEN ts_code LIKE '%.SZ' THEN 'sz'||replace(ts_code,'.SZ','') WHEN ts_code LIKE '%.BJ' THEN 'bj'||replace(ts_code,'.BJ','') ELSE ts_code END FROM stock_analysis LIMIT 20")
+                        for r in c.fetchall():
+                            if r and r[0] not in _holding_list:
+                                _holding_list.insert(0, r[0])
+                    except Exception: pass
+                    c.close(); break
+        except Exception: pass
     holding_combo = ttk.Combobox(cond, values=_holding_list, width=14)
     holding_combo.set(_holding_list[0])
     holding_combo.grid(row=3, column=1, columnspan=3, sticky="w", pady=2)
@@ -1047,7 +1078,7 @@ def _flash_refresh(parent):
 # 📈 1分钟 K线图弹窗 — 新浪直连 + MA5/10/20/60
 # ═══════════════════════════════════════════════
 
-def _show_minute_kline_dialog(parent_root):
+def _show_minute_kline_dialog(parent_root, app=None):
     """📈 1分钟周期 K线图 — 新浪直连 scale=1, 240 根, MA5/10/20/60"""
     import requests, json as _json, numpy as np
     try:
@@ -1082,28 +1113,46 @@ def _show_minute_kline_dialog(parent_root):
         "隆基绿能 sh601012", "大金重工 sz002487", "恒瑞医药 sh600276",
         "东方财富 sz300059", "中际旭创 sz300308", "药明康德 sh603259",
     ]
-    # 从 SQLite 持仓表读
+    # 持仓股: 优先 app 持仓 tab → 兜底 SQLite
     _holding_codes = []
-    try:
-        import sqlite3 as _sql, os as _os
-        for _db_cand in [
-            _os.path.expanduser("~/stockyidong_project/data/stock_analysis.db"),
-            _os.path.expanduser("~/Agent/stockyidong_project/data/stock_analysis.db"),
-        ]:
-            if _os.path.exists(_db_cand):
-                c = _sql.connect(_db_cand).cursor()
+    if app is not None:
+        try:
+            for _gi in range(1, 6):
                 try:
-                    c.execute("SELECT name, ts_code FROM stock_analysis LIMIT 30")
-                    for name, tcode in c.fetchall():
-                        if tcode:
-                            # tcode: 600519.SH → sh600519
-                            code, ex = tcode.split(".") if "." in tcode else (tcode, "SH")
-                            ex_map = {"SH": "sh", "SZ": "sz", "BJ": "bj"}
-                            sina_code = ex_map.get(ex, "sh") + code
-                            _holding_codes.append(f"{name or tcode} {sina_code}")
+                    stocks, _, _, _ = app._get_holding_group_data(_gi)
+                    for _s in (stocks or []):
+                        if isinstance(_s, (list, tuple)) and len(_s) >= 2:
+                            _hn, _hc = str(_s[0]), str(_s[1])
+                            _ex = _hc.split(".")[-1] if "." in _hc else ""
+                            _ex_map = {"SH": "sh", "SZ": "sz", "BJ": "bj", "sh": "sh", "sz": "sz", "bj": "bj"}
+                            _pure = _hc.split(".")[0]
+                            _sina = _ex_map.get(_ex, "sh") + _pure
+                            _label = f"{_hn} {_sina}"
+                            if _label not in _holding_codes:
+                                _holding_codes.append(_label)
                 except Exception: pass
-                c.close(); break
-    except Exception: pass
+        except Exception: pass
+
+    if not _holding_codes:
+        try:
+            import sqlite3 as _sql, os as _os
+            for _db_cand in [
+                _os.path.expanduser("~/stockyidong_project/data/stock_analysis.db"),
+                _os.path.expanduser("~/Agent/stockyidong_project/data/stock_analysis.db"),
+            ]:
+                if _os.path.exists(_db_cand):
+                    c = _sql.connect(_db_cand).cursor()
+                    try:
+                        c.execute("SELECT name, ts_code FROM stock_analysis LIMIT 30")
+                        for name, tcode in c.fetchall():
+                            if tcode:
+                                code, ex = tcode.split(".") if "." in tcode else (tcode, "SH")
+                                ex_map = {"SH": "sh", "SZ": "sz", "BJ": "bj"}
+                                sina_code = ex_map.get(ex, "sh") + code
+                                _holding_codes.append(f"{name or tcode} {sina_code}")
+                    except Exception: pass
+                    c.close(); break
+        except Exception: pass
 
     ALL_OPTIONS = _INDEX_LIST + _holding_codes + _LEADER_LIST
 
