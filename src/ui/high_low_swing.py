@@ -1180,7 +1180,7 @@ def _show_minute_kline_dialog(parent_root, app=None):
                     c.close(); break
         except Exception: pass
 
-    ALL_OPTIONS = _ETF_LIST + _INDEX_LIST + _holding_codes + _LEADER_LIST
+    ALL_OPTIONS = _INDEX_LIST + _ETF_LIST + _holding_codes + _LEADER_LIST
 
     # ── 顶部条件区 ──
     top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=44); top.pack(fill=tk.X)
@@ -1467,8 +1467,9 @@ def _show_multi_kline_comparison(parent_root, app=None):
 
     # ── 下拉候选池 ──
     _POOL = [
-        # 指数
-        "上证指数 sh000001", "深成指 sz399001", "创业板 sz399006", "科创50 sh000688",
+        # 🎯 三大指数置顶 (游资必看)
+        "上证指数 sh000001", "深成指 sz399001", "创业板 sz399006",
+        "科创50 sh000688", "沪深300 sh000300", "中证500 sh000905",
         # ETF
         "证券ETF sh512880", "半导体ETF sh512480", "创业板ETF sz159915",
         "沪深300ETF sh510300", "中证500ETF sh510500", "中证1000ETF sh512100",
