@@ -580,8 +580,16 @@ def _compute_block_pct_from_cache():
                       merged["industry"].astype(str).str.contains(pat, na=False)
                 mask = idx if mask is None else (mask | idx)
             if mask is not None and mask.sum() >= 2:
-                sub = merged[mask]
-                result[fix_name] = (float(sub["pct_chg"].mean()), int(mask.sum()))
+                sub = merged[mask].copy()
+                mean_pct = float(sub["pct_chg"].mean())
+                n = int(mask.sum())
+                # Top3 龙头: 按成交额取前3 (成交额=amount, 单位千元)
+                if "amount" in sub.columns:
+                    top3 = sub.sort_values("amount", ascending=False).head(3)
+                else:
+                    top3 = sub.sort_values("pct_chg", ascending=False).head(3)
+                top3_list = [(str(r["name"]), float(r["pct_chg"])) for _, r in top3.iterrows()]
+                result[fix_name] = (mean_pct, n, top3_list)
             else:
                 result[fix_name] = None
 
@@ -922,8 +930,8 @@ def _build_block_grid(parent, win, col=0):
     canvas.pack(fill=tk.BOTH, expand=True)
     win._block_canvas = canvas
 
-    # 每格元数据: [板块名, 涨跌幅, 净流入, 是否锁定, 是否脉冲中, 匹配个股数]
-    win._block_meta = [[name, None, None, True, False, None] for name in FIXED_BLOCKS]
+    # 每格元数据: [板块名, 涨跌幅, 净流入, 是否锁定, 是否脉冲中, 匹配个股数, top3龙头[(name,pct),...]]
+    win._block_meta = [[name, None, None, True, False, None, []] for name in FIXED_BLOCKS]
     win._block_cells = []  # [(x1,y1,x2,y2), 板块名]
 
     # 下方矛盾描述
@@ -962,6 +970,7 @@ def _refresh_all_blocks(win):
                     if val and val[0] is not None:
                         win._block_meta[i][1] = val[0]
                         win._block_meta[i][5] = val[1]
+                        win._block_meta[i][6] = val[2] if len(val) > 2 else []
                         matched_any = True
             if matched_any:
                 print(f"[👁️看盘] ✅ tushare 聚合补齐剩余板块")
@@ -975,6 +984,7 @@ def _refresh_all_blocks(win):
                 if val and val[0] is not None:
                     win._block_meta[i][1] = val[0]
                     win._block_meta[i][5] = val[1]
+                    win._block_meta[i][6] = val[2] if len(val) > 2 else []
                     matched_any = True
                 else:
                     win._block_meta[i][1] = None
@@ -1080,15 +1090,37 @@ def _draw_block_grid(win):
             c.create_rectangle(x1, y1, x2, y2, fill=bg, outline="#555",
                                width=1, tags=f"cell_{idx}")
 
-        # 板块名 (格子变小, 字号缩)
-        c.create_text(x1 + cw // 2, y1 + ch // 2 - 10, text=name,
+        # 板块名 (上半部分)
+        c.create_text(x1 + cw // 2, y1 + 14, text=name,
                       fill="#FFFFFF", font=("", 10, "bold"), tags=f"cell_{idx}")
         # 涨跌幅
         if pct is not None:
             sign = "+" if pct >= 0 else ""
-            c.create_text(x1 + cw // 2, y1 + ch // 2 + 10,
+            c.create_text(x1 + cw // 2, y1 + 30,
                           text=f"{sign}{pct:.2f}%", fill=fg,
-                          font=("", 10, "bold"), tags=f"cell_{idx}")
+                          font=("", 11, "bold"), tags=f"cell_{idx}")
+
+        # 个股数小标签 (右上角, 如果有)
+        n_stocks = meta[5]
+        if n_stocks:
+            c.create_text(x2 - 7, y1 + 20, text=f"n={n_stocks}", fill="#9E9E9E",
+                          font=("", 7), tags=f"cell_{idx}")
+
+        # Top3 龙头 (下半部分, 3 行小字号)
+        top3 = meta[6] if len(meta) > 6 else []
+        if top3:
+            for ti, (sname, spct) in enumerate(top3[:3]):
+                sy = y1 + ch - 22 + ti * 10
+                # 名字截断到 4 字
+                short = sname[:4] if len(sname) > 4 else sname
+                sfg = "#FF8A80" if spct >= 0 else "#69F0AE"
+                ssign = "+" if spct >= 0 else ""
+                c.create_text(x1 + 6, sy, text=f"{short}",
+                              fill="#BDBDBD", font=("", 8), anchor=tk.W,
+                              tags=f"cell_{idx}")
+                c.create_text(x2 - 6, sy, text=f"{ssign}{spct:.1f}%",
+                              fill=sfg, font=("", 8), anchor=tk.E,
+                              tags=f"cell_{idx}")
 
         # ❓ 板块分析按钮 (左上角, 蓝色下划线)
         c.create_text(x1 + 12, y1 + 10, text="❓", fill="#90CAF9",
