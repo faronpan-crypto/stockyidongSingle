@@ -8296,6 +8296,7 @@ class StockKeywordAnalyzerGUI:
             ("💰是否加仓", self._show_add_position_dialog, False, "quick"),
             # ---- 🤖 AI分析 (quick) ----
             ("背离做T", self._show_divergence_t_v2, False, "quick"),
+            ("🎯高抛低吸", self._show_high_low_swing_dialog, False, "quick"),
             ("✍️AI写手", self._show_ai_writer_dialog, False, "quick"),
             ("🎬短剧写手", self._show_short_drama_dialog, False, "quick"),
             ("📊舆情助手", self._show_public_opinion_dialog, False, "quick"),
@@ -95331,6 +95332,18 @@ except Exception as e:
         analyze_btn.configure(command=_run_analysis)
         # 立即拉一次（首次打开弹窗有数据）
         _run_analysis()
+    def _show_high_low_swing_dialog(self):
+        """🎯 高抛低吸 (做T专区) —— Lazy import ui.high_low_swing"""
+        import tkinter as _tk
+        try:
+            from ui import high_low_swing as _hls
+            _hls.show_high_low_swing(getattr(self, 'root', None) or self)
+        except Exception as _e:
+            try:
+                from tkinter import messagebox as _mb
+                _mb.showerror("错误", f"无法打开高抛低吸弹窗: {_e}")
+            except Exception:
+                print(f"[high_low_swing] error: {_e}")
     def _show_divergence_t_v2(self):
         """背离做T v2：盘中实时/盘后大盘S1-S4分析 + AI建议 + 资讯表保存"""
         import datetime as dt

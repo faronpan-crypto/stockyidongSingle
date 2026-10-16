@@ -14143,6 +14143,16 @@ class DapanMixin:
         except Exception as e:
             print(f"[👁️看盘❌] {e}", flush=True); _tb.print_exc()
 
+    def _show_high_low_swing(self):
+        """🎯 高抛低吸 (做T专区) — lazy import, 不联网"""
+        import traceback as _tb
+        print("[🎯高抛低吸] 按钮被点击!", flush=True)
+        try:
+            from ui.high_low_swing import show_high_low_swing as _hl
+            _hl(getattr(self, 'root', None) or getattr(self, '_root', None))
+        except Exception as e:
+            print(f"[🎯高抛低吸❌] {e}", flush=True); _tb.print_exc()
+
     def _show_wechat_dialog(self):
         """📱 微信日报生成 — lazy import"""
         import traceback as _tb
