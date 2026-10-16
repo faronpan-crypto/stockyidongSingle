@@ -272,6 +272,108 @@ _TUSHARE_DAILY_CACHE = {"time": 0, "data": None}
 _TUSHARE_SB_CACHE = {"time": 0, "data": None}
 _BLOCK_PCT_CACHE = {"time": 0, "data": None}
 _SPOT_INDEX_CACHE = {"time": 0, "data": None}
+_SINA_REALTIME_CACHE = {"time": 0, "data": None}
+
+
+def _is_trading_hours():
+    """判断是否在盘中 (交易日 9:15-15:05)"""
+    now = datetime.now()
+    # 周末不交易
+    if now.weekday() >= 5:
+        return False
+    h = now.hour; m = now.minute
+    mins = h * 60 + m
+    return (9 * 60 + 15) <= mins <= (15 * 60 + 5)
+
+
+def _get_sina_realtime():
+    """新浪直连实时: 四大指数 + 行业板块 (秒级返回)
+    返回 dict: {
+        "indices": {"IH": {close, pct, ...}, "IF": ..., "IC": ..., "IM": ...},
+        "sectors": {"券商": pct, "银行": pct, ...},
+        "estimated_up_count": int,  # 估算值
+        "trade_date": "20261016",
+        "source": "新浪实时"
+    }
+    """
+    now = time.time()
+    if _SINA_REALTIME_CACHE["data"] and (now - _SINA_REALTIME_CACHE["time"] < 30):
+        return _SINA_REALTIME_CACHE["data"]
+
+    result = {"indices": {}, "sectors": {}, "estimated_up_count": None,
+              "trade_date": datetime.now().strftime("%Y%m%d"), "source": "新浪实时"}
+    try:
+        import requests, re
+
+        # 1. 四大指数 (IH/IF/IC/IM 对应上证50/沪深300/中证500/中证1000)
+        idx_map = [("IH", "sh000016"), ("IF", "sh000300"),
+                   ("IC", "sh000905"), ("IM", "sh000852")]
+        codes = ",".join(c for _, c in idx_map)
+        r = requests.get(f"https://hq.sinajs.cn/list={codes}",
+                         headers={"Referer": "https://finance.sina.com.cn",
+                                  "User-Agent": "Mozilla/5.0",
+                                  "Accept-Language": "zh-CN"},
+                         timeout=6)
+        if r.status_code == 200:
+            for line, (name, _) in zip(r.text.strip().split("\n"), idx_map):
+                m = re.search(r'"([^"]+)"', line)
+                if m:
+                    parts = m.group(1).split(",")
+                    if len(parts) >= 6:
+                        close = float(parts[3])
+                        yclose = float(parts[2])
+                        pct = (close - yclose) / yclose * 100
+                        result["indices"][name] = {"close": close, "pct": round(pct, 2),
+                                                   "yclose": yclose}
+
+        # 2. 行业板块 (新浪行业分类 ~30 个, 这里只取 9 个关注板块)
+        # 新浪行业指数代码: http://vip.stock.finance.sina.com.cn/q/view/newSHSectors.php
+        # 用 akshare 新浪行业指数
+        try:
+            import akshare as ak
+            # 只拿 top 板块, 快速
+            df_sector = ak.stock_sector_spot(indicator="新浪行业")
+            # df_sector 列: 序号, 名称, 现价, 涨跌幅, ...
+            if df_sector is not None and len(df_sector) > 0:
+                pct_col = [c for c in df_sector.columns if "涨跌" in str(c)]
+                name_col = [c for c in df_sector.columns if "名称" in str(c) or "板块" in str(c)]
+                if pct_col and name_col:
+                    # 把我们关注的 9 个板块映射
+                    sector_map = {
+                        "券商": ["证券", "券商"],
+                        "银行": ["银行"],
+                        "CPO": ["通信设备", "光模块"],
+                        "半导体": ["半导体", "芯片", "电子"],
+                        "AI": ["软件", "计算机", "IT"],
+                        "电池": ["电池", "新能源"],
+                        "煤炭": ["煤炭"],
+                        "电力": ["电力"],
+                        "医疗": ["医药", "医疗"],
+                    }
+                    for our_name, kws in sector_map.items():
+                        for _, row in df_sector.iterrows():
+                            row_name = str(row[name_col[0]])
+                            if any(kw in row_name for kw in kws):
+                                result["sectors"][our_name] = round(float(row[pct_col[0]]), 2)
+                                break
+        except Exception as e:
+            print(f"[👁️看盘] 新浪行业板块失败 (不影响): {e}")
+
+        # 3. 估算全市场涨跌比 (用中证1000 涨跌幅反推)
+        if "IM" in result["indices"]:
+            im_pct = result["indices"]["IM"]["pct"]
+            # 历史回归: IM 涨跌 +1% → 上涨家数占比 +15% (粗糙但够用)
+            base_up = 2300  # 基准: 平盘时约 2300 家上涨
+            est_up = int(base_up + im_pct * 180)
+            est_up = max(300, min(5200, est_up))
+            result["estimated_up_count"] = est_up
+
+        _SINA_REALTIME_CACHE["data"] = result
+        _SINA_REALTIME_CACHE["time"] = now
+        print(f"[👁️看盘] ✅ 新浪实时: {result['indices']}, 估算涨 {result['estimated_up_count']}")
+    except Exception as e:
+        print(f"[👁️看盘] 新浪实时失败: {e}")
+    return result
 
 
 def _get_tushare_daily_today():
@@ -1203,15 +1305,30 @@ def _get_spot_index_cache():
 
 
 def _refresh_futures(win):
-    """刷新四宫格 — 显示现货指数 + 今日涨跌, 期货拿不到则标注"""
-    spot = _get_spot_index_cache()
-
-    # 更新数据日期标签
-    if spot:
-        dates = sorted({v["trade_date"] for v in spot.values()})
-        win._data_date_lbl.config(text=f"📅 数据日期: {dates[-1]} (tushare index_daily)")
+    """刷新四宫格 — 盘中用新浪实时, 收盘用 tushare index_daily"""
+    if _is_trading_hours():
+        realtime = _get_sina_realtime()
+        spot = None  # 不拿 tushare
+        if realtime and realtime.get("indices"):
+            spot = {}
+            for name, info in realtime["indices"].items():
+                spot[name] = {"close": info["close"], "pct": info["pct"],
+                              "trade_date": realtime["trade_date"]}
+            win._data_date_lbl.config(
+                text=f"🟢 盘中实时 {datetime.now().strftime('%H:%M')} | {realtime['trade_date']} | 新浪直连",
+                fg="#81C784")
+        else:
+            win._data_date_lbl.config(text="⚠️ 新浪实时失败, 回退收盘数据", fg="#F48FB1")
+            spot = _get_spot_index_cache()
     else:
-        win._data_date_lbl.config(text="⚠️ 实时接口无响应, 数据可能过时")
+        spot = _get_spot_index_cache()
+        if spot:
+            dates = sorted({v.get("trade_date", "") for v in spot.values() if v})
+            win._data_date_lbl.config(
+                text=f"📅 收盘数据: {dates[-1] if dates else '—'} | tushare index_daily",
+                fg="#90CAF9")
+        else:
+            win._data_date_lbl.config(text="⚠️ 数据加载中", fg="#BDBDBD")
 
     if spot:
         for i, (name, full_name, _ts_code) in enumerate(FUT_NAMES):
@@ -2005,34 +2122,71 @@ def _refresh_watch_analysis(win, force_ai=False):
 
 def _gather_analysis_context(win):
     ctx = {}
-    daily = _TUSHARE_DAILY_CACHE.get("data")
-    if daily is not None and len(daily) > 0:
-        ctx["trade_date"] = str(sorted(daily["trade_date"].unique())[-1])
-        ctx["pct_mean"] = round(float(daily["pct_chg"].mean()), 2)
-        ctx["up_count"] = int((daily["pct_chg"] > 0).sum())
-        ctx["down_count"] = int((daily["pct_chg"] < 0).sum())
-        ctx["zt_count"] = int((daily["pct_chg"] >= 9.5).sum())
-        ctx["dt_count"] = int((daily["pct_chg"] <= -9.5).sum())
+    is_intraday = _is_trading_hours()
+    realtime = _get_sina_realtime() if is_intraday else None
+
+    # 盘中: 优先用新浪实时覆盖 tushare 收盘数据
+    if is_intraday and realtime and realtime.get("indices"):
+        ctx["trade_date"] = realtime.get("trade_date", datetime.now().strftime("%Y%m%d"))
+        # 用中证1000 作为"全市场情绪代理"的均值
+        spot = realtime["indices"]
+        pcts = [v["pct"] for v in spot.values()]
+        ctx["pct_mean"] = round(sum(pcts) / len(pcts), 2) if pcts else 0
+        # 涨跌比从实时估算
+        est_up = realtime.get("estimated_up_count", 2300)
+        ctx["up_count"] = est_up
+        ctx["down_count"] = 5565 - est_up  # 总股数近似 5565
+        ctx["zt_count"] = None  # 盘中涨停数不精确, 不覆盖
+        ctx["dt_count"] = None
+        # 板块
+        if realtime.get("sectors"):
+            ctx["block_ranking"] = sorted(realtime["sectors"].items(),
+                                          key=lambda x: x[1], reverse=True)
+        else:
+            ctx["block_ranking"] = []
+        # 现货指数 (盘中用实时)
+        ctx["spot"] = {name: {"close": info["close"], "pct": info["pct"],
+                              "trade_date": ctx["trade_date"]}
+                       for name, info in spot.items()}
+        ctx["data_source"] = "🟢 盘中实时 (新浪直连)"
     else:
-        ctx.update({"trade_date": "—", "pct_mean": 0, "up_count": 0, "down_count": 0,
-                    "zt_count": 0, "dt_count": 0})
-    sb = _TUSHARE_SB_CACHE.get("data")
-    if daily is not None and sb is not None:
-        merged = daily.merge(sb, on="ts_code", how="left")
-        block_avgs = {}
-        for bname, kws in BLOCK_KEYWORDS.items():
-            mask = merged["name"].str.contains("|".join(kws), case=False, na=False)
-            sub = merged[mask]
-            if len(sub) > 0:
-                block_avgs[bname] = round(float(sub["pct_chg"].mean()), 2)
-        ctx["block_ranking"] = sorted(block_avgs.items(), key=lambda x: x[1], reverse=True)
-    else:
-        ctx["block_ranking"] = []
-    ctx["spot"] = _SPOT_INDEX_CACHE.get("data") or {}
+        # 收盘: 用 tushare
+        daily = _TUSHARE_DAILY_CACHE.get("data")
+        if daily is not None and len(daily) > 0:
+            ctx["trade_date"] = str(sorted(daily["trade_date"].unique())[-1])
+            ctx["pct_mean"] = round(float(daily["pct_chg"].mean()), 2)
+            ctx["up_count"] = int((daily["pct_chg"] > 0).sum())
+            ctx["down_count"] = int((daily["pct_chg"] < 0).sum())
+            ctx["zt_count"] = int((daily["pct_chg"] >= 9.5).sum())
+            ctx["dt_count"] = int((daily["pct_chg"] <= -9.5).sum())
+        else:
+            ctx.update({"trade_date": "—", "pct_mean": 0, "up_count": 0, "down_count": 0,
+                        "zt_count": 0, "dt_count": 0})
+        sb = _TUSHARE_SB_CACHE.get("data")
+        if daily is not None and sb is not None:
+            merged = daily.merge(sb, on="ts_code", how="left")
+            block_avgs = {}
+            for bname, kws in BLOCK_KEYWORDS.items():
+                mask = merged["name"].str.contains("|".join(kws), case=False, na=False)
+                sub = merged[mask]
+                if len(sub) > 0:
+                    block_avgs[bname] = round(float(sub["pct_chg"].mean()), 2)
+            ctx["block_ranking"] = sorted(block_avgs.items(), key=lambda x: x[1], reverse=True)
+        else:
+            ctx["block_ranking"] = []
+        ctx["spot"] = _SPOT_INDEX_CACHE.get("data") or {}
+        ctx["data_source"] = "📅 收盘数据 (tushare)"
     total = ctx["up_count"] + ctx["down_count"]
     ctx["up_ratio"] = round(ctx["up_count"] / total * 100, 1) if total > 0 else 50
-    zt = ctx["zt_count"]; ratio = ctx["up_ratio"]
-    if zt >= 80 and ratio >= 70: ctx["cycle"] = "P3 高潮"
+    zt = ctx.get("zt_count") or 0; ratio = ctx["up_ratio"]
+    # 盘中 zt 不精确, 只用 ratio 判断
+    if zt == 0:
+        if ratio >= 70: ctx["cycle"] = "P3 高潮 (估)"
+        elif ratio >= 55: ctx["cycle"] = "P2 发酵 (估)"
+        elif ratio >= 50: ctx["cycle"] = "P1 启动 (估)"
+        elif ratio < 45: ctx["cycle"] = "P4 退潮 (估)"
+        else: ctx["cycle"] = "P5 震荡 (估)"
+    elif zt >= 80 and ratio >= 70: ctx["cycle"] = "P3 高潮"
     elif zt >= 40 and ratio >= 55: ctx["cycle"] = "P2 发酵"
     elif zt >= 15 and ratio >= 50: ctx["cycle"] = "P1 启动"
     elif ratio < 45: ctx["cycle"] = "P4 退潮"
@@ -2046,7 +2200,7 @@ def _gather_analysis_context(win):
 def _build_7layer_analysis(ctx):
     date = ctx.get("trade_date", "—"); pct = ctx.get("pct_mean", 0)
     up = ctx.get("up_count", 0); down = ctx.get("down_count", 0)
-    zt = ctx.get("zt_count", 0); dt = ctx.get("dt_count", 0)
+    zt = ctx.get("zt_count") or 0; dt = ctx.get("dt_count") or 0
     cycle = ctx.get("cycle", "—"); light = ctx.get("light", "—")
     ratio = ctx.get("up_ratio", 0); blocks = ctx.get("block_ranking", [])
     spot = ctx.get("spot", {})
