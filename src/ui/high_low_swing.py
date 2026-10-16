@@ -1251,12 +1251,10 @@ def _show_minute_kline_dialog(parent_root, app=None):
             return
 
         n = len_var.get()
-        # 判断周期: ETF (5位数字) → 日线 scale=240; 指数/个股 → 1min scale=1
-        _pure_code = sina_code[2:] if len(sina_code) == 8 else sina_code  # 去掉 sh/sz/bj 前缀
-        _is_etf = len(_pure_code) == 5  # ETF 如 512480 (5位), 个股 600519 (6位), 指数 000001 (6位)
-        _scale = 240 if _is_etf else 1
-        _period_label = "日线" if _is_etf else "1min"
-        status_lbl.config(text=f"⏳ 拉取 {opt} {n} 根 {_period_label} K线 (scale={_scale})...", fg=_FG_BLUE)
+        # 所有标的统一 1min (盘中/盘后都有 240 根缓存)
+        _scale = 1
+        _period_label = "1min"
+        status_lbl.config(text=f"⏳ 拉取 {opt} {n} 根 {_period_label} K线...", fg=_FG_BLUE)
         dlg.update()
 
         def _fetch():
@@ -1580,20 +1578,18 @@ def _show_multi_kline_comparison(parent_root, app=None):
     fig = None
     canvas = None
 
-    def _fetch_one(sina_code, n=80):
-        """拉一个标的的 K 线 (ETF 日线, 个股 1min)"""
-        _pure = sina_code[2:] if len(sina_code) == 8 else sina_code
-        is_etf = len(_pure) == 5
-        scale = 240 if is_etf else 1
+    def _fetch_one(sina_code, n=240):
+        """拉一个标的的 1min K 线 (统一 1min, 新浪 ETF/指数/个股都支持)"""
+        scale = 1
         try:
             url = (f"https://quotes.sina.cn/cn/api/jsonp.php/var%20{sina_code}=/"
                    f"CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen={n}")
             r = requests.get(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"},
                              timeout=8)
             start = r.text.index("(") + 1; end = r.text.rindex(");")
-            return _json.loads(r.text[start:end]), is_etf, None
+            return _json.loads(r.text[start:end]), False, None
         except Exception as e:
-            return None, is_etf, str(e)
+            return None, False, str(e)
 
     def _ma(arr, n):
         out = np.full_like(arr, np.nan, dtype=float)
@@ -1676,9 +1672,18 @@ def _show_multi_kline_comparison(parent_root, app=None):
             ax.plot(x, ma20, color="#AB47BC", lw=0.9, label="MA20")
             ax.plot(x, ma60, color="#EF9A9A", lw=1.2, label="MA60")
 
+            # 🎯 mini K 线也加 MA60 上穿🟢买/下穿🔴卖
+            for i in range(61, len(c)):
+                if np.isnan(ma60[i]) or np.isnan(ma60[i-1]): continue
+                if c[i-1] < ma60[i-1] and c[i] >= ma60[i]:
+                    ax.scatter([x[i]], [c[i] * 0.998], marker="^", s=40,
+                               color="#66BB6A", zorder=10)
+                elif c[i-1] > ma60[i-1] and c[i] <= ma60[i]:
+                    ax.scatter([x[i]], [c[i] * 1.002], marker="v", s=40,
+                               color="#EF5350", zorder=10)
+
             # 标题 (周期 + 最新 MA)
-            period = "日线" if is_etf else "1min"
-            title_txt = f"{label} ({period})"
+            title_txt = f"{label} (1min)"
             ax.set_title(title_txt, color="#E0E0E0", fontsize=9, fontweight="bold", pad=4)
             ax.set_facecolor(_BG_PANEL)
             ax.tick_params(colors=_FG_DIM, labelsize=7)
