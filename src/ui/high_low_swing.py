@@ -1331,10 +1331,12 @@ def _show_minute_kline_dialog(parent_root, app=None):
 
         fig.subplots_adjust(top=0.92, bottom=0.18, left=0.08, right=0.94, hspace=0.05)
 
-        # ── Canvas + Toolbar ──
-        canvas = FigureCanvasTkAgg(fig, master=canvas_frame, background=_BG_PANEL)
+        canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        # 手动设置 canvas widget 背景
+        try: canvas.get_tk_widget().configure(bg=_BG_PANEL)
+        except Exception: pass
         tb = NavigationToolbar2Tk(canvas, canvas_frame)
         tb.update()
         tb.pack(side=tk.BOTTOM, fill=tk.X)
