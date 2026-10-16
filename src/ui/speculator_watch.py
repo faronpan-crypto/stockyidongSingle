@@ -2674,7 +2674,8 @@ def _build_leak_panel(parent, win):
     tabs = [("📰 资讯股", "#64B5F6", "news", ("代码", "名称", "涨幅%", "成交额", "备注")),
             ("🔥 强势票", "#FFD54F", "strong", ("代码", "名称", "涨幅%", "成交额", "备注")),
             ("📉 超跌票", "#EF5350", "drop", ("代码", "名称", "涨幅%", "成交额", "8日回撤")),
-            ("🛡️ 支撑位", "#AED581", "support", ("代码", "名称", "现价", "10日支撑", "20日支撑", "60日支撑"))]
+            ("🛡️ 支撑位", "#AED581", "support", ("代码", "名称", "现价", "10日支撑", "20日支撑", "60日支撑")),
+            ("📉 高开低走", "#FF8A65", "hlswing", ("代码", "名称", "高开幅度", "低走幅度", "高抛位", "低吸位"))]
 
     win._leak_tvs = {}
     for title, color, key, cols in tabs:
@@ -2860,7 +2861,7 @@ def _load_leak_data(win):
     def _bg():
         try:
             # 准备数据
-            data = {"news": [], "strong": [], "drop": [], "support": []}
+            data = {"news": [], "strong": [], "drop": [], "support": [], "hlswing": []}
             pro = None  # 先声明, 各模块复用
             try:
                 import tushare as ts
@@ -3086,6 +3087,116 @@ def _load_leak_data(win):
                 print(f"[👁️看盘] ✅ 支撑位分析: {len(data['support'])} 只")
             except Exception as e:
                 print(f"[捡漏] 支撑位失败: {e}")
+
+            # ⑤ 高抛低吸 (高开低走识别 + 位计算)
+            try:
+                # 候选: 强势票 + 资讯股 + 龙头, unique 最多 30 只
+                candi = set()
+                for row in data.get("strong", []):
+                    if row and row[0]: candi.add(row[0])
+                for row in data.get("news", []):
+                    if row and row[0]: candi.add(row[0])
+                for code in ["600519", "300750", "002594", "601318", "300059",
+                             "600036", "601012", "000001", "600276", "300124"]:
+                    candi.add(code)
+                candi = list(candi)[:30]
+
+                today_daily = _TUSHARE_DAILY_CACHE.get("data")  # 今日有 open/high/low/close
+
+                for code in candi:
+                    try:
+                        # 1) 先从今日 daily 缓存取 (如果 tushare daily 已拉过)
+                        tc = code + ".SZ" if code.startswith("3") or code.startswith("0") or code.startswith("2") else code + ".SH"
+                        td_row = None
+                        if today_daily is not None and len(today_daily) > 0:
+                            sub = today_daily[today_daily["ts_code"] == tc]
+                            if len(sub) > 0: td_row = sub.iloc[0]
+
+                        open_p = float(td_row["open"]) if td_row is not None else 0
+                        high_p = float(td_row["high"]) if td_row is not None else 0
+                        low_p = float(td_row["low"]) if td_row is not None else 0
+                        close_p = float(td_row["close"]) if td_row is not None else 0
+                        preclose_p = float(td_row["pre_close"]) if td_row is not None else 0
+
+                        if preclose_p <= 0 or close_p <= 0: continue
+
+                        # 高开幅度 = (开盘 - 昨收) / 昨收
+                        gap_pct = (open_p - preclose_p) / preclose_p * 100
+                        # 低走幅度 = (开盘 - 收盘) / 开盘
+                        fade_pct = (open_p - close_p) / open_p * 100
+
+                        # 高开低走判定: 高开 >= 1% 且 收盘 < 开盘 且 振幅 >= 2%
+                        amp_pct = (high_p - low_p) / preclose_p * 100
+                        if gap_pct >= 1.0 and close_p < open_p and amp_pct >= 2.0:
+                            # 需要 MA 来算位: 拉 80 日 K 线
+                            kd = None
+                            if pro is not None:
+                                end = datetime.now().strftime("%Y%m%d")
+                                start = (datetime.now() - timedelta(days=180)).strftime("%Y%m%d")
+                                try:
+                                    kd = pro.daily(ts_code=tc, start_date=start, end_date=end)
+                                except Exception: kd = None
+                            if kd is None or len(kd) < 20: continue
+
+                            kd = kd.sort_values("trade_date").reset_index(drop=True)
+                            close = kd["close"].astype(float)
+                            n = len(close)
+                            ma5 = close.rolling(5).mean().iloc[-1]
+                            ma10 = close.rolling(10).mean().iloc[-1]
+                            ma20 = close.rolling(20).mean().iloc[-1]
+
+                            # BOLL (20, 2)
+                            boll_mid = ma20
+                            std20 = close.rolling(20).std().iloc[-1]
+                            boll_up = boll_mid + 2 * std20
+                            boll_low = boll_mid - 2 * std20
+
+                            # ATR (14)
+                            tr = kd.apply(lambda r: max(
+                                float(r["high"]) - float(r["low"]),
+                                abs(float(r["high"]) - float(r["pre_close"])),
+                                abs(float(r["low"]) - float(r["pre_close"]))), axis=1)
+                            atr = tr.rolling(14).mean().iloc[-1]
+
+                            # 高抛位: 现价上方的压力 — 取 min(日内高点, BOLL上轨, MA5) 中最低的
+                            sell_cands = [x for x in [high_p, boll_up, ma5] if x == x]
+                            sell_level = min(sell_cands) if sell_cands else high_p
+                            # 低吸位: 现价下方的支撑 — 在 [日内低, BOLL下, MA10, MA20] 里选比现价低且最高的
+                            buy_cands_all = [x for x in [low_p, boll_low, ma10, ma20] if x == x]
+                            # 先过滤掉比现价高太多的 (阻力不是支撑), 再选最高的
+                            buy_cands_below = [x for x in buy_cands_all if x <= close_p * 1.02]
+                            buy_level = max(buy_cands_below) if buy_cands_below else low_p
+
+                            name = "—"
+                            if _TUSHARE_SB_CACHE.get("data") is not None:
+                                c2 = _TUSHARE_SB_CACHE["data"]
+                                cm = c2[c2["ts_code"].str.startswith(code)]
+                                if len(cm) > 0: name = str(cm.iloc[0]["name"])
+
+                            # 格式化 sell_level / buy_level: 如果是 NaN 用 —
+                            def _fmt(v):
+                                if v != v: return "—"
+                                return f"{v:.2f}"
+
+                            # 只保留 sell 和 buy 都合理的 (sell > buy, 且 buy 不远离现价)
+                            if sell_level != sell_level or buy_level != buy_level: continue
+                            if sell_level <= buy_level: continue
+                            # 低吸位不能比现价高太多 (>5%) 或者 比现价低 >15% 就离谱
+                            if buy_level > close_p * 1.05 or buy_level < close_p * 0.85: continue
+
+                            data["hlswing"].append((
+                                code, name,
+                                f"{gap_pct:+.1f}%",
+                                f"{fade_pct:+.1f}%",
+                                _fmt(sell_level),
+                                _fmt(buy_level)))
+                    except Exception: continue
+
+                # 按高开幅度排, 高开越多越典型
+                data["hlswing"].sort(key=lambda x: float(x[2].rstrip("%+")), reverse=True)
+                print(f"[👁️看盘] ✅ 高开低走: {len(data['hlswing'])} 只")
+            except Exception as e:
+                print(f"[捡漏] 高开低走失败: {e}")
 
             # 更新 UI + 写缓存
             def _apply():
