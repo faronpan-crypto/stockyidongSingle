@@ -2638,10 +2638,9 @@ def _open_kline_fallback(win, code, name):
             return
         df = df.sort_values("trade_date")
 
-        # 简单 K 线弹窗
+        # 简单 K 线弹窗 (非模态, 看盘界面保持可操作)
         top = tk.Toplevel(win); top.title(f"📊 {name}({code}) 日K线"); top.geometry("900x520")
-        try: top.grab_set()
-        except Exception: pass
+        # 注意: 不加 grab_set(), 允许多个 K 线图并排看, 看盘界面继续可操作
 
         import matplotlib
         matplotlib.use("TkAgg")
