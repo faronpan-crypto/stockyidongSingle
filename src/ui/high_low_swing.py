@@ -484,6 +484,11 @@ def show_high_low_swing(parent):
               font=("", 10, "bold"), padx=10, pady=2,
               command=lambda: _show_ai_mock(win)).pack(side=tk.LEFT, padx=(10, 4), pady=8)
 
+    # 📈 1min K线图
+    tk.Button(toolbar, text="📈 1min K线", bg="#7B1FA2", fg="white",
+              font=("", 10, "bold"), padx=10, pady=2,
+              command=lambda: _show_minute_kline_dialog(parent_root)).pack(side=tk.LEFT, padx=4, pady=8)
+
     # 🔄 刷新
     tk.Button(toolbar, text="🔄 刷新", bg="#1976D2", fg="white",
               font=("", 10, "bold"), padx=10, pady=2,
@@ -1028,3 +1033,271 @@ def _flash_refresh(parent):
 # ⚡ 择时判断弹窗 — 独立 Toplevel
 # ═══════════════════════════════════════════════
 
+
+
+# ═══════════════════════════════════════════════
+# 📈 1分钟 K线图弹窗 — 新浪直连 + MA5/10/20/60
+# ═══════════════════════════════════════════════
+
+def _show_minute_kline_dialog(parent_root):
+    """📈 1分钟周期 K线图 — 新浪直连 scale=1, 240 根, MA5/10/20/60"""
+    import requests, json as _json, numpy as np
+    try:
+        import matplotlib
+        matplotlib.use("TkAgg")
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        from matplotlib.figure import Figure
+        from matplotlib.patches import FancyBboxPatch
+        import matplotlib.pyplot as plt
+        from matplotlib.dates import DateFormatter, AutoDateLocator
+        from datetime import datetime, timedelta
+        HAVE_MPL = True
+    except Exception:
+        HAVE_MPL = False
+
+    dlg = tk.Toplevel(parent_root)
+    dlg.title("📈 1分钟 K线图 (MA5/10/20/60)")
+    dlg.geometry("1080x760")
+    dlg.configure(bg=_BG_DEEP)
+    dlg.minsize(900, 640)
+
+    # ── 下拉选项: 指数 + 持仓股 + 龙头 ──
+    _INDEX_LIST = [
+        "上证指数 sh000001", "深成指 sz399001", "创业板 sz399006",
+        "科创50 sh000688", "沪深300 sh000300", "中证500 sh000905",
+        "中证1000 sh000852", "北证50 bj899050",
+    ]
+    _LEADER_LIST = [
+        "贵州茅台 sh600519", "宁德时代 sz300750", "比亚迪 sz002594",
+        "中国平安 sh601318", "招商银行 sh600036", "五粮液 sz000858",
+        "寒武纪 sh688256", "中芯国际 sh688981", "美的集团 sz000333",
+        "隆基绿能 sh601012", "大金重工 sz002487", "恒瑞医药 sh600276",
+        "东方财富 sz300059", "中际旭创 sz300308", "药明康德 sh603259",
+    ]
+    # 从 SQLite 持仓表读
+    _holding_codes = []
+    try:
+        import sqlite3 as _sql, os as _os
+        for _db_cand in [
+            _os.path.expanduser("~/stockyidong_project/data/stock_analysis.db"),
+            _os.path.expanduser("~/Agent/stockyidong_project/data/stock_analysis.db"),
+        ]:
+            if _os.path.exists(_db_cand):
+                c = _sql.connect(_db_cand).cursor()
+                try:
+                    c.execute("SELECT name, ts_code FROM stock_analysis LIMIT 30")
+                    for name, tcode in c.fetchall():
+                        if tcode:
+                            # tcode: 600519.SH → sh600519
+                            code, ex = tcode.split(".") if "." in tcode else (tcode, "SH")
+                            ex_map = {"SH": "sh", "SZ": "sz", "BJ": "bj"}
+                            sina_code = ex_map.get(ex, "sh") + code
+                            _holding_codes.append(f"{name or tcode} {sina_code}")
+                except Exception: pass
+                c.close(); break
+    except Exception: pass
+
+    ALL_OPTIONS = _INDEX_LIST + _holding_codes + _LEADER_LIST
+
+    # ── 顶部条件区 ──
+    top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=44); top.pack(fill=tk.X)
+    top.pack_propagate(False)
+    tk.Label(top, text="📈 1分钟 K线图", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+             font=("", 12, "bold")).pack(side=tk.LEFT, padx=(12, 10), pady=10)
+    tk.Label(top, text="选择/输入:", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 10)).pack(side=tk.LEFT, padx=(4, 2), pady=10)
+
+    combo_var = tk.StringVar(value=ALL_OPTIONS[0])
+    combo = ttk.Combobox(top, values=ALL_OPTIONS, width=22, textvariable=combo_var)
+    combo.pack(side=tk.LEFT, pady=10)
+
+    # datalen 选择 (新浪最多 1024)
+    tk.Label(top, text="根数:", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 10)).pack(side=tk.LEFT, padx=(10, 2), pady=10)
+    len_var = tk.IntVar(value=240)
+    ttk.Spinbox(top, from_=60, to=480, width=4, textvariable=len_var, increment=60).pack(side=tk.LEFT, pady=10)
+
+    # MA 周期显示
+    tk.Label(top, text="均线: MA5/10/20/60", bg=_BG_TOOLBAR, fg=_FG_BLUE,
+             font=("", 10, "bold")).pack(side=tk.LEFT, padx=(12, 6), pady=10)
+
+    status_lbl = tk.Label(top, text="⏳ 选择标的后点🔍加载", bg=_BG_TOOLBAR, fg=_FG_DIM,
+                          font=("", 9))
+    status_lbl.pack(side=tk.RIGHT, padx=10, pady=10)
+
+    # ── 中央 canvas ──
+    canvas_frame = tk.Frame(dlg, bg=_BG_DEEP)
+    canvas_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+
+    fig = Figure(figsize=(10, 6), dpi=96, facecolor=_BG_PANEL)
+    canvas = None
+    ax = None
+
+    def _sina_code_from_option(opt):
+        """从 '贵州茅台 sh600519' 或直接 'sh600519' 提取新浪代码"""
+        opt = opt.strip()
+        # 尝试最后一个空格后的内容
+        parts = opt.split()
+        for p in reversed(parts):
+            p = p.lower()
+            if p.startswith(("sh", "sz", "bj")) and len(p) == 8:
+                return p
+        # 否则假定直接输入新浪代码
+        if opt.lower().startswith(("sh", "sz", "bj")):
+            return opt.lower()
+        return None
+
+    def _ma(arr, n):
+        """移动平均 (前 n-1 个 NaN)"""
+        out = np.full_like(arr, np.nan, dtype=float)
+        if len(arr) >= n:
+            cumsum = np.cumsum(arr)
+            out[n - 1:] = (cumsum[n - 1:] - np.concatenate([[0], cumsum[:-n]])) / n
+        return out
+
+    def _do_load():
+        nonlocal canvas, ax
+        if not HAVE_MPL:
+            messagebox.showerror("缺少依赖", "需要 matplotlib: pip install matplotlib")
+            return
+
+        opt = combo_var.get()
+        sina_code = _sina_code_from_option(opt)
+        if not sina_code:
+            messagebox.showwarning("格式", "请选择或输入新浪代码 (如 sh600519)")
+            return
+
+        n = len_var.get()
+        status_lbl.config(text=f"⏳ 拉取 {opt} {n} 根 1min K线...", fg=_FG_BLUE)
+        dlg.update()
+
+        def _fetch():
+            try:
+                url = (f"https://quotes.sina.cn/cn/api/jsonp.php/var%20{sina_code}=/"
+                       f"CN_MarketData.getKLineData?symbol={sina_code}&scale=1&ma=no&datalen={n}")
+                r = requests.get(url, headers={"User-Agent": "Mozilla/5.0",
+                                               "Referer": "https://finance.sina.com.cn"},
+                                 timeout=10)
+                txt = r.text
+                start = txt.index("(") + 1; end = txt.rindex(");")
+                data = _json.loads(txt[start:end])
+                return data, None
+            except Exception as e:
+                return None, str(e)
+
+        import threading
+        def _bg():
+            data, err = _fetch()
+            dlg.after(0, lambda: _on_loaded(data, err, opt))
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _on_loaded(data, err, opt):
+        nonlocal canvas, ax
+        if err or not data:
+            status_lbl.config(text=f"❌ 加载失败: {err or '无数据'}", fg="#EF5350")
+            return
+        status_lbl.config(text=f"✅ {opt}: {len(data)} 根 | 最新 {data[-1]['day']}", fg="#66BB6A")
+
+        # ── 解析 ──
+        import numpy as _np
+        times = [datetime.strptime(d["day"], "%Y-%m-%d %H:%M:%S") for d in data]
+        o = _np.array([float(d["open"]) for d in data])
+        h = _np.array([float(d["high"]) for d in data])
+        l = _np.array([float(d["low"]) for d in data])
+        c = _np.array([float(d["close"]) for d in data])
+        v = _np.array([float(d["volume"]) for d in data])
+
+        # MA 计算
+        ma5 = _ma(c, 5); ma10 = _ma(c, 10); ma20 = _ma(c, 20); ma60 = _ma(c, 60)
+
+        # ── 清旧图 ──
+        fig.clear()
+        if canvas is not None:
+            try: canvas.get_tk_widget().destroy()
+            except Exception: pass
+            try: canvas.toolbar.destroy()
+            except Exception: pass
+
+        # 上: K线图 (70%)
+        ax = fig.add_axes([0.06, 0.26, 0.88, 0.65], facecolor=_BG_PANEL)
+        # 下: 成交量 (15%)
+        axv = fig.add_axes([0.06, 0.08, 0.88, 0.15], sharex=ax, facecolor=_BG_PANEL)
+
+        x = _np.arange(len(times))
+        # 蜡烛图简化版 (涨跌着色)
+        for i in range(len(times)):
+            up = c[i] >= o[i]
+            color = "#EF5350" if up else "#66BB6A"
+            # 影线
+            ax.plot([x[i], x[i]], [l[i], h[i]], color=color, linewidth=0.8)
+            # 实体
+            body_lo = min(o[i], c[i]); body_hi = max(o[i], c[i])
+            rect_h = max(body_hi - body_lo, 0.001)
+            ax.add_patch(FancyBboxPatch((x[i] - 0.35, body_lo), 0.7, rect_h,
+                                        boxstyle="square,pad=0",
+                                        facecolor=color, edgecolor=color, linewidth=0.5))
+
+        # MA 线
+        ax.plot(x, ma5, color="#FFD54F", lw=1.2, label="MA5")
+        ax.plot(x, ma10, color="#42A5F5", lw=1.2, label="MA10")
+        ax.plot(x, ma20, color="#AB47BC", lw=1.2, label="MA20")
+        ax.plot(x, ma60, color="#EF9A9A", lw=1.5, label="MA60")
+
+        # 最后一根画 MA60 数值 (用户核心关注)
+        if not _np.isnan(ma60[-1]):
+            ax.axhline(ma60[-1], color="#EF9A9A", ls="--", lw=0.8, alpha=0.7)
+            ax.text(x[-1] - 2, ma60[-1], f"  MA60={ma60[-1]:.2f}",
+                    color="#EF9A9A", fontsize=8, va="bottom", ha="right")
+
+        # 样式
+        ax.set_title(f"{opt}  |  1分钟 K线 (MA5/10/20/60)  |  {len(data)} 根",
+                     color="#E0E0E0", fontsize=11, fontweight="bold", pad=8)
+        ax.set_facecolor(_BG_PANEL)
+        ax.tick_params(colors=_FG_DIM, labelsize=8)
+        for spine in ax.spines.values(): spine.set_color(_FG_DIM)
+        ax.grid(True, alpha=0.15, color=_FG_DIM)
+        ax.legend(loc="upper left", fontsize=8, facecolor=_BG_PANEL,
+                  edgecolor=_FG_DIM, labelcolor="#E0E0E0", framealpha=0.8)
+        # X 轴标签 (每隔一段显示)
+        step = max(1, len(times) // 8)
+        ax.set_xticks(x[::step])
+        ax.set_xticklabels([t.strftime("%H:%M") for t in times[::step]], rotation=30, fontsize=7)
+
+        # 成交量
+        colors = ["#EF5350" if c[i] >= o[i] else "#66BB6A" for i in range(len(times))]
+        axv.bar(x, v, color=colors, width=0.7)
+        axv.set_facecolor(_BG_PANEL)
+        axv.tick_params(colors=_FG_DIM, labelsize=7)
+        for spine in axv.spines.values(): spine.set_color(_FG_DIM)
+        axv.grid(True, alpha=0.15, color=_FG_DIM)
+        axv.set_ylabel("量", color=_FG_DIM, fontsize=8, rotation=0, labelpad=16)
+
+        fig.subplots_adjust(top=0.92, bottom=0.18, left=0.08, right=0.94, hspace=0.05)
+
+        # ── Canvas + Toolbar ──
+        canvas = FigureCanvasTkAgg(fig, master=canvas_frame, background=_BG_PANEL)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        tb = NavigationToolbar2Tk(canvas, canvas_frame)
+        tb.update()
+        tb.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # 显示最后几根 MA 值 (右上角浮窗)
+        last_ma_txt = (f"MA5={ma5[-1]:.2f}  MA10={ma10[-1]:.2f}  "
+                       f"MA20={ma20[-1]:.2f}  MA60={ma60[-1]:.2f}\n"
+                       f"最新={c[-1]:.2f}  收盘位置 vs MA60: "
+                       f"{'📈 上方' if c[-1] > ma60[-1] else '📉 下方'}")
+        status_lbl.config(text=status_lbl.cget("text") + " | " + last_ma_txt.split("\n")[1],
+                          fg="#66BB6A")
+
+    # 🔍 加载按钮
+    tk.Button(top, text="🔍 加载", bg="#7B1FA2", fg="white", font=("", 10, "bold"),
+              padx=10, pady=2, cursor="hand2", command=_do_load).pack(side=tk.RIGHT, padx=10, pady=10)
+
+    # 回车也触发
+    combo.bind("<Return>", lambda e: _do_load())
+
+    # 首次自动加载默认
+    dlg.after(300, _do_load)
+
+    return dlg
