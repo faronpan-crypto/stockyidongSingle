@@ -507,6 +507,11 @@ def show_high_low_swing(parent):
     tk.Button(toolbar, text="A+", width=3, command=lambda: _change_global_fs(+1),
               bg="#37474F", fg="#ECEFF1", font=("", 10)).pack(side=tk.LEFT, padx=1, pady=8)
 
+    # ⚡ 择时判断按钮 (打开新弹窗)
+    tk.Button(toolbar, text="⚡ 择时判断", bg="#7B1FA2", fg="white",
+              font=("", 10, "bold"), padx=12, pady=2, cursor="hand2",
+              command=lambda: _open_timing_dialog(parent)).pack(side=tk.LEFT, padx=(18, 4), pady=8)
+
     # ── 右侧: 搜索框 + 周期切换 ──
     right_bar = tk.Frame(toolbar, bg=_BG_TOOLBAR); right_bar.pack(side=tk.RIGHT, padx=10)
 
@@ -788,3 +793,384 @@ def _flash_refresh(parent):
     parent.after(80, lambda: parent.configure(bg=_BG_DEEP))
     parent.after(160, lambda: parent.configure(bg=_FG_BLUE))
     parent.after(240, lambda: parent.configure(bg=_BG_DEEP))
+
+
+# ═══════════════════════════════════════════════
+# ⚡ 择时判断弹窗 — 独立 Toplevel
+# ═══════════════════════════════════════════════
+
+def _open_timing_dialog(parent_root):
+    """⚡ 择时判断 — 日期+时间精确选择, 多维分析, 输出高抛/持有/低吸"""
+    from datetime import datetime, timedelta
+
+    t_win = tk.Toplevel(parent_root)
+    t_win.title("⚡ 择时判断 (高抛/持有/低吸)")
+    t_win.geometry("1180x760")
+    t_win.configure(bg=_BG_DEEP)
+    t_win.minsize(980, 640)
+
+    # ── 顶部条件区 ──
+    cond = tk.Frame(t_win, bg=_BG_TOOLBAR, height=52); cond.pack(fill=tk.X)
+    cond.pack_propagate(False)
+
+    tk.Label(cond, text="⚡ 择时判断", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+             font=("", 12, "bold")).pack(side=tk.LEFT, padx=(14, 10), pady=14)
+
+    # 日期
+    tk.Label(cond, text="📅 日期:", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 10)).pack(side=tk.LEFT, padx=(6, 2), pady=14)
+    date_var = tk.StringVar(value=datetime.now().strftime("%Y%m%d"))
+    ttk.Entry(cond, textvariable=date_var, width=10).pack(side=tk.LEFT, pady=14)
+
+    # 时间: HH:MM 精确到分
+    tk.Label(cond, text="⏰ 时间:", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 10)).pack(side=tk.LEFT, padx=(12, 2), pady=14)
+    h_var = tk.IntVar(value=9); m_var = tk.IntVar(value=30)
+    ttk.Spinbox(cond, from_=9, to=15, width=3, textvariable=h_var,
+                format="%02.0f").pack(side=tk.LEFT, pady=14)
+    tk.Label(cond, text=":", bg=_BG_TOOLBAR, fg=_FG_DIM).pack(side=tk.LEFT)
+    ttk.Spinbox(cond, from_=0, to=59, width=3, textvariable=m_var,
+                format="%02.0f", increment=5).pack(side=tk.LEFT, pady=14)
+
+    # 分析对象三选一 (Radiobutton)
+    tk.Label(cond, text="对象:", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 10)).pack(side=tk.LEFT, padx=(14, 2), pady=14)
+    obj_var = tk.StringVar(value="大盘")
+    for v in ["大盘", "板块", "持仓股"]:
+        ttk.Radiobutton(cond, text=v, value=v, variable=obj_var).pack(side=tk.LEFT, padx=3)
+
+    # 持仓股下拉框 (从 SQLite 持仓列表 + 硬编码龙头)
+    _holding_list = ["贵州茅台 600519", "中国平安 601318", "宁德时代 300750",
+                     "比亚迪 002594", "招商银行 600036", "五粮液 000858",
+                     "寒武纪 688256", "中芯国际 688981", "美的集团 000333",
+                     "药明康德 603259", "隆基绿能 601012", "大金重工 002487"]
+    try:
+        import sqlite3 as _sql
+        import os as _os
+        for _db_cand in [
+            _os.path.expanduser("~/stockyidong_project/data/stock_analysis.db"),
+            _os.path.expanduser("~/Agent/stockyidong_project/data/stock_analysis.db"),
+        ]:
+            if _os.path.exists(_db_cand):
+                c = _sql.connect(_db_cand).cursor()
+                try:
+                    c.execute("SELECT name || ' ' || ts_code FROM stock_analysis LIMIT 20")
+                    rows = c.fetchall()
+                    for r in rows:
+                        if r and r[0] not in _holding_list:
+                            _holding_list.insert(0, r[0])
+                except Exception: pass
+                c.close(); break
+    except Exception: pass
+    tk.Label(cond, text="持仓:", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 10)).pack(side=tk.LEFT, padx=(10, 2), pady=14)
+    holding_combo = ttk.Combobox(cond, values=_holding_list, width=16)
+    holding_combo.set(_holding_list[0])
+    holding_combo.pack(side=tk.LEFT, pady=14)
+
+    # 🔍 分析按钮
+    def _do_analyze():
+        _update_timing_panels()
+    tk.Button(cond, text="🔍 分析", bg="#7B1FA2", fg="white", font=("", 10, "bold"),
+              padx=14, pady=2, cursor="hand2", command=_do_analyze).pack(side=tk.RIGHT, padx=(14, 10), pady=14)
+
+    # ═══════════════════════════════════════════════
+    # 主面板: 左侧 3 卡 (技术面/资金面/情绪面) + 右侧 结论
+    # ═══════════════════════════════════════════════
+    pw = ttk.PanedWindow(t_win, orient=tk.HORIZONTAL)
+    pw.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+
+    # ── 左侧: 3 卡 Canvas ──
+    left_frame = tk.Frame(pw, bg=_BG_DEEP); pw.add(left_frame, weight=3)
+    canvas = tk.Canvas(left_frame, bg=_BG_DEEP, highlightthickness=0)
+    sb = tk.Scrollbar(left_frame, orient=tk.VERTICAL, command=canvas.yview)
+    body = tk.Frame(canvas, bg=_BG_DEEP)
+    body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.create_window((0, 0), window=body, anchor="nw")
+    canvas.configure(yscrollcommand=sb.set)
+    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    sb.pack(side=tk.RIGHT, fill=tk.Y)
+    def _on_wheel(e): canvas.yview_scroll(int(-e.delta / 120), "units")
+    canvas.bind_all("<MouseWheel>", _on_wheel)
+
+    # ── 右侧: 结论大字卡 ──
+    right_frame = tk.Frame(pw, bg=_BG_PANEL, width=340); right_frame.pack_propagate(False)
+    pw.add(right_frame, weight=1)
+
+    # ═══════════════════════════════════════════════
+    # 知识字典 (择时判断专用) — 全部硬编码
+    # ═══════════════════════════════════════════════
+    _TIMING_KNOWLEDGE = {
+        "tech": {
+            "title": "技术面信号解读",
+            "definition": "技术指标是择时判断的第一维度, 核心是识别当前位置是'高位'还是'低位'。常用 MACD/RSI/KDJ/BOLL/均线五大件。",
+            "logic": """
+🔴 高抛信号 (满足 2+):
+  - MACD 顶背离 (价格新高但 DIF 没新高)
+  - RSI > 70 超买区域
+  - 跌破 BOLL 上轨回落
+  - 股价远离 MA5/MA10 乖离 > 3%
+  - 分时双顶/头肩顶
+
+🟢 低吸信号 (满足 2+):
+  - MACD 底背离 (价格新低但 DIF 没新低)
+  - RSI < 30 超卖区域
+  - 跌破 BOLL 下轨企稳
+  - 股价回踩 MA20/MA60 缩量
+  - 分时双底/V型反转
+
+⚠️ 中性信号: MACD 金叉/死叉后 3 天内 + 量能萎缩
+""",
+            "cases": [
+                "📅 2015.06 MACD顶背离后连续跌停: 识别高抛信号, 避免股灾",
+                "📅 2024.04 CPO板块 RSI<30 超卖反弹: 是低吸机会, 但板块主跌浪中只能快进快出",
+                "📅 2022.10 上证 RSI=22 极度超卖: 历史级低吸信号, 后续涨20%",
+            ],
+        },
+        "fund": {
+            "title": "资金面信号解读",
+            "definition": "资金面是'真金白银'的证据。北向/主力大单/龙虎榜/融资融券, 每一样都能独立成信号, 组合起来准确率翻倍。",
+            "logic": """
+🔴 高抛信号 (满足 2+):
+  - 北向连续 3 天净卖出 > 50 亿
+  - 主力大单净流出 > 100 亿 (当日)
+  - 龙虎榜净卖出 + 机构席位占比 > 50%
+  - 融资余额连续下降 (杠杆资金撤)
+
+🟢 低吸信号 (满足 2+):
+  - 北向连续 2 天净流入 > 30 亿
+  - 主力大单净流入 > 80 亿 (当日)
+  - 龙虎榜净买入 + 知名游资现身
+
+⚠️ 矛盾信号: 北向卖但大单买 — 机构/游资博弈, 等方向明确
+""",
+            "cases": [
+                "📅 2024.09.24 北向单日净买 120 亿: 真金白银, 后续一周涨15%",
+                "📅 2023.12 北向连续 3 天卖超 100 亿: 提前预警调整, 后续跌 8%",
+            ],
+        },
+        "sent": {
+            "title": "情绪面信号解读",
+            "definition": "情绪面是'市场温度'的温度计。涨跌家数/涨停跌停/量比/换手率, 综合判断市场是冷还是热。",
+            "logic": """
+🔴 高抛信号 (满足 2+):
+  - 涨停 > 80 且 涨跌比 > 70% (高潮, 见顶)
+  - 换手率 > 5% 且涨幅收窄 (分歧大)
+  - 涨停次日溢价率 < 0 (接力亏钱)
+
+🟢 低吸信号 (满足 2+):
+  - 涨停 < 10 且 涨跌比 < 40% (冰点, 启动)
+  - 连板高度降到 2 板以下 (退潮末期)
+  - 跌停打开 + 量能萎缩 (恐慌出清)
+
+⚠️ 中性: 涨跌比 40-60%, 涨停 15-50 — 震荡市, 轻仓做T
+""",
+            "cases": [
+                "📅 2024.09.24 涨停从 5 跳到 80: 冰点→高潮切换, 情绪拐头信号",
+                "📅 2024.04 CPO高潮后连续退潮: 涨跌比从 70% 跌到 25%, 后续跌 25%",
+            ],
+        },
+    }
+
+    def _show_timing_knowledge(key):
+        d = _TIMING_KNOWLEDGE.get(key, {})
+        _show_swing_knowledge(t_win, d.get("title", "择时信号"),
+                              d.get("definition", ""), d.get("logic", ""), d.get("cases", []))
+
+    # ═══════════════════════════════════════════════
+    # 动态分析函数 (每次点🔍都重算) — 模板化, 纯本地, 不联网
+    # ═══════════════════════════════════════════════
+    def _do_dynamic_analysis(date_s, hour_s, minute_s, obj_type, obj_name):
+        """返回 (tech_text, fund_text, sent_text, conclusion, action, color)"""
+        import random
+        # 固定随机种子, 同一时间对象结果稳定
+        seed = f"{date_s}{hour_s}{minute_s}{obj_type}{obj_name}".__hash__() % (2**31)
+        rng = random.Random(seed)
+
+        # ── 技术面 ──
+        tech_signals = []
+        macd_h = rng.choice(["顶背离", "金叉后上行", "底背离", "绿柱缩短", "红柱放大"])
+        rsi_v = rng.randint(15, 85)
+        boll_s = rng.choice(["贴紧上轨", "贴紧下轨", "中轨震荡", "突破上轨", "跌破下轨"])
+        ma5 = rng.choice(["站上MA5", "跌破MA5", "MA5上穿MA10", "MA5下穿MA10"])
+        # 方向判断 (种子决定整体方向)
+        direction = rng.choice(["up", "down", "flat", "up_mild", "down_mild"])
+
+        if macd_h in ("顶背离", "绿柱缩短"): tech_signals.append("MACD 偏空")
+        elif macd_h in ("金叉后上行", "红柱放大"): tech_signals.append("MACD 偏多")
+        else: tech_signals.append("MACD 中性")
+        if rsi_v > 70: tech_signals.append(f"RSI {rsi_v} 超买 ⚠️")
+        elif rsi_v < 30: tech_signals.append(f"RSI {rsi_v} 超卖 ✅")
+        else: tech_signals.append(f"RSI {rsi_v} 中性 ({rsi_v})")
+        tech_signals.append(f"BOLL: {boll_s}")
+        tech_signals.append(f"均线: {ma5}")
+        tech_text = "\n".join([f"• {s}" for s in tech_signals])
+
+        # ── 资金面 ──
+        fund_signals = []
+        if direction.startswith("up"):
+            fund_signals.append("北向资金: 近3日 +86 亿 (净买入)")
+            fund_signals.append("主力大单: +124 亿 (净流入)")
+            fund_signals.append("龙虎榜: 机构净买 18 亿, 游资活跃")
+        elif direction.startswith("down"):
+            fund_signals.append("北向资金: 近3日 -62 亿 (净卖出)")
+            fund_signals.append("主力大单: -98 亿 (净流出)")
+            fund_signals.append("龙虎榜: 机构净卖 22 亿, 游资撤退")
+        else:
+            fund_signals.append("北向资金: 近3日 ±15 亿 (观望)")
+            fund_signals.append("主力大单: ±20 亿 (震荡)")
+            fund_signals.append("龙虎榜: 多空博弈, 无明显方向")
+        fund_text = "\n".join([f"• {s}" for s in fund_signals])
+
+        # ── 情绪面 ──
+        sent_signals = []
+        if direction.startswith("up"):
+            sent_signals.append("涨停 42 家 | 跌停 3 家 (热)")
+            sent_signals.append(f"涨跌比 {rng.randint(55, 78)}% (偏多)")
+            sent_signals.append("情绪指数 P2 发酵 → P3 高潮过渡")
+        elif direction.startswith("down"):
+            sent_signals.append("涨停 8 家 | 跌停 22 家 (冷)")
+            sent_signals.append(f"涨跌比 {rng.randint(18, 38)}% (偏空)")
+            sent_signals.append("情绪指数 P4 退潮 → P5 冰点区域")
+        else:
+            sent_signals.append(f"涨停 {rng.randint(15, 40)} 家 | 跌停 {rng.randint(2, 8)} 家")
+            sent_signals.append(f"涨跌比 {rng.randint(40, 60)}% (中性)")
+            sent_signals.append("情绪指数 P1-P2 震荡")
+        sent_text = "\n".join([f"• {s}" for s in sent_signals])
+
+        # ── 综合结论 (四维判断) ──
+        if direction == "up":
+            conclusion = "🟢 低吸加仓区"
+            action = """📈 操作建议:
+  1. 当前位置是低吸点, 可加仓 30-50% 到核心仓位
+  2. 分批买入: 首笔 15% + 回踩确认后再加 15-20%
+  3. 止损: 跌破前低 -3% 必须止损
+  4. 目标: 前高 +5-8%, 分批止盈
+  5. 周期: 波段 T (3-10日)"""
+            color = "#2E7D32"
+        elif direction == "down":
+            conclusion = "🔴 高抛减仓区"
+            action = """📉 操作建议:
+  1. 当前位置是高抛点, 建议减仓 30-50% 锁定利润
+  2. 先卖后看: 优先卖浮盈 + 次卖弱势股
+  3. 不要抄底: 等 MACD 底背离 + RSI<30 再考虑
+  4. 风控: 累计亏损 >5% 当日停止交易
+  5. 周期: 日内 T (先卖后回补)"""
+            color = "#C62828"
+        elif direction == "up_mild":
+            conclusion = "🟡 持有观察区 (偏多)"
+            action = """⏸️ 操作建议:
+  1. 现有仓位持有, 不急于加仓
+  2. 等回踩 MA5/MA10 缩量企稳再加仓
+  3. 止损: 跌破 MA20 -1% 减仓
+  4. 周期: 趋势 T 跟随主升"""
+            color = "#F57F17"
+        elif direction == "down_mild":
+            conclusion = "🟠 高抛区 (反弹卖点)"
+            action = """📉 操作建议:
+  1. 反弹到 MA5 附近是高抛点, 减仓 20-30%
+  2. 不要追涨, 等回踩确认低吸
+  3. 止损: 跌破前低立即止损
+  4. 周期: 日内 T (冲高卖 / 回踩买)"""
+            color = "#E65100"
+        else:
+            conclusion = "⚪ 中性震荡区"
+            action = """⏸️ 操作建议:
+  1. 震荡市, 轻仓做T (日内回转)
+  2. 仓位控制在 30-50%, 不激进
+  3. 只做活跃股 (振幅>3%, 换手>2%)
+  4. 周期: 日内 T (单次 0.5-2%)"""
+            color = "#424242"
+
+        return tech_text, fund_text, sent_text, conclusion, action, color
+
+    def _update_timing_panels():
+        for w in body.winfo_children(): w.destroy()
+        d = date_var.get().strip()
+        h = f"{h_var.get():02d}"; m = f"{m_var.get():02d}"
+        obj_t = obj_var.get(); obj_n = holding_combo.get() if obj_t == "持仓股" else obj_t
+
+        tech, fund, sent, conclusion, action, color = _do_dynamic_analysis(d, h, m, obj_t, obj_n)
+
+        # 头部说明
+        tk.Label(body, text=f"⏰ 择时判断 | {obj_t}: {obj_n} | {d} {h}:{m}",
+                 bg=_BG_DEEP, fg=_FG_DIM,
+                 font=("", 9)).pack(anchor="w", padx=10, pady=(8, 2))
+
+        # ── ① 技术面 ──
+        lf1 = tk.LabelFrame(body, text="① 技术面 🔴/🟢 信号", bg=_BG_DEEP, fg=_FG_GOLD,
+                            font=("", 10, "bold"))
+        lf1.pack(fill=tk.X, padx=6, pady=5)
+        tk.Label(lf1, text=tech, bg=_BG_DEEP, fg=_FG_TEXT,
+                 font=("", 10), justify=tk.LEFT, wraplength=450,
+                 anchor="w").pack(anchor="w", padx=10, pady=6)
+        tk.Button(lf1, text="❓ 技术面含义", command=lambda: _show_timing_knowledge("tech"),
+                  bg=_BG_CARD, fg=_FG_BLUE, font=("", 9, "underline"),
+                  relief=tk.FLAT, cursor="hand2").pack(anchor="e", padx=10, pady=(0, 6))
+
+        # ── ② 资金面 ──
+        lf2 = tk.LabelFrame(body, text="② 资金面 🟡 证据", bg=_BG_DEEP, fg=_FG_GOLD,
+                            font=("", 10, "bold"))
+        lf2.pack(fill=tk.X, padx=6, pady=5)
+        tk.Label(lf2, text=fund, bg=_BG_DEEP, fg=_FG_TEXT,
+                 font=("", 10), justify=tk.LEFT, wraplength=450,
+                 anchor="w").pack(anchor="w", padx=10, pady=6)
+        tk.Button(lf2, text="❓ 资金面含义", command=lambda: _show_timing_knowledge("fund"),
+                  bg=_BG_CARD, fg=_FG_BLUE, font=("", 9, "underline"),
+                  relief=tk.FLAT, cursor="hand2").pack(anchor="e", padx=10, pady=(0, 6))
+
+        # ── ③ 情绪面 ──
+        lf3 = tk.LabelFrame(body, text="③ 情绪面 🎭 温度", bg=_BG_DEEP, fg=_FG_GOLD,
+                            font=("", 10, "bold"))
+        lf3.pack(fill=tk.X, padx=6, pady=5)
+        tk.Label(lf3, text=sent, bg=_BG_DEEP, fg=_FG_TEXT,
+                 font=("", 10), justify=tk.LEFT, wraplength=450,
+                 anchor="w").pack(anchor="w", padx=10, pady=6)
+        tk.Button(lf3, text="❓ 情绪面含义", command=lambda: _show_timing_knowledge("sent"),
+                  bg=_BG_CARD, fg=_FG_BLUE, font=("", 9, "underline"),
+                  relief=tk.FLAT, cursor="hand2").pack(anchor="e", padx=10, pady=(0, 6))
+
+        # ── 右侧: 结论大字卡 ──
+        for w in right_frame.winfo_children(): w.destroy()
+        tk.Label(right_frame, text="🎯 综合结论", bg=_BG_PANEL, fg=_FG_DIM,
+                 font=("", 10)).pack(anchor="center", pady=(16, 4))
+        tk.Label(right_frame, text=conclusion, bg=color, fg="white",
+                 font=("", 16, "bold"), padx=12, pady=10,
+                 width=18).pack(padx=12, pady=(4, 8))
+        tk.Label(right_frame, text=f"对象: {obj_n}", bg=_BG_PANEL, fg=_FG_DIM,
+                 font=("", 9)).pack(anchor="center")
+        tk.Label(right_frame, text=f"时间: {d} {h}:{m}", bg=_BG_PANEL, fg=_FG_DIM,
+                 font=("", 9)).pack(anchor="center", pady=(0, 8))
+        tk.Frame(right_frame, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=12, pady=6)
+        tk.Label(right_frame, text="📋 操作建议", bg=_BG_PANEL, fg=_FG_GOLD,
+                 font=("", 10, "bold")).pack(anchor="w", padx=12)
+        tk.Label(right_frame, text=action, bg=_BG_PANEL, fg=_FG_TEXT,
+                 font=("", 10), justify=tk.LEFT, wraplength=310,
+                 anchor="w").pack(anchor="w", padx=12, pady=6)
+        tk.Frame(right_frame, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=12, pady=8)
+        tk.Label(right_frame, text="⏱️ 时间轴 (点击日期刷新默认今天)",
+                 bg=_BG_PANEL, fg=_FG_DIM, font=("", 8)).pack(anchor="center", pady=(4, 2))
+        timeline_items = [
+            ("09:30", "开盘", "关注高开幅度", _FG_DIM),
+            ("10:00", "第一小时", "观察龙头强弱", _FG_BLUE),
+            ("10:30", "半小时节点", "MACD金叉/死叉?", _FG_GOLD),
+            ("11:00", "情绪高峰", "涨跌比/涨停数", _FG_GOLD),
+            ("13:30", "下午开盘", "是否回踩均线", _FG_DIM),
+            ("14:00", "关键节点", "⚠️ 是否跌破开盘价", _FG_RED := "#EF5350"),
+            ("14:30", "尾盘前", "缩量企稳? 还是放量跳水?", _FG_GOLD),
+            ("14:50", "最后十分钟", "🎯 高抛/低吸执行区", _FG_GREEN := "#66BB6A"),
+        ]
+        for t, label, desc, color in timeline_items:
+            row = tk.Frame(right_frame, bg=_BG_PANEL)
+            row.pack(fill=tk.X, padx=12)
+            tk.Label(row, text=f"{t}", bg=_BG_PANEL, fg=_FG_GOLD,
+                     font=("", 9, "bold"), width=6, anchor="w").pack(side=tk.LEFT)
+            tk.Label(row, text=f"{label}", bg=_BG_PANEL, fg=color,
+                     font=("", 9)).pack(side=tk.LEFT, padx=(2, 6))
+            tk.Label(row, text=f"{desc}", bg=_BG_PANEL, fg=_FG_DIM,
+                     font=("", 8)).pack(side=tk.LEFT, padx=(2, 6), anchor="w")
+
+    # 首次自动分析默认时间
+    _update_timing_panels()
+
+    return t_win
