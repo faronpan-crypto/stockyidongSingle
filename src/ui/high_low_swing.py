@@ -485,9 +485,17 @@ def show_high_low_swing(parent):
               command=lambda: _show_ai_mock(win)).pack(side=tk.LEFT, padx=(10, 4), pady=8)
 
     # 📈 1min K线图
+    def _on_1min_kline():
+        print("[📈1minK] 按钮被点击!", flush=True)
+        import traceback
+        try:
+            _show_minute_kline_dialog(parent_root)
+            print("[📈1minK] 弹窗已创建", flush=True)
+        except Exception as e:
+            print(f"[📈1minK❌] {e}", flush=True); traceback.print_exc()
     tk.Button(toolbar, text="📈 1min K线", bg="#7B1FA2", fg="white",
               font=("", 10, "bold"), padx=10, pady=2,
-              command=lambda: _show_minute_kline_dialog(parent_root)).pack(side=tk.LEFT, padx=4, pady=8)
+              command=_on_1min_kline).pack(side=tk.LEFT, padx=4, pady=8)
 
     # 🔄 刷新
     tk.Button(toolbar, text="🔄 刷新", bg="#1976D2", fg="white",
