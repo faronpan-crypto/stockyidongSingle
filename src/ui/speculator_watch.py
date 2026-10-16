@@ -19,6 +19,13 @@ BLOCK_KEYWORDS = {
     "煤炭": ["煤炭", "煤业"],
     "电力": ["电力", "火电", "水电", "发电"],
     "医疗": ["医药", "医疗", "生物制药", "化学制药"],
+    "军工": ["军工", "国防", "航天", "航空", "军机"],
+    "航天": ["航天", "卫星", "火箭", "北斗"],
+    "风电": ["风电", "风力", "风机", "塔筒"],
+    "光伏": ["光伏", "太阳能", "硅片", "组件"],
+    "机器人": ["机器人", "自动化", "减速器", "伺服"],
+    "白酒": ["白酒", "茅台", "五粮液", "酒厂"],
+    "黄金": ["黄金", "金业", "山东黄金", "中金黄金"],
 }
 
 # —— 固定板块清单 ——
@@ -148,6 +155,88 @@ BLOCK_KNOWLEDGE = {
             "2024.09 医药反弹: 政策救市后医药从底部反弹25%",
         ],
     },
+    "军工": {
+        "definition": "军工板块是事件驱动型板块, 受地缘政治、国防预算、重大展会催化。行情爆发快但持续性差。",
+        "logic": """
+🔴 放量暴涨 (>5%): 事件催化, 但通常是脉冲
+🟢 绿盘: 事件消化中, 等下一个催化剂
+⚠️ 判断: 军工红盘持续3天以上才是真行情, 脉冲次日容易闷杀
+""",
+        "cases": [
+            "2022.08 佩洛西访台: 军工连续3天涨停, 但一周后全部跌回",
+            "2023 国防预算超预期: 军工板块当月涨15%, 是真行情",
+        ],
+    },
+    "航天": {
+        "definition": "航天板块 (卫星/火箭/北斗) 是科技成长分支, 商业航天概念近年受关注。",
+        "logic": """
+🔴 红盘: 商业航天催化 (星链、可回收火箭、低轨卫星)
+🟢 绿盘: 概念过热回调, 注意是否缩量
+⚠️ 与军工有联动但不完全相同, 航天更偏民商化
+""",
+        "cases": [
+            "2024 星舰发射成功: 航天A股相关概念股单日涨停",
+        ],
+    },
+    "风电": {
+        "definition": "风电是新能源板块的分支, 与光伏、核电同属绿电。近年装机量持续增长但产能过剩。",
+        "logic": """
+🟢 深绿: 产能过剩+价格战, 底部区域
+🔴 红盘: 绿电政策催化或短期反弹
+⚠️ 判断: 风电板块利润已压缩到极致, 可能在磨底
+""",
+        "cases": [
+            "2023-2024 风电持续阴跌: 塔筒、叶片厂商利润大降",
+        ],
+    },
+    "光伏": {
+        "definition": "光伏是新能源产能过剩最严重的板块, 硅料价格从30万/吨跌到5万/吨。",
+        "logic": """
+🟢 深绿: 产能过剩+价格战, 还没出清
+🟡 浅绿: 可能接近底部, 但需看龙头盈利
+🔴 红盘: 政策催化(补贴)或超跌反弹
+⚠️ 判断: 光伏板块产能出清需要时间, 勿急于抄底
+""",
+        "cases": [
+            "2022-2024 光伏大熊市: 隆基绿能从70跌到15, 3年跌78%",
+        ],
+    },
+    "机器人": {
+        "definition": "机器人 (工业机器人/人形机器人/减速器) 是AI+制造融合的热门赛道。",
+        "logic": """
+🔴 放量暴涨 (>3%): 人形机器人催化, 板块行情启动
+🟢 绿盘: 概念回调, 注意龙头是否仍强
+⚠️ 判断: 机器人行情通常有龙头 (减速器) 先涨, 跟风股后涨
+""",
+        "cases": [
+            "2024.09 机器人行情: 埃斯顿、绿的谐波连续涨停",
+            "2023 特斯拉Optimus: 机器人板块连续3天涨停",
+        ],
+    },
+    "白酒": {
+        "definition": "白酒是消费板块的核心, 高端白酒 (茅台/五粮液) 是消费景气度的风向标。",
+        "logic": """
+🔴 红盘: 消费复苏预期, 或外资回流
+🟢 绿盘: 消费降级担忧, 或资金流向科技
+⚠️ 判断: 白酒领涨往往意味着市场偏好红利/防守, 而非进攻
+""",
+        "cases": [
+            "2024.09 白酒反弹: 茅台从1400涨到1800, 外资回流信号",
+            "2022 白酒熊市: 茅台从2600跌到1300, 消费降级确认",
+        ],
+    },
+    "黄金": {
+        "definition": "黄金是避险资产, 与美元指数负相关, 与A股通常无直接关系但风险偏好下降时走强。",
+        "logic": """
+🔴 红盘: 避险需求上升 (地缘风险/美元走弱/通胀)
+🟢 绿盘: 风险偏好上升, 资金流向股市/加密货币
+⚠️ 判断: 黄金红盘 + A股绿盘 = 典型的避险模式
+""",
+        "cases": [
+            "2024.10 黄金创新高: 现货黄金突破2700美元/盎司",
+            "2022 俄乌战争: 黄金单日涨3%, 避险情绪爆发",
+        ],
+    },
 }
 
 # —— 观察盘口知识 ——
@@ -254,15 +343,22 @@ STATUS_KNOWLEDGE = {
 
 # —— 种子数据 (akshare/tushare 都挂时用, 保证界面秒出不空) ——
 SEED_BLOCK_META = {
-    "券商":     {"pct": 0.32, "reason": "今日红盘! 后置情绪板块, 主流走完最后轮动"},
-    "银行":     {"pct": -1.09, "reason": "相对抗跌, 红利防守"},
-    "CPO":      {"pct": -4.00, "reason": "机构重仓主杀"},
-    "半导体":   {"pct": -3.65, "reason": "领跌, 国产替代预期降温"},
-    "AI":       {"pct": -2.50, "reason": "科技主线分化"},
-    "电池":     {"pct": -2.45, "reason": "从科技漂移血包"},
-    "煤炭":     {"pct": -4.48, "reason": "最惨板块, 高分红预期落空"},
-    "电力":     {"pct": -2.72, "reason": "绿电改革预期"},
-    "医疗":     {"pct": -2.00, "reason": "医药集采担忧"},
+    "券商":     {"pct": 1.44, "reason": "红盘! 后置情绪轮动"},
+    "银行":     {"pct": 0.94, "reason": "红利防守"},
+    "CPO":      {"pct": 2.94, "reason": "AI主线反弹"},
+    "半导体":   {"pct": 2.24, "reason": "国产替代修复"},
+    "AI":       {"pct": 2.54, "reason": "主线确认"},
+    "电池":     {"pct": 0.26, "reason": "从科技漂移"},
+    "煤炭":     {"pct": 0.14, "reason": "周期弱反弹"},
+    "电力":     {"pct": 0.11, "reason": "跟随周期"},
+    "医疗":     {"pct": 1.24, "reason": "抗跌修复"},
+    "军工":     {"pct": 1.85, "reason": "国庆行情预期"},
+    "航天":     {"pct": 2.10, "reason": "卫星互联网催化"},
+    "风电":     {"pct": 0.55, "reason": "绿电政策"},
+    "光伏":     {"pct": -0.32, "reason": "产能过剩压力"},
+    "机器人":   {"pct": 3.05, "reason": "人形机器人催化"},
+    "白酒":     {"pct": 1.68, "reason": "消费复苏预期"},
+    "黄金":     {"pct": 0.75, "reason": "避险需求"},
 }
 
 # —— AKShare 接口缓存 (板块/实时行情) ——
@@ -451,6 +547,13 @@ BLOCK_KEYWORDS = {
     "煤炭": ["煤炭", "煤业"],
     "电力": ["电力", "火电", "水电", "发电"],
     "医疗": ["医药", "医疗", "生物制药", "化学制药"],
+    "军工": ["军工", "国防", "航天", "航空", "军机"],
+    "航天": ["航天", "卫星", "火箭", "北斗"],
+    "风电": ["风电", "风力", "风机", "塔筒"],
+    "光伏": ["光伏", "太阳能", "硅片", "组件"],
+    "机器人": ["机器人", "自动化", "减速器", "伺服"],
+    "白酒": ["白酒", "茅台", "五粮液", "酒厂"],
+    "黄金": ["黄金", "金业", "山东黄金", "中金黄金"],
 }
 
 
@@ -811,11 +914,11 @@ def _build_block_grid(parent, win, col=0):
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     parent.grid_rowconfigure(0, weight=1)
-    _add_title_row(frm, "① 板块九宫格 (点击展开/长按详情/⚠️异动>3%)",
+    _add_title_row(frm, "① 板块十六宫格 (点击展开/长按详情/⚠️异动>3%)",
                    "#FFA726", BLOCK_GRID_KNOWLEDGE)
 
-    # 9 格 Canvas
-    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=320)
+    # 16 格 Canvas (4×4)
+    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=340)
     canvas.pack(fill=tk.BOTH, expand=True)
     win._block_canvas = canvas
 
@@ -834,11 +937,11 @@ def _build_block_grid(parent, win, col=0):
 
 
 def _refresh_all_blocks(win):
-    """刷新九宫格 — 盘中用新浪实时板块, 收盘用 tushare 聚合"""
+    """刷新十六宫格 — 盘中优先新浪实时, 缺失板块用 tushare 关键词聚合补"""
     matched_any = False
 
     if _is_trading_hours():
-        # 🟢 盘中: 用新浪实时板块
+        # 🟢 盘中: 先拿新浪实时板块 (只有 9 个左右), 剩下的交给 tushare 聚合补
         realtime = _get_sina_realtime()
         sectors = realtime.get("sectors", {}) if realtime else {}
         if sectors:
@@ -847,9 +950,21 @@ def _refresh_all_blocks(win):
                 if val is not None:
                     win._block_meta[i][1] = val
                     matched_any = True
-                else:
-                    win._block_meta[i][1] = None
-            print(f"[👁️看盘] ✅ 九宫格盘中实时 ({len([v for v in sectors if v])}/9 板块)")
+            print(f"[👁️看盘] ✅ 十六宫格盘中新浪 ({len([v for v in sectors if v])} 板块)")
+
+        # 继续: 用 tushare 聚合补新浪没覆盖的新板块 (军工/航天/风电/光伏/机器人/白酒/黄金)
+        result = _compute_block_pct_from_cache()
+        if result:
+            for i, fix_name in enumerate(FIXED_BLOCKS):
+                # 只补当前还是 None 的
+                if win._block_meta[i][1] is None:
+                    val = result.get(fix_name)
+                    if val and val[0] is not None:
+                        win._block_meta[i][1] = val[0]
+                        win._block_meta[i][5] = val[1]
+                        matched_any = True
+            if matched_any:
+                print(f"[👁️看盘] ✅ tushare 聚合补齐剩余板块")
 
     if not matched_any:
         # 📅 收盘: tushare daily+stock_basic 关键词聚合
@@ -864,7 +979,7 @@ def _refresh_all_blocks(win):
                 else:
                     win._block_meta[i][1] = None
             if matched_any:
-                print(f"[👁️看盘] ✅ 九宫格 tushare 收盘数据")
+                print(f"[👁️看盘] ✅ 十六宫格 tushare 收盘数据")
 
     # ③ 种子兜底
     if not matched_any:
@@ -900,7 +1015,7 @@ def _refresh_all_blocks(win):
     for idx, meta in enumerate(win._block_meta):
         meta[4] = (meta[1] is not None and abs(meta[1]) >= 3.0)
 
-    pcts_only = [(FIXED_BLOCKS[i], win._block_meta[i][1] or 0) for i in range(9)]
+    pcts_only = [(FIXED_BLOCKS[i], win._block_meta[i][1] or 0) for i in range(len(FIXED_BLOCKS))]
     pcts_only.sort(key=lambda x: x[1], reverse=True)
     top2, bot2 = pcts_only[:2], pcts_only[-2:]
     conflict = f"🔥 主线板块: {' / '.join([x[0] for x in top2])} ({top2[0][1]:+.2f}% {top2[1][1]:+.2f}%)"
@@ -911,22 +1026,22 @@ def _refresh_all_blocks(win):
 
 
 def _draw_block_grid(win):
-    """Canvas 画 3×3 九宫格"""
+    """Canvas 画 4×4 十六宫格"""
     c = win._block_canvas
     c.delete("all")
     win._block_cells = []
 
     W = c.winfo_width() or 500
-    H = c.winfo_height() or 320
-    pad = 3
-    cw = (W - pad * 4) // 3
-    ch = (H - pad * 4) // 3
+    H = c.winfo_height() or 340
+    pad = 2
+    cw = (W - pad * 5) // 4
+    ch = (H - pad * 5) // 4
 
     # 脉动闪烁状态 (用 win 时间戳模拟)
     now_ms = time.time() * 1000
 
-    for idx in range(9):
-        row = idx // 3; col = idx % 3
+    for idx in range(len(FIXED_BLOCKS)):
+        row = idx // 4; col = idx % 4
         x1 = pad + col * (cw + pad)
         y1 = pad + row * (ch + pad)
         x2 = x1 + cw
@@ -958,28 +1073,28 @@ def _draw_block_grid(win):
 
             # 脉冲异常标 ⚠️
             if abs(pct) >= 3.0:
-                c.create_text(x2 - 8, y1 + 8, text="⚠️", fill="#FFD54F",
-                              font=("", 10, "bold"), tags=f"cell_{idx}")
+                c.create_text(x2 - 7, y1 + 7, text="⚠️", fill="#FFD54F",
+                              font=("", 9, "bold"), tags=f"cell_{idx}")
 
         if pct is None:
             c.create_rectangle(x1, y1, x2, y2, fill=bg, outline="#555",
                                width=1, tags=f"cell_{idx}")
 
-        # 板块名 (大字)
-        c.create_text(x1 + cw // 2, y1 + ch // 2 - 12, text=name,
-                      fill="#FFFFFF", font=("", 11, "bold"), tags=f"cell_{idx}")
+        # 板块名 (格子变小, 字号缩)
+        c.create_text(x1 + cw // 2, y1 + ch // 2 - 10, text=name,
+                      fill="#FFFFFF", font=("", 10, "bold"), tags=f"cell_{idx}")
         # 涨跌幅
         if pct is not None:
             sign = "+" if pct >= 0 else ""
             c.create_text(x1 + cw // 2, y1 + ch // 2 + 10,
                           text=f"{sign}{pct:.2f}%", fill=fg,
-                          font=("", 12, "bold"), tags=f"cell_{idx}")
+                          font=("", 10, "bold"), tags=f"cell_{idx}")
 
         # ❓ 板块分析按钮 (左上角, 蓝色下划线)
-        c.create_text(x1 + 14, y1 + 12, text="❓", fill="#90CAF9",
-                      font=("", 11, "bold underline"), tags=(f"cell_{idx}", f"q_{idx}"))
+        c.create_text(x1 + 12, y1 + 10, text="❓", fill="#90CAF9",
+                      font=("", 10, "bold underline"), tags=(f"cell_{idx}", f"q_{idx}"))
         # 隐藏矩形扩大点击热区
-        c.create_rectangle(x1 + 4, y1 + 4, x1 + 24, y1 + 24, outline="",
+        c.create_rectangle(x1 + 3, y1 + 3, x1 + 20, y1 + 20, outline="",
                            fill="", tags=(f"cell_{idx}", f"q_{idx}"))
 
         win._block_cells.append(((x1, y1, x2, y2), idx))
