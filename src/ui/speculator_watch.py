@@ -681,13 +681,21 @@ def show_speculator_watch(root=None, app=None):
 
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
-    # 左: 2×3 六区 | 右: 游资看盘思路分析 (7层)
+    # 左: 3行 (九宫格/盘口/量能 顶 | 期货/周期/状态 中 | 捡漏 底) | 右: 游资看盘思路分析
     left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     right_pane = tk.Frame(outer, bg="#181818", width=560); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
     right_pane.pack_propagate(False)
 
-    row_top = tk.Frame(left_pane, bg="#121212"); row_top.pack(fill=tk.BOTH, expand=True)
-    row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.pack(fill=tk.BOTH, expand=True)
+    # 三行 grid: row_top(expand) | row_bot(expand) | row_leak(fixed height)
+    left_pane.grid_rowconfigure(0, weight=3)
+    left_pane.grid_rowconfigure(1, weight=3)
+    left_pane.grid_rowconfigure(2, weight=0)  # 捡漏: 固定 200px 高度
+    left_pane.grid_columnconfigure(0, weight=1)
+
+    row_top = tk.Frame(left_pane, bg="#121212"); row_top.grid(row=0, column=0, sticky="nsew")
+    row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, sticky="nsew")
+    row_leak = tk.Frame(left_pane, bg="#121212", height=200); row_leak.grid(row=2, column=0, sticky="nsew", pady=(2, 0))
+    row_leak.pack_propagate(False)
 
     _build_block_grid(row_top, win, 0)
     _build_orderbook(row_top, win, 1)
@@ -695,6 +703,9 @@ def show_speculator_watch(root=None, app=None):
     _build_futures_grid(row_bot, win, 0)
     _build_cycle_panel(row_bot, win, 1)
     _build_status_panel(row_bot, win, 2)
+
+    # 底部: 捡漏模块 (三标签 Notebooks)
+    _build_leak_panel(row_leak, win)
 
     # 右侧: 游资看盘思路分析
     _build_watch_analysis(right_pane, win)
@@ -2494,3 +2505,346 @@ def _apply_analysis(win, layers, conclusion):
             lbl.config(text=layers.get(title, "—"))
     except Exception as e:
         print(f"[👁️看盘] 应用分析失败: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════
+# 捡漏模块 — 三标签 Notebook: 资讯股/强势票/超跌票
+# ═══════════════════════════════════════════════════════════════
+
+LEAK_KNOWLEDGE = {
+    "资讯股": {"definition": "从最近10天的资讯/股吧/雪球里被频繁提及的股票。资讯是情绪的催化剂 — 资讯密集处往往预示资金关注。",
+               "logic": "🔴 提及次数飙升 + 股价还没动 = 潜在机会\n🟢 提及次数高 + 股价已经涨 = 可能是热点尾声\n⚠️ 注意: 资讯有滞后性, 结合量能判断是否真有资金进场",
+               "cases": ["2024.09 固态电池资讯密集后, 龙头票连续3天涨停",
+                         "2023.11 AI资讯爆发, CPO板块3个月涨80%"]},
+    "强势票": {"definition": "今日涨幅≥5%且成交放大的个股, 是市场中最强的龙头。强势票往往有资金持续流入。",
+               "logic": "🔴 早盘强势 + 量能放大 = 可能是当天主线\n🟡 午后强势 = 跟随性反弹, 持续性差\n⚠️ 追强势票必须看封单/换手率, 避免追高被套",
+               "cases": ["2024.09.24 涨停潮当日, 券商龙头午后强势封板, 次日再涨停",
+                         "2024.04 CPO强势票连涨后, 机构出货连续跌停"]},
+    "超跌票": {"definition": "近60日从高点回撤≥20%的股票, 可能是错杀或基本面恶化。捡漏需结合基本面判断。",
+               "logic": "🔴 超跌 + 基本面没变坏 + 底部放量 = 真捡漏机会\n🟢 超跌 + 基本面恶化 = 价值陷阱 (抄底抄到半山腰)\n⚠️ 必须设置止损 -8%, 超跌股可能继续跌",
+               "cases": ["2022.10 腾讯控股从400跌到160(-60%), 后来反弹到400 = 真捡漏",
+                         "2024.04 CPO龙头中际旭创从150跌到60, 后来继续跌到45 = 假捡漏"]},
+}
+
+
+def _build_leak_panel(parent, win):
+    """捡漏模块三标签 Notebook"""
+    outer = tk.Frame(parent, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
+    _add_title_row(outer, "🎣 捡漏 (单击→日K 双击→游资心法)", "#CE93D8", LEAK_KNOWLEDGE.get("资讯股", {}))
+
+    nb = ttk.Notebook(outer)
+    nb.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+
+    # Notebook 样式: 深色
+    style = ttk.Style(); style.theme_use("clam")
+    style.configure("Leak.TNotebook", background="#121212", borderwidth=0)
+    style.configure("Leak.TNotebook.Tab", background="#2A2A2A", foreground="#BDBDBD",
+                    padding=(16, 4), font=("", 9))
+    style.map("Leak.TNotebook.Tab", background=[("selected", "#37474F")],
+              foreground=[("selected", "#FFD54F")])
+    nb.configure(style="Leak.TNotebook")
+
+    tabs = [("📰 资讯股", "#64B5F6", "news"),
+            ("🔥 强势票", "#FFD54F", "strong"),
+            ("📉 超跌票", "#EF5350", "drop")]
+
+    win._leak_tvs = {}
+    for title, color, key in tabs:
+        tab = tk.Frame(nb, bg="#121212"); nb.add(tab, text=title)
+
+        cols = ("代码", "名称", "涨幅%", "成交额(亿)", "备注")
+        tv = ttk.Treeview(tab, columns=cols, show="headings", height=5)
+        for c in cols:
+            tv.heading(c, text=c); tv.column(c, width=110, anchor=tk.CENTER)
+        tv.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+
+        # 滚动条
+        sb = ttk.Scrollbar(tab, orient=tk.VERTICAL, command=tv.yview)
+        tv.configure(yscrollcommand=sb.set)
+
+        # 单击 → 日K线, 双击 → 游资心法
+        tv.bind("<ButtonRelease-1>", lambda e, t=tv, k=key: _leak_on_click(win, t, e))
+        tv.bind("<Double-Button-1>", lambda e, t=tv, k=key: _leak_on_double(win, t, e))
+
+        win._leak_tvs[key] = tv
+
+    # 后台拉取捡漏数据
+    threading.Thread(target=_load_leak_data, args=(win,), daemon=True).start()
+
+
+def _leak_on_click(win, tv, event):
+    """单击 Treeview → 打开日K线"""
+    row_id = tv.identify_row(event.y)
+    if not row_id: return
+    try:
+        vals = tv.item(row_id, "values")
+        code = str(vals[0])
+        name = str(vals[1])
+        print(f"[👁️看盘 捡漏] 单击 {code} {name} → 日K线")
+        _open_kline_dialog(win, code, name)
+    except Exception as e:
+        print(f"[👁️看盘 捡漏] 单击失败: {e}")
+
+
+def _leak_on_double(win, tv, event):
+    """双击 Treeview → 打开游资心法"""
+    row_id = tv.identify_row(event.y)
+    if not row_id: return
+    try:
+        vals = tv.item(row_id, "values")
+        code = str(vals[0])
+        name = str(vals[1])
+        print(f"[👁️看盘 捡漏] 双击 {code} {name} → 游资心法")
+        _open_hotmoney_dialog(win, code, name)
+    except Exception as e:
+        print(f"[👁️看盘 捡漏] 双击失败: {e}")
+
+
+def _open_kline_dialog(win, code, name):
+    """打开日K线弹窗 (优先调用主程序 Mixin, 兜底自建)"""
+    # 尝试 1: 通过 main_app 拿到 tab_stock_detail 的方法
+    main_app = getattr(win, "_main_app", None) or getattr(win, "app", None)
+    if main_app is not None and hasattr(main_app, "_get_daily_kline_data_tushare"):
+        try:
+            kd = main_app._get_daily_kline_data_tushare(code)
+            if not kd or not isinstance(kd, dict) or "data" not in kd:
+                return _open_kline_fallback(win, code, name)
+            # 用主程序已有的放大弹窗
+            if hasattr(main_app, "_show_daily_kline_zoom"):
+                main_app._show_daily_kline_zoom(kd, f"{name}({code})")
+                return
+        except Exception as e:
+            print(f"[捡漏K线] 主程序调用失败: {e}")
+    _open_kline_fallback(win, code, name)
+
+
+def _open_kline_fallback(win, code, name):
+    """兜底: 自己拉 K 线画简化图"""
+    try:
+        import tushare as ts
+        TOKEN = os.environ.get("TUSHARE_TOKEN", "")
+        if not TOKEN: return
+        ts.set_token(TOKEN); pro = ts.pro_api()
+        # 转 tushare code: 600xxx → 600xxx.SH, 000xxx → 000xxx.SZ, 300xxx → 300xxx.SZ, 688xxx → 688xxx.SH
+        if code.startswith("6"): ts_code = code + ".SH"
+        elif code.startswith("0") or code.startswith("3"): ts_code = code + ".SZ"
+        elif code.startswith("688"): ts_code = code + ".SH"
+        elif code.startswith("8") or code.startswith("4"): ts_code = code + ".BJ"
+        else: ts_code = code
+        df = pro.daily(ts_code=ts_code, start_date=(datetime.now()-timedelta(days=180)).strftime("%Y%m%d"),
+                       end_date=datetime.now().strftime("%Y%m%d"))
+        if df is None or len(df) < 10:
+            messagebox.showinfo("提示", f"{name} K线数据不足", parent=win)
+            return
+        df = df.sort_values("trade_date")
+
+        # 简单 K 线弹窗
+        top = tk.Toplevel(win); top.title(f"📊 {name}({code}) 日K线"); top.geometry("900x520")
+        try: top.grab_set()
+        except Exception: pass
+
+        import matplotlib
+        matplotlib.use("TkAgg")
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        import matplotlib.dates as mdates
+        from datetime import datetime as dt
+
+        fig = Figure(figsize=(9, 5), dpi=100, facecolor="#1E1E1E")
+        ax = fig.add_subplot(111, facecolor="#121212")
+
+        dates = [dt.strptime(d, "%Y%m%d") for d in df["trade_date"]]
+        closes = df["close"].values
+        colors = ["#EF5350" if c >= o else "#66BB6A" for c, o in zip(df["close"], df["open"])]
+        ax.bar(dates, df["close"] - df["open"], bottom=df["open"], color=colors, width=0.6)
+        ax.vlines(dates, df["low"], df["high"], colors, linewidth=0.8)
+        # MA5/MA10/MA20
+        import numpy as np
+        ma5 = np.convolve(closes, np.ones(5)/5, mode="valid")
+        ma10 = np.convolve(closes, np.ones(10)/10, mode="valid")
+        ma20 = np.convolve(closes, np.ones(20)/20, mode="valid")
+        ax.plot(dates[4:], ma5, color="#FFD54F", linewidth=1, label="MA5")
+        ax.plot(dates[9:], ma10, color="#64B5F6", linewidth=1, label="MA10")
+        ax.plot(dates[19:], ma20, color="#CE93D8", linewidth=1, label="MA20")
+        ax.legend(loc="upper left", fontsize=8, facecolor="#121212", labelcolor="#E0E0E0")
+        ax.tick_params(colors="#BDBDBD"); ax.spines[:].set_color("#424242")
+        ax.set_title(f"{name}({code}) 近 {len(df)} 日 K线 | 收盘 {closes[-1]:.2f} ({df['pct_chg'].iloc[-1]:+.2f}%)",
+                     color="#FFD54F", fontsize=12)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
+
+        canvas = FigureCanvasTkAgg(fig, top); canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        toolbar = NavigationToolbar2Tk(canvas, top); toolbar.update()
+        toolbar.pack(side=tk.BOTTOM, fill=tk.X)
+    except Exception as e:
+        messagebox.showerror("错误", f"K线加载失败: {e}", parent=win)
+
+
+def _open_hotmoney_dialog(win, code, name):
+    """打开游资心法 (优先主程序, 兜底简单提示)"""
+    main_app = getattr(win, "_main_app", None) or getattr(win, "app", None)
+    if main_app is not None and hasattr(main_app, "tab_math"):
+        try:
+            # tab_math.open_hotmoney_analysis 或类似
+            fn = getattr(main_app, "open_hotmoney_analysis", None) or \
+                 getattr(main_app, "_open_hotmoney_analysis", None)
+            if fn:
+                fn(code, name); return
+        except Exception as e:
+            print(f"[捡漏游资] 主程序调用失败: {e}")
+    # 兜底: 简单提示
+    messagebox.showinfo("🦅 游资心法", f"双击触发 {name}({code}) 的游资心法分析\n\n"
+                        f"提示: 在持仓Tab或股票分析Tab打开该股票即可查看完整游资心法",
+                        parent=win)
+
+
+def _load_leak_data(win):
+    """后台加载捡漏三榜"""
+    def _bg():
+        try:
+            # 准备数据
+            data = {"news": [], "strong": [], "drop": []}
+            pro = None  # 先声明, 各模块复用
+            try:
+                import tushare as ts
+                TOKEN = os.environ.get("TUSHARE_TOKEN", "")
+                if TOKEN:
+                    ts.set_token(TOKEN); pro = ts.pro_api()
+            except Exception: pass
+
+            # ① 强势票: 今日涨幅≥5%
+            try:
+                d = _TUSHARE_DAILY_CACHE.get("data")
+                sb = _TUSHARE_SB_CACHE.get("data")
+                if d is None and pro is not None:
+                    td = datetime.now().strftime("%Y%m%d")
+                    d = pro.daily(trade_date=td)
+                    for i in range(1, 7):
+                        if d is None or len(d) == 0:
+                            td = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
+                            d = pro.daily(trade_date=td)
+                if sb is None and pro is not None:
+                    sb = pro.stock_basic(list_status="L", fields="ts_code,name")
+                if d is not None and sb is not None and len(d) > 0:
+                    merged = d.merge(sb, on="ts_code", how="left")
+                    strong = merged[merged["pct_chg"] >= 5].sort_values("pct_chg", ascending=False).head(30)
+                    for _, r in strong.iterrows():
+                        tc = str(r["ts_code"]); pure = tc.split(".")[0]
+                        data["strong"].append((pure, str(r["name"] or ""),
+                                               f"{float(r['pct_chg']):+.2f}",
+                                               f"{float(r['amount'] or 0)/1e4:.1f}", "主升"))
+            except Exception as e:
+                print(f"[捡漏] 强势票失败: {e}")
+
+            # ② 资讯股: crawled_articles 板块热词 + 涨停池
+            try:
+                from collections import Counter
+                import sqlite3
+                db = sqlite3.connect("data/stock_analysis.db")
+                cur = db.cursor()
+                cur.execute("SELECT title FROM crawled_articles ORDER BY rowid DESC LIMIT 1000")
+                titles = [r[0] or "" for r in cur.fetchall()]
+                hot_kws = ["固态电池", "AI", "CPO", "机器人", "算力", "半导体",
+                           "航天", "军工", "医药", "创新药", "电力", "光伏"]
+                kw_cnt = Counter()
+                for t in titles:
+                    for kw in hot_kws:
+                        if kw in t: kw_cnt[kw] += 1
+                kw_leaders = {
+                    "固态电池": ["300750", "002594"],
+                    "AI": ["300750", "002230", "688256", "300308"],
+                    "CPO": ["300308", "688256", "002222"],
+                    "机器人": ["300024", "002747"],
+                    "算力": ["688256", "300308"],
+                    "半导体": ["688981", "002230", "300782"],
+                    "航天": ["600118", "000063"],
+                    "军工": ["002179", "300699"],
+                    "医药": ["600276", "300760"],
+                    "创新药": ["688180", "300760"],
+                    "电力": ["600900", "601985"],
+                    "光伏": ["300274", "601012"],
+                }
+                news_codes = set()
+                for kw, cnt in kw_cnt.most_common():
+                    if cnt >= 2 and kw in kw_leaders:
+                        for c in kw_leaders[kw]: news_codes.add(c)
+                # 强势票也进资讯
+                for r in data["strong"][:8]: news_codes.add(r[0])
+                if news_codes and _TUSHARE_SB_CACHE.get("data") is not None:
+                    sb2 = _TUSHARE_SB_CACHE["data"]
+                    for code in list(news_codes)[:20]:
+                        cm = sb2[sb2["ts_code"].str.startswith(code)]
+                        if len(cm) > 0:
+                            name = cm.iloc[0]["name"]
+                            pct = "—"
+                            if _TUSHARE_DAILY_CACHE.get("data") is not None:
+                                dc = _TUSHARE_DAILY_CACHE["data"]
+                                c2 = dc[dc["ts_code"].str.startswith(code)]
+                                if len(c2) > 0:
+                                    pct = f"{float(c2.iloc[0]['pct_chg']):+.2f}"
+                            data["news"].append((code, str(name), pct, "—", f"热词 {kw_cnt.most_common(2)}"))
+                # 如果 crawled_articles 太旧 (最近没有爬取), 用硬编码板块龙头做种子
+                if len(data["news"]) < 5:
+                    for code, name in [("300750","宁德时代"),("002230","科大讯飞"),
+                                       ("300308","中际旭创"),("688256","寒武纪"),
+                                       ("688981","中芯国际"),("300024","机器人"),
+                                       ("600276","恒瑞医药"),("600118","中国卫星")]:
+                        if any(row[0]==code for row in data["news"]): continue
+                        data["news"].append((code, name, "—", "—", "板块龙头"))
+                db.close()
+            except Exception as e:
+                print(f"[捡漏] 资讯股失败: {e}")
+
+            # ③ 超跌票: 从 daily 抽样计算 60 日回撤
+            try:
+                if pro is not None:
+                    d = _TUSHARE_DAILY_CACHE.get("data")
+                    sb = _TUSHARE_SB_CACHE.get("data")
+                    if d is None and pro is not None:
+                        td = datetime.now().strftime("%Y%m%d")
+                        d = pro.daily(trade_date=td)
+                    if sb is None and pro is not None:
+                        sb = pro.stock_basic(list_status="L", fields="ts_code,name")
+                    if d is not None and sb is not None and len(d) > 1000:
+                        merged = d.merge(sb, on="ts_code", how="left")
+                        drop_cands = merged[
+                            (merged["pct_chg"] < -1) &
+                            (~merged["name"].str.contains("ST|退|N|XD|DR", na=False))
+                        ].sort_values("pct_chg").head(40)
+                        drop_results = []; calc = 0
+                        for _, r in drop_cands.iterrows():
+                            if calc >= 20: break
+                            try:
+                                tc = str(r["ts_code"])
+                                k = pro.daily(ts_code=tc,
+                                              start_date=(datetime.now()-timedelta(days=120)).strftime("%Y%m%d"),
+                                              end_date=datetime.now().strftime("%Y%m%d"))
+                                calc += 1
+                                if k is None or len(k) < 20: continue
+                                high60 = k.tail(60)["high"].max()
+                                close = float(r["close"])
+                                dd = (close - high60) / high60 * 100
+                                if dd <= -15:
+                                    pure = tc.split(".")[0]
+                                    drop_results.append((dd, pure, str(r["name"] or ""),
+                                                         close, float(r["pct_chg"])))
+                            except Exception: continue
+                        drop_results.sort(key=lambda x: x[0])
+                        for dd, code, name, close, tp in drop_results[:25]:
+                            data["drop"].append((code, name, f"{tp:+.2f}",
+                                                 f"{close:.2f}", f"距高点 {dd:+.1f}%"))
+            except Exception as e:
+                print(f"[捡漏] 超跌票失败: {e}")
+
+            # 更新 UI
+            def _apply():
+                for key, tv in win._leak_tvs.items():
+                    for i in tv.get_children(): tv.delete(i)
+                    for row in data.get(key, [])[:20]:
+                        tv.insert("", tk.END, values=row)
+                total = sum(len(v) for v in data.values())
+                print(f"[👁️看盘] ✅ 捡漏数据: 资讯 {len(data['news'])} | 强势 {len(data['strong'])} | 超跌 {len(data['drop'])}")
+            win.after(0, _apply)
+        except Exception as e:
+            print(f"[👁️看盘❌] 捡漏加载异常: {e}\n{traceback.format_exc()}")
+    threading.Thread(target=_bg, daemon=True).start()
