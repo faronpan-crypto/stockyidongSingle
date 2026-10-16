@@ -271,6 +271,9 @@ _AK_BLOCK_CACHE = {"time": 0, "data": None}
 _TUSHARE_DAILY_CACHE = {"time": 0, "data": None}
 _TUSHARE_SB_CACHE = {"time": 0, "data": None}
 _BLOCK_PCT_CACHE = {"time": 0, "data": None}
+
+# —— 捡漏持久化缓存 (JSON 文件, 秒出用) ——
+_LEAK_CACHE_PATH = os.path.expanduser("~/.qclaw/watch_leak_cache.json")
 _SPOT_INDEX_CACHE = {"time": 0, "data": None}
 _SINA_REALTIME_CACHE = {"time": 0, "data": None}
 
@@ -683,7 +686,7 @@ def show_speculator_watch(root=None, app=None):
 
     # 左: 3行 (九宫格/盘口/量能 顶跨2列 | 期货/周期/状态 中跨2列 | 捡漏 底左半) | 右: 游资看盘思路分析 (宽度减半)
     left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    right_pane = tk.Frame(outer, bg="#121212", width=280); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+    right_pane = tk.Frame(outer, bg="#121212", width=340); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
     right_pane.pack_propagate(False)
 
     # 左面板 grid: 2列 × 3行, row_top/row_bot 跨两列全宽, row_leak 只占 column 0 (一半宽)
@@ -695,7 +698,7 @@ def show_speculator_watch(root=None, app=None):
 
     row_top = tk.Frame(left_pane, bg="#121212"); row_top.grid(row=0, column=0, columnspan=2, sticky="nsew")
     row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, columnspan=2, sticky="nsew")
-    row_leak = tk.Frame(left_pane, bg="#000000", height=200); row_leak.grid(row=2, column=0, sticky="nsew", pady=(2, 0))
+    row_leak = tk.Frame(left_pane, bg="#000000", height=230); row_leak.grid(row=2, column=0, sticky="nsew", pady=(2, 0))
     row_leak.pack_propagate(False)
 
     _build_block_grid(row_top, win, 0)
@@ -2529,7 +2532,7 @@ LEAK_KNOWLEDGE = {
 
 
 def _build_leak_panel(parent, win):
-    """捡漏模块三标签 Notebook — 黑色背景, 只占一半宽度"""
+    """捡漏模块三标签 Notebook — 黑色背景, 只占一半宽度, UI创建先读缓存秒出"""
     outer = tk.Frame(parent, bg="#000000"); outer.pack(fill=tk.BOTH, expand=True)
     _add_title_row(outer, "🎣 捡漏 (单击→日K 双击→游资心法)", "#CE93D8", LEAK_KNOWLEDGE.get("资讯股", {}))
 
@@ -2561,14 +2564,10 @@ def _build_leak_panel(parent, win):
         tab = tk.Frame(nb, bg="#000000"); nb.add(tab, text=title)
 
         cols = ("代码", "名称", "涨幅%", "成交额", "备注")
-        tv = ttk.Treeview(tab, columns=cols, show="headings", height=5, style="Leak.Treeview")
+        tv = ttk.Treeview(tab, columns=cols, show="headings", height=6, style="Leak.Treeview")
         for c in cols:
-            tv.heading(c, text=c); tv.column(c, width=90, anchor=tk.CENTER)
+            tv.heading(c, text=c); tv.column(c, width=100, anchor=tk.CENTER)
         tv.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-
-        # 滚动条
-        sb = ttk.Scrollbar(tab, orient=tk.VERTICAL, command=tv.yview)
-        tv.configure(yscrollcommand=sb.set)
 
         # 单击 → 日K线, 双击 → 游资心法
         tv.bind("<ButtonRelease-1>", lambda e, t=tv, k=key: _leak_on_click(win, t, e))
@@ -2576,7 +2575,17 @@ def _build_leak_panel(parent, win):
 
         win._leak_tvs[key] = tv
 
-    # 后台拉取捡漏数据
+    # === UI 创建时立刻从本地缓存秒出 ===
+    cached = _load_leak_cache()
+    if cached:
+        for key, tv in win._leak_tvs.items():
+            for row in cached.get(key, [])[:20]:
+                tv.insert("", tk.END, values=tuple(row))
+        # 更新顶栏日期标签 (如果有)
+        if hasattr(win, "_top_status") and cached.get("date"):
+            win._top_status.config(text=f"📅 缓存 {cached['date']}")
+
+    # 后台刷新真实数据 (更新 UI + 写缓存)
     threading.Thread(target=_load_leak_data, args=(win,), daemon=True).start()
 
 
@@ -2703,6 +2712,31 @@ def _open_hotmoney_dialog(win, code, name):
     messagebox.showinfo("🦅 游资心法", f"双击触发 {name}({code}) 的游资心法分析\n\n"
                         f"提示: 在持仓Tab或股票分析Tab打开该股票即可查看完整游资心法",
                         parent=win)
+
+
+def _load_leak_cache():
+    """读本地捡漏缓存 JSON, 返回 dict 或 None"""
+    try:
+        if os.path.exists(_LEAK_CACHE_PATH):
+            with open(_LEAK_CACHE_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception: pass
+    return None
+
+
+def _save_leak_cache(data, date_str):
+    """写捡漏缓存 JSON"""
+    try:
+        os.makedirs(os.path.dirname(_LEAK_CACHE_PATH), exist_ok=True)
+        cache = {"date": date_str, "saved_at": datetime.now().isoformat(),
+                 "news": data.get("news", []),
+                 "strong": data.get("strong", []),
+                 "drop": data.get("drop", [])}
+        with open(_LEAK_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+        print(f"[👁️看盘] ✅ 捡漏缓存写入 {len(cache['news'])}+{len(cache['strong'])}+{len(cache['drop'])} 行")
+    except Exception as e:
+        print(f"[👁️看盘] 写捡漏缓存失败: {e}")
 
 
 def _load_leak_data(win):
@@ -2859,12 +2893,15 @@ def _load_leak_data(win):
             except Exception as e:
                 print(f"[捡漏] 超跌票失败: {e}")
 
-            # 更新 UI
+            # 更新 UI + 写缓存
             def _apply():
                 for key, tv in win._leak_tvs.items():
                     for i in tv.get_children(): tv.delete(i)
                     for row in data.get(key, [])[:20]:
                         tv.insert("", tk.END, values=row)
+                # 写 JSON 持久化缓存, 下次打开秒出
+                date_str = datetime.now().strftime("%Y%m%d_%H%M")
+                _save_leak_cache(data, date_str)
                 total = sum(len(v) for v in data.values())
                 print(f"[👁️看盘] ✅ 捡漏数据: 资讯 {len(data['news'])} | 强势 {len(data['strong'])} | 超跌 {len(data['drop'])}")
             win.after(0, _apply)
