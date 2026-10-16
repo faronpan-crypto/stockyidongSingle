@@ -681,9 +681,9 @@ def show_speculator_watch(root=None, app=None):
 
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
-    # 左: 3行 (九宫格/盘口/量能 顶 | 期货/周期/状态 中 | 捡漏 底) | 右: 游资看盘思路分析
+    # 左: 3行 (九宫格/盘口/量能 顶 | 期货/周期/状态 中 | 捡漏 底) | 右: 游资看盘思路分析 (宽度减半)
     left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    right_pane = tk.Frame(outer, bg="#181818", width=560); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+    right_pane = tk.Frame(outer, bg="#121212", width=280); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
     right_pane.pack_propagate(False)
 
     # 三行 grid: row_top(expand) | row_bot(expand) | row_leak(fixed height)
@@ -1985,8 +1985,8 @@ def _build_watch_analysis(parent, win):
     _LF = [13]      # LabelFrame 标题字体
     _CONCL = [16]   # 结论字体
 
-    top = tk.Frame(parent, bg="#181818"); top.pack(fill=tk.X, pady=4)
-    tk.Label(top, text="🧠 游资看盘思路分析", bg="#181818", fg="#FFD54F",
+    top = tk.Frame(parent, bg="#121212"); top.pack(fill=tk.X, pady=4)
+    tk.Label(top, text="🧠 看盘思路", bg="#121212", fg="#FFD54F",
              font=("", 12, "bold")).pack(side=tk.LEFT, padx=8)
 
     def _fs_lbl(): return f"🔤 {_F[0]}pt"
@@ -2003,8 +2003,8 @@ def _build_watch_analysis(parent, win):
         for title, lf in win._wa_lfs.items():
             lf.config(font=("", _LF[0], "bold"))
 
-    fs_box = tk.Frame(top, bg="#181818"); fs_box.pack(side=tk.RIGHT, padx=6)
-    fs_lbl = tk.Label(fs_box, text=_fs_lbl(), bg="#181818", fg="#90CAF9", font=("", 10))
+    fs_box = tk.Frame(top, bg="#121212"); fs_box.pack(side=tk.RIGHT, padx=6)
+    fs_lbl = tk.Label(fs_box, text=_fs_lbl(), bg="#121212", fg="#90CAF9", font=("", 10))
     fs_lbl.pack(side=tk.LEFT, padx=(0, 2))
     tk.Button(fs_box, text="A-", width=3, bg="#37474F", fg="#ECEFF1", font=("", 9),
               command=lambda: _change_fs(-1)).pack(side=tk.LEFT, padx=1)
@@ -2015,11 +2015,11 @@ def _build_watch_analysis(parent, win):
     tk.Button(top, text="🤖 AI分析", command=lambda: _ai_popup(win),
               bg="#3949AB", fg="#ECEFF1", font=("", 10, "bold")).pack(side=tk.RIGHT, padx=4)
 
-    canvas = tk.Canvas(parent, bg="#181818", highlightthickness=0, width=540)
+    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0, width=260)
     sb = tk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
-    body = tk.Frame(canvas, bg="#181818")
+    body = tk.Frame(canvas, bg="#121212")
     body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.create_window((0, 0), window=body, anchor="nw", width=540)
+    canvas.create_window((0, 0), window=body, anchor="nw", width=260)
     canvas.configure(yscrollcommand=sb.set)
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     sb.pack(side=tk.RIGHT, fill=tk.Y)
@@ -2029,41 +2029,41 @@ def _build_watch_analysis(parent, win):
 
     # 结论区 (特大字体, 独立)
     concl_lf = tk.LabelFrame(body, text="🎯 今日结论",
-                             bg="#1E1E1E", fg="#FFD54F", font=("", 12, "bold"))
+                             bg="#121212", fg="#FFD54F", font=("", 11, "bold"))
     concl_lf.pack(fill=tk.X, padx=8, pady=(6, 8))
     win._wa_conclusion = tk.Label(concl_lf, text="⏳ 加载中...",
-                                 bg="#1E1E1E", fg="#FFFFFF", font=("", _CONCL[0], "bold"),
-                                 wraplength=500, justify=tk.LEFT, padx=10, pady=8)
+                                 bg="#121212", fg="#FFFFFF", font=("", _CONCL[0], "bold"),
+                                 wraplength=240, justify=tk.LEFT, padx=8, pady=6)
     win._wa_conclusion.pack(fill=tk.X)
 
     # 7 层 — 每层加 ❓🤖 按钮
     win._wa_layers = {}   # title → content label
     win._wa_lfs = {}      # title → LabelFrame
     for title, question, color in WATCH_ANALYSIS_LAYERS:
-        lf = tk.LabelFrame(body, text=title, bg="#181818", fg=color, font=("", _LF[0], "bold"))
+        lf = tk.LabelFrame(body, text=title, bg="#121212", fg=color, font=("", _LF[0], "bold"))
         lf.pack(fill=tk.X, padx=8, pady=5)
         win._wa_lfs[title] = lf
 
         # 层顶部: 问题 + ❓ + 🤖
-        hdr = tk.Frame(lf, bg="#181818"); hdr.pack(fill=tk.X, padx=6, pady=(4, 0))
-        tk.Label(hdr, text=f"💬 {question}", bg="#181818", fg="#9E9E9E",
-                 font=("", 10)).pack(side=tk.LEFT)
+        hdr = tk.Frame(lf, bg="#121212"); hdr.pack(fill=tk.X, padx=6, pady=(4, 0))
+        tk.Label(hdr, text=f"💬 {question}", bg="#121212", fg="#9E9E9E",
+                 font=("", 9)).pack(side=tk.LEFT)
         # ❓ 判断逻辑
-        q_btn = tk.Label(hdr, text="❓", bg="#181818", fg="#64B5F6",
-                         font=("", 11, "bold underline"), cursor="hand2")
+        q_btn = tk.Label(hdr, text="❓", bg="#121212", fg="#64B5F6",
+                         font=("", 10, "bold underline"), cursor="hand2")
         q_btn.pack(side=tk.RIGHT, padx=(6, 2))
         q_btn.bind("<Button-1>", lambda _e, t=title: _show_layer_knowledge(win, t))
         q_btn.bind("<Double-Button-1>", lambda _e, t=title: _show_layer_knowledge(win, t))
         # 🤖 AI 分析
-        ai_btn = tk.Label(hdr, text="🤖", bg="#181818", fg="#81D4FA",
-                          font=("", 11, "bold"), cursor="hand2")
+        ai_btn = tk.Label(hdr, text="🤖", bg="#121212", fg="#81D4FA",
+                          font=("", 10, "bold"), cursor="hand2")
         ai_btn.pack(side=tk.RIGHT, padx=2)
         ai_btn.bind("<Button-1>", lambda _e, t=title: _ai_layer_popup(win, t))
         ai_btn.bind("<Double-Button-1>", lambda _e, t=title: _ai_layer_popup(win, t))
 
         # 内容
-        lbl = tk.Label(lf, text="⏳ 加载中...", bg="#181818", fg="#E0E0E0",
-                       font=("", _F[0]), wraplength=500, justify=tk.LEFT,
+        lbl = tk.Label(lf, text="⏳ 加载中...", bg="#121212", fg="#E0E0E0",
+                       font=("", _F[0]), wraplength=240, justify=tk.LEFT,
                        padx=8, pady=6)
         lbl.pack(fill=tk.X)
         win._wa_layers[title] = lbl
@@ -2795,44 +2795,60 @@ def _load_leak_data(win):
             except Exception as e:
                 print(f"[捡漏] 资讯股失败: {e}")
 
-            # ③ 超跌票: 从 daily 抽样计算 60 日回撤
+            # ③ 超跌票: 从资讯股池 + 强势票池 + 硬编码龙头里筛 8 日回撤≥20%
             try:
                 if pro is not None:
-                    d = _TUSHARE_DAILY_CACHE.get("data")
-                    sb = _TUSHARE_SB_CACHE.get("data")
-                    if d is None and pro is not None:
-                        td = datetime.now().strftime("%Y%m%d")
-                        d = pro.daily(trade_date=td)
-                    if sb is None and pro is not None:
-                        sb = pro.stock_basic(list_status="L", fields="ts_code,name")
-                    if d is not None and sb is not None and len(d) > 1000:
-                        merged = d.merge(sb, on="ts_code", how="left")
-                        drop_cands = merged[
-                            (merged["pct_chg"] < -1) &
-                            (~merged["name"].str.contains("ST|退|N|XD|DR", na=False))
-                        ].sort_values("pct_chg").head(40)
-                        drop_results = []; calc = 0
-                        for _, r in drop_cands.iterrows():
-                            if calc >= 20: break
-                            try:
-                                tc = str(r["ts_code"])
-                                k = pro.daily(ts_code=tc,
-                                              start_date=(datetime.now()-timedelta(days=120)).strftime("%Y%m%d"),
-                                              end_date=datetime.now().strftime("%Y%m%d"))
-                                calc += 1
-                                if k is None or len(k) < 20: continue
-                                high60 = k.tail(60)["high"].max()
-                                close = float(r["close"])
-                                dd = (close - high60) / high60 * 100
-                                if dd <= -15:
-                                    pure = tc.split(".")[0]
-                                    drop_results.append((dd, pure, str(r["name"] or ""),
-                                                         close, float(r["pct_chg"])))
-                            except Exception: continue
-                        drop_results.sort(key=lambda x: x[0])
-                        for dd, code, name, close, tp in drop_results[:25]:
-                            data["drop"].append((code, name, f"{tp:+.2f}",
-                                                 f"{close:.2f}", f"距高点 {dd:+.1f}%"))
+                    # 构建候选集: (资讯股 ∪ 强势票 ∪ 硬编码龙头) 去重
+                    hard_leaders = ["300750", "002594", "002230", "688256", "300308",
+                                    "688981", "002487", "600519", "601318", "000001",
+                                    "300760", "601012", "600036", "000063", "002179",
+                                    "300024", "600276", "002714", "300782", "300124",
+                                    "002487", "301282", "301569", "688265", "300111",
+                                    "002543", "600668", "600812", "600721"]
+                    cand_codes = set(hard_leaders)
+                    for r in data["strong"][:15]: cand_codes.add(r[0])
+                    for r in data["news"]: cand_codes.add(r[0])
+                    print(f"[捡漏 超跌] 候选集 {len(cand_codes)} 只 (龙头+资讯+强势)")
+
+                    drop_results = []
+                    for code in cand_codes:
+                        try:
+                            # 转 tushare code
+                            if code.startswith("6"): tc = code + ".SH"
+                            elif code.startswith("0") or code.startswith("3"): tc = code + ".SZ"
+                            elif code.startswith("688"): tc = code + ".SH"
+                            elif code.startswith("8") or code.startswith("4"): tc = code + ".BJ"
+                            else: tc = code + ".SZ"
+                            k = pro.daily(ts_code=tc,
+                                          start_date=(datetime.now()-timedelta(days=30)).strftime("%Y%m%d"),
+                                          end_date=datetime.now().strftime("%Y%m%d"))
+                            if k is None or len(k) < 5: continue
+                            k = k.sort_values("trade_date")
+                            last8 = k.tail(8)
+                            high8 = last8["high"].max()
+                            close = float(k.iloc[-1]["close"])
+                            dd = (close - high8) / high8 * 100
+                            if dd <= -20:
+                                # 拿名称 (宽松匹配, 避免 ts_code 格式差异)
+                                name = "—"
+                                if _TUSHARE_SB_CACHE.get("data") is not None:
+                                    c2 = _TUSHARE_SB_CACHE["data"]
+                                    # 精确先试
+                                    cm = c2[c2["ts_code"] == tc]
+                                    if len(cm) == 0:
+                                        # 再试 startswith (纯代码匹配)
+                                        cm = c2[c2["ts_code"].str.startswith(code)]
+                                    if len(cm) > 0: name = str(cm.iloc[0]["name"])
+                                tp = float(k.iloc[-1]["pct_chg"])
+                                drop_results.append((dd, code, name, close, tp, high8))
+                        except Exception: continue
+                        if len(drop_results) >= 30: break
+
+                    drop_results.sort(key=lambda x: x[0])
+                    for dd, code, name, close, tp, high8 in drop_results[:25]:
+                        data["drop"].append((code, name, f"{tp:+.2f}",
+                                             f"{close:.2f}",
+                                             f"8日最高{high8:.1f}→回撤 {dd:+.1f}%"))
             except Exception as e:
                 print(f"[捡漏] 超跌票失败: {e}")
 
