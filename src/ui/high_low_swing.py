@@ -5,10 +5,10 @@ import tkinter as tk
 import tkinter.ttk as ttk
 
 # ── 全局字号 (可变: A- / A+ 按钮修改后 refresh config) ──
-_FONT_BASE = [14]           # 正文字号 (用户反馈调大)
-_FONT_TITLE = [18]          # 大标题
-_FONT_LF = [15]             # LabelFrame 标题
-_FONT_SM = [12]             # 小字
+_FONT_BASE = [15]           # 正文字号 (用户反馈调大, 默认 15pt)
+_FONT_TITLE = [20]          # 大标题
+_FONT_LF = [16]             # LabelFrame 标题
+_FONT_SM = [13]             # 小字
 
 # ── 配色 ──
 _BG_DEEP = "#121212"
@@ -489,23 +489,37 @@ def show_high_low_swing(parent):
               font=("", 10, "bold"), padx=10, pady=2,
               command=lambda: _flash_refresh(win)).pack(side=tk.LEFT, padx=4, pady=8)
 
-    # 🔤 12pt A- A+
-    fs_label = tk.Label(toolbar, text=f"🔤 {_FONT_BASE[0]}pt", bg=_BG_TOOLBAR, fg=_FG_BLUE,
-                        font=("", 10))
-    fs_label.pack(side=tk.LEFT, padx=(20, 4), pady=8)
+    # ── 🔤 字体调节 (显眼版) ──
+    fs_frame = tk.Frame(toolbar, bg=_BG_TOOLBAR)
+    fs_frame.pack(side=tk.LEFT, padx=(18, 4), pady=8)
+    tk.Label(fs_frame, text="🔤 字体:", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+             font=("", 11, "bold")).pack(side=tk.LEFT, padx=(0, 4))
+    fs_label = tk.Label(fs_frame, text=f"{_FONT_BASE[0]}pt", bg=_BG_TOOLBAR, fg=_FG_BLUE,
+                        font=("", 12, "bold"))
+    fs_label.pack(side=tk.LEFT, padx=(0, 4))
 
     def _change_global_fs(delta):
-        _FONT_BASE[0] = max(10, min(18, _FONT_BASE[0] + delta))
-        _FONT_TITLE[0] = max(13, min(24, _FONT_TITLE[0] + delta))
-        _FONT_LF[0] = max(11, min(22, _FONT_LF[0] + delta))
-        _FONT_SM[0] = max(9, min(16, _FONT_SM[0] + delta))
-        fs_label.config(text=f"🔤 {_FONT_BASE[0]}pt")
+        _FONT_BASE[0] = max(10, min(24, _FONT_BASE[0] + delta))
+        _FONT_TITLE[0] = max(14, min(30, _FONT_TITLE[0] + delta))
+        _FONT_LF[0] = max(12, min(26, _FONT_LF[0] + delta))
+        _FONT_SM[0] = max(10, min(22, _FONT_SM[0] + delta))
+        fs_label.config(text=f"{_FONT_BASE[0]}pt")
+        fs_spinbox.set(_FONT_BASE[0])
         _refresh_fonts()
 
-    tk.Button(toolbar, text="A-", width=3, command=lambda: _change_global_fs(-1),
-              bg="#37474F", fg="#ECEFF1", font=("", 10)).pack(side=tk.LEFT, padx=1, pady=8)
-    tk.Button(toolbar, text="A+", width=3, command=lambda: _change_global_fs(+1),
-              bg="#37474F", fg="#ECEFF1", font=("", 10)).pack(side=tk.LEFT, padx=1, pady=8)
+    tk.Button(fs_frame, text="A-", width=3, command=lambda: _change_global_fs(-1),
+              bg="#37474F", fg="#ECEFF1", font=("", 11, "bold")).pack(side=tk.LEFT, padx=1)
+    # Spinbox 直接跳转 pt
+    fs_var = tk.IntVar(value=_FONT_BASE[0])
+    fs_spinbox = ttk.Spinbox(fs_frame, from_=10, to=24, width=3, textvariable=fs_var,
+                             command=lambda: _jump_fs(int(fs_var.get())))
+    fs_spinbox.pack(side=tk.LEFT, padx=1)
+    tk.Button(fs_frame, text="A+", width=3, command=lambda: _change_global_fs(+1),
+              bg="#37474F", fg="#ECEFF1", font=("", 11, "bold")).pack(side=tk.LEFT, padx=1)
+
+    def _jump_fs(target):
+        delta = target - _FONT_BASE[0]
+        _change_global_fs(delta)
 
     # 右侧面板已内嵌择时判断 (条件+结论+三维分析), 无需独立按钮
 
@@ -684,19 +698,20 @@ def show_high_low_swing(parent):
         obj_t = obj_var.get(); obj_n = holding_combo.get() if obj_t == "持仓股" else obj_t
         tech, fund, sent, conclusion, action, color = _do_dynamic(d, h, m, obj_t, obj_n)
 
+
         tk.Label(right_body, text=f"⏰ {obj_t}: {obj_n}", bg=_BG_PANEL, fg=_FG_DIM,
-                 font=("", 9)).pack(anchor="w", padx=6, pady=(4, 2))
+                 font=("", _FONT_SM[0])).pack(anchor="w", padx=6, pady=(4, 2))
         tk.Label(right_body, text=f"📅 {d} {h}:{m}", bg=_BG_PANEL, fg=_FG_DIM,
-                 font=("", 9)).pack(anchor="w", padx=6)
+                 font=("", _FONT_SM[0])).pack(anchor="w", padx=6)
 
         # 结论大字卡
         tk.Frame(right_body, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=6, pady=6)
         tk.Label(right_body, text="🎯 综合结论", bg=_BG_PANEL, fg=_FG_GOLD,
-                 font=("", 10, "bold")).pack(anchor="w", padx=6)
+                 font=("", _FONT_LF[0], "bold")).pack(anchor="w", padx=6)
         tk.Label(right_body, text=conclusion, bg=color, fg="white",
                  font=("", 18, "bold"), padx=6, pady=3, width=20).pack(padx=4, pady=3)
         tk.Label(right_body, text=action, bg=_BG_PANEL, fg=_FG_TEXT,
-                 font=("", 12), justify=tk.LEFT, wraplength=270,
+                 font=("", _FONT_BASE[0]), justify=tk.LEFT, wraplength=270,
                  anchor="w").pack(anchor="w", padx=4, pady=3)
 
         tk.Frame(right_body, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=6, pady=6)
@@ -706,17 +721,17 @@ def show_high_low_swing(parent):
             lf = tk.LabelFrame(right_body, text=f" {title} ", bg=_BG_PANEL, fg=_FG_GOLD, font=("", 9, "bold"))
             lf.pack(fill=tk.X, padx=3, pady=2)
             content_frame = tk.Frame(lf, bg=_BG_PANEL); content_frame.pack(fill=tk.X, padx=6, pady=4)
-            tk.Label(content_frame, text=txt, bg=_BG_PANEL, fg=_FG_TEXT, font=("", 9),
+            tk.Label(content_frame, text=txt, bg=_BG_PANEL, fg=_FG_TEXT, font=("", _FONT_SM[0]),
                      justify=tk.LEFT, wraplength=300, anchor="w").pack(anchor="w", padx=4)
             tk.Button(content_frame, text="❓", command=lambda _k=k: _show_t_knowledge(_k),
-                      bg=_BG_PANEL, fg=_FG_BLUE, font=("", 8, "underline"),
+                      bg=_BG_PANEL, fg=_FG_BLUE, font=("", 10, "underline"),
                       relief=tk.FLAT, cursor="hand2").pack(anchor="e", padx=4, pady=2)
 
         tk.Frame(right_body, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=6, pady=6)
 
         # 时间轴 (紧凑版)
         tk.Label(right_body, text="⏱️ 日内关键节点", bg=_BG_PANEL, fg=_FG_DIM,
-                 font=("", 9)).pack(anchor="w", padx=6)
+                 font=("", _FONT_SM[0])).pack(anchor="w", padx=6)
         timeline_items = [
             ("09:30", "高开幅度", _FG_DIM), ("10:00", "龙头强弱", _FG_BLUE),
             ("10:30", "MACD金叉/死叉?", _FG_GOLD), ("11:00", "情绪高峰", _FG_GOLD),
@@ -728,7 +743,25 @@ def show_high_low_swing(parent):
             row.pack(fill=tk.X, padx=3)
             tk.Label(row, text=t, bg=_BG_PANEL, fg=_FG_GOLD, font=("", 9, "bold"),
                      width=6, anchor="w").pack(side=tk.LEFT)
-            tk.Label(row, text=label, bg=_BG_PANEL, fg=c, font=("", 9)).pack(side=tk.LEFT, padx=(2, 6))
+            tk.Label(row, text=label, bg=_BG_PANEL, fg=c, font=("", _FONT_SM[0])).pack(side=tk.LEFT, padx=(2, 6))
+
+
+        # 🔥 自动把 right_body 所有 Label 加入 _font_widgets
+        def _collect_font(w):
+            for c in w.winfo_children():
+                if isinstance(c, tk.Label):
+                    _font_widgets.append((c, "body"))
+                if hasattr(c, 'winfo_children'):
+                    _collect_font(c)
+        _collect_font(right_body)
+    # 🔥 自动把 right_body 所有 Label 加入 _font_widgets (A-/A+ 实时生效)
+    def _collect_font(w):
+        for c in w.winfo_children():
+            if isinstance(c, tk.Label):
+                _font_widgets.append((c, "body"))
+            if hasattr(c, 'winfo_children'):
+                _collect_font(c)
+    _collect_font(right_body)
 
     _refresh_right()
 
