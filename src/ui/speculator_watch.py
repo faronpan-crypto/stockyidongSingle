@@ -589,28 +589,57 @@ def show_speculator_watch(root=None, app=None):
     win.protocol("WM_DELETE_WINDOW", lambda: (setattr(win, "_running", False), win.destroy()))
 
     print("[👁️看盘] 六区构建完成, 立刻填充本地数据...", flush=True)
-    try:
-        _refresh_all_blocks(win)
-        _refresh_volume(win)
-        _refresh_cycle(win)
-        _refresh_status(win)
-        _load_orderbook(win)
-        _refresh_futures(win)
-        _load_limitup_dropdown(win)
-        _refresh_watch_analysis(win)
-        print("[👁️看盘] ✅ 本地数据全部填充完成!", flush=True)
-    except Exception as e:
-        print(f"[👁️看盘❌] 填充异常: {e}\n{traceback.format_exc()}", flush=True)
 
-    # 后台仅做 akshare 补充 (失败不影响)
-    def _bg():
+    # 先用种子数据秒出所有面板 (保证不空)
+    _seed_fill_all(win)
+
+    # 后台线程拉真实数据替换
+    def _real_fill():
+        try: _refresh_all_blocks(win)
+        except Exception as e: print(f"[👁️看盘❌] blocks: {e}")
+        try: _refresh_volume(win)
+        except Exception as e: print(f"[👁️看盘❌] volume: {e}")
+        try: _refresh_cycle(win)
+        except Exception as e: print(f"[👁️看盘❌] cycle: {e}")
+        try: _refresh_status(win)
+        except Exception as e: print(f"[👁️看盘❌] status: {e}")
+        try: _refresh_futures(win)
+        except Exception as e: print(f"[👁️看盘❌] futures: {e}")
+        try: _load_limitup_dropdown(win)
+        except Exception as e: print(f"[👁️看盘❌] limitup: {e}")
+        try: _refresh_watch_analysis(win)
+        except Exception as e: print(f"[👁️看盘❌] analysis: {e}")
+        try: _load_orderbook(win)  # akshare, 挂了不影响
+        except Exception as e: print(f"[👁️看盘❌] orderbook: {e}")
+        print("[👁️看盘] ✅ 真实数据全部填充完成!", flush=True)
+    threading.Thread(target=_real_fill, daemon=True).start()
+
+    # akshare 独立后台 (挂了不影响)
+    def _bg_ak():
         try:
             _get_ak_blocks(); _get_ak_spot()
             win.after(0, lambda: _refresh_all_blocks(win))
-            win.after(0, lambda: _refresh_volume(win))
         except Exception: pass
-    threading.Thread(target=_bg, daemon=True).start()
+    threading.Thread(target=_bg_ak, daemon=True).start()
     return win
+
+
+def _seed_fill_all(win):
+    """种子数据秒出 — 所有面板先有内容, 再后台替换成真实数据"""
+    try:
+        # 顶栏日期标签先显示种子状态
+        if hasattr(win, '_data_date_lbl'):
+            win._data_date_lbl.config(text="⏳ 加载实时数据中...", fg="#BDBDBD")
+        # 右侧分析面板先显示种子结论 (从 SEED 数据推导)
+        ctx = {"pct_mean": -2.85, "up_count": 430, "down_count": 5108,
+               "zt_count": 44, "dt_count": 51, "trade_date": "— (加载中)",
+               "up_ratio": 7.8, "cycle": "P4 退潮", "light": "🔴 红灯",
+               "block_ranking": [("券商", 0.06), ("银行", -1.07), ("CPO", -4.0)],
+               "spot": {}}
+        layers, concl = _build_7layer_analysis(ctx)
+        _apply_analysis(win, layers, concl)
+    except Exception as e:
+        print(f"[👁️看盘] 种子填充失败 (不影响): {e}")
 
 
 def _load_limitup_dropdown(win):
