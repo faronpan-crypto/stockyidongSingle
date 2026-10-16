@@ -5,10 +5,10 @@ import tkinter as tk
 import tkinter.ttk as ttk
 
 # ── 全局字号 (可变: A- / A+ 按钮修改后 refresh config) ──
-_FONT_BASE = [12]           # 正文字号
-_FONT_TITLE = [16]          # 大标题
-_FONT_LF = [13]             # LabelFrame 标题
-_FONT_SM = [10]             # 小字
+_FONT_BASE = [14]           # 正文字号 (用户反馈调大)
+_FONT_TITLE = [18]          # 大标题
+_FONT_LF = [15]             # LabelFrame 标题
+_FONT_SM = [12]             # 小字
 
 # ── 配色 ──
 _BG_DEEP = "#121212"
@@ -559,7 +559,7 @@ def show_high_low_swing(parent):
     win.protocol("WM_DELETE_WINDOW", lambda: (canvas.unbind_all("<MouseWheel>"), win.destroy()))
 
     # ── 右侧: 择时判断整合区 ──
-    right_panel = tk.Frame(main_pw, bg=_BG_PANEL, width=340)
+    right_panel = tk.Frame(main_pw, bg=_BG_PANEL, width=290)  # 宽度减 50, 整体左移
     right_panel.pack_propagate(False)
     main_pw.add(right_panel, weight=1)
 
@@ -612,7 +612,7 @@ def show_high_low_swing(parent):
     tk.Button(cond, text="🔍 分析", bg="#7B1FA2", fg="white", font=("", 9, "bold"),
               padx=10, pady=1, cursor="hand2", command=lambda: _refresh_right()).grid(row=4, column=0, columnspan=4, sticky="we", pady=(6, 4))
 
-    tk.Frame(right_panel, bg=_FG_GOLD, height=1).pack(fill=tk.X, padx=10, pady=6)
+    tk.Frame(right_panel, bg=_FG_GOLD, height=1).pack(fill=tk.X, padx=6, pady=3)
 
     # ── 择时分析知识字典 ──
     _TIMING_KNOWLEDGE = {
@@ -694,17 +694,17 @@ def show_high_low_swing(parent):
         tk.Label(right_body, text="🎯 综合结论", bg=_BG_PANEL, fg=_FG_GOLD,
                  font=("", 10, "bold")).pack(anchor="w", padx=6)
         tk.Label(right_body, text=conclusion, bg=color, fg="white",
-                 font=("", 14, "bold"), padx=10, pady=8, width=20).pack(padx=6, pady=4)
+                 font=("", 18, "bold"), padx=6, pady=3, width=20).pack(padx=4, pady=3)
         tk.Label(right_body, text=action, bg=_BG_PANEL, fg=_FG_TEXT,
-                 font=("", 10), justify=tk.LEFT, wraplength=310,
-                 anchor="w").pack(anchor="w", padx=6, pady=4)
+                 font=("", 12), justify=tk.LEFT, wraplength=270,
+                 anchor="w").pack(anchor="w", padx=4, pady=3)
 
         tk.Frame(right_body, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=6, pady=6)
 
         # 三维分析折叠区
         for k, title, txt in [("tech", "① 技术面", tech), ("fund", "② 资金面", fund), ("sent", "③ 情绪面", sent)]:
             lf = tk.LabelFrame(right_body, text=f" {title} ", bg=_BG_PANEL, fg=_FG_GOLD, font=("", 9, "bold"))
-            lf.pack(fill=tk.X, padx=6, pady=4)
+            lf.pack(fill=tk.X, padx=3, pady=2)
             content_frame = tk.Frame(lf, bg=_BG_PANEL); content_frame.pack(fill=tk.X, padx=6, pady=4)
             tk.Label(content_frame, text=txt, bg=_BG_PANEL, fg=_FG_TEXT, font=("", 9),
                      justify=tk.LEFT, wraplength=300, anchor="w").pack(anchor="w", padx=4)
@@ -725,7 +725,7 @@ def show_high_low_swing(parent):
         ]
         for t, label, c in timeline_items:
             row = tk.Frame(right_body, bg=_BG_PANEL)
-            row.pack(fill=tk.X, padx=6)
+            row.pack(fill=tk.X, padx=3)
             tk.Label(row, text=t, bg=_BG_PANEL, fg=_FG_GOLD, font=("", 9, "bold"),
                      width=6, anchor="w").pack(side=tk.LEFT)
             tk.Label(row, text=label, bg=_BG_PANEL, fg=c, font=("", 9)).pack(side=tk.LEFT, padx=(2, 6))
@@ -738,7 +738,7 @@ def show_high_low_swing(parent):
     def _make_school_card(parent, data):
         """创建一个流派卡片, 带 ❓ 按钮"""
         card = tk.Frame(parent, bg=_BG_CARD, highlightbackground=_FG_BLUE, highlightthickness=1)
-        card.pack(fill=tk.X, padx=6, pady=5)
+        card.pack(fill=tk.X, padx=4, pady=3)
 
         # 标题行
         title_row = tk.Frame(card, bg=_BG_CARD); title_row.pack(fill=tk.X, padx=8, pady=(8, 2))
@@ -829,7 +829,7 @@ def show_high_low_swing(parent):
     for layer in _T_THREE_LAYERS:
         card = tk.Frame(t_cols, bg=_BG_CARD, highlightbackground=layer["color"],
                         highlightthickness=1)
-        card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=6)
+        card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=3, pady=3)
 
         head = tk.Frame(card, bg=_BG_CARD); head.pack(fill=tk.X, padx=8, pady=(8, 4))
         tk.Label(head, text=layer["name"], bg=_BG_CARD, fg=layer["color"],
