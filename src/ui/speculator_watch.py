@@ -681,9 +681,9 @@ def show_speculator_watch(root=None, app=None):
 
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
-    # 左: 3行 (九宫格/盘口/量能 顶 | 期货/周期/状态 中 | 捡漏 底) | 右: 游资看盘思路分析 (宽度减半)
+    # 左: 3行 (九宫格/盘口/量能 顶 | 期货/周期/状态 中 | 捡漏 底) | 右: 游资看盘思路分析 (超窄+红底)
     left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    right_pane = tk.Frame(outer, bg="#121212", width=280); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+    right_pane = tk.Frame(outer, bg="#3E1818", width=140); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
     right_pane.pack_propagate(False)
 
     # 三行 grid: row_top(expand) | row_bot(expand) | row_leak(fixed height)
@@ -1985,8 +1985,8 @@ def _build_watch_analysis(parent, win):
     _LF = [13]      # LabelFrame 标题字体
     _CONCL = [16]   # 结论字体
 
-    top = tk.Frame(parent, bg="#121212"); top.pack(fill=tk.X, pady=4)
-    tk.Label(top, text="🧠 看盘思路", bg="#121212", fg="#FFD54F",
+    top = tk.Frame(parent, bg="#3E1818"); top.pack(fill=tk.X, pady=4)
+    tk.Label(top, text="🧠 看盘", bg="#3E1818", fg="#FFCDD2",
              font=("", 12, "bold")).pack(side=tk.LEFT, padx=8)
 
     def _fs_lbl(): return f"🔤 {_F[0]}pt"
@@ -2003,8 +2003,8 @@ def _build_watch_analysis(parent, win):
         for title, lf in win._wa_lfs.items():
             lf.config(font=("", _LF[0], "bold"))
 
-    fs_box = tk.Frame(top, bg="#121212"); fs_box.pack(side=tk.RIGHT, padx=6)
-    fs_lbl = tk.Label(fs_box, text=_fs_lbl(), bg="#121212", fg="#90CAF9", font=("", 10))
+    fs_box = tk.Frame(top, bg="#3E1818"); fs_box.pack(side=tk.RIGHT, padx=6)
+    fs_lbl = tk.Label(fs_box, text=_fs_lbl(), bg="#3E1818", fg="#EF9A9A", font=("", 9))
     fs_lbl.pack(side=tk.LEFT, padx=(0, 2))
     tk.Button(fs_box, text="A-", width=3, bg="#37474F", fg="#ECEFF1", font=("", 9),
               command=lambda: _change_fs(-1)).pack(side=tk.LEFT, padx=1)
@@ -2015,11 +2015,11 @@ def _build_watch_analysis(parent, win):
     tk.Button(top, text="🤖 AI分析", command=lambda: _ai_popup(win),
               bg="#3949AB", fg="#ECEFF1", font=("", 10, "bold")).pack(side=tk.RIGHT, padx=4)
 
-    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0, width=260)
+    canvas = tk.Canvas(parent, bg="#3E1818", highlightthickness=0, width=130)
     sb = tk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
-    body = tk.Frame(canvas, bg="#121212")
+    body = tk.Frame(canvas, bg="#3E1818")
     body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.create_window((0, 0), window=body, anchor="nw", width=260)
+    canvas.create_window((0, 0), window=body, anchor="nw", width=130)
     canvas.configure(yscrollcommand=sb.set)
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     sb.pack(side=tk.RIGHT, fill=tk.Y)
@@ -2028,43 +2028,39 @@ def _build_watch_analysis(parent, win):
     canvas.bind_all("<MouseWheel>", _mw)
 
     # 结论区 (特大字体, 独立)
-    concl_lf = tk.LabelFrame(body, text="🎯 今日结论",
-                             bg="#121212", fg="#FFD54F", font=("", 11, "bold"))
-    concl_lf.pack(fill=tk.X, padx=8, pady=(6, 8))
-    win._wa_conclusion = tk.Label(concl_lf, text="⏳ 加载中...",
-                                 bg="#121212", fg="#FFFFFF", font=("", _CONCL[0], "bold"),
-                                 wraplength=240, justify=tk.LEFT, padx=8, pady=6)
+    concl_lf = tk.LabelFrame(body, text="🎯 结论", bg="#3E1818", fg="#FFEBEE", font=("", 10, "bold"))
+    concl_lf.pack(fill=tk.X, padx=2, pady=(4, 4))
+    win._wa_conclusion = tk.Label(concl_lf, text="⏳", bg="#3E1818", fg="#FFEBEE",
+                                 font=("", _CONCL[0]-2, "bold"),
+                                 wraplength=110, justify=tk.LEFT, padx=3, pady=3)
     win._wa_conclusion.pack(fill=tk.X)
 
-    # 7 层 — 每层加 ❓🤖 按钮
-    win._wa_layers = {}   # title → content label
-    win._wa_lfs = {}      # title → LabelFrame
+    # 7 层 — 每层加 ❓🤖 按钮 (红色系 + 超窄)
+    win._wa_layers = {}
+    win._wa_lfs = {}
     for title, question, color in WATCH_ANALYSIS_LAYERS:
-        lf = tk.LabelFrame(body, text=title, bg="#121212", fg=color, font=("", _LF[0], "bold"))
-        lf.pack(fill=tk.X, padx=8, pady=5)
+        lf = tk.LabelFrame(body, text=title, bg="#3E1818", fg="#FFCDD2",
+                            font=("", _LF[0]-1, "bold"))
+        lf.pack(fill=tk.X, padx=2, pady=2)
         win._wa_lfs[title] = lf
 
-        # 层顶部: 问题 + ❓ + 🤖
-        hdr = tk.Frame(lf, bg="#121212"); hdr.pack(fill=tk.X, padx=6, pady=(4, 0))
-        tk.Label(hdr, text=f"💬 {question}", bg="#121212", fg="#9E9E9E",
-                 font=("", 9)).pack(side=tk.LEFT)
-        # ❓ 判断逻辑
-        q_btn = tk.Label(hdr, text="❓", bg="#121212", fg="#64B5F6",
-                         font=("", 10, "bold underline"), cursor="hand2")
-        q_btn.pack(side=tk.RIGHT, padx=(6, 2))
+        hdr = tk.Frame(lf, bg="#3E1818"); hdr.pack(fill=tk.X, padx=3, pady=(2, 0))
+        tk.Label(hdr, text=f"💬 {question}", bg="#3E1818", fg="#FFCDD2",
+                 font=("", 8)).pack(side=tk.LEFT)
+        q_btn = tk.Label(hdr, text="❓", bg="#3E1818", fg="#FFEBEE",
+                         font=("", 9, "bold underline"), cursor="hand2")
+        q_btn.pack(side=tk.RIGHT, padx=(4, 2))
         q_btn.bind("<Button-1>", lambda _e, t=title: _show_layer_knowledge(win, t))
         q_btn.bind("<Double-Button-1>", lambda _e, t=title: _show_layer_knowledge(win, t))
-        # 🤖 AI 分析
-        ai_btn = tk.Label(hdr, text="🤖", bg="#121212", fg="#81D4FA",
-                          font=("", 10, "bold"), cursor="hand2")
+        ai_btn = tk.Label(hdr, text="🤖", bg="#3E1818", fg="#FFCDD2",
+                          font=("", 9, "bold"), cursor="hand2")
         ai_btn.pack(side=tk.RIGHT, padx=2)
         ai_btn.bind("<Button-1>", lambda _e, t=title: _ai_layer_popup(win, t))
         ai_btn.bind("<Double-Button-1>", lambda _e, t=title: _ai_layer_popup(win, t))
 
-        # 内容
-        lbl = tk.Label(lf, text="⏳ 加载中...", bg="#121212", fg="#E0E0E0",
-                       font=("", _F[0]), wraplength=240, justify=tk.LEFT,
-                       padx=8, pady=6)
+        lbl = tk.Label(lf, text="⏳", bg="#3E1818", fg="#FFCDD2",
+                       font=("", _F[0]-1), wraplength=110, justify=tk.LEFT,
+                       padx=3, pady=3)
         lbl.pack(fill=tk.X)
         win._wa_layers[title] = lbl
 
