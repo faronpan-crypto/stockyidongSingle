@@ -681,20 +681,21 @@ def show_speculator_watch(root=None, app=None):
 
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
-    # 左: 3行 (九宫格/盘口/量能 顶 | 期货/周期/状态 中 | 捡漏 底) | 右: 游资看盘思路分析 (超窄+红底)
+    # 左: 3行 (九宫格/盘口/量能 顶跨2列 | 期货/周期/状态 中跨2列 | 捡漏 底左半) | 右: 游资看盘思路分析 (宽度减半)
     left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    right_pane = tk.Frame(outer, bg="#121212", width=140); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+    right_pane = tk.Frame(outer, bg="#121212", width=280); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
     right_pane.pack_propagate(False)
 
-    # 三行 grid: row_top(expand) | row_bot(expand) | row_leak(fixed height)
+    # 左面板 grid: 2列 × 3行, row_top/row_bot 跨两列全宽, row_leak 只占 column 0 (一半宽)
     left_pane.grid_rowconfigure(0, weight=3)
     left_pane.grid_rowconfigure(1, weight=3)
     left_pane.grid_rowconfigure(2, weight=0)  # 捡漏: 固定 200px 高度
-    left_pane.grid_columnconfigure(0, weight=1)
+    left_pane.grid_columnconfigure(0, weight=1, uniform="half")
+    left_pane.grid_columnconfigure(1, weight=1, uniform="half")
 
-    row_top = tk.Frame(left_pane, bg="#121212"); row_top.grid(row=0, column=0, sticky="nsew")
-    row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, sticky="nsew")
-    row_leak = tk.Frame(left_pane, bg="#121212", height=200); row_leak.grid(row=2, column=0, sticky="nsew", pady=(2, 0))
+    row_top = tk.Frame(left_pane, bg="#121212"); row_top.grid(row=0, column=0, columnspan=2, sticky="nsew")
+    row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, columnspan=2, sticky="nsew")
+    row_leak = tk.Frame(left_pane, bg="#000000", height=200); row_leak.grid(row=2, column=0, sticky="nsew", pady=(2, 0))
     row_leak.pack_propagate(False)
 
     _build_block_grid(row_top, win, 0)
@@ -704,7 +705,7 @@ def show_speculator_watch(root=None, app=None):
     _build_cycle_panel(row_bot, win, 1)
     _build_status_panel(row_bot, win, 2)
 
-    # 底部: 捡漏模块 (三标签 Notebooks)
+    # 底部左半: 捡漏模块 (三标签 Notebook)
     _build_leak_panel(row_leak, win)
 
     # 右侧: 游资看盘思路分析
@@ -1986,7 +1987,7 @@ def _build_watch_analysis(parent, win):
     _CONCL = [16]   # 结论字体
 
     top = tk.Frame(parent, bg="#121212"); top.pack(fill=tk.X, pady=4)
-    tk.Label(top, text="🧠 看盘", bg="#121212", fg="#BDBDBD",
+    tk.Label(top, text="🧠 看盘思路", bg="#121212", fg="#FFD54F",
              font=("", 12, "bold")).pack(side=tk.LEFT, padx=8)
 
     def _fs_lbl(): return f"🔤 {_F[0]}pt"
@@ -2004,7 +2005,7 @@ def _build_watch_analysis(parent, win):
             lf.config(font=("", _LF[0], "bold"))
 
     fs_box = tk.Frame(top, bg="#121212"); fs_box.pack(side=tk.RIGHT, padx=6)
-    fs_lbl = tk.Label(fs_box, text=_fs_lbl(), bg="#121212", fg="#90CAF9", font=("", 9))
+    fs_lbl = tk.Label(fs_box, text=_fs_lbl(), bg="#121212", fg="#90CAF9", font=("", 10))
     fs_lbl.pack(side=tk.LEFT, padx=(0, 2))
     tk.Button(fs_box, text="A-", width=3, bg="#37474F", fg="#ECEFF1", font=("", 9),
               command=lambda: _change_fs(-1)).pack(side=tk.LEFT, padx=1)
@@ -2015,11 +2016,11 @@ def _build_watch_analysis(parent, win):
     tk.Button(top, text="🤖 AI分析", command=lambda: _ai_popup(win),
               bg="#3949AB", fg="#ECEFF1", font=("", 10, "bold")).pack(side=tk.RIGHT, padx=4)
 
-    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0, width=130)
+    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0, width=260)
     sb = tk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
     body = tk.Frame(canvas, bg="#121212")
     body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.create_window((0, 0), window=body, anchor="nw", width=130)
+    canvas.create_window((0, 0), window=body, anchor="nw", width=260)
     canvas.configure(yscrollcommand=sb.set)
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     sb.pack(side=tk.RIGHT, fill=tk.Y)
@@ -2028,39 +2029,43 @@ def _build_watch_analysis(parent, win):
     canvas.bind_all("<MouseWheel>", _mw)
 
     # 结论区 (特大字体, 独立)
-    concl_lf = tk.LabelFrame(body, text="🎯 结论", bg="#121212", fg="#FFD54F", font=("", 10, "bold"))
-    concl_lf.pack(fill=tk.X, padx=2, pady=(4, 4))
-    win._wa_conclusion = tk.Label(concl_lf, text="⏳", bg="#121212", fg="#FFD54F",
-                                 font=("", _CONCL[0]-2, "bold"),
-                                 wraplength=110, justify=tk.LEFT, padx=3, pady=3)
+    concl_lf = tk.LabelFrame(body, text="🎯 今日结论",
+                             bg="#121212", fg="#FFD54F", font=("", 11, "bold"))
+    concl_lf.pack(fill=tk.X, padx=8, pady=(6, 8))
+    win._wa_conclusion = tk.Label(concl_lf, text="⏳ 加载中...",
+                                 bg="#121212", fg="#FFFFFF", font=("", _CONCL[0], "bold"),
+                                 wraplength=240, justify=tk.LEFT, padx=8, pady=6)
     win._wa_conclusion.pack(fill=tk.X)
 
-    # 7 层 — 每层加 ❓🤖 按钮 (红色系 + 超窄)
-    win._wa_layers = {}
-    win._wa_lfs = {}
+    # 7 层 — 每层加 ❓🤖 按钮
+    win._wa_layers = {}   # title → content label
+    win._wa_lfs = {}      # title → LabelFrame
     for title, question, color in WATCH_ANALYSIS_LAYERS:
-        lf = tk.LabelFrame(body, text=title, bg="#121212", fg="#BDBDBD",
-                            font=("", _LF[0]-1, "bold"))
-        lf.pack(fill=tk.X, padx=2, pady=2)
+        lf = tk.LabelFrame(body, text=title, bg="#121212", fg=color, font=("", _LF[0], "bold"))
+        lf.pack(fill=tk.X, padx=8, pady=5)
         win._wa_lfs[title] = lf
 
-        hdr = tk.Frame(lf, bg="#121212"); hdr.pack(fill=tk.X, padx=3, pady=(2, 0))
-        tk.Label(hdr, text=f"💬 {question}", bg="#121212", fg="#BDBDBD",
-                 font=("", 8)).pack(side=tk.LEFT)
-        q_btn = tk.Label(hdr, text="❓", bg="#121212", fg="#FFD54F",
-                         font=("", 9, "bold underline"), cursor="hand2")
-        q_btn.pack(side=tk.RIGHT, padx=(4, 2))
+        # 层顶部: 问题 + ❓ + 🤖
+        hdr = tk.Frame(lf, bg="#121212"); hdr.pack(fill=tk.X, padx=6, pady=(4, 0))
+        tk.Label(hdr, text=f"💬 {question}", bg="#121212", fg="#9E9E9E",
+                 font=("", 9)).pack(side=tk.LEFT)
+        # ❓ 判断逻辑
+        q_btn = tk.Label(hdr, text="❓", bg="#121212", fg="#64B5F6",
+                         font=("", 10, "bold underline"), cursor="hand2")
+        q_btn.pack(side=tk.RIGHT, padx=(6, 2))
         q_btn.bind("<Button-1>", lambda _e, t=title: _show_layer_knowledge(win, t))
         q_btn.bind("<Double-Button-1>", lambda _e, t=title: _show_layer_knowledge(win, t))
-        ai_btn = tk.Label(hdr, text="🤖", bg="#121212", fg="#BDBDBD",
-                          font=("", 9, "bold"), cursor="hand2")
+        # 🤖 AI 分析
+        ai_btn = tk.Label(hdr, text="🤖", bg="#121212", fg="#81D4FA",
+                          font=("", 10, "bold"), cursor="hand2")
         ai_btn.pack(side=tk.RIGHT, padx=2)
         ai_btn.bind("<Button-1>", lambda _e, t=title: _ai_layer_popup(win, t))
         ai_btn.bind("<Double-Button-1>", lambda _e, t=title: _ai_layer_popup(win, t))
 
-        lbl = tk.Label(lf, text="⏳", bg="#121212", fg="#BDBDBD",
-                       font=("", _F[0]-1), wraplength=110, justify=tk.LEFT,
-                       padx=3, pady=3)
+        # 内容
+        lbl = tk.Label(lf, text="⏳ 加载中...", bg="#121212", fg="#E0E0E0",
+                       font=("", _F[0]), wraplength=240, justify=tk.LEFT,
+                       padx=8, pady=6)
         lbl.pack(fill=tk.X)
         win._wa_layers[title] = lbl
 
@@ -2524,20 +2529,27 @@ LEAK_KNOWLEDGE = {
 
 
 def _build_leak_panel(parent, win):
-    """捡漏模块三标签 Notebook"""
-    outer = tk.Frame(parent, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
+    """捡漏模块三标签 Notebook — 黑色背景, 只占一半宽度"""
+    outer = tk.Frame(parent, bg="#000000"); outer.pack(fill=tk.BOTH, expand=True)
     _add_title_row(outer, "🎣 捡漏 (单击→日K 双击→游资心法)", "#CE93D8", LEAK_KNOWLEDGE.get("资讯股", {}))
 
     nb = ttk.Notebook(outer)
     nb.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
-    # Notebook 样式: 深色
+    # Notebook 样式: 黑色背景
     style = ttk.Style(); style.theme_use("clam")
-    style.configure("Leak.TNotebook", background="#121212", borderwidth=0)
-    style.configure("Leak.TNotebook.Tab", background="#2A2A2A", foreground="#BDBDBD",
-                    padding=(16, 4), font=("", 9))
-    style.map("Leak.TNotebook.Tab", background=[("selected", "#37474F")],
+    style.configure("Leak.TNotebook", background="#000000", borderwidth=0)
+    style.configure("Leak.TNotebook.Tab", background="#1A1A1A", foreground="#BDBDBD",
+                    padding=(12, 3), font=("", 8))
+    style.map("Leak.TNotebook.Tab", background=[("selected", "#000000")],
               foreground=[("selected", "#FFD54F")])
+    # Treeview 黑底样式
+    style.configure("Leak.Treeview", background="#000000", foreground="#E0E0E0",
+                    fieldbackground="#000000", rowheight=22, font=("", 9))
+    style.configure("Leak.Treeview.Heading", background="#1A1A1A", foreground="#FFD54F",
+                    font=("", 9, "bold"))
+    style.map("Leak.Treeview", background=[("selected", "#1565C0")],
+              foreground=[("selected", "#FFFFFF")])
     nb.configure(style="Leak.TNotebook")
 
     tabs = [("📰 资讯股", "#64B5F6", "news"),
@@ -2546,12 +2558,12 @@ def _build_leak_panel(parent, win):
 
     win._leak_tvs = {}
     for title, color, key in tabs:
-        tab = tk.Frame(nb, bg="#121212"); nb.add(tab, text=title)
+        tab = tk.Frame(nb, bg="#000000"); nb.add(tab, text=title)
 
-        cols = ("代码", "名称", "涨幅%", "成交额(亿)", "备注")
-        tv = ttk.Treeview(tab, columns=cols, show="headings", height=5)
+        cols = ("代码", "名称", "涨幅%", "成交额", "备注")
+        tv = ttk.Treeview(tab, columns=cols, show="headings", height=5, style="Leak.Treeview")
         for c in cols:
-            tv.heading(c, text=c); tv.column(c, width=110, anchor=tk.CENTER)
+            tv.heading(c, text=c); tv.column(c, width=90, anchor=tk.CENTER)
         tv.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
         # 滚动条
