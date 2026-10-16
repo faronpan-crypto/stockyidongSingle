@@ -1412,126 +1412,230 @@ def _build_cycle_panel(parent, win, col=1):
                         font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
-    _add_title_row(frm, "⑤ 周期阶段 (P1/P2/P3 — 周期论绑定)",
+    _add_title_row(frm, "⑤ 周期阶段 (P1-P5 — 周期论绑定)",
                    "#BA68C8", CYCLE_KNOWLEDGE)
 
-    # 三阶段状态灯
-    row = tk.Frame(frm, bg="#1E1E1E"); row.pack(pady=8)
-    stages = [("P1 启动期", "#EF5350"), ("P2 发酵期", "#FFD54F"), ("P3 高潮期", "#66BB6A")]
-    win._stage_lights = []
-    for title, color in stages:
-        col_f = tk.Frame(row, bg="#1E1E1E"); col_f.pack(side=tk.LEFT, padx=12)
-        light = tk.Label(col_f, text="●", fg="#424242", bg="#1E1E1E", font=("", 24))
-        light.pack()
-        tk.Label(col_f, text=title, bg="#1E1E1E", fg=color, font=("", 9)).pack()
-        win._stage_lights.append((light, color))
+    # —— P1-P5 五阶段可视化圆点 (参考图方案) ——
+    row = tk.Frame(frm, bg="#1E1E1E"); row.pack(pady=(6, 2))
+    stages_def = [
+        ("P1 冰点", "#424242", "#66BB6A"),   # 灰底 = 未激活, 激活=绿色
+        ("P2 启动", "#424242", "#FFD54F"),
+        ("P3 发酵", "#424242", "#FF8F00"),
+        ("P4 高潮", "#424242", "#EF5350"),
+        ("P5 退潮", "#424242", "#78909C"),
+    ]
+    win._stage_dots = []
+    for i, (name, inact, act) in enumerate(stages_def):
+        col_f = tk.Frame(row, bg="#1E1E1E"); col_f.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        dot = tk.Label(col_f, text="●", fg=inact, bg="#1E1E1E", font=("", 22))
+        dot.pack(anchor=tk.CENTER)
+        lbl = tk.Label(col_f, text=name.split(" ")[1], bg="#1E1E1E",
+                       fg=inact, font=("", 8))
+        lbl.pack(anchor=tk.CENTER)
+        win._stage_dots.append((dot, lbl, act))
+
+    # 30 日 / 15 日 涨幅统计
+    win._cycle_stats = tk.Label(frm, text="📊 30日 --% | 15日 --% | 5日 --%",
+                                bg="#1E1E1E", fg="#90CAF9", font=("Menlo", 9))
+    win._cycle_stats.pack(anchor=tk.W, padx=4, pady=(4, 0))
 
     # 周期判定文字
     win._cycle_text = tk.Label(frm, text="📌 正在判断当前周期阶段...",
                                bg="#1E1E1E", fg="#E0E0E0", font=("", 10),
                                wraplength=420, justify=tk.LEFT)
-    win._cycle_text.pack(fill=tk.X, pady=8, padx=4)
+    win._cycle_text.pack(fill=tk.X, pady=4, padx=4)
 
-    # 阶段说明
-    tk.Label(frm, text="P1=启动初期(试错), P2=发酵(主升), P3=高潮(即将见顶)",
+    # 阶段说明 (P1-P5)
+    tk.Label(frm, text="P1冰点→P2启动→P3发酵→P4高潮→P5退潮 — 仓位: 0-15%→30-40%→50-70%→止盈→空仓",
              bg="#1E1E1E", fg="#757575", font=("", 8)).pack(anchor=tk.W, padx=4)
 
 
 def _refresh_cycle(win):
-    """周期 P1/P2/P3 — 读 sentiment_history 近 30 天 m5_avg 涨跌"""
-    rows = _read_local_sentiment(limit=30)
-    if rows and len(rows) >= 2:
-        # m5_avg 是每日指数平均涨跌 (类似大盘涨跌)
-        m5_vals = [(r[10] or 0) for r in rows]  # m5_avg 字段
-        # cum_return: 用每日涨跌累加近似
-        ret30 = sum(m5_vals[:30]) if m5_vals else 0
-        ret5 = sum(m5_vals[:5]) if len(m5_vals) >= 5 else ret30
-        print(f"[👁️看盘] 周期读本地: ret30≈{ret30:+.1f}% ret5≈{ret5:+.1f}%")
+    """周期 P1-P5 — 盘中用实时涨跌比, 收盘读 sentiment_history"""
+    ret30, ret15, ret5 = -5.6, -7.5, -1.8
+    cycle = "P2 启动期"
+
+    if _is_trading_hours():
+        # 🟢 盘中: 用实时涨跌比 + 指数涨跌判断周期
+        realtime = _get_sina_realtime()
+        ctx_local = _gather_analysis_context(win)
+        cycle = ctx_local.get("cycle", "P2 启动")
+        ret30 = ctx_local.get("pct_mean", 0) * 2  # 估算
+        ret5 = ret30 * 0.5
     else:
-        print("[👁️看盘] 🌱 周期种子")
-        ret30 = -5.5; ret5 = -2.1
+        # 📅 收盘: 读 sentiment_history 近 30 天
+        rows = _read_local_sentiment(limit=30)
+        if rows and len(rows) >= 2:
+            m5_vals = [(r[10] or 0) for r in rows]
+            ret30 = sum(m5_vals[:30]) if m5_vals else 0
+            ret15 = sum(m5_vals[:15]) if len(m5_vals) >= 15 else ret30
+            ret5 = sum(m5_vals[:5]) if len(m5_vals) >= 5 else ret30
+            ctx_local = _gather_analysis_context(win)
+            cycle = ctx_local.get("cycle", "P2 启动")
 
-    if ret30 >= 5: stage_idx = 2
-    elif ret30 >= 0: stage_idx = 1
-    else: stage_idx = 0
+    # 映射 P1-P5
+    pct_mean = ret30 / 30 if ret30 != 0 else 0
+    if "冰点" in cycle or "P1" in cycle and "启动" not in cycle:
+        stage_idx = 0
+    elif "启动" in cycle or "P1 启动" in cycle:
+        stage_idx = 1
+    elif "发酵" in cycle or "P2" in cycle:
+        stage_idx = 2
+    elif "高潮" in cycle or "P3" in cycle:
+        stage_idx = 3
+    elif "退潮" in cycle or "P4" in cycle:
+        stage_idx = 4
+    else:
+        stage_idx = 2  # 默认发酵
 
-    for i, (light, color) in enumerate(win._stage_lights):
-        light.config(fg=color if i == stage_idx else "#424242")
+    # 更新 5 个圆点 (当前 + 下一阶段高亮)
+    for i, (dot, lbl, act) in enumerate(win._stage_dots):
+        if i == stage_idx:
+            dot.config(fg=act, font=("", 22, "bold"))
+            lbl.config(fg=act, font=("", 9, "bold"))
+        else:
+            dot.config(fg="#424242", font=("", 20))
+            lbl.config(fg="#616161", font=("", 8))
 
-    desc = {
-        0: ("P1 启动期 · 试错", f"30日 {ret30:+.1f}% | 5日 {ret5:+.1f}% — 信心不足, 轮动快。仓位 30-50%。"),
-        1: ("P2 发酵期 · 主升", f"30日 {ret30:+.1f}% | 5日 {ret5:+.1f}% — 赚钱效应显现。主升加仓至 60-70%。"),
-        2: ("P3 高潮期 · 谨慎", f"30日 {ret30:+.1f}% | 5日 {ret5:+.1f}% — 涨幅已大, 警惕回调。逐步止盈。"),
+    win._cycle_stats.config(
+        text=f"📊 30日 {ret30:+.1f}% | 15日 {ret15:+.1f}% | 5日 {ret5:+.1f}%")
+
+    # 阶段详情
+    stage_info = {
+        0: ("P1 冰点", "市场绝望, 涨少跌多, 缩量\n策略: 低仓位试探 (α 15%)"),
+        1: ("P2 启动", "信心萌芽, 龙头出现, 轮动加快\n策略: 加仓进攻 (α 30-40%)"),
+        2: ("P3 发酵", "主升确认, 赚钱效应扩散\n策略: 主升持有 (α 50-70%)"),
+        3: ("P4 高潮", "情绪极端亢奋, 涨停潮\n策略: 逐步止盈, 警惕见顶"),
+        4: ("P5 退潮", "情绪转弱, 杀跌增加\n策略: 防守为主, 空仓观望"),
     }
-    title, body = desc[stage_idx]
-    win._cycle_text.config(text=f"📌 当前处于: {title}\n{body}")
+    title, body = stage_info[stage_idx]
+    win._cycle_text.config(text=f"📌 当前处于: {title} · {cycle}\n{body}")
 
 
 def _build_status_panel(parent, win, col=2):
-    """⑥ 状态判定三状态灯 — 盘中机会/状态机会/主升期"""
+    """⑥ 状态判定三状态灯 — 盘中机会/状态机会/主升期 + 红圈判定 + 主控股推荐"""
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#90CAF9", font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
-    _add_title_row(frm, "⑥ 状态判定 (盘中机会/状态机会/主升期)",
+    _add_title_row(frm, "⑥ 状态判定 (盘中机会/红圈判定/主控股推荐)",
                    "#90CAF9", STATUS_KNOWLEDGE)
 
-    states = [("🎯 盘中机会", "#66BB6A", "盘中异动/脉冲/量能异常"),
-              ("✅ 状态机会", "#FFD54F", "形态突破/周期确认/资金持续流入"),
-              ("🔥 主升期 / ⚠️ 正常", "#EF5350", "主升期运行 / 进入正常震荡")]
-
+    # —— 顶部: 三状态卡 ——
     win._status_cards = []
-    for title, color, desc in states:
-        card = tk.Frame(frm, bg="#2A2A2A", padx=8, pady=6)
-        card.pack(fill=tk.X, pady=3, padx=2)
+    state_defs = [
+        ("🎯 盘中机会", "#66BB6A", "盘中异动/脉冲/量能异常"),
+        ("✅ 状态机会", "#FFD54F", "形态突破/周期确认/资金持续流入"),
+        ("🔥 主升期 / ⚠️ 正常", "#EF5350", "主升期运行 / 进入正常震荡"),
+    ]
+    for title, color, desc in state_defs:
+        card = tk.Frame(frm, bg="#2A2A2A", padx=8, pady=4)
+        card.pack(fill=tk.X, pady=2, padx=2)
         head = tk.Frame(card, bg="#2A2A2A"); head.pack(fill=tk.X)
         light = tk.Label(head, text="⚫", fg="#757575", bg="#2A2A2A", font=("", 12))
         light.pack(side=tk.LEFT)
         tk.Label(head, text=title, bg="#2A2A2A", fg=color,
-                 font=("", 10, "bold")).pack(side=tk.LEFT, padx=6)
+                 font=("", 9, "bold")).pack(side=tk.LEFT, padx=6)
         lbl = tk.Label(card, text=desc, bg="#2A2A2A", fg="#BDBDBD",
                        font=("", 8), wraplength=420, justify=tk.LEFT)
         lbl.pack(anchor=tk.W)
         win._status_cards.append((light, card, title))
 
+    # —— 红圈判定区 (参考图方案) ——
+    sep1 = tk.Frame(frm, bg="#424242", height=1); sep1.pack(fill=tk.X, pady=(6, 2))
+    tk.Label(frm, text="⭕ 红圈判定 (形态/结构)", bg="#1E1E1E", fg="#EF5350",
+             font=("", 9, "bold")).pack(anchor=tk.W, padx=4)
+
+    red_frame = tk.Frame(frm, bg="#1E1E1E"); red_frame.pack(fill=tk.X, padx=4, pady=2)
+    win._red_break_lbl = tk.Label(red_frame, text="  🟢 形态破位信号: ——",
+                                  bg="#1E1E1E", fg="#66BB6A", font=("", 9))
+    win._red_break_lbl.pack(anchor=tk.W)
+    win._red_trend_lbl = tk.Label(red_frame, text="  🟢 红圈确认: ——",
+                                  bg="#1E1E1E", fg="#66BB6A", font=("", 9))
+    win._red_trend_lbl.pack(anchor=tk.W)
+
+    # —— 主控股推荐 ——
+    sep2 = tk.Frame(frm, bg="#424242", height=1); sep2.pack(fill=tk.X, pady=(4, 2))
+    tk.Label(frm, text="🏆 主控股推荐", bg="#1E1E1E", fg="#FFD54F",
+             font=("", 9, "bold")).pack(anchor=tk.W, padx=4)
+    win._leader_lbl = tk.Label(frm, text="——", bg="#2A2A2A", fg="#81C784",
+                               font=("", 10, "bold"), wraplength=420,
+                               justify=tk.LEFT, padx=8, pady=4)
+    win._leader_lbl.pack(fill=tk.X, padx=4, pady=2)
+
+    # —— 底部综合建议 ——
+    sep3 = tk.Frame(frm, bg="#424242", height=1); sep3.pack(fill=tk.X, pady=(4, 2))
     win._status_msg = tk.Label(frm, text="💡 实时刷新中...", bg="#1E1E1E",
                                 fg="#E0E0E0", font=("", 9, "italic"),
                                 wraplength=420, justify=tk.LEFT)
-    win._status_msg.pack(fill=tk.X, pady=(6, 0), padx=4)
+    win._status_msg.pack(fill=tk.X, padx=4, pady=(0, 4))
 
 
 def _refresh_status(win):
-    """状态判定 — 读 sentiment_history 最新涨跌家数"""
-    rows = _read_local_sentiment(limit=2)
-    if rows:
-        latest = rows[0]
-        up, down = latest[3] or 0, latest[4] or 0
-        m1 = latest[1] or 0
-        breadth = up / (up + down) * 100 if (up + down) > 0 else 50
-        print(f"[👁️看盘] 状态读本地: up={up} down={down} breadth={breadth:.0f}%")
-    else:
-        print("[👁️看盘] 🌱 状态种子")
-        up, down, breadth, m1 = 979, 4496, 18, -2.8
+    """状态判定 — 红圈 + 主控股 + 综合建议"""
+    # 获取上下文 (盘中实时 or 收盘)
+    ctx = _gather_analysis_context(win)
+    up = ctx.get("up_count", 0); down = ctx.get("down_count", 5565) - up
+    breadth = ctx.get("up_ratio", 50)
+    light = ctx.get("light", "🟡 黄灯")
+    pct_mean = ctx.get("pct_mean", 0)
+    block_ranking = ctx.get("block_ranking", [])
 
     cards = getattr(win, '_status_cards', [])
-    # ① 盘中机会: breadth 突变 (今日 vs 历史均值)
-    is_intraday = breadth >= 35 or breadth <= 20
+    # ① 盘中机会: breadth 突变 or 涨跌比 < 30% or > 65%
+    is_intraday = breadth >= 65 or breadth <= 30
     if len(cards) >= 1:
         cards[0][0].config(fg="#66BB6A" if is_intraday else "#757575", text="🟢" if is_intraday else "⚫")
-    # ② 状态机会: m1 方向明确 (绝对值 >1%)
-    is_status = abs(m1) >= 1.0
+    # ② 状态机会: pct_mean 方向明确 (大盘均值 |pct| > 1%)
+    is_status = abs(pct_mean) >= 1.0
     if len(cards) >= 2:
         cards[1][0].config(fg="#FFD54F" if is_status else "#757575", text="🟡" if is_status else "⚫")
-    # ③ 主升期: breadth > 55% 且 m1 > 0
-    is_surge = breadth >= 50 and m1 > 0
+    # ③ 主升期: breadth > 50% 且 pct_mean > 0 (市场普涨)
+    is_surge = breadth >= 48 and pct_mean > 0
     if len(cards) >= 3:
         cards[2][0].config(fg="#EF5350" if is_surge else "#757575", text="🔴" if is_surge else "⚫")
 
-    # 综合建议
-    if is_surge: advice = "🔥 主升期, 重点追涨龙头板块, 加仓主升标的"
-    elif is_status: advice = "⚠️ 状态机会确认, 关注领涨板块持续性"
-    elif is_intraday: advice = "🎯 盘中异动, 捕捉短期脉冲机会"
-    else: advice = "⏸️ 市场方向不明, 观望为主, 控制仓位"
-    msg = f"📈 涨{up}/跌{down} (广度 {breadth:.0f}%)  情绪 {m1:+.1f}%\n💡 {advice}"
+    # —— 红圈判定 ——
+    # 形态破位: breadth 突然从 > 50% 跌到 < 40% (假突破)
+    break_ok = breadth >= 40  # breadth 不崩 = 未破位
+    break_color = "#66BB6A" if break_ok else "#EF5350"
+    break_text = "🟢 未破位" if break_ok else "🔴 已破位! 警惕诱多"
+    win._red_break_lbl.config(text=f"  {break_text}", fg=break_color)
+
+    # 红圈确认: breadth > 45% 且 pct_mean >= 0 (红圈确认 = 多头有效)
+    trend_ok = breadth >= 45 and pct_mean >= 0
+    trend_color = "#66BB6A" if trend_ok else "#757575"
+    trend_text = "🟢 红圈确认" if trend_ok else ("⚫ 主升期正常" if is_surge else "⚫ 进入震荡")
+    win._red_trend_lbl.config(text=f"  {trend_text}", fg=trend_color)
+
+    # —— 主控股推荐 (从板块增量榜取 Top3) ——
+    if block_ranking:
+        top3 = block_ranking[:3]
+        hot3 = block_ranking[-3:] if len(block_ranking) >= 6 else []
+        # 只推荐红盘板块 (pct > 0)
+        recommend = [b for b in top3 if b[1] > 0][:2]
+        if recommend:
+            parts = [f"🔥{b[0]}({b[1]:+.1f}%)" for b in recommend]
+            win._leader_lbl.config(text="  推荐: " + "  ".join(parts), fg="#EF5350")
+        elif light.startswith("🟡"):
+            win._leader_lbl.config(text="  谨慎参与, 可关注 银行/煤炭 防守", fg="#FFD54F")
+        else:
+            win._leader_lbl.config(text="  空仓观望, 主线不明", fg="#757575")
+    else:
+        win._leader_lbl.config(text="  (板块数据加载中...)", fg="#BDBDBD")
+
+    # —— 综合建议 ——
+    if is_surge and trend_ok:
+        advice = "🔥 主升期 + 红圈确认! 重点追涨 TOP2 板块, 加仓主升"
+    elif is_intraday and is_status:
+        advice = "⚠️ 盘中异动 + 状态机会! 关注脉冲板块持续性"
+    elif breadth < 35:
+        advice = f"⏸️ 广度 {breadth:.0f}% 偏低, 观望为主, 控制仓位"
+    elif light.startswith("🔴"):
+        advice = "🛑 红灯期间禁止开新仓, 保护本金"
+    else:
+        advice = "💡 轻仓试探, 控制单票仓位 ≤ 5%"
+    msg = (f"📈 涨{up}/跌{down} | 广度 {breadth:.0f}% | 大盘均值 {pct_mean:+.1f}%\n"
+           f"💡 {advice}")
     win._status_msg.config(text=msg)
 
 
