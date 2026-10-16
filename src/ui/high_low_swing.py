@@ -489,7 +489,7 @@ def show_high_low_swing(parent):
         print("[📈1minK] 按钮被点击!", flush=True)
         import traceback
         try:
-            _show_minute_kline_dialog(parent_root)
+            _show_minute_kline_dialog(parent)
             print("[📈1minK] 弹窗已创建", flush=True)
         except Exception as e:
             print(f"[📈1minK❌] {e}", flush=True); traceback.print_exc()
