@@ -498,6 +498,18 @@ def show_high_low_swing(parent, app=None):
               font=("", 10, "bold"), padx=10, pady=2,
               command=_on_1min_kline).pack(side=tk.LEFT, padx=4, pady=8)
 
+    # 🔍 多股并排对比
+    def _on_multi_compare():
+        print("[🔍多股] 按钮被点击!", flush=True)
+        import traceback
+        try:
+            _show_multi_kline_comparison(parent, app=app)
+        except Exception as e:
+            print(f"[🔍多股❌] {e}", flush=True); traceback.print_exc()
+    tk.Button(toolbar, text="🔍 多股对比", bg="#00695C", fg="white",
+              font=("", 10, "bold"), padx=10, pady=2,
+              command=_on_multi_compare).pack(side=tk.LEFT, padx=4, pady=8)
+
     # 🔄 刷新
     tk.Button(toolbar, text="🔄 刷新", bg="#1976D2", fg="white",
               font=("", 10, "bold"), padx=10, pady=2,
@@ -1106,6 +1118,20 @@ def _show_minute_kline_dialog(parent_root, app=None):
         "科创50 sh000688", "沪深300 sh000300", "中证500 sh000905",
         "中证1000 sh000852", "北证50 bj899050",
     ]
+    # ⚠️ ETF 新浪只有日线 (scale=240), 无 1min
+    _ETF_LIST = [
+        "证券ETF sh512880", "券商ETF sh512000", "半导体ETF sh512480",
+        "科创50ETF sh588000", "创业板ETF sz159915", "沪深300ETF sh510300",
+        "中证500ETF sh510500", "中证1000ETF sh512100",
+        "纳指ETF sh513100", "日经ETF sh513520", "标普ETF sh513500",
+        "黄金ETF sh518880", "白银ETF sh161226", "原油ETF sh501018",
+        "光伏ETF sh515790", "新能源车ETF sh515030",
+        "医疗ETF sh512170", "医药ETF sz159928",
+        "军工ETF sh512660", "白酒ETF sh512690", "消费ETF sz159928",
+        "恒生ETF sz159920", "中概互联ETF sz513050",
+        "AI ETF sh515070", "机器人ETF sz159529",
+        "红利ETF sh510880", "国债ETF sh511010",
+    ]
     _LEADER_LIST = [
         "贵州茅台 sh600519", "宁德时代 sz300750", "比亚迪 sz002594",
         "中国平安 sh601318", "招商银行 sh600036", "五粮液 sz000858",
@@ -1154,7 +1180,7 @@ def _show_minute_kline_dialog(parent_root, app=None):
                     c.close(); break
         except Exception: pass
 
-    ALL_OPTIONS = _INDEX_LIST + _holding_codes + _LEADER_LIST
+    ALL_OPTIONS = _ETF_LIST + _INDEX_LIST + _holding_codes + _LEADER_LIST
 
     # ── 顶部条件区 ──
     top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=44); top.pack(fill=tk.X)
@@ -1225,13 +1251,18 @@ def _show_minute_kline_dialog(parent_root, app=None):
             return
 
         n = len_var.get()
-        status_lbl.config(text=f"⏳ 拉取 {opt} {n} 根 1min K线...", fg=_FG_BLUE)
+        # 判断周期: ETF (5位数字) → 日线 scale=240; 指数/个股 → 1min scale=1
+        _pure_code = sina_code[2:] if len(sina_code) == 8 else sina_code  # 去掉 sh/sz/bj 前缀
+        _is_etf = len(_pure_code) == 5  # ETF 如 512480 (5位), 个股 600519 (6位), 指数 000001 (6位)
+        _scale = 240 if _is_etf else 1
+        _period_label = "日线" if _is_etf else "1min"
+        status_lbl.config(text=f"⏳ 拉取 {opt} {n} 根 {_period_label} K线 (scale={_scale})...", fg=_FG_BLUE)
         dlg.update()
 
         def _fetch():
             try:
                 url = (f"https://quotes.sina.cn/cn/api/jsonp.php/var%20{sina_code}=/"
-                       f"CN_MarketData.getKLineData?symbol={sina_code}&scale=1&ma=no&datalen={n}")
+                       f"CN_MarketData.getKLineData?symbol={sina_code}&scale={_scale}&ma=no&datalen={n}")
                 r = requests.get(url, headers={"User-Agent": "Mozilla/5.0",
                                                "Referer": "https://finance.sina.com.cn"},
                                  timeout=10)
@@ -1359,4 +1390,277 @@ def _show_minute_kline_dialog(parent_root, app=None):
     # 首次自动加载默认
     dlg.after(300, _do_load)
 
+    return dlg
+
+
+# ═══════════════════════════════════════════════
+# 🔍 多股并排对比 — 网格 mini K线 + MA5/10/20/60
+# ═══════════════════════════════════════════════
+
+def _show_multi_kline_comparison(parent_root, app=None):
+    """多标的并排对比 mini K 线图。ETF=日线, 个股=1min"""
+    import requests, json as _json, threading
+    import numpy as np
+    from datetime import datetime
+
+    try:
+        import matplotlib
+        matplotlib.use("TkAgg")
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        from matplotlib.figure import Figure
+        from matplotlib.patches import FancyBboxPatch
+        HAVE_MPL = True
+    except Exception:
+        HAVE_MPL = False
+
+    if not HAVE_MPL:
+        messagebox.showerror("缺少依赖", "需要 matplotlib")
+        return
+
+    dlg = tk.Toplevel(parent_root)
+    dlg.title("🔍 多股并排对比 (MA5/10/20/60)")
+    dlg.geometry("1280x860")
+    dlg.configure(bg=_BG_DEEP)
+    dlg.minsize(1000, 700)
+
+    # ── 下拉候选池 ──
+    _POOL = [
+        # 指数
+        "上证指数 sh000001", "深成指 sz399001", "创业板 sz399006", "科创50 sh000688",
+        # ETF
+        "证券ETF sh512880", "半导体ETF sh512480", "创业板ETF sz159915",
+        "沪深300ETF sh510300", "中证500ETF sh510500", "中证1000ETF sh512100",
+        "纳指ETF sh513100", "黄金ETF sh518880", "光伏ETF sh515790",
+        "新能源车ETF sh515030", "军工ETF sh512660", "AI ETF sh515070",
+        # 龙头股
+        "贵州茅台 sh600519", "宁德时代 sz300750", "比亚迪 sz002594",
+        "中国平安 sh601318", "招商银行 sh600036", "寒武纪 sh688256",
+        "中芯国际 sh688981", "大金重工 sz002487", "中际旭创 sz300308",
+    ]
+    # 持仓 tab 补充
+    if app is not None:
+        try:
+            for _gi in range(1, 6):
+                try:
+                    stocks, _, _, _ = app._get_holding_group_data(_gi)
+                    for _s in (stocks or []):
+                        if isinstance(_s, (list, tuple)) and len(_s) >= 2:
+                            _hn, _hc = str(_s[0]), str(_s[1])
+                            _ex = _hc.split(".")[-1] if "." in _hc else ""
+                            _ex_map = {"SH": "sh", "SZ": "sz", "BJ": "bj", "sh": "sh", "sz": "sz", "bj": "bj"}
+                            _pure = _hc.split(".")[0]
+                            _label = f"{_hn} {_ex_map.get(_ex, 'sh')}{_pure}"
+                            if _label not in _POOL:
+                                _POOL.append(_label)
+                except Exception: pass
+        except Exception: pass
+
+    # ── 顶部条件 ──
+    top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=50); top.pack(fill=tk.X)
+    top.pack_propagate(False)
+    tk.Label(top, text="🔍 多股并排对比", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+             font=("", 11, "bold")).pack(side=tk.LEFT, padx=(10, 8), pady=10)
+
+    # 列数
+    tk.Label(top, text="列数:", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT, padx=(4, 2))
+    cols_var = tk.IntVar(value=2)
+    ttk.Spinbox(top, from_=1, to=3, width=2, textvariable=cols_var).pack(side=tk.LEFT, pady=10)
+
+    # 下拉多选 (Listbox)
+    tk.Label(top, text="标的:", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT, padx=(10, 2))
+
+    # 预设按钮组 (用 Frame + Checkbutton)
+    preset_row = tk.Frame(top, bg=_BG_TOOLBAR); preset_row.pack(side=tk.LEFT, padx=(4, 4), pady=10)
+    tk.Label(preset_row, text="预设:", bg=_BG_TOOLBAR, fg=_FG_BLUE, font=("", 9)).pack(side=tk.LEFT)
+
+    _PRESETS = {
+        "指数": ["sh000001", "sz399001", "sz399006"],
+        "ETF": ["sh512880", "sh512480", "sh518880"],
+        "龙头": ["sh600519", "sz300750", "sz300308"],
+        "全红盘": ["sh512880", "sh512000", "sh515030", "sh600519"],
+        "看盘": ["sh512880", "sh512480", "sh515070", "sh512660", "sh512100", "sh518880"],
+    }
+
+    selected_codes = set()
+
+    def _toggle_preset(name):
+        codes = _PRESETS[name]
+        for c in codes:
+            if c in selected_codes:
+                selected_codes.discard(c)
+            else:
+                selected_codes.add(c)
+        _update_combo()
+        print(f"[🔍多股] 预设 {name}: {len(selected_codes)} 个已选", flush=True)
+
+    for name in _PRESETS:
+        tk.Button(preset_row, text=name, bg="#424242", fg="#E0E0E0",
+                  font=("", 8), padx=4, pady=0, cursor="hand2",
+                  command=lambda n=name: _toggle_preset(n)).pack(side=tk.LEFT, padx=1)
+
+    # 下拉选择 + 手动添加
+    _combo_opt = [o for o in _POOL]
+    combo_var = tk.StringVar(value=_combo_opt[0])
+    combo = ttk.Combobox(top, values=_combo_opt, width=20, textvariable=combo_var)
+    combo.pack(side=tk.LEFT, pady=10, padx=(6, 2))
+
+    def _add_combo():
+        opt = combo_var.get().strip()
+        code = ""
+        for p in reversed(opt.split()):
+            if p.lower().startswith(("sh", "sz", "bj")):
+                code = p.lower(); break
+        if code:
+            selected_codes.add(code)
+            _update_combo()
+
+    tk.Button(top, text="➕", bg="#1976D2", fg="white", font=("", 9, "bold"),
+              padx=4, pady=0, cursor="hand2", command=_add_combo).pack(side=tk.LEFT)
+
+    selected_lbl = tk.Label(top, text="已选: 0", bg=_BG_TOOLBAR, fg=_FG_GOLD, font=("", 9))
+    selected_lbl.pack(side=tk.LEFT, padx=(8, 4))
+
+    def _update_combo():
+        selected_lbl.config(text=f"已选: {len(selected_codes)} 个 — {', '.join(sorted(selected_codes))}")
+
+    # 🔍 开始
+    tk.Button(top, text="🔍 开始对比", bg="#00695C", fg="white",
+              font=("", 10, "bold"), padx=12, pady=2, cursor="hand2",
+              command=lambda: _render_grid()).pack(side=tk.RIGHT, padx=10, pady=10)
+
+    # ── Canvas 区 ──
+    canvas_frame = tk.Frame(dlg, bg=_BG_DEEP)
+    canvas_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+    status_lbl = tk.Label(canvas_frame, text="👆 选标的 → 🔍开始对比", bg=_BG_DEEP, fg=_FG_DIM, font=("", 10))
+    status_lbl.pack(anchor="center", pady=4)
+
+    fig = None
+    canvas = None
+
+    def _fetch_one(sina_code, n=80):
+        """拉一个标的的 K 线 (ETF 日线, 个股 1min)"""
+        _pure = sina_code[2:] if len(sina_code) == 8 else sina_code
+        is_etf = len(_pure) == 5
+        scale = 240 if is_etf else 1
+        try:
+            url = (f"https://quotes.sina.cn/cn/api/jsonp.php/var%20{sina_code}=/"
+                   f"CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen={n}")
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"},
+                             timeout=8)
+            start = r.text.index("(") + 1; end = r.text.rindex(");")
+            return _json.loads(r.text[start:end]), is_etf, None
+        except Exception as e:
+            return None, is_etf, str(e)
+
+    def _ma(arr, n):
+        out = np.full_like(arr, np.nan, dtype=float)
+        if len(arr) >= n:
+            cs = np.cumsum(arr)
+            out[n - 1:] = (cs[n - 1:] - np.concatenate([[0], cs[:-n]])) / n
+        return out
+
+    def _find_label(code):
+        """从 _POOL 找中文名"""
+        for o in _POOL:
+            if code in o.split():
+                return o.replace(" " + code, "")
+        return code
+
+    def _render_grid():
+        nonlocal fig, canvas
+        if not selected_codes:
+            messagebox.showwarning("选择", "请先选至少 1 个标的")
+            return
+        codes = sorted(selected_codes)[:9]  # 最多 9 个
+        cols = cols_var.get()
+        rows = (len(codes) + cols - 1) // cols
+
+        status_lbl.config(text=f"⏳ 拉取 {len(codes)} 个标的...", fg=_FG_BLUE)
+        dlg.update()
+
+        # 并行拉取
+        results = [None] * len(codes)
+        lock = threading.Lock()
+
+        def _worker(idx, code):
+            data, is_etf, err = _fetch_one(code)
+            with lock:
+                results[idx] = (data, is_etf, err, code)
+
+        threads = [threading.Thread(target=_worker, args=(i, c), daemon=True) for i, c in enumerate(codes)]
+        for t in threads: t.start()
+        for t in threads: t.join(timeout=15)
+
+        # 清旧 canvas
+        if canvas is not None:
+            try: canvas.get_tk_widget().destroy()
+            except Exception: pass
+            try: canvas.toolbar.destroy()
+            except Exception: pass
+
+        fig = Figure(figsize=(cols * 4.5, rows * 3.5 + 0.5), dpi=96, facecolor=_BG_PANEL)
+
+        for i, (data, is_etf, err, code) in enumerate(results):
+            ax = fig.add_subplot(rows, cols, i + 1, facecolor=_BG_PANEL)
+            label = _find_label(code)
+            if err or not data:
+                ax.text(0.5, 0.5, f"❌ {label}\n{err or '空'}", ha="center", va="center",
+                        color="#EF5350", fontsize=10, transform=ax.transAxes)
+                ax.set_axis_off()
+                continue
+
+            # 解析
+            times = [datetime.strptime(d["day"], "%Y-%m-%d %H:%M:%S" if ":" in d["day"] else "%Y-%m-%d")
+                     for d in data]
+            o = np.array([float(d["open"]) for d in data])
+            h = np.array([float(d["high"]) for d in data])
+            lo = np.array([float(d["low"]) for d in data])
+            c = np.array([float(d["close"]) for d in data])
+
+            x = np.arange(len(times))
+            # 蜡烛
+            for j in range(len(times)):
+                up = c[j] >= o[j]
+                col = "#EF5350" if up else "#66BB6A"
+                ax.plot([x[j], x[j]], [lo[j], h[j]], color=col, lw=0.6)
+                bl = min(o[j], c[j]); bh = max(o[j], c[j])
+                ax.add_patch(FancyBboxPatch((x[j] - 0.35, bl), 0.7, max(bh - bl, 0.001),
+                                            boxstyle="square,pad=0", facecolor=col, edgecolor=col, lw=0.4))
+            # MA 线
+            ma5 = _ma(c, 5); ma10 = _ma(c, 10); ma20 = _ma(c, 20); ma60 = _ma(c, 60)
+            ax.plot(x, ma5, color="#FFD54F", lw=0.9, label="MA5")
+            ax.plot(x, ma10, color="#42A5F5", lw=0.9, label="MA10")
+            ax.plot(x, ma20, color="#AB47BC", lw=0.9, label="MA20")
+            ax.plot(x, ma60, color="#EF9A9A", lw=1.2, label="MA60")
+
+            # 标题 (周期 + 最新 MA)
+            period = "日线" if is_etf else "1min"
+            title_txt = f"{label} ({period})"
+            ax.set_title(title_txt, color="#E0E0E0", fontsize=9, fontweight="bold", pad=4)
+            ax.set_facecolor(_BG_PANEL)
+            ax.tick_params(colors=_FG_DIM, labelsize=7)
+            for s in ax.spines.values(): s.set_color(_FG_DIM)
+            ax.grid(True, alpha=0.12, color=_FG_DIM)
+
+            # 最新 MA60 标记
+            if not np.isnan(ma60[-1]):
+                pos = "📈" if c[-1] > ma60[-1] else "📉"
+                ax.text(0.98, 0.95, f"MA60={ma60[-1]:.2f} {pos}", transform=ax.transAxes,
+                        color="#EF9A9A", fontsize=7, ha="right", va="top")
+
+        fig.subplots_adjust(top=0.95, bottom=0.05, left=0.05, right=0.95, hspace=0.45, wspace=0.3)
+
+        canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        try: canvas.get_tk_widget().configure(bg=_BG_PANEL)
+        except Exception: pass
+        tb = NavigationToolbar2Tk(canvas, canvas_frame)
+        tb.update()
+        tb.pack(side=tk.BOTTOM, fill=tk.X)
+
+        status_lbl.config(text=f"✅ {len(codes)} 个标的, {rows}×{cols} 网格", fg="#66BB6A")
+        print(f"[🔍多股] ✅ 渲染完成 {len(codes)} 个", flush=True)
+
+    dlg.after(300, lambda: (None))  # 延迟显示
     return dlg
