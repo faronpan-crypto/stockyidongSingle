@@ -1331,6 +1331,48 @@ def _show_minute_kline_dialog(parent_root, app=None):
         ax.plot(x, ma20, color="#AB47BC", lw=1.2, label="MA20")
         ax.plot(x, ma60, color="#EF9A9A", lw=1.5, label="MA60")
 
+        # ═══════════════════════════════════════════════
+        # 🎯 MA60 上穿/下穿 检测 — 游资做T核心信号
+        #   MA60 向上 + 价格从下向上穿 = 🟢 买入
+        #   MA60 向上 + 价格从上向下穿 = 🔴 卖出
+        # ═══════════════════════════════════════════════
+        buy_signals = []
+        sell_signals = []
+        ma60_slope = 0.0
+        for i in range(61, len(c)):
+            if _np.isnan(ma60[i]) or _np.isnan(ma60[i - 1]):
+                continue
+            # MA60 斜率 (最近 5 根)
+            if i >= 65 and not _np.isnan(ma60[i - 5]):
+                ma60_slope = (ma60[i] - ma60[i - 5]) / 5.0
+
+            # 穿越检测: 前一根 close < MA60, 当前 close > MA60 → 上穿
+            if (c[i - 1] < ma60[i - 1]) and (c[i] >= ma60[i]):
+                strength = "强" if ma60_slope > 0 else "弱"
+                buy_signals.append((i, c[i], strength))
+            # 前一根 close > MA60, 当前 close < MA60 → 下穿
+            elif (c[i - 1] > ma60[i - 1]) and (c[i] <= ma60[i]):
+                strength = "强" if ma60_slope > 0 else "弱"
+                sell_signals.append((i, c[i], strength))
+
+        # 画买入标记 🟢 (MA60 上方)
+        for idx, price, strength in buy_signals:
+            ax.scatter([x[idx]], [price * 0.997], marker="^", s=80,
+                       color="#66BB6A", zorder=10, edgecolors="white", linewidths=0.5)
+            ax.annotate(f"🟢买{strength}", xy=(x[idx], price),
+                        xytext=(x[idx], price * 1.008), ha="center", fontsize=7,
+                        color="#66BB6A", fontweight="bold",
+                        arrowprops=dict(arrowstyle="->", color="#66BB6A", lw=0.8))
+
+        # 画卖出标记 🔴 (MA60 下方)
+        for idx, price, strength in sell_signals:
+            ax.scatter([x[idx]], [price * 1.003], marker="v", s=80,
+                       color="#EF5350", zorder=10, edgecolors="white", linewidths=0.5)
+            ax.annotate(f"🔴卖{strength}", xy=(x[idx], price),
+                        xytext=(x[idx], price * 0.992), ha="center", fontsize=7,
+                        color="#EF5350", fontweight="bold",
+                        arrowprops=dict(arrowstyle="->", color="#EF5350", lw=0.8))
+
         # 最后一根画 MA60 数值 (用户核心关注)
         if not _np.isnan(ma60[-1]):
             ax.axhline(ma60[-1], color="#EF9A9A", ls="--", lw=0.8, alpha=0.7)
