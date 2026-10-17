@@ -1235,31 +1235,75 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
 
     ALL_OPTIONS = _INDEX_LIST + _ETF_LIST + _holding_codes + _LEADER_LIST
 
-    # ── 顶部条件区 ──
-    top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=44); top.pack(fill=tk.X)
-    top.pack_propagate(False)
-    tk.Label(top, text="📈 1分钟 K线图", bg=_BG_TOOLBAR, fg=_FG_GOLD,
-             font=("", 12, "bold")).pack(side=tk.LEFT, padx=(12, 10), pady=10)
-    tk.Label(top, text="选择/输入:", bg=_BG_TOOLBAR, fg=_FG_DIM,
-             font=("", 10)).pack(side=tk.LEFT, padx=(4, 2), pady=10)
+    # ═══════════════════════════════════════════════
+    # 📊 流派列表 (diagnose_mode 可切换值)
+    # ═══════════════════════════════════════════════
+    _SCHOOL_OPTIONS = [
+        "不诊断 (纯K线)", "形态学", "周期论", "技术指标",
+        "资金面", "情绪面", "算法量化", "做T三层",
+    ]
+
+    # ── 顶部双行工具栏 ──
+    top = tk.Frame(dlg, bg=_BG_TOOLBAR)
+    top.pack(fill=tk.X)
+
+    # Row 1: 标题 + 股票 + 根数 + 🔍加载
+    r1 = tk.Frame(top, bg=_BG_TOOLBAR); r1.pack(fill=tk.X)
+    tk.Label(r1, text="📈 1分钟 K线图", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+             font=("", 12, "bold")).pack(side=tk.LEFT, padx=(12, 10), pady=6)
+    tk.Label(r1, text="股票:", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 10)).pack(side=tk.LEFT, padx=(4, 2), pady=6)
 
     combo_var = tk.StringVar(value=ALL_OPTIONS[0])
-    combo = ttk.Combobox(top, values=ALL_OPTIONS, width=22, textvariable=combo_var)
-    combo.pack(side=tk.LEFT, pady=10)
+    combo = ttk.Combobox(r1, values=ALL_OPTIONS, width=22, textvariable=combo_var)
+    combo.pack(side=tk.LEFT, pady=6)
 
-    # datalen 选择 (新浪最多 1024)
-    tk.Label(top, text="根数:", bg=_BG_TOOLBAR, fg=_FG_DIM,
-             font=("", 10)).pack(side=tk.LEFT, padx=(10, 2), pady=10)
+    tk.Label(r1, text="根数:", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 10)).pack(side=tk.LEFT, padx=(10, 2), pady=6)
     len_var = tk.IntVar(value=240)
-    ttk.Spinbox(top, from_=60, to=480, width=4, textvariable=len_var, increment=60).pack(side=tk.LEFT, pady=10)
+    ttk.Spinbox(r1, from_=60, to=480, width=4, textvariable=len_var,
+                increment=60).pack(side=tk.LEFT, pady=6)
 
-    # MA 周期显示
-    tk.Label(top, text="均线: MA5/10/20/60", bg=_BG_TOOLBAR, fg=_FG_BLUE,
-             font=("", 10, "bold")).pack(side=tk.LEFT, padx=(12, 6), pady=10)
+    _btn_load = tk.Button(r1, text="🔍 加载", bg="#7B1FA2", fg="white", font=("", 10, "bold"),
+              padx=10, pady=1, cursor="hand2")
+    _btn_load.pack(side=tk.RIGHT, padx=(4, 10), pady=6)
+    _btn_redraw = tk.Button(r1, text="🎨 重画(同票)", bg="#00695C", fg="white", font=("", 9, "bold"),
+              padx=8, pady=1, cursor="hand2")
+    _btn_redraw.pack(side=tk.RIGHT, padx=2, pady=6)
 
-    status_lbl = tk.Label(top, text="⏳ 选择标的后点🔍加载", bg=_BG_TOOLBAR, fg=_FG_DIM,
-                          font=("", 9))
-    status_lbl.pack(side=tk.RIGHT, padx=10, pady=10)
+    # Row 2: 流派下拉 + 最新时间 + 状态
+    r2 = tk.Frame(top, bg=_BG_TOOLBAR); r2.pack(fill=tk.X)
+    tk.Label(r2, text="🩺流派:", bg=_BG_TOOLBAR, fg=_FG_BLUE,
+             font=("", 10, "bold")).pack(side=tk.LEFT, padx=(12, 2), pady=(0, 6))
+
+    # diagnose_mode 变成可变 StringVar, 切换后自动重画
+    _cached_data = None  # 🆕 提前声明: StringVar 初始化会触发 trace, 必须先绑定
+    _diag_var = tk.StringVar(value=diagnose_mode or "不诊断 (纯K线)")
+    diag_combo = ttk.Combobox(r2, values=_SCHOOL_OPTIONS, width=16,
+                              textvariable=_diag_var, state="readonly")
+    diag_combo.pack(side=tk.LEFT, pady=(0, 6))
+
+    # 流派切换提示文字
+    _hint_lbl = tk.Label(r2, text="  ← 切换后点「🎨重画」即可对同一票重新分析",
+                         bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9))
+    _hint_lbl.pack(side=tk.LEFT, padx=4, pady=(0, 6))
+
+    # 流派切换 → 自动触发重画 (120ms debounce)
+    def _on_diag_change(*_a):
+        try:
+            if _cached_data is not None:
+                dlg.after(120, _redraw_current)
+        except Exception: pass
+    _diag_var.trace_add("write", _on_diag_change)
+
+    # 最新时间显示 (从 data 提取)
+    _time_lbl = tk.Label(r2, text="⏱ 等待加载...", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+                         font=("", 9))
+    _time_lbl.pack(side=tk.RIGHT, padx=10, pady=(0, 6))
+
+    # 均线 info 挪到第二行
+    tk.Label(r2, text="| MA5/10/20/60 |", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 9)).pack(side=tk.RIGHT, padx=6, pady=(0, 6))
 
     # ── 中央 canvas ──
     canvas_frame = tk.Frame(dlg, bg=_BG_DEEP)
@@ -1268,6 +1312,13 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
     fig = Figure(figsize=(10, 6), dpi=96, facecolor=_BG_PANEL)
     canvas = None
     ax = None
+
+    def _redraw_current():
+        """🎨 重画同一只票 — 用缓存数据, 只换流派分析层"""
+        if _cached_data is None:
+            _time_lbl.config(text="⚠ 先加载一次数据", fg="#EF5350")
+            return
+        _do_render(_cached_data, combo_var.get())
 
     def _sina_code_from_option(opt):
         """从 '贵州茅台 sh600519' 或直接 'sh600519' 提取新浪代码"""
@@ -1307,7 +1358,7 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
         # 所有标的统一 1min (盘中/盘后都有 240 根缓存)
         _scale = 1
         _period_label = "1min"
-        status_lbl.config(text=f"⏳ 拉取 {opt} {n} 根 {_period_label} K线...", fg=_FG_BLUE)
+        _time_lbl.config(text=f"⏳ 拉取 {opt} {n} 根 {_period_label} K线...", fg=_FG_BLUE)
         dlg.update()
 
         def _fetch():
@@ -1327,15 +1378,24 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
         import threading
         def _bg():
             data, err = _fetch()
-            dlg.after(0, lambda: _on_loaded(data, err, opt))
+            def _handle():
+                nonlocal _cached_data
+                if err or not data:
+                    _time_lbl.config(text=f"❌ 加载失败: {err or '无数据'}", fg="#EF5350")
+                    return
+                _cached_data = data
+                _do_render(data, opt)
+            dlg.after(0, _handle)
         threading.Thread(target=_bg, daemon=True).start()
 
-    def _on_loaded(data, err, opt):
+    def _do_render(data, opt):
+        """纯粹的渲染函数 (数据已在, 只画). 流派诊断用当前下拉值."""
         nonlocal canvas, ax
-        if err or not data:
-            status_lbl.config(text=f"❌ 加载失败: {err or '无数据'}", fg="#EF5350")
-            return
-        status_lbl.config(text=f"✅ {opt}: {len(data)} 根 | 最新 {data[-1]['day']}", fg="#66BB6A")
+        # 🆕 流派判断用当前下拉值 (local diagnose_mode 覆盖外层参数)
+        _diag_now = _diag_var.get()
+        diagnose_mode = None if _diag_now in ("不诊断", "不诊断 (纯K线)", "") else _diag_now
+
+        _time_lbl.config(text=f"✅ {opt}: {len(data)} 根 | 最新 {data[-1]['day']} | 🩺{diagnose_mode or '纯K线'}", fg="#66BB6A")
 
         # ── 解析 ──
         import numpy as _np
@@ -1739,7 +1799,7 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
 
         # 追加诊断说明到状态栏
         if diagnose_note:
-            status_lbl.config(text=status_lbl.cget("text") + " | " + diagnose_note,
+            _time_lbl.config(text=_time_lbl.cget("text") + " | " + diagnose_note,
                               fg="#CE93D8", font=("", _FG_BLUE) and ("", 9))
 
         # 样式
@@ -1749,8 +1809,7 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
         ax.tick_params(colors=_FG_DIM, labelsize=8)
         for spine in ax.spines.values(): spine.set_color(_FG_DIM)
         ax.grid(True, alpha=0.15, color=_FG_DIM)
-        ax.legend(loc="upper left", fontsize=8, facecolor=_BG_PANEL,
-                  edgecolor=_FG_DIM, labelcolor="#E0E0E0", framealpha=0.8)
+        # ax.legend removed: macOS 字体重影 bug, 改为顶部标题标注均线颜色
         # X 轴标签 (每隔一段显示)
         step = max(1, len(times) // 8)
         ax.set_xticks(x[::step])
@@ -1782,14 +1841,15 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                        f"MA20={ma20[-1]:.2f}  MA60={ma60[-1]:.2f}\n"
                        f"最新={c[-1]:.2f}  收盘位置 vs MA60: "
                        f"{'📈 上方' if c[-1] > ma60[-1] else '📉 下方'}")
-        status_lbl.config(text=status_lbl.cget("text") + " | " + last_ma_txt.split("\n")[1],
+        # 流派分析前先加 MA 概览
+        _time_lbl.config(text=_time_lbl.cget("text") + " | " + last_ma_txt.split("\n")[1],
                           fg="#66BB6A")
 
-    # 🔍 加载按钮
-    tk.Button(top, text="🔍 加载", bg="#7B1FA2", fg="white", font=("", 10, "bold"),
-              padx=10, pady=2, cursor="hand2", command=_do_load).pack(side=tk.RIGHT, padx=10, pady=10)
+    # 🆕 绑定按钮 command (顶部工具栏已创建, 这里绑逻辑)
+    _btn_load.config(command=_do_load)
+    _btn_redraw.config(command=_redraw_current)
 
-    # 回车也触发
+    # 回车也触发加载
     combo.bind("<Return>", lambda e: _do_load())
 
     # 自动加载: 优先 default_code (诊断入口传入), 否则默认第一个
