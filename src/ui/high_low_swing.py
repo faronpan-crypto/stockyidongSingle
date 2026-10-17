@@ -1284,17 +1284,9 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
     diag_combo.pack(side=tk.LEFT, pady=(0, 6))
 
     # 流派切换提示文字
-    _hint_lbl = tk.Label(r2, text="  ← 切换后点「🎨重画」即可对同一票重新分析",
-                         bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9))
+    _hint_lbl = tk.Label(r2, text="  ← 切换流派后点🎨重画(同票)",
+                         bg=_BG_TOOLBAR, fg="#CE93D8", font=("", 9, "bold"))
     _hint_lbl.pack(side=tk.LEFT, padx=4, pady=(0, 6))
-
-    # 流派切换 → 自动触发重画 (120ms debounce)
-    def _on_diag_change(*_a):
-        try:
-            if _cached_data is not None:
-                dlg.after(120, _redraw_current)
-        except Exception: pass
-    _diag_var.trace_add("write", _on_diag_change)
 
     # 最新时间显示 (从 data 提取)
     _time_lbl = tk.Label(r2, text="⏱ 等待加载...", bg=_BG_TOOLBAR, fg=_FG_GOLD,
