@@ -31,6 +31,25 @@ BLOCK_KEYWORDS = {
 # —— 固定板块清单 ——
 FIXED_BLOCKS = list(BLOCK_KEYWORDS.keys())
 
+# —— 板块 → 东财行业/新浪指数代码 (用于日K获取) ——
+# akshare stock_board_industry_hist_em 需要精确东财行业名
+BLOCK_EM_NAME = {
+    "券商": "证券", "银行": "银行", "CPO": "通信设备",
+    "半导体": "半导体", "AI": "计算机应用", "电池": "电池",
+    "煤炭": "煤炭开采", "电力": "电力", "医疗": "医疗服务",
+    "军工": "国防军工", "航天": "航空装备", "风电": "风电设备",
+    "光伏": "光伏设备", "机器人": "自动化设备", "白酒": "白酒",
+    "黄金": "黄金",
+}
+# 新浪行业指数代码 (备用, cn指数接口)
+BLOCK_SINA_INDEX = {
+    "券商": "sh399975", "银行": "sh399986", "半导体": "sh399998",
+    "AI": "sz399085", "电池": "sz399997", "白酒": "sz399999",
+    "军工": "sh399999", "煤炭": "sh399990", "电力": "sh399995",
+    "黄金": "sh000606", "医疗": "sz399673", "光伏": "sz399748",
+    "机器人": "sz399730", "风电": "sz399747", "航天": "sh399968", "CPO": "sz399738",
+}
+
 # —— 股指期货四宫格 (IH/IF/IC/IM) ——
 # ref_val 在运行时从 tushare index_daily 动态获取现货, 不再硬编码
 FUT_NAMES = [("IH", "上证50", "000016.SH"),
@@ -1111,16 +1130,17 @@ def _draw_block_grid(win):
         if top3:
             for ti, (sname, spct) in enumerate(top3[:3]):
                 sy = y1 + ch - 22 + ti * 10
-                # 名字截断到 4 字
                 short = sname[:4] if len(sname) > 4 else sname
                 sfg = "#FF8A80" if spct >= 0 else "#69F0AE"
                 ssign = "+" if spct >= 0 else ""
+                # 🆕 给每只股票加独立 tag, 双击时识别
+                stock_tag = f"stock_{idx}_{ti}"
                 c.create_text(x1 + 6, sy, text=f"{short}",
                               fill="#BDBDBD", font=("", 8), anchor=tk.W,
-                              tags=f"cell_{idx}")
+                              tags=(f"cell_{idx}", stock_tag))
                 c.create_text(x2 - 6, sy, text=f"{ssign}{spct:.1f}%",
                               fill=sfg, font=("", 8), anchor=tk.E,
-                              tags=f"cell_{idx}")
+                              tags=(f"cell_{idx}", stock_tag, f"pct_{idx}_{ti}"))
 
         # ❓ 板块分析按钮 (左上角, 蓝色下划线)
         c.create_text(x1 + 12, y1 + 10, text="❓", fill="#90CAF9",
@@ -1131,21 +1151,92 @@ def _draw_block_grid(win):
 
         win._block_cells.append(((x1, y1, x2, y2), idx))
 
-    # 点击绑定 (每格)
-    def _on_click(event):
+    # 点击绑定: 单击 → 板块日K, 双击 → 个股日K
+    def _on_single_click(event):
         for (x1, y1, x2, y2), idx in win._block_cells:
             if x1 <= event.x <= x2 and y1 <= event.y <= y2:
-                # ❓ 热区 (左上角 20×20) → 弹知识弹窗
-                if x1 + 4 <= event.x <= x1 + 24 and y1 + 4 <= event.y <= y1 + 24:
+                tags = c.gettags(event.x, event.y)
+                # ❓ 热区 → 知识弹窗
+                if f"q_{idx}" in tags:
                     name = win._block_meta[idx][0]
-                    kd = BLOCK_KNOWLEDGE.get(name, {"definition": "(暂无该板块的分析知识)"})
+                    kd = BLOCK_KNOWLEDGE.get(name, {"definition": "(暂无)"})
                     _show_knowledge_popup(win, name, kd)
                 else:
-                    _show_block_detail(win, idx)
+                    # 🆕 单击 → 板块指数日K
+                    _show_block_daily_kline(win, idx)
                 return
-    c.bind("<Button-1>", _on_click)
-    c.bind("<Button-3>", lambda e: _show_block_detail(win, -1, full=True))  # 右键详情
+
+    def _on_double_click(event):
+        for (x1, y1, x2, y2), idx in win._block_cells:
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                tags = c.gettags(event.x, event.y)
+                # ❓ 热区 → 知识弹窗
+                if f"q_{idx}" in tags:
+                    name = win._block_meta[idx][0]
+                    kd = BLOCK_KNOWLEDGE.get(name, {"definition": "(暂无)"})
+                    _show_knowledge_popup(win, name, kd)
+                    return
+                # 🆕 双击 Top3 龙头 → 该股票日K
+                top3 = win._block_meta[idx][6] if len(win._block_meta[idx]) > 6 else []
+                hit_name = None
+                for ti, (sname, _pct) in enumerate(top3[:3]):
+                    if f"stock_{idx}_{ti}" in tags:
+                        hit_name = sname; break
+                if hit_name:
+                    # 从成分股列表找代码
+                    sina, sname2 = _lookup_stock_code_by_name(hit_name)
+                    if sina:
+                        _show_stock_daily_kline(win, sina, sname2 or hit_name)
+                        return
+                # 🆕 兜底: 双击宫格任意位置 → 该板块第一只成分股
+                sina, sname = _get_first_stock_sina(win, idx)
+                if sina:
+                    _show_stock_daily_kline(win, sina, sname)
+                else:
+                    messagebox.showinfo("提示", f"无法获取 {win._block_meta[idx][0]} 成分股代码")
+                return
+
+    c.bind("<Button-1>", _on_single_click)
+    c.bind("<Double-1>", _on_double_click)
+    c.bind("<Button-3>", lambda e: _show_block_detail(win, -1, full=True))
     c.bind("<Configure>", lambda e: _draw_block_grid(win))
+
+
+def _lookup_stock_code_by_name(name):
+    """Try to find a stock's sina code by name (local SQLite cache → akshare → holding tab)"""
+    # 1. Try sqlite stock_analysis table (existing code cache)
+    try:
+        import sqlite3
+        for dbpath in [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "stock_analysis.db"),
+            os.path.expanduser("~/StockAnalyzer/Database/stock_analysis.db"),
+        ]:
+            if os.path.exists(dbpath):
+                con = sqlite3.connect(dbpath)
+                cur = con.cursor()
+                cur.execute("SELECT code FROM stock_analysis WHERE name LIKE ? LIMIT 1",
+                            (f"%{name}%",))
+                row = cur.fetchone(); con.close()
+                if row:
+                    code = row[0]
+                    if "." in code: code = code.split(".")[0]
+                    if code.startswith("6"): return "sh" + code, name
+                    if code.startswith(("0", "3")): return "sz" + code, name
+                    if code.startswith(("4", "8")): return "bj" + code, name
+                    return "sh" + code, name
+    except Exception: pass
+    # 2. Try akshare spot
+    try:
+        import akshare as ak
+        df = ak.stock_zh_a_spot_em()
+        row = df[df["名称"].str.contains(name[:2], na=False)].head(1)
+        if len(row):
+            code = str(row.iloc[0]["代码"])
+            if code.startswith("6"): return "sh" + code, str(row.iloc[0]["名称"])
+            if code.startswith(("0", "3")): return "sz" + code, str(row.iloc[0]["名称"])
+            if code.startswith(("4", "8")): return "bj" + code, str(row.iloc[0]["名称"])
+    except Exception: pass
+    return None, None
 
 
 def _show_block_detail(win, idx, full=False):
@@ -1349,6 +1440,300 @@ def _build_volume_panel(parent, win, col=2):
     win._fut_basis_lbl = tk.Label(frm, text="加载中...", bg="#1E1E1E",
                                   fg="#E0E0E0", font=("Menlo", 9), justify=tk.LEFT)
     win._fut_basis_lbl.pack(fill=tk.X, padx=2)
+
+
+# ============================================================
+# Block / Stock Daily K-line Dialog (with MA/MACD/KDJ/support-resistance)
+# ============================================================
+
+def _fetch_block_daily(block_name, days=200):
+    """Fetch block daily K-line via akshare eastmoney → hardcoded seed (offline)"""
+    import numpy as np
+
+    # 1) akshare 东财行业历史
+    try:
+        import akshare as ak
+        em_name = BLOCK_EM_NAME.get(block_name, block_name)
+        df = ak.stock_board_industry_hist_em(symbol=em_name, period="日k", adjust="qfq")
+        if df is not None and len(df) > 30:
+            date_col = [c for c in df.columns if "日期" in str(c) or "date" in str(c).lower()][0]
+            df = df.sort_values(date_col).tail(days)
+            dates = df[date_col].astype(str).tolist()
+            return {"dates": dates, "o": df.iloc[:, 1].astype(float).to_numpy(),
+                    "h": df.iloc[:, 2].astype(float).to_numpy(),
+                    "l": df.iloc[:, 3].astype(float).to_numpy(),
+                    "c": df.iloc[:, 4].astype(float).to_numpy(),
+                    "v": df.iloc[:, 5].astype(float).to_numpy(),
+                    "src": f"EM-{em_name}"}
+    except Exception as e:
+        print(f"[watch-K] akshare block fail: {e}")
+
+    # 2) Seed data (offline fallback — deterministic per block name)
+    print(f"[watch-K] using SEED data for {block_name}")
+    return _make_seed_daily(block_name, days)
+
+
+def _make_seed_daily(name, days=180):
+    """Generate pseudo-random seed data for block — deterministic per name"""
+    import numpy as np
+    from datetime import datetime, timedelta
+    seed = abs(hash(name)) % (2**31)
+    rng = np.random.default_rng(seed)
+    base_prices = {
+        "券商": 9500, "银行": 1800, "CPO": 3200, "半导体": 5600,
+        "AI": 4200, "电池": 2800, "煤炭": 3500, "电力": 4100,
+        "医疗": 15000, "军工": 2900, "航天": 2100, "风电": 1900,
+        "光伏": 2600, "机器人": 5800, "白酒": 21000, "黄金": 580,
+    }
+    base = base_prices.get(name, 3000)
+    c = np.zeros(days); c[0] = base
+    drift = rng.normal(0.0005, 0.015, days)
+    for i in range(1, days):
+        c[i] = c[i-1] * (1 + drift[i])
+    o = c * (1 + rng.normal(0, 0.005, days))
+    h = np.maximum(o, c) * (1 + abs(rng.normal(0, 0.008, days)))
+    l = np.minimum(o, c) * (1 - abs(rng.normal(0, 0.008, days)))
+    v = abs(rng.normal(50000, 20000, days))
+    dates = []
+    cur = datetime.now() - timedelta(days=days*2)
+    while len(dates) < days:
+        if cur.weekday() < 5: dates.append(cur.strftime("%Y-%m-%d"))
+        cur += timedelta(days=1)
+    return {"dates": dates, "o": o, "h": h, "l": l, "c": c, "v": v,
+            "src": f"SEED-{name}(offline)"}
+
+
+def _fetch_stock_daily(sina_code, days=200):
+    """Fetch stock daily K-line via sina CN_MarketData.getKLineData (scale=240=daily)"""
+    try:
+        import requests, json, time
+        import numpy as np
+        symbol = sina_code
+        url = f"https://quotes.sina.cn/cn/api/jsonp.php/var%20_{symbol}_{int(time.time()*1000)}/CN_MarketData.getKLineData"
+        params = {"symbol": symbol, "scale": 240, "ma": "no", "datalen": days}
+        r = requests.get(url, params=params, timeout=10)
+        txt = r.text
+        start = txt.index("(") + 1; end = txt.rindex(")")
+        data = json.loads(txt[start:end])
+        if data and len(data) > 30:
+            dates = [d["day"] for d in data]
+            o = np.array([float(d["open"]) for d in data])
+            h = np.array([float(d["high"]) for d in data])
+            l = np.array([float(d["low"]) for d in data])
+            c = np.array([float(d["close"]) for d in data])
+            v = np.array([float(d["volume"]) for d in data])
+            return {"dates": dates, "o": o, "h": h, "l": l, "c": c, "v": v,
+                    "src": f"SINA-{symbol}"}
+    except Exception as e:
+        print(f"[watch-K] sina stock fail: {e}")
+    return None
+
+
+def _ma_calc(arr, n):
+    import numpy as np
+    out = np.full(len(arr), np.nan)
+    if len(arr) >= n:
+        cs = np.cumsum(arr)
+        out[n-1:] = (cs[n-1:] - np.concatenate([[0], cs[:-n]])) / n
+    return out
+
+
+def _ema_calc(arr, n):
+    import pandas as pd
+    return pd.Series(arr).ewm(span=n, adjust=False).mean().to_numpy()
+
+
+def _show_daily_kline_dialog(parent, title, data):
+    """Full daily K-line dialog with MA / MACD / KDJ / support-resistance / chip dist."""
+    import numpy as np
+    import pandas as pd
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+    from matplotlib.figure import Figure
+    from matplotlib.patches import Rectangle
+
+    dlg = tk.Toplevel(parent)
+    dlg.title(f"Daily K-line: {title}")
+    dlg.geometry("1080x780")
+    dlg.configure(bg="#121212")
+
+    top = tk.Frame(dlg, bg="#1E1E1E"); top.pack(fill=tk.X)
+    tk.Label(top, text=f"{title}  ({data.get('src','?')})",
+             bg="#1E1E1E", fg="#FFD54F", font=("", 12, "bold")).pack(side=tk.LEFT, padx=12, pady=6)
+    info = f"{len(data['dates'])} bars  latest {data['dates'][-1]}  close {data['c'][-1]:.2f}"
+    tk.Label(top, text=info, bg="#1E1E1E", fg="#A5D6A7", font=("", 10)).pack(side=tk.LEFT, padx=10)
+
+    canvas_frame = tk.Frame(dlg, bg="#121212"); canvas_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+
+    dates = data["dates"]; o = data["o"]; h = data["h"]; l = data["l"]
+    c = data["c"]; v = data["v"]
+    x = np.arange(len(dates))
+    ma5 = _ma_calc(c, 5); ma10 = _ma_calc(c, 10); ma20 = _ma_calc(c, 20)
+    ma60 = _ma_calc(c, 60); ma120 = _ma_calc(c, 120)
+
+    ema12 = _ema_calc(c, 12); ema26 = _ema_calc(c, 26)
+    dif = ema12 - ema26; dea = _ema_calc(dif, 9); macd_hist = (dif - dea) * 2
+
+    low9 = pd.Series(l).rolling(9).min().to_numpy()
+    high9 = pd.Series(h).rolling(9).max().to_numpy()
+    rsv = np.where(high9 - low9 > 0, (c - low9) / (high9 - low9) * 100, 50.0)
+    k = _ema_calc(np.nan_to_num(rsv, 50), 3)
+    d = _ema_calc(k, 3); j = 3 * k - 2 * d
+
+    fig = Figure(figsize=(11, 7.2), dpi=96, facecolor="#121212")
+    fig.subplots_adjust(left=0.08, right=0.95, top=0.96, bottom=0.06, hspace=0.08)
+    gs = fig.add_gridspec(4, 1, height_ratios=[5.5, 1.2, 1.2, 1.2], hspace=0.08)
+    ax = fig.add_subplot(gs[0]); axv = fig.add_subplot(gs[1], sharex=ax)
+    axm = fig.add_subplot(gs[2], sharex=ax); axk = fig.add_subplot(gs[3], sharex=ax)
+    for a in (ax, axv, axm, axk):
+        a.set_facecolor("#1E1E1E"); a.tick_params(colors="#9E9E9E", labelsize=8)
+        for sp in a.spines.values(): sp.set_color("#444")
+        a.grid(True, alpha=0.12, color="#666")
+
+    # Candles
+    for i in range(len(x)):
+        up = c[i] >= o[i]; col = "#EF5350" if up else "#66BB6A"
+        ax.plot([x[i], x[i]], [l[i], h[i]], color=col, lw=0.8)
+        body_lo = min(o[i], c[i]); body_hi = max(o[i], c[i])
+        ax.add_patch(Rectangle((x[i]-0.35, body_lo), 0.7, max(body_hi-body_lo, 0.001),
+                                facecolor=col, edgecolor=col, linewidth=0.3))
+
+    ax.plot(x, ma5, color="#FFD54F", lw=1.2, label="MA5")
+    ax.plot(x, ma10, color="#42A5F5", lw=1.2, label="MA10")
+    ax.plot(x, ma20, color="#AB47BC", lw=1.2, label="MA20")
+    ax.plot(x, ma60, color="#66BB6A", lw=1.4, label="MA60")
+    ax.plot(x, ma120, color="#FF7043", lw=1.4, label="MA120")
+
+    # Support / Resistance from local extremes
+    def _local_extrema(arr, order=5):
+        hi, lo = [], []
+        for i in range(order, len(arr)-order):
+            if arr[i] == max(arr[i-order:i+order+1]): hi.append((i, arr[i]))
+            if arr[i] == min(arr[i-order:i+order+1]): lo.append((i, arr[i]))
+        return hi, lo
+    tail = min(120, len(x))
+    hi_all, lo_all = _local_extrema(h[-tail:], 8)
+    hi_all = [(idx + len(x) - tail, val) for idx, val in hi_all]
+    lo_all = [(idx + len(x) - tail, val) for idx, val in lo_all]
+    def _dedup(pts, thresh=0.01):
+        out = []
+        for idx, val in sorted(pts, key=lambda t: -t[1]):
+            if not out or abs(val - out[-1][1]) / out[-1][1] > thresh:
+                out.append((idx, val))
+        return out[:4]
+    for idx, val in _dedup(sorted(hi_all, key=lambda t: -t[1])):
+        ax.axhline(val, color="#EF5350", ls="--", lw=0.9, alpha=0.7)
+        ax.text(len(x)-1, val, f"  resist {val:.2f}", color="#EF5350", fontsize=8, va="bottom")
+    for idx, val in _dedup(sorted(lo_all, key=lambda t: -t[1])):
+        ax.axhline(val, color="#66BB6A", ls="--", lw=0.9, alpha=0.7)
+        ax.text(len(x)-1, val, f"  support {val:.2f}", color="#66BB6A", fontsize=8, va="top")
+
+    # Chip distribution (Gaussian KDE on closes)
+    try:
+        from scipy.stats import gaussian_kde
+        prices = np.linspace(np.nanmin(c[-tail:])*0.97, np.nanmax(c[-tail:])*1.03, 50)
+        kde = gaussian_kde(c[-tail:])
+        dens = kde(prices); dens = dens / dens.max() * 0.22 * (np.nanmax(h)-np.nanmin(l))
+        ax.fill_betweenx(prices, len(x)-1-dens, len(x)-1, alpha=0.18, color="#B39DDB")
+    except Exception: pass
+
+    last = len(x) - 1
+    ax.text(0.01, 0.97,
+            f"O{o[last]:.2f} H{h[last]:.2f} L{l[last]:.2f} C{c[last]:.2f} V{v[last]:.0f}",
+            transform=ax.transAxes, color="#E0E0E0", fontsize=8, va="top",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#2A2A2A", edgecolor="#555"))
+
+    cv_colors = ["#EF5350" if c[i] >= o[i] else "#66BB6A" for i in range(len(x))]
+    axv.bar(x, v, color=cv_colors, width=0.7, alpha=0.8); axv.set_ylabel("Vol", color="#9E9E9E", fontsize=8)
+
+    md_colors = ["#EF5350" if m >= 0 else "#66BB6A" for m in macd_hist]
+    axm.bar(x, macd_hist, color=md_colors, width=0.6, alpha=0.8)
+    axm.plot(x, dif, color="#FFD54F", lw=1, label="DIF")
+    axm.plot(x, dea, color="#42A5F5", lw=1, label="DEA")
+    axm.axhline(0, color="#555", lw=0.5); axm.set_ylabel("MACD", color="#9E9E9E", fontsize=8)
+
+    axk.plot(x, k, color="#FFD54F", lw=1, label="K")
+    axk.plot(x, d, color="#42A5F5", lw=1, label="D")
+    axk.plot(x, j, color="#AB47BC", lw=0.9, label="J")
+    axk.axhline(80, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
+    axk.axhline(20, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
+    axk.set_ylabel("KDJ", color="#9E9E9E", fontsize=8)
+    axk.set_xlabel(f"Date  ({len(dates)} bars)", color="#9E9E9E", fontsize=8)
+
+    step = max(1, len(dates) // 12)
+    ticks = x[::step]; lbls = [dates[i][:10] for i in ticks]
+    for a in (ax, axv, axm): a.set_xticks(ticks); a.set_xticklabels([])
+    axk.set_xticks(ticks); axk.set_xticklabels(lbls, rotation=30, fontsize=7, color="#9E9E9E")
+    ax.legend(loc="upper left", fontsize=8, facecolor="#2A2A2A", edgecolor="#555", labelcolor="#E0E0E0")
+
+    canvas = FigureCanvasTkAgg(fig, master=canvas_frame); canvas.draw()
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    try: canvas.get_tk_widget().configure(bg="#121212")
+    except Exception: pass
+    tb = NavigationToolbar2Tk(canvas, canvas_frame); tb.update(); tb.pack(side=tk.BOTTOM, fill=tk.X)
+
+
+def _show_block_daily_kline(win, idx):
+    """Single-click block cell -> block index daily K-line"""
+    import threading
+    name = win._block_meta[idx][0]
+    print(f"[watch-K] block '{name}' fetching...", flush=True)
+    dlg_load = tk.Toplevel(win); dlg_load.title("Loading"); dlg_load.geometry("260x80")
+    dlg_load.configure(bg="#1E1E1E"); dlg_load.transient(win)
+    tk.Label(dlg_load, text=f"Loading {name} daily K-line...",
+             bg="#1E1E1E", fg="#FFD54F", font=("", 11)).pack(pady=20)
+    def _bg():
+        data = _fetch_block_daily(name, days=240)
+        def _done():
+            try: dlg_load.destroy()
+            except Exception: pass
+            if data is None:
+                messagebox.showwarning("Warning", f"{name} K-line data fetch failed")
+                return
+            _show_daily_kline_dialog(win, f"Block: {name}", data)
+        dlg_load.after(0, _done)
+    threading.Thread(target=_bg, daemon=True).start()
+
+
+def _show_stock_daily_kline(win, sina_code, stock_name=""):
+    """Double-click stock -> stock daily K-line"""
+    import threading
+    label = f"{stock_name} ({sina_code})" if stock_name else sina_code
+    print(f"[watch-K] stock '{label}' fetching...", flush=True)
+    dlg_load = tk.Toplevel(win); dlg_load.title("Loading"); dlg_load.geometry("260x80")
+    dlg_load.configure(bg="#1E1E1E"); dlg_load.transient(win)
+    tk.Label(dlg_load, text=f"Loading {label} daily K-line...",
+             bg="#1E1E1E", fg="#FFD54F", font=("", 11)).pack(pady=20)
+    def _bg():
+        data = _fetch_stock_daily(sina_code, days=240)
+        def _done():
+            try: dlg_load.destroy()
+            except Exception: pass
+            if data is None:
+                messagebox.showwarning("Warning", f"{label} K-line data fetch failed")
+                return
+            _show_daily_kline_dialog(win, label, data)
+        dlg_load.after(0, _done)
+    threading.Thread(target=_bg, daemon=True).start()
+
+
+def _get_first_stock_sina(win, idx):
+    """Get first constituent stock's sina code from a block"""
+    try:
+        import akshare as ak
+        name = win._block_meta[idx][0]
+        em_name = BLOCK_EM_NAME.get(name, name)
+        df = ak.stock_board_industry_cons_em(symbol=em_name)
+        if df is not None and len(df) > 0:
+            code = str(df.iloc[0]["代码"])
+            if code.startswith("6"): sina = "sh" + code
+            elif code.startswith("0") or code.startswith("3"): sina = "sz" + code
+            elif code.startswith("4") or code.startswith("8"): sina = "bj" + code
+            else: sina = "sh" + code
+            sname = str(df.iloc[0]["名称"])
+            return sina, sname
+    except Exception as e:
+        print(f"[watch-K] constituents fetch fail: {e}")
+    return None, None
 
 
 def _refresh_volume(win):
