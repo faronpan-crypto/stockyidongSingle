@@ -1243,59 +1243,47 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
         "资金面", "情绪面", "算法量化", "做T三层",
     ]
 
-    # ── 顶部双行工具栏 ──
-    top = tk.Frame(dlg, bg=_BG_TOOLBAR)
+    # ── 单行紧凑工具栏 (避免双行挤爆) ──
+    top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=44)
     top.pack(fill=tk.X)
+    top.pack_propagate(False)
 
-    # Row 1: 标题 + 股票 + 根数 + 🔍加载
+    # Row 1 (只保留一行, 所有控件紧凑排列)
     r1 = tk.Frame(top, bg=_BG_TOOLBAR); r1.pack(fill=tk.X)
-    tk.Label(r1, text="📈 1分钟 K线图", bg=_BG_TOOLBAR, fg=_FG_GOLD,
-             font=("", 12, "bold")).pack(side=tk.LEFT, padx=(12, 10), pady=6)
-    tk.Label(r1, text="股票:", bg=_BG_TOOLBAR, fg=_FG_DIM,
-             font=("", 10)).pack(side=tk.LEFT, padx=(4, 2), pady=6)
+    tk.Label(r1, text="📈", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+             font=("", 11, "bold")).pack(side=tk.LEFT, padx=(10, 4), pady=8)
 
     combo_var = tk.StringVar(value=ALL_OPTIONS[0])
-    combo = ttk.Combobox(r1, values=ALL_OPTIONS, width=22, textvariable=combo_var)
-    combo.pack(side=tk.LEFT, pady=6)
+    combo = ttk.Combobox(r1, values=ALL_OPTIONS, width=18, textvariable=combo_var)
+    combo.pack(side=tk.LEFT, pady=8, padx=(0, 2))
 
-    tk.Label(r1, text="根数:", bg=_BG_TOOLBAR, fg=_FG_DIM,
-             font=("", 10)).pack(side=tk.LEFT, padx=(10, 2), pady=6)
+    tk.Label(r1, text="根数", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 9)).pack(side=tk.LEFT, pady=8)
     len_var = tk.IntVar(value=240)
     ttk.Spinbox(r1, from_=60, to=480, width=4, textvariable=len_var,
-                increment=60).pack(side=tk.LEFT, pady=6)
+                increment=60).pack(side=tk.LEFT, pady=8, padx=(2, 6))
 
-    _btn_load = tk.Button(r1, text="🔍 加载", bg="#7B1FA2", fg="white", font=("", 10, "bold"),
-              padx=10, pady=1, cursor="hand2")
-    _btn_load.pack(side=tk.RIGHT, padx=(4, 10), pady=6)
-    _btn_redraw = tk.Button(r1, text="🎨 重画(同票)", bg="#00695C", fg="white", font=("", 9, "bold"),
-              padx=8, pady=1, cursor="hand2")
-    _btn_redraw.pack(side=tk.RIGHT, padx=2, pady=6)
+    _btn_load = tk.Button(r1, text="🔍", bg="#7B1FA2", fg="white", font=("", 9, "bold"),
+                          padx=6, pady=1, cursor="hand2")
+    _btn_load.pack(side=tk.LEFT, padx=2, pady=8)
+    _btn_redraw = tk.Button(r1, text="🎨", bg="#00695C", fg="white", font=("", 9, "bold"),
+                            padx=6, pady=1, cursor="hand2")
+    _btn_redraw.pack(side=tk.LEFT, padx=2, pady=8)
 
-    # Row 2: 流派下拉 + 最新时间 + 状态
-    r2 = tk.Frame(top, bg=_BG_TOOLBAR); r2.pack(fill=tk.X)
-    tk.Label(r2, text="🩺流派:", bg=_BG_TOOLBAR, fg=_FG_BLUE,
-             font=("", 10, "bold")).pack(side=tk.LEFT, padx=(12, 2), pady=(0, 6))
+    tk.Label(r1, text="|", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT, padx=4, pady=8)
+    tk.Label(r1, text="🩺", bg=_BG_TOOLBAR, fg=_FG_BLUE, font=("", 10, "bold")).pack(side=tk.LEFT, pady=8)
 
-    # diagnose_mode 变成可变 StringVar, 切换后自动重画
-    _cached_data = None  # 🆕 提前声明: StringVar 初始化会触发 trace, 必须先绑定
+    # diagnose_mode 变成可变 StringVar, 切换后手动点🎨重画
+    _cached_data = None
     _diag_var = tk.StringVar(value=diagnose_mode or "不诊断 (纯K线)")
-    diag_combo = ttk.Combobox(r2, values=_SCHOOL_OPTIONS, width=16,
+    diag_combo = ttk.Combobox(r1, values=_SCHOOL_OPTIONS, width=14,
                               textvariable=_diag_var, state="readonly")
-    diag_combo.pack(side=tk.LEFT, pady=(0, 6))
+    diag_combo.pack(side=tk.LEFT, pady=8)
 
-    # 流派切换提示文字
-    _hint_lbl = tk.Label(r2, text="  ← 切换流派后点🎨重画(同票)",
-                         bg=_BG_TOOLBAR, fg="#CE93D8", font=("", 9, "bold"))
-    _hint_lbl.pack(side=tk.LEFT, padx=4, pady=(0, 6))
-
-    # 最新时间显示 (从 data 提取)
-    _time_lbl = tk.Label(r2, text="⏱ 等待加载...", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+    # 右侧: 时间 + MA (单行最右)
+    _time_lbl = tk.Label(r1, text="⏳ 等待加载...", bg=_BG_TOOLBAR, fg=_FG_GOLD,
                          font=("", 9))
-    _time_lbl.pack(side=tk.RIGHT, padx=10, pady=(0, 6))
-
-    # 均线 info 挪到第二行
-    tk.Label(r2, text="| MA5/10/20/60 |", bg=_BG_TOOLBAR, fg=_FG_DIM,
-             font=("", 9)).pack(side=tk.RIGHT, padx=6, pady=(0, 6))
+    _time_lbl.pack(side=tk.RIGHT, padx=10, pady=8)
 
     # ── 中央 canvas ──
     canvas_frame = tk.Frame(dlg, bg=_BG_DEEP)
@@ -1392,464 +1380,475 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
     def _do_render(data, opt):
         """纯粹的渲染函数 (数据已在, 只画). 流派诊断用当前下拉值."""
         nonlocal canvas, ax, _toolbar
-        # 🆕 流派判断用当前下拉值 (local diagnose_mode 覆盖外层参数)
-        _diag_now = _diag_var.get()
-        diagnose_mode = None if _diag_now in ("不诊断", "不诊断 (纯K线)", "") else _diag_now
+        import traceback as _tb
+        try:
+            # 🆕 流派判断用当前下拉值 (local diagnose_mode 覆盖外层参数)
+            _diag_now = _diag_var.get()
+            diagnose_mode = None if _diag_now in ("不诊断", "不诊断 (纯K线)", "") else _diag_now
 
-        _time_lbl.config(text=f"✅ {opt}: {len(data)} 根 | 最新 {data[-1]['day']} | 🩺{diagnose_mode or '纯K线'}", fg="#66BB6A")
+            # 🆕 用列表收集状态, 最后一次性 config 避免追加重影
+            _status_parts = [
+                f"✅ {opt}",
+                f"{len(data)}根",
+                f"最新 {data[-1]['day']}",
+                f"🩺{diagnose_mode or '纯K线'}",
+            ]
 
-        # ── 解析 ──
-        import numpy as _np
-        times = [datetime.strptime(d["day"], "%Y-%m-%d %H:%M:%S") for d in data]
-        o = _np.array([float(d["open"]) for d in data])
-        h = _np.array([float(d["high"]) for d in data])
-        l = _np.array([float(d["low"]) for d in data])
-        c = _np.array([float(d["close"]) for d in data])
-        v = _np.array([float(d["volume"]) for d in data])
+            # ── 解析 ──
+            import numpy as _np
+            times = [datetime.strptime(d["day"], "%Y-%m-%d %H:%M:%S") for d in data]
+            o = _np.array([float(d["open"]) for d in data])
+            h = _np.array([float(d["high"]) for d in data])
+            l = _np.array([float(d["low"]) for d in data])
+            c = _np.array([float(d["close"]) for d in data])
+            v = _np.array([float(d["volume"]) for d in data])
 
-        # MA 计算
-        ma5 = _ma(c, 5); ma10 = _ma(c, 10); ma20 = _ma(c, 20); ma60 = _ma(c, 60)
+            # MA 计算
+            ma5 = _ma(c, 5); ma10 = _ma(c, 10); ma20 = _ma(c, 20); ma60 = _ma(c, 60)
 
-        # ── 清旧图 (安全版: destroy 后 update_idletasks 让 Tk 真正清理) ──
-        fig.clear()
-        if canvas is not None:
-            try:
-                canvas.get_tk_widget().destroy()
-                dlg.update_idletasks()
-            except Exception: pass
-            canvas = None
-        if _toolbar is not None:
-            try: _toolbar.destroy()
-            except Exception: pass
-            _toolbar = None
+            # ── 清旧图 (安全版: destroy 后 update_idletasks 让 Tk 真正清理) ──
+            fig.clear()
+            if canvas is not None:
+                try:
+                    canvas.get_tk_widget().destroy()
+                    dlg.update_idletasks()
+                except Exception: pass
+                canvas = None
+            if _toolbar is not None:
+                try: _toolbar.destroy()
+                except Exception: pass
+                _toolbar = None
 
-        # 上: K线图 (70%)
-        ax = fig.add_axes([0.06, 0.26, 0.88, 0.65], facecolor=_BG_PANEL)
-        # 下: 成交量 (15%)
-        axv = fig.add_axes([0.06, 0.08, 0.88, 0.15], sharex=ax, facecolor=_BG_PANEL)
+            # 上: K线图 (70%)
+            ax = fig.add_axes([0.06, 0.26, 0.88, 0.65], facecolor=_BG_PANEL)
+            # 下: 成交量 (15%)
+            axv = fig.add_axes([0.06, 0.08, 0.88, 0.15], sharex=ax, facecolor=_BG_PANEL)
 
-        x = _np.arange(len(times))
-        # 蜡烛图简化版 (涨跌着色)
-        for i in range(len(times)):
-            up = c[i] >= o[i]
-            color = "#EF5350" if up else "#66BB6A"
-            # 影线
-            ax.plot([x[i], x[i]], [l[i], h[i]], color=color, linewidth=0.8)
-            # 实体
-            body_lo = min(o[i], c[i]); body_hi = max(o[i], c[i])
-            rect_h = max(body_hi - body_lo, 0.001)
-            ax.add_patch(FancyBboxPatch((x[i] - 0.35, body_lo), 0.7, rect_h,
-                                        boxstyle="square,pad=0",
-                                        facecolor=color, edgecolor=color, linewidth=0.5))
+            x = _np.arange(len(times))
+            # 蜡烛图简化版 (涨跌着色)
+            for i in range(len(times)):
+                up = c[i] >= o[i]
+                color = "#EF5350" if up else "#66BB6A"
+                # 影线
+                ax.plot([x[i], x[i]], [l[i], h[i]], color=color, linewidth=0.8)
+                # 实体
+                body_lo = min(o[i], c[i]); body_hi = max(o[i], c[i])
+                rect_h = max(body_hi - body_lo, 0.001)
+                ax.add_patch(FancyBboxPatch((x[i] - 0.35, body_lo), 0.7, rect_h,
+                                            boxstyle="square,pad=0",
+                                            facecolor=color, edgecolor=color, linewidth=0.5))
 
-        # MA 线
-        ax.plot(x, ma5, color="#FFD54F", lw=1.2, label="MA5")
-        ax.plot(x, ma10, color="#42A5F5", lw=1.2, label="MA10")
-        ax.plot(x, ma20, color="#AB47BC", lw=1.2, label="MA20")
-        ax.plot(x, ma60, color="#EF9A9A", lw=1.5, label="MA60")
+            # MA 线
+            ax.plot(x, ma5, color="#FFD54F", lw=1.2, label="MA5")
+            ax.plot(x, ma10, color="#42A5F5", lw=1.2, label="MA10")
+            ax.plot(x, ma20, color="#AB47BC", lw=1.2, label="MA20")
+            ax.plot(x, ma60, color="#EF9A9A", lw=1.5, label="MA60")
 
-        # ═══════════════════════════════════════════════
-        # 🎯 MA60 上穿/下穿 检测 — 游资做T核心信号
-        #   MA60 向上 + 价格从下向上穿 = 🟢 买入
-        #   MA60 向上 + 价格从上向下穿 = 🔴 卖出
-        # ═══════════════════════════════════════════════
-        buy_signals = []
-        sell_signals = []
-        ma60_slope = 0.0
-        for i in range(61, len(c)):
-            if _np.isnan(ma60[i]) or _np.isnan(ma60[i - 1]):
-                continue
-            # MA60 斜率 (最近 5 根)
-            if i >= 65 and not _np.isnan(ma60[i - 5]):
-                ma60_slope = (ma60[i] - ma60[i - 5]) / 5.0
+            # ═══════════════════════════════════════════════
+            # 🎯 MA60 上穿/下穿 检测 — 游资做T核心信号
+            #   MA60 向上 + 价格从下向上穿 = 🟢 买入
+            #   MA60 向上 + 价格从上向下穿 = 🔴 卖出
+            # ═══════════════════════════════════════════════
+            buy_signals = []
+            sell_signals = []
+            ma60_slope = 0.0
+            for i in range(61, len(c)):
+                if _np.isnan(ma60[i]) or _np.isnan(ma60[i - 1]):
+                    continue
+                # MA60 斜率 (最近 5 根)
+                if i >= 65 and not _np.isnan(ma60[i - 5]):
+                    ma60_slope = (ma60[i] - ma60[i - 5]) / 5.0
 
-            # 穿越检测: 前一根 close < MA60, 当前 close > MA60 → 上穿
-            if (c[i - 1] < ma60[i - 1]) and (c[i] >= ma60[i]):
-                strength = "强" if ma60_slope > 0 else "弱"
-                buy_signals.append((i, c[i], strength))
-            # 前一根 close > MA60, 当前 close < MA60 → 下穿
-            elif (c[i - 1] > ma60[i - 1]) and (c[i] <= ma60[i]):
-                strength = "强" if ma60_slope > 0 else "弱"
-                sell_signals.append((i, c[i], strength))
+                # 穿越检测: 前一根 close < MA60, 当前 close > MA60 → 上穿
+                if (c[i - 1] < ma60[i - 1]) and (c[i] >= ma60[i]):
+                    strength = "强" if ma60_slope > 0 else "弱"
+                    buy_signals.append((i, c[i], strength))
+                # 前一根 close > MA60, 当前 close < MA60 → 下穿
+                elif (c[i - 1] > ma60[i - 1]) and (c[i] <= ma60[i]):
+                    strength = "强" if ma60_slope > 0 else "弱"
+                    sell_signals.append((i, c[i], strength))
 
-        # 画买入标记 🟢 (MA60 上方)
-        for idx, price, strength in buy_signals:
-            ax.scatter([x[idx]], [price * 0.997], marker="^", s=80,
-                       color="#66BB6A", zorder=10, edgecolors="white", linewidths=0.5)
-            ax.annotate(f"🟢买{strength}", xy=(x[idx], price),
-                        xytext=(x[idx], price * 1.008), ha="center", fontsize=7,
-                        color="#66BB6A", fontweight="bold",
-                        arrowprops=dict(arrowstyle="->", color="#66BB6A", lw=0.8))
+            # 画买入标记 🟢 (MA60 上方)
+            for idx, price, strength in buy_signals:
+                ax.scatter([x[idx]], [price * 0.997], marker="^", s=80,
+                           color="#66BB6A", zorder=10, edgecolors="white", linewidths=0.5)
+                ax.annotate(f"🟢买{strength}", xy=(x[idx], price),
+                            xytext=(x[idx], price * 1.008), ha="center", fontsize=7,
+                            color="#66BB6A", fontweight="bold",
+                            arrowprops=dict(arrowstyle="->", color="#66BB6A", lw=0.8))
 
-        # 画卖出标记 🔴 (MA60 下方)
-        for idx, price, strength in sell_signals:
-            ax.scatter([x[idx]], [price * 1.003], marker="v", s=80,
-                       color="#EF5350", zorder=10, edgecolors="white", linewidths=0.5)
-            ax.annotate(f"🔴卖{strength}", xy=(x[idx], price),
-                        xytext=(x[idx], price * 0.992), ha="center", fontsize=7,
-                        color="#EF5350", fontweight="bold",
-                        arrowprops=dict(arrowstyle="->", color="#EF5350", lw=0.8))
+            # 画卖出标记 🔴 (MA60 下方)
+            for idx, price, strength in sell_signals:
+                ax.scatter([x[idx]], [price * 1.003], marker="v", s=80,
+                           color="#EF5350", zorder=10, edgecolors="white", linewidths=0.5)
+                ax.annotate(f"🔴卖{strength}", xy=(x[idx], price),
+                            xytext=(x[idx], price * 0.992), ha="center", fontsize=7,
+                            color="#EF5350", fontweight="bold",
+                            arrowprops=dict(arrowstyle="->", color="#EF5350", lw=0.8))
 
-        # 最后一根画 MA60 数值 (用户核心关注)
-        if not _np.isnan(ma60[-1]):
-            ax.axhline(ma60[-1], color="#EF9A9A", ls="--", lw=0.8, alpha=0.7)
-            ax.text(x[-1] - 2, ma60[-1], f"  MA60={ma60[-1]:.2f}",
-                    color="#EF9A9A", fontsize=8, va="bottom", ha="right")
+            # 最后一根画 MA60 数值 (用户核心关注)
+            if not _np.isnan(ma60[-1]):
+                ax.axhline(ma60[-1], color="#EF9A9A", ls="--", lw=0.8, alpha=0.7)
+                ax.text(x[-1] - 2, ma60[-1], f"  MA60={ma60[-1]:.2f}",
+                        color="#EF9A9A", fontsize=8, va="bottom", ha="right")
 
-        # ═══════════════════════════════════════════════
-        # 🩺 流派差异化诊断覆盖层
-        # ═══════════════════════════════════════════════
-        diagnose_note = ""
-        def _find_local_extrema(arr, order=5):
-            """找局部极值点: order 范围内最高/最低"""
-            highs, lows = [], []
-            for i in range(order, len(arr) - order):
-                if arr[i] == max(arr[i - order:i + order + 1]):
-                    highs.append((i, arr[i]))
-                if arr[i] == min(arr[i - order:i + order + 1]):
-                    lows.append((i, arr[i]))
-            return highs, lows
+            # ═══════════════════════════════════════════════
+            # 🩺 流派差异化诊断覆盖层
+            # ═══════════════════════════════════════════════
+            diagnose_note = ""
+            def _find_local_extrema(arr, order=5):
+                """找局部极值点: order 范围内最高/最低"""
+                highs, lows = [], []
+                for i in range(order, len(arr) - order):
+                    if arr[i] == max(arr[i - order:i + order + 1]):
+                        highs.append((i, arr[i]))
+                    if arr[i] == min(arr[i - order:i + order + 1]):
+                        lows.append((i, arr[i]))
+                return highs, lows
 
-        def _simplify_swings(highs, lows, threshold=0.003):
-            """简化高低点: 幅度太小的过滤, 保留主要拐点"""
-            all_pts = [(i, p, "H") for i, p in highs] + [(i, p, "L") for i, p in lows]
-            all_pts.sort(key=lambda t: t[0])
-            # 相邻同向合并 (选更极端)
-            out = []
-            for pt in all_pts:
-                if not out:
-                    out.append(pt); continue
-                prev = out[-1]
-                if prev[2] == pt[2]:
-                    # 同向: 保留更极端
-                    if pt[2] == "H" and pt[1] > prev[1]:
-                        out[-1] = pt
-                    elif pt[2] == "L" and pt[1] < prev[1]:
-                        out[-1] = pt
-                else:
-                    # 反向: 幅度过滤
-                    if abs(pt[1] - prev[1]) / max(abs(prev[1]), 0.001) > threshold:
-                        out.append(pt)
-            return out
-
-        if diagnose_mode in ("形态学", "morphology", "形态"):
-            # 🔵 形态学诊断: 扫描极值点 + 双顶/双底配对 + 颈线
-            highs, lows = _find_local_extrema(h, order=8)
-            highs_l, lows_l = _find_local_extrema(l, order=8)
-            # 用 close 极值补充
-            hx, lx = _find_local_extrema(c, order=8)
-            # 合并并简化
-            all_highs = list(set(highs + highs_l + hx))
-            all_lows = list(set(lows + lows_l + lx))
-            all_highs.sort(); all_lows.sort()
-
-            # 画所有识别的顶和底
-            for idx, price in all_highs:
-                ax.scatter([x[idx]], [price * 1.004], marker="o", s=30,
-                           color="#EF4444", zorder=9, alpha=0.7)
-            for idx, price in all_lows:
-                ax.scatter([x[idx]], [price * 0.996], marker="o", s=30,
-                           color="#22C55E", zorder=9, alpha=0.7)
-
-            # 双顶检测: 两个顶高度差 < 3%, 间距 10-40 根 K
-            top_patterns = []
-            for i in range(len(all_highs)):
-                for j in range(i + 1, len(all_highs)):
-                    t1_idx, t1_p = all_highs[i]
-                    t2_idx, t2_p = all_highs[j]
-                    if not (10 <= t2_idx - t1_idx <= 60):
-                        continue
-                    diff_pct = abs(t1_p - t2_p) / t1_p
-                    if diff_pct < 0.03:
-                        top_patterns.append((t1_idx, t2_idx, (t1_p + t2_p) / 2, "M顶"))
-                        break
-
-            # 双底检测
-            bot_patterns = []
-            for i in range(len(all_lows)):
-                for j in range(i + 1, len(all_lows)):
-                    b1_idx, b1_p = all_lows[i]
-                    b2_idx, b2_p = all_lows[j]
-                    if not (10 <= b2_idx - b1_idx <= 60):
-                        continue
-                    diff_pct = abs(b1_p - b2_p) / b1_p
-                    if diff_pct < 0.03:
-                        bot_patterns.append((b1_idx, b2_idx, (b1_p + b2_p) / 2, "W底"))
-                        break
-
-            # 画颈线
-            for t1, t2, neck, label in top_patterns:
-                ax.plot([x[t1], x[t2]], [neck, neck], color="#f59e0b", lw=1.2, ls="--", zorder=8)
-                ax.annotate(f"⚠ {label} | 颈线 {neck:.2f}", xy=(x[t2], neck),
-                            xytext=(x[t2] - 5, neck * 1.008), fontsize=8, color="#f59e0b",
-                            fontweight="bold")
-            for b1, b2, neck, label in bot_patterns:
-                ax.plot([x[b1], x[b2]], [neck, neck], color="#22c55e", lw=1.2, ls="--", zorder=8)
-                ax.annotate(f"✅ {label} | 颈线 {neck:.2f}", xy=(x[b2], neck),
-                            xytext=(x[b2] - 5, neck * 0.992), fontsize=8, color="#22c55e",
-                            fontweight="bold")
-
-            # 箱体检测: 最近 60 根 K, 顶底来回 2 次以上
-            if len(all_highs) >= 2 and len(all_lows) >= 2:
-                recent_h = [(i, p) for i, p in all_highs if i >= len(c) - 60]
-                recent_l = [(i, p) for i, p in all_lows if i >= len(c) - 60]
-                if len(recent_h) >= 2 and len(recent_l) >= 2:
-                    top_line = _np.mean([p for _, p in recent_h])
-                    bot_line = _np.mean([p for _, p in recent_l])
-                    box_height_pct = (top_line - bot_line) / bot_line
-                    if box_height_pct < 0.04:
-                        ax.axhline(top_line, color="#60a5fa", lw=0.8, ls=":", zorder=7)
-                        ax.axhline(bot_line, color="#60a5fa", lw=0.8, ls=":", zorder=7)
-                        ax.text(x[-1], top_line, f"箱体上沿 {top_line:.2f}",
-                                color="#60a5fa", fontsize=7, ha="right")
-                        ax.text(x[-1], bot_line, f"箱体下沿 {bot_line:.2f}",
-                                color="#60a5fa", fontsize=7, ha="right")
-                        diagnose_note = f"📐 形态学: M顶{len(top_patterns)}个, W底{len(bot_patterns)}个, 箱体震荡区间 {bot_line:.2f}-{top_line:.2f}"
+            def _simplify_swings(highs, lows, threshold=0.003):
+                """简化高低点: 幅度太小的过滤, 保留主要拐点"""
+                all_pts = [(i, p, "H") for i, p in highs] + [(i, p, "L") for i, p in lows]
+                all_pts.sort(key=lambda t: t[0])
+                # 相邻同向合并 (选更极端)
+                out = []
+                for pt in all_pts:
+                    if not out:
+                        out.append(pt); continue
+                    prev = out[-1]
+                    if prev[2] == pt[2]:
+                        # 同向: 保留更极端
+                        if pt[2] == "H" and pt[1] > prev[1]:
+                            out[-1] = pt
+                        elif pt[2] == "L" and pt[1] < prev[1]:
+                            out[-1] = pt
                     else:
-                        diagnose_note = f"📐 形态学: M顶{len(top_patterns)}个, W底{len(bot_patterns)}个"
+                        # 反向: 幅度过滤
+                        if abs(pt[1] - prev[1]) / max(abs(prev[1]), 0.001) > threshold:
+                            out.append(pt)
+                return out
+
+            if diagnose_mode in ("形态学", "morphology", "形态"):
+                # 🔵 形态学诊断: 扫描极值点 + 双顶/双底配对 + 颈线
+                highs, lows = _find_local_extrema(h, order=8)
+                highs_l, lows_l = _find_local_extrema(l, order=8)
+                # 用 close 极值补充
+                hx, lx = _find_local_extrema(c, order=8)
+                # 合并并简化
+                all_highs = list(set(highs + highs_l + hx))
+                all_lows = list(set(lows + lows_l + lx))
+                all_highs.sort(); all_lows.sort()
+
+                # 画所有识别的顶和底
+                for idx, price in all_highs:
+                    ax.scatter([x[idx]], [price * 1.004], marker="o", s=30,
+                               color="#EF4444", zorder=9, alpha=0.7)
+                for idx, price in all_lows:
+                    ax.scatter([x[idx]], [price * 0.996], marker="o", s=30,
+                               color="#22C55E", zorder=9, alpha=0.7)
+
+                # 双顶检测: 两个顶高度差 < 3%, 间距 10-40 根 K
+                top_patterns = []
+                for i in range(len(all_highs)):
+                    for j in range(i + 1, len(all_highs)):
+                        t1_idx, t1_p = all_highs[i]
+                        t2_idx, t2_p = all_highs[j]
+                        if not (10 <= t2_idx - t1_idx <= 60):
+                            continue
+                        diff_pct = abs(t1_p - t2_p) / t1_p
+                        if diff_pct < 0.03:
+                            top_patterns.append((t1_idx, t2_idx, (t1_p + t2_p) / 2, "M顶"))
+                            break
+
+                # 双底检测
+                bot_patterns = []
+                for i in range(len(all_lows)):
+                    for j in range(i + 1, len(all_lows)):
+                        b1_idx, b1_p = all_lows[i]
+                        b2_idx, b2_p = all_lows[j]
+                        if not (10 <= b2_idx - b1_idx <= 60):
+                            continue
+                        diff_pct = abs(b1_p - b2_p) / b1_p
+                        if diff_pct < 0.03:
+                            bot_patterns.append((b1_idx, b2_idx, (b1_p + b2_p) / 2, "W底"))
+                            break
+
+                # 画颈线
+                for t1, t2, neck, label in top_patterns:
+                    ax.plot([x[t1], x[t2]], [neck, neck], color="#f59e0b", lw=1.2, ls="--", zorder=8)
+                    ax.annotate(f"⚠ {label} | 颈线 {neck:.2f}", xy=(x[t2], neck),
+                                xytext=(x[t2] - 5, neck * 1.008), fontsize=8, color="#f59e0b",
+                                fontweight="bold")
+                for b1, b2, neck, label in bot_patterns:
+                    ax.plot([x[b1], x[b2]], [neck, neck], color="#22c55e", lw=1.2, ls="--", zorder=8)
+                    ax.annotate(f"✅ {label} | 颈线 {neck:.2f}", xy=(x[b2], neck),
+                                xytext=(x[b2] - 5, neck * 0.992), fontsize=8, color="#22c55e",
+                                fontweight="bold")
+
+                # 箱体检测: 最近 60 根 K, 顶底来回 2 次以上
+                if len(all_highs) >= 2 and len(all_lows) >= 2:
+                    recent_h = [(i, p) for i, p in all_highs if i >= len(c) - 60]
+                    recent_l = [(i, p) for i, p in all_lows if i >= len(c) - 60]
+                    if len(recent_h) >= 2 and len(recent_l) >= 2:
+                        top_line = _np.mean([p for _, p in recent_h])
+                        bot_line = _np.mean([p for _, p in recent_l])
+                        box_height_pct = (top_line - bot_line) / bot_line
+                        if box_height_pct < 0.04:
+                            ax.axhline(top_line, color="#60a5fa", lw=0.8, ls=":", zorder=7)
+                            ax.axhline(bot_line, color="#60a5fa", lw=0.8, ls=":", zorder=7)
+                            ax.text(x[-1], top_line, f"箱体上沿 {top_line:.2f}",
+                                    color="#60a5fa", fontsize=7, ha="right")
+                            ax.text(x[-1], bot_line, f"箱体下沿 {bot_line:.2f}",
+                                    color="#60a5fa", fontsize=7, ha="right")
+                            diagnose_note = f"📐 形态学: M顶{len(top_patterns)}个, W底{len(bot_patterns)}个, 箱体震荡区间 {bot_line:.2f}-{top_line:.2f}"
+                        else:
+                            diagnose_note = f"📐 形态学: M顶{len(top_patterns)}个, W底{len(bot_patterns)}个"
+                    else:
+                        diagnose_note = f"📐 形态学: M顶{len(top_patterns)}个, W底{len(bot_patterns)}个 (极值点不够)"
                 else:
-                    diagnose_note = f"📐 形态学: M顶{len(top_patterns)}个, W底{len(bot_patterns)}个 (极值点不够)"
-            else:
-                diagnose_note = f"📐 形态学: 极值点不足, 暂无清晰形态"
+                    diagnose_note = f"📐 形态学: 极值点不足, 暂无清晰形态"
 
-        elif diagnose_mode in ("周期论", "cycle", "缠论"):
-            # 🟣 周期论诊断: 简化版 — 分解走势 + 中枢 + MACD 面积背驰
-            # 1) 简化走势分解: 相邻反向高低点 (threshold 0.2%)
-            swings = _simplify_swings(
-                [(i, h[i]) for i in range(1, len(h) - 1) if h[i] >= max(h[i - 1], h[i + 1])],
-                [(i, l[i]) for i in range(1, len(l) - 1) if l[i] <= min(l[i - 1], l[i + 1])],
-                threshold=0.002
-            )
-
-            # 画所有识别的 swing 点
-            for idx, price, kind in swings:
-                marker = "^" if kind == "L" else "v"
-                mcolor = "#22C55E" if kind == "L" else "#EF4444"
-                ax.scatter([x[idx]], [price], marker=marker, s=35, color=mcolor,
-                           zorder=9, edgecolors="white", linewidths=0.5)
-
-            # 2) 识别中枢: 连续 3 段走势的重叠区间
-            zhongshu_list = []
-            for i in range(len(swings) - 3):
-                # 4 个 swing 点 = 3 段走势
-                p0 = swings[i]; p1 = swings[i + 1]
-                p2 = swings[i + 2]; p3 = swings[i + 3]
-                # 中枢: 三段走势重叠
-                highs = [max(p0[1], p1[1]), max(p1[1], p2[1]), max(p2[1], p3[1])]
-                lows_ = [min(p0[1], p1[1]), min(p1[1], p2[1]), min(p2[1], p3[1])]
-                zg = min(highs)   # 中枢上沿
-                zd = max(lows_)   # 中枢下沿
-                if zg > zd and (zg - zd) / zd > 0.001:
-                    zhongshu_list.append((p0[0], p3[0], zg, zd))
-
-            # 画中枢 (水平矩形)
-            for zs_start, zs_end, zg, zd in zhongshu_list[-3:]:
-                rect = matplotlib.patches.FancyBboxPatch(
-                    (x[zs_start] - 0.5, zd), x[zs_end] - x[zs_start] + 1, zg - zd,
-                    boxstyle="round,pad=0.5", facecolor="#8b5cf6", facealpha=0.18,
-                    edgecolor="#8b5cf6", edgealpha=0.7, linewidth=1.2, ls="--", zorder=6
+            elif diagnose_mode in ("周期论", "cycle", "缠论"):
+                # 🟣 周期论诊断: 简化版 — 分解走势 + 中枢 + MACD 面积背驰
+                # 1) 简化走势分解: 相邻反向高低点 (threshold 0.2%)
+                swings = _simplify_swings(
+                    [(i, h[i]) for i in range(1, len(h) - 1) if h[i] >= max(h[i - 1], h[i + 1])],
+                    [(i, l[i]) for i in range(1, len(l) - 1) if l[i] <= min(l[i - 1], l[i + 1])],
+                    threshold=0.002
                 )
-                ax.add_patch(rect)
-                ax.text(x[zs_start], zg, f" ZG={zg:.2f}", color="#a78bfa", fontsize=8, va="bottom")
-                ax.text(x[zs_start], zd, f" ZD={zd:.2f}", color="#a78bfa", fontsize=8, va="top")
 
-            # 3) MACD 面积背驰检测 (简化)
-            # DIF = EMA12 - EMA26, DEA = EMA9(DIF), MACD柱 = 2*(DIF-DEA)
-            def _ema(arr, n):
-                out = _np.zeros_like(arr, dtype=float)
-                out[0] = arr[0]
-                k = 2 / (n + 1)
-                for i in range(1, len(arr)):
-                    out[i] = arr[i] * k + out[i - 1] * (1 - k)
-                return out
-            ema12 = _ema(c, 12); ema26 = _ema(c, 26)
-            dif = ema12 - ema26; dea = _ema(dif, 9)
-            macd_hist = 2 * (dif - dea)
+                # 画所有识别的 swing 点
+                for idx, price, kind in swings:
+                    marker = "^" if kind == "L" else "v"
+                    mcolor = "#22C55E" if kind == "L" else "#EF4444"
+                    ax.scatter([x[idx]], [price], marker=marker, s=35, color=mcolor,
+                               zorder=9, edgecolors="white", linewidths=0.5)
 
-            # 找同方向 MACD 柱区间 (最近两段上涨/下跌)
-            def _segments(arr):
-                segs = []; seg_start = 0; prev_pos = arr[0] >= 0
-                for i in range(1, len(arr)):
-                    cur_pos = arr[i] >= 0
-                    if cur_pos != prev_pos:
-                        segs.append((seg_start, i - 1, prev_pos))
-                        seg_start = i; prev_pos = cur_pos
-                segs.append((seg_start, len(arr) - 1, prev_pos))
-                return segs
+                # 2) 识别中枢: 连续 3 段走势的重叠区间
+                zhongshu_list = []
+                for i in range(len(swings) - 3):
+                    # 4 个 swing 点 = 3 段走势
+                    p0 = swings[i]; p1 = swings[i + 1]
+                    p2 = swings[i + 2]; p3 = swings[i + 3]
+                    # 中枢: 三段走势重叠
+                    highs = [max(p0[1], p1[1]), max(p1[1], p2[1]), max(p2[1], p3[1])]
+                    lows_ = [min(p0[1], p1[1]), min(p1[1], p2[1]), min(p2[1], p3[1])]
+                    zg = min(highs)   # 中枢上沿
+                    zd = max(lows_)   # 中枢下沿
+                    if zg > zd and (zg - zd) / zd > 0.001:
+                        zhongshu_list.append((p0[0], p3[0], zg, zd))
 
-            segs = _segments(macd_hist)
-            divergences = []  # (type "顶"/"底", idx1, area1, idx2, area2)
-            if len(segs) >= 4:
-                # 找最近两段同向 (绿柱→底背驰, 红柱→顶背驰)
-                for sign, label in [(True, "顶背驰"), (False, "底背驰")]:
-                    pair_idxs = [(i, i + 2) for i in range(len(segs) - 2)
-                                 if segs[i][2] == sign and segs[i + 2][2] == sign]
-                    for si1, si2 in pair_idxs[-2:]:
-                        s1 = segs[si1]; s2 = segs[si2]
-                        area1 = abs(macd_hist[s1[0]:s1[1] + 1].sum())
-                        area2 = abs(macd_hist[s2[0]:s2[1] + 1].sum())
-                        p1 = max(c[s1[0]:s1[1] + 1]) if sign else min(c[s1[0]:s1[1] + 1])
-                        p2 = max(c[s2[0]:s2[1] + 1]) if sign else min(c[s2[0]:s2[1] + 1])
-                        price_new_high = (sign and p2 > p1) or (not sign and p2 < p1)
-                        if area2 < area1 and price_new_high:
-                            divergences.append((label, s2[0], area1, area2))
+                # 画中枢 (水平矩形)
+                for zs_start, zs_end, zg, zd in zhongshu_list[-3:]:
+                    rect = matplotlib.patches.FancyBboxPatch(
+                        (x[zs_start] - 0.5, zd), x[zs_end] - x[zs_start] + 1, zg - zd,
+                        boxstyle="round,pad=0.5", facecolor="#8b5cf6", facealpha=0.18,
+                        edgecolor="#8b5cf6", edgealpha=0.7, linewidth=1.2, ls="--", zorder=6
+                    )
+                    ax.add_patch(rect)
+                    ax.text(x[zs_start], zg, f" ZG={zg:.2f}", color="#a78bfa", fontsize=8, va="bottom")
+                    ax.text(x[zs_start], zd, f" ZD={zd:.2f}", color="#a78bfa", fontsize=8, va="top")
 
-            for label, di, *_ in divergences:
-                color = "#EF4444" if label == "顶背驰" else "#22C55E"
-                price = max(c[di:di + 15]) if label == "顶背驰" else min(c[di:di + 15])
-                ax.annotate(f"⚠ {label} (P1)", xy=(x[di], price),
-                            xytext=(x[di] - 3, price * (1.005 if label == "顶背驰" else 0.995)),
-                            fontsize=8, color=color, fontweight="bold",
-                            arrowprops=dict(arrowstyle="->", color=color, lw=1))
+                # 3) MACD 面积背驰检测 (简化)
+                # DIF = EMA12 - EMA26, DEA = EMA9(DIF), MACD柱 = 2*(DIF-DEA)
+                def _ema(arr, n):
+                    out = _np.zeros_like(arr, dtype=float)
+                    out[0] = arr[0]
+                    k = 2 / (n + 1)
+                    for i in range(1, len(arr)):
+                        out[i] = arr[i] * k + out[i - 1] * (1 - k)
+                    return out
+                ema12 = _ema(c, 12); ema26 = _ema(c, 26)
+                dif = ema12 - ema26; dea = _ema(dif, 9)
+                macd_hist = 2 * (dif - dea)
 
-            # 4) 简单 P3 三买检测 (回调不进中枢)
-            sanmai = []
-            for zs_start, zs_end, zg, zd in zhongshu_list:
-                # 中枢之后, 回调不破 ZG = 三买
-                post = c[zs_end + 5: zs_end + 40]
-                if len(post) > 0:
-                    min_post = min(post)
-                    min_idx = zs_end + 5 + _np.argmin(post)
-                    if min_post >= zg and min_idx < len(c) - 5:
-                        sanmai.append((min_idx, min_post))
-            for mi, mp in sanmai:
-                ax.scatter([x[mi]], [mp], marker="*", s=150, color="#22C55E",
-                           zorder=10, edgecolors="white", linewidths=0.8)
-                ax.annotate(f"P3三买", xy=(x[mi], mp),
-                            xytext=(x[mi] + 2, mp * 0.992), fontsize=8,
-                            color="#22C55E", fontweight="bold")
+                # 找同方向 MACD 柱区间 (最近两段上涨/下跌)
+                def _segments(arr):
+                    segs = []; seg_start = 0; prev_pos = arr[0] >= 0
+                    for i in range(1, len(arr)):
+                        cur_pos = arr[i] >= 0
+                        if cur_pos != prev_pos:
+                            segs.append((seg_start, i - 1, prev_pos))
+                            seg_start = i; prev_pos = cur_pos
+                    segs.append((seg_start, len(arr) - 1, prev_pos))
+                    return segs
 
-            diagnose_note = (f"🟣 周期论: 中枢{len(zhongshu_list)}个, "
-                             f"背驰{len(divergences)}次({' | '.join(d[0] for d in divergences) if divergences else '无'}), "
-                             f"P3三买{len(sanmai)}个")
+                segs = _segments(macd_hist)
+                divergences = []  # (type "顶"/"底", idx1, area1, idx2, area2)
+                if len(segs) >= 4:
+                    # 找最近两段同向 (绿柱→底背驰, 红柱→顶背驰)
+                    for sign, label in [(True, "顶背驰"), (False, "底背驰")]:
+                        pair_idxs = [(i, i + 2) for i in range(len(segs) - 2)
+                                     if segs[i][2] == sign and segs[i + 2][2] == sign]
+                        for si1, si2 in pair_idxs[-2:]:
+                            s1 = segs[si1]; s2 = segs[si2]
+                            area1 = abs(macd_hist[s1[0]:s1[1] + 1].sum())
+                            area2 = abs(macd_hist[s2[0]:s2[1] + 1].sum())
+                            p1 = max(c[s1[0]:s1[1] + 1]) if sign else min(c[s1[0]:s1[1] + 1])
+                            p2 = max(c[s2[0]:s2[1] + 1]) if sign else min(c[s2[0]:s2[1] + 1])
+                            price_new_high = (sign and p2 > p1) or (not sign and p2 < p1)
+                            if area2 < area1 and price_new_high:
+                                divergences.append((label, s2[0], area1, area2))
 
-        elif diagnose_mode in ("技术指标", "tech"):
-            # 🎯 技术指标强化: MACD/RSI 辅助
-            def _ema(arr, n):
-                out = _np.zeros_like(arr, dtype=float); out[0] = arr[0]; k = 2 / (n + 1)
-                for i in range(1, len(arr)): out[i] = arr[i] * k + out[i - 1] * (1 - k)
-                return out
-            ema12 = _ema(c, 12); ema26 = _ema(c, 26); dif = ema12 - ema26; dea = _ema(dif, 9)
-            macd_hist = 2 * (dif - dea)
-            # 金叉/死叉
-            for i in range(1, len(dif)):
-                if dif[i - 1] <= dea[i - 1] and dif[i] > dea[i]:
-                    ax.scatter([x[i]], [c[i] * 0.995], marker="*", s=70,
-                               color="#fbbf24", zorder=10)
-                    ax.annotate("MACD金叉", xy=(x[i], c[i]),
-                                xytext=(x[i], c[i] * 0.988), fontsize=7,
-                                color="#fbbf24", fontweight="bold",
-                                arrowprops=dict(arrowstyle="->", color="#fbbf24", lw=0.6))
-                elif dif[i - 1] >= dea[i - 1] and dif[i] < dea[i]:
-                    ax.scatter([x[i]], [c[i] * 1.005], marker="x", s=60,
-                               color="#ef4444", zorder=10)
-                    ax.annotate("MACD死叉", xy=(x[i], c[i]),
-                                xytext=(x[i], c[i] * 1.012), fontsize=7,
-                                color="#ef4444", fontweight="bold",
-                                arrowprops=dict(arrowstyle="->", color="#ef4444", lw=0.6))
-            # RSI 标注
-            delta = _np.diff(c); gain = _np.where(delta > 0, delta, 0); loss = -_np.where(delta < 0, delta, 0)
-            avg_gain = _np.array([_np.mean(gain[max(0, i - 14):i]) for i in range(14, len(c))])
-            avg_loss = _np.array([_np.mean(loss[max(0, i - 14):i]) for i in range(14, len(c))])
-            rs = avg_gain / _np.where(avg_loss < 1e-9, 1e-9, avg_loss)
-            rsi = 100 - 100 / (1 + rs)
-            last_rsi = rsi[-1] if len(rsi) > 0 else 50
-            diagnose_note = f"🎯 技术指标: MACD={'红柱' if macd_hist[-1] > 0 else '绿柱'}, RSI(14)={last_rsi:.1f}"
+                for label, di, *_ in divergences:
+                    color = "#EF4444" if label == "顶背驰" else "#22C55E"
+                    price = max(c[di:di + 15]) if label == "顶背驰" else min(c[di:di + 15])
+                    ax.annotate(f"⚠ {label} (P1)", xy=(x[di], price),
+                                xytext=(x[di] - 3, price * (1.005 if label == "顶背驰" else 0.995)),
+                                fontsize=8, color=color, fontweight="bold",
+                                arrowprops=dict(arrowstyle="->", color=color, lw=1))
 
-        elif diagnose_mode in ("资金面", "fund"):
-            # 💰 资金面: MA60斜率 + 成交量背离
-            ma60_slope = (ma60[-1] - ma60[-10]) / 10 if len(ma60) > 60 else 0
-            price_above_ma60 = c[-1] > ma60[-1]
-            # 量价背离检测: 最近 30 根涨但量缩 = 顶背离
-            recent_p = c[-30:]; recent_v = v[-30:]
-            price_trend = recent_p[-1] - recent_p[0]
-            vol_trend = recent_v[-15:].mean() - recent_v[:15].mean()
-            vol_divergence = ""
-            if price_trend > 0 and vol_trend < 0:
-                vol_divergence = "⚠ 价涨量缩 (顶背离)"
-                ax.annotate(vol_divergence, xy=(x[-10], c[-10]),
-                            xytext=(x[-10], max(h[-10:]) * 1.005), fontsize=8,
-                            color="#f59e0b", fontweight="bold",
-                            arrowprops=dict(arrowstyle="->", color="#f59e0b", lw=1))
-            elif price_trend < 0 and vol_trend > 0:
-                vol_divergence = "⚠ 价跌量增 (恐慌抛)"
-            diagnose_note = (f"💰 资金面: MA60斜率={ma60_slope:.4f}, "
-                             f"{'价格在MA60上方 ✅' if price_above_ma60 else '价格在MA60下方 ⚠'}, "
-                             f"{vol_divergence or '量价配合正常'}")
+                # 4) 简单 P3 三买检测 (回调不进中枢)
+                sanmai = []
+                for zs_start, zs_end, zg, zd in zhongshu_list:
+                    # 中枢之后, 回调不破 ZG = 三买
+                    post = c[zs_end + 5: zs_end + 40]
+                    if len(post) > 0:
+                        min_post = min(post)
+                        min_idx = zs_end + 5 + _np.argmin(post)
+                        if min_post >= zg and min_idx < len(c) - 5:
+                            sanmai.append((min_idx, min_post))
+                for mi, mp in sanmai:
+                    ax.scatter([x[mi]], [mp], marker="*", s=150, color="#22C55E",
+                               zorder=10, edgecolors="white", linewidths=0.8)
+                    ax.annotate(f"P3三买", xy=(x[mi], mp),
+                                xytext=(x[mi] + 2, mp * 0.992), fontsize=8,
+                                color="#22C55E", fontweight="bold")
 
-        elif diagnose_mode in ("算法量化", "quant", "量化"):
-            # 📊 算法量化: MA60穿越历史胜率 (简化统计)
-            # 统计这张图上历史 MA60 穿越后的 10 根 K 涨跌
-            up_count = up_win = 0; dn_count = dn_win = 0
-            for i in range(61, len(c) - 10):
-                if _np.isnan(ma60[i]) or _np.isnan(ma60[i - 1]): continue
-                if c[i - 1] < ma60[i - 1] and c[i] >= ma60[i]:
-                    up_count += 1
-                    if c[i + 10] > c[i]: up_win += 1
-                elif c[i - 1] > ma60[i - 1] and c[i] <= ma60[i]:
-                    dn_count += 1
-                    if c[i + 10] < c[i]: dn_win += 1
-            up_rate = f"{up_win}/{up_count}" if up_count else "0/0"
-            dn_rate = f"{dn_win}/{dn_count}" if dn_count else "0/0"
-            diagnose_note = (f"📊 算法量化: 本图MA60上穿后10根涨胜率={up_rate}, "
-                             f"下穿后跌胜率={dn_rate} (小样本, 仅参考)")
+                diagnose_note = (f"🟣 周期论: 中枢{len(zhongshu_list)}个, "
+                                 f"背驰{len(divergences)}次({' | '.join(d[0] for d in divergences) if divergences else '无'}), "
+                                 f"P3三买{len(sanmai)}个")
 
-        elif diagnose_mode in ("做T", "三层模型"):
-            # 🎯 做T三层模型: 显示完整日内操作锚点
-            ma60_slope = (ma60[-1] - ma60[-10]) / 10 if len(ma60) > 60 else 0
-            # 1min MA60 穿越 + 斜率 + 时段
-            time_labels = [t.strftime("%H:%M") for t in times]
-            last_time = time_labels[-1] if time_labels else "--:--"
-            diagnose_note = (f"🎯 做T三层: 当前时间 {last_time}, MA60斜率={ma60_slope:.4f}, "
-                             f"价格{'在MA60上方' if c[-1] > ma60[-1] else '在MA60下方'}")
+            elif diagnose_mode in ("技术指标", "tech"):
+                # 🎯 技术指标强化: MACD/RSI 辅助
+                def _ema(arr, n):
+                    out = _np.zeros_like(arr, dtype=float); out[0] = arr[0]; k = 2 / (n + 1)
+                    for i in range(1, len(arr)): out[i] = arr[i] * k + out[i - 1] * (1 - k)
+                    return out
+                ema12 = _ema(c, 12); ema26 = _ema(c, 26); dif = ema12 - ema26; dea = _ema(dif, 9)
+                macd_hist = 2 * (dif - dea)
+                # 金叉/死叉
+                for i in range(1, len(dif)):
+                    if dif[i - 1] <= dea[i - 1] and dif[i] > dea[i]:
+                        ax.scatter([x[i]], [c[i] * 0.995], marker="*", s=70,
+                                   color="#fbbf24", zorder=10)
+                        ax.annotate("MACD金叉", xy=(x[i], c[i]),
+                                    xytext=(x[i], c[i] * 0.988), fontsize=7,
+                                    color="#fbbf24", fontweight="bold",
+                                    arrowprops=dict(arrowstyle="->", color="#fbbf24", lw=0.6))
+                    elif dif[i - 1] >= dea[i - 1] and dif[i] < dea[i]:
+                        ax.scatter([x[i]], [c[i] * 1.005], marker="x", s=60,
+                                   color="#ef4444", zorder=10)
+                        ax.annotate("MACD死叉", xy=(x[i], c[i]),
+                                    xytext=(x[i], c[i] * 1.012), fontsize=7,
+                                    color="#ef4444", fontweight="bold",
+                                    arrowprops=dict(arrowstyle="->", color="#ef4444", lw=0.6))
+                # RSI 标注
+                delta = _np.diff(c); gain = _np.where(delta > 0, delta, 0); loss = -_np.where(delta < 0, delta, 0)
+                avg_gain = _np.array([_np.mean(gain[max(0, i - 14):i]) for i in range(14, len(c))])
+                avg_loss = _np.array([_np.mean(loss[max(0, i - 14):i]) for i in range(14, len(c))])
+                rs = avg_gain / _np.where(avg_loss < 1e-9, 1e-9, avg_loss)
+                rsi = 100 - 100 / (1 + rs)
+                last_rsi = rsi[-1] if len(rsi) > 0 else 50
+                diagnose_note = f"🎯 技术指标: MACD={'红柱' if macd_hist[-1] > 0 else '绿柱'}, RSI(14)={last_rsi:.1f}"
 
-        # 追加诊断说明到状态栏
-        if diagnose_note:
-            _time_lbl.config(text=_time_lbl.cget("text") + " | " + diagnose_note,
-                              fg="#CE93D8", font=("", _FG_BLUE) and ("", 9))
+            elif diagnose_mode in ("资金面", "fund"):
+                # 💰 资金面: MA60斜率 + 成交量背离
+                ma60_slope = (ma60[-1] - ma60[-10]) / 10 if len(ma60) > 60 else 0
+                price_above_ma60 = c[-1] > ma60[-1]
+                # 量价背离检测: 最近 30 根涨但量缩 = 顶背离
+                recent_p = c[-30:]; recent_v = v[-30:]
+                price_trend = recent_p[-1] - recent_p[0]
+                vol_trend = recent_v[-15:].mean() - recent_v[:15].mean()
+                vol_divergence = ""
+                if price_trend > 0 and vol_trend < 0:
+                    vol_divergence = "⚠ 价涨量缩 (顶背离)"
+                    ax.annotate(vol_divergence, xy=(x[-10], c[-10]),
+                                xytext=(x[-10], max(h[-10:]) * 1.005), fontsize=8,
+                                color="#f59e0b", fontweight="bold",
+                                arrowprops=dict(arrowstyle="->", color="#f59e0b", lw=1))
+                elif price_trend < 0 and vol_trend > 0:
+                    vol_divergence = "⚠ 价跌量增 (恐慌抛)"
+                diagnose_note = (f"💰 资金面: MA60斜率={ma60_slope:.4f}, "
+                                 f"{'价格在MA60上方 ✅' if price_above_ma60 else '价格在MA60下方 ⚠'}, "
+                                 f"{vol_divergence or '量价配合正常'}")
 
-        # 样式
-        ax.set_title(f"{opt}  |  1分钟 K线 (MA5/10/20/60)  |  {len(data)} 根",
-                     color="#E0E0E0", fontsize=11, fontweight="bold", pad=8)
-        ax.set_facecolor(_BG_PANEL)
-        ax.tick_params(colors=_FG_DIM, labelsize=8)
-        for spine in ax.spines.values(): spine.set_color(_FG_DIM)
-        ax.grid(True, alpha=0.15, color=_FG_DIM)
-        # ax.legend removed: macOS 字体重影 bug, 改为顶部标题标注均线颜色
-        # X 轴标签 (每隔一段显示)
-        step = max(1, len(times) // 8)
-        ax.set_xticks(x[::step])
-        ax.set_xticklabels([t.strftime("%H:%M") for t in times[::step]], rotation=30, fontsize=7)
+            elif diagnose_mode in ("算法量化", "quant", "量化"):
+                # 📊 算法量化: MA60穿越历史胜率 (简化统计)
+                # 统计这张图上历史 MA60 穿越后的 10 根 K 涨跌
+                up_count = up_win = 0; dn_count = dn_win = 0
+                for i in range(61, len(c) - 10):
+                    if _np.isnan(ma60[i]) or _np.isnan(ma60[i - 1]): continue
+                    if c[i - 1] < ma60[i - 1] and c[i] >= ma60[i]:
+                        up_count += 1
+                        if c[i + 10] > c[i]: up_win += 1
+                    elif c[i - 1] > ma60[i - 1] and c[i] <= ma60[i]:
+                        dn_count += 1
+                        if c[i + 10] < c[i]: dn_win += 1
+                up_rate = f"{up_win}/{up_count}" if up_count else "0/0"
+                dn_rate = f"{dn_win}/{dn_count}" if dn_count else "0/0"
+                diagnose_note = (f"📊 算法量化: 本图MA60上穿后10根涨胜率={up_rate}, "
+                                 f"下穿后跌胜率={dn_rate} (小样本, 仅参考)")
 
-        # 成交量
-        colors = ["#EF5350" if c[i] >= o[i] else "#66BB6A" for i in range(len(times))]
-        axv.bar(x, v, color=colors, width=0.7)
-        axv.set_facecolor(_BG_PANEL)
-        axv.tick_params(colors=_FG_DIM, labelsize=7)
-        for spine in axv.spines.values(): spine.set_color(_FG_DIM)
-        axv.grid(True, alpha=0.15, color=_FG_DIM)
-        axv.set_ylabel("量", color=_FG_DIM, fontsize=8, rotation=0, labelpad=16)
+            elif diagnose_mode in ("做T", "三层模型"):
+                # 🎯 做T三层模型: 显示完整日内操作锚点
+                ma60_slope = (ma60[-1] - ma60[-10]) / 10 if len(ma60) > 60 else 0
+                # 1min MA60 穿越 + 斜率 + 时段
+                time_labels = [t.strftime("%H:%M") for t in times]
+                last_time = time_labels[-1] if time_labels else "--:--"
+                diagnose_note = (f"🎯 做T三层: 当前时间 {last_time}, MA60斜率={ma60_slope:.4f}, "
+                                 f"价格{'在MA60上方' if c[-1] > ma60[-1] else '在MA60下方'}")
 
-        fig.subplots_adjust(top=0.92, bottom=0.18, left=0.08, right=0.94, hspace=0.05)
+            # 追加诊断说明到状态栏
+            if diagnose_note:
+                _status_parts.append(diagnose_note)
 
-        canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        # 手动设置 canvas widget 背景
-        try: canvas.get_tk_widget().configure(bg=_BG_PANEL)
-        except Exception: pass
-        _toolbar = NavigationToolbar2Tk(canvas, canvas_frame)
-        _toolbar.update()
-        _toolbar.pack(side=tk.BOTTOM, fill=tk.X)
+            # ax.set_title removed → 信息已在 _time_lbl 和窗口 title 中
+            ax.set_facecolor(_BG_PANEL)
+            ax.tick_params(colors=_FG_DIM, labelsize=8)
+            for spine in ax.spines.values(): spine.set_color(_FG_DIM)
+            ax.grid(True, alpha=0.15, color=_FG_DIM)
+            # ax.legend removed: macOS 字体重影 bug, 改为顶部标题标注均线颜色
+            # X 轴标签 (每隔一段显示)
+            step = max(1, len(times) // 8)
+            ax.set_xticks(x[::step])
+            ax.set_xticklabels([t.strftime("%H:%M") for t in times[::step]], rotation=30, fontsize=7)
 
-        # 显示最后几根 MA 值 (右上角浮窗)
-        last_ma_txt = (f"MA5={ma5[-1]:.2f}  MA10={ma10[-1]:.2f}  "
-                       f"MA20={ma20[-1]:.2f}  MA60={ma60[-1]:.2f}\n"
-                       f"最新={c[-1]:.2f}  收盘位置 vs MA60: "
-                       f"{'📈 上方' if c[-1] > ma60[-1] else '📉 下方'}")
-        # 流派分析前先加 MA 概览
-        _time_lbl.config(text=_time_lbl.cget("text") + " | " + last_ma_txt.split("\n")[1],
-                          fg="#66BB6A")
+            # 成交量
+            colors = ["#EF5350" if c[i] >= o[i] else "#66BB6A" for i in range(len(times))]
+            axv.bar(x, v, color=colors, width=0.7)
+            axv.set_facecolor(_BG_PANEL)
+            axv.tick_params(colors=_FG_DIM, labelsize=7)
+            for spine in axv.spines.values(): spine.set_color(_FG_DIM)
+            axv.grid(True, alpha=0.15, color=_FG_DIM)
+            axv.set_ylabel("量", color=_FG_DIM, fontsize=8, rotation=0, labelpad=16)
+
+            fig.subplots_adjust(top=0.92, bottom=0.18, left=0.08, right=0.94, hspace=0.05)
+
+            # 🆕 最后统一设置状态栏 (不再追加, 彻底解决重影)
+            _time_lbl.config(text=" | ".join(_status_parts), fg="#66BB6A")
+
+            canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            # 手动设置 canvas widget 背景
+            try: canvas.get_tk_widget().configure(bg=_BG_PANEL)
+            except Exception: pass
+            _toolbar = NavigationToolbar2Tk(canvas, canvas_frame)
+            _toolbar.update()
+            _toolbar.pack(side=tk.BOTTOM, fill=tk.X)
+
+            # 显示最后几根 MA 值 (右上角浮窗)
+            last_ma_txt = (f"MA5={ma5[-1]:.2f}  MA10={ma10[-1]:.2f}  "
+                           f"MA20={ma20[-1]:.2f}  MA60={ma60[-1]:.2f}\n"
+                           f"最新={c[-1]:.2f}  收盘位置 vs MA60: "
+                           f"{'📈 上方' if c[-1] > ma60[-1] else '📉 下方'}")
+            # 流派分析前先加 MA 概览
+            _status_parts.append(last_ma_txt.split("\n")[1])
+
+        except Exception as _e:
+            _tb.print_exc()
+            _time_lbl.config(text=f'❌ 渲染异常: {_e}', fg='#EF5350')
 
     # 🆕 绑定按钮 command (顶部工具栏已创建, 这里绑逻辑)
     _btn_load.config(command=_do_load)
