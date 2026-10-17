@@ -1385,6 +1385,7 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
             # 🆕 流派判断用当前下拉值 (local diagnose_mode 覆盖外层参数)
             _diag_now = _diag_var.get()
             diagnose_mode = None if _diag_now in ("不诊断", "不诊断 (纯K线)", "") else _diag_now
+            print(f"[🎨渲染] START opt={opt!r} len={len(data)} diag={diagnose_mode!r}", flush=True)
 
             # 🆕 用列表收集状态, 最后一次性 config 避免追加重影
             _status_parts = [
@@ -1407,6 +1408,7 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
             ma5 = _ma(c, 5); ma10 = _ma(c, 10); ma20 = _ma(c, 20); ma60 = _ma(c, 60)
 
             # ── 清旧图 (安全版: destroy 后 update_idletasks 让 Tk 真正清理) ──
+            print("[🎨渲染] → 清旧图 fig.clear()", flush=True)
             fig.clear()
             if canvas is not None:
                 try:
@@ -1420,8 +1422,10 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 _toolbar = None
 
             # 上: K线图 (70%)
+            print("[🎨渲染] → add_axes K线", flush=True)
             ax = fig.add_axes([0.06, 0.26, 0.88, 0.65], facecolor=_BG_PANEL)
             # 下: 成交量 (15%)
+            print("[🎨渲染] → add_axes 成交量", flush=True)
             axv = fig.add_axes([0.06, 0.08, 0.88, 0.15], sharex=ax, facecolor=_BG_PANEL)
 
             x = _np.arange(len(times))
@@ -1638,12 +1642,13 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                     if zg > zd and (zg - zd) / zd > 0.001:
                         zhongshu_list.append((p0[0], p3[0], zg, zd))
 
-                # 画中枢 (水平矩形)
+                # 画中枢 (水平矩形) — 用 Rectangle 替代 FancyBboxPatch 支持 facealpha
+                from matplotlib.patches import Rectangle as _Rect
                 for zs_start, zs_end, zg, zd in zhongshu_list[-3:]:
-                    rect = matplotlib.patches.FancyBboxPatch(
+                    rect = _Rect(
                         (x[zs_start] - 0.5, zd), x[zs_end] - x[zs_start] + 1, zg - zd,
-                        boxstyle="round,pad=0.5", facecolor="#8b5cf6", facealpha=0.18,
-                        edgecolor="#8b5cf6", edgealpha=0.7, linewidth=1.2, ls="--", zorder=6
+                        facecolor="#8b5cf6", alpha=0.18,
+                        edgecolor="#8b5cf6", linewidth=1.2, ls="--", zorder=6
                     )
                     ax.add_patch(rect)
                     ax.text(x[zs_start], zg, f" ZG={zg:.2f}", color="#a78bfa", fontsize=8, va="bottom")
@@ -1825,11 +1830,13 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
 
             fig.subplots_adjust(top=0.92, bottom=0.18, left=0.08, right=0.94, hspace=0.05)
 
+            print("[🎨渲染] → 流派分支完成, 准备 canvas", flush=True)
             # 🆕 最后统一设置状态栏 (不再追加, 彻底解决重影)
             _time_lbl.config(text=" | ".join(_status_parts), fg="#66BB6A")
 
             canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
             canvas.draw()
+            print("[🎨渲染] → canvas.draw() done", flush=True)
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
             # 手动设置 canvas widget 背景
             try: canvas.get_tk_widget().configure(bg=_BG_PANEL)
@@ -1848,6 +1855,7 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
 
         except Exception as _e:
             _tb.print_exc()
+            print(f"[🎨渲染] ❌ EXCEPTION: {_e}", flush=True)
             _time_lbl.config(text=f'❌ 渲染异常: {_e}', fg='#EF5350')
 
     # 🆕 绑定按钮 command (顶部工具栏已创建, 这里绑逻辑)
