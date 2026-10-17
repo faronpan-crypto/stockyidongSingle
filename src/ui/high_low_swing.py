@@ -1312,13 +1312,18 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
     fig = Figure(figsize=(10, 6), dpi=96, facecolor=_BG_PANEL)
     canvas = None
     ax = None
+    _toolbar = None
 
     def _redraw_current():
         """🎨 重画同一只票 — 用缓存数据, 只换流派分析层"""
         if _cached_data is None:
             _time_lbl.config(text="⚠ 先加载一次数据", fg="#EF5350")
             return
-        _do_render(_cached_data, combo_var.get())
+        try:
+            _do_render(_cached_data, combo_var.get())
+        except Exception as _e:
+            import traceback as _tb; _tb.print_exc()
+            _time_lbl.config(text=f"❌ 重画异常: {_e}", fg="#EF5350")
 
     def _sina_code_from_option(opt):
         """从 '贵州茅台 sh600519' 或直接 'sh600519' 提取新浪代码"""
@@ -1384,13 +1389,17 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                     _time_lbl.config(text=f"❌ 加载失败: {err or '无数据'}", fg="#EF5350")
                     return
                 _cached_data = data
-                _do_render(data, opt)
+                try:
+                    _do_render(data, opt)
+                except Exception as _e:
+                    import traceback as _tb; _tb.print_exc()
+                    _time_lbl.config(text=f"❌ 渲染异常: {_e}", fg="#EF5350")
             dlg.after(0, _handle)
         threading.Thread(target=_bg, daemon=True).start()
 
     def _do_render(data, opt):
         """纯粹的渲染函数 (数据已在, 只画). 流派诊断用当前下拉值."""
-        nonlocal canvas, ax
+        nonlocal canvas, ax, _toolbar
         # 🆕 流派判断用当前下拉值 (local diagnose_mode 覆盖外层参数)
         _diag_now = _diag_var.get()
         diagnose_mode = None if _diag_now in ("不诊断", "不诊断 (纯K线)", "") else _diag_now
@@ -1409,13 +1418,18 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
         # MA 计算
         ma5 = _ma(c, 5); ma10 = _ma(c, 10); ma20 = _ma(c, 20); ma60 = _ma(c, 60)
 
-        # ── 清旧图 ──
+        # ── 清旧图 (安全版: destroy 后 update_idletasks 让 Tk 真正清理) ──
         fig.clear()
         if canvas is not None:
-            try: canvas.get_tk_widget().destroy()
+            try:
+                canvas.get_tk_widget().destroy()
+                dlg.update_idletasks()
             except Exception: pass
-            try: canvas.toolbar.destroy()
+            canvas = None
+        if _toolbar is not None:
+            try: _toolbar.destroy()
             except Exception: pass
+            _toolbar = None
 
         # 上: K线图 (70%)
         ax = fig.add_axes([0.06, 0.26, 0.88, 0.65], facecolor=_BG_PANEL)
@@ -1832,9 +1846,9 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
         # 手动设置 canvas widget 背景
         try: canvas.get_tk_widget().configure(bg=_BG_PANEL)
         except Exception: pass
-        tb = NavigationToolbar2Tk(canvas, canvas_frame)
-        tb.update()
-        tb.pack(side=tk.BOTTOM, fill=tk.X)
+        _toolbar = NavigationToolbar2Tk(canvas, canvas_frame)
+        _toolbar.update()
+        _toolbar.pack(side=tk.BOTTOM, fill=tk.X)
 
         # 显示最后几根 MA 值 (右上角浮窗)
         last_ma_txt = (f"MA5={ma5[-1]:.2f}  MA10={ma10[-1]:.2f}  "
