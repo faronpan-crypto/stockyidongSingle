@@ -1365,8 +1365,12 @@ def _build_orderbook(parent, win, col=1):
     win._ob_limit_up_tv = tv1
 
     # 盘口
-    tk.Label(frm, text="📌 买卖盘口 (实时)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(6, 2))
+    top_row = tk.Frame(frm, bg="#1E1E1E"); top_row.pack(fill=tk.X, pady=(6, 2))
+    tk.Label(top_row, text="📌 买卖盘口 (实时)",
+             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(side=tk.LEFT)
+    win._ob_cur_label = tk.Label(top_row, text="(等加载...)", bg="#1E1E1E",
+                                  fg="#BDBDBD", font=("", 9, "bold"))
+    win._ob_cur_label.pack(side=tk.RIGHT)
     order_frame = tk.Frame(frm, bg="#1E1E1E"); order_frame.pack(fill=tk.X, padx=2)
     # 卖盘 (右对齐)
     ask_frame = tk.Frame(order_frame, bg="#1E1E1E")
@@ -1396,28 +1400,69 @@ def _build_orderbook(parent, win, col=1):
 
 
 def _load_orderbook(win):
-    """加载涨停板排队 + 盘口 (用 akshare 实时)"""
+    """加载涨停板排队 + 盘口五档 (akshare 涨停 + 新浪 snapshot 盘口)"""
+    # 先加载盘口 (用新浪 snapshot, 秒出)
+    def _load_snapshot():
+        try:
+            sel = win._ob_cb.get()  # e.g. "晟楠科技(920006) +30.0%" or "上证指数 sh000001"
+            import re, requests
+            code_match = re.search(r'[(（](\d{6})[)）]', sel) or re.search(r'([a-z]{2}\d{6})', sel.lower())
+            if not code_match: return
+            raw = code_match.group(1)
+            sina = raw if raw[:2].isalpha() else ("sh" if raw.startswith("6") or raw.startswith("9") else "sz" if raw.startswith("0") or raw.startswith("3") else "bj" if raw.startswith(("4","8")) else "sh") + raw
+            url = f"https://hq.sinajs.cn/list={sina}"
+            r = requests.get(url, headers={"Referer": "https://finance.sina.com.cn"}, timeout=6)
+            if not r.ok or '"' not in r.text: return
+            parts = r.text.split('"')[1].split(',')
+            if len(parts) < 32: return
+            cur = float(parts[3])
+            # 买5..1: parts[6..10] (价格), parts[11..15] (数量)
+            # 卖1..5: parts[16..20] (价格), parts[21..25] (数量)
+            bid_prices = parts[10:5:-1]   # idx 10,9,8,7,6 = 买5,买4,买3,买2,买1
+            bid_vols   = parts[15:10:-1]  # idx 15,14,13,12,11
+            ask_prices = parts[16:21]     # idx 16..20 = 卖1..卖5
+            ask_vols   = parts[21:26]
+            # 盘口填充 — 买5在上(最小), 买1在下(最大). 卖1在上(最小), 卖5在下(最大)
+            def _fmt(price, vol):
+                try:
+                    p = float(price); v = int(float(vol))
+                    v_str = f"{v//10000}万" if v >= 10000 else str(v)
+                    return f"{p:.2f}  {v_str}"
+                except: return f"{price}  {vol}"
+            def _fill(lbls, prices, vols, ask=True):
+                for i in range(5):
+                    p = prices[i]; v = vols[i]
+                    tag = f"卖{5-i}" if ask else f"买{5-i}"  # label[0]=top row=卖5/买5
+                    lbls[i].config(text=f"{tag} {_fmt(p, v)}")
+            _fill(win._ob_ask_labels, ask_prices, ask_vols, ask=True)
+            _fill(win._ob_bid_labels, bid_prices, bid_vols, ask=False)
+            win._ob_sina_code = sina
+            # 额外: 在顶栏显示现价和涨跌幅
+            pct = (cur - float(parts[2])) / float(parts[2]) * 100 if float(parts[2]) else 0
+            tag = "+" if pct >= 0 else ""
+            win._ob_cur_label.config(text=f"现价 {cur:.2f}  {tag}{pct:.2f}%",
+                                      fg="#EF5350" if pct >= 0 else "#66BB6A")
+            print(f"[👁️盘口] {sina}: cur={cur}, ask1={ask_prices[0]}({ask_vols[0]}), bid1={bid_prices[0]}({bid_vols[0]})", flush=True)
+        except Exception as e:
+            print(f"[👁️盘口] snapshot err: {e}")
+    # 填充盘口
+    _load_snapshot()
+    # 涨停板排队 (后台)
     def _bg():
         try:
             import akshare as ak
             df = ak.stock_zh_a_spot_em()
-            up_col = [c for c in df.columns if "涨停" in str(c)]
             pct_col = [c for c in df.columns if "涨跌幅" in str(c)]
             hand_col = [c for c in df.columns if "换手率" in str(c)]
             vol_col = [c for c in df.columns if "成交量" in str(c)]
-
-            # 涨停股 Top 10 (封单最大)
             limit_up = df[df[pct_col[0]] >= 9.5].head(10)
             win.after(0, lambda: _fill_limit_up(win, limit_up, hand_col, vol_col))
-
-            # 特定数量: 识别整体成交量级别
             vols = df[vol_col[0]].astype(float).values
             v5000 = (vols >= 500000).sum()
             v500 = ((vols >= 50000) & (vols < 500000)).sum()
             v50 = ((vols >= 5000) & (vols < 50000)).sum()
             msg = f"5万手以上: {v5000}股  |  5000-5万手: {v500}股  |  500-5000手: {v50}股"
             win.after(0, lambda: win._ob_pattern_text.config(text=msg))
-
         except Exception as e:
             win.after(0, lambda: win._ob_pattern_text.config(text=f"❌ {str(e)[:80]}"))
     threading.Thread(target=_bg, daemon=True).start()
@@ -1540,30 +1585,55 @@ def _make_seed_daily(name, days=180):
             "src": f"SEED-{name}(offline)"}
 
 
-def _fetch_stock_daily(sina_code, days=200):
-    """Fetch stock daily K-line via sina CN_MarketData.getKLineData (scale=240=daily)"""
+def _fetch_stock_kline(sina_code, scale=240, days=240):
+    """Fetch stock K-line via sina CN_MarketData.getKLineData
+    scale: 5/15/30/60 分钟, 240 日线, "week" 周线 (日→周合成), "month" 月线"""
     try:
         import requests, json, time
         import numpy as np
-        symbol = sina_code
-        url = f"https://quotes.sina.cn/cn/api/jsonp.php/var%20_{symbol}_{int(time.time()*1000)}/CN_MarketData.getKLineData"
-        params = {"symbol": symbol, "scale": 240, "ma": "no", "datalen": days}
-        r = requests.get(url, params=params, timeout=10)
+        # 周/月需要先拉日线再合成
+        fetch_scale = 240 if scale in ("week", "month") else scale
+        url = f"https://quotes.sina.cn/cn/api/jsonp.php/var%20_{sina_code}_{int(time.time()*1000)}/CN_MarketData.getKLineData"
+        params = {"symbol": sina_code, "scale": fetch_scale, "ma": "no", "datalen": days}
+        r = requests.get(url, params=params, timeout=12,
+                         headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"})
         txt = r.text
-        start = txt.index("(") + 1; end = txt.rindex(")")
-        data = json.loads(txt[start:end])
-        if data and len(data) > 30:
-            dates = [d["day"] for d in data]
-            o = np.array([float(d["open"]) for d in data])
-            h = np.array([float(d["high"]) for d in data])
-            l = np.array([float(d["low"]) for d in data])
-            c = np.array([float(d["close"]) for d in data])
-            v = np.array([float(d["volume"]) for d in data])
-            return {"dates": dates, "o": o, "h": h, "l": l, "c": c, "v": v,
-                    "src": f"SINA-{symbol}"}
+        if "(" not in txt or ")" not in txt: return None
+        data = json.loads(txt[txt.index("(")+1 : txt.rindex(")")])
+        if not data or len(data) < 10: return None
+        dates = [d["day"] for d in data]
+        o = np.array([float(d["open"]) for d in data])
+        h = np.array([float(d["high"]) for d in data])
+        l = np.array([float(d["low"]) for d in data])
+        c = np.array([float(d["close"]) for d in data])
+        v = np.array([float(d["volume"]) for d in data])
+        # 合成周线/月线
+        if scale == "week":
+            return _resample_kline(dates, o, h, l, c, v, "W-MON", f"SINA周线-{sina_code}")
+        if scale == "month":
+            return _resample_kline(dates, o, h, l, c, v, "ME", f"SINA月线-{sina_code}")
+        return {"dates": dates, "o": o, "h": h, "l": l, "c": c, "v": v,
+                "src": f"SINA-{scale}min-{sina_code}"}
     except Exception as e:
-        print(f"[watch-K] sina stock fail: {e}")
-    return None
+        print(f"[watch-K] kline fetch fail (scale={scale}): {e}")
+        return None
+
+
+def _resample_kline(dates, o, h, l, c, v, rule, src):
+    """Resample daily bars to weekly/monthly via pandas"""
+    import pandas as pd, numpy as np
+    df = pd.DataFrame({"o": o, "h": h, "l": l, "c": c, "v": v},
+                      index=pd.to_datetime(dates, errors="coerce"))
+    df = df.dropna().resample(rule).agg({"o": "first", "h": "max", "l": "min",
+                                          "c": "last", "v": "sum"}).dropna()
+    if len(df) < 5: return None
+    return {"dates": df.index.strftime("%Y-%m-%d").tolist(),
+            "o": df.o.to_numpy(float), "h": df.h.to_numpy(float),
+            "l": df.l.to_numpy(float), "c": df.c.to_numpy(float),
+            "v": df.v.to_numpy(float), "src": src}
+
+# Alias for backward compat
+_fetch_stock_daily = lambda sina_code, days=240: _fetch_stock_kline(sina_code, scale=240, days=days)
 
 
 def _ma_calc(arr, n):
@@ -1580,8 +1650,8 @@ def _ema_calc(arr, n):
     return pd.Series(arr).ewm(span=n, adjust=False).mean().to_numpy()
 
 
-def _show_daily_kline_dialog(parent, title, data):
-    """Full daily K-line dialog with MA / MACD / KDJ / support-resistance / chip dist."""
+def _show_daily_kline_dialog(parent, title, data, sina_code=None):
+    """K-line dialog with top-bar period switcher (60min/Day/Week/Month) + full MA/MACD/KDJ/support-resistance."""
     import numpy as np
     import pandas as pd
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -1589,124 +1659,163 @@ def _show_daily_kline_dialog(parent, title, data):
     from matplotlib.patches import Rectangle
 
     dlg = tk.Toplevel(parent)
-    dlg.title(f"Daily K-line: {title}")
+    dlg.title(f"K-line: {title}")
     dlg.geometry("1080x780")
     dlg.configure(bg="#121212")
 
+    # 顶栏: 标题 + 周期切换 + 信息
     top = tk.Frame(dlg, bg="#1E1E1E"); top.pack(fill=tk.X)
-    tk.Label(top, text=f"{title}  ({data.get('src','?')})",
+    tk.Label(top, text=f"📊 {title}",
              bg="#1E1E1E", fg="#FFD54F", font=("", 12, "bold")).pack(side=tk.LEFT, padx=12, pady=6)
-    info = f"{len(data['dates'])} bars  latest {data['dates'][-1]}  close {data['c'][-1]:.2f}"
-    tk.Label(top, text=info, bg="#1E1E1E", fg="#A5D6A7", font=("", 10)).pack(side=tk.LEFT, padx=10)
+
+    PERIODS = [("60分钟", 60), ("日线", 240), ("周线", "week"), ("月线", "month")]
+    _period_var = tk.StringVar(value="日线")
+    _canvas_ref = {"canvas": None, "toolbar": None, "fig": None}
+
+    def _redraw(new_data):
+        """Clear old, redraw with new_data"""
+        if _canvas_ref["fig"] is None: return
+        fig = _canvas_ref["fig"]
+        for ax in fig.axes[:]: fig.delaxes(ax)
+        fig.clear()
+        # same layout
+        gs = fig.add_gridspec(4, 1, height_ratios=[5.5, 1.2, 1.2, 1.2], hspace=0.08)
+        ax = fig.add_subplot(gs[0]); axv = fig.add_subplot(gs[1], sharex=ax)
+        axm = fig.add_subplot(gs[2], sharex=ax); axk = fig.add_subplot(gs[3], sharex=ax)
+        for a in (ax, axv, axm, axk):
+            a.set_facecolor("#1E1E1E"); a.tick_params(colors="#9E9E9E", labelsize=8)
+            for sp in a.spines.values(): sp.set_color("#444")
+            a.grid(True, alpha=0.12, color="#666")
+
+        dates = new_data["dates"]; o = new_data["o"]; h = new_data["h"]; l = new_data["l"]
+        c = new_data["c"]; v = new_data["v"]
+        x = np.arange(len(dates))
+        ma5 = _ma_calc(c, 5); ma10 = _ma_calc(c, 10); ma20 = _ma_calc(c, 20)
+        ma60 = _ma_calc(c, 60); ma120 = _ma_calc(c, 120)
+
+        ema12 = _ema_calc(c, 12); ema26 = _ema_calc(c, 26)
+        dif = ema12 - ema26; dea = _ema_calc(dif, 9); macd_hist = (dif - dea) * 2
+
+        low9 = pd.Series(l).rolling(9).min().to_numpy()
+        high9 = pd.Series(h).rolling(9).max().to_numpy()
+        rsv = np.where(high9 - low9 > 0, (c - low9) / (high9 - low9) * 100, 50.0)
+        k = _ema_calc(np.nan_to_num(rsv, 50), 3)
+        d = _ema_calc(k, 3); j = 3 * k - 2 * d
+
+        # Candles
+        for i in range(len(x)):
+            up = c[i] >= o[i]; col = "#EF5350" if up else "#66BB6A"
+            ax.plot([x[i], x[i]], [l[i], h[i]], color=col, lw=0.8)
+            body_lo = min(o[i], c[i]); body_hi = max(o[i], c[i])
+            ax.add_patch(Rectangle((x[i]-0.35, body_lo), 0.7, max(body_hi-body_lo, 0.001),
+                                    facecolor=col, edgecolor=col, linewidth=0.3))
+        ax.plot(x, ma5, color="#FFD54F", lw=1.2, label="MA5")
+        ax.plot(x, ma10, color="#42A5F5", lw=1.2, label="MA10")
+        ax.plot(x, ma20, color="#AB47BC", lw=1.2, label="MA20")
+        ax.plot(x, ma60, color="#66BB6A", lw=1.4, label="MA60")
+        ax.plot(x, ma120, color="#FF7043", lw=1.4, label="MA120")
+
+        # Support / Resistance (local extremes, last 120 bars)
+        def _local_extrema(arr, order=5):
+            hi, lo = [], []
+            for i in range(order, len(arr)-order):
+                if arr[i] == max(arr[i-order:i+order+1]): hi.append((i, arr[i]))
+                if arr[i] == min(arr[i-order:i+order+1]): lo.append((i, arr[i]))
+            return hi, lo
+        tail = min(120, len(x))
+        hi_all = [(idx + len(x) - tail, val) for idx, val in _local_extrema(h[-tail:], 8)[0]]
+        lo_all = [(idx + len(x) - tail, val) for idx, val in _local_extrema(l[-tail:], 8)[1]]
+        def _dedup(pts, thresh=0.01):
+            out = []
+            for idx, val in sorted(pts, key=lambda t: -t[1]):
+                if not out or abs(val - out[-1][1]) / out[-1][1] > thresh:
+                    out.append((idx, val))
+            return out[:4]
+        for idx, val in _dedup(sorted(hi_all, key=lambda t: -t[1])):
+            ax.axhline(val, color="#EF5350", ls="--", lw=0.9, alpha=0.7)
+            ax.text(len(x)-1, val, f"  resist {val:.2f}", color="#EF5350", fontsize=8, va="bottom")
+        for idx, val in _dedup(sorted(lo_all, key=lambda t: -t[1])):
+            ax.axhline(val, color="#66BB6A", ls="--", lw=0.9, alpha=0.7)
+            ax.text(len(x)-1, val, f"  support {val:.2f}", color="#66BB6A", fontsize=8, va="top")
+
+        # Chip dist
+        try:
+            from scipy.stats import gaussian_kde
+            prices = np.linspace(np.nanmin(c[-tail:])*0.97, np.nanmax(c[-tail:])*1.03, 50)
+            kde = gaussian_kde(c[-tail:])
+            dens = kde(prices); dens = dens / dens.max() * 0.22 * (np.nanmax(h)-np.nanmin(l))
+            ax.fill_betweenx(prices, len(x)-1-dens, len(x)-1, alpha=0.18, color="#B39DDB")
+        except Exception: pass
+
+        last = len(x) - 1
+        ax.text(0.01, 0.97,
+                f"O{o[last]:.2f} H{h[last]:.2f} L{l[last]:.2f} C{c[last]:.2f} V{v[last]:.0f}",
+                transform=ax.transAxes, color="#E0E0E0", fontsize=8, va="top",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#2A2A2A", edgecolor="#555"))
+
+        cv_colors = ["#EF5350" if c[i] >= o[i] else "#66BB6A" for i in range(len(x))]
+        axv.bar(x, v, color=cv_colors, width=0.7, alpha=0.8); axv.set_ylabel("Vol", color="#9E9E9E", fontsize=8)
+
+        md_colors = ["#EF5350" if m >= 0 else "#66BB6A" for m in macd_hist]
+        axm.bar(x, macd_hist, color=md_colors, width=0.6, alpha=0.8)
+        axm.plot(x, dif, color="#FFD54F", lw=1, label="DIF")
+        axm.plot(x, dea, color="#42A5F5", lw=1, label="DEA")
+        axm.axhline(0, color="#555", lw=0.5); axm.set_ylabel("MACD", color="#9E9E9E", fontsize=8)
+
+        axk.plot(x, k, color="#FFD54F", lw=1, label="K")
+        axk.plot(x, d, color="#42A5F5", lw=1, label="D")
+        axk.plot(x, j, color="#AB47BC", lw=0.9, label="J")
+        axk.axhline(80, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
+        axk.axhline(20, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
+        axk.set_ylabel("KDJ", color="#9E9E9E", fontsize=8)
+        axk.set_xlabel(f"Date ({len(dates)} bars)", color="#9E9E9E", fontsize=8)
+
+        step = max(1, len(dates) // 12)
+        ticks = x[::step]; lbls = [dates[i][:10] for i in ticks]
+        for a in (ax, axv, axm): a.set_xticks(ticks); a.set_xticklabels([])
+        axk.set_xticks(ticks); axk.set_xticklabels(lbls, rotation=30, fontsize=7, color="#9E9E9E")
+        ax.legend(loc="upper left", fontsize=8, facecolor="#2A2A2A", edgecolor="#555", labelcolor="#E0E0E0")
+
+        _canvas_ref["canvas"].draw_idle()
+        info_lbl.config(text=f"{len(dates)} bars | latest {dates[-1]} | close {c[-1]:.2f} | {new_data.get('src','?')}")
+
+    # 周期切换按钮
+    for period_label, period_val in PERIODS:
+        tk.Radiobutton(top, text=period_label, variable=_period_var, value=period_label,
+                       bg="#1E1E1E", fg="#FFD54F", selectcolor="#1E1E1E",
+                       activebackground="#1E1E1E", font=("", 10),
+                       indicatoron=False, width=7,
+                       command=lambda pv=period_val: _on_period_change(pv)).pack(side=tk.LEFT, padx=2, pady=6)
+
+    # 切周期
+    def _on_period_change(period_val):
+        if sina_code is None:
+            messagebox.showinfo("提示", "仅从股票入口打开的弹窗支持周期切换")
+            return
+        print(f"[👁️K线] switch period={period_val} for {sina_code}", flush=True)
+        data2 = _fetch_stock_kline(sina_code, scale=period_val, days=240)
+        if data2 is None:
+            messagebox.showwarning("提示", f"周期 {period_val} 数据获取失败")
+            return
+        _redraw(data2)
+
+    info_lbl = tk.Label(top, text=f"", bg="#1E1E1E", fg="#A5D6A7", font=("", 9))
+    info_lbl.pack(side=tk.RIGHT, padx=10)
 
     canvas_frame = tk.Frame(dlg, bg="#121212"); canvas_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
 
-    dates = data["dates"]; o = data["o"]; h = data["h"]; l = data["l"]
-    c = data["c"]; v = data["v"]
-    x = np.arange(len(dates))
-    ma5 = _ma_calc(c, 5); ma10 = _ma_calc(c, 10); ma20 = _ma_calc(c, 20)
-    ma60 = _ma_calc(c, 60); ma120 = _ma_calc(c, 120)
-
-    ema12 = _ema_calc(c, 12); ema26 = _ema_calc(c, 26)
-    dif = ema12 - ema26; dea = _ema_calc(dif, 9); macd_hist = (dif - dea) * 2
-
-    low9 = pd.Series(l).rolling(9).min().to_numpy()
-    high9 = pd.Series(h).rolling(9).max().to_numpy()
-    rsv = np.where(high9 - low9 > 0, (c - low9) / (high9 - low9) * 100, 50.0)
-    k = _ema_calc(np.nan_to_num(rsv, 50), 3)
-    d = _ema_calc(k, 3); j = 3 * k - 2 * d
-
+    # 首次渲染
     fig = Figure(figsize=(11, 7.2), dpi=96, facecolor="#121212")
     fig.subplots_adjust(left=0.08, right=0.95, top=0.96, bottom=0.06, hspace=0.08)
-    gs = fig.add_gridspec(4, 1, height_ratios=[5.5, 1.2, 1.2, 1.2], hspace=0.08)
-    ax = fig.add_subplot(gs[0]); axv = fig.add_subplot(gs[1], sharex=ax)
-    axm = fig.add_subplot(gs[2], sharex=ax); axk = fig.add_subplot(gs[3], sharex=ax)
-    for a in (ax, axv, axm, axk):
-        a.set_facecolor("#1E1E1E"); a.tick_params(colors="#9E9E9E", labelsize=8)
-        for sp in a.spines.values(): sp.set_color("#444")
-        a.grid(True, alpha=0.12, color="#666")
-
-    # Candles
-    for i in range(len(x)):
-        up = c[i] >= o[i]; col = "#EF5350" if up else "#66BB6A"
-        ax.plot([x[i], x[i]], [l[i], h[i]], color=col, lw=0.8)
-        body_lo = min(o[i], c[i]); body_hi = max(o[i], c[i])
-        ax.add_patch(Rectangle((x[i]-0.35, body_lo), 0.7, max(body_hi-body_lo, 0.001),
-                                facecolor=col, edgecolor=col, linewidth=0.3))
-
-    ax.plot(x, ma5, color="#FFD54F", lw=1.2, label="MA5")
-    ax.plot(x, ma10, color="#42A5F5", lw=1.2, label="MA10")
-    ax.plot(x, ma20, color="#AB47BC", lw=1.2, label="MA20")
-    ax.plot(x, ma60, color="#66BB6A", lw=1.4, label="MA60")
-    ax.plot(x, ma120, color="#FF7043", lw=1.4, label="MA120")
-
-    # Support / Resistance from local extremes
-    def _local_extrema(arr, order=5):
-        hi, lo = [], []
-        for i in range(order, len(arr)-order):
-            if arr[i] == max(arr[i-order:i+order+1]): hi.append((i, arr[i]))
-            if arr[i] == min(arr[i-order:i+order+1]): lo.append((i, arr[i]))
-        return hi, lo
-    tail = min(120, len(x))
-    hi_all, lo_all = _local_extrema(h[-tail:], 8)
-    hi_all = [(idx + len(x) - tail, val) for idx, val in hi_all]
-    lo_all = [(idx + len(x) - tail, val) for idx, val in lo_all]
-    def _dedup(pts, thresh=0.01):
-        out = []
-        for idx, val in sorted(pts, key=lambda t: -t[1]):
-            if not out or abs(val - out[-1][1]) / out[-1][1] > thresh:
-                out.append((idx, val))
-        return out[:4]
-    for idx, val in _dedup(sorted(hi_all, key=lambda t: -t[1])):
-        ax.axhline(val, color="#EF5350", ls="--", lw=0.9, alpha=0.7)
-        ax.text(len(x)-1, val, f"  resist {val:.2f}", color="#EF5350", fontsize=8, va="bottom")
-    for idx, val in _dedup(sorted(lo_all, key=lambda t: -t[1])):
-        ax.axhline(val, color="#66BB6A", ls="--", lw=0.9, alpha=0.7)
-        ax.text(len(x)-1, val, f"  support {val:.2f}", color="#66BB6A", fontsize=8, va="top")
-
-    # Chip distribution (Gaussian KDE on closes)
-    try:
-        from scipy.stats import gaussian_kde
-        prices = np.linspace(np.nanmin(c[-tail:])*0.97, np.nanmax(c[-tail:])*1.03, 50)
-        kde = gaussian_kde(c[-tail:])
-        dens = kde(prices); dens = dens / dens.max() * 0.22 * (np.nanmax(h)-np.nanmin(l))
-        ax.fill_betweenx(prices, len(x)-1-dens, len(x)-1, alpha=0.18, color="#B39DDB")
-    except Exception: pass
-
-    last = len(x) - 1
-    ax.text(0.01, 0.97,
-            f"O{o[last]:.2f} H{h[last]:.2f} L{l[last]:.2f} C{c[last]:.2f} V{v[last]:.0f}",
-            transform=ax.transAxes, color="#E0E0E0", fontsize=8, va="top",
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="#2A2A2A", edgecolor="#555"))
-
-    cv_colors = ["#EF5350" if c[i] >= o[i] else "#66BB6A" for i in range(len(x))]
-    axv.bar(x, v, color=cv_colors, width=0.7, alpha=0.8); axv.set_ylabel("Vol", color="#9E9E9E", fontsize=8)
-
-    md_colors = ["#EF5350" if m >= 0 else "#66BB6A" for m in macd_hist]
-    axm.bar(x, macd_hist, color=md_colors, width=0.6, alpha=0.8)
-    axm.plot(x, dif, color="#FFD54F", lw=1, label="DIF")
-    axm.plot(x, dea, color="#42A5F5", lw=1, label="DEA")
-    axm.axhline(0, color="#555", lw=0.5); axm.set_ylabel("MACD", color="#9E9E9E", fontsize=8)
-
-    axk.plot(x, k, color="#FFD54F", lw=1, label="K")
-    axk.plot(x, d, color="#42A5F5", lw=1, label="D")
-    axk.plot(x, j, color="#AB47BC", lw=0.9, label="J")
-    axk.axhline(80, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
-    axk.axhline(20, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
-    axk.set_ylabel("KDJ", color="#9E9E9E", fontsize=8)
-    axk.set_xlabel(f"Date  ({len(dates)} bars)", color="#9E9E9E", fontsize=8)
-
-    step = max(1, len(dates) // 12)
-    ticks = x[::step]; lbls = [dates[i][:10] for i in ticks]
-    for a in (ax, axv, axm): a.set_xticks(ticks); a.set_xticklabels([])
-    axk.set_xticks(ticks); axk.set_xticklabels(lbls, rotation=30, fontsize=7, color="#9E9E9E")
-    ax.legend(loc="upper left", fontsize=8, facecolor="#2A2A2A", edgecolor="#555", labelcolor="#E0E0E0")
+    _canvas_ref["fig"] = fig
+    _redraw(data)
 
     canvas = FigureCanvasTkAgg(fig, master=canvas_frame); canvas.draw()
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     try: canvas.get_tk_widget().configure(bg="#121212")
     except Exception: pass
     tb = NavigationToolbar2Tk(canvas, canvas_frame); tb.update(); tb.pack(side=tk.BOTTOM, fill=tk.X)
+    _canvas_ref["canvas"] = canvas
 
 
 def _show_block_daily_kline(win, idx):
@@ -1732,23 +1841,23 @@ def _show_block_daily_kline(win, idx):
 
 
 def _show_stock_daily_kline(win, sina_code, stock_name=""):
-    """Double-click stock -> stock daily K-line"""
+    """Double-click stock -> stock K-line with period switcher (need sina_code for 60min/week/month)"""
     import threading
     label = f"{stock_name} ({sina_code})" if stock_name else sina_code
     print(f"[watch-K] stock '{label}' fetching...", flush=True)
     dlg_load = tk.Toplevel(win); dlg_load.title("Loading"); dlg_load.geometry("260x80")
     dlg_load.configure(bg="#1E1E1E"); dlg_load.transient(win)
-    tk.Label(dlg_load, text=f"Loading {label} daily K-line...",
+    tk.Label(dlg_load, text=f"Loading {label} K-line...",
              bg="#1E1E1E", fg="#FFD54F", font=("", 11)).pack(pady=20)
     def _bg():
-        data = _fetch_stock_daily(sina_code, days=240)
+        data = _fetch_stock_kline(sina_code, scale=240, days=240)
         def _done():
             try: dlg_load.destroy()
             except Exception: pass
             if data is None:
                 messagebox.showwarning("Warning", f"{label} K-line data fetch failed")
                 return
-            _show_daily_kline_dialog(win, label, data)
+            _show_daily_kline_dialog(win, label, data, sina_code=sina_code)
         dlg_load.after(0, _done)
     threading.Thread(target=_bg, daemon=True).start()
 
