@@ -14536,66 +14536,171 @@ class DapanMixin:
 
         _th.Thread(target=_worker, daemon=True).start()
     def _render_stamp_board(self, source, rows, status=None):
-        """主线程: 画邮票格子 (用 grid + 强制 scrollregion)"""
+        """主线程: 画邮票格子 (用 grid + 板块分组 + 板块逻辑/资讯)"""
         import tkinter as tk
+        import os
         inner = getattr(self, f"_{source}_stamp_inner", None)
         if inner is None:
+            return
+        rows = getattr(self, f"_{source}_stamp_data", []) or rows
+        if not rows:
+            inner.update_idletasks()
+            for w in inner.winfo_children(): w.destroy()
             return
         # 强制更新, 拿到 inner 真实宽度
         inner.update_idletasks()
         for w in inner.winfo_children(): w.destroy()
-        self.__dict__[f"_{source}_stamp_data"] = rows
+
+        # ── 🆕 板块归类映射 ──
+        BLOCK_GROUPS = {
+            "银行": ["sh601398","sh601939","sh601288","sh601988","sh600036","sh601166","sz002142","sh600016"],
+            "券商": ["sh600030","sh601211","sh601788","sh600837","sh601688","sz000776","sh600109","sz300059"],
+            "白酒": ["sh600519","sz000858","sh600809","sz000568","sh603369","sz000596","sz002304"],
+            "半导体": ["sh603986","sh688256","sh688981","sz002049","sz300223","sh603501","sh600584","sz300782"],
+            "AI": ["sz002230","sz300059","sz300496","sh600588","sz002415","sh603019","sh600570","sz300033"],
+            "CPO": ["sz002281","sh600487","sz002222","sh601869","sh603502","sz300394"],
+            "新能源": ["sz300750","sz002594","sz300014","sh601012","sz002460","sh600438","sz300274","sz002074"],
+            "军工": ["sh600893","sh600760","sh600118","sz002414","sz000768","sh601698","sz300034","sh600150"],
+            "光伏": ["sh601012","sz002459","sh601865","sz300118","sh600438","sz300274","sh600089","sh603799"],
+            "机器人": ["sz300024","sz002747","sz300607","sh600021","sh601100","sz300124","sz002527"],
+            "煤炭能源": ["sh601225","sh601088","sh600188","sh601015","sh600395","sh601985","sz000933"],
+            "医药医疗": ["sh600276","sz000538","sz002422","sh600196","sz002007","sh600535","sz300015","sz300003"],
+            "黄金有色": ["sh600547","sh600489","sh601899","sz002155","sh600362","sh601600","sz000878"],
+            "地产建材": ["sh600048","sh600340","sz001979","sh600585","sh601155","sz000002","sh600031"],
+            "消费家电": ["sh600690","sz000651","sh600887","sz002475","sh601888","sh601166","sz300999"],
+            "其他热门": [],
+        }
+        BLOCK_LOGIC = {
+            "银行": "低股息护盘/拉指数 — 行情末端避风港",
+            "券商": "牛熊先知 — 市场情绪温度计, 先见底先见顶",
+            "白酒": "消费信仰/外资风向标 — 锚定A股估值底座",
+            "半导体": "国产替代+周期反转 — 高弹性科技锚",
+            "AI": "情绪新周期龙头 — 大模型/算力/应用端",
+            "CPO": "硬件→算力→应用最后一环 — 量价齐升",
+            "新能源": "旧能源退场+储能新叙事 — 超跌+政策托底",
+            "军工": "主题驱动+事件催化 — 航发/军工电子/无人机",
+            "光伏": "产能出清+海外需求修复 — 底部反转最顺",
+            "机器人": "人形/工业机器人 — AI硬件载体",
+            "煤炭能源": "周期底+高股息 — 老能源红利过渡",
+            "医药医疗": "集采落地+创新药出海 — 估值底等政策",
+            "黄金有色": "降息周期+避险双属性 — 美元指数反向锚",
+            "地产建材": "政策底+数据验证 — 修复逻辑最不确定",
+            "消费家电": "内需修复 — 家电以旧换新+消费电子换代",
+            "其他热门": "板块归属不明 — 独立逻辑或事件驱动",
+        }
+        BLOCK_KWS = {
+            "银行": ["银行","招行","工行"], "券商": ["券商","证券","中信"],
+            "白酒": ["白酒","茅台"], "半导体": ["半导体","芯片","中芯"],
+            "AI": ["AI","大模型","算力"], "CPO": ["CPO","光模块","光通信"],
+            "新能源": ["电池","锂电","宁德","比亚迪"], "军工": ["军工","航发","国防"],
+            "光伏": ["光伏","太阳能","硅片"], "机器人": ["机器人","人形"],
+            "煤炭能源": ["煤炭","煤业","能源"], "医药医疗": ["医药","医疗","药明"],
+            "黄金有色": ["黄金","金业","有色"], "地产建材": ["地产","建材"],
+            "消费家电": ["家电","消费"], "其他热门": [],
+        }
+        code_to_block = {}
+        for blk, codes in BLOCK_GROUPS.items():
+            for c in codes: code_to_block[c] = blk
+        grouped = {}
+        for item in rows:
+            blk = code_to_block.get(item.get("code", ""), "其他热门")
+            grouped.setdefault(blk, []).append(item)
+        def _blk_score(kv):
+            return len(kv[1]) * max(sum(abs(r["pct"]) for r in kv[1]) / max(len(kv[1]), 1), 0.1)
+        sorted_blocks = sorted(grouped.items(), key=_blk_score, reverse=True)
+
+        def _arts(block_keywords, limit=1):
+            try:
+                import sqlite3
+                con = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "stock_analysis.db"))
+                cur = con.cursor()
+                if not block_keywords: return []
+                where = " OR ".join(["title LIKE ? OR content LIKE ?"] * len(block_keywords))
+                params = []
+                for kw in block_keywords: params += [f"%{kw}%", f"%{kw}%"]
+                cur.execute(f"SELECT title, source FROM crawled_articles WHERE {where} ORDER BY id DESC LIMIT {limit}", params)
+                r = cur.fetchall(); con.close(); return r
+            except Exception: return []
+
         CELL_W, CELL_H = 86, 94
         COL_W, ROW_H = 92, 100
         PAD = 4
-        # 统计爬取代码数量
+
         crawl_cnt = sum(1 for r in rows if r.get('origin','') in ("taogubaSSR","taoguba详情","jiuyanSSR","jiuyan详情") or "爬取" in r.get('origin',''))
         if status:
             extra = f" 🧲爬取{crawl_cnt}只" if crawl_cnt > 0 else ""
             status.configure(text=f"✅ {len(rows)}只热股{extra}", foreground="#81C784")
-        # 算列数: inner 当前宽度 / 每列占位
+
         iw = inner.winfo_width()
-        if iw < 50:  # inner 还没尺寸 → 用父 Canvas
+        if iw < 50:
             try:
                 cv = inner.master
                 iw = cv.winfo_width() if hasattr(cv, 'winfo_width') else 800
             except: iw = 800
-        cols = max(3, iw // COL_W)  # 至少 3 列
-        # 强制 inner 有尺寸 (grid 布局需要)
-        total_rows = (len(rows) + cols - 1) // cols
-        inner.configure(width=cols * COL_W, height=total_rows * ROW_H)
+        cols = max(3, iw // COL_W)
+
+        def _blk_span(items): return (len(items) + cols - 1) // cols
+        total_span = sum(_blk_span(it) for _, it in sorted_blocks)
+        header_rows = len(sorted_blocks)
+        inner.configure(width=cols * COL_W, height=total_span * ROW_H + header_rows * 34 + 8)
         inner.grid_propagate(False)
-        # 画 grid
-        for i, item in enumerate(rows):
-            r, c = divmod(i, cols)
-            pct = item["pct"]
-            if pct > 0.5: bg = "#C62828"
-            elif pct < -0.5: bg = "#2E7D32"
-            else: bg = "#37474F"
-            stamp = tk.Frame(inner, bg=bg, width=CELL_W, height=CELL_H,
-                             highlightthickness=1, highlightbackground="#455A64",
-                             cursor="hand2")
-            stamp.grid(row=r, column=c, padx=PAD // 2, pady=PAD // 2, sticky="nw")
-            stamp.grid_propagate(False)
-            name_lbl = tk.Label(stamp, text=item["name"], bg=bg, fg="white",
-                                font=("Helvetica", 10, "bold"), anchor="center")
-            name_lbl.pack(fill=tk.BOTH, expand=True, padx=2, pady=(14, 0))
-            pct_text = f"{pct:+.2f}%"
-            pct_lbl = tk.Label(stamp, text=pct_text, bg=bg, fg="white",
-                               font=("Helvetica", 10, "bold"))
-            pct_lbl.pack(side=tk.BOTTOM, pady=(0, 4))
-            if item["freq"] >= 3:
-                freq_bg = "#FF6F00" if item["freq"] >= 10 else "#EF5350" if item["freq"] >= 5 else "#FF8A65"
-                freq_lbl = tk.Label(stamp, text=str(item["freq"]), bg=freq_bg, fg="white",
-                                    font=("Helvetica", 8, "bold"), padx=4, pady=0)
-                freq_lbl.place(relx=1.0, rely=0.0, x=-3, y=2, anchor="ne")
-            stamp._stamp = item
-            stamp._last_click = {"time": 0}
-            def _bind_all(w):
-                w.bind("<Motion>", lambda e, it=item, src=source: self._show_stamp_hover(e, src, it))
-                w.bind("<Leave>", lambda e, src=source: self._hide_stamp_hover(src))
-                w.bind("<Button-1>", lambda e, it=item, stamp=stamp: self._stamp_on_click(e, stamp, it))
-            _bind_all(stamp); _bind_all(name_lbl); _bind_all(pct_lbl)
+
+        cur_row = 0
+        for blk_name, items in sorted_blocks:
+            # 🆕 板块标题行 (深色条带)
+            hdr = tk.Frame(inner, bg="#263238", height=32)
+            hdr.grid(row=cur_row, column=0, columnspan=cols, sticky="we", padx=2, pady=(6, 2))
+            hdr.grid_propagate(False)
+            tk.Label(hdr, text=f"📌 {blk_name} ({len(items)})", bg="#263238", fg="#FFD54F",
+                     font=("", 11, "bold")).pack(side=tk.LEFT, padx=(10, 6), pady=4)
+            tk.Label(hdr, text=BLOCK_LOGIC.get(blk_name, "")[:48], bg="#263238",
+                     fg="#A5D6A7", font=("", 9), anchor="w").pack(side=tk.LEFT, padx=2, pady=4, fill=tk.X, expand=True)
+            arts = _arts(BLOCK_KWS.get(blk_name, []), 1)
+            if arts and arts[0][0]:
+                tk.Label(hdr, text=f"📰 {arts[0][0][:26]}", bg="#263238", fg="#80DEEA",
+                         font=("", 8), anchor="e").pack(side=tk.RIGHT, padx=8, pady=4)
+            cur_row += 1
+
+            # 邮票
+            for i, item in enumerate(items):
+                r, c = divmod(i, cols)
+                pct = item["pct"]
+                bg = "#C62828" if pct > 0.5 else "#2E7D32" if pct < -0.5 else "#37474F"
+                stamp = tk.Frame(inner, bg=bg, width=CELL_W, height=CELL_H,
+                                 highlightthickness=1, highlightbackground="#455A64", cursor="hand2")
+                stamp.grid(row=cur_row + r, column=c, padx=PAD // 2, pady=PAD // 2, sticky="nw")
+                stamp.grid_propagate(False)
+                tk.Label(stamp, text=item["name"], bg=bg, fg="white",
+                         font=("Helvetica", 10, "bold")).pack(fill=tk.BOTH, expand=True, padx=2, pady=(14, 0))
+                tk.Label(stamp, text=f"{pct:+.2f}%", bg=bg, fg="white",
+                         font=("Helvetica", 10, "bold")).pack(side=tk.BOTTOM, pady=(0, 4))
+                if item["freq"] >= 3:
+                    fbg = "#FF6F00" if item["freq"] >= 10 else "#EF5350" if item["freq"] >= 5 else "#FF8A65"
+                    freq_lbl = tk.Label(stamp, text=str(item["freq"]), bg=fbg, fg="white",
+                                        font=("Helvetica", 8, "bold"), padx=4, pady=0)
+                    freq_lbl.place(relx=1.0, rely=0.0, x=-3, y=2, anchor="ne")
+                stamp._stamp = item
+                stamp._last_click = {"time": 0}
+                name_lbl = stamp.winfo_children()[0] if stamp.winfo_children() else None
+                pct_lbl = stamp.winfo_children()[-1] if len(stamp.winfo_children()) > 1 else None
+                def _bind_all(w):
+                    pass  # 下面统一绑定
+                _bind_all(stamp)
+
+            # 统一绑定事件到所有 stamp (复用原 _show_stamp_hover / _stamp_on_click)
+            for child in inner.winfo_children():
+                if not hasattr(child, '_stamp'): continue
+                def _bind_everything(w):
+                    for c in w.winfo_children(): _bind_everything(c)
+                    try:
+                        it = w.master._stamp if hasattr(w.master, '_stamp') else None
+                        if it is not None and w is not w.master:
+                            w.bind("<Motion>", lambda e, it=it, src=source: self._show_stamp_hover(e, src, it))
+                            w.bind("<Leave>", lambda e, src=source: self._hide_stamp_hover(src))
+                            w.bind("<Button-1>", lambda e, it=it, stamp=w.master: self._stamp_on_click(e, stamp, it))
+                    except Exception: pass
+                _bind_everything(child)
+
         # 强制刷新 scrollregion
         inner.update_idletasks()
         try:
@@ -14603,7 +14708,7 @@ class DapanMixin:
             cv.configure(scrollregion=cv.bbox("all"))
         except Exception as e:
             print(f"[邮票格子] scrollregion 更新: {e}", flush=True)
-        print(f"[邮票格子] {source} 渲染完成: {len(rows)} 只, {cols} 列, {total_rows} 行", flush=True)
+        print(f"[邮票格子] {source} 渲染完成: {len(rows)} 只, {len(sorted_blocks)} 板块", flush=True)
     def _show_stamp_hover(self, event, source, item):
         """hover 显示详情"""
         import tkinter as tk
