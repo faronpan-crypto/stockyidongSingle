@@ -1153,42 +1153,41 @@ def _draw_block_grid(win):
 
     # 点击绑定: 单击 → 板块日K, 双击 → 个股日K
     def _on_single_click(event):
+        print(f"[👁️点击] single at ({event.x},{event.y}), canvas type={type(c).__name__}", flush=True)
         for (x1, y1, x2, y2), idx in win._block_cells:
             if x1 <= event.x <= x2 and y1 <= event.y <= y2:
                 tags = c.gettags(event.x, event.y)
-                # ❓ 热区 → 知识弹窗
+                print(f"[👁️点击] hit idx={idx}, tags={tags[:5] if tags else 'empty'}, _block_meta len={len(win._block_meta)}, cell_idx={idx < len(win._block_meta)}", flush=True)
                 if f"q_{idx}" in tags:
                     name = win._block_meta[idx][0]
                     kd = BLOCK_KNOWLEDGE.get(name, {"definition": "(暂无)"})
                     _show_knowledge_popup(win, name, kd)
                 else:
-                    # 🆕 单击 → 板块指数日K
                     _show_block_daily_kline(win, idx)
                 return
+        print(f"[👁️点击] no cell hit, cells={len(win._block_cells)}", flush=True)
 
     def _on_double_click(event):
+        print(f"[👁️点击] DOUBLE at ({event.x},{event.y})", flush=True)
         for (x1, y1, x2, y2), idx in win._block_cells:
             if x1 <= event.x <= x2 and y1 <= event.y <= y2:
                 tags = c.gettags(event.x, event.y)
-                # ❓ 热区 → 知识弹窗
+                print(f"[👁️点击] DOUBLE hit idx={idx}", flush=True)
                 if f"q_{idx}" in tags:
                     name = win._block_meta[idx][0]
                     kd = BLOCK_KNOWLEDGE.get(name, {"definition": "(暂无)"})
                     _show_knowledge_popup(win, name, kd)
                     return
-                # 🆕 双击 Top3 龙头 → 该股票日K
                 top3 = win._block_meta[idx][6] if len(win._block_meta[idx]) > 6 else []
                 hit_name = None
                 for ti, (sname, _pct) in enumerate(top3[:3]):
                     if f"stock_{idx}_{ti}" in tags:
                         hit_name = sname; break
                 if hit_name:
-                    # 从成分股列表找代码
                     sina, sname2 = _lookup_stock_code_by_name(hit_name)
                     if sina:
                         _show_stock_daily_kline(win, sina, sname2 or hit_name)
                         return
-                # 🆕 兜底: 双击宫格任意位置 → 该板块第一只成分股
                 sina, sname = _get_first_stock_sina(win, idx)
                 if sina:
                     _show_stock_daily_kline(win, sina, sname)
@@ -1196,8 +1195,46 @@ def _draw_block_grid(win):
                     messagebox.showinfo("提示", f"无法获取 {win._block_meta[idx][0]} 成分股代码")
                 return
 
-    c.bind("<Button-1>", _on_single_click)
-    c.bind("<Double-1>", _on_double_click)
+    # 🆕 改成用 event.time 区分单击 vs 双击 (macOS Canvas 上 <Double-1> 经常触发不了)
+    _click_state = {"time": 0, "idx": -1}
+    def _unified_click(event):
+        now = event.time
+        for (x1, y1, x2, y2), idx in win._block_cells:
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                tags = c.gettags(event.x, event.y)
+                # ❓ 热区 → 知识弹窗 (单击即可)
+                if f"q_{idx}" in tags:
+                    name = win._block_meta[idx][0]
+                    kd = BLOCK_KNOWLEDGE.get(name, {"definition": "(暂无)"})
+                    _show_knowledge_popup(win, name, kd)
+                    _click_state["time"] = now; _click_state["idx"] = idx
+                    return
+                # 如果两次点击间隔 < 300ms 且同一格 → 双击
+                if (now - _click_state["time"]) < 300 and _click_state["idx"] == idx:
+                    _click_state["time"] = 0  # reset
+                    top3 = win._block_meta[idx][6] if len(win._block_meta[idx]) > 6 else []
+                    hit_name = None
+                    for ti, (sname, _pct) in enumerate(top3[:3]):
+                        if f"stock_{idx}_{ti}" in tags:
+                            hit_name = sname; break
+                    if hit_name:
+                        sina, sname2 = _lookup_stock_code_by_name(hit_name)
+                        if sina:
+                            _show_stock_daily_kline(win, sina, sname2 or hit_name)
+                            return
+                    sina, sname = _get_first_stock_sina(win, idx)
+                    if sina:
+                        _show_stock_daily_kline(win, sina, sname)
+                    else:
+                        messagebox.showinfo("提示", f"无法获取 {win._block_meta[idx][0]} 成分股代码")
+                else:
+                    # 单击 → 板块指数日K
+                    _click_state["time"] = now; _click_state["idx"] = idx
+                    _show_block_daily_kline(win, idx)
+                return
+    # 改用统一 <Button-1> 处理 (event.time 区分单击双击)
+    c.bind("<Button-1>", _unified_click)
+    c.bind("<Double-1>", _unified_click)  # 兜底
     c.bind("<Button-3>", lambda e: _show_block_detail(win, -1, full=True))
     c.bind("<Configure>", lambda e: _draw_block_grid(win))
 
