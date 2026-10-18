@@ -58,6 +58,7 @@ def build_books_tab(parent, root=None):
     from tkinter import ttk, filedialog, messagebox
 
     _ensure_book_table()
+    _backfill_intro()  # 启动时也给旧书补 smart fallback intro
 
     # 顶栏
     top = tk.Frame(parent, bg="#121212"); top.pack(fill=tk.X, pady=(0, 6))
@@ -273,6 +274,8 @@ def _batch_import_from_dir(root, container):
             skipped.append(title)
     # 更新所有按钮 genre (之前没 genre 的也补)
     _backfill_genre()
+    # ⚡ 给空 intro 的旧书批量填 smart fallback (让弹窗打开就有内容)
+    _backfill_intro()
     messagebox.showinfo("导入完成",
                         f"✅ 导入 {len(imported)} 本\n⏭️ 跳过 {len(skipped)} 本(已存在)\n\n" +
                         ("\n".join(f"  {i+1}. {t}" for i, t in enumerate(imported[:15])) +
@@ -337,6 +340,28 @@ def _backfill_genre():
         con.commit(); con.close()
     except Exception as e:
         print(f"[书籍] backfill genre err: {e}")
+
+
+def _backfill_intro():
+    """给 intro 为空/太短/水话/种子 的旧书批量填 smart fallback"""
+    try:
+        con = _sqlite3.connect(_DB_PATH)
+        cur = con.execute("SELECT id, title, intro, author FROM books")
+        filled = 0
+        for bid, title, intro, author in cur.fetchall():
+            need = False
+            if not intro or len(intro.strip()) < 40: need = True
+            elif "AI/联网没抓到" in intro: need = True
+            elif _is_water_intro(intro): need = True
+            if need:
+                fb = _build_smart_fallback_intro(title, author or "")
+                con.execute("UPDATE books SET intro=? WHERE id=?", (fb, bid))
+                filled += 1
+        con.commit(); con.close()
+        if filled:
+            print(f"[书籍] ✅ backfill intro: {filled} 本")
+    except Exception as e:
+        print(f"[书籍] backfill intro err: {e}")
 
 
 def _add_single_book(root, container):
@@ -505,83 +530,8 @@ def _open_book_detail(parent, bid):
 
     dlg.grab_set()
 
-    # ── 自动联网: intro 太短 (种子模板或空) 或是豆瓣模板水话 就后台抓, 抓到后自动刷新 UI ──
-    _intro = row["intro"] or ""
-    _rating = row["rating"] or 0
-    _looks_empty = (len(_intro) < 40) or ("AI/联网没抓到" in _intro) or (_rating == 0) or _is_water_intro(_intro)
-    if _looks_empty:
-        def _auto_fetch():
-            summary = _fetch_book_intro_worker(row["title"], row["author"])
-            # 过滤: 只存非空值, 且把非字符串类型处理一下
-            fields_to_save = {}
-            for k, v in summary.items():
-                if v is None: continue
-                if isinstance(v, str) and not v.strip(): continue
-                if isinstance(v, float):  # rating
-                    if v > 0: fields_to_save[k] = v
-                    continue
-                if isinstance(v, int):    # pages
-                    if v > 0: fields_to_save[k] = v
-                    continue
-                fields_to_save[k] = v
-            if not fields_to_save: return
-            # 存库 (纯 SQLite, 线程安全)
-            try:
-                con = _sqlite3.connect(_DB_PATH)
-                now = _dt.now().strftime("%Y-%m-%d %H:%M")
-                sets = ", ".join(f"{k}=?" for k in fields_to_save.keys()) + ", updated_at=?"
-                con.execute(f"UPDATE books SET {sets} WHERE id=?",
-                            list(fields_to_save.values()) + [now, bid])
-                con.commit(); con.close()
-            except Exception as ex:
-                print(f"[书籍] auto fetch db err: {ex}", flush=True)
-            # ⚠️ Tk 不是线程安全 — 用 after(0, ...) 切回主线程刷新 UI
-            def _refresh():
-                try:
-                    if not dlg.winfo_exists(): return
-                    con2 = _sqlite3.connect(_DB_PATH)
-                    con2.row_factory = _sqlite3.Row
-                    new_row = con2.execute("SELECT * FROM books WHERE id=?", (bid,)).fetchone()
-                    con2.close()
-                    if not new_row: return
-                    # 刷新 header 副标题
-                    sub2 = []
-                    if new_row["author"]: sub2.append(f"✍️ {new_row['author']}")
-                    if new_row["rating"] and new_row["rating"] > 0: sub2.append(f"⭐ {new_row['rating']:.1f}")
-                    if new_row["pub_year"]: sub2.append(f"📅 {new_row['pub_year']}")
-                    if new_row["pages"]: sub2.append(f"📄 {new_row['pages']}页")
-                    for w in header.winfo_children():
-                        if isinstance(w, tk.Label) and "✍️" in (w.cget("text") or ""):
-                            w.configure(text="  |  ".join(sub2)); break
-                    # 刷新 text widgets (重建 tab)
-                    for widget in t1.winfo_children(): widget.destroy()
-                    for widget in t2.winfo_children(): widget.destroy()
-                    _make_labeled_text(t1, "📚 作者简介 / 官方简介", new_row["intro"] or "", (0, 0), height=8)
-                    _make_labeled_text(t1, "💡 核心观点 / 书摘", new_row["highlights"] or "", (1, 0), height=6)
-                    _make_labeled_text(t2, "👍 网上好评 / 推荐语", new_row["pros"] or "", (0, 0), height=6)
-                    _make_labeled_text(t2, "👎 争议 / 负面评价", new_row["cons"] or "", (1, 0), height=4)
-                    _make_labeled_text(t2, "🔗 相关书籍 (每行一本)", new_row["related"] or "", (2, 0), height=3)
-                    _make_labeled_text(t2, "🛠 涉及方法论 (每行一个)", new_row["methods"] or "", (3, 0), height=3)
-                    # 也刷新主 Tab 的卡片网格
-                    try:
-                        _root = dlg.winfo_toplevel()
-                        # 往上找 books tab 的 scroll_inner
-                        for child in _root.winfo_children():
-                            if not hasattr(child, 'winfo_children'): continue
-                            for sub in child.winfo_children():
-                                for sub2 in sub.winfo_children():
-                                    try:
-                                        if hasattr(sub2, 'winfo_children') and any(
-                                            hasattr(c, 'cget') and c.cget('bg') == '#121212'
-                                            for c in sub2.winfo_children()[:1]):
-                                            _render_buttons(sub2, "")
-                                            break
-                                    except: pass
-                    except Exception: pass
-                except Exception as ex:
-                    print(f"[书籍] auto fetch UI refresh err: {ex}", flush=True)
-            dlg.after(0, _refresh)
-        _threading.Thread(target=_auto_fetch, daemon=True).start()
+    # ⚠️ 不再自动联网刷新 — 爬不到就爬不到, 直接显示 DB 已有内容
+    # 用户想抓手动点 "🤖 AI/联网 抓取" 按钮即可
 
 
 # 编辑中 — 需要从 _make_labeled_text 里拿到 text widget
