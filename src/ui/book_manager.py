@@ -79,20 +79,11 @@ def build_books_tab(parent, root=None):
     tk.Button(top, text="＋ 手动添加", command=lambda: _add_single_book(root, container),
               bg="#2E7D32", fg="white", font=("", 9, "bold"), padx=6).pack(side=tk.RIGHT, padx=3)
 
-    # 分类过滤器
+    # 分类过滤器 (按钮循环在 canvas/scroll_inner 都就绪后再建)
     filter_row = tk.Frame(parent, bg="#121212"); filter_row.pack(fill=tk.X, pady=(0, 4))
     tk.Label(filter_row, text="分类:", bg="#121212", fg="#A5D6A7", font=("", 9)).pack(side=tk.LEFT, padx=6)
     genres = ["全部", "投资", "心理", "历史", "科技", "传记", "哲学", "方法", "其他"]
     filter_var = tk.StringVar(value="全部")
-    for g in genres:
-        active = g == "全部"
-        b = tk.Button(filter_row, text=g, width=5,
-                      bg="#1565C0" if active else "#37474F",
-                      fg="white" if active else "#B0BEC5",
-                      font=("", 9, "bold" if active else "normal"),
-                      relief=tk.FLAT,
-                      command=lambda _g=g: (_filter_change(_g, scroll_inner, filter_var, canvas)))
-        b.pack(side=tk.LEFT, padx=2)
 
     # 带滚动条的容器 — Canvas + inner Frame
     from tkinter import Canvas as _Canvas
@@ -112,19 +103,34 @@ def build_books_tab(parent, root=None):
     canvas.bind_all("<MouseWheel>", _on_mousewheel)
     parent.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
-    # lambda 闭包用的变量 — 指向 inner Frame
-    container = scroll_inner
+    # root 用于弹窗 (Toplevel parent) — 在 canvas 定义后, 才能建按钮 command
+    _root_ref = root if root else parent.winfo_toplevel()
+    container = scroll_inner  # 给顶栏按钮闭包引用
 
-    _render_buttons(scroll_inner, "", filter_genre="全部")
+    def _filter_change_with_tl(g):
+        _filter_change(g, scroll_inner, filter_var, canvas, toplevel=_root_ref)
+
+    # 现在建分类按钮 (canvas/scroll_inner/_root_ref 都就绪了)
+    for g in genres:
+        active = g == "全部"
+        b = tk.Button(filter_row, text=g, width=5,
+                      bg="#1565C0" if active else "#37474F",
+                      fg="white" if active else "#B0BEC5",
+                      font=("", 9, "bold" if active else "normal"),
+                      relief=tk.FLAT,
+                      command=lambda _g=g: _filter_change_with_tl(_g))
+        b.pack(side=tk.LEFT, padx=2)
+
+    _render_buttons(scroll_inner, "", filter_genre="全部", toplevel=_root_ref)
 
     # 给 combobox 填全量书名
     all_titles = _list_titles()
     cb["values"] = all_titles
 
 
-def _filter_change(g, container, filter_var, canvas=None):
+def _filter_change(g, container, filter_var, canvas=None, toplevel=None):
     filter_var.set(g)
-    _render_buttons(container, "", filter_genre=g)
+    _render_buttons(container, "", filter_genre=g, toplevel=toplevel)
     if canvas: canvas.yview_moveto(0)
 
 
@@ -139,9 +145,14 @@ def _list_titles():
         return []
 
 
-def _render_buttons(parent, keyword="", filter_genre=None, filter_widget=None):
+def _render_buttons(parent, keyword="", filter_genre=None, filter_widget=None, toplevel=None):
     """渲染书籍按钮网格"""
     import tkinter as tk
+    # 确保有 toplevel
+    if toplevel is None:
+        try: toplevel = parent.winfo_toplevel()
+        except: pass
+
     for w in parent.winfo_children(): w.destroy()
 
     try:
@@ -174,11 +185,11 @@ def _render_buttons(parent, keyword="", filter_genre=None, filter_widget=None):
 
     for i, (bid, title, author, genre, rating) in enumerate(rows):
         r, c = divmod(i, COLS)
-        _make_book_card(btn_frame, bid, title, author, genre, rating, r, c)
+        _make_book_card(btn_frame, bid, title, author, genre, rating, r, c, toplevel=toplevel)
 
 
-def _make_book_card(parent, bid, title, author, genre, rating, row, col):
-    """单个书籍按钮卡片"""
+def _make_book_card(parent, bid, title, author, genre, rating, row, col, toplevel=None):
+    """单个书籍按钮卡片 — toplevel 用于点击时正确打开弹窗"""
     import tkinter as tk
     COLORS = {
         "投资": "#1565C0", "心理": "#7B1FA2", "历史": "#6A1B9A",
@@ -196,23 +207,28 @@ def _make_book_card(parent, bid, title, author, genre, rating, row, col):
     sub = f"✍️ {author or '佚名'}"
     if rating and rating > 0:
         sub += f"   ⭐{rating:.1f}"
-    if genre:
+    if genre and genre != "其他":
         sub += f"   [{genre}]"
     tk.Label(card, text=sub, bg=bg, fg="rgba(255,255,255,0.75)",
              font=("", 9), anchor="w").pack(fill=tk.X, pady=(2, 0))
 
-    def _open(_e=None, _id=bid):
-        from src.ui.book_manager import _open_book_detail  # 延迟 import 避免循环
-        _open_book_detail(parent.winfo_toplevel(), _id)
+    def _open(_e=None, _bid=bid):
+        # 优先用传入的 toplevel, 否则用 Tk 官方 winfo_toplevel()
+        try:
+            top = toplevel or card.winfo_toplevel()
+        except Exception:
+            top = None
+        _open_book_detail(top, _bid)
 
-    def _rm(_e=None, _id=bid, _card=card):
+    def _rm(_e=None, _id=bid, _card=card, _t=title):
         from tkinter import messagebox as _mb
-        if _mb.askyesno("删除", f"确认删除《{title}》?\n(所有手写笔记也会删)"):
+        if _mb.askyesno("删除", f"确认删除《{_t}》?\n(所有手写笔记也会删)"):
             _delete_book(_id); _card.destroy()
 
+    # 关键: 用 ButtonRelease 替代 Button-1, 避免 Tk 焦点问题
     for w in [card] + list(card.winfo_children()):
-        w.bind("<Button-1>", _open)
-        w.bind("<Button-3>", _rm)  # 右键删除
+        w.bind("<ButtonRelease-1>", _open)
+        w.bind("<Button-3>", _rm)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -478,6 +494,84 @@ def _open_book_detail(parent, bid):
 
     dlg.grab_set()
 
+    # ── 自动联网: intro 太短 (种子模板或空) 就后台抓, 抓到后自动刷新 UI ──
+    _intro = row["intro"] or ""
+    _rating = row["rating"] or 0
+    _looks_empty = (len(_intro) < 40) or ("AI/联网没抓到" in _intro) or (_rating == 0)
+    if _looks_empty:
+        def _auto_fetch():
+            summary = _fetch_book_intro_worker(row["title"], row["author"])
+            # 过滤: 只存非空值, 且把非字符串类型处理一下
+            fields_to_save = {}
+            for k, v in summary.items():
+                if v is None: continue
+                if isinstance(v, str) and not v.strip(): continue
+                if isinstance(v, float):  # rating
+                    if v > 0: fields_to_save[k] = v
+                    continue
+                if isinstance(v, int):    # pages
+                    if v > 0: fields_to_save[k] = v
+                    continue
+                fields_to_save[k] = v
+            if not fields_to_save: return
+            # 存库 (纯 SQLite, 线程安全)
+            try:
+                con = _sqlite3.connect(_DB_PATH)
+                now = _dt.now().strftime("%Y-%m-%d %H:%M")
+                sets = ", ".join(f"{k}=?" for k in fields_to_save.keys()) + ", updated_at=?"
+                con.execute(f"UPDATE books SET {sets} WHERE id=?",
+                            list(fields_to_save.values()) + [now, bid])
+                con.commit(); con.close()
+            except Exception as ex:
+                print(f"[书籍] auto fetch db err: {ex}", flush=True)
+            # ⚠️ Tk 不是线程安全 — 用 after(0, ...) 切回主线程刷新 UI
+            def _refresh():
+                try:
+                    if not dlg.winfo_exists(): return
+                    con2 = _sqlite3.connect(_DB_PATH)
+                    con2.row_factory = _sqlite3.Row
+                    new_row = con2.execute("SELECT * FROM books WHERE id=?", (bid,)).fetchone()
+                    con2.close()
+                    if not new_row: return
+                    # 刷新 header 副标题
+                    sub2 = []
+                    if new_row["author"]: sub2.append(f"✍️ {new_row['author']}")
+                    if new_row["rating"] and new_row["rating"] > 0: sub2.append(f"⭐ {new_row['rating']:.1f}")
+                    if new_row["pub_year"]: sub2.append(f"📅 {new_row['pub_year']}")
+                    if new_row["pages"]: sub2.append(f"📄 {new_row['pages']}页")
+                    for w in header.winfo_children():
+                        if isinstance(w, tk.Label) and "✍️" in (w.cget("text") or ""):
+                            w.configure(text="  |  ".join(sub2)); break
+                    # 刷新 text widgets (重建 tab)
+                    for widget in t1.winfo_children(): widget.destroy()
+                    for widget in t2.winfo_children(): widget.destroy()
+                    _make_labeled_text(t1, "📚 作者简介 / 官方简介", new_row["intro"] or "", (0, 0), height=8)
+                    _make_labeled_text(t1, "💡 核心观点 / 书摘", new_row["highlights"] or "", (1, 0), height=6)
+                    _make_labeled_text(t2, "👍 网上好评 / 推荐语", new_row["pros"] or "", (0, 0), height=6)
+                    _make_labeled_text(t2, "👎 争议 / 负面评价", new_row["cons"] or "", (1, 0), height=4)
+                    _make_labeled_text(t2, "🔗 相关书籍 (每行一本)", new_row["related"] or "", (2, 0), height=3)
+                    _make_labeled_text(t2, "🛠 涉及方法论 (每行一个)", new_row["methods"] or "", (3, 0), height=3)
+                    # 也刷新主 Tab 的卡片网格
+                    try:
+                        _root = dlg.winfo_toplevel()
+                        # 往上找 books tab 的 scroll_inner
+                        for child in _root.winfo_children():
+                            if not hasattr(child, 'winfo_children'): continue
+                            for sub in child.winfo_children():
+                                for sub2 in sub.winfo_children():
+                                    try:
+                                        if hasattr(sub2, 'winfo_children') and any(
+                                            hasattr(c, 'cget') and c.cget('bg') == '#121212'
+                                            for c in sub2.winfo_children()[:1]):
+                                            _render_buttons(sub2, "")
+                                            break
+                                    except: pass
+                    except Exception: pass
+                except Exception as ex:
+                    print(f"[书籍] auto fetch UI refresh err: {ex}", flush=True)
+            dlg.after(0, _refresh)
+        _threading.Thread(target=_auto_fetch, daemon=True).start()
+
 
 # 编辑中 — 需要从 _make_labeled_text 里拿到 text widget
 _editors = {}
@@ -510,41 +604,111 @@ def _make_labeled_text(parent, label, initial, grid_pos, height=6, editable=Fals
 # ═════════════════════════════════════════════════════════════════════════
 
 def _fetch_book_intro_worker(title, author_hint=""):
-    """后台线程: 抓取豆瓣搜索结果 + 百度百科 — 合并"""
+    """后台线程: 豆瓣 suggest → 详情页完整解析 (rating/intro/作者/出版社/页数/ISBN)"""
     import requests
     out = {}
     headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                             "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"}
-    q = title
-    if author_hint: q += f" {author_hint}"
+                             "AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+               "Accept-Language": "zh-CN,zh;q=0.9"}
+    q = title  # 只用书名搜 — 加作者名会导致豆瓣 suggest 返回空
+    print(f"[书籍] 开始抓《{title}》联网数据...", flush=True)
 
-    # 1) 豆瓣搜索 API (不稳定, 但能拿到基本信息)
+    # ═══ ① 豆瓣 suggest API → 找到匹配 subject ═══
+    subject_url = ""
     try:
-        r = requests.get(f"https://book.douban.com/j/subject_suggest?q={q}",
+        r = requests.get(f"https://book.douban.com/j/subject_suggest?q={requests.utils.quote(q)}",
                          headers=headers, timeout=8)
         if r.ok:
             data = r.json()
-            if data:
-                b = data[0]
-                out["author"] = b.get("author", "") or out.get("author", "")
-                out["intro"] = b.get("introduction", "") or b.get("desc", "")
-                out["rating"] = float(b.get("score", 0) or 0)
-                out["pub_year"] = str(b.get("year", ""))
-    except Exception: pass
+            if data and isinstance(data, list) and len(data) > 0:
+                # 选标题最匹配的 (豆瓣会返回不同版本)
+                best = None; best_score = 0
+                for b in data:
+                    b_title = b.get("title", "")
+                    s = 0
+                    if title in b_title or b_title in title: s += 3
+                    if b.get("author_name") and author_hint and author_hint[:2] in b.get("author_name", ""): s += 2
+                    if s > best_score: best = b; best_score = s
+                if not best: best = data[0]
+                if best:
+                    subject_url = best.get("url", "")
+                    an = best.get("author_name", "")
+                    if an and not out.get("author"): out["author"] = an
+                    yr = best.get("year", "")
+                    if yr and not out.get("pub_year"): out["pub_year"] = yr
+                    print(f"[书籍] 豆瓣 suggest 命中: {best.get('title')} → {subject_url}", flush=True)
+    except Exception as e:
+        print(f"[书籍] 豆瓣suggest失败: {e}", flush=True)
 
-    # 2) 百度百科网页抓 (简单 HTML)
-    try:
-        r2 = requests.get(f"https://baike.baidu.com/item/{title}", headers=headers, timeout=8)
-        if r2.ok:
-            t = r2.text
-            m = _re.search(r'<meta name="description" content="([^"]+)"', t)
-            if m and not out.get("intro"):
-                out["intro"] = _re.sub(r"[\s]+", " ", m.group(1)).strip()
-    except Exception: pass
+    # ═══ ② 豆瓣详情页 → 解析完整数据 ═══
+    if subject_url:
+        try:
+            r2 = requests.get(subject_url, headers=headers, timeout=12)
+            if r2.ok and len(r2.text) > 5000:
+                text = r2.text
+                # rating
+                m = _re.search(r'property="v:average"[^>]*>([^<]+)', text)
+                if m:
+                    try: out["rating"] = float(m.group(1).strip())
+                    except: pass
+                # 基本信息: 作者/出版社/出版年/页数/ISBN
+                info_map = {"作者": "author", "出版社": "", "出版年": "pub_year",
+                            "页数": "pages", "ISBN": ""}
+                for label, field in info_map.items():
+                    if not field: continue
+                    for mm in _re.finditer(r'<span class="pl">' + label + r':</span>(.*?)<br', text, _re.DOTALL):
+                        val = _re.sub(r'<[^>]+>', '', mm.group(1)).strip()
+                        if val:
+                            if field == "pages":
+                                try: out[field] = int(_re.sub(r'\D', '', val))
+                                except: pass
+                            else:
+                                out[field] = val
+                        break
+                # intro: 取第一个 class="intro" div (内容简介)
+                intros_found = []
+                for m4 in _re.finditer(r'class="intro"[^>]*>(.*?)</div>', text, _re.DOTALL):
+                    txt = _re.sub(r'<[^>]+>', '', m4.group(1))
+                    txt = _re.sub(r'\s+', ' ', txt).strip()
+                    if len(txt) > 30: intros_found.append(txt)
+                if intros_found:
+                    out["intro"] = intros_found[0]  # 第一个通常是内容简介
+                    if len(intros_found) > 1:
+                        # 第二个通常是作者简介, 拼到 intro 末尾
+                        out["intro"] += "\n\n———\n\n📝 " + intros_found[1]
+                # douban_url
+                out["douban_url"] = subject_url
+                print(f"[书籍] ✅ 豆瓣详情页: rating={out.get('rating')}, intro={len(out.get('intro',''))}字", flush=True)
+        except Exception as e:
+            print(f"[书籍] 豆瓣详情页失败: {e}", flush=True)
 
-    # 3) 通用 AI 种子 — 如果没抓到, 就生成模板
+    # ═══ ③ 百度百科 HTML (兜底) ═══
     if not out.get("intro"):
-        out["intro"] = f"《{title}》是一本{_guess_genre(title)}类书籍。\n\n(AI/联网没抓到, 请手动补充 👍)"
+        try:
+            url3 = f"https://baike.baidu.com/item/{requests.utils.quote(title)}"
+            r3 = requests.get(url3, headers=headers, timeout=10, allow_redirects=True)
+            if r3.ok and len(r3.text) > 2000:
+                m = _re.search(r'<meta\s+name="description"\s+content="([^"]+)"', r3.text)
+                if m:
+                    desc = _re.sub(r"[\s]+", " ", m.group(1)).strip()
+                    if len(desc) > 30:
+                        out["intro"] = desc
+                        print(f"[书籍] ✅ 百度百科 meta description", flush=True)
+                if not out.get("intro"):
+                    m2 = _re.search(r'class="lemma-summary"[^>]*>(.*?)</div>', r3.text, _re.DOTALL)
+                    if m2:
+                        txt = _re.sub(r"<[^>]+>", "", m2.group(1))
+                        txt = _re.sub(r"[\s]+", " ", txt).strip()
+                        if len(txt) > 30:
+                            out["intro"] = txt
+                            print(f"[书籍] ✅ 百度百科 lemma-summary", flush=True)
+        except Exception as e:
+            print(f"[书籍] 百度百科失败: {e}", flush=True)
+
+    # ═══ 最终兜底: 种子模板 ═══
+    if not out.get("intro"):
+        out["intro"] = f"《{title}》是一本{_guess_genre(title)}类书籍。\n\n(AI/联网没抓到 — 请手动补充 👍)"
+        print(f"[书籍] ⚠️ 用种子兜底 (豆瓣/百科全失败)", flush=True)
     if not out.get("pros"):
         out["pros"] = f"值得一读的核心理由:\n① 切中{_guess_genre(title)}领域的经典痛点\n② 提供可落地的方法论/案例\n③ 被多位读者/同行推荐"
     if not out.get("related"):
