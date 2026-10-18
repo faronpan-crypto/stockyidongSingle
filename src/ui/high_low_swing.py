@@ -1079,15 +1079,20 @@ def show_high_low_swing(parent, app=None):
         widgets_list.append((v, "body"))
 
     def _render_seed_places(body, hot_sectors):
-        """种子占位 — 后台数据到了会覆盖"""
-        tk.Label(body, text="⏳ 加载推荐板块龙头...", bg=_BG_PANEL, fg=_FG_DIM,
-                 font=("", 9)).pack(anchor="w", pady=8)
+        """种子占位 — 后台数据到了会覆盖 (表格式)"""
+        head = tk.Frame(body, bg=_BG_PANEL); head.pack(fill=tk.X, pady=(0, 2))
+        for txt in ["板块", "#", "股票", "成交额", "涨跌幅"]:
+            tk.Label(head, text=txt, bg=_BG_PANEL, fg=_FG_GOLD,
+                     font=("", 9, "bold")).pack(side=tk.LEFT, padx=2)
         for ind in hot_sectors[:3]:
-            sf = tk.Frame(body, bg=_BG_PANEL); sf.pack(fill=tk.X, pady=2)
-            tk.Label(sf, text=f"📌 {ind}", bg=_BG_PANEL, fg=_FG_GOLD,
-                     font=("", 9, "bold")).pack(anchor="w")
-            tk.Label(sf, text="  · · · 等待板块龙头数据 · · ·", bg=_BG_PANEL, fg=_FG_DIM,
-                     font=("", 8)).pack(anchor="w")
+            for n in [1, 2, 3]:
+                row = tk.Frame(body, bg=_BG_PANEL); row.pack(fill=tk.X, pady=1)
+                tk.Label(row, text=f" {ind}", bg=_BG_PANEL, fg=_FG_DIM,
+                         font=("", 8)).pack(side=tk.LEFT, padx=2)
+                tk.Label(row, text=f"{n}", bg=_BG_PANEL, fg=_FG_DIM,
+                         font=("", 9, "bold")).pack(side=tk.LEFT, padx=0)
+                tk.Label(row, text="· · · 加载中 · · ·", bg=_BG_PANEL, fg=_FG_DIM,
+                         font=("", 8)).pack(side=tk.LEFT, padx=2)
 
     # ── 流派数据引用 dict — 给后台线程分发 ──
     _school_hot_refs = {}
@@ -1163,32 +1168,40 @@ def show_high_low_swing(parent, app=None):
                         tk.Label(_body, text=f"❌ 网络拉不到 {_sn} 板块数据",
                                  bg=_BG_PANEL, fg=_FG_DIM, font=("", 9)).pack(anchor="w", pady=8)
                         return
+                    # ⚡ 全部板块的股票合并成一张列表 — 板块名放第一列
+                    all_rows = []
                     for sec_name, leaders in _sd:
-                        sf = tk.Frame(_body, bg=_BG_PANEL); sf.pack(fill=tk.X, pady=(4, 2))
-                        # 板块标题 — 算板块总成交额
-                        total_amt = sum(x[2] for x in leaders) / 1e8
-                        avg_pct = sum(x[3] for x in leaders) / max(len(leaders), 1)
-                        tk.Label(sf, text=f"📌 {sec_name}  总成交{total_amt:.0f}亿  均涨{avg_pct:+.1f}%",
-                                 bg=_BG_PANEL, fg=_FG_GOLD, font=("", 9, "bold")).pack(anchor="w")
                         for n, (code, name, amt, pct) in enumerate(leaders, 1):
-                            amt_yi = amt / 1e8
-                            pct_color = _FG_RED if pct >= 0 else _FG_GREEN  # A股红涨绿跌
-                            row_bg = "#004D40" if n == 1 else "#37474F"
-                            sf2 = tk.Frame(sf, bg=row_bg, cursor="hand2")
-                            sf2.pack(fill=tk.X, pady=1)
-                            # 点击打开日K
-                            _top = sf2.winfo_toplevel() if hasattr(sf2, 'winfo_toplevel') else win
-                            sf2.bind("<Button-1>", lambda e, _c=code, _nm=name, _t=_top:
-                                     _quick_open_daily_kline(_t, _c, _nm))
-                            for child in sf2.winfo_children():
-                                child.bind("<Button-1>", lambda e, _c=code, _nm=name, _t=_top:
-                                           _quick_open_daily_kline(_t, _c, _nm))
-                            tk.Label(sf2, text=f" {n}  {name}", bg=row_bg, fg="white",
-                                     font=("", 9, "bold")).pack(side=tk.LEFT, padx=4)
-                            tk.Label(sf2, text=f"{amt_yi:.1f}亿", bg=row_bg, fg=_FG_DIM,
-                                     font=("", 9)).pack(side=tk.RIGHT, padx=4)
-                            tk.Label(sf2, text=f"{pct:+.1f}%", bg=row_bg, fg=pct_color,
-                                     font=("", 9, "bold")).pack(side=tk.RIGHT, padx=2)
+                            all_rows.append((sec_name, n, code, name, amt, pct))
+                    # 表头
+                    head = tk.Frame(_body, bg=_BG_PANEL)
+                    head.pack(fill=tk.X, pady=(0, 2))
+                    for txt, w in [("板块", 70), ("#", 22), ("股票", 80), ("成交额", 55), ("涨跌幅", 55)]:
+                        tk.Label(head, text=txt, bg=_BG_PANEL, fg=_FG_GOLD,
+                                 font=("", 9, "bold"), width=w//8, anchor="w").pack(side=tk.LEFT, padx=2)
+                    # 数据行
+                    for sec_name, n, code, name, amt, pct in all_rows:
+                        row_bg = "#1B3A3A" if n == 1 else _BG_PANEL
+                        pct_color = _FG_RED if pct >= 0 else _FG_GREEN
+                        amt_yi = amt / 1e8
+                        row = tk.Frame(_body, bg=row_bg, cursor="hand2")
+                        row.pack(fill=tk.X, pady=1)
+                        _top = row.winfo_toplevel() if hasattr(row, 'winfo_toplevel') else win
+                        row.bind("<Button-1>", lambda e, _c=code, _nm=name, _t=_top:
+                                 _quick_open_daily_kline(_t, _c, _nm))
+                        for child in row.winfo_children():
+                            child.bind("<Button-1>", lambda e, _c=code, _nm=name, _t=_top:
+                                       _quick_open_daily_kline(_t, _c, _nm))
+                        tk.Label(row, text=f" {sec_name}", bg=row_bg, fg=_FG_DIM,
+                                 font=("", 8), width=9, anchor="w").pack(side=tk.LEFT, padx=2)
+                        tk.Label(row, text=f"{n}", bg=row_bg, fg=_FG_GOLD if n==1 else _FG_DIM,
+                                 font=("", 9, "bold"), width=3, anchor="w").pack(side=tk.LEFT, padx=0)
+                        tk.Label(row, text=name, bg=row_bg, fg="white",
+                                 font=("", 9, "bold"), width=10, anchor="w").pack(side=tk.LEFT, padx=2)
+                        tk.Label(row, text=f"{amt_yi:.1f}亿", bg=row_bg, fg=_FG_DIM,
+                                 font=("", 9), width=6, anchor="e").pack(side=tk.LEFT, padx=2)
+                        tk.Label(row, text=f"{pct:+.1f}%", bg=row_bg, fg=pct_color,
+                                 font=("", 9, "bold"), width=6, anchor="e").pack(side=tk.LEFT, padx=2)
                 except Exception as ex:
                     print(f"[高抛流派] render err: {ex}", flush=True)
             # 给 Tk 主线程一点时间渲染种子, 再替换
