@@ -91,22 +91,41 @@ def build_books_tab(parent, root=None):
                       fg="white" if active else "#B0BEC5",
                       font=("", 9, "bold" if active else "normal"),
                       relief=tk.FLAT,
-                      command=lambda _g=g: (_filter_change(_g, container, filter_var)))
+                      command=lambda _g=g: (_filter_change(_g, scroll_inner, filter_var, canvas)))
         b.pack(side=tk.LEFT, padx=2)
 
-    container = tk.Frame(parent, bg="#121212")
-    container.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+    # 带滚动条的容器 — Canvas + inner Frame
+    from tkinter import Canvas as _Canvas
+    outer = tk.Frame(parent, bg="#121212")
+    outer.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+    canvas = _Canvas(outer, bg="#121212", highlightthickness=0)
+    vsb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
+    scroll_inner = tk.Frame(canvas, bg="#121212")
+    scroll_inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.create_window((0, 0), window=scroll_inner, anchor="nw")
+    canvas.configure(yscrollcommand=vsb.set)
+    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    vsb.pack(side=tk.RIGHT, fill=tk.Y)
+    # 鼠标滚轮
+    def _on_mousewheel(event):
+        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    canvas.bind_all("<MouseWheel>", _on_mousewheel)
+    parent.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
-    _render_buttons(container, "", filter_genre="全部", filter_widget=filter_row)
+    # lambda 闭包用的变量 — 指向 inner Frame
+    container = scroll_inner
+
+    _render_buttons(scroll_inner, "", filter_genre="全部")
 
     # 给 combobox 填全量书名
     all_titles = _list_titles()
     cb["values"] = all_titles
 
 
-def _filter_change(g, container, filter_var):
+def _filter_change(g, container, filter_var, canvas=None):
     filter_var.set(g)
     _render_buttons(container, "", filter_genre=g)
+    if canvas: canvas.yview_moveto(0)
 
 
 def _list_titles():
@@ -201,33 +220,96 @@ def _make_book_card(parent, bid, title, author, genre, rating, row, col):
 # ═════════════════════════════════════════════════════════════════════════
 
 def _batch_import_from_dir(root, container):
-    """📂 从目录批量导入: 扫描文件名, 自动去扩展名"""
+    """📂 从目录批量导入: 递归扫描所有子目录"""
     from tkinter import filedialog, messagebox
-    d = filedialog.askdirectory(title="选择书籍目录 (支持 txt/md/pdf/epub 文件名作为书名)")
+    d = filedialog.askdirectory(title="选择书籍目录 (递归扫描子目录)")
     if not d: return
     files = []
-    for name in sorted(_os.listdir(d)):
-        p = _os.path.join(d, name)
-        if not _os.path.isfile(p): continue
-        if _os.path.splitext(name)[1].lower() in (".txt", ".md", ".pdf", ".epub", ".mobi", ".docx"):
-            files.append(name)
+    for root_dir, dirs, fnames in _os.walk(d):
+        for name in sorted(fnames):
+            p = _os.path.join(root_dir, name)
+            if not _os.path.isfile(p): continue
+            if _os.path.splitext(name)[1].lower() in (".txt", ".md", ".pdf", ".epub", ".mobi", ".docx"):
+                files.append((p, name))
     if not files:
         messagebox.showinfo("目录导入", "这个目录里没找到书籍文件\n(支持 .txt .md .pdf .epub .mobi .docx)")
         return
-    # 简单: 去扩展名就当书名
+    # 去扩展名当书名
     imported = []; skipped = []
-    for fn in files:
+    for p, fn in files:
         title = _os.path.splitext(fn)[0].strip()
         if len(title) < 2: continue
-        if _upsert_book({"title": title, "source": f"目录:{d}"}):
+        genre = _guess_genre(title, p)
+        if _upsert_book({"title": title, "genre": genre, "source": f"目录:{d}"}):
             imported.append(title)
         else:
             skipped.append(title)
+    # 更新所有按钮 genre (之前没 genre 的也补)
+    _backfill_genre()
     messagebox.showinfo("导入完成",
                         f"✅ 导入 {len(imported)} 本\n⏭️ 跳过 {len(skipped)} 本(已存在)\n\n" +
-                        ("\n".join(f"  {i+1}. {t}" for i, t in enumerate(imported[:10])) +
-                         ("\n  ..." if len(imported) > 10 else "")) if imported else "没有新书籍")
+                        ("\n".join(f"  {i+1}. {t}" for i, t in enumerate(imported[:15])) +
+                         (f"\n  ... 还有 {len(imported)-15} 本" if len(imported) > 15 else "")) if imported else "没有新书籍")
+    # 刷新书名 autocomplete
+    cb = None
+    for w in container.winfo_children():
+        try:
+            for c in w.winfo_children():
+                if isinstance(c, ttk.Combobox): cb = c
+        except Exception: pass
+    if cb is not None: cb["values"] = _list_titles()
     _render_buttons(container, "")
+
+
+def _guess_genre(title, filepath=""):
+    """从书名推断 genre — 优先级: 投资 > 心理 > 历史 > 传记 > 科技 > 哲学 > 方法 > 其他"""
+    # 1) 投资 (优先级最高, 避免"技术分析"被误归科技)
+    if any(k in title for k in ("投资", "股票", "基金", "金融", "交易", "复利", "证券",
+                                 "巴菲特", "格雷厄姆", "索罗斯", "利弗莫尔", "投机", "操盘",
+                                 "作手", "均线", "蜡烛图", "期货", "期权", "量化", "价值投资",
+                                 "成长股", "华尔街", "股市", "行情", "操盘手", "交易员",
+                                 "炒股", "股市心理", "大盘", "牛熊", "量价", "波段",
+                                 "期权", "ETF", "指数", "大宗商品")):
+        return "投资"
+    # 2) 心理
+    if any(k in title for k in ("心理", "思维", "认知", "人性", "情绪",
+                                 "快与慢", "反脆弱", "黑天鹅", "随机漫步", "心理学",
+                                 "压力", "情绪管理")):
+        return "心理"
+    # 3) 历史
+    if any(k in title for k in ("历史", "史记", "帝国", "通史", "明朝", "万历",
+                                 "中国史", "世界史", "人类简史", "兴衰", "周期")):
+        return "历史"
+    # 4) 传记
+    if any(k in title for k in ("传记", "自传", "生平传")):
+        return "传记"
+    # 5) 科技 (技术/科学/算法 — 但排除前面已命中投资的技术分析)
+    if any(k in title for k in ("科学", "科技", "物理", "算法", "数据结构",
+                                 "统计", "编程", "深度学习", "人工智能", "计算机程序",
+                                 "程序员")):
+        return "科技"
+    # 6) 哲学
+    if any(k in title for k in ("哲学", "存在", "思辨", "康德", "尼采", "叔本华", "形而上学")):
+        return "哲学"
+    # 7) 方法 (自我提升/系统思考)
+    if any(k in title for k in ("原则", "习惯", "效率", "方法", "复盘", "系统",
+                                 "深度工作", "原子习惯", "番茄工作")):
+        return "方法"
+    return "其他"
+
+
+def _backfill_genre():
+    """给已存在但 genre='其他' 的书自动补 genre"""
+    try:
+        con = _sqlite3.connect(_DB_PATH)
+        cur = con.execute("SELECT id, title FROM books WHERE genre='其他' OR genre IS NULL")
+        for bid, title in cur.fetchall():
+            g = _guess_genre(title)
+            if g != "其他":
+                con.execute("UPDATE books SET genre=? WHERE id=?", (g, bid))
+        con.commit(); con.close()
+    except Exception as e:
+        print(f"[书籍] backfill genre err: {e}")
 
 
 def _add_single_book(root, container):
@@ -471,15 +553,6 @@ def _fetch_book_intro_worker(title, author_hint=""):
         out["methods"] = _guess_methods(title)
 
     return out
-
-
-def _guess_genre(title):
-    t = title.lower()
-    if any(k in t for k in ("投资", "股票", "基金", "金融", "交易", "复利")): return "投资"
-    if any(k in t for k in ("心理", "思维", "认知", "人性", "情绪")): return "心理/认知"
-    if any(k in t for k in ("历史", "史", "史记", "帝国")): return "历史"
-    if any(k in t for k in ("科学", "科技", "物理", "技术")): return "科技"
-    return "综合"
 
 
 def _suggest_related(title):
