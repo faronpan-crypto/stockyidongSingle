@@ -14657,21 +14657,24 @@ class DapanMixin:
 
         cur_row = 0
         for blk_name, items in sorted_blocks:
-            # 🆕 板块标题行 (深色条带)
+            # 🆕 板块标题行 (深色条带) — 全部用 place 绝对定位, 避免 pack 覆盖
             hdr = tk.Frame(inner, bg="#263238", height=32)
             hdr.grid(row=cur_row, column=0, columnspan=cols, sticky="we", padx=2, pady=(6, 2))
             hdr.grid_propagate(False)
+            # 左: 板块名
             tk.Label(hdr, text=f"📌 {blk_name} ({len(items)})", bg="#263238", fg="#FFD54F",
-                     font=("", 11, "bold")).pack(side=tk.LEFT, padx=(10, 6), pady=4)
-            tk.Label(hdr, text=BLOCK_LOGIC.get(blk_name, "")[:48], bg="#263238",
-                     fg="#A5D6A7", font=("", 9), anchor="w").pack(side=tk.LEFT, padx=2, pady=4, fill=tk.X, expand=True)
+                     font=("", 11, "bold")).place(x=10, y=6, anchor="w")
+            # 中: 板块逻辑 (固定位置, 截断)
+            tk.Label(hdr, text=BLOCK_LOGIC.get(blk_name, "")[:40], bg="#263238",
+                     fg="#A5D6A7", font=("", 9)).place(x=190, y=8, anchor="w")
+            # 右: 新闻标题
             arts = _arts(BLOCK_KWS.get(blk_name, []), 1)
             if arts and arts[0][0]:
-                tk.Label(hdr, text=f"📰 {arts[0][0][:26]}", bg="#263238", fg="#80DEEA",
-                         font=("", 8), anchor="e").pack(side=tk.RIGHT, padx=8, pady=4)
+                tk.Label(hdr, text=f"📰 {arts[0][0][:22]}", bg="#263238", fg="#80DEEA",
+                         font=("", 8)).place(relx=1.0, y=8, x=-8, anchor="e")
             cur_row += 1
 
-            # 邮票
+            # 邮票 — 用 place 替代 pack, 给徽标留出左上角空间
             for i, item in enumerate(items):
                 r, c = divmod(i, cols)
                 pct = item["pct"]
@@ -14680,15 +14683,17 @@ class DapanMixin:
                                  highlightthickness=1, highlightbackground="#455A64", cursor="hand2")
                 stamp.grid(row=cur_row + r, column=c, padx=PAD // 2, pady=PAD // 2, sticky="nw")
                 stamp.grid_propagate(False)
+                # 用 place 放邮票内容 — 给 freq 徽标留左上 24x16 空间
                 tk.Label(stamp, text=item["name"], bg=bg, fg="white",
-                         font=("Helvetica", 10, "bold")).pack(fill=tk.BOTH, expand=True, padx=2, pady=(14, 0))
+                         font=("Helvetica", 10, "bold")).place(x=4, y=20, anchor="nw")
                 tk.Label(stamp, text=f"{pct:+.2f}%", bg=bg, fg="white",
-                         font=("Helvetica", 10, "bold")).pack(side=tk.BOTTOM, pady=(0, 4))
+                         font=("Helvetica", 10, "bold")).place(relx=0.5, rely=1.0,
+                                                                x=0, y=-4, anchor="s")
                 if item["freq"] >= 3:
                     fbg = "#FF6F00" if item["freq"] >= 10 else "#EF5350" if item["freq"] >= 5 else "#FF8A65"
                     freq_lbl = tk.Label(stamp, text=str(item["freq"]), bg=fbg, fg="white",
                                         font=("Helvetica", 8, "bold"), padx=4, pady=0)
-                    freq_lbl.place(relx=1.0, rely=0.0, x=-3, y=2, anchor="ne")
+                    freq_lbl.place(x=2, y=2, anchor="nw")
                 stamp._stamp = item
                 stamp._last_click = {"time": 0}
                 name_lbl = stamp.winfo_children()[0] if stamp.winfo_children() else None
