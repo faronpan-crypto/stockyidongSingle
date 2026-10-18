@@ -18,32 +18,62 @@ _DB_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..
 # ═════════════════════════════════════════════════════════════════════════
 
 def _ensure_book_table():
-    """建表 (幂等)"""
+    """建表 (幂等) + 升级 schema"""
     con = _sqlite3.connect(_DB_PATH)
     cur = con.cursor()
     cur.execute("""
     CREATE TABLE IF NOT EXISTS books (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT UNIQUE,             -- 书名 (唯一)
+        title TEXT UNIQUE,
         author TEXT DEFAULT '',
-        genre TEXT DEFAULT '',         -- 分类: 投资/心理/历史/科技/传记/其他
-        source TEXT DEFAULT '手动',    -- 导入来源: 手动/目录/豆瓣
-        rating REAL DEFAULT 0,         -- 网上评分 (0-5)
+        translator TEXT DEFAULT '',
+        publisher TEXT DEFAULT '',
+        genre TEXT DEFAULT '',
+        source TEXT DEFAULT '手动',
+        rating REAL DEFAULT 0,
+        rating_count INTEGER DEFAULT 0,
         douban_url TEXT DEFAULT '',
         pub_year TEXT DEFAULT '',
         pages INTEGER DEFAULT 0,
+        isbn TEXT DEFAULT '',
+        price TEXT DEFAULT '',
+        original_title TEXT DEFAULT '',
+        series TEXT DEFAULT '',
         -- 内容层
-        intro TEXT DEFAULT '',         -- 官方简介
-        highlights TEXT DEFAULT '',    -- 书摘/金句
-        user_summary TEXT DEFAULT '',  -- 自我读书概要
-        user_notes TEXT DEFAULT '',    -- 个人笔记
-        related TEXT DEFAULT '',       -- 相关书籍 (JSON list)
-        methods TEXT DEFAULT '',       -- 涉及的方法论 (JSON list)
-        pros TEXT DEFAULT '',          -- 网上好评
-        cons TEXT DEFAULT '',          -- 网上差评
+        intro TEXT DEFAULT '',
+        author_bio TEXT DEFAULT '',        -- 作者简介
+        chapters TEXT DEFAULT '',          -- 目录/章节 (带页码)
+        summary TEXT DEFAULT '',           -- 中心思想/内容梗概
+        highlights TEXT DEFAULT '',
+        comments TEXT DEFAULT '',          -- 热门短评 (JSON)
+        user_summary TEXT DEFAULT '',
+        user_notes TEXT DEFAULT '',
+        related TEXT DEFAULT '',
+        methods TEXT DEFAULT '',
+        pros TEXT DEFAULT '',
+        cons TEXT DEFAULT '',
         created_at TEXT,
-        updated_at TEXT
+        updated_at TEXT,
+        fetched_at TEXT DEFAULT ''         -- 联网抓取时间
     )""")
+    # ⚡ 增量升级旧表 — 加新字段 (ALTER TABLE 幂等)
+    _MIGRATIONS = [
+        ("ALTER TABLE books ADD COLUMN translator TEXT DEFAULT ''", "translator"),
+        ("ALTER TABLE books ADD COLUMN publisher TEXT DEFAULT ''", "publisher"),
+        ("ALTER TABLE books ADD COLUMN rating_count INTEGER DEFAULT 0", "rating_count"),
+        ("ALTER TABLE books ADD COLUMN isbn TEXT DEFAULT ''", "isbn"),
+        ("ALTER TABLE books ADD COLUMN price TEXT DEFAULT ''", "price"),
+        ("ALTER TABLE books ADD COLUMN original_title TEXT DEFAULT ''", "original_title"),
+        ("ALTER TABLE books ADD COLUMN series TEXT DEFAULT ''", "series"),
+        ("ALTER TABLE books ADD COLUMN author_bio TEXT DEFAULT ''", "author_bio"),
+        ("ALTER TABLE books ADD COLUMN chapters TEXT DEFAULT ''", "chapters"),
+        ("ALTER TABLE books ADD COLUMN summary TEXT DEFAULT ''", "summary"),
+        ("ALTER TABLE books ADD COLUMN comments TEXT DEFAULT ''", "comments"),
+        ("ALTER TABLE books ADD COLUMN fetched_at TEXT DEFAULT ''", "fetched_at"),
+    ]
+    for sql, col in _MIGRATIONS:
+        try: cur.execute(sql)
+        except Exception: pass  # 字段已存在则忽略
     con.commit()
     con.close()
 
@@ -425,7 +455,7 @@ def _delete_book(bid):
 # ═════════════════════════════════════════════════════════════════════════
 
 def _open_book_detail(parent, bid):
-    """📘 打开书籍详情弹窗 — 多 Tab"""
+    """📘 打开书籍详情弹窗 — 丰富多 Tab + 动态显示"""
     import tkinter as tk
     from tkinter import ttk, scrolledtext, messagebox
 
@@ -441,44 +471,111 @@ def _open_book_detail(parent, bid):
 
     dlg = tk.Toplevel(parent)
     dlg.title(f"📘 {row['title']} — 书籍详情")
-    dlg.geometry("900x680")
+    dlg.geometry("1000x760")
     dlg.configure(bg="#121212")
     dlg.transient(parent)
 
-    # 标题栏
-    header = tk.Frame(dlg, bg="#1565C0", height=52); header.pack(fill=tk.X)
-    header.pack_propagate(False)
-    tk.Label(header, text=f"📘 {row['title']}", bg="#1565C0", fg="white",
-             font=("", 16, "bold")).pack(side=tk.LEFT, padx=14, pady=10)
+    # ═══ 丰富标题栏 ═══
+    header = tk.Frame(dlg, bg="#1565C0"); header.pack(fill=tk.X)
+    # 大标题行
+    title_row = tk.Frame(header, bg="#1565C0"); title_row.pack(fill=tk.X, padx=14, pady=(10, 2))
+    tk.Label(title_row, text=f"📘 {row['title']}", bg="#1565C0", fg="white",
+             font=("", 17, "bold")).pack(side=tk.LEFT)
+    # 评分徽章 (大)
+    if row["rating"] and row["rating"] > 0:
+        rating_bg = "#EF5350" if row["rating"] < 7 else ("#FFA726" if row["rating"] < 8 else "#66BB6A")
+        badge = tk.Frame(title_row, bg=rating_bg, padx=10, pady=2)
+        badge.pack(side=tk.RIGHT)
+        cnt = f"{row['rating_count']}人评价" if row.get("rating_count") and row["rating_count"] > 0 else ""
+        tk.Label(badge, text=f"⭐ {row['rating']:.1f}  {cnt}", bg=rating_bg, fg="white",
+                 font=("", 11, "bold")).pack()
+    # 副标题行: 作者/译者/出版社/出版年/定价/ISBN
+    sub_row = tk.Frame(header, bg="#1565C0"); sub_row.pack(fill=tk.X, padx=14, pady=(0, 10))
     sub_parts = []
-    if row["author"]: sub_parts.append(f"✍️ {row['author']}")
-    if row["genre"]: sub_parts.append(f"📂 {row['genre']}")
-    if row["rating"] and row["rating"] > 0: sub_parts.append(f"⭐ {row['rating']:.1f}")
-    if row["pub_year"]: sub_parts.append(f"📅 {row['pub_year']}")
-    if row["pages"]: sub_parts.append(f"📄 {row['pages']}页")
-    tk.Label(header, text="  |  ".join(sub_parts), bg="#1565C0", fg="#BBDEFB",
-             font=("", 10)).pack(side=tk.LEFT, pady=10)
+    if row.get("author"): sub_parts.append(f"✍️ {row['author']}")
+    if row.get("translator"): sub_parts.append(f"🌐 译者: {row['translator']}")
+    if row.get("publisher"): sub_parts.append(f"🏢 {row['publisher']}")
+    if row.get("pub_year"): sub_parts.append(f"📅 {row['pub_year']}")
+    if row.get("price"): sub_parts.append(f"💰 {row['price']}元")
+    if row.get("pages"): sub_parts.append(f"📄 {row['pages']}页")
+    if row.get("isbn"): sub_parts.append(f"ISBN {row['isbn']}")
+    if row.get("original_title"): sub_parts.append(f"原作: {row['original_title']}")
+    if row.get("series"): sub_parts.append(f"📚 {row['series']}")
+    if row.get("genre"): sub_parts.append(f"📂 {row['genre']}")
+    tk.Label(sub_row, text="  │  ".join(sub_parts), bg="#1565C0", fg="#BBDEFB",
+             font=("", 9), wraplength=950, justify="left", anchor="w").pack(anchor="w")
 
     nb = ttk.Notebook(dlg); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
 
-    # ── Tab1: 官方介绍 ──
-    t1 = tk.Frame(nb, bg="#121212"); nb.add(t1, text="📖 官方介绍")
-    _make_labeled_text(t1, "📚 作者简介 / 官方简介", row["intro"] or "", (0, 0), height=8)
-    _make_labeled_text(t1, "💡 核心观点 / 书摘", row["highlights"] or "", (1, 0), height=6)
+    # ═══ 动态 Tab — 根据数据有无显示 ═══
+    tab_frames = {}  # name -> frame
 
-    # ── Tab2: 外界声音 ──
-    t2 = tk.Frame(nb, bg="#121212"); nb.add(t2, text="🌐 外界声音")
-    _make_labeled_text(t2, "👍 网上好评 / 推荐语", row["pros"] or "", (0, 0), height=6)
-    _make_labeled_text(t2, "👎 争议 / 负面评价", row["cons"] or "", (1, 0), height=4)
-    _make_labeled_text(t2, "🔗 相关书籍 (每行一本)", row["related"] or "", (2, 0), height=3)
-    _make_labeled_text(t2, "🛠 涉及方法论 (每行一个)", row["methods"] or "", (3, 0), height=3)
+    # Tab1: 官方介绍 (总有)
+    t1 = tk.Frame(nb, bg="#121212"); tab_frames["intro"] = t1
+    _make_labeled_text(t1, "📖 内容简介", row["intro"] or "", (0, 0), height=10)
+    if row.get("summary") and len(row["summary"]) > 30:
+        _make_labeled_text(t1, "💡 中心思想 / 核心概要", row["summary"], (1, 0), height=6)
+    if row.get("highlights") and len(row["highlights"]) > 10:
+        _make_labeled_text(t1, "💎 核心观点 / 书摘", row["highlights"],
+                           (2, 0) if row.get("summary") else (1, 0), height=5)
+    nb.add(t1, text="📖 官方介绍")
 
-    # ── Tab3: 我的笔记 (可编辑) ──
-    t3 = tk.Frame(nb, bg="#121212"); nb.add(t3, text="✏️ 我的笔记")
+    # Tab2: 目录章节 (有数据才显示)
+    if row.get("chapters") and len(row["chapters"]) > 20:
+        t_ch = tk.Frame(nb, bg="#121212"); tab_frames["chapters"] = t_ch
+        _make_labeled_text(t_ch, "📑 目录 / 章节结构", row["chapters"], (0, 0), height=18)
+        nb.add(t_ch, text="📑 目录章节")
+
+    # Tab3: 作者简介 (有数据才显示)
+    if row.get("author_bio") and len(row["author_bio"]) > 30:
+        t_ab = tk.Frame(nb, bg="#121212"); tab_frames["author_bio"] = t_ab
+        _make_labeled_text(t_ab, "👤 作者简介 / 生平", row["author_bio"], (0, 0), height=14)
+        nb.add(t_ab, text="👤 作者简介")
+
+    # Tab4: 热门评论 (有数据才显示)
+    import json as _json3
+    comments_list = []
+    if row.get("comments"):
+        try: comments_list = _json3.loads(row["comments"])
+        except: pass
+    if comments_list:
+        t_cm = tk.Frame(nb, bg="#121212"); tab_frames["comments"] = t_cm
+        # 用 Treeview 显示评论 (投票数 + 内容)
+        tree_frame = tk.Frame(t_cm, bg="#121212"); tree_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        tk.Label(tree_frame, text="💬 豆瓣热门短评 (按有用数排序)",
+                 bg="#121212", fg="#FFD54F", font=("", 10, "bold")).pack(anchor="w")
+        tv = ttk.Treeview(tree_frame, columns=("vote", "text"), show="headings", height=14)
+        tv.heading("vote", text="👍"); tv.heading("text", text="短评内容")
+        tv.column("vote", width=60, anchor="center"); tv.column("text", width=900, anchor="w")
+        for c in sorted(comments_list, key=lambda x: -x.get("vote", 0)):
+            tv.insert("", "end", values=(c.get("vote", ""), c.get("text", "")[:120]))
+        tv.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        tab_frames["comments_tv"] = tv  # 存引用供刷新
+        nb.add(t_cm, text=f"💬 热门短评 ({len(comments_list)}条)")
+
+    # Tab5: 外界声音 (总有)
+    t2 = tk.Frame(nb, bg="#121212"); tab_frames["social"] = t2
+    grid_row = 0
+    if row.get("pros") and len(row["pros"]) > 10:
+        _make_labeled_text(t2, "👍 网上好评 / 推荐语", row["pros"], (grid_row, 0), height=5); grid_row += 1
+    if row.get("cons") and len(row["cons"]) > 10:
+        _make_labeled_text(t2, "👎 争议 / 负面评价", row["cons"], (grid_row, 0), height=4); grid_row += 1
+    if row.get("related") and len(row["related"]) > 10:
+        _make_labeled_text(t2, "🔗 相关书籍", row["related"], (grid_row, 0), height=3); grid_row += 1
+    if row.get("methods") and len(row["methods"]) > 10:
+        _make_labeled_text(t2, "🛠 涉及方法论", row["methods"], (grid_row, 0), height=3); grid_row += 1
+    if grid_row == 0:
+        tk.Label(t2, text="(暂无外界评价数据 — 点「🔄再爬取更新」试试)",
+                 bg="#121212", fg="#546E7A", font=("", 11)).pack(pady=40)
+    nb.add(t2, text="🌐 外界声音")
+
+    # Tab6: 我的笔记 (可编辑, 总有)
+    t3 = tk.Frame(nb, bg="#121212"); tab_frames["notes"] = t3
     _make_labeled_text(t3, "📝 自我读书概要 / 特色解读", row["user_summary"] or "",
                        (0, 0), height=7, editable=True, tag="_summary")
     _make_labeled_text(t3, "🧠 个人笔记 / 读后感 / 划线摘录", row["user_notes"] or "",
                        (1, 0), height=7, editable=True, tag="_notes")
+    nb.add(t3, text="✏️ 我的笔记")
 
     def _save():
         nonlocal row
@@ -498,48 +595,55 @@ def _open_book_detail(parent, bid):
               bg="#2E7D32", fg="white", font=("", 10, "bold"), padx=10).pack(side=tk.LEFT, padx=8)
     tk.Button(btn_row, text="🔄 再爬取更新", command=lambda: _do_fetch_background(notify_user=True),
               bg="#7B1FA2", fg="white", font=("", 10, "bold"), padx=10).pack(side=tk.LEFT)
+    # 豆瓣链接按钮
+    if row.get("douban_url"):
+        try:
+            import webbrowser as _wb
+            tk.Button(btn_row, text="📖 打开豆瓣页",
+                      command=lambda u=row["douban_url"]: _wb.open(u),
+                      bg="#0277BD", fg="white", font=("", 10), padx=8).pack(side=tk.LEFT)
+        except Exception: pass
     tk.Button(btn_row, text="关闭", command=dlg.destroy).pack(side=tk.RIGHT)
 
     dlg.grab_set()
 
-    # ═══ ⚡ 自动联网: DB 里 intro 是空/太短/水话/rating=0 就后台抓 ═══
-    # 抓到后静默刷新弹窗 UI (不用 messagebox), 不打扰用户
+    # ═══ ⚡ 自动联网: 需要更新就后台抓 ═══
     _intro_now = row["intro"] or ""
     _rating_now = row["rating"] or 0
-    _need_fetch = (len(_intro_now) < 40) or ("AI/联网没抓到" in _intro_now) or (_rating_now == 0)
-    # ⚠️ 注意: 水话检测不走自动抓 — 因为 smart fallback 已经比水话好,
-    # 自动联网不一定能抓到更好的 (豆瓣很多老书简介就是水话)
-    # 只有 DB 里真的空/太短/rating=0 才自动抓
+    _chapters_now = row.get("chapters") or ""
+    _comments_now = row.get("comments") or ""
+    _author_bio_now = row.get("author_bio") or ""
+    # 触发条件: intro 空/太短, 或 rating=0, 或 章节+评论+作者简介 全空
+    _need_fetch = (len(_intro_now) < 40) or (_rating_now == 0) or (
+        not _chapters_now and not _comments_now and not _author_bio_now)
 
+    # ═══ 后台联网 + 刷新 UI 的闭包 ═══
     def _do_fetch_background(notify_user=False):
-        """后台抓 → 存 DB → 刷新弹窗 UI"""
+        """后台抓 → 存 DB → 切主线程刷新整个弹窗"""
         def _bg():
             try:
                 summary = _fetch_book_intro_worker(row["title"], row["author"])
-                # 过滤: 只存非空有效值
                 fields = {}
                 for k, v in (summary or {}).items():
                     if v is None: continue
                     if isinstance(v, str) and not v.strip(): continue
-                    if isinstance(v, float):
-                        if v > 0: fields[k] = v
-                    elif isinstance(v, int):
-                        if v > 0: fields[k] = v
-                    else:
-                        fields[k] = v
-                # 存 DB
+                    if isinstance(v, (float, int)):
+                        if k in ("rating", "rating_count", "pages") and v > 0: fields[k] = v
+                        continue
+                    fields[k] = v
                 if fields:
                     try:
                         con = _sqlite3.connect(_DB_PATH)
                         now = _dt.now().strftime("%Y-%m-%d %H:%M")
+                        fields["fetched_at"] = now
                         sets = ", ".join(f"{k}=?" for k in fields.keys()) + ", updated_at=?"
                         con.execute(f"UPDATE books SET {sets} WHERE id=?",
                                     list(fields.values()) + [now, bid])
                         con.commit(); con.close()
                     except Exception as ex:
                         print(f"[书籍] fetch db save err: {ex}", flush=True)
-                # 切回主线程刷新 UI
-                def _refresh_ui():
+                # 切主线程 — 刷新整个弹窗 (因为 Tab 可能增删)
+                def _refresh_all():
                     try:
                         if not dlg.winfo_exists(): return
                         # 重新读 DB
@@ -548,75 +652,27 @@ def _open_book_detail(parent, bid):
                         nr = con2.execute("SELECT * FROM books WHERE id=?", (bid,)).fetchone()
                         con2.close()
                         if not nr: return
-                        # 刷新 header 副标题
-                        for w in header.winfo_children():
-                            if isinstance(w, tk.Label) and "✍️" in (w.cget("text") or ""):
-                                sp = []
-                                if nr["author"]: sp.append(f"✍️ {nr['author']}")
-                                if nr["rating"] and nr["rating"] > 0: sp.append(f"⭐ {nr['rating']:.1f}")
-                                if nr["pub_year"]: sp.append(f"📅 {nr['pub_year']}")
-                                if nr["pages"]: sp.append(f"📄 {nr['pages']}页")
-                                w.configure(text="  |  ".join(sp))
-                                break
-                        # 刷新 text widget (frame 里第 row_idx 行的 ScrolledText)
-                        def _update_grid_text(frame, row_idx, new_content):
-                            try:
-                                for child in frame.grid_slaves(row=row_idx):
-                                    if not isinstance(child, tk.Frame): continue
-                                    for sub in child.winfo_children():
-                                        try:
-                                            sub.delete("1.0", "end")
-                                            sub.insert("1.0", new_content or "")
-                                        except Exception: pass
-                            except Exception: pass
-                        if "intro" in fields:
-                            _update_grid_text(t1, 0, nr["intro"] or "")
-                        if "highlights" in fields:
-                            _update_grid_text(t1, 1, nr["highlights"] or "")
-                        if "pros" in fields:
-                            _update_grid_text(t2, 0, nr["pros"] or "")
-                        if "cons" in fields:
-                            _update_grid_text(t2, 1, nr["cons"] or "")
-                        if "related" in fields:
-                            _update_grid_text(t2, 2, nr["related"] or "")
-                        if "methods" in fields:
-                            _update_grid_text(t2, 3, nr["methods"] or "")
-                        # 手动按钮才弹通知
+                        # ⚡ 直接 destroy 整个 dialog 重建 — 最简单最稳
+                        dlg.destroy()
+                        _open_book_detail(parent, bid)
                         if notify_user:
-                            if fields:
-                                messagebox.showinfo("✅ 爬取成功",
-                                    "已从网络拉取:\n" + "\n".join(f"  • {k}" for k in fields.keys()))
-                            else:
-                                messagebox.showwarning("⚠️ 没抓到",
-                                    "网络不通或没找到 (豆瓣反爬)\n\n保持原有内容")
+                            messagebox.showinfo("✅ 爬取成功",
+                                "已从网络拉取最新数据, 弹窗已刷新!\n\n"
+                                "如果之前目录章节/评论是空的, 现在应该有了。")
                     except Exception as ex:
-                        print(f"[书籍] refresh UI err: {ex}", flush=True)
+                        print(f"[书籍] refresh err: {ex}", flush=True)
                         if notify_user:
                             messagebox.showerror("刷新失败", str(ex))
-                dlg.after(0, _refresh_ui)
+                dlg.after(0, _refresh_all)
             except Exception as e:
                 print(f"[书籍] fetch bg err: {e}", flush=True)
                 if notify_user:
                     dlg.after(0, lambda: messagebox.showwarning("爬取失败", str(e)))
         _threading.Thread(target=_bg, daemon=True).start()
 
-    # 首次自动抓 (静默)
     if _need_fetch:
         print(f"[书籍] ⚡ 自动联网抓取 《{row['title']}》", flush=True)
         _do_fetch_background(notify_user=False)
-
-    def _save():
-        nonlocal row
-        try:
-            s_text = _editors.get("_summary")
-            n_text = _editors.get("_notes")
-            con = _sqlite3.connect(_DB_PATH)
-            con.execute("UPDATE books SET user_summary=?, user_notes=?, updated_at=? WHERE id=?",
-                        (s_text, n_text, _dt.now().strftime("%Y-%m-%d %H:%M"), bid))
-            con.commit(); con.close()
-            messagebox.showinfo("保存", "✅ 笔记已保存")
-        except Exception as e:
-            messagebox.showerror("保存失败", str(e))
 
 
 # 编辑中 — 需要从 _make_labeled_text 里拿到 text widget
@@ -761,16 +817,24 @@ def _fetch_book_intro_worker(title, author_hint=""):
             r2 = requests.get(subject_url, headers=headers, timeout=12)
             if r2.ok and len(r2.text) > 5000:
                 text = r2.text
-                # rating
+                # ══ 评分 + 评价人数 ══
                 m = _re.search(r'property="v:average"[^>]*>([^<]+)', text)
                 if m:
                     try: out["rating"] = float(m.group(1).strip())
                     except: pass
-                # 基本信息: 作者/出版社/出版年/页数/ISBN
-                info_map = {"作者": "author", "出版社": "", "出版年": "pub_year",
-                            "页数": "pages", "ISBN": ""}
-                for label, field in info_map.items():
-                    if not field: continue
+                # rating_count: "2974人评价"
+                m2 = _re.search(r'rating_people">.*?<span property="v:votes">(\d+)', text, _re.DOTALL)
+                if m2:
+                    try: out["rating_count"] = int(m2.group(1))
+                    except: pass
+
+                # ══ 基本信息面板 (<div id="info">) ══
+                info_extract = {
+                    "作者": "author", "译者": "translator", "出版社": "publisher",
+                    "出版年": "pub_year", "页数": "pages", "ISBN": "isbn",
+                    "定价": "price", "原作名": "original_title", "丛书": "series",
+                }
+                for label, field in info_extract.items():
                     for mm in _re.finditer(r'<span class="pl">' + label + r':</span>(.*?)<br', text, _re.DOTALL):
                         val = _re.sub(r'<[^>]+>', '', mm.group(1)).strip()
                         if val:
@@ -780,24 +844,71 @@ def _fetch_book_intro_worker(title, author_hint=""):
                             else:
                                 out[field] = val
                         break
-                # intro: 取第一个 class="intro" div (内容简介)
+
+                # ══ 目录/章节 ══
+                dir_found = None
+                for dir_pat in [r'id="dir_\d+_short"[^>]*>(.*?)</div>', r'id="dir"[^>]*>(.*?)</div>',
+                                r'class="indent"[^>]*id="dir[^"]*"[^>]*>(.*?)</div>']:
+                    m_dir = _re.search(dir_pat, text, _re.DOTALL)
+                    if m_dir:
+                        dir_html = m_dir.group(1)
+                        dir_text = _re.sub(r'<br\s*/?>', '\n', dir_html)
+                        dir_text = _re.sub(r'<[^>]+>', '', dir_text)
+                        dir_text = _re.sub(r'[ \t]+', ' ', dir_text)
+                        dir_text = _re.sub(r'\n\s*\n+', '\n', dir_text).strip()
+                        # 过滤 "更多" 这种截断标记
+                        dir_text = _re.sub(r'·\s*·\s*·.*', '', dir_text).strip()
+                        if len(dir_text) > 20:
+                            dir_found = dir_text
+                            break
+                if dir_found:
+                    out["chapters"] = dir_found
+
+                # ══ 简介 (分离: intro=内容简介, author_bio=作者简介) ══
                 intros_found = []
                 for m4 in _re.finditer(r'class="intro"[^>]*>(.*?)</div>', text, _re.DOTALL):
                     txt = _re.sub(r'<[^>]+>', '', m4.group(1))
                     txt = _re.sub(r'\s+', ' ', txt).strip()
                     if len(txt) > 30: intros_found.append(txt)
                 if intros_found:
-                    out["intro"] = intros_found[0]  # 第一个通常是内容简介
-                    if len(intros_found) > 1:
-                        # 第二个通常是作者简介, 拼到 intro 末尾
-                        out["intro"] += "\n\n———\n\n📝 " + intros_found[1]
-                    # ⚠️ 检测豆瓣模板水话 —— 太水就丢弃换 smart fallback
+                    # 第一个是内容简介
+                    out["intro"] = intros_found[0]
+                    # 如果检测到模板水话 → 标记 (但保留, 后续可 smart fallback)
                     if _is_water_intro(out["intro"]):
-                        print(f"[书籍] ⚠️ 豆瓣 intro 被判定为模板水话, 丢弃", flush=True)
-                        del out["intro"]
-                # douban_url
+                        print(f"[书籍] ⚠️ 豆瓣 intro 是模板水话", flush=True)
+                    # 第二个通常是作者简介
+                    if len(intros_found) > 1:
+                        out["author_bio"] = intros_found[1]
+                    # 如果还有第三个, 可能是译者序之类的 → 拼到 summary
+                    if len(intros_found) > 2:
+                        out["summary"] = intros_found[2]
+
+                # ══ 热门短评 (前5条) ══
+                comment_list = []
+                for ci, mci in enumerate(_re.finditer(
+                        r'<li class="comment-item"[^>]*>.*?<div class="comment">(.*?)</div>\s*</li>',
+                        text, _re.DOTALL)):
+                    if ci >= 5: break
+                    c_html = mci.group(1)
+                    # 短评正文: <span class="short">...</span>
+                    m_short = _re.search(r'class="short"[^>]*>(.*?)</span>', c_html, _re.DOTALL)
+                    # 有用数
+                    m_vote = _re.search(r'class="vote-count"[^>]*>(\d+)', c_html)
+                    vote = int(m_vote.group(1)) if m_vote else 0
+                    if m_short:
+                        c_txt = _re.sub(r'<[^>]+>', '', m_short.group(1)).strip()
+                        c_txt = _re.sub(r'\s+', ' ', c_txt)
+                        if len(c_txt) > 5:
+                            comment_list.append({"vote": vote, "text": c_txt[:300]})
+                if comment_list:
+                    import json as _json2
+                    out["comments"] = _json2.dumps(comment_list, ensure_ascii=False)
+
+                # ══ douban_url ══
                 out["douban_url"] = subject_url
-                print(f"[书籍] ✅ 豆瓣详情页: rating={out.get('rating')}, intro={len(out.get('intro',''))}字", flush=True)
+                print(f"[书籍] ✅ 豆瓣详情: rating={out.get('rating')}, "
+                      f"chapters={len(out.get('chapters',''))}字, "
+                      f"comments={len(comment_list)}条", flush=True)
         except Exception as e:
             print(f"[书籍] 豆瓣详情页失败: {e}", flush=True)
 
