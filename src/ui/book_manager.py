@@ -209,16 +209,27 @@ def _make_book_card(parent, bid, title, author, genre, rating, row, col, topleve
         sub += f"   ⭐{rating:.1f}"
     if genre and genre != "其他":
         sub += f"   [{genre}]"
-    tk.Label(card, text=sub, bg=bg, fg="rgba(255,255,255,0.75)",
+    tk.Label(card, text=sub, bg=bg, fg="#CCCCCC",
              font=("", 9), anchor="w").pack(fill=tk.X, pady=(2, 0))
 
     def _open(_e=None, _bid=bid):
         # 优先用传入的 toplevel, 否则用 Tk 官方 winfo_toplevel()
+        import traceback as _tb
+        top = toplevel
+        if top is None:
+            try:
+                top = card.winfo_toplevel()
+            except Exception:
+                _tb.print_exc()
+                top = None
+        if top is None:
+            print(f"[书籍] ❌ _open 找不到 toplevel parent! bid={_bid}", flush=True)
+            return
         try:
-            top = toplevel or card.winfo_toplevel()
-        except Exception:
-            top = None
-        _open_book_detail(top, _bid)
+            _open_book_detail(top, _bid)
+        except Exception as e:
+            print(f"[书籍] ❌ _open_book_detail 异常: {e}")
+            _tb.print_exc()
 
     def _rm(_e=None, _id=bid, _card=card, _t=title):
         from tkinter import messagebox as _mb
