@@ -1597,67 +1597,88 @@ def _show_zt_logic_popup(parent, row, score, reasons, zt_logic, winrate):
 
 
 def _build_orderbook(parent, win, col=1):
-    """② 涨停强弱排名 — 多维度算法排序 + ❓涨停详解"""
+    """② 涨停强弱排名 — 板块分组 + 多维度算法排序 + ❓涨停详解 + 双击股票弹日K"""
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FF6D00",
                         font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
-    _add_title_row(frm, "② 涨停强弱排名 (游资多维度算法)",
+    _add_title_row(frm, "② 涨停强弱排名 (游资多维度 · 板块分组)",
                    "#FF6D00", ZT_RANK_KNOWLEDGE)
 
-    # 顶部: 刷新按钮 + 日期
     top = tk.Frame(frm, bg="#1E1E1E"); top.pack(fill=tk.X, pady=(2, 2))
     win._zt_date_lbl = tk.Label(top, text="⏳ 加载涨停池...", bg="#1E1E1E",
-                                 fg="#BDBDBD", font=("", 9))
+                                 fg="#BDBDBD", font=("", 8))
     win._zt_date_lbl.pack(side=tk.LEFT, padx=4)
     tk.Button(top, text="🔄 刷新", command=lambda: _load_orderbook(win),
               bg="#37474F", fg="white", font=("", 8), padx=4).pack(side=tk.RIGHT)
 
-    # Treeview: 排名 | 代码 | 名称 | 涨停原因 | 分数 | 封板时间 | 连板 | 炸板 | 换手 | 行业 | ❓
-    cols = ("rank", "code", "name", "logic", "score", "time", "lb", "zb", "hand", "ind", "help")
-    headings = [("#", "代码", "名称", "💡逻辑", "分", "封板", "板", "炸", "换手", "行业", "❓")]
-    widths = [30, 65, 80, 150, 38, 55, 28, 28, 45, 75, 28]
-    tv = ttk.Treeview(frm, columns=cols, show="headings", height=10)
+    # Treeview: 板块分组嵌套 (列更紧凑, 字体更小)
+    cols = ("rank", "name", "logic", "score", "time", "lb", "zb", "hand", "ind", "help")
+    headings = [("#", "名称", "💡逻辑", "分", "封板", "板", "炸", "换手", "行业", "❓")]
+    widths = [28, 92, 130, 30, 45, 22, 22, 38, 60, 24]
+    tv = ttk.Treeview(frm, columns=cols, show="headings tree", height=11)
+    tv.configure(rowheight=18)
     for i, c in enumerate(cols):
         tv.heading(c, text=headings[0][i])
         tv.column(c, width=widths[i], anchor="center", stretch=False)
     tv.column("logic", anchor="w", stretch=True)
+    # 字体缩小到 8pt
+    tv.tag_configure("high", foreground="#66BB6A", font=("", 8))
+    tv.tag_configure("mid", foreground="#FFA726", font=("", 8))
+    tv.tag_configure("low", foreground="#EF5350", font=("", 8))
+    tv.tag_configure("rank1", foreground="#FFD54F", font=("", 8, "bold"))
+    tv.tag_configure("sector", foreground="#FF6D00", font=("", 8, "bold"),
+                     background="#263238")  # 板块标题行: 橙字 + 深灰底
+
     tv.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
-    # 分数字体颜色标签
-    tv.tag_configure("high", foreground="#66BB6A")      # ≥70 绿
-    tv.tag_configure("mid", foreground="#FFA726")      # 50-70 橙
-    tv.tag_configure("low", foreground="#EF5350")       # <50 红
-    tv.tag_configure("rank1", foreground="#FFD54F", font=("", 10, "bold"))
-
     win._zt_tv = tv
-    win._zt_rows = []  # 存 (row_dict, score, reasons, zt_logic, winrate)
+    win._zt_by_iid = {}  # iid -> (row, score, reasons, zt_logic, winrate)
 
-    # ❓ 点击绑定
-    def _on_tv_click(event):
-        region = tv.identify("region", event.x, event.y)
-        if region != "cell": return
-        col_id = tv.identify_column(event.x)  # e.g. "#11"
-        col_idx = int(col_id.replace("#", "")) - 1
-        if col_idx != len(cols) - 1:  # 只响应最后一列 "help"
-            # 双击任意列也打开
-            if event.type != "4":  # 4 = Double-1 也开
-                pass
-            else:
-                pass
+    def _on_double_click(event):
+        """双击: 股票子行 → 弹日K线; 板块父行 → 切换展开"""
         iid = tv.identify_row(event.y)
         if not iid: return
-        idx = int(iid) - 1
-        rows = getattr(win, "_zt_rows", [])
-        if 0 <= idx < len(rows):
-            row, score, reasons, zt_logic, winrate = rows[idx]
-            _show_zt_logic_popup(frm.winfo_toplevel(), row, score, reasons, zt_logic, winrate)
+        parent_iid = tv.parent(iid)
+        if parent_iid:
+            # 子行 = 股票 → 弹日K
+            info = win._zt_by_iid.get(iid)
+            if not info: return
+            row, _s, *_ = info
+            try:
+                code = str(row.get("代码", ""))
+                name = str(row.get("名称", ""))
+                if code.startswith(("6", "9")): sina = "sh" + code
+                elif code.startswith(("0", "3")): sina = "sz" + code
+                elif code.startswith(("4", "8")): sina = "bj" + code
+                else: sina = "sh" + code
+                _show_stock_daily_kline(frm.winfo_toplevel(), sina, name)
+                print(f"[👁️涨停双击] {name}({sina}) → 弹日K", flush=True)
+            except Exception as e:
+                print(f"[👁️涨停双击] err: {e}")
+        else:
+            try: tv.item(iid, open=not tv.item(iid, "open"))
+            except Exception: pass
 
-    tv.bind("<Double-1>", _on_tv_click)
-    tv.bind("<ButtonRelease-1>", _on_tv_click)
+    def _on_single_click(event):
+        """单击 ❓ 列 → 涨停详解弹窗"""
+        region = tv.identify("region", event.x, event.y)
+        if region != "cell": return
+        col_id = tv.identify_column(event.x)
+        if col_id != f"#{len(cols)}": return
+        iid = tv.identify_row(event.y)
+        if not iid: return
+        parent_iid = tv.parent(iid)
+        if not parent_iid: return
+        info = win._zt_by_iid.get(iid)
+        if not info: return
+        row, score, reasons, zt_logic, winrate = info
+        _show_zt_logic_popup(frm.winfo_toplevel(), row, score, reasons, zt_logic, winrate)
 
-    # 操作提示
-    tk.Label(frm, text="💡 双击任意行查看涨停详解  |  分数≥70=强势  |  连板+早封板+无炸板=最高优先级",
+    tv.bind("<Double-1>", _on_double_click)
+    tv.bind("<ButtonRelease-1>", _on_single_click)
+
+    tk.Label(frm, text="💡 双击股票 → 日K线  |  双击板块 → 展开/收起  |  点❓ → 涨停详解",
              bg="#1E1E1E", fg="#78909C", font=("", 8)).pack(anchor="w", padx=4, pady=(0, 2))
 
 
@@ -1701,36 +1722,59 @@ def _load_orderbook(win):
         # 排序: 分数降序
         results.sort(key=lambda x: -x[1])
 
+        # 按板块分组 (ind -> [results...])
+        by_ind = {}
+        for item in results:
+            ind = str(item[0].get("所属行业", "其他"))
+            by_ind.setdefault(ind, []).append(item)
+
+        # 板块热度: 涨停股数 × 板块平均分数, 取 Top 8
+        sector_scores = []
+        for ind, items in by_ind.items():
+            n = len(items)
+            avg_s = sum(it[1] for it in items) / max(n, 1)
+            heat = n * avg_s  # 热度分
+            sector_scores.append((ind, n, avg_s, heat))
+        sector_scores.sort(key=lambda x: -x[3])
+        top_sectors = sector_scores[:8]
+
         def _render():
             tv = win._zt_tv
             for i in tv.get_children(): tv.delete(i)
-            win._zt_rows = results[:40]  # 最多显示 40 只
-            for idx, (row, score, reasons, zt_logic, winrate) in enumerate(results[:40], 1):
-                # 封板时间格式
-                t = str(row.get("首次封板时间", "")).zfill(6)
-                t_fmt = f"{t[:2]}:{t[2:4]}" if len(t) >= 4 else "--:--"
-                lb = int(row.get("连板数", 1) or 1)
-                zb = int(row.get("炸板次数", 0) or 0)
-                hand = float(row.get("换手率", 0) or 0)
-                ind = str(row.get("所属行业", ""))[:5]
-                name = str(row.get("名称", ""))[:8]
-                code = str(row.get("代码", ""))
+            win._zt_by_iid = {}  # 清空重建
 
-                # 颜色 tag
-                tag = "high" if score >= 70 else "mid" if score >= 50 else "low"
-                if idx == 1: tag = ("rank1", "high")
+            for ind, n_stk, avg_s, heat in top_sectors:
+                ind_short = ind[:8]
+                parent_iid = f"sector_{ind}"
+                tv.insert("", tk.END, iid=parent_iid, open=False,
+                          values=("", f"📌 {ind_short}  ({n_stk}只 均分{avg_s:.0f})",
+                                  f"🔥 {heat:.0f}", "", "", "", "", "", ind_short, ""),
+                          tags=("sector",))
 
-                tv.insert("", tk.END, iid=str(idx),
-                          values=(idx, code, name, zt_logic, f"{score:.0f}",
-                                  t_fmt, lb, zb, f"{hand:.1f}", ind, "❓"),
-                          tags=(tag,) if isinstance(tag, str) else tag)
+                top3 = by_ind[ind][:3]
+                for child_n, it in enumerate(top3, 1):
+                    row, score, reasons, zt_logic, winrate = it
+                    t = str(row.get("首次封板时间", "")).zfill(6)
+                    t_fmt = f"{t[:2]}:{t[2:4]}" if len(t) >= 4 else "--:--"
+                    lb = int(row.get("连板数", 1) or 1)
+                    zb = int(row.get("炸板次数", 0) or 0)
+                    hand = float(row.get("换手率", 0) or 0)
+                    name = str(row.get("名称", ""))[:8]
+                    tag = "high" if score >= 70 else "mid" if score >= 50 else "low"
+                    child_iid = f"child_{ind}_{child_n}"
+                    tv.insert(parent_iid, tk.END, iid=child_iid, open=False,
+                              values=(child_n, name, zt_logic, f"{score:.0f}",
+                                      t_fmt, lb, zb, f"{hand:.1f}", ind_short, "❓"),
+                              tags=(tag,))
+                    # 存映射: iid -> info
+                    win._zt_by_iid[child_iid] = (row, score, reasons, zt_logic, winrate)
 
             n = len(results)
             high = sum(1 for _, s, *_ in results if s >= 70)
             win._zt_date_lbl.config(
-                text=f"📅 {date_str}  |  共 {n} 只涨停  |  强势≥70分: {high} 只",
+                text=f"📅 {date_str}  |  共 {n} 只涨停 · {len(top_sectors)} 个板块  |  强势≥70: {high}",
                 fg="#66BB6A" if high >= 5 else "#FFA726")
-            print(f"[👁️涨停] {date_str}: {n}只, 强势(≥70): {high}只", flush=True)
+            print(f"[👁️涨停] {date_str}: {n}只, {len(top_sectors)}板块, 强势(≥70): {high}只", flush=True)
 
         win.after(0, _render)
 
