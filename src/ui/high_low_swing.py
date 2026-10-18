@@ -2517,9 +2517,12 @@ def _quick_open_daily_kline(parent, code6, name):
     from matplotlib.figure import Figure
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
-    # 补 sina 前缀
-    ex_map = ("sh" if code6.startswith("6") else "bj" if code6.startswith(("4", "8")) else "sz")
-    sina_code = f"{ex_map}{code6}"
+    # 补 sina 前缀 (已带 sh/sz/bj 前缀直接用)
+    if code6.startswith(("sh", "sz", "bj")):
+        sina_code = code6
+    else:
+        ex_map = ("sh" if code6.startswith("6") else "bj" if code6.startswith(("4", "8")) else "sz")
+        sina_code = f"{ex_map}{code6}"
 
     dlg = tk.Toplevel(parent)
     dlg.title(f"📊 {name}({code6}) 日K线")
