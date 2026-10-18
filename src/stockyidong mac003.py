@@ -4758,6 +4758,15 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         except Exception as _be:
             import traceback as _tb; _tb.print_exc()
             ttk.Label(books_frame, text=f"❌ 书籍模块加载失败: {_be}").pack(pady=20)
+        # ── 📊 基金持仓 Tab (放在书籍右边) ──
+        fund_frame = ttk.Frame(crawler_control_notebook, padding=5)
+        crawler_control_notebook.add(fund_frame, text="📊基金持仓")
+        try:
+            from ui.fund_holdings_tab import build_fund_holdings_tab
+            build_fund_holdings_tab(fund_frame, root=self.root)
+        except Exception as _fe:
+            import traceback as _tb; _tb.print_exc()
+            ttk.Label(fund_frame, text=f"❌ 基金持仓加载失败: {_fe}").pack(pady=20)
         # ── 工具 Tab 按钮 ──
         tools_row_a = ttk.Frame(tools_frame); tools_row_a.pack(fill=tk.X, pady=2)
         _tools_pad = {"side": tk.LEFT, "padx": 2, "pady": 2, "fill": tk.X, "expand": True}
