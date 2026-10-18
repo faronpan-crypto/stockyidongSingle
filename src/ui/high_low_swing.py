@@ -1216,9 +1216,16 @@ def show_high_low_swing(parent, app=None):
                     "陕西煤业":"sh601225","中国神华":"sh601088","大同煤业":"sh601015",
                 }
                 _c = _code_map.get(nm, "")
-                _on_row_click = lambda e, _cc=_c, _nm=nm: (
-                    _quick_open_daily_kline(win, _cc, _nm) if _cc else None
-                )
+                _row_key = f"seed_{_cc}"
+                def _on_row_click(e, _cc=_c, _nm=nm, _key=_row_key):
+                    now = e.time
+                    last = _row_click_state.get(_key, 0)
+                    if 0 < (now - last) < 400 and _cc:
+                        # 双击: 打开日K
+                        _row_click_state[_key] = 0
+                        _quick_open_daily_kline(win, _cc, _nm)
+                    else:
+                        _row_click_state[_key] = now
                 tk.Label(row, text=f"{n}", bg=row_bg, fg=_FG_GOLD if n==1 else _FG_DIM,
                          font=("", 9, "bold"), width=2, anchor="w").pack(side=tk.LEFT, padx=(4,0))
                 tk.Label(row, text=nm, bg=row_bg, fg="white",
@@ -1232,6 +1239,8 @@ def show_high_low_swing(parent, app=None):
 
     # ── 流派数据引用 dict — 给后台线程分发 ──
     _school_hot_refs = {}
+    # 🆕 模拟双击: 存每只股票行上次点击的 event.time (400ms 内两次 = 双击)
+    _row_click_state = {}
 
     # 流派标题
     tk.Label(body, text="🏛️ 五大流派信号扫描", bg=_BG_DEEP, fg=_FG_GOLD,
@@ -1366,8 +1375,16 @@ def show_high_low_swing(parent, app=None):
                         pct_color = _FG_RED if pct >= 0 else _FG_GREEN
                         row = tk.Frame(body, bg=row_bg, cursor="hand2")
                         row.pack(fill=tk.X, pady=1)
-                        # 点击开日K (用默认参数绑定闭包)
-                        _on_click = lambda e, _c=code, _nm=name: _quick_open_daily_kline(win, _c, _nm)
+                        # 🆕 模拟双击打开日K (400ms 内两次单击)
+                        _rkey = f"real_{code}"
+                        def _on_click(e, _c=code, _nm=name, _rk=_rkey):
+                            now = e.time
+                            last = _row_click_state.get(_rk, 0)
+                            if 0 < (now - last) < 400 and _c:
+                                _row_click_state[_rk] = 0
+                                _quick_open_daily_kline(win, _c, _nm)
+                            else:
+                                _row_click_state[_rk] = now
                         tk.Label(row, text=f"{n}", bg=row_bg, fg=_FG_GOLD if n==1 else _FG_DIM,
                                  font=("", 9, "bold"), width=2, anchor="w").pack(side=tk.LEFT, padx=(4,0))
                         tk.Label(row, text=name, bg=row_bg, fg="white",
