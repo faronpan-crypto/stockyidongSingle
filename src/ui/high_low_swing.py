@@ -952,18 +952,17 @@ def show_high_low_swing(parent, app=None):
     # ═══════════════════════════════════════════════
     # 5 大流派卡片 (在 body 里)
     # ═══════════════════════════════════════════════
-    def _make_school_card(parent, data, row_idx):
-        """两列 grid 布局: 左流派分析 + 右 Top3 板块×每板块 Top3 股票"""
+    def _make_school_card(parent, data):
+        """两列 pack 布局: 左流派分析 + 右 Top3 板块×每板块 Top3 股票"""
         name = data["name"]
         hot_info = _SCHOOL_HOT.get(name, {})
         hot_sectors = hot_info.get("hot_sectors", [])
         hot_tag = hot_info.get("tag", "")
 
         card = tk.Frame(parent, bg=_BG_CARD, highlightbackground=_FG_BLUE, highlightthickness=1)
-        card.grid(row=row_idx, column=0, sticky="we", padx=4, pady=3)
-        parent.grid_columnconfigure(0, weight=1)
+        card.pack(fill=tk.X, padx=4, pady=3)
 
-        # ── 左列: 流派分析 (固定宽度, 至少撑住右列) ──
+        # ── 左列: 流派分析 (fill+BOTH+expand) ──
         left = tk.Frame(card, bg=_BG_CARD); left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # 标题行
@@ -1067,8 +1066,8 @@ def show_high_low_swing(parent, app=None):
              font=("", _fs_title() + 2, "bold")).pack(anchor="w", padx=10, pady=(8, 2))
     tk.Frame(body, bg=_FG_GOLD, height=2).pack(fill=tk.X, padx=10, pady=(0, 6))
 
-    for i, sch in enumerate(_SCHOOLS):
-        _make_school_card(body, sch, i)
+    for sch in _SCHOOLS:
+        _make_school_card(body, sch)
 
     # ── 启动后台线程: 拉 akshare 涨停池 → 分发给每个流派 ──
     def _bg_load_school_hot():
