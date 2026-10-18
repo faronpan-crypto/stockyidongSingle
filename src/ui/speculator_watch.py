@@ -859,11 +859,15 @@ def show_speculator_watch(root=None, app=None):
 
     print("[👁️看盘] 六区构建完成, 立刻填充本地数据...", flush=True)
 
-    # 先用种子数据秒出所有面板 (保证不空)
+    # 先用种子数据秒出其他面板 (保证不空) — 信号决策面板不再秒出种子
     _seed_fill_all(win)
 
-    # 后台线程拉真实数据替换
+    # 后台线程拉真实数据替换 — ⚡ 信号决策最优先 (顶部大字报, 用户一眼就看)
     def _real_fill():
+        # ⚡ 第一优先级: 信号决策 (新浪日线, 8s 超时)
+        try: _refresh_sign_decision(win)
+        except Exception as e: print(f"[👁️看盘❌] sign_decision: {e}")
+        # 其他面板
         try: _refresh_all_blocks(win)
         except Exception as e: print(f"[👁️看盘❌] blocks: {e}")
         try: _refresh_volume(win)
@@ -880,8 +884,6 @@ def show_speculator_watch(root=None, app=None):
         except Exception as e: print(f"[👁️看盘❌] analysis: {e}")
         try: _load_orderbook(win)  # akshare, 挂了不影响
         except Exception as e: print(f"[👁️看盘❌] orderbook: {e}")
-        try: _refresh_sign_decision(win)
-        except Exception as e: print(f"[👁️看盘❌] sign_decision: {e}")
         print("[👁️看盘] ✅ 真实数据全部填充完成!", flush=True)
     threading.Thread(target=_real_fill, daemon=True).start()
 
@@ -3998,14 +4000,10 @@ def _calc_sign_decision():
 
 
 def _build_sign_decision_panel(parent, win):
-    """🎯 信号决策面板 — 先用种子秒出, 后台刷新真实 closes"""
+    """🎯 信号决策面板 — 显示加载中, 后台直接拉真实 closes (不再用种子)"""
     import numpy as np
 
-    # ── 种子 closes 秒出 (主线程不联网) ──
-    rng = np.random.default_rng(42)
-    seed_closes = 3200 + np.cumsum(rng.normal(0.0, 15, 200))
-
-    title = tk.Label(parent, text="🎯 信号决策 (大盘综合) · ⏳加载中",
+    title = tk.Label(parent, text="🎯 信号决策 (大盘综合) · ⏳加载中...",
                      bg="#1E1E1E", fg="#FFD54F", font=("", 10, "bold"))
     title.pack(anchor="w", padx=6, pady=(4, 2))
 
@@ -4078,8 +4076,7 @@ def _build_sign_decision_panel(parent, win):
                     "big_signal_lbl": big_signal_lbl, "big_sub_lbl": big_sub_lbl,
                     "big_pct_lbl": big_pct_lbl, "big_frame": big_frame}
 
-    # 立刻用种子渲染一次
-    _apply_sign_data(win, _calc_sign_decision_from_closes(seed_closes), from_seed=True)
+    # ⚠️ 不再用种子秒出 — 留加载中, 后台 _real_fill 里的 _refresh_sign_decision 会立刻拉真实数据
 
 
 def _calc_sign_decision_from_closes(closes):
