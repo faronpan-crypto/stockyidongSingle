@@ -14773,6 +14773,7 @@ class DapanMixin:
                              font=("", 9), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
                 cur_row += 1
                 row._stamp = item
+                row._last_click = {"time": 0}  # 🆕 必须初始化, 否则第一次点击就 AttributeError
                 row.bind("<Button-1>", lambda e, it=item, stamp=row, src=source: self._stamp_on_click(e, stamp, it))
                 for c in row.winfo_children():
                     c.bind("<Button-1>", lambda e, it=item, stamp=row, src=source: self._stamp_on_click(e, stamp, it))
@@ -14821,8 +14822,8 @@ class DapanMixin:
         if tip: tip.withdraw()
 
     def _stamp_on_click(self, event, stamp, item):
-        """邮票格子点击: 300ms 内连续两次 → 弹日K线"""
-        import time as _t, threading as _th, traceback as _tb
+        """邮票格子: 300ms 内两次点击 → 直接用新浪秒开日K线"""
+        import time as _t
         now = int(_t.time() * 1000)
         last = stamp._last_click["time"]
         if 0 < (now - last) < 400:
@@ -14830,36 +14831,35 @@ class DapanMixin:
             code = str(item.get("code", "") or "").strip()
             name = str(item.get("name", "") or "").strip()
             if not code: return
-
-            def _kw():
-                try:
-                    import tkinter.messagebox as _mb
-                    code_clean = code
-                    for _p in ["sz", "sh", "bj"]:
-                        if code_clean.lower().startswith(_p):
-                            code_clean = code_clean[2:]; break
-                    code_clean = code_clean.zfill(6)
-
-                    kd = None
-                    for i, fn in enumerate([self._get_daily_kline_data_tushare,
-                                           self._get_daily_kline_data_akshare]):
-                        try:
-                            kd = fn(code_clean, days=120);
-                            if kd: break
-                        except Exception as e:
-                            print(f"[邮票双击-K线] 路径{i+1}: {type(e).__name__}: {e}")
-
-                    ok = (isinstance(kd, dict) and 'data' in kd and len(kd['data']) > 10) or \
-                         (isinstance(kd, list) and len(kd) > 10)
-
-                    if ok:
-                        self.root.after(0, lambda: self._show_daily_kline_zoom(kd, name))
-                    else:
-                        self.root.after(0, lambda: _mb.showwarning(
-                            "提示", f"无法获取 {name}({code}) 的K线数据", parent=self.root))
-                except Exception as e:
-                    print(f"[邮票双击-K线] 异常: {type(e).__name__}: {e}"); _tb.print_exc()
-            _th.Thread(target=_kw, daemon=True).start()
+            # 🔄 直接复用高抛低吸的秒开日K — 新浪接口不挂
+            try:
+                from ui.high_low_swing import _quick_open_daily_kline
+                _quick_open_daily_kline(self.root, code, name)
+            except Exception as e:
+                print(f"[邮票双击-K线] 快速路径失败: {e}")
+                # 回退: 原 tushare/akshare 路径
+                import threading as _th, traceback as _tb
+                def _kw():
+                    try:
+                        import tkinter.messagebox as _mb
+                        code_clean = code
+                        for _p in ["sz", "sh", "bj"]:
+                            if code_clean.lower().startswith(_p):
+                                code_clean = code_clean[2:]; break
+                        code_clean = code_clean.zfill(6)
+                        kd = None
+                        for i, fn in enumerate([self._get_daily_kline_data_tushare,
+                                               self._get_daily_kline_data_akshare]):
+                            try:
+                                kd = fn(code_clean, days=120)
+                                if kd: break
+                            except Exception: pass
+                        ok = (isinstance(kd, dict) and 'data' in kd and len(kd['data']) > 10) or \
+                             (isinstance(kd, list) and len(kd) > 10)
+                        if ok: self.root.after(0, lambda: self._show_daily_kline_zoom(kd, name))
+                        else: self.root.after(0, lambda: _mb.showwarning("提示", f"无法获取 {name} 的K线数据"))
+                    except Exception: _tb.print_exc()
+                _th.Thread(target=_kw, daemon=True).start()
         else:
             stamp._last_click["time"] = now
 
