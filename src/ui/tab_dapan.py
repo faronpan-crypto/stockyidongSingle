@@ -14226,6 +14226,14 @@ class DapanMixin:
         3) 预设沪深300热门池 (兜底)
         行情: 腾讯 qt.gtimg.cn (稳定活源)"""
         import threading as _th, json as _json
+
+        # ⚠️ 并发锁 — 防止多次刷新导致渲染乱序/重影
+        _running_attr = f"_{source}_stamp_running"
+        if getattr(self, _running_attr, False):
+            print(f"[邮票格子] {source} 已有任务在跑, 跳过本次刷新", flush=True)
+            return
+        setattr(self, _running_attr, True)
+
         status = getattr(self, f"_{source}_stamp_status", None)
         if status:
             status.configure(text="⏳ 正在爬取淘韭文本...", foreground="#FFA726")
@@ -14546,10 +14554,12 @@ class DapanMixin:
         if not rows:
             inner.update_idletasks()
             for w in inner.winfo_children(): w.destroy()
+            inner.update_idletasks()  # 强制 Tk 移除
             return
         # 强制更新, 拿到 inner 真实宽度
         inner.update_idletasks()
         for w in inner.winfo_children(): w.destroy()
+        inner.update_idletasks()  # ⚠️ 关键: 确保旧 widget 从屏幕彻底移除再重建
 
         # ── 🆕 板块归类映射 ──
         BLOCK_GROUPS = {
@@ -14709,6 +14719,9 @@ class DapanMixin:
         except Exception as e:
             print(f"[邮票格子] scrollregion 更新: {e}", flush=True)
         print(f"[邮票格子] {source} 渲染完成: {len(rows)} 只, {len(sorted_blocks)} 板块", flush=True)
+        # 释放并发锁 (无论成功失败)
+        try: setattr(self, f"_{source}_stamp_running", False)
+        except Exception: pass
     def _show_stamp_hover(self, event, source, item):
         """hover 显示详情"""
         import tkinter as tk
