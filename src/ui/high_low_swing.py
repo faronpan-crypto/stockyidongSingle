@@ -1159,6 +1159,15 @@ def show_high_low_swing(parent, app=None):
         v.pack(side=tk.LEFT, padx=6)
         widgets_list.append((v, "body"))
 
+    def _bind_click_deep(widget, handler):
+        """递归给 widget 及其所有子控件绑定点击事件 (Tk <Button-1> 不冒泡)"""
+        try:
+            widget.bind("<Button-1>", handler)
+        except Exception:
+            pass
+        for c in widget.winfo_children():
+            _bind_click_deep(c, handler)
+
     def _render_seed_places(body, hot_sectors):
         """种子占位 — 直接用预设板块 + 股票名, 用户立刻看到完整结构
         后台线程数据到了 destroy+渲染刷新涨跌幅和技术标签"""
@@ -1206,8 +1215,9 @@ def show_high_low_swing(parent, app=None):
                     "陕西煤业":"sh601225","中国神华":"sh601088","大同煤业":"sh601015",
                 }
                 _c = _code_map.get(nm, "")
-                row.bind("<Button-1>", lambda e, _cc=_c, _nm=nm:
-                         _quick_open_daily_kline(win, _cc, _nm) if _cc else None)
+                _on_row_click = lambda e, _cc=_c, _nm=nm: (
+                    _quick_open_daily_kline(win, _cc, _nm) if _cc else None
+                )
                 tk.Label(row, text=f"{n}", bg=row_bg, fg=_FG_GOLD if n==1 else _FG_DIM,
                          font=("", 9, "bold"), width=2, anchor="w").pack(side=tk.LEFT, padx=(4,0))
                 tk.Label(row, text=nm, bg=row_bg, fg="white",
@@ -1216,6 +1226,8 @@ def show_high_low_swing(parent, app=None):
                          font=("", 9), width=8, anchor="w").pack(side=tk.LEFT, padx=2)
                 tk.Label(row, text="加载中...", bg=row_bg, fg=_FG_DIM,
                          font=("", 8)).pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
+                # 🆕 递归绑定: row + 所有子 Label 都绑点击 (Tk <Button-1> 不冒泡)
+                _bind_click_deep(row, _on_row_click)
 
     # ── 流派数据引用 dict — 给后台线程分发 ──
     _school_hot_refs = {}
@@ -1354,8 +1366,7 @@ def show_high_low_swing(parent, app=None):
                         row = tk.Frame(body, bg=row_bg, cursor="hand2")
                         row.pack(fill=tk.X, pady=1)
                         # 点击开日K (用默认参数绑定闭包)
-                        row.bind("<Button-1>", lambda e, _c=code, _nm=name:
-                                 _quick_open_daily_kline(win, _c, _nm))
+                        _on_click = lambda e, _c=code, _nm=name: _quick_open_daily_kline(win, _c, _nm)
                         tk.Label(row, text=f"{n}", bg=row_bg, fg=_FG_GOLD if n==1 else _FG_DIM,
                                  font=("", 9, "bold"), width=2, anchor="w").pack(side=tk.LEFT, padx=(4,0))
                         tk.Label(row, text=name, bg=row_bg, fg="white",
@@ -1364,6 +1375,8 @@ def show_high_low_swing(parent, app=None):
                                  font=("", 9, "bold"), width=8, anchor="w").pack(side=tk.LEFT, padx=2)
                         tk.Label(row, text=tech or "—", bg=row_bg, fg="#CE93D8",
                                  font=("", 8), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
+                        # 🆕 递归绑定: row + 所有子 Label 都绑点击
+                        _bind_click_deep(row, _on_click)
                 _rendered_names.add(sname)
             except Exception as ex:
                 import traceback; traceback.print_exc()
