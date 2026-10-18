@@ -627,12 +627,19 @@ def _open_book_detail(parent, bid):
             try:
                 summary = _fetch_book_intro_worker(row["title"], row.get("author") or "")
                 fields = {}
+                # ⚡ DB 列白名单 (防止返回表里不存在的字段如 subject_url/suggest_title)
+                _ALLOWED_COLS = {"author", "translator", "publisher", "rating", "rating_count",
+                                 "douban_url", "pub_year", "pages", "isbn", "price",
+                                 "original_title", "series", "intro", "author_bio",
+                                 "chapters", "summary", "comments", "highlights",
+                                 "related", "methods", "pros", "cons"}
                 for k, v in (summary or {}).items():
                     if v is None: continue
+                    if k not in _ALLOWED_COLS: continue  # 表里没有的字段跳过
+                    # 类型白名单: 只允许 str/int/float
+                    if not isinstance(v, (str, int, float)): continue
                     if isinstance(v, str) and not v.strip(): continue
-                    if isinstance(v, (float, int)):
-                        if k in ("rating", "rating_count", "pages") and v > 0: fields[k] = v
-                        continue
+                    if isinstance(v, (float, int)) and v <= 0: continue
                     fields[k] = v
                 if fields:
                     try:
