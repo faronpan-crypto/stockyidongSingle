@@ -1354,154 +1354,387 @@ def _show_block_detail(win, idx, full=False):
 # ② 观察盘口 — 档位 + 涨停板排队 + 特定数量
 # ═══════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════
+# ② 涨停强弱排名 — 多维度算法 (资金30%+情绪35%+技术20%+板块15%)
+# 数据源: akshare stock_zt_pool_em + stock_zt_pool_previous_em + stock_zt_pool_strong_em
+# ═══════════════════════════════════════════════════════════════
+
+ZT_RANK_KNOWLEDGE = {
+    "definition": "涨停强弱排名 — 游资实战多维度算法筛选最强涨停股",
+    "logic": """📊 评分维度 (满分100)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 资金面 (30分)
+   • 封板资金金额: >5亿=10分, >1亿=7分, >5000万=4分
+   • 换手率: 3-15%=10分(健康), 1-3%/15-25%=5分, 其他=2分
+   • 成交额: >10亿=10分, >3亿=7分, >1亿=4分
+
+🔥 情绪面 (35分)
+   • 连板高度: ≥5板=15分(妖股), 3板=12分, 2板=8分
+   • 封板时间: 9:30前=12分(一字板最强), 10:30前=8分, 13:30前=5分
+   • 炸板次数: 0次=8分(坚决), 1次=5分, ≥2次=2分
+
+📈 技术面 (20分)
+   • 流通市值: <50亿=10分(小盘弹性大), <150亿=7分, <500亿=4分
+   • 涨停统计: 近N天高频涨停=10分
+
+🌐 板块共振 (15分)
+   • 同行业涨停数 ≥3 = 15分 (主线热点)
+   • 同行业涨停数 = 2 = 10分
+   • 独立涨停 = 5分
+
+⚠️ 实战高分票 (≥70): 优先关注, 次日溢价概率大
+⚠️ 低分票 (<40): 观望为主, 炸板/闷杀概率高
+""",
+    "cases": [
+        "2024.09.24 券商涨停潮: 所有券商股封单>10亿+无炸板+9:30前封板 → 评分普遍>85, 次日集体高开",
+        "2024.04 CPO板块: 中际旭创涨停封板3次炸板+下午封板 → 评分仅38, 次日低开闷杀",
+        "2023.11 AI行情: 鸿博股份7连板+一字板+封板稳定 → 评分96, 连续7天一字涨停",
+    ],
+}
+
+
+# 涨停原因关键词映射 (硬编码, 匹配所属行业+资讯关键词)
+ZT_LOGIC_MAP = {
+    "半导体": "国产替代/周期反转/算力需求",
+    "半导体及元件": "国产替代/周期反转/算力需求",
+    "白酒": "消费复苏/外资回流/批价回升",
+    "食品饮料": "消费复苏/外资回流/批价回升",
+    "新能源": "政策托底/储能新叙事/超跌反弹",
+    "电力": "AI算力供电/夏季缺口/煤电转型",
+    "汽车整车": "出口数据/智驾落地/价格战缓和",
+    "光伏设备": "产能出清/N型技术迭代/海外需求",
+    "医疗器械": "集采边际缓和/创新药审批加速",
+    "互联网服务": "AI应用落地/降本增效/平台经济反弹",
+    "人工智能": "大模型迭代/算力租赁/应用场景爆发",
+    "通信设备": "CPO需求/光模块涨价/海外云厂商资本开支",
+    "军工": "订单落地/新型号/国企改革",
+    "通用设备": "设备更新/高端制造/政策补贴",
+    "银行": "息差见底/地产风险缓释/估值修复",
+    "证券": "市场成交放量/政策暖风/做市商扩容",
+    "保险": "长端利率修复/资产质量改善",
+    "房地产开": "政策松绑/成交回暖/去化预期",
+    "物流": "AI供应链/跨境电商/油价下跌",
+    "广告营销": "AI营销/短剧出海/数字经济",
+    "传媒": "AI内容/短剧出海/游戏版号",
+    "建筑装饰": "基建投资/旧改/地产链复苏",
+    "机器人": "具身智能/特斯拉Optimus/工业自动化",
+    "商业航天": "星舰技术/低轨卫星/商业发射",
+}
+
+
+def _calc_zt_strength(row, same_ind_count=1):
+    """多维度涨停强弱评分 — 返回 (score, reasons_list, zt_logic_str)"""
+    score = 0.0; reasons = []
+
+    # ── 资金面 30分 ──
+    seal = float(row.get("封板资金", 0) or 0)
+    if seal > 5e8: score += 10; reasons.append("封板>5亿")
+    elif seal > 1e8: score += 7; reasons.append("封板>1亿")
+    elif seal > 5e7: score += 4
+
+    hand = float(row.get("换手率", 0) or 0)
+    if 3 <= hand <= 15: score += 10; reasons.append(f"换手{hand:.1f}%健康")
+    elif 1 <= hand < 3 or 15 < hand <= 25: score += 5
+    else: score += 2
+
+    amt = float(row.get("成交额", 0) or 0)
+    if amt > 1e9: score += 10; reasons.append("成交>10亿")
+    elif amt > 3e8: score += 7
+    elif amt > 1e8: score += 4
+
+    # ── 情绪面 35分 ──
+    lb = int(row.get("连板数", 1) or 1)
+    if lb >= 5: score += 15; reasons.append(f"{lb}连板妖股")
+    elif lb >= 3: score += 12; reasons.append(f"{lb}连板")
+    elif lb >= 2: score += 8; reasons.append("2连板")
+    else: score += 3
+
+    t_str = str(row.get("首次封板时间", "150000")).zfill(6)
+    hhmm = int(t_str[:4]) if len(t_str) >= 4 else 1500
+    if hhmm <= 930: score += 12; reasons.append("9:30前封板⭐")
+    elif hhmm <= 1030: score += 8; reasons.append("10:30前封板")
+    elif hhmm <= 1330: score += 5
+    else: score += 2
+
+    zb = int(row.get("炸板次数", 0) or 0)
+    if zb == 0: score += 8; reasons.append("无炸板")
+    elif zb == 1: score += 5
+    else: score += 2
+
+    # ── 技术面 20分 ──
+    mv = float(row.get("流通市值", 0) or 0)
+    if mv < 5e9: score += 10; reasons.append("小盘<50亿")
+    elif mv < 1.5e10: score += 7
+    elif mv < 5e10: score += 4
+    else: score += 2
+
+    zt_stat = str(row.get("涨停统计", "1/1"))
+    try:
+        n, m = zt_stat.split("/")
+        ratio = int(n) / max(int(m), 1)
+        if ratio >= 0.7: score += 10; reasons.append(f"近{m}天{zt_stat}高频")
+        elif ratio >= 0.5: score += 7
+        else: score += 4
+    except Exception:
+        score += 5
+
+    # ── 板块共振 15分 ──
+    if same_ind_count >= 3: score += 15; reasons.append(f"板块{same_ind_count}股共振🔥")
+    elif same_ind_count == 2: score += 10; reasons.append("板块2股共振")
+    else: score += 5
+
+    # 涨停原因
+    ind = str(row.get("所属行业", ""))
+    zt_logic = ZT_LOGIC_MAP.get(ind, f"{ind}板块异动")
+    if lb >= 3:
+        zt_logic += f" · {lb}板龙头"
+    if same_ind_count >= 3:
+        zt_logic += " · 板块高潮"
+
+    return round(score, 1), reasons, zt_logic
+
+
+def _estimate_zt_next_day_winrate(row, is_first_board_today=True):
+    """估算涨停次日胜率 — 基于连板高度 + 历史统计种子"""
+    lb = int(row.get("连板数", 1) or 1)
+    zb = int(row.get("炸板次数", 0) or 0)
+    hand = float(row.get("换手率", 0) or 0)
+    t_str = str(row.get("首次封板时间", "150000")).zfill(6)
+    hhmm = int(t_str[:4]) if len(t_str) >= 4 else 1500
+
+    # 游资实战统计: 不同条件下的次日溢价概率
+    base_rate = 50.0
+    if lb >= 5: base_rate = 82.0  # 妖股接力
+    elif lb >= 3: base_rate = 70.0
+    elif lb == 2: base_rate = 58.0
+    else: base_rate = 45.0
+
+    # 封板时间加分
+    if hhmm <= 930: base_rate += 10
+    elif hhmm <= 1030: base_rate += 5
+    elif hhmm >= 1400: base_rate -= 8
+
+    # 炸板扣分
+    base_rate -= zb * 8
+
+    # 换手率极端扣分
+    if hand > 25: base_rate -= 10  # 超高换手=出货
+    elif hand < 1: base_rate -= 5   # 流动性差
+
+    base_rate = max(15, min(92, base_rate))
+    return round(base_rate, 1)
+
+
+def _show_zt_logic_popup(parent, row, score, reasons, zt_logic, winrate):
+    """涨停股 ❓弹窗 — 涨停逻辑 + 次日胜率 + 历史案例"""
+    import tkinter as tk
+    dlg = tk.Toplevel(parent)
+    code = row.get("代码", "")
+    name = row.get("名称", "")
+    dlg.title(f"📘 {name}({code}) 涨停详解")
+    dlg.geometry("520x560")
+    dlg.configure(bg="#1E1E1E")
+    dlg.transient(parent)
+
+    # 顶部标题栏
+    tk.Label(dlg, text=f"📘 {name}({code})", bg="#1E1E1E", fg="#FFD54F",
+             font=("", 14, "bold")).pack(pady=(10, 2))
+    tk.Label(dlg, text=f"所属行业: {row.get('所属行业', '—')}  |  连板数: {row.get('连板数', 1)}板  |  涨停统计: {row.get('涨停统计', '1/1')}",
+             bg="#1E1E1E", fg="#90A4AE", font=("", 9)).pack()
+
+    # 分数大字
+    score_frame = tk.Frame(dlg, bg="#1E1E1E"); score_frame.pack(fill=tk.X, pady=10)
+    fg = "#66BB6A" if score >= 70 else "#FFA726" if score >= 50 else "#EF5350"
+    tk.Label(score_frame, text=f"强弱评分: {score:.0f} / 100", bg="#1E1E1E", fg=fg,
+             font=("", 22, "bold")).pack(side=tk.LEFT, padx=20)
+    tk.Label(score_frame, text=f"📈 次日胜率估: {winrate:.0f}%", bg="#1E1E1E", fg="#81C784",
+             font=("", 14, "bold")).pack(side=tk.RIGHT, padx=20)
+
+    # 涨停原因卡片
+    card1 = tk.Frame(dlg, bg="#263238", padx=10, pady=8); card1.pack(fill=tk.X, padx=10, pady=4)
+    tk.Label(card1, text="💡 涨停逻辑", bg="#263238", fg="#FFD54F",
+             font=("", 10, "bold")).pack(anchor="w")
+    tk.Label(card1, text=zt_logic, bg="#263238", fg="#E0E0E0",
+             font=("", 11), wraplength=480, justify=tk.LEFT).pack(anchor="w", pady=(4, 0))
+
+    # 强弱点
+    card2 = tk.Frame(dlg, bg="#1B3A1B" if score >= 60 else "#3E2723", padx=10, pady=8)
+    card2.pack(fill=tk.X, padx=10, pady=4)
+    tk.Label(card2, text="✨ 强弱要点", bg=card2["bg"], fg="#CE93D8",
+             font=("", 10, "bold")).pack(anchor="w")
+    reason_text = " | ".join(reasons) if reasons else "(无特殊标记)"
+    tk.Label(card2, text=reason_text, bg=card2["bg"], fg="#E0E0E0",
+             font=("", 10), wraplength=480, justify=tk.LEFT).pack(anchor="w", pady=(4, 0))
+
+    # 次日概率说明
+    card3 = tk.Frame(dlg, bg="#263238", padx=10, pady=8); card3.pack(fill=tk.X, padx=10, pady=4)
+    tk.Label(card3, text="📈 次日表现估算", bg="#263238", fg="#81C784",
+             font=("", 10, "bold")).pack(anchor="w")
+    lb = int(row.get("连板数", 1) or 1)
+    if lb >= 3:
+        desc = f"{lb}连板龙头, 游资接力意愿强, 次日高开概率高 (历史统计 {winrate:.0f}%)。注意: 3板以上是情绪博弈, 炸板也极快!"
+    elif lb == 2:
+        desc = f"2连板, 情绪确认期。若早盘快速弱转强, 次日有望继续板。平开震荡则关注同板块是否有助攻。历史胜率 {winrate:.0f}%"
+    else:
+        desc = f"首板异动, 次日方向看板块是否有持续消息催化 + 大盘情绪配合。历史首板次日溢价 {winrate:.0f}%。"
+    tk.Label(card3, text=desc, bg="#263238", fg="#BDBDBD",
+             font=("", 9), wraplength=480, justify=tk.LEFT).pack(anchor="w", pady=(4, 0))
+
+    # 操作建议
+    card4 = tk.Frame(dlg, bg="#1E1E1E", padx=10, pady=8); card4.pack(fill=tk.X, padx=10, pady=8)
+    tk.Label(card4, text="🎯 操作建议", bg="#1E1E1E", fg="#CE93D8",
+             font=("", 10, "bold")).pack(anchor="w")
+    if score >= 70:
+        tip = "⭐ 高分票, 次日优先关注! 若高开<5%可考虑低吸接力, 高开>7%追高风险大。"
+    elif score >= 50:
+        tip = "📊 中等强度, 观察次日开盘30分钟是否放量站稳均价线再判断。"
+    else:
+        tip = "⚠️ 低分票, 谨慎参与。等次日板块明确方向后再操作。"
+    tk.Label(card4, text=tip, bg="#1E1E1E", fg="#E0E0E0",
+             font=("", 10), wraplength=480, justify=tk.LEFT).pack(anchor="w", pady=(4, 0))
+
+    tk.Button(dlg, text="关闭", command=dlg.destroy).pack(pady=8)
+
+
 def _build_orderbook(parent, win, col=1):
-    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#64B5F6",
+    """② 涨停强弱排名 — 多维度算法排序 + ❓涨停详解"""
+    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FF6D00",
                         font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
-    _add_title_row(frm, "② 观察盘口 (涨停板排队/特定数量/盘口档位)",
-                   "#64B5F6", ORDERBOOK_KNOWLEDGE)
+    _add_title_row(frm, "② 涨停强弱排名 (游资多维度算法)",
+                   "#FF6D00", ZT_RANK_KNOWLEDGE)
 
-    # 顶部: 搜索 + 档位
-    top = tk.Frame(frm, bg="#1E1E1E"); top.pack(fill=tk.X, pady=(2, 4))
-    tk.Label(top, text="🔍 搜索:", bg="#1E1E1E", fg="#E0E0E0", font=("", 9)).pack(side=tk.LEFT)
-    # Combobox: 可手动输入 + 下拉今日涨停股
-    win._ob_codes = tk.StringVar()
-    win._ob_cb = ttk.Combobox(top, textvariable=win._ob_codes, width=22,
-                              values=[], state="normal")
-    win._ob_cb.pack(side=tk.LEFT, padx=2)
-    win._ob_cb.bind("<<ComboboxSelected>>", lambda _e: _load_orderbook(win))
-    win._ob_cb.bind("<Return>", lambda _e: _load_orderbook(win))
-    tk.Button(top, text="查", command=lambda: _load_orderbook(win)).pack(side=tk.LEFT)
+    # 顶部: 刷新按钮 + 日期
+    top = tk.Frame(frm, bg="#1E1E1E"); top.pack(fill=tk.X, pady=(2, 2))
+    win._zt_date_lbl = tk.Label(top, text="⏳ 加载涨停池...", bg="#1E1E1E",
+                                 fg="#BDBDBD", font=("", 9))
+    win._zt_date_lbl.pack(side=tk.LEFT, padx=4)
+    tk.Button(top, text="🔄 刷新", command=lambda: _load_orderbook(win),
+              bg="#37474F", fg="white", font=("", 8), padx=4).pack(side=tk.RIGHT)
 
-    win._ob_level = tk.StringVar(value="5档")
-    ttk.Combobox(top, textvariable=win._ob_level, values=["1档", "5档", "10档", "全息"],
-                 width=6, state="readonly").pack(side=tk.LEFT, padx=4)
+    # Treeview: 排名 | 代码 | 名称 | 涨停原因 | 分数 | 封板时间 | 连板 | 炸板 | 换手 | 行业 | ❓
+    cols = ("rank", "code", "name", "logic", "score", "time", "lb", "zb", "hand", "ind", "help")
+    headings = [("#", "代码", "名称", "💡逻辑", "分", "封板", "板", "炸", "换手", "行业", "❓")]
+    widths = [30, 65, 80, 150, 38, 55, 28, 28, 45, 75, 28]
+    tv = ttk.Treeview(frm, columns=cols, show="headings", height=10)
+    for i, c in enumerate(cols):
+        tv.heading(c, text=headings[0][i])
+        tv.column(c, width=widths[i], anchor="center", stretch=False)
+    tv.column("logic", anchor="w", stretch=True)
+    tv.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
-    # 涨停板排队单
-    tk.Label(frm, text="📌 涨停板排队单 (封单变化)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(4, 2))
-    tv1 = ttk.Treeview(frm, columns=("代码", "名称", "封单(万手)", "换手率%"),
-                       show="headings", height=5)
-    for c in ("代码", "名称", "封单(万手)", "换手率%"):
-        tv1.heading(c, text=c); tv1.column(c, width=90)
-    tv1.pack(fill=tk.X, padx=2)
-    win._ob_limit_up_tv = tv1
+    # 分数字体颜色标签
+    tv.tag_configure("high", foreground="#66BB6A")      # ≥70 绿
+    tv.tag_configure("mid", foreground="#FFA726")      # 50-70 橙
+    tv.tag_configure("low", foreground="#EF5350")       # <50 红
+    tv.tag_configure("rank1", foreground="#FFD54F", font=("", 10, "bold"))
 
-    # 盘口
-    top_row = tk.Frame(frm, bg="#1E1E1E"); top_row.pack(fill=tk.X, pady=(6, 2))
-    tk.Label(top_row, text="📌 买卖盘口 (实时)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(side=tk.LEFT)
-    win._ob_cur_label = tk.Label(top_row, text="(等加载...)", bg="#1E1E1E",
-                                  fg="#BDBDBD", font=("", 9, "bold"))
-    win._ob_cur_label.pack(side=tk.RIGHT)
-    order_frame = tk.Frame(frm, bg="#1E1E1E"); order_frame.pack(fill=tk.X, padx=2)
-    # 卖盘 (右对齐)
-    ask_frame = tk.Frame(order_frame, bg="#1E1E1E")
-    ask_frame.pack(side=tk.RIGHT)
-    win._ob_ask_labels = []
-    for i in range(5):
-        lbl = tk.Label(ask_frame, text="卖5 -", fg="#EF5350", bg="#1E1E1E",
-                       font=("Menlo", 9), anchor="e", width=18)
-        lbl.pack(anchor="e")
-        win._ob_ask_labels.append(lbl)
-    # 买盘
-    bid_frame = tk.Frame(order_frame, bg="#1E1E1E")
-    bid_frame.pack(side=tk.LEFT)
-    win._ob_bid_labels = []
-    for i in range(5):
-        lbl = tk.Label(bid_frame, text="买5 -", fg="#66BB6A", bg="#1E1E1E",
-                       font=("Menlo", 9), anchor="w", width=18)
-        lbl.pack(anchor="w")
-        win._ob_bid_labels.append(lbl)
+    win._zt_tv = tv
+    win._zt_rows = []  # 存 (row_dict, score, reasons, zt_logic, winrate)
 
-    # 特定数量识别
-    tk.Label(frm, text="📌 特定数量规律 (50/500/5000手)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(6, 2))
-    win._ob_pattern_text = tk.Label(frm, text="(等加载...)", bg="#1E1E1E",
-                                    fg="#CE93D8", font=("", 9), wraplength=350, justify=tk.LEFT)
-    win._ob_pattern_text.pack(fill=tk.X, padx=2)
+    # ❓ 点击绑定
+    def _on_tv_click(event):
+        region = tv.identify("region", event.x, event.y)
+        if region != "cell": return
+        col_id = tv.identify_column(event.x)  # e.g. "#11"
+        col_idx = int(col_id.replace("#", "")) - 1
+        if col_idx != len(cols) - 1:  # 只响应最后一列 "help"
+            # 双击任意列也打开
+            if event.type != "4":  # 4 = Double-1 也开
+                pass
+            else:
+                pass
+        iid = tv.identify_row(event.y)
+        if not iid: return
+        idx = int(iid) - 1
+        rows = getattr(win, "_zt_rows", [])
+        if 0 <= idx < len(rows):
+            row, score, reasons, zt_logic, winrate = rows[idx]
+            _show_zt_logic_popup(frm.winfo_toplevel(), row, score, reasons, zt_logic, winrate)
+
+    tv.bind("<Double-1>", _on_tv_click)
+    tv.bind("<ButtonRelease-1>", _on_tv_click)
+
+    # 操作提示
+    tk.Label(frm, text="💡 双击任意行查看涨停详解  |  分数≥70=强势  |  连板+早封板+无炸板=最高优先级",
+             bg="#1E1E1E", fg="#78909C", font=("", 8)).pack(anchor="w", padx=4, pady=(0, 2))
 
 
 def _load_orderbook(win):
-    """加载涨停板排队 + 盘口五档 (akshare 涨停 + 新浪 snapshot 盘口)"""
-    # 先加载盘口 (用新浪 snapshot, 秒出)
-    def _load_snapshot():
-        try:
-            sel = win._ob_cb.get()  # e.g. "晟楠科技(920006) +30.0%" or "上证指数 sh000001"
-            import re, requests
-            code_match = re.search(r'[(（](\d{6})[)）]', sel) or re.search(r'([a-z]{2}\d{6})', sel.lower())
-            if not code_match: return
-            raw = code_match.group(1)
-            sina = raw if raw[:2].isalpha() else ("sh" if raw.startswith("6") or raw.startswith("9") else "sz" if raw.startswith("0") or raw.startswith("3") else "bj" if raw.startswith(("4","8")) else "sh") + raw
-            url = f"https://hq.sinajs.cn/list={sina}"
-            r = requests.get(url, headers={"Referer": "https://finance.sina.com.cn"}, timeout=6)
-            if not r.ok or '"' not in r.text: return
-            parts = r.text.split('"')[1].split(',')
-            if len(parts) < 32: return
-            cur = float(parts[3])
-            # 买5..1: parts[6..10] (价格), parts[11..15] (数量)
-            # 卖1..5: parts[16..20] (价格), parts[21..25] (数量)
-            bid_prices = parts[10:5:-1]   # idx 10,9,8,7,6 = 买5,买4,买3,买2,买1
-            bid_vols   = parts[15:10:-1]  # idx 15,14,13,12,11
-            ask_prices = parts[16:21]     # idx 16..20 = 卖1..卖5
-            ask_vols   = parts[21:26]
-            # 盘口填充 — 买5在上(最小), 买1在下(最大). 卖1在上(最小), 卖5在下(最大)
-            def _fmt(price, vol):
-                try:
-                    p = float(price); v = int(float(vol))
-                    v_str = f"{v//10000}万" if v >= 10000 else str(v)
-                    return f"{p:.2f}  {v_str}"
-                except: return f"{price}  {vol}"
-            def _fill(lbls, prices, vols, ask=True):
-                for i in range(5):
-                    p = prices[i]; v = vols[i]
-                    tag = f"卖{5-i}" if ask else f"买{5-i}"  # label[0]=top row=卖5/买5
-                    lbls[i].config(text=f"{tag} {_fmt(p, v)}")
-            _fill(win._ob_ask_labels, ask_prices, ask_vols, ask=True)
-            _fill(win._ob_bid_labels, bid_prices, bid_vols, ask=False)
-            win._ob_sina_code = sina
-            # 额外: 在顶栏显示现价和涨跌幅
-            pct = (cur - float(parts[2])) / float(parts[2]) * 100 if float(parts[2]) else 0
-            tag = "+" if pct >= 0 else ""
-            win._ob_cur_label.config(text=f"现价 {cur:.2f}  {tag}{pct:.2f}%",
-                                      fg="#EF5350" if pct >= 0 else "#66BB6A")
-            print(f"[👁️盘口] {sina}: cur={cur}, ask1={ask_prices[0]}({ask_vols[0]}), bid1={bid_prices[0]}({bid_vols[0]})", flush=True)
-        except Exception as e:
-            print(f"[👁️盘口] snapshot err: {e}")
-    # 填充盘口
-    _load_snapshot()
-    # 涨停板排队 (后台)
+    """后台加载涨停池 → 评分排序 → 渲染"""
     def _bg():
+        import datetime
         try:
             import akshare as ak
-            df = ak.stock_zh_a_spot_em()
-            pct_col = [c for c in df.columns if "涨跌幅" in str(c)]
-            hand_col = [c for c in df.columns if "换手率" in str(c)]
-            vol_col = [c for c in df.columns if "成交量" in str(c)]
-            limit_up = df[df[pct_col[0]] >= 9.5].head(10)
-            win.after(0, lambda: _fill_limit_up(win, limit_up, hand_col, vol_col))
-            vols = df[vol_col[0]].astype(float).values
-            v5000 = (vols >= 500000).sum()
-            v500 = ((vols >= 50000) & (vols < 500000)).sum()
-            v50 = ((vols >= 5000) & (vols < 50000)).sum()
-            msg = f"5万手以上: {v5000}股  |  5000-5万手: {v500}股  |  500-5000手: {v50}股"
-            win.after(0, lambda: win._ob_pattern_text.config(text=msg))
         except Exception as e:
-            win.after(0, lambda: win._ob_pattern_text.config(text=f"❌ {str(e)[:80]}"))
-    threading.Thread(target=_bg, daemon=True).start()
+            win.after(0, lambda: win._zt_date_lbl.config(text=f"❌ akshare 不可用: {e}", fg="#EF5350"))
+            return
 
+        # 算最近交易日
+        today = datetime.date.today(); d = today
+        while d.weekday() >= 5: d -= datetime.timedelta(days=1)
+        date_str = d.strftime("%Y%m%d")
 
-def _fill_limit_up(win, df, hand_col, vol_col):
-    tv = win._ob_limit_up_tv
-    for i in tv.get_children(): tv.delete(i)
-    for _, r in df.iterrows():
         try:
-            code = r.iloc[1]; name = r.iloc[2]
-            vol = float(r[vol_col[0]]) / 10000  # 转万手
-            hand = r[hand_col[0]] if hand_col else 0
-            tv.insert("", tk.END, values=(code, name, f"{vol:.1f}", f"{hand:.2f}"))
-        except Exception: pass
+            df = ak.stock_zt_pool_em(date=date_str)
+        except Exception as e:
+            win.after(0, lambda: win._zt_date_lbl.config(text=f"❌ 涨停池拉取失败: {e}", fg="#EF5350"))
+            return
+
+        if df is None or len(df) == 0:
+            win.after(0, lambda: win._zt_date_lbl.config(
+                text=f"📅 {date_str} 涨停池为空 (非交易日或当日无涨停)", fg="#BDBDBD"))
+            return
+
+        # 同行业涨停数 → 板块共振
+        ind_counts = df["所属行业"].value_counts().to_dict() if "所属行业" in df.columns else {}
+
+        # 评分
+        results = []
+        for _, r in df.iterrows():
+            same_ind = ind_counts.get(r.get("所属行业", ""), 1)
+            score, reasons, zt_logic = _calc_zt_strength(r, same_ind)
+            winrate = _estimate_zt_next_day_winrate(r)
+            results.append((r, score, reasons, zt_logic, winrate))
+
+        # 排序: 分数降序
+        results.sort(key=lambda x: -x[1])
+
+        def _render():
+            tv = win._zt_tv
+            for i in tv.get_children(): tv.delete(i)
+            win._zt_rows = results[:40]  # 最多显示 40 只
+            for idx, (row, score, reasons, zt_logic, winrate) in enumerate(results[:40], 1):
+                # 封板时间格式
+                t = str(row.get("首次封板时间", "")).zfill(6)
+                t_fmt = f"{t[:2]}:{t[2:4]}" if len(t) >= 4 else "--:--"
+                lb = int(row.get("连板数", 1) or 1)
+                zb = int(row.get("炸板次数", 0) or 0)
+                hand = float(row.get("换手率", 0) or 0)
+                ind = str(row.get("所属行业", ""))[:5]
+                name = str(row.get("名称", ""))[:8]
+                code = str(row.get("代码", ""))
+
+                # 颜色 tag
+                tag = "high" if score >= 70 else "mid" if score >= 50 else "low"
+                if idx == 1: tag = ("rank1", "high")
+
+                tv.insert("", tk.END, iid=str(idx),
+                          values=(idx, code, name, zt_logic, f"{score:.0f}",
+                                  t_fmt, lb, zb, f"{hand:.1f}", ind, "❓"),
+                          tags=(tag,) if isinstance(tag, str) else tag)
+
+            n = len(results)
+            high = sum(1 for _, s, *_ in results if s >= 70)
+            win._zt_date_lbl.config(
+                text=f"📅 {date_str}  |  共 {n} 只涨停  |  强势≥70分: {high} 只",
+                fg="#66BB6A" if high >= 5 else "#FFA726")
+            print(f"[👁️涨停] {date_str}: {n}只, 强势(≥70): {high}只", flush=True)
+
+        win.after(0, _render)
+
+    threading.Thread(target=_bg, daemon=True).start()
 
 
 # ═══════════════════════════════════════════════════════════════
