@@ -468,6 +468,8 @@ def _open_book_detail(parent, bid):
     except Exception as e:
         messagebox.showerror("错误", f"数据库: {e}"); return
     if not row: return
+    # ⚡ sqlite3.Row 没有 .get() 方法 —— 立刻转 dict
+    row = dict(row)
 
     dlg = tk.Toplevel(parent)
     dlg.title(f"📘 {row['title']} — 书籍详情")
