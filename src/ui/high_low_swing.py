@@ -588,6 +588,7 @@ def _show_swing_knowledge(parent, title, def_text, logic_text, cases_list):
 def show_high_low_swing(parent, app=None):
     """🎯 高抛低吸 (做T专区) — 不联网, Lazy import. 
     app: 主程序实例, 用于从持仓 tab 拿真实持仓股列表"""
+    import threading
     win = tk.Toplevel(parent)
     win.title("🎯 高抛低吸 (做T专区)")
     win.geometry("1280x820")
@@ -1186,25 +1187,24 @@ def show_high_low_swing(parent, app=None):
         _make_school_card(body, sch)
 
     # ── 启动后台线程: 预设成分股 + 新浪批量拉行情 (秒加载) ──
-    import queue as _queue
-    _render_q = _queue.Queue()  # 🆕 线程安全通信
+    # ── 启动后台线程: 预设成分股 + 新浪批量拉行情 ──
+    # 🆕 最简单: 全局 dict + threading.Event, 不走 queue
+    _bg_done = threading.Event()
+    _bg_result = {}  # sname → sectors_data list
 
     def _bg_load_school_hot():
-        import json, ssl, urllib.request, time, numpy as np
+        import json, ssl, urllib.request, time as _time, numpy as np
         ctx = ssl._create_unverified_context()
 
-        # 收集所有代码 (去重)
         all_codes = set()
-        for sec_name_list in [refs["sectors"] for refs in _school_hot_refs.values()]:
-            for sec in sec_name_list:
+        for refs in _school_hot_refs.values():
+            for sec in refs["sectors"]:
                 for c in _SECTOR_STOCKS.get(sec, []):
                     all_codes.add(c)
         all_codes = list(all_codes)
 
+        # 1) 新浪批量实时行情
         sina_data = {}
-        kline_cache = {}
-
-        # 1) 新浪批量实时行情 (0.12s)
         for bi in range(0, len(all_codes), 40):
             batch = all_codes[bi:bi+40]
             try:
@@ -1215,131 +1215,110 @@ def show_high_low_swing(parent, app=None):
                 for line in text.strip().split("\n"):
                     if "=" not in line: continue
                     code = line.split("=")[0].replace("var hq_str_", "")
-                    fields = line.split('"')[1].split(",")
-                    if len(fields) < 5: continue
-                    name = fields[0][:8]
-                    try:
-                        now = float(fields[3]); close = float(fields[2])
-                        pct = (now - close) / close * 100 if close > 0 else 0
-                    except: now = close = pct = 0
-                    sina_data[code] = {"name": name, "pct": round(pct, 2), "close": close}
-            except Exception as e:
-                print(f"[高抛流派] 新浪 batch: {type(e).__name__}", flush=True)
-            time.sleep(0.03)
-        print(f"[高抛流派] 新浪行情 OK {len(sina_data)} 只", flush=True)
+                    f = line.split('"')[1].split(",")
+                    if len(f) < 5: continue
+                    try: pct = (float(f[3]) - float(f[2])) / float(f[2]) * 100 if float(f[2]) > 0 else 0
+                    except: pct = 0
+                    sina_data[code] = {"name": f[0][:8], "pct": round(pct, 2)}
+            except Exception: pass
+            _time.sleep(0.03)
 
         # 2) 新浪日线算 MA
-        def _fetch_kline(code):
+        def _kline(code):
             try:
-                url = ("https://quotes.sina.cn/cn/api/jsonp.php"
-                       f"/var_whk_{code}/CN_MarketData.getKLineData"
+                url = (f"https://quotes.sina.cn/cn/api/jsonp.php/_/CN_MarketData.getKLineData"
                        f"?symbol={code}&scale=240&ma=no&datalen=80")
-                req = urllib.request.Request(url, headers=_EM_HDR)
-                with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=_EM_HDR),
+                                           timeout=6, context=ctx) as resp:
                     txt = resp.read()
                 if b"(" not in txt: return None
                 data = json.loads(txt[txt.index(b"(")+1:txt.rindex(b")")])
-                if not data or len(data) < 20: return None
-                return np.array([float(d["close"]) for d in data])
+                return np.array([float(d["close"]) for d in data]) if data and len(data)>=20 else None
             except: return None
 
+        kline_cache = {}
         for code in all_codes:
-            closes = _fetch_kline(code)
-            if closes is not None: kline_cache[code] = closes
-            time.sleep(0.02)
-        print(f"[高抛流派] 日线 MA OK {len(kline_cache)} 只", flush=True)
+            c = _kline(code)
+            if c is not None: kline_cache[code] = c
+            _time.sleep(0.02)
 
-        # 3) 组装每个流派数据 → 放进 Queue (线程安全)
+        # 3) 组装结果 → 全局 dict
         for sname, refs in _school_hot_refs.items():
-            hot_list = refs["sectors"]
-            sectors_data = []
-            for sec_name in hot_list:
-                leaders = _SECTOR_STOCKS.get(sec_name, [])[:3]
+            sd = []
+            for sec_name in refs["sectors"]:
                 items = []
-                for code in leaders:
+                for code in _SECTOR_STOCKS.get(sec_name, [])[:3]:
                     info = sina_data.get(code)
-                    if info:
-                        # 技术复合标签
-                        pct = info["pct"]
-                        tags = []
-                        if pct >= 2: tags.append("🔥放量")
-                        elif pct <= -2: tags.append("❄️缩量")
-                        tags.append("红盘" if pct >= 0 else "绿盘")
-                        if code in kline_cache:
-                            c = kline_cache[code]
-                            if len(c) >= 5 and c[-1] > np.mean(c[-5:]): tags.append("站上MA5")
-                            if len(c) >= 10 and c[-1] > np.mean(c[-10:]): tags.append("站上MA10")
-                            if len(c) >= 20 and c[-1] > np.mean(c[-20:]): tags.append("站上MA20")
-                            if len(c) >= 10 and np.mean(c[-5:]) > np.mean(c[-10:]): tags.append("MA5>MA10金叉")
-                        items.append((code, info["name"], pct, " | ".join(tags)))
-                if items: sectors_data.append((sec_name, items))
-            # 🆕 只放纯数据进 Queue, 不碰任何 Tk widget
-            _render_q.put((sname, sectors_data))
-        print(f"[高抛流派] ✅ Queue 放好, 等主线程轮询", flush=True)
+                    if not info: continue
+                    pct = info["pct"]
+                    tags = []
+                    if pct >= 2: tags.append("🔥放量")
+                    elif pct <= -2: tags.append("❄️缩量")
+                    tags.append("红盘" if pct >= 0 else "绿盘")
+                    if code in kline_cache:
+                        c = kline_cache[code]
+                        if len(c) >= 5 and c[-1] > np.mean(c[-5:]): tags.append("站上MA5")
+                        if len(c) >= 10 and c[-1] > np.mean(c[-10:]): tags.append("站上MA10")
+                        if len(c) >= 10 and np.mean(c[-5:]) > np.mean(c[-10:]): tags.append("MA5>MA10金叉")
+                    items.append((code, info["name"], pct, " | ".join(tags)))
+                if items: sd.append((sec_name, items))
+            _bg_result[sname] = sd
+        _bg_done.set()
 
     threading.Thread(target=_bg_load_school_hot, daemon=True).start()
 
-    # 🆕 主线程轮询 Queue (安全调用 Tk)
-    def _poll_render():
-        try:
-            while True:
-                sname, sd = _render_q.get_nowait()
-                refs = _school_hot_refs.get(sname)
-                if not refs: continue
+    # 🆕 主线程轮询 — 每 200ms 检查一次 _bg_done
+    _rendered_names = set()
+    def _poll_and_render():
+        # 对已经有结果的流派直接渲染 (主线程安全)
+        for sname, sd in _bg_result.items():
+            if sname in _rendered_names: continue
+            refs = _school_hot_refs.get(sname)
+            if not refs: continue
+            try:
                 body = refs["frame"]
-                try:
-                    for w in body.winfo_children(): w.destroy()
-                    if not sd:
-                        tk.Label(body, text=f"❌ 网络拉不到数据",
-                                 bg=_BG_PANEL, fg=_FG_DIM, font=("", 9)).pack(anchor="w", pady=8)
-                        continue
-                    head = tk.Frame(body, bg=_BG_PANEL)
-                    head.pack(fill=tk.X, pady=(0, 2))
-                    for txt, w in [("#", 22), ("股票", 72), ("涨跌幅", 52), ("技术复合分析", 200)]:
-                        tk.Label(head, text=txt, bg=_BG_PANEL, fg=_FG_GOLD,
-                                 font=("", 9, "bold"), width=w//8, anchor="w").pack(side=tk.LEFT, padx=2)
-                    for sec_name, items in sd:
-                        reason = _SCHOOL_BLOCK_REASON.get(sname, {}).get(sec_name, f"{sname}关注")
-                        r0 = tk.Frame(body, bg="#2A3A5A")
-                        r0.pack(fill=tk.X, pady=(6, 1))
-                        tk.Label(r0, text=f"📌 {sec_name} ({sname}流派)  ⚡ {reason[:52]}",
-                                 bg="#2A3A5A", fg="#80DEEA", font=("", 9, "bold")).pack(anchor="w", padx=4, pady=1)
-                        for n, (code, name, pct, tech) in enumerate(items, 1):
-                            row_bg = "#1B3A3A" if n == 1 else _BG_PANEL
-                            pct_color = _FG_RED if pct >= 0 else _FG_GREEN
-                            row = tk.Frame(body, bg=row_bg, cursor="hand2")
-                            row.pack(fill=tk.X, pady=1)
-                            # 闭包默认参数绑定 — 避免 Python lambda 陷阱
-                            row.bind("<Button-1>", lambda e, _c=code, _nm=name:
-                                     _quick_open_daily_kline(row.winfo_toplevel(), _c, _nm))
-                            tk.Label(row, text=f"{n}", bg=row_bg, fg=_FG_GOLD if n==1 else _FG_DIM,
-                                     font=("", 9, "bold"), width=3, anchor="w").pack(side=tk.LEFT, padx=2)
-                            tk.Label(row, text=name, bg=row_bg, fg="white",
-                                     font=("", 9, "bold"), width=9, anchor="w").pack(side=tk.LEFT, padx=2)
-                            tk.Label(row, text=f"{pct:+.2f}%", bg=row_bg, fg=pct_color,
-                                     font=("", 9, "bold"), width=8, anchor="w").pack(side=tk.LEFT, padx=2)
-                            tk.Label(row, text=tech or "—", bg=row_bg, fg="#CE93D8",
-                                     font=("", 8), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
-                except Exception as ex:
-                    import traceback; traceback.print_exc()
-                    print(f"[高抛流派] render err: {ex}", flush=True)
-        except _queue.Empty:
-            pass
-        # 继续轮询
-        try:
-            for refs in _school_hot_refs.values():
-                if refs["frame"].winfo_exists():
-                    refs["frame"].after(250, _poll_render)
-                    break
-        except Exception:
-            pass
+                for w in body.winfo_children(): w.destroy()
+                if not sd:
+                    tk.Label(body, text="❌ 网络拉不到数据", bg=_BG_PANEL, fg=_FG_DIM,
+                             font=("", 9)).pack(pady=8); continue
+                # 表头
+                tk.Label(body, text="#  股票        涨跌幅   技术复合分析",
+                         bg=_BG_PANEL, fg=_FG_GOLD, font=("", 9, "bold"),
+                         anchor="w").pack(fill=tk.X, padx=4, pady=(0, 2))
+                for sec_name, items in sd:
+                    reason = _SCHOOL_BLOCK_REASON.get(sname, {}).get(sec_name, f"{sname}关注")
+                    r0 = tk.Frame(body, bg="#2A3A5A")
+                    r0.pack(fill=tk.X, pady=(6, 1))
+                    tk.Label(r0, text=f"📌 {sec_name} ({sname})  ⚡ {reason[:52]}",
+                             bg="#2A3A5A", fg="#80DEEA", font=("", 9, "bold"),
+                             anchor="w").pack(fill=tk.X, padx=4, pady=1)
+                    for n, (code, name, pct, tech) in enumerate(items, 1):
+                        row_bg = "#1B3A3A" if n == 1 else _BG_PANEL
+                        pct_color = _FG_RED if pct >= 0 else _FG_GREEN
+                        row = tk.Frame(body, bg=row_bg, cursor="hand2")
+                        row.pack(fill=tk.X, pady=1)
+                        # 点击开日K (用默认参数绑定闭包)
+                        row.bind("<Button-1>", lambda e, _c=code, _nm=name:
+                                 _quick_open_daily_kline(win, _c, _nm))
+                        tk.Label(row, text=f"{n}", bg=row_bg, fg=_FG_GOLD if n==1 else _FG_DIM,
+                                 font=("", 9, "bold"), width=2, anchor="w").pack(side=tk.LEFT, padx=(4,0))
+                        tk.Label(row, text=name, bg=row_bg, fg="white",
+                                 font=("", 9, "bold"), width=9, anchor="w").pack(side=tk.LEFT, padx=2)
+                        tk.Label(row, text=f"{pct:+.2f}%", bg=row_bg, fg=pct_color,
+                                 font=("", 9, "bold"), width=8, anchor="w").pack(side=tk.LEFT, padx=2)
+                        tk.Label(row, text=tech or "—", bg=row_bg, fg="#CE93D8",
+                                 font=("", 8), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
+                _rendered_names.add(sname)
+            except Exception as ex:
+                import traceback; traceback.print_exc()
+        # 继续轮询 (还有没渲染完的 or bg 还没完成)
+        if len(_rendered_names) < len(_school_hot_refs) or not _bg_done.is_set():
+            try:
+                if win.winfo_exists():
+                    win.after(200, _poll_and_render)
+            except Exception: pass
 
-    # 启动主线程轮询 (延迟 300ms 等 frame 全部创建好)
-    try:
-        first_frame = next(iter(_school_hot_refs.values()))["frame"]
-        first_frame.after(300, _poll_render)
-    except Exception:
-        pass
+    win.after(200, _poll_and_render)
 
     # ═══════════════════════════════════════════════
     # 做 T 三层模型 (LabelFrame)
