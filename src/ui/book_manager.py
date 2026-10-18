@@ -493,45 +493,130 @@ def _open_book_detail(parent, bid):
         except Exception as e:
             messagebox.showerror("保存失败", str(e))
 
-    def _ai_fetch():
-        """联网抓取豆瓣/百度百科简介 + AI 生成概要"""
-        from tkinter import messagebox
-        def _bg():
-            summary = _fetch_book_intro_worker(row["title"], row["author"])
-            if not summary:
-                dlg.after(0, lambda: messagebox.showwarning("AI 获取", "网络不通或未找到\n(豆瓣反爬或书名不匹配)"))
-                return
-            # 填回
-            fields = {}
-            for k, v in summary.items():
-                if v: fields[k] = v
-            if not fields:
-                dlg.after(0, lambda: messagebox.showwarning("AI 获取", "没抓到有效内容"))
-                return
-            con = _sqlite3.connect(_DB_PATH)
-            now = _dt.now().strftime("%Y-%m-%d %H:%M")
-            sets = ", ".join(f"{k}=?" for k in fields.keys()) + ", updated_at=?"
-            con.execute(f"UPDATE books SET {sets} WHERE id=?", list(fields.values()) + [now, bid])
-            con.commit(); con.close()
-            def _ok():
-                messagebox.showinfo("AI 获取成功",
-                                    "✅ 已从网络拉取以下字段:\n" +
-                                    "\n".join(f"  • {k}" for k in fields.keys()) +
-                                    "\n\n切换 Tab 查看, 记得到「✏️我的笔记」写自己的读书概要!")
-            dlg.after(0, _ok)
-        _threading.Thread(target=_bg, daemon=True).start()
-
     btn_row = tk.Frame(dlg, bg="#121212"); btn_row.pack(fill=tk.X, padx=6, pady=(0, 4))
-    tk.Button(btn_row, text="🤖 AI/联网 抓取豆瓣+百科", command=_ai_fetch,
-              bg="#7B1FA2", fg="white", font=("", 10, "bold"), padx=10).pack(side=tk.LEFT)
     tk.Button(btn_row, text="💾 保存我的笔记", command=_save,
               bg="#2E7D32", fg="white", font=("", 10, "bold"), padx=10).pack(side=tk.LEFT, padx=8)
+    tk.Button(btn_row, text="🔄 再爬取更新", command=lambda: _do_fetch_background(notify_user=True),
+              bg="#7B1FA2", fg="white", font=("", 10, "bold"), padx=10).pack(side=tk.LEFT)
     tk.Button(btn_row, text="关闭", command=dlg.destroy).pack(side=tk.RIGHT)
 
     dlg.grab_set()
 
-    # ⚠️ 不再自动联网刷新 — 爬不到就爬不到, 直接显示 DB 已有内容
-    # 用户想抓手动点 "🤖 AI/联网 抓取" 按钮即可
+    # ═══ ⚡ 自动联网: DB 里 intro 是空/太短/水话/rating=0 就后台抓 ═══
+    # 抓到后静默刷新弹窗 UI (不用 messagebox), 不打扰用户
+    _intro_now = row["intro"] or ""
+    _rating_now = row["rating"] or 0
+    _need_fetch = (len(_intro_now) < 40) or ("AI/联网没抓到" in _intro_now) or (_rating_now == 0)
+    # ⚠️ 注意: 水话检测不走自动抓 — 因为 smart fallback 已经比水话好,
+    # 自动联网不一定能抓到更好的 (豆瓣很多老书简介就是水话)
+    # 只有 DB 里真的空/太短/rating=0 才自动抓
+
+    def _do_fetch_background(notify_user=False):
+        """后台抓 → 存 DB → 刷新弹窗 UI"""
+        def _bg():
+            try:
+                summary = _fetch_book_intro_worker(row["title"], row["author"])
+                # 过滤: 只存非空有效值
+                fields = {}
+                for k, v in (summary or {}).items():
+                    if v is None: continue
+                    if isinstance(v, str) and not v.strip(): continue
+                    if isinstance(v, float):
+                        if v > 0: fields[k] = v
+                    elif isinstance(v, int):
+                        if v > 0: fields[k] = v
+                    else:
+                        fields[k] = v
+                # 存 DB
+                if fields:
+                    try:
+                        con = _sqlite3.connect(_DB_PATH)
+                        now = _dt.now().strftime("%Y-%m-%d %H:%M")
+                        sets = ", ".join(f"{k}=?" for k in fields.keys()) + ", updated_at=?"
+                        con.execute(f"UPDATE books SET {sets} WHERE id=?",
+                                    list(fields.values()) + [now, bid])
+                        con.commit(); con.close()
+                    except Exception as ex:
+                        print(f"[书籍] fetch db save err: {ex}", flush=True)
+                # 切回主线程刷新 UI
+                def _refresh_ui():
+                    try:
+                        if not dlg.winfo_exists(): return
+                        # 重新读 DB
+                        con2 = _sqlite3.connect(_DB_PATH)
+                        con2.row_factory = _sqlite3.Row
+                        nr = con2.execute("SELECT * FROM books WHERE id=?", (bid,)).fetchone()
+                        con2.close()
+                        if not nr: return
+                        # 刷新 header 副标题
+                        for w in header.winfo_children():
+                            if isinstance(w, tk.Label) and "✍️" in (w.cget("text") or ""):
+                                sp = []
+                                if nr["author"]: sp.append(f"✍️ {nr['author']}")
+                                if nr["rating"] and nr["rating"] > 0: sp.append(f"⭐ {nr['rating']:.1f}")
+                                if nr["pub_year"]: sp.append(f"📅 {nr['pub_year']}")
+                                if nr["pages"]: sp.append(f"📄 {nr['pages']}页")
+                                w.configure(text="  |  ".join(sp))
+                                break
+                        # 刷新 text widget (frame 里第 row_idx 行的 ScrolledText)
+                        def _update_grid_text(frame, row_idx, new_content):
+                            try:
+                                for child in frame.grid_slaves(row=row_idx):
+                                    if not isinstance(child, tk.Frame): continue
+                                    for sub in child.winfo_children():
+                                        try:
+                                            sub.delete("1.0", "end")
+                                            sub.insert("1.0", new_content or "")
+                                        except Exception: pass
+                            except Exception: pass
+                        if "intro" in fields:
+                            _update_grid_text(t1, 0, nr["intro"] or "")
+                        if "highlights" in fields:
+                            _update_grid_text(t1, 1, nr["highlights"] or "")
+                        if "pros" in fields:
+                            _update_grid_text(t2, 0, nr["pros"] or "")
+                        if "cons" in fields:
+                            _update_grid_text(t2, 1, nr["cons"] or "")
+                        if "related" in fields:
+                            _update_grid_text(t2, 2, nr["related"] or "")
+                        if "methods" in fields:
+                            _update_grid_text(t2, 3, nr["methods"] or "")
+                        # 手动按钮才弹通知
+                        if notify_user:
+                            if fields:
+                                messagebox.showinfo("✅ 爬取成功",
+                                    "已从网络拉取:\n" + "\n".join(f"  • {k}" for k in fields.keys()))
+                            else:
+                                messagebox.showwarning("⚠️ 没抓到",
+                                    "网络不通或没找到 (豆瓣反爬)\n\n保持原有内容")
+                    except Exception as ex:
+                        print(f"[书籍] refresh UI err: {ex}", flush=True)
+                        if notify_user:
+                            messagebox.showerror("刷新失败", str(ex))
+                dlg.after(0, _refresh_ui)
+            except Exception as e:
+                print(f"[书籍] fetch bg err: {e}", flush=True)
+                if notify_user:
+                    dlg.after(0, lambda: messagebox.showwarning("爬取失败", str(e)))
+        _threading.Thread(target=_bg, daemon=True).start()
+
+    # 首次自动抓 (静默)
+    if _need_fetch:
+        print(f"[书籍] ⚡ 自动联网抓取 《{row['title']}》", flush=True)
+        _do_fetch_background(notify_user=False)
+
+    def _save():
+        nonlocal row
+        try:
+            s_text = _editors.get("_summary")
+            n_text = _editors.get("_notes")
+            con = _sqlite3.connect(_DB_PATH)
+            con.execute("UPDATE books SET user_summary=?, user_notes=?, updated_at=? WHERE id=?",
+                        (s_text, n_text, _dt.now().strftime("%Y-%m-%d %H:%M"), bid))
+            con.commit(); con.close()
+            messagebox.showinfo("保存", "✅ 笔记已保存")
+        except Exception as e:
+            messagebox.showerror("保存失败", str(e))
 
 
 # 编辑中 — 需要从 _make_labeled_text 里拿到 text widget
