@@ -14656,65 +14656,62 @@ class DapanMixin:
         inner.grid_propagate(False)
 
         cur_row = 0
+        # ── 🆕 表头行 (板块 | 股票 | 涨跌幅 | 词频 | 逻辑) ──
+        head = tk.Frame(inner, bg="#263238")
+        head.grid(row=cur_row, column=0, columnspan=5, sticky="we", padx=2, pady=(6, 2))
+        for txt, w, c in [("板块", 110, "#FFD54F"), ("股票", 100, "white"),
+                          ("涨跌幅", 70, "#A5D6A7"), ("词频", 50, "#80DEEA"),
+                          ("逻辑 / 资讯", 300, "#CE93D8")]:
+            tk.Label(head, text=txt, bg="#263238", fg=c, font=("", 10, "bold"),
+                     width=w//9, anchor="w").pack(side=tk.LEFT, padx=4)
+        cur_row += 1
+
+        seen_blocks = set()
         for blk_name, items in sorted_blocks:
-            # 🆕 板块标题行 (深色条带) — 全部用 place 绝对定位, 避免 pack 覆盖
-            hdr = tk.Frame(inner, bg="#263238", height=32)
-            hdr.grid(row=cur_row, column=0, columnspan=cols, sticky="we", padx=2, pady=(6, 2))
-            hdr.grid_propagate(False)
-            # 左: 板块名
-            tk.Label(hdr, text=f"📌 {blk_name} ({len(items)})", bg="#263238", fg="#FFD54F",
-                     font=("", 11, "bold")).place(x=10, y=6, anchor="w")
-            # 中: 板块逻辑 (固定位置, 截断)
-            tk.Label(hdr, text=BLOCK_LOGIC.get(blk_name, "")[:40], bg="#263238",
-                     fg="#A5D6A7", font=("", 9)).place(x=190, y=8, anchor="w")
-            # 右: 新闻标题
-            arts = _arts(BLOCK_KWS.get(blk_name, []), 1)
-            if arts and arts[0][0]:
-                tk.Label(hdr, text=f"📰 {arts[0][0][:22]}", bg="#263238", fg="#80DEEA",
-                         font=("", 8)).place(relx=1.0, y=8, x=-8, anchor="e")
-            cur_row += 1
-
-            # 邮票 — 用 place 替代 pack, 给徽标留出左上角空间
+            BLOCK_LOGIC = BLOCK_LOGIC  # 外层已定义
             for i, item in enumerate(items):
-                r, c = divmod(i, cols)
+                row_bg = "#1B3A3A" if i == 0 else "#1E1E2E"  # 板块首行高亮
+                row = tk.Frame(inner, bg=row_bg, cursor="hand2")
+                row.grid(row=cur_row, column=0, columnspan=5, sticky="we", padx=2, pady=1)
+                row.grid_propagate(False)
                 pct = item["pct"]
-                bg = "#C62828" if pct > 0.5 else "#2E7D32" if pct < -0.5 else "#37474F"
-                stamp = tk.Frame(inner, bg=bg, width=CELL_W, height=CELL_H,
-                                 highlightthickness=1, highlightbackground="#455A64", cursor="hand2")
-                stamp.grid(row=cur_row + r, column=c, padx=PAD // 2, pady=PAD // 2, sticky="nw")
-                stamp.grid_propagate(False)
-                # 用 place 放邮票内容 — 给 freq 徽标留左上 24x16 空间
-                tk.Label(stamp, text=item["name"], bg=bg, fg="white",
-                         font=("Helvetica", 10, "bold")).place(x=4, y=20, anchor="nw")
-                tk.Label(stamp, text=f"{pct:+.2f}%", bg=bg, fg="white",
-                         font=("Helvetica", 10, "bold")).place(relx=0.5, rely=1.0,
-                                                                x=0, y=-4, anchor="s")
-                if item["freq"] >= 3:
-                    fbg = "#FF6F00" if item["freq"] >= 10 else "#EF5350" if item["freq"] >= 5 else "#FF8A65"
-                    freq_lbl = tk.Label(stamp, text=str(item["freq"]), bg=fbg, fg="white",
-                                        font=("Helvetica", 8, "bold"), padx=4, pady=0)
-                    freq_lbl.place(x=2, y=2, anchor="nw")
-                stamp._stamp = item
-                stamp._last_click = {"time": 0}
-                name_lbl = stamp.winfo_children()[0] if stamp.winfo_children() else None
-                pct_lbl = stamp.winfo_children()[-1] if len(stamp.winfo_children()) > 1 else None
-                def _bind_all(w):
-                    pass  # 下面统一绑定
-                _bind_all(stamp)
-
-            # 统一绑定事件到所有 stamp (复用原 _show_stamp_hover / _stamp_on_click)
-            for child in inner.winfo_children():
-                if not hasattr(child, '_stamp'): continue
-                def _bind_everything(w):
-                    for c in w.winfo_children(): _bind_everything(c)
-                    try:
-                        it = w.master._stamp if hasattr(w.master, '_stamp') else None
-                        if it is not None and w is not w.master:
-                            w.bind("<Motion>", lambda e, it=it, src=source: self._show_stamp_hover(e, src, it))
-                            w.bind("<Leave>", lambda e, src=source: self._hide_stamp_hover(src))
-                            w.bind("<Button-1>", lambda e, it=it, stamp=w.master: self._stamp_on_click(e, stamp, it))
-                    except Exception: pass
-                _bind_everything(child)
+                pct_color = "#EF5350" if pct >= 0 else "#66BB6A"
+                freq = item.get("freq", 0)
+                # 第1列: 板块名 (每板块只在首行显示, 合并视觉)
+                if blk_name not in seen_blocks:
+                    tk.Label(row, text=f" {blk_name}", bg=row_bg, fg="#FFD54F",
+                             font=("", 10, "bold"), width=12, anchor="w").pack(side=tk.LEFT, padx=4)
+                    seen_blocks.add(blk_name)
+                else:
+                    tk.Label(row, text=" ", bg=row_bg, width=12, anchor="w").pack(side=tk.LEFT, padx=4)
+                # 第2列: 股票名
+                tk.Label(row, text=item["name"], bg=row_bg, fg="white",
+                         font=("", 10, "bold"), width=12, anchor="w").pack(side=tk.LEFT, padx=2)
+                # 第3列: 涨跌幅
+                tk.Label(row, text=f"{pct:+.2f}%", bg=row_bg, fg=pct_color,
+                         font=("", 10, "bold"), width=8, anchor="w").pack(side=tk.LEFT, padx=2)
+                # 第4列: 词频徽标 (≥3才显示)
+                if freq >= 3:
+                    fbg = "#FF6F00" if freq >= 10 else "#EF5350" if freq >= 5 else "#FF8A65"
+                    tk.Label(row, text=f"🔥{freq}", bg=fbg, fg="white",
+                             font=("", 9, "bold"), padx=3, pady=0).pack(side=tk.LEFT, padx=2)
+                else:
+                    tk.Label(row, text="  ", bg=row_bg, width=5).pack(side=tk.LEFT, padx=2)
+                # 第5列: 板块逻辑 (首行显示)
+                if i == 0:
+                    logic_text = BLOCK_LOGIC.get(blk_name, "")[:55]
+                    arts = _arts(BLOCK_KWS.get(blk_name, []), 1)
+                    if arts and arts[0][0]:
+                        logic_text = f"{logic_text}  |  📰 {arts[0][0][:22]}"
+                    tk.Label(row, text=logic_text, bg=row_bg, fg="#A5D6A7",
+                             font=("", 9), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
+                cur_row += 1
+                row._stamp = item
+                row.bind("<Button-1>", lambda e, it=item, stamp=row, src=source: self._stamp_on_click(e, stamp, it))
+                for c in row.winfo_children():
+                    c.bind("<Button-1>", lambda e, it=item, stamp=row, src=source: self._stamp_on_click(e, stamp, it))
+                    c.bind("<Motion>", lambda e, it=item, src=source: self._show_stamp_hover(e, src, it))
+                    c.bind("<Leave>", lambda e, src=source: self._hide_stamp_hover(src))
 
         # 强制刷新 scrollregion
         inner.update_idletasks()
