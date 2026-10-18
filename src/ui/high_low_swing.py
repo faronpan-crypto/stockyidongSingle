@@ -24,6 +24,30 @@ _FG_TEXT = "#E0E0E0"
 _FG_DIM = "#9E9E9E"
 
 # ── 5 大流派数据 ──
+# hot_sectors: 该流派最适合分析的板块 (匹配 akshare stock_zt_pool_em 的「所属行业」字段)
+# sector_keys: 行业关键词匹配 (更宽松)
+_SCHOOL_HOT = {
+    "形态学": {
+        "hot_sectors": ["半导体及元件", "新能源", "光伏设备", "医疗器械"],
+        "tag": "反转/底部形态"
+    },
+    "周期论": {
+        "hot_sectors": ["白酒", "食品饮料", "银行", "保险"],
+        "tag": "中枢/背驰延续"
+    },
+    "技术指标": {
+        "hot_sectors": ["通信设备", "互联网服务", "半导体及元件", "证券"],
+        "tag": "金叉/死叉信号密集"
+    },
+    "资金面": {
+        "hot_sectors": ["白酒", "银行", "保险", "新能源", "煤炭能源"],
+        "tag": "北向/主力偏好"
+    },
+    "算法量化": {
+        "hot_sectors": ["半导体及元件", "通信设备", "证券", "新能源"],
+        "tag": "高波动/高频首选"
+    },
+}
 _SCHOOLS = [
     {
         "icon": "🔵",
@@ -928,19 +952,27 @@ def show_high_low_swing(parent, app=None):
     # ═══════════════════════════════════════════════
     # 5 大流派卡片 (在 body 里)
     # ═══════════════════════════════════════════════
-    def _make_school_card(parent, data):
-        """创建一个流派卡片, 带 ❓ 按钮"""
+    def _make_school_card(parent, data, row_idx):
+        """两列 grid 布局: 左流派分析 + 右 Top3 板块×每板块 Top3 股票"""
+        name = data["name"]
+        hot_info = _SCHOOL_HOT.get(name, {})
+        hot_sectors = hot_info.get("hot_sectors", [])
+        hot_tag = hot_info.get("tag", "")
+
         card = tk.Frame(parent, bg=_BG_CARD, highlightbackground=_FG_BLUE, highlightthickness=1)
-        card.pack(fill=tk.X, padx=4, pady=3)
+        card.grid(row=row_idx, column=0, sticky="we", padx=4, pady=3)
+        parent.grid_columnconfigure(0, weight=1)
+
+        # ── 左列: 流派分析 (固定宽度, 至少撑住右列) ──
+        left = tk.Frame(card, bg=_BG_CARD); left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # 标题行
-        title_row = tk.Frame(card, bg=_BG_CARD); title_row.pack(fill=tk.X, padx=8, pady=(8, 2))
+        title_row = tk.Frame(left, bg=_BG_CARD); title_row.pack(fill=tk.X, padx=8, pady=(8, 2))
         title_lbl = tk.Label(title_row, text=f"{data['icon']} {data['name']}", bg=_BG_CARD,
                              fg=_FG_GOLD, font=("", _fs_title(), "bold"))
         title_lbl.pack(side=tk.LEFT)
         _font_widgets.append((title_lbl, "title"))
 
-        # ❓ 按钮
         def _on_knowledge():
             _show_swing_knowledge(win, f"{data['icon']} {data['name']}",
                                  data["definition"], data["logic"], data["cases"])
@@ -948,30 +980,27 @@ def show_high_low_swing(parent, app=None):
         tk.Button(title_row, text="❓", command=_on_knowledge,
                   bg=_FG_BLUE, fg=_BG_DEEP, font=("", 11, "bold"),
                   width=2, relief=tk.FLAT, cursor="hand2").pack(side=tk.RIGHT)
-
-        # 🩺 诊断按钮 — 弹 1min K 线 + 流派专属分析
         tk.Button(title_row, text="🩺诊断",
                   command=lambda _m=data["name"]: _diagnose_1min(diagnose_mode=_m),
                   bg="#00695C", fg="white", font=("", 8, "bold"),
                   padx=4, pady=0, cursor="hand2").pack(side=tk.RIGHT, padx=2)
 
         # tagline
-        tk.Label(card, text=data["tagline"], bg=_BG_CARD, fg=_FG_DIM,
+        tk.Label(left, text=data["tagline"], bg=_BG_CARD, fg=_FG_DIM,
                  font=("", _fs_sm())).pack(anchor="w", padx=8)
 
-        tk.Frame(card, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=8, pady=4)
+        tk.Frame(left, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=8, pady=4)
 
         # 核心信号
-        _row(card, "🧠 核心信号:", data["core"], _FG_TEXT, _font_widgets)
-        # 工具/指标
-        _row(card, "🛠️ 工具/指标:", data["tools"], _FG_BLUE, _font_widgets)
+        _row(left, "🧠 核心信号:", data["core"], _FG_TEXT, _font_widgets)
+        _row(left, "🛠️ 工具/指标:", data["tools"], _FG_BLUE, _font_widgets)
+
         # 今日信号 + 置信度
-        signal_row = tk.Frame(card, bg=_BG_CARD); signal_row.pack(fill=tk.X, padx=8, pady=3)
+        signal_row = tk.Frame(left, bg=_BG_CARD); signal_row.pack(fill=tk.X, padx=8, pady=3)
         tk.Label(signal_row, text="📡 今日信号:", bg=_BG_CARD, fg=_FG_DIM,
                  font=("", _fs_sm())).pack(side=tk.LEFT)
         tk.Label(signal_row, text=data["today_signal"], bg=_BG_CARD, fg=_FG_TEXT,
                  font=("", _fs(), "bold")).pack(side=tk.LEFT, padx=6)
-        # 置信度进度条
         conf = data["confidence"]
         conf_bar_bg = tk.Frame(signal_row, bg=_BG_PANEL, height=16, width=120)
         conf_bar_bg.pack(side=tk.LEFT, padx=6)
@@ -982,27 +1011,157 @@ def show_high_low_swing(parent, app=None):
                  font=("", _fs_sm(), "bold")).pack(side=tk.LEFT, padx=4)
 
         # 操作建议
-        advice_row = tk.Frame(card, bg=_BG_CARD); advice_row.pack(fill=tk.X, padx=8, pady=(3, 8))
+        advice_row = tk.Frame(left, bg=_BG_CARD); advice_row.pack(fill=tk.X, padx=8, pady=(3, 8))
         tk.Label(advice_row, text="💡 操作建议:", bg=_BG_CARD, fg=_FG_DIM,
                  font=("", _fs_sm())).pack(side=tk.LEFT)
         tk.Label(advice_row, text=data["advice"], bg=_BG_CARD, fg=data["advice_color"],
                  font=("", _fs(), "bold")).pack(side=tk.LEFT, padx=6)
 
-    # 流派卡片函数内 helper
+        # ── 右列: 🎯 推荐板块 × 每板块 Top3 股票 (固定宽度 340) ──
+        right = tk.Frame(card, bg=_BG_PANEL, width=340, highlightbackground=_FG_GOLD,
+                         highlightthickness=1)
+        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 0))
+        right.pack_propagate(False)
+
+        # 右列标题
+        r_title = tk.Frame(right, bg=_BG_PANEL); r_title.pack(fill=tk.X, padx=6, pady=(6, 2))
+        tk.Label(r_title, text=f"🎯 {name} 热榜", bg=_BG_PANEL, fg=_FG_GOLD,
+                 font=("", 10, "bold")).pack(side=tk.LEFT)
+        tk.Label(r_title, text=hot_tag, bg=_BG_PANEL, fg=_FG_DIM,
+                 font=("", 8)).pack(side=tk.LEFT, padx=6)
+
+        r_body = tk.Frame(right, bg=_BG_PANEL); r_body.pack(fill=tk.BOTH, expand=True, padx=6, pady=2)
+
+        # 种子渲染 — 先秒出 3 个板块×3 个股票占位
+        _render_seed_places(r_body, hot_sectors)
+
+        # 存引用, 后台线程刷新时用
+        _school_hot_refs[name] = {
+            "frame": r_body,
+            "sectors": hot_sectors,
+        }
+
     def _row(parent, label, value, color, widgets_list):
         r = tk.Frame(parent, bg=_BG_CARD); r.pack(fill=tk.X, padx=8, pady=2)
         tk.Label(r, text=label, bg=_BG_CARD, fg=_FG_DIM, font=("", _fs_sm())).pack(side=tk.LEFT)
-        v = tk.Label(r, text=value, bg=_BG_CARD, fg=color, font=("", _fs()), wraplength=800, justify=tk.LEFT)
+        v = tk.Label(r, text=value, bg=_BG_CARD, fg=color, font=("", _fs()), wraplength=600, justify=tk.LEFT)
         v.pack(side=tk.LEFT, padx=6)
         widgets_list.append((v, "body"))
+
+    def _render_seed_places(body, hot_sectors):
+        """种子占位 — 后台数据到了会覆盖"""
+        tk.Label(body, text="⏳ 加载当日涨停池...", bg=_BG_PANEL, fg=_FG_DIM,
+                 font=("", 9)).pack(anchor="w", pady=8)
+        for ind in hot_sectors[:3]:
+            sf = tk.Frame(body, bg=_BG_PANEL); sf.pack(fill=tk.X, pady=2)
+            tk.Label(sf, text=f"📌 {ind}", bg=_BG_PANEL, fg=_FG_GOLD,
+                     font=("", 9, "bold")).pack(anchor="w")
+            tk.Label(sf, text="  · · · 等待涨停池数据 · · ·", bg=_BG_PANEL, fg=_FG_DIM,
+                     font=("", 8)).pack(anchor="w")
+
+    # ── 流派数据引用 dict — 给后台线程分发 ──
+    _school_hot_refs = {}
 
     # 流派标题
     tk.Label(body, text="🏛️ 五大流派信号扫描", bg=_BG_DEEP, fg=_FG_GOLD,
              font=("", _fs_title() + 2, "bold")).pack(anchor="w", padx=10, pady=(8, 2))
     tk.Frame(body, bg=_FG_GOLD, height=2).pack(fill=tk.X, padx=10, pady=(0, 6))
 
-    for sch in _SCHOOLS:
-        _make_school_card(body, sch)
+    for i, sch in enumerate(_SCHOOLS):
+        _make_school_card(body, sch, i)
+
+    # ── 启动后台线程: 拉 akshare 涨停池 → 分发给每个流派 ──
+    def _bg_load_school_hot():
+        import threading
+        import datetime
+        try:
+            import akshare as ak
+            today = datetime.date.today(); d = today
+            while d.weekday() >= 5: d -= datetime.timedelta(days=1)
+            date_str = d.strftime("%Y%m%d")
+            df = ak.stock_zt_pool_em(date=date_str)
+        except Exception as e:
+            print(f"[高抛流派] akshare 拉取失败: {e}, 用种子", flush=True)
+            return
+        if df is None or len(df) == 0:
+            print("[高抛流派] 涨停池空, 用种子", flush=True); return
+
+        # 同行业涨停数
+        ind_counts = df["所属行业"].value_counts().to_dict() if "所属行业" in df.columns else {}
+
+        # 评分 (复用之前的 _calc_zt_strength)
+        # 用简化版: 涨停数 + 连板 + 封板时间
+        results = []
+        for _, r in df.iterrows():
+            ind = str(r.get("所属行业", ""))
+            lb = int(r.get("连板数", 1) or 1)
+            t_str = str(r.get("首次封板时间", "150000")).zfill(6)
+            hhmm = int(t_str[:4]) if len(t_str) >= 4 else 1500
+            score = lb * 10 + (12 if hhmm <= 930 else 8 if hhmm <= 1030 else 3)
+            results.append((r, score, ind))
+
+        # 按流派 hot_sectors 过滤 + 取每板块 Top3 股票 + 跨板块排序取 Top3 板块
+        def _match_sector(row_ind, hot_list):
+            for h in hot_list:
+                if h in row_ind or row_ind in h: return True
+            return False
+
+        for sname, refs in _school_hot_refs.items():
+            hot_list = refs["sectors"]
+            # 过滤匹配板块的股票
+            matched = [(r, sc, ind) for (r, sc, ind) in results if _match_sector(ind, hot_list)]
+            if not matched: continue
+            # 按板块分组
+            by_sector = {}
+            for r, sc, ind in matched:
+                by_sector.setdefault(ind, []).append((r, sc))
+            # 板块内按分数排序取 Top3, 板块按股票数×均分排序取 Top3
+            sector_rank = []
+            for ind, items in by_sector.items():
+                items.sort(key=lambda x: -x[1])
+                top3 = items[:3]
+                avg_s = sum(x[1] for x in top3) / max(len(top3), 1)
+                sector_rank.append((ind, top3, len(items), avg_s))
+            sector_rank.sort(key=lambda x: -x[2] * x[3])
+            top_sectors = sector_rank[:3]
+
+            # 切回主线程渲染
+            def _render(_sectors=top_sectors, _body=refs["frame"]):
+                for w in _body.winfo_children(): w.destroy()
+                if not _sectors:
+                    tk.Label(_body, text="❌ 今日涨停无匹配板块",
+                             bg=_BG_PANEL, fg=_FG_DIM, font=("", 9)).pack(anchor="w", pady=8)
+                    return
+                for ind, top3, n_stk, avg_s in _sectors:
+                    sf = tk.Frame(_body, bg=_BG_PANEL); sf.pack(fill=tk.X, pady=(4, 2))
+                    tk.Label(sf, text=f"📌 {ind}  ({n_stk}只均分{avg_s:.0f})", bg=_BG_PANEL,
+                             fg=_FG_GOLD, font=("", 9, "bold")).pack(anchor="w")
+                    for n, (row, sc) in enumerate(top3, 1):
+                        name = str(row.get("名称", ""))[:8]
+                        lb = int(row.get("连板数", 1) or 1)
+                        t = str(row.get("首次封板时间", "")).zfill(6)
+                        t_fmt = f"{t[:2]}:{t[2:4]}" if len(t) >= 4 else "--:--"
+                        code = str(row.get("代码", ""))
+                        row_bg = "#37474F" if n > 1 else "#004D40"
+                        sf2 = tk.Frame(sf, bg=row_bg, cursor="hand2")
+                        sf2.pack(fill=tk.X, pady=1)
+                        sf2.bind("<Button-1>", lambda e, _c=code, _nm=name:
+                                 _quick_open_daily_kline(win.winfo_toplevel(), _c, _nm))
+                        tk.Label(sf2, text=f" {n}  {name}", bg=row_bg, fg="white",
+                                 font=("", 9, "bold")).pack(side=tk.LEFT, padx=4)
+                        tk.Label(sf2, text=f"{lb}板  {t_fmt}  分{sc:.0f}", bg=row_bg, fg="#FFD54F",
+                                 font=("", 8)).pack(side=tk.LEFT, padx=2)
+                        tk.Label(sf2, text="双击→日K", bg=row_bg, fg=_FG_DIM,
+                                 font=("", 8)).pack(side=tk.RIGHT, padx=4)
+                        for w in sf2.winfo_children(): w.bind("<Button-1>", lambda e, _c=code, _nm=name:
+                                 _quick_open_daily_kline(win.winfo_toplevel(), _c, _nm))
+            _body.update_idletasks()
+
+            win.after(0, _render)
+
+        print(f"[高抛流派] akshare 分发给 {len(_school_hot_refs)} 个流派卡片", flush=True)
+
+    threading.Thread(target=_bg_load_school_hot, daemon=True).start()
 
     # ═══════════════════════════════════════════════
     # 做 T 三层模型 (LabelFrame)
@@ -2164,4 +2323,187 @@ def _show_multi_kline_comparison(parent_root, app=None):
         print(f"[🔍多股] ✅ 渲染完成 {len(codes)} 个", flush=True)
 
     dlg.after(300, lambda: (None))  # 延迟显示
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 📊 简化版日K线弹窗 (双击股票时弹) — 支持 60min/日/周/月 切换
+# 数据源: 新浪 CN_MarketData.getKLineData
+# ═════════════════════════════════════════════════════════════════════════
+
+def _quick_open_daily_kline(parent, code6, name):
+    """双击股票弹日K线 — 轻量版, 支持周期切换"""
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+    import requests
+    import numpy as np
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+
+    # 补 sina 前缀
+    ex_map = ("sh" if code6.startswith("6") else "bj" if code6.startswith(("4", "8")) else "sz")
+    sina_code = f"{ex_map}{code6}"
+
+    dlg = tk.Toplevel(parent)
+    dlg.title(f"📊 {name}({code6}) 日K线")
+    dlg.geometry("1100x720")
+    dlg.configure(bg=_BG_DEEP)
+
+    # 顶栏: 周期切换
+    top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=42); top.pack(fill=tk.X)
+    top.pack_propagate(False)
+    tk.Label(top, text=f"📊 {name} ({code6})", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+             font=("", 11, "bold")).pack(side=tk.LEFT, padx=10, pady=8)
+
+    period_var = tk.StringVar(value="day")
+    for txt, val in [("60分", "60"), ("日线", "day"), ("周线", "week"), ("月线", "month")]:
+        tk.Radiobutton(top, text=txt, variable=period_var, value=val,
+                       bg=_BG_TOOLBAR, fg="white", selectcolor=_BG_DEEP,
+                       activebackground=_BG_TOOLBAR, activeforeground="white",
+                       command=lambda: _reload()).pack(side=tk.LEFT, padx=6)
+
+    status = tk.Label(top, text="⏳ 加载中...", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9))
+    status.pack(side=tk.RIGHT, padx=10)
+
+    fig = Figure(figsize=(12, 7.2), facecolor=_BG_DEEP, dpi=100)
+    canvas = FigureCanvasTkAgg(fig, master=dlg)
+    canvas.get_tk_widget().configure(bg=_BG_DEEP)
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    tb = NavigationToolbar2Tk(canvas, dlg); tb.update()
+    try: tb.pdestroy()
+    except Exception: pass
+    try: tb = None
+    except Exception: pass
+
+    # 缓存
+    _cache = {"data": None, "period": None}
+
+    def _fetch(period):
+        try:
+            scale_map = {"60": "60", "day": "240", "week": "240", "month": "240"}
+            scale = scale_map.get(period, "240")
+            url = f"https://quotes.sina.cn/cn/api/jsonp.php/var{np.random.randint(999)}/CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen=240"
+            r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code != 200: return None
+            txt = r.text[r.text.index("(") + 1:r.text.rindex(")")]
+            import json
+            data = json.loads(txt)
+            if not data: return None
+            # 日线: pandas resample 合成周/月
+            if period in ("week", "month"):
+                import pandas as pd
+                df = pd.DataFrame(data)
+                df["day"] = pd.to_datetime(df["day"])
+                df = df.sort_values("day")
+                for col in ("open", "close", "high", "low", "volume"):
+                    df[col] = df[col].astype(float)
+                rule = "W-MON" if period == "week" else "ME"
+                agg = {"open": "first", "close": "last", "high": "max", "low": "min", "volume": "sum"}
+                df2 = df.set_index("day").resample(rule).agg(agg).dropna()
+                df2 = df2.reset_index()
+                df2["day"] = df2["day"].dt.strftime("%Y-%m-%d")
+                data = df2.to_dict("records")
+            return data
+        except Exception as e:
+            print(f"[日K] fetch err: {e}", flush=True); return None
+
+    def _ma(arr, n):
+        cs = np.cumsum(arr)
+        out = np.full(len(arr), np.nan)
+        out[n - 1:] = (cs[n - 1:] - np.concatenate([[0], cs[:-n]])) / n
+        return out
+
+    def _draw(data, period):
+        nonlocal canvas, fig
+        try:
+            fig.clear()
+            closes = np.array([float(d["close"]) for d in data])
+            opens = np.array([float(d["open"]) for d in data])
+            highs = np.array([float(d["high"]) for d in data])
+            lows = np.array([float(d["low"]) for d in data])
+            vols = np.array([float(d.get("volume", 0)) for d in data])
+            dates = [d["day"] for d in data]
+            n = len(closes)
+            x = np.arange(n)
+
+            # 主图 (蜡烛)
+            ax1 = fig.add_axes([0.08, 0.30, 0.88, 0.55], facecolor=_BG_PANEL)
+            ma5 = _ma(closes, 5); ma10 = _ma(closes, 10)
+            ma20 = _ma(closes, 20); ma60 = _ma(closes, 60)
+
+            # 蜡烛 (简化 stub: 高低竖线 + 开收盘方块)
+            w = 0.6
+            for i in range(n):
+                c = closes[i]; o = opens[i]; h = highs[i]; l = lows[i]
+                col = "#EF5350" if c < o else "#66BB6A"
+                ax1.plot([x[i], x[i]], [l, h], color=col, linewidth=0.8)
+                ax1.bar(x[i], abs(c - o), bottom=min(c, o), width=w, color=col, edgecolor=col)
+
+            ax1.plot(x, ma5, color="#FF8A65", lw=0.9, label="MA5")
+            ax1.plot(x, ma10, color="#42A5F5", lw=0.9, label="MA10")
+            ax1.plot(x, ma20, color="#AB47BC", lw=0.9, label="MA20")
+            ax1.plot(x, ma60, color="#EF5350", lw=1.0, label="MA60")
+            ax1.legend(loc="upper left", fontsize=8, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
+            ax1.set_facecolor(_BG_PANEL)
+            for spine in ax1.spines.values(): spine.set_color(_FG_DIM)
+            ax1.tick_params(colors=_FG_DIM, labelsize=8)
+            # x 轴: 每 20 根显示日期
+            step = max(1, n // 8)
+            ticks = list(range(0, n, step))
+            ax1.set_xticks(ticks); ax1.set_xticklabels([dates[i][-5:] for i in ticks], rotation=30)
+
+            # 副图 1: 成交量
+            ax2 = fig.add_axes([0.08, 0.16, 0.88, 0.13], facecolor=_BG_PANEL, sharex=ax1)
+            colors = ["#EF5350" if closes[i] < opens[i] else "#66BB6A" for i in range(n)]
+            ax2.bar(x, vols, color=colors, width=w)
+            ax2.set_facecolor(_BG_PANEL)
+            for spine in ax2.spines.values(): spine.set_color(_FG_DIM)
+            ax2.tick_params(colors=_FG_DIM, labelsize=7)
+            ax2.set_ylabel("VOL", color=_FG_DIM, fontsize=8)
+
+            # 副图 2: MACD
+            ax3 = fig.add_axes([0.08, 0.04, 0.88, 0.11], facecolor=_BG_PANEL, sharex=ax1)
+            ema12 = np.array(closes)
+            ema26 = np.array(closes)
+            for i in range(1, n):
+                ema12[i] = closes[i] * 2 / 13 + ema12[i - 1] * (1 - 2 / 13)
+                ema26[i] = closes[i] * 2 / 27 + ema26[i - 1] * (1 - 2 / 27)
+            dif = ema12 - ema26
+            dea = np.array(dif)
+            for i in range(1, n): dea[i] = dif[i] * 2 / 10 + dea[i - 1] * (1 - 2 / 10)
+            hist = 2 * (dif - dea)
+            h_colors = ["#EF5350" if h >= 0 else "#66BB6A" for h in hist]
+            ax3.bar(x, hist, color=h_colors, width=w)
+            ax3.plot(x, dif, color="#42A5F5", lw=0.8, label="DIF")
+            ax3.plot(x, dea, color="#FFB74D", lw=0.8, label="DEA")
+            ax3.axhline(y=0, color=_FG_DIM, lw=0.6)
+            ax3.set_facecolor(_BG_PANEL)
+            for spine in ax3.spines.values(): spine.set_color(_FG_DIM)
+            ax3.tick_params(colors=_FG_DIM, labelsize=7)
+            ax3.set_ylabel("MACD", color=_FG_DIM, fontsize=8)
+
+            # 标题
+            last_p = closes[-1] if n else 0
+            chg = (closes[-1] / closes[-2] - 1) * 100 if n > 1 else 0
+            ax1.set_title(f"{name} ({code6})  {period}K  最新 {last_p:.2f}  {chg:+.2f}%",
+                          color=_FG_GOLD, fontsize=11, pad=8)
+
+            fig.subplots_adjust(hspace=0.05, wspace=0.02)
+            canvas.draw()
+            status.config(text=f"✅ {len(data)} 根 {period}K, 最新 {dates[-1]}", fg="#66BB6A")
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            status.config(text=f"❌ 渲染失败: {e}", fg="#EF5350")
+
+    def _reload():
+        period = period_var.get()
+        status.config(text=f"⏳ 加载 {period}K...", fg=_FG_DIM)
+        def _bg():
+            d = _fetch(period)
+            dlg.after(0, lambda: _draw(d, period) if d else
+                      status.config(text="❌ 拉取失败 (网络/非交易时段)", fg="#EF5350"))
+        import threading
+        threading.Thread(target=_bg, daemon=True).start()
+
+    _reload()
+    dlg.grab_set()
     return dlg
