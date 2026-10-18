@@ -2560,7 +2560,7 @@ def _quick_open_daily_kline(parent, code6, name):
              font=("", 11, "bold")).pack(side=tk.LEFT, padx=10, pady=8)
 
     period_var = tk.StringVar(value="day")
-    for txt, val in [("60分", "60"), ("日线", "day"), ("周线", "week"), ("月线", "month")]:
+    for txt, val in [("分时", "minute"), ("60分", "60"), ("日线", "day"), ("周线", "week"), ("月线", "month")]:
         tk.Radiobutton(top, text=txt, variable=period_var, value=val,
                        bg=_BG_TOOLBAR, fg="white", selectcolor=_BG_DEEP,
                        activebackground=_BG_TOOLBAR, activeforeground="white",
@@ -2606,6 +2606,17 @@ def _quick_open_daily_kline(parent, code6, name):
 
     def _fetch(period):
         try:
+            if period == "minute":
+                # 🆕 分时图: 新浪 intraday 接口
+                url = f"https://quotes.sina.cn/cn/api/jsonp.php/_/CN_MarketData.getKLineData?symbol={sina_code}&scale=1&ma=no&datalen=240"
+                r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+                if r.status_code != 200: return None
+                txt = r.text[r.text.index("(") + 1:r.text.rindex(")")]
+                import json
+                data = json.loads(txt)
+                if not data: return None
+                return data
+
             scale_map = {"60": "60", "day": "240", "week": "240", "month": "240"}
             scale = scale_map.get(period, "240")
             url = f"https://quotes.sina.cn/cn/api/jsonp.php/var{np.random.randint(999)}/CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen=240"
@@ -2934,14 +2945,8 @@ def _quick_open_daily_kline(parent, code6, name):
         if not pats:
             canvas.draw(); return
 
-        # 找到 ax1 主图 (第一个 axes)
-        ax_main = None
-        for ax in fig.axes:
-            if ax.get_ylabel() == "":  # 主图没 ylabel
-                ax_main = ax; break
-        if ax_main is None and len(fig.axes) > 0:
-            ax_main = fig.axes[0]
-
+        # 硬编码: fig.add_axes 的第一个 axes ([0.08, 0.30, 0.88, 0.55]) 就是 ax1 主图
+        ax_main = fig.axes[0] if fig.axes else None
         if ax_main is None: return
 
         for p in pats:
@@ -2967,6 +2972,11 @@ def _quick_open_daily_kline(parent, code6, name):
         if not want_candle and not want_futures:
             _analysis_frame.pack_forget()
             dlg.geometry("1100x720"); return
+        # 分时图不支持蜡烛形态 (没有 open/high/low 的蜡烛结构)
+        current_period = period_var.get()
+        if current_period == "minute" and want_candle:
+            candle_var.set(False); want_candle = False
+            messagebox.showinfo("提示", "分时图不支持蜡烛形态分析, 请切换到日线/60分等周期")
         # 需要数据
         data = _cache.get("data")
         if not data:
@@ -3005,6 +3015,15 @@ def _quick_open_daily_kline(parent, code6, name):
 
     def _draw(data, period):
         nonlocal canvas, fig
+        # 清除旧标注
+        global _mark_handles
+        try:
+            for h in _mark_handles:
+                try: h.remove()
+                except: pass
+        except Exception: pass
+        _mark_handles = []
+
         try:
             fig.clear()
             closes = np.array([float(d["close"]) for d in data])
@@ -3016,7 +3035,48 @@ def _quick_open_daily_kline(parent, code6, name):
             n = len(closes)
             x = np.arange(n)
 
-            # 主图 (蜡烛)
+            # ── 分时图特殊处理 (折线 + 均价线 + 前收盘参考) ──
+            if period == "minute":
+                ax1 = fig.add_axes([0.08, 0.28, 0.88, 0.58], facecolor=_BG_PANEL)
+                # 前收盘价 (今天第一根的 open 或昨日收盘)
+                prev_close = opens[0] if opens[0] > 0 else closes[0]
+                avg_price = np.cumsum(closes * vols) / np.maximum(np.cumsum(vols), 1)
+                # 蓝线=价格, 黄线=均价
+                ax1.plot(x, closes, color="#42A5F5", lw=1.1, label="价格")
+                ax1.plot(x, avg_price, color="#FFD54F", lw=1.0, label="均价")
+                # 前收盘参考线 (水平虚线)
+                ax1.axhline(y=prev_close, color="#EF5350", lw=0.7, ls="--", label=f"昨收 {prev_close:.2f}")
+                # 涨跌底色
+                pct_range = max(abs(closes.max() - prev_close), abs(closes.min() - prev_close)) / prev_close * 100 + 1
+                ax1.set_ylim(prev_close * (1 - pct_range/100), prev_close * (1 + pct_range/100))
+                ax1.legend(loc="upper left", fontsize=8, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
+                ax1.set_facecolor(_BG_PANEL)
+                for spine in ax1.spines.values(): spine.set_color(_FG_DIM)
+                ax1.tick_params(colors=_FG_DIM, labelsize=8)
+                # x 轴时间 (分时 day 字段是 HH:MM)
+                step = max(1, n // 6)
+                ticks = list(range(0, n, step))
+                ax1.set_xticks(ticks); ax1.set_xticklabels([dates[i][-5:] if len(dates[i]) >= 5 else dates[i] for i in ticks], rotation=30)
+                # 副图: 成交量
+                ax2 = fig.add_axes([0.08, 0.04, 0.88, 0.22], facecolor=_BG_PANEL, sharex=ax1)
+                colors_v = ["#EF5350" if closes[i] >= prev_close else "#66BB6A" for i in range(n)]
+                ax2.bar(x, vols, color=colors_v, width=0.8)
+                ax2.set_facecolor(_BG_PANEL)
+                for spine in ax2.spines.values(): spine.set_color(_FG_DIM)
+                ax2.tick_params(colors=_FG_DIM, labelsize=7)
+                ax2.set_ylabel("VOL", color=_FG_DIM, fontsize=8)
+
+                last_p = closes[-1] if n else 0
+                chg_pct = (last_p / prev_close - 1) * 100 if prev_close > 0 else 0
+                color_t = "#EF5350" if chg_pct >= 0 else "#66BB6A"
+                ax1.set_title(f"{name} ({code6})  分时图  现价 {last_p:.2f}  {chg_pct:+.2f}%",
+                              color=color_t, fontsize=11, pad=8)
+                fig.subplots_adjust(hspace=0.05, wspace=0.02)
+                canvas.draw()
+                status.config(text=f"✅ 分时图 {len(data)} 根, 最新 {dates[-1]}", fg="#66BB6A")
+                return
+
+            # ── K 线图 (60分/日/周/月) ──
             ax1 = fig.add_axes([0.08, 0.30, 0.88, 0.55], facecolor=_BG_PANEL)
             ma5 = _ma(closes, 5); ma10 = _ma(closes, 10)
             ma20 = _ma(closes, 20); ma60 = _ma(closes, 60)
@@ -3081,6 +3141,10 @@ def _quick_open_daily_kline(parent, code6, name):
             fig.subplots_adjust(hspace=0.05, wspace=0.02)
             canvas.draw()
             status.config(text=f"✅ {len(data)} 根 {period}K, 最新 {dates[-1]}", fg="#66BB6A")
+
+            # 🆕 K 线图时, 如果勾了蜡烛分析, 在新的 ax1 上重新标注
+            if candle_var.get():
+                _mark_candle_patterns(opens, highs, lows, closes)
         except Exception as e:
             import traceback; traceback.print_exc()
             status.config(text=f"❌ 渲染失败: {e}", fg="#EF5350")
