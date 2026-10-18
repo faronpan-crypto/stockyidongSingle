@@ -14173,7 +14173,7 @@ class DapanMixin:
         ttk.Label(top, text="📯 淘股吧热股扫描 — 邮票格子 (红涨绿跌, 词频徽标=提及次数)",
                   font=("", 11, "bold")).pack(side=tk.LEFT)
         ttk.Button(top, text="🔄刷新淘股吧", width=14,
-                   command=lambda: self._refresh_stamp_board("taoguba")).pack(side=tk.RIGHT)
+                   command=lambda: self._refresh_stamp_board("taoguba", force=True)).pack(side=tk.RIGHT)
         self._taoguba_stamp_status = ttk.Label(top, text="")
         self._taoguba_stamp_status.pack(side=tk.RIGHT, padx=8)
         cv = tk.Canvas(parent, highlightthickness=0, bg="#1E1E2E")
@@ -14192,6 +14192,8 @@ class DapanMixin:
         cv.bind("<Leave>", lambda e: self._hide_stamp_hover("taoguba"))
         def _wheel(e): cv.yview_scroll(int(-1 * (e.delta / 120)), "units")
         cv.bind_all("<MouseWheel>", _wheel)
+        # 🆕 Tab 构建完自动触发 (force=False → 先读缓存, 无缓存才联网)
+        parent.after(200, lambda: self._refresh_stamp_board("taoguba"))
 
     def _build_jiuyan_stamp_tab(self, parent):
         """🧭 韭研公社 邮票格子 Tab"""
@@ -14199,7 +14201,7 @@ class DapanMixin:
         ttk.Label(top, text="🧭 韭研公社热股扫描 — 邮票格子 (红涨绿跌, 词频徽标=提及次数)",
                   font=("", 11, "bold")).pack(side=tk.LEFT)
         ttk.Button(top, text="🔄刷新韭研公社", width=14,
-                   command=lambda: self._refresh_stamp_board("jiuyan")).pack(side=tk.RIGHT)
+                   command=lambda: self._refresh_stamp_board("jiuyan", force=True)).pack(side=tk.RIGHT)
         self._jiuyan_stamp_status = ttk.Label(top, text="")
         self._jiuyan_stamp_status.pack(side=tk.RIGHT, padx=8)
         cv = tk.Canvas(parent, highlightthickness=0, bg="#1E1E2E")
@@ -14218,23 +14220,55 @@ class DapanMixin:
         cv.bind("<Leave>", lambda e: self._hide_stamp_hover("jiuyan"))
         def _wheel(e): cv.yview_scroll(int(-1 * (e.delta / 120)), "units")
         cv.bind_all("<MouseWheel>", _wheel)
+        # 🆕 Tab 构建完自动触发 (force=False → 先读缓存, 无缓存才联网)
+        parent.after(200, lambda: self._refresh_stamp_board("jiuyan"))
 
-    def _refresh_stamp_board(self, source):
+    def _refresh_stamp_board(self, source, force=False):
         """🔄 邮票格子 — 三级热股 + 淘韭文本爬虫加权
+
+        缓存策略:
+          ① 启动时自动调用 (force=False) → 当天已爬过? 读缓存 → 秒显示
+          ② 点「🔄刷新」按钮 (force=True) → 强制联网重爬
+          ③ 缓存文件: /tmp/stamp_cache_{source}_{YYYYMMDD}.json (当天有效)
+
         1) 爬淘股吧/韭研文本 → 提代码 + 股票名匹配 → 词频加权
         2) 新浪换手率/成交额 Top 50 (交易时段)
         3) 预设沪深300热门池 (兜底)
         行情: 腾讯 qt.gtimg.cn (稳定活源)"""
-        import threading as _th, json as _json
+        import threading as _th, json as _json, os as _os
+        from datetime import datetime as _dt
 
         # ⚠️ 并发锁 — 防止多次刷新导致渲染乱序/重影
         _running_attr = f"_{source}_stamp_running"
         if getattr(self, _running_attr, False):
             print(f"[邮票格子] {source} 已有任务在跑, 跳过本次刷新", flush=True)
             return
-        setattr(self, _running_attr, True)
+
+        # 🆕 缓存文件路径
+        _today = _dt.now().strftime("%Y%m%d")
+        _cache_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                   "..", "..", "data", f"stamp_cache_{source}_{_today}.json")
+        _cache_path = _os.path.normpath(_cache_path)
 
         status = getattr(self, f"_{source}_stamp_status", None)
+        inner = getattr(self, f"_{source}_stamp_inner", None)
+
+        # 🆕 读缓存 (非 force 且文件存在)
+        if not force and _os.path.exists(_cache_path):
+            try:
+                with open(_cache_path, "r", encoding="utf-8") as f:
+                    _cached = _json.load(f)
+                if inner and _cached and isinstance(_cached, list):
+                    setattr(self, f"_{source}_stamp_data", _cached)
+                    self._render_stamp_board(source, inner, _cached)
+                    if status: status.configure(text=f"📂 读缓存 {len(_cached)} 只 ({_today})", foreground="#66BB6A")
+                    print(f"[邮票格子] {source} 读缓存 OK ({len(_cached)} 只)", flush=True)
+                    return
+            except Exception as _ce:
+                print(f"[邮票格子] {source} 缓存读失败: {_ce}, 走联网", flush=True)
+
+        setattr(self, _running_attr, True)
+
         if status:
             status.configure(text="⏳ 正在爬取淘韭文本...", foreground="#FFA726")
 
@@ -14539,6 +14573,22 @@ class DapanMixin:
             _crawl_rows.sort(key=lambda x: -x['freq'])
             _other_rows.sort(key=lambda x: -x['pct'])  # 其余按涨跌幅排
             rows = _crawl_rows + _other_rows
+
+            # 🆕 写缓存 (当天有效, 下次 Tab 启动秒显)
+            try:
+                _safe_rows = []
+                for r in rows:
+                    sr = {}
+                    for k, v in r.items():
+                        if isinstance(v, (str, int, float, bool)) or v is None:
+                            sr[k] = v
+                    _safe_rows.append(sr)
+                _os.makedirs(_os.path.dirname(_cache_path), exist_ok=True)
+                with open(_cache_path, "w", encoding="utf-8") as f:
+                    _json.dump(_safe_rows, f, ensure_ascii=False, indent=2)
+                print(f"[邮票格子] {source} 缓存已写: {_cache_path} ({len(_safe_rows)} 只)", flush=True)
+            except Exception as _we:
+                print(f"[邮票格子] {source} 缓存写失败: {_we}", flush=True)
 
             self.root.after(0, lambda: self._render_stamp_board(source, rows, status))
 
