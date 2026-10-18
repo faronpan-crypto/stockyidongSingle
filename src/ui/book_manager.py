@@ -70,6 +70,8 @@ def _ensure_book_table():
         ("ALTER TABLE books ADD COLUMN summary TEXT DEFAULT ''", "summary"),
         ("ALTER TABLE books ADD COLUMN comments TEXT DEFAULT ''", "comments"),
         ("ALTER TABLE books ADD COLUMN fetched_at TEXT DEFAULT ''", "fetched_at"),
+        ("ALTER TABLE books ADD COLUMN ai_summary TEXT DEFAULT ''", "ai_summary"),
+        ("ALTER TABLE books ADD COLUMN ai_summary_at TEXT DEFAULT ''", "ai_summary_at"),
     ]
     for sql, col in _MIGRATIONS:
         try: cur.execute(sql)
@@ -528,7 +530,44 @@ def _open_book_detail(parent, bid):
         _make_labeled_text(t_ch, "📑 目录 / 章节结构", row["chapters"], (0, 0), height=18)
         nb.add(t_ch, text="📑 目录章节")
 
-    # Tab3: 作者简介 (有数据才显示)
+    # ═══ Tab3: 🤖 AI 解读 (总有 — 第一次自动生成, 后续缓存) ═══
+    tab_ai = tk.Frame(nb, bg="#121212"); tab_frames["ai"] = tab_ai
+    _me_ai = _make_labeled_text
+
+    ai_text_widget = {}  # 闭包引用
+
+    def _build_ai_tab(initial_text, _gen_time=None):
+        for w in tab_ai.winfo_children(): w.destroy()
+        ai_frame = tk.Frame(tab_ai, bg="#121212"); ai_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        tk.Label(ai_frame, text=f"🤖 AI 智能解读{' · 生成于 ' + _gen_time if _gen_time else ' (点击右下角 AI 按钮可强制刷新)'}",
+                 bg="#121212", fg="#80DEEA", font=("", 12, "bold")).pack(anchor="w", pady=(0, 4))
+        from tkinter import scrolledtext as _st
+        _ai_txt = _st.ScrolledText(ai_frame, bg="#1E1E2E", fg="#C8E6C9",
+                                   font=("", _me_ai._font_size), wrap=tk.WORD,
+                                   relief=tk.FLAT, padx=8, pady=6, height=20)
+        _ai_txt.pack(fill=tk.BOTH, expand=True)
+        _ai_txt.insert("1.0", initial_text or "⏳ 点击右下角「🔄 AI 重新解读」按钮开始生成...\n\n首次使用时会自动生成, 之后缓存不联网。")
+        _ai_txt.configure(state=tk.DISABLED)
+        _me_ai._all_texts.append(_ai_txt)
+        ai_text_widget["txt"] = _ai_txt
+        def _zoom_ai(_e=None, delta=0):
+            cur = _me_ai._font_size
+            if delta: cur = max(9, min(24, cur + delta))
+            elif _e:
+                if _e.delta > 0: cur = min(24, cur + 1)
+                elif _e.delta < 0: cur = max(9, cur - 1)
+            _me_ai._font_size = cur
+            for t in _me_ai._all_texts:
+                try: t.configure(font=("", cur))
+                except: pass
+        _ai_txt.bind("<Control-MouseWheel>", _zoom_ai)
+        _ai_txt.bind("<Control-Up>", lambda e: _zoom_ai(delta=1))
+        _ai_txt.bind("<Control-Down>", lambda e: _zoom_ai(delta=-1))
+
+    _build_ai_tab(row.get("ai_summary", ""), row.get("ai_summary_at", ""))
+    nb.add(tab_ai, text="🤖 AI 解读")
+
+    # Tab4: 作者简介 (有数据才显示)
     if row.get("author_bio") and len(row["author_bio"]) > 30:
         t_ab = tk.Frame(nb, bg="#121212"); tab_frames["author_bio"] = t_ab
         _make_labeled_text(t_ab, "👤 作者简介 / 生平", row["author_bio"], (0, 0), height=14)
@@ -630,6 +669,9 @@ def _open_book_detail(parent, bid):
     btn_row = tk.Frame(dlg, bg="#121212"); btn_row.pack(fill=tk.X, padx=6, pady=(0, 4))
     tk.Button(btn_row, text="💾 保存我的笔记", command=_save,
               bg="#2E7D32", fg="white", font=("", 10, "bold"), padx=10).pack(side=tk.LEFT, padx=8)
+    tk.Button(btn_row, text="🔄 AI 重新解读",
+              command=lambda: _force_ai_regenerate(),
+              bg="#00695C", fg="white", font=("", 10, "bold"), padx=10).pack(side=tk.LEFT, padx=4)
     tk.Button(btn_row, text="🔄 再爬取更新", command=lambda: _do_fetch_background(notify_user=True),
               bg="#7B1FA2", fg="white", font=("", 10, "bold"), padx=10).pack(side=tk.LEFT)
     # 豆瓣链接按钮
@@ -641,6 +683,30 @@ def _open_book_detail(parent, bid):
                       bg="#0277BD", fg="white", font=("", 10), padx=8).pack(side=tk.LEFT)
         except Exception: pass
     tk.Button(btn_row, text="关闭", command=dlg.destroy).pack(side=tk.RIGHT)
+
+    # ═══ AI 解读: 自动生成 + 手动刷新回调 ═══
+    def _refresh_ai_tab(ai_text):
+        """后台生成完 → 主线程刷新 Tab 内容"""
+        try:
+            dlg.after(0, lambda: _build_ai_tab(ai_text, _dt.now().strftime("%Y-%m-%d %H:%M")))
+        except Exception as e: print(f"[书籍] AI refresh err: {e}", flush=True)
+
+    def _force_ai_regenerate():
+        """用户手动点按钮强制重新解读"""
+        _build_ai_tab("⏳ AI 正在重新解读中... (基于最新爬取数据)", "")
+        # 重新读 DB 最新行 (可能刚才爬取更新了)
+        try:
+            _con = _sqlite3.connect(_DB_PATH); _con.row_factory = _sqlite3.Row
+            _fresh = _con.execute("SELECT * FROM books WHERE id=?", (bid,)).fetchone()
+            _con.close()
+            if _fresh:
+                _bg_generate_ai(bid, dict(_fresh), refresh_ui_fn=_refresh_ai_tab)
+        except Exception as e:
+            print(f"[书籍] AI regenerate err: {e}", flush=True)
+
+    # ⚡ 自动触发: 第一次打开 (ai_summary 为空) → 后台生成
+    if not row.get("ai_summary"):
+        _bg_generate_ai(bid, dict(row), refresh_ui_fn=_refresh_ai_tab)
 
     dlg.grab_set()
 
@@ -794,6 +860,219 @@ def _make_labeled_text(parent, label, initial, grid_pos, height=6, editable=Fals
 # ═════════════════════════════════════════════════════════════════════════
 # 4. AI/联网抓取 (可选)
 # ═════════════════════════════════════════════════════════════════════════
+
+def _generate_ai_summary(row):
+    """🤖 本地 AI 解读 — 基于真实爬取数据 + 领域知识库 (零 API)"""
+    import re as _re3
+    import random as _rand
+
+    title = row.get("title", "")
+    author = row.get("author", "")
+    genre = row.get("genre", "") or "其他"
+    intro = row.get("intro", "")
+    summary = row.get("summary", "")
+    chapters = row.get("chapters", "")
+    rating = row.get("rating", 0)
+    rating_count = row.get("rating_count", 0)
+    pros = row.get("pros", "")
+    cons = row.get("cons", "")
+    methods = row.get("methods", "")
+    related = row.get("related", "")
+    comments_raw = row.get("comments", "")
+
+    # ── 1. 领域知识库: 书名关键词 → 核心概念 ──
+    _DOMAIN = [
+        ("缠论", "缠中说禅理论体系", "走势终完美 + 中枢 + 买卖点三级联立",
+         "严格的几何化分析框架, 把价格波动完全拆解为中枢扩张与收敛的递归结构"),
+        ("波浪", "艾略特波浪理论", "五浪上升+三浪调整的八浪循环 (1-2-3-4-5-A-B-C)",
+         "市场心理的群体行为模式在价格图表上的自然显现"),
+        ("道氏", "道氏理论", "市场趋势分为主要/次要/短暂三级; 收盘价验证趋势",
+         "最古老的技术分析基石, 所有现代技术指标的理论源头"),
+        ("K线", "日本蜡烛图技术", "单根K线的多空博弈含义 + 组合形态信号",
+         "东方交易智慧的精髓, 用最少信息揭示最直观的多空力量对比"),
+        ("期货技术", "期货市场技术分析", "经典技术指标在期货双向交易中的实战应用",
+         "技术分析领域的百科全书级著作, 覆盖图表/指标/系统/心理四大板块"),
+        ("短线", "短线交易方法论", "日内/隔日级别快进快出的节奏控制与纪律",
+         "高手对决拼的不是胜率而是盈亏比 + 出手次数 + 执行纪律"),
+        ("聪明的投资", "价值投资基石", "市场先生 + 安全边际 + 能力圈 + 分散",
+         "投资的本质是买入企业的一部分所有权, 而非交易筹码"),
+        ("股票大作手", "杰西·利弗莫尔交易哲学", "顺势而为 + 关键点 + 金字塔加仓",
+         "史上最伟大的操盘手, 其交易原则至今仍是机构培训的必修内容"),
+        ("系统交易", "系统化交易方法论", "用统计学/计算机构建可回测的交易系统",
+         "把模糊的交易直觉转化为可量化/可验证/可执行的机械规则"),
+        ("AI", "人工智能", "机器学习 + 神经网络 + 深度学习应用",
+         "技术分析的未来方向: 用 AI 挖掘人眼无法识别的高维模式"),
+        ("大众心理", "群体行为与市场情绪", "群体极化 + 反身性 + 情绪周期",
+         "市场短期波动由情绪驱动, 长期由基本面决定 — 理解群体才能反群体"),
+        ("趋势", "趋势交易体系", "只做顺势, 截断亏损让利润奔跑",
+         "90%的时间震荡, 10%的时间趋势 — 成功的交易者只赚那10%的钱"),
+        ("缺口", "缺口理论", "突破/中继/衰竭三类缺口的识别与交易",
+         "缺口是最强烈的价格信号之一, 但只有 5% 的缺口能持续超过 3 天"),
+        ("量价", "量价关系分析", "量在价先 + 量价背离 + 缩量回调",
+         "成交量是价格的先行指标, 技术分析中唯一客观不可操纵的数据维度"),
+        ("海龟", "海龟交易法则", "唐奇安通道突破 + ATR 止损 + 仓位管理",
+         "史上最著名的交易系统之一, 简单到荒谬但极其有效"),
+        ("N字", "N字形态理论", "突破-整理-再突破的三段式价格结构",
+         "所有趋势形态的基础模板, N字是趋势延续最可靠的形态信号"),
+    ]
+
+    # 匹配关键词
+    matched_domain = None
+    for kw, name, core, meaning in _DOMAIN:
+        if kw in title:
+            matched_domain = {"name": name, "core": core, "meaning": meaning}
+            break
+
+    # ── 2. 评分定性 ──
+    if rating >= 9.0: rating_qual = "殿堂级"
+    elif rating >= 8.5: rating_qual = "经典必读书目"
+    elif rating >= 8.0: rating_qual = "口碑佳作"
+    elif rating >= 7.5: rating_qual = "值得一读"
+    elif rating >= 7.0: rating_qual = "中规中矩"
+    else: rating_qual = "争议较大"
+
+    # ── 3. 解析评论 ──
+    comments_list = []
+    if comments_raw:
+        try: import json as _j3; comments_list = _j3.loads(comments_raw)
+        except: pass
+    hot_comments = sorted(comments_list, key=lambda x: -x.get("vote", 0))[:3]
+
+    # ── 4. 中心主旨 ──
+    if matched_domain:
+        core_idea = f"《{matched_domain['name']}》的核心主张是：{matched_domain['core']}。"
+        core_idea += f"这本书的关键洞察在于 —— {matched_domain['meaning']}。"
+    elif summary and len(summary) > 30:
+        core_idea = f"本书的中心思想可以概括为：{summary[:200]}。"
+    elif intro and len(intro) > 50:
+        core_idea = f"从内容简介来看，本书的主旨围绕「{intro[:40].rstrip('。')}」展开。"
+    else:
+        core_idea = "根据书名和分类来看，这本书的核心价值应该在于该领域的体系化梳理。"
+
+    # ── 5. 方法论框架 ──
+    framework_parts = []
+    if methods:
+        try:
+            m_list = eval(methods) if methods.startswith("[") else [m.strip() for m in methods.split(",")]
+            if isinstance(m_list, list) and m_list:
+                framework_parts.append(f"书中系统介绍的方法论包括：{', '.join(str(m)[:20] for m in m_list[:5])}。")
+        except: pass
+    if matched_domain:
+        framework_parts.append(f"从技术框架来看，它属于「{matched_domain['name']}」流派，")
+        framework_parts.append(f"其分析逻辑是「{matched_domain['core']}」。")
+    elif genre == "投资":
+        framework_parts.append("这是一本投资领域的书籍，可能涉及基本面分析、技术分析或交易心理等维度。")
+    elif genre == "心理":
+        framework_parts.append("这本书侧重交易/投资心理学，探讨决策中的认知偏差与情绪管理。")
+    elif genre == "历史":
+        framework_parts.append("本书以历史案例为线索，可能通过回顾市场过往来提炼可复制的规律。")
+
+    framework = " ".join(framework_parts) if framework_parts else "暂未识别出明确的方法论框架。"
+
+    # ── 6. 实战应用 ──
+    app_parts = []
+    if genre == "投资":
+        app_parts.append("适合有一定市场经验的投资者，用来校准分析框架或补全知识盲区。")
+    if matched_domain and "技术" in matched_domain["name"] or matched_domain and "趋势" in matched_domain["name"]:
+        app_parts.append("书中的技术分析方法可直接用于日常看盘决策，但建议先用历史数据回测验证胜率。")
+    elif matched_domain and "心理" in matched_domain["name"]:
+        app_parts.append("交易心理是专业交易者的分水岭 — 知识占20%，执行占80%。")
+    if not app_parts:
+        app_parts.append("建议带着问题去读，而不是期望一本书解决所有困惑。")
+    application = " ".join(app_parts)
+
+    # ── 7. 局限性 ──
+    limit_parts = []
+    if cons and len(cons) > 10:
+        limit_parts.append(f"读者反映的主要不足：{cons[:150]}")
+    if rating and rating < 8.0:
+        limit_parts.append(f"评分 {rating} 分不算顶尖，说明在某些方面存在争议或局限性。")
+    if genre == "投资":
+        limit_parts.append("⚠️ 没有任何一本书能保证稳定盈利 — 书中的方法需要结合自己的交易风格打磨。")
+    if not limit_parts:
+        limit_parts.append("不同读者从同一本书中能读到完全不同的东西 — 关键在于你自己的思考。")
+    limitation = " ".join(limit_parts)
+
+    # ── 8. 读者反馈亮点 ──
+    if hot_comments:
+        cf_lines = []
+        for c in hot_comments[:3]:
+            txt = c.get("text", "")[:100]
+            vote = c.get("vote", 0)
+            cf_lines.append(f"  👍{vote} 「{txt}」")
+        crowd_voice = "读者真实声音：\n" + "\n".join(cf_lines)
+    else:
+        crowd_voice = "暂无热门评论数据 — 看完后可以在「✏️ 我的笔记」Tab 分享你的读后感。"
+
+    # ── 9. 延伸阅读 ──
+    if related:
+        try:
+            r_list = eval(related) if related.startswith("[") else [r.strip() for r in related.split(",")]
+            if isinstance(r_list, list) and r_list:
+                ext = "相关书籍推荐：" + "、".join(str(r)[:25] for r in r_list[:5])
+            else: ext = "可以在书架上同分类下找相关书籍交叉阅读。"
+        except: ext = "可以在书架上同分类下找相关书籍交叉阅读。"
+    else:
+        ext = "建议读完后找同领域其他流派的书对照阅读 — 单一视角容易形成认知偏差。"
+
+    # ── 10. 拼接成结构化解读 ──
+    ai = f"""📊 【AI 智能解读】《{title}》{' — ' + author if author else ''}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⭐ 豆瓣评分: **{rating or '—'}** ({rating_count}人评价) · 定位: {rating_qual}
+📂 分类: {genre}
+🎯 解读生成时间: {_dt.now().strftime('%Y-%m-%d %H:%M')}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🧠 【核心主旨】
+{core_idea}
+
+📐 【方法论框架】
+{framework}
+
+🎯 【实战应用建议】
+{application}
+
+⚠️ 【局限性 / 注意事项】
+{limitation}
+
+💬 【读者真实反馈】
+{crowd_voice}
+
+🔗 【延伸阅读】
+{ext}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 以上解读基于书籍元数据 + 领域知识库自动生成, 点右下角「🔄 AI 重新解读」可刷新
+"""
+    return ai
+
+# ═════════════════════════════════════════════════════════════════════════
+# 1b. AI 解读后台生成 + 存 DB
+# ═════════════════════════════════════════════════════════════════════════
+
+def _bg_generate_ai(bid, row_dict, refresh_ui_fn=None):
+    """后台线程生成 AI 解读, 存 DB, 调 refresh_ui_fn 刷新 Tab"""
+    def _worker():
+        try:
+            import time as _t; _t.sleep(0.1)  # 让 UI 先渲染
+            ai_text = _generate_ai_summary(row_dict)
+            con = _sqlite3.connect(_DB_PATH)
+            con.execute("UPDATE books SET ai_summary=?, ai_summary_at=?, updated_at=? WHERE id=?",
+                        (ai_text, _dt.now().strftime("%Y-%m-%d %H:%M"),
+                         _dt.now().strftime("%Y-%m-%d %H:%M"), bid))
+            con.commit(); con.close()
+            print(f"[书籍] ✅ AI 解读已存 DB ({len(ai_text)}字)", flush=True)
+            if refresh_ui_fn:
+                try: refresh_ui_fn(ai_text)
+                except Exception as e: print(f"[书籍] AI refresh UI err: {e}", flush=True)
+        except Exception as e:
+            print(f"[书籍] AI generate err: {e}", flush=True)
+            import traceback; traceback.print_exc()
+    _threading.Thread(target=_worker, daemon=True).start()
+
 
 def _is_water_intro(text):
     """检测简介是否是豆瓣模板水话 — 这些词在豆瓣老书简介里高频出现"""
