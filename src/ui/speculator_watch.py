@@ -3845,14 +3845,19 @@ def _load_index_closes(index_code="sh000001", days=240):
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"})
         with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
             text = r.read().decode("utf-8")
-        m = re.search(r"var\s+code\s*=\s*(\[.*?\])", text, re.DOTALL)
-        if m:
-            data = json.loads(m.group(1))
-            if data and len(data) >= 60:
-                closes = np.array([float(d["close"]) for d in data])
-                dates = [d.get("day", "") for d in data]
-                print(f"[👁️信号] 新浪真实数据 {index_code}: {len(closes)}根, 最新={closes[-1]:.2f}, MA60={np.mean(closes[-60:]):.2f}", flush=True)
-                return dates, closes
+        # 新浪格式: var code=([...]);  — 正则匹配不到, 用字符串切
+        # 跳过开头的 /*<script>...*/ 垃圾
+        data = None
+        if '([' in text and ']);' in text:
+            start = text.index('([') + 1
+            end = text.rindex(']);') + 1
+            data = json.loads(text[start:end])
+        if data and len(data) >= 60:
+            closes = np.array([float(d["close"]) for d in data])
+            dates = [d.get("day", "") for d in data]
+            ma60 = np.mean(closes[-60:])
+            print(f"[👁️信号] 新浪真实数据 {index_code}: {len(closes)}根, 最新={closes[-1]:.2f}({dates[-1]}), MA60={ma60:.2f}", flush=True)
+            return dates, closes
     except Exception as e:
         print(f"[👁️信号] 新浪拉指数日线失败: {e}", flush=True)
 
