@@ -418,8 +418,11 @@ def build_fund_holdings_tab(parent, root=None):
             _bind_click_deep(c, handler)
 
     def _on_stock_click(e, sina, name):
+        print(f"[基金持仓] 点击股票 sina={sina} name={name}", flush=True)
         if sina:
             _open_kline(root, sina, name)
+        else:
+            print(f"[基金持仓] sina 为空, 无法打开K线 name={name}", flush=True)
 
     # ── 渲染: 基金卡片 ──
     def _render_fund_cards():
@@ -456,15 +459,28 @@ def build_fund_holdings_tab(parent, root=None):
                 row_bg = "#2A2A3A" if hi % 2 == 0 else _BG_CARD
                 row = tk.Frame(card, bg=row_bg, cursor="hand2")
                 row.pack(fill=tk.X, padx=2, pady=1)
-                # 点击打开日K
-                _bind_click_deep(row, lambda e, s=sina, n=h["name"]: _on_stock_click(e, s, n))
 
-                tk.Label(row, text=f"{hi+1}.", bg=row_bg, fg=_FG_DIM,
-                         font=("", 8), width=2).pack(side=tk.LEFT)
-                tk.Label(row, text=h["name"], bg=row_bg, fg=_FG_TEXT,
-                         font=("", 9)).pack(side=tk.LEFT, padx=2)
-                tk.Label(row, text=f"占{h['total_pct']:.1f}%", bg=row_bg,
-                         fg=_FG_GOLD, font=("", 8)).pack(side=tk.RIGHT, padx=6)
+                def _mk_click(_s=sina, _n=h["name"]):
+                    return lambda e: _on_stock_click(e, _s, _n)
+                _h = _mk_click()
+                # row 自己 + 所有子控件都绑
+                row.bind("<ButtonRelease-1>", _h)
+                row.bind("<Double-Button-1>", _h)
+
+                _idx_lbl = tk.Label(row, text=f"{hi+1}.", bg=row_bg, fg=_FG_DIM,
+                                    font=("", 8), width=2)
+                _idx_lbl.pack(side=tk.LEFT)
+                _idx_lbl.bind("<ButtonRelease-1>", _h); _idx_lbl.bind("<Double-Button-1>", _h)
+
+                _nm_lbl = tk.Label(row, text=h["name"], bg=row_bg, fg=_FG_TEXT,
+                                   font=("", 9))
+                _nm_lbl.pack(side=tk.LEFT, padx=2)
+                _nm_lbl.bind("<ButtonRelease-1>", _h); _nm_lbl.bind("<Double-Button-1>", _h)
+
+                _pct_lbl = tk.Label(row, text=f"占{h['total_pct']:.1f}%", bg=row_bg,
+                                    fg=_FG_GOLD, font=("", 8))
+                _pct_lbl.pack(side=tk.RIGHT, padx=6)
+                _pct_lbl.bind("<ButtonRelease-1>", _h); _pct_lbl.bind("<Double-Button-1>", _h)
 
             tk.Frame(card, bg=_BG_CARD, height=4).pack(fill=tk.X)
 
@@ -497,20 +513,40 @@ def build_fund_holdings_tab(parent, root=None):
                 row_bg = _BG_CARD if hi % 2 == 0 else "#2A2A3A"
                 row = tk.Frame(agg_inner, bg=row_bg, cursor="hand2")
                 row.pack(fill=tk.X, padx=6, pady=1)
-                _bind_click_deep(row, lambda e, sn=s["sina"], nm=s["name"]: _on_stock_click(e, sn, nm))
 
-                tk.Label(row, text=f"{hi+1}.", bg=row_bg, fg=_FG_DIM,
-                         font=("", 9, "bold"), width=3).pack(side=tk.LEFT, padx=(4,0))
-                tk.Label(row, text=s["name"], bg=row_bg, fg=_FG_TEXT,
-                         font=("", 9, "bold")).pack(side=tk.LEFT, padx=2)
-                tk.Label(row, text=f"({s['code6']})", bg=row_bg, fg=_FG_DIM,
-                         font=("", 8)).pack(side=tk.LEFT)
-                tk.Label(row, text=f"{s['fund_count']}只基金持有", bg=row_bg,
-                         fg=_FG_BLUE, font=("", 8)).pack(side=tk.LEFT, padx=10)
-                tk.Label(row, text=f"{s['total_mv']:.1f}亿", bg=row_bg,
-                         fg=_FG_CYAN, font=("", 8)).pack(side=tk.RIGHT, padx=8)
-                tk.Label(row, text=f"{s['total_pct']:.1f}%", bg=row_bg,
-                         fg=_FG_GOLD, font=("", 8), width=6, anchor="e").pack(side=tk.RIGHT)
+                def _mk(_s=s["sina"], _n=s["name"]):
+                    return lambda e: _on_stock_click(e, _s, _n)
+                _h = _mk()
+                row.bind("<ButtonRelease-1>", _h); row.bind("<Double-Button-1>", _h)
+
+                def _bind_all(parent, _h2=_h):
+                    parent.bind("<ButtonRelease-1>", _h2); parent.bind("<Double-Button-1>", _h2)
+                    for c in parent.winfo_children():
+                        _bind_all(c, _h2)
+
+                _idx = tk.Label(row, text=f"{hi+1}.", bg=row_bg, fg=_FG_DIM,
+                               font=("", 9, "bold"), width=3)
+                _idx.pack(side=tk.LEFT, padx=(4,0))
+                _nm = tk.Label(row, text=s["name"], bg=row_bg, fg=_FG_TEXT,
+                               font=("", 9, "bold"))
+                _nm.pack(side=tk.LEFT, padx=2)
+                _code = tk.Label(row, text=f"({s['code6']})", bg=row_bg, fg=_FG_DIM,
+                                 font=("", 8))
+                _code.pack(side=tk.LEFT)
+                _fc = tk.Label(row, text=f"{s['fund_count']}只基金持有", bg=row_bg,
+                               fg=_FG_BLUE, font=("", 8))
+                _fc.pack(side=tk.LEFT, padx=10)
+                _mv = tk.Label(row, text=f"{s['total_mv']:.1f}亿", bg=row_bg,
+                               fg=_FG_CYAN, font=("", 8))
+                _mv.pack(side=tk.RIGHT, padx=8)
+                _pct = tk.Label(row, text=f"{s['total_pct']:.1f}%", bg=row_bg,
+                                fg=_FG_GOLD, font=("", 8), width=6, anchor="e")
+                _pct.pack(side=tk.RIGHT)
+
+                # 给 row + 所有子 Label 都绑
+                for w in [row, _idx, _nm, _code, _fc, _mv, _pct]:
+                    w.bind("<ButtonRelease-1>", _h)
+                    w.bind("<Double-Button-1>", _h)
 
     def _render_all():
         _render_fund_cards()

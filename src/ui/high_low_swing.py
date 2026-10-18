@@ -10,6 +10,9 @@ _FONT_TITLE = [20]          # 大标题
 _FONT_LF = [16]             # LabelFrame 标题
 _FONT_SM = [13]             # 小字
 
+# ── 日K窗口单例 ──
+_active_kline_win = None
+
 # ── 配色 ──
 _BG_DEEP = "#121212"
 _BG_PANEL = "#1E1E1E"
@@ -2570,6 +2573,18 @@ def _quick_open_daily_kline(parent, code6, name):
     from matplotlib.figure import Figure
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
+    # 单例: 关掉之前已打开的日K窗口
+    global _active_kline_win
+    try:
+        if '_active_kline_win' in dir() and _active_kline_win is not None:
+            try:
+                _active_kline_win.destroy()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    _active_kline_win = None
+
     # 补 sina 前缀 (已带 sh/sz/bj 前缀直接用)
     if code6.startswith(("sh", "sz", "bj")):
         sina_code = code6
@@ -2581,6 +2596,13 @@ def _quick_open_daily_kline(parent, code6, name):
     dlg.title(f"📊 {name}({code6}) 日K线")
     dlg.geometry("1100x720")
     dlg.configure(bg=_BG_DEEP)
+    _active_kline_win = dlg
+
+    def _on_close():
+        global _active_kline_win
+        _active_kline_win = None
+        dlg.destroy()
+    dlg.protocol("WM_DELETE_WINDOW", _on_close)
 
     # 顶栏: 周期切换
     top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=42); top.pack(fill=tk.X)
