@@ -14260,12 +14260,13 @@ class DapanMixin:
                     _cached = _json.load(f)
                 if inner and _cached and isinstance(_cached, list):
                     setattr(self, f"_{source}_stamp_data", _cached)
-                    self._render_stamp_board(source, inner, _cached)
+                    self._render_stamp_board(source, _cached, status)
                     if status: status.configure(text=f"📂 读缓存 {len(_cached)} 只 ({_today})", foreground="#66BB6A")
                     print(f"[邮票格子] {source} 读缓存 OK ({len(_cached)} 只)", flush=True)
                     return
             except Exception as _ce:
-                print(f"[邮票格子] {source} 缓存读失败: {_ce}, 走联网", flush=True)
+                import traceback as _tb; _tb.print_exc()
+                print(f"[邮票格子] {source} 缓存读失败: {_ce}, inner={inner is not None}, status type={type(status).__name__}", flush=True)
 
         setattr(self, _running_attr, True)
 

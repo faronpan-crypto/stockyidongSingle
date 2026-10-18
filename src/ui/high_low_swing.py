@@ -1216,7 +1216,7 @@ def show_high_low_swing(parent, app=None):
                     "陕西煤业":"sh601225","中国神华":"sh601088","大同煤业":"sh601015",
                 }
                 _c = _code_map.get(nm, "")
-                _row_key = f"seed_{_cc}"
+                _row_key = f"seed_{_c}"
                 def _on_row_click(e, _cc=_c, _nm=nm, _key=_row_key):
                     now = e.time
                     last = _row_click_state.get(_key, 0)
