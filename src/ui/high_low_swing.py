@@ -2607,6 +2607,28 @@ def _quick_open_daily_kline(parent, code6, name):
                    activebackground=_BG_TOOLBAR, activeforeground="#80CBC4",
                    command=lambda: _on_analyze()).pack(side=tk.LEFT, padx=6)
 
+    # 🆕 支撑线 / 买卖点
+    sup_var = tk.BooleanVar(value=True)
+    bsp_var = tk.BooleanVar(value=True)
+    tk.Checkbutton(top, text="📏 支撑线", variable=sup_var,
+                   bg=_BG_TOOLBAR, fg="#81D4FA", selectcolor=_BG_DEEP,
+                   activebackground=_BG_TOOLBAR, activeforeground="#81D4FA",
+                   command=lambda: _reload()).pack(side=tk.LEFT, padx=(20, 6))
+    tk.Checkbutton(top, text="🎯 买卖点", variable=bsp_var,
+                   bg=_BG_TOOLBAR, fg="#FFD54F", selectcolor=_BG_DEEP,
+                   activebackground=_BG_TOOLBAR, activeforeground="#FFD54F",
+                   command=lambda: _reload()).pack(side=tk.LEFT, padx=6)
+
+    # 🆕 副图指标下拉
+    tk.Label(top, text="副图:", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 9)).pack(side=tk.LEFT, padx=(20, 2))
+    sub_indic = tk.StringVar(value="MACD")
+    _sub_opts = ["MACD", "RSI", "KDJ", "BOLL", "OBV"]
+    sub_menu = ttk.Combobox(top, textvariable=sub_indic, values=_sub_opts,
+                            width=6, state="readonly")
+    sub_menu.pack(side=tk.LEFT)
+    sub_menu.bind("<<ComboboxSelected>>", lambda e: _reload())
+
     status = tk.Label(top, text="⏳ 加载中...", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9))
     status.pack(side=tk.RIGHT, padx=10)
 
@@ -3107,7 +3129,8 @@ def _quick_open_daily_kline(parent, code6, name):
                 return
 
             # ── K 线图 (60分/日/周/月) ──
-            ax1 = fig.add_axes([0.08, 0.30, 0.88, 0.55], facecolor=_BG_PANEL)
+            # 布局: 主图 0.34~0.88, VOL 0.20~0.32, 副图 0.04~0.18
+            ax1 = fig.add_axes([0.08, 0.34, 0.88, 0.52], facecolor=_BG_PANEL)
             ma5 = _ma(closes, 5); ma10 = _ma(closes, 10)
             ma20 = _ma(closes, 20); ma60 = _ma(closes, 60)
 
@@ -3132,35 +3155,212 @@ def _quick_open_daily_kline(parent, code6, name):
             ticks = list(range(0, n, step))
             ax1.set_xticks(ticks); ax1.set_xticklabels([dates[i][-5:] for i in ticks], rotation=30)
 
-            # 副图 1: 成交量 (红涨绿跌)
-            ax2 = fig.add_axes([0.08, 0.16, 0.88, 0.13], facecolor=_BG_PANEL, sharex=ax1)
+            # 🆕 支撑/阻力水平线 (局部极值聚类)
+            if sup_var.get() and n >= 20:
+                # 找最近 120 根的局部峰谷
+                _lookback = min(n, 120)
+                _slice = slice(n - _lookback, n)
+                _h_sl, _l_sl = highs[_slice], lows[_slice]
+                _local_max = []
+                _local_min = []
+                for i in range(2, _lookback - 2):
+                    if _h_sl[i] >= max(_h_sl[i-2:i+3]):
+                        _local_max.append(_h_sl[i])
+                    if _l_sl[i] <= min(_l_sl[i-2:i+3]):
+                        _local_min.append(_l_sl[i])
+                # 聚类合并 (阈值 1.5%)
+                def _cluster(peaks, thr=0.015):
+                    if not peaks: return []
+                    peaks = sorted(peaks)
+                    groups = [[peaks[0]]]
+                    for p in peaks[1:]:
+                        if (p - groups[-1][-1]) / groups[-1][-1] <= thr:
+                            groups[-1].append(p)
+                        else:
+                            groups.append([p])
+                    return [float(np.mean(g)) for g in groups if len(g) >= 2]
+                _supports = _cluster(_local_min, 0.015)
+                _resistances = _cluster(_local_max, 0.015)
+                # 过滤: 只画在当前价格上下 20% 范围内
+                _cur = closes[-1]
+                for s in _supports:
+                    if _cur * 0.8 < s < _cur * 1.02:
+                        ax1.axhline(y=s, color="#81D4FA", lw=0.7, ls="--", alpha=0.7)
+                        ax1.text(n - 0.5, s, f"S {s:.2f}", color="#81D4FA", fontsize=7, va="bottom", ha="right")
+                for r in _resistances:
+                    if _cur * 0.98 < r < _cur * 1.2:
+                        ax1.axhline(y=r, color="#FF8A80", lw=0.7, ls="--", alpha=0.7)
+                        ax1.text(n - 0.5, r, f"R {r:.2f}", color="#FF8A80", fontsize=7, va="bottom", ha="right")
+
+            # 🆕 买卖点标记
+            if bsp_var.get() and n >= 30:
+                _bs = []  # (idx, price, 'buy'/'sell', label)
+                # 金叉/死叉 (MA5 vs MA10)
+                for i in range(1, n):
+                    if np.isnan(ma5[i]) or np.isnan(ma10[i]) or np.isnan(ma5[i-1]) or np.isnan(ma10[i-1]):
+                        continue
+                    if ma5[i-1] < ma10[i-1] and ma5[i] >= ma10[i]:
+                        _bs.append((i, lows[i], "buy", "金叉"))
+                    elif ma5[i-1] > ma10[i-1] and ma5[i] <= ma10[i]:
+                        _bs.append((i, highs[i], "sell", "死叉"))
+                # BOLL 突破 (如果副图选了 BOLL, 主图也画带)
+                _boll_upper = None
+                # 锤子线 (看涨) / 射击之星 (看跌) — 只用最近 60 根避免太密
+                _recent = range(max(10, n - 60), n)
+                for i in _recent:
+                    if i < 1 or i >= n: continue
+                    bdy = abs(closes[i] - opens[i])
+                    if bdy < 0.001 * closes[i]: continue
+                    full_r = highs[i] - lows[i]
+                    if full_r < 0.005 * closes[i]: continue
+                    ur = highs[i] - max(closes[i], opens[i])
+                    lr = min(closes[i], opens[i]) - lows[i]
+                    # 锤子线: 下影长
+                    if lr >= 2 * bdy and ur < bdy * 0.5 and closes[i] > opens[i]:
+                        _bs.append((i, lows[i], "buy", "锤子"))
+                    # 射击之星: 上影长
+                    if ur >= 2 * bdy and lr < bdy * 0.5 and closes[i] < opens[i]:
+                        _bs.append((i, highs[i], "sell", "射击"))
+                # BOLL 计算 (后面主图也要画)
+                _boll_mid = _ma(closes, 20)
+                _boll_std = np.full(n, np.nan)
+                for i in range(19, n):
+                    _boll_std[i] = np.std(closes[i-19:i+1])
+                _boll_upper = _boll_mid + 2 * _boll_std
+                _boll_lower = _boll_mid - 2 * _boll_std
+                # BOLL 突破上轨 → 卖点候选
+                for i in range(max(20, n - 60), n):
+                    if np.isnan(_boll_upper[i]): continue
+                    if closes[i-1] < _boll_upper[i-1] and closes[i] >= _boll_upper[i]:
+                        _bs.append((i, highs[i], "sell", "破上轨"))
+                    if closes[i-1] > _boll_lower[i-1] and closes[i] <= _boll_lower[i]:
+                        _bs.append((i, lows[i], "buy", "破下轨"))
+                # 去重 (同一 idx 只保留第一个)
+                _seen_idx = set()
+                _bs_u = []
+                for b in _bs:
+                    if b[0] not in _seen_idx:
+                        _bs_u.append(b); _seen_idx.add(b[0])
+                # 过滤太远的 (只画最近 60 根)
+                _bs_u = [b for b in _bs_u if b[0] >= n - 60]
+                for _idx, _pr, _typ, _lbl in _bs_u:
+                    _col_b = "#66BB6A" if _typ == "buy" else "#EF5350"
+                    _ym = lows[_idx] * 0.985 if _typ == "buy" else highs[_idx] * 1.015
+                    _mkr = "^" if _typ == "buy" else "v"
+                    ax1.plot(x[_idx], _ym, marker=_mkr, color=_col_b, markersize=8, zorder=10)
+                    ax1.annotate(_lbl, (x[_idx], _ym), xytext=(0, 6 if _typ == "buy" else -12),
+                                 textcoords="offset points", fontsize=7, color=_col_b, ha="center")
+
+            # 副图 1: 成交量 + MA5/MA10
+            ax2 = fig.add_axes([0.08, 0.20, 0.88, 0.12], facecolor=_BG_PANEL, sharex=ax1)
             colors = ["#EF5350" if closes[i] >= opens[i] else "#66BB6A" for i in range(n)]
             ax2.bar(x, vols, color=colors, width=w)
+            vol_ma5 = _ma(vols, 5)
+            vol_ma10 = _ma(vols, 10)
+            ax2.plot(x, vol_ma5, color="#FF8A65", lw=0.8, label="VMA5")
+            ax2.plot(x, vol_ma10, color="#42A5F5", lw=0.8, label="VMA10")
+            ax2.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
             ax2.set_facecolor(_BG_PANEL)
             for spine in ax2.spines.values(): spine.set_color(_FG_DIM)
             ax2.tick_params(colors=_FG_DIM, labelsize=7)
             ax2.set_ylabel("VOL", color=_FG_DIM, fontsize=8)
 
-            # 副图 2: MACD
-            ax3 = fig.add_axes([0.08, 0.04, 0.88, 0.11], facecolor=_BG_PANEL, sharex=ax1)
-            ema12 = np.array(closes)
-            ema26 = np.array(closes)
-            for i in range(1, n):
-                ema12[i] = closes[i] * 2 / 13 + ema12[i - 1] * (1 - 2 / 13)
-                ema26[i] = closes[i] * 2 / 27 + ema26[i - 1] * (1 - 2 / 27)
-            dif = ema12 - ema26
-            dea = np.array(dif)
-            for i in range(1, n): dea[i] = dif[i] * 2 / 10 + dea[i - 1] * (1 - 2 / 10)
-            hist = 2 * (dif - dea)
-            h_colors = ["#EF5350" if h >= 0 else "#66BB6A" for h in hist]
-            ax3.bar(x, hist, color=h_colors, width=w)
-            ax3.plot(x, dif, color="#42A5F5", lw=0.8, label="DIF")
-            ax3.plot(x, dea, color="#FFB74D", lw=0.8, label="DEA")
-            ax3.axhline(y=0, color=_FG_DIM, lw=0.6)
+            # 副图 2: 可切换指标
+            sub_name = sub_indic.get()
+            ax3 = fig.add_axes([0.08, 0.04, 0.88, 0.14], facecolor=_BG_PANEL, sharex=ax1)
+            if sub_name == "MACD":
+                ema12 = np.array(closes)
+                ema26 = np.array(closes)
+                for i in range(1, n):
+                    ema12[i] = closes[i] * 2 / 13 + ema12[i - 1] * (1 - 2 / 13)
+                    ema26[i] = closes[i] * 2 / 27 + ema26[i - 1] * (1 - 2 / 27)
+                dif = ema12 - ema26
+                dea = np.array(dif)
+                for i in range(1, n): dea[i] = dif[i] * 2 / 10 + dea[i - 1] * (1 - 2 / 10)
+                hist = 2 * (dif - dea)
+                h_colors = ["#EF5350" if h >= 0 else "#66BB6A" for h in hist]
+                ax3.bar(x, hist, color=h_colors, width=w)
+                ax3.plot(x, dif, color="#42A5F5", lw=0.8, label="DIF")
+                ax3.plot(x, dea, color="#FFB74D", lw=0.8, label="DEA")
+                ax3.axhline(y=0, color=_FG_DIM, lw=0.6)
+                ax3.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
+                ax3.set_ylabel("MACD", color=_FG_DIM, fontsize=8)
+            elif sub_name == "RSI":
+                # Wilder RSI(14)
+                rsi_n = 14
+                delta = np.diff(closes)
+                gain = np.where(delta > 0, delta, 0.0)
+                loss = np.where(delta < 0, -delta, 0.0)
+                rsi = np.full(n, np.nan)
+                if len(gain) >= rsi_n:
+                    avg_gain = np.mean(gain[:rsi_n])
+                    avg_loss = np.mean(loss[:rsi_n])
+                    rsi[rsi_n] = 100 - 100 / (1 + avg_gain / avg_loss) if avg_loss > 0 else 100
+                    for i in range(rsi_n + 1, n):
+                        avg_gain = (avg_gain * (rsi_n - 1) + gain[i-1]) / rsi_n
+                        avg_loss = (avg_loss * (rsi_n - 1) + loss[i-1]) / rsi_n
+                        rsi[i] = 100 - 100 / (1 + avg_gain / avg_loss) if avg_loss > 0 else 100
+                ax3.plot(x, rsi, color="#CE93D8", lw=1.0, label="RSI(14)")
+                ax3.axhline(y=70, color="#EF5350", lw=0.6, ls="--", alpha=0.7)
+                ax3.axhline(y=30, color="#66BB6A", lw=0.6, ls="--", alpha=0.7)
+                ax3.axhline(y=50, color=_FG_DIM, lw=0.5, ls=":")
+                ax3.set_ylim(0, 100)
+                ax3.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
+                ax3.set_ylabel("RSI", color=_FG_DIM, fontsize=8)
+            elif sub_name == "KDJ":
+                # KDJ(9,3,3)
+                kdj_n = 9
+                kd_low = np.full(n, np.nan)
+                kd_high = np.full(n, np.nan)
+                for i in range(kdj_n - 1, n):
+                    kd_low[i] = np.min(lows[i - kdj_n + 1:i + 1])
+                    kd_high[i] = np.max(highs[i - kdj_n + 1:i + 1])
+                rsv = np.full(n, 50.0)
+                for i in range(n):
+                    if kd_high[i] - kd_low[i] > 0:
+                        rsv[i] = (closes[i] - kd_low[i]) / (kd_high[i] - kd_low[i]) * 100
+                k = np.full(n, 50.0); d = np.full(n, 50.0); j = np.full(n, 50.0)
+                for i in range(1, n):
+                    k[i] = k[i-1] * 2/3 + rsv[i] * 1/3
+                    d[i] = d[i-1] * 2/3 + k[i] * 1/3
+                    j[i] = 3 * k[i] - 2 * d[i]
+                ax3.plot(x, k, color="#42A5F5", lw=0.9, label="K")
+                ax3.plot(x, d, color="#FFB74D", lw=0.9, label="D")
+                ax3.plot(x, j, color="#CE93D8", lw=0.8, label="J")
+                ax3.axhline(y=80, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
+                ax3.axhline(y=20, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
+                ax3.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
+                ax3.set_ylabel("KDJ", color=_FG_DIM, fontsize=8)
+            elif sub_name == "BOLL":
+                # BOLL 带 (在副图里画 MID, UPPER, LOWER 和 %B)
+                boll_mid = _ma(closes, 20)
+                boll_std = np.full(n, np.nan)
+                for i in range(19, n):
+                    boll_std[i] = np.std(closes[i-19:i+1])
+                boll_up = boll_mid + 2 * boll_std
+                boll_lo = boll_mid - 2 * boll_std
+                pct_b = (closes - boll_lo) / np.maximum(boll_up - boll_lo, 0.001)
+                ax3.plot(x, pct_b, color="#80CBC4", lw=0.9, label="%B")
+                ax3.axhline(y=1.0, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
+                ax3.axhline(y=0.5, color=_FG_DIM, lw=0.5, ls=":")
+                ax3.axhline(y=0.0, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
+                ax3.set_ylim(-0.1, 1.1)
+                ax3.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
+                ax3.set_ylabel("BOLL%B", color=_FG_DIM, fontsize=8)
+            elif sub_name == "OBV":
+                obv = np.zeros(n)
+                for i in range(1, n):
+                    if closes[i] > closes[i-1]: obv[i] = obv[i-1] + vols[i]
+                    elif closes[i] < closes[i-1]: obv[i] = obv[i-1] - vols[i]
+                    else: obv[i] = obv[i-1]
+                obv_ma5 = _ma(obv, 5)
+                ax3.plot(x, obv, color="#42A5F5", lw=0.9, label="OBV")
+                ax3.plot(x, obv_ma5, color="#FFB74D", lw=0.8, label="OBV_MA5")
+                ax3.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
+                ax3.set_ylabel("OBV", color=_FG_DIM, fontsize=8)
             ax3.set_facecolor(_BG_PANEL)
             for spine in ax3.spines.values(): spine.set_color(_FG_DIM)
             ax3.tick_params(colors=_FG_DIM, labelsize=7)
-            ax3.set_ylabel("MACD", color=_FG_DIM, fontsize=8)
 
             # 标题
             last_p = closes[-1] if n else 0
