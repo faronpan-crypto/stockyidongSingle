@@ -1160,12 +1160,11 @@ def show_high_low_swing(parent, app=None):
         widgets_list.append((v, "body"))
 
     def _bind_click_deep(widget, handler):
-        """递归给 widget 及其所有子控件绑定单击+双击 (Tk 事件不冒泡, 双击是独立事件)"""
-        try:
-            widget.bind("<Button-1>", handler)
-            widget.bind("<Double-Button-1>", handler)
-        except Exception:
-            pass
+        """递归给 widget 及其所有子控件绑多种点击事件
+        Tk 事件不冒泡, <Double-Button-1> 在 macOS Canvas 上常失效"""
+        for evt in ("<ButtonRelease-1>", "<Double-Button-1>"):
+            try: widget.bind(evt, handler)
+            except Exception: pass
         for c in widget.winfo_children():
             _bind_click_deep(c, handler)
 
@@ -1216,16 +1215,10 @@ def show_high_low_swing(parent, app=None):
                     "陕西煤业":"sh601225","中国神华":"sh601088","大同煤业":"sh601015",
                 }
                 _c = _code_map.get(nm, "")
-                _row_key = f"seed_{_c}"
-                def _on_row_click(e, _cc=_c, _nm=nm, _key=_row_key):
-                    now = e.time
-                    last = _row_click_state.get(_key, 0)
-                    if 0 < (now - last) < 400 and _cc:
-                        # 双击: 打开日K
-                        _row_click_state[_key] = 0
+                def _on_row_click(e, _cc=_c, _nm=nm):
+                    print(f"[🎯流派种子] 点击 {_nm}({_cc})", flush=True)
+                    if _cc:
                         _quick_open_daily_kline(win, _cc, _nm)
-                    else:
-                        _row_click_state[_key] = now
                 tk.Label(row, text=f"{n}", bg=row_bg, fg=_FG_GOLD if n==1 else _FG_DIM,
                          font=("", 9, "bold"), width=2, anchor="w").pack(side=tk.LEFT, padx=(4,0))
                 tk.Label(row, text=nm, bg=row_bg, fg="white",
@@ -1375,16 +1368,10 @@ def show_high_low_swing(parent, app=None):
                         pct_color = _FG_RED if pct >= 0 else _FG_GREEN
                         row = tk.Frame(body, bg=row_bg, cursor="hand2")
                         row.pack(fill=tk.X, pady=1)
-                        # 🆕 模拟双击打开日K (400ms 内两次单击)
-                        _rkey = f"real_{code}"
-                        def _on_click(e, _c=code, _nm=name, _rk=_rkey):
-                            now = e.time
-                            last = _row_click_state.get(_rk, 0)
-                            if 0 < (now - last) < 400 and _c:
-                                _row_click_state[_rk] = 0
-                                _quick_open_daily_kline(win, _c, _nm)
-                            else:
-                                _row_click_state[_rk] = now
+                        # 🆕 单击/双击都打开日K
+                        def _on_click(e, _c=code, _nm=name):
+                            print(f"[🎯流派实时] 点击 {_nm}({_c})", flush=True)
+                            if _c: _quick_open_daily_kline(win, _c, _nm)
                         tk.Label(row, text=f"{n}", bg=row_bg, fg=_FG_GOLD if n==1 else _FG_DIM,
                                  font=("", 9, "bold"), width=2, anchor="w").pack(side=tk.LEFT, padx=(4,0))
                         tk.Label(row, text=name, bg=row_bg, fg="white",
