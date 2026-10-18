@@ -1160,9 +1160,10 @@ def show_high_low_swing(parent, app=None):
         widgets_list.append((v, "body"))
 
     def _bind_click_deep(widget, handler):
-        """递归给 widget 及其所有子控件绑定点击事件 (Tk <Button-1> 不冒泡)"""
+        """递归给 widget 及其所有子控件绑定单击+双击 (Tk 事件不冒泡, 双击是独立事件)"""
         try:
             widget.bind("<Button-1>", handler)
+            widget.bind("<Double-Button-1>", handler)
         except Exception:
             pass
         for c in widget.winfo_children():
