@@ -817,34 +817,68 @@ def _fetch_book_intro_worker(title, author_hint=""):
     out = {}
     print(f"[书籍] ⚡ 并行抓《{title}》(多源)...", flush=True)
 
-    # ── 线程 1: 豆瓣 suggest ──
-    def _t_douban_suggest():
+    # ── 标题清洗: 去掉文件名后缀, 让搜索更准 ──
+    import re as _re2
+    _clean = q
+    for _s in [".扫描版", "(扫描版)", "扫描版", "（高清版）", ".高清版",
+               "[美]", "[中]", "[匈]", "[英]", "[日]", "[德]", "[法]",
+               "[", "]", "(", ")", "%B9", "[美]"]:
+        _clean = _clean.replace(_s, "")
+    _clean = _re2.sub(r"\(.*?\)", "", _clean)  # 去括号内容
+    _clean = _clean.split("—")[0].split("-市场")[0].split("市场行为")[0][:30].strip()
+    print(f"[书籍] 搜索标题: 《{_clean}》 (原: 《{q[:40]}》)", flush=True)
+    q_search = _clean if _clean else q
+
+    # ── 线程 1: 微信读书搜索 (主源! 官方 JSON API, 反爬最松) ──
+    def _t_weread():
         try:
-            r = requests.get(f"https://book.douban.com/j/subject_suggest?q={requests.utils.quote(q)}",
-                             headers=HEADERS, timeout=5)
+            url = f"https://weread.qq.com/web/search/global?keyword={requests.utils.quote(q_search)}&maxIdx=0&fragmentSize=24"
+            r = requests.get(url, headers=HEADERS, timeout=8)
             if r.ok:
                 data = r.json()
-                if data and isinstance(data, list) and len(data) > 0:
-                    best = None; best_score = 0
-                    for b in data:
-                        b_title = b.get("title", "")
-                        s = 0
-                        if q in b_title or b_title in q: s += 3
-                        if b.get("author_name") and author_hint and author_hint[:2] in b.get("author_name", ""): s += 2
-                        if s > best_score: best = b; best_score = s
-                    if not best: best = data[0]
-                    if best:
-                        return {"subject_url": best.get("url", ""),
-                                "author": best.get("author_name", ""),
-                                "pub_year": best.get("year", ""),
-                                "suggest_title": best.get("title", "")}
-        except Exception as e: print(f"[书籍] suggest ERR: {e}", flush=True)
+                books = data.get("books", [])
+                best = None; best_score = 0
+                for item in books:
+                    bi = item.get("bookInfo", {})
+                    bt = bi.get("title", "")
+                    s = 0
+                    if q_search in bt or bt in q_search: s += 5
+                    if author_hint and author_hint[:2] in bi.get("author", ""): s += 3
+                    if s > best_score: best = bi; best_score = s
+                if not best and books: best = books[0].get("bookInfo", {})
+                if best:
+                    result = {}
+                    if best.get("author"): result["author"] = best["author"]
+                    if best.get("translator"): result["translator"] = best["translator"]
+                    if best.get("publisher"): result["publisher"] = best["publisher"]
+                    wr = best.get("newRating", 0)
+                    if wr > 0: result["rating"] = round(wr / 100, 1)
+                    wc = best.get("newRatingCount", 0)
+                    if wc > 0: result["rating_count"] = wc
+                    intro = best.get("intro", "")
+                    if intro and len(intro) > 30: result["intro"] = intro
+                    price = best.get("price", 0)
+                    if price > 0: result["price"] = f"{price:.2f}元"
+                    if result.get("author") or result.get("rating"):
+                        print(f"[书籍] ✅ 微信读书: rating={result.get('rating')}, intro={len(intro)}字", flush=True)
+                    return result
+        except Exception as e: print(f"[书籍] weread ERR: {e}", flush=True)
         return {}
 
-    # ── 线程 2: 百度百科 (快, 兜底 intro) ──
+    # ── 线程 2: 360 搜豆瓣 subject URL (辅助, 详情页可能被封) ──
+    def _t_find_subject():
+        try:
+            url = f"https://www.so.com/s?q={requests.utils.quote(q_search + ' 豆瓣')}"
+            r = requests.get(url, headers=HEADERS, timeout=8)
+            links = _re.findall(r'(https?://book\.douban\.com/subject/\d+/)', r.text)
+            if links: return {"subject_url": links[0]}
+        except Exception: pass
+        return {}
+
+    # ── 线程 3: 百度百科 (兜底 intro) ──
     def _t_baike():
         try:
-            r = requests.get(f"https://baike.baidu.com/item/{requests.utils.quote(q)}",
+            r = requests.get(f"https://baike.baidu.com/item/{requests.utils.quote(q_search)}",
                              headers=HEADERS, timeout=6, allow_redirects=True)
             if r.ok and len(r.text) > 2000:
                 text = r.text
@@ -852,95 +886,81 @@ def _fetch_book_intro_worker(title, author_hint=""):
                 if m:
                     desc = _re.sub(r"[\s]+", " ", m.group(1)).strip()
                     if len(desc) > 30: return {"baike_intro": desc}
-                m2 = _re.search(r'class="lemma-summary"[^>]*>(.*?)</div>', text, _re.DOTALL)
-                if m2:
-                    txt = _re.sub(r"<[^>]+>", "", m2.group(1))
-                    txt = _re.sub(r"[\s]+", " ", txt).strip()
-                    if len(txt) > 30: return {"baike_intro": txt}
-        except Exception as e: print(f"[书籍] baike ERR: {e}", flush=True)
+        except Exception: pass
         return {}
 
-    # ── 线程 3: 百度搜索 (兜底摘要) ──
+    # ── 线程 4: 百度搜索 (兜底摘要) ──
     def _t_baidu_search():
         try:
-            r = requests.get(f"https://www.baidu.com/s?wd={requests.utils.quote(q + ' 书籍 简介')}",
+            r = requests.get(f"https://www.baidu.com/s?wd={requests.utils.quote(q_search + ' 书籍 简介')}",
                              headers=HEADERS, timeout=6)
             abs_list = []
-            # 百度搜索多种摘要 class
             for pat in [r'class="c-abstract[^"]*"[^>]*>(.*?)</span>',
-                        r'class="content-right_\d+"[^>]*>(.*?)</div>',
-                        r'class="c-span-last[^"]*"[^>]*>(.*?)</span>']:
+                        r'class="content-right_\d+"[^>]*>(.*?)</div>']:
                 for m in _re.finditer(pat, r.text, _re.DOTALL):
                     txt = _re.sub(r'<[^>]+>', '', m.group(1))
                     txt = _re.sub(r'\s+', ' ', txt).strip()
                     if 40 < len(txt) < 400: abs_list.append(txt)
             if abs_list: return {"search_snippets": abs_list[:3]}
-        except Exception as e: pass
-        return {}
-
-    # ── 线程 4: 京东图书 (快抓基础信息) ──
-    def _t_jd():
-        try:
-            r = requests.get(f"https://search.jd.com/Search?keyword={requests.utils.quote(q)}",
-                             headers=HEADERS, timeout=5)
-            if r.ok and len(r.text) > 2000:
-                # 京东图书标题
-                m = _re.search(r'class="p-name[^"]*"[^>]*>(.*?)</div>', r.text, _re.DOTALL)
-                if m:
-                    txt = _re.sub(r'<[^>]+>', '', m.group(1)).strip()
-                    if 10 < len(txt) < 100: return {"jd_title": txt}
         except Exception: pass
         return {}
 
-    # ═══ 第一波: suggest + 百科 + 搜索 + 京东 并行 ═══
+    # ═══ 第一波: 微信读书 + 360豆瓣 + 百科 + 百度搜索 并行 ═══
     with ThreadPoolExecutor(max_workers=4) as ex:
-        f_sug = ex.submit(_t_douban_suggest)
+        f_wr  = ex.submit(_t_weread)
+        f_sub = ex.submit(_t_find_subject)
         f_bai = ex.submit(_t_baike)
         f_bds = ex.submit(_t_baidu_search)
-        f_jd  = ex.submit(_t_jd)
 
-        sug_res = f_sug.result()
+        wr_res  = f_wr.result()
+        sub_res = f_sub.result()
         bai_res = f_bai.result()
         bds_res = f_bds.result()
-        jd_res  = f_jd.result()
 
-    # 合并第一波结果
-    out.update(sug_res)
-    subject_url = sug_res.get("subject_url", "")
+    # 合并第一波: 微信读书为主, subject_url 留着给第二波详情页
+    out.update(wr_res)
+    out.update(sub_res)
+    subject_url = sub_res.get("subject_url", "")
 
-    # ═══ 第二波: 如果 suggest 拿到 subject_url → 抓详情页 + 评论子页 ═══
+    # ═══ 第二波: 豆瓣详情页只补目录/评论 (微信读书已给了 intro/rating) ═══
+    # 且只有详情页 > 5000 字节才解析 (992 字节是登录跳转, 跳过)
     detail_text = ""
-    with ThreadPoolExecutor(max_workers=2) as ex2:
-        futs = []
-        if subject_url:
-            futs.append(ex2.submit(lambda: requests.get(subject_url, headers=HEADERS, timeout=8).text if subject_url else ""))
-            futs.append(ex2.submit(lambda: requests.get(subject_url + "comments/", headers=HEADERS, timeout=5).text if subject_url else ""))
-        else:
-            futs.append(ex2.submit(lambda: ""))
-            futs.append(ex2.submit(lambda: ""))
+    comment_text = ""
+    if subject_url:
+        try:
+            td = requests.get(subject_url, headers=HEADERS, timeout=8).text
+            if td and len(td) > 5000:
+                detail_text = td
+        except Exception: pass
+        try:
+            tc = requests.get(subject_url + "comments/", headers=HEADERS, timeout=5).text
+            if tc and len(tc) > 5000:
+                comment_text = tc
+        except Exception: pass
 
-        if futs[0].result(): detail_text = futs[0].result()
-
-    # ═══ 解析豆瓣详情页 HTML ═══
-    if detail_text and len(detail_text) > 5000:
+    # ═══ 解析豆瓣详情页 HTML (只补微信读书没给的字段) ═══
+    if detail_text:
         text = detail_text
-        # 评分 + 评价人数
-        m = _re.search(r'property="v:average"[^>]*>([^<]+)', text)
-        if m:
-            try: out["rating"] = float(m.group(1).strip())
-            except: pass
-        m2 = _re.search(r'rating_people">.*?<span property="v:votes">(\d+)', text, _re.DOTALL)
-        if m2:
-            try: out["rating_count"] = int(m2.group(1))
-            except: pass
+        # 评分 (微信读书没给才用豆瓣)
+        if not out.get("rating"):
+            m = _re.search(r'property="v:average"[^>]*>([^<]+)', text)
+            if m:
+                try: out["rating"] = float(m.group(1).strip())
+                except: pass
+        if not out.get("rating_count"):
+            m2 = _re.search(r'rating_people">.*?<span property="v:votes">(\d+)', text, _re.DOTALL)
+            if m2:
+                try: out["rating_count"] = int(m2.group(1))
+                except: pass
 
-        # 基本信息面板
+        # 基本信息面板 (微信读书没给才用豆瓣)
         info_extract = {
             "作者": "author", "译者": "translator", "出版社": "publisher",
             "出版年": "pub_year", "页数": "pages", "ISBN": "isbn",
             "定价": "price", "原作名": "original_title", "丛书": "series",
         }
         for label, field in info_extract.items():
+            if out.get(field): continue  # 微信读书已给
             for mm in _re.finditer(r'<span class="pl">' + label + r':</span>(.*?)<br', text, _re.DOTALL):
                 val = _re.sub(r'<[^>]+>', '', mm.group(1)).strip()
                 if val:
@@ -950,41 +970,46 @@ def _fetch_book_intro_worker(title, author_hint=""):
                     else: out[field] = val
                 break
 
-        # 目录/章节
-        dir_found = None
-        for dir_pat in [r'id="dir_\d+_short"[^>]*>(.*?)</div>', r'id="dir"[^>]*>(.*?)</div>',
-                        r'class="indent"[^>]*id="dir[^"]*"[^>]*>(.*?)</div>']:
-            m_dir = _re.search(dir_pat, text, _re.DOTALL)
-            if m_dir:
-                dir_html = m_dir.group(1)
-                dir_text = _re.sub(r'<br\s*/?>', '\n', dir_html)
-                dir_text = _re.sub(r'<[^>]+>', '', dir_text)
-                dir_text = _re.sub(r'[ \t]+', ' ', dir_text)
-                dir_text = _re.sub(r'\n\s*\n+', '\n', dir_text).strip()
-                dir_text = _re.sub(r'·\s*·\s*·.*', '', dir_text).strip()
-                if len(dir_text) > 20:
-                    dir_found = dir_text
-                    break
-        if dir_found: out["chapters"] = dir_found
+        # 目录/章节 (微信读书没给 → 豆瓣补)
+        if not out.get("chapters"):
+            dir_found = None
+            for dir_pat in [r'id="dir_\d+_short"[^>]*>(.*?)</div>', r'id="dir"[^>]*>(.*?)</div>',
+                            r'class="indent"[^>]*id="dir[^"]*"[^>]*>(.*?)</div>']:
+                m_dir = _re.search(dir_pat, text, _re.DOTALL)
+                if m_dir:
+                    dir_html = m_dir.group(1)
+                    dir_text = _re.sub(r'<br\s*/?>', '\n', dir_html)
+                    dir_text = _re.sub(r'<[^>]+>', '', dir_text)
+                    dir_text = _re.sub(r'[ \t]+', ' ', dir_text)
+                    dir_text = _re.sub(r'\n\s*\n+', '\n', dir_text).strip()
+                    dir_text = _re.sub(r'·\s*·\s*·.*', '', dir_text).strip()
+                    if len(dir_text) > 20:
+                        dir_found = dir_text
+                        break
+            if dir_found: out["chapters"] = dir_found
 
-        # 简介 (分离)
-        intros_found = []
-        for m4 in _re.finditer(r'class="intro"[^>]*>(.*?)</div>', text, _re.DOTALL):
-            txt = _re.sub(r'<[^>]+>', '', m4.group(1))
-            txt = _re.sub(r'\s+', ' ', txt).strip()
-            if len(txt) > 30: intros_found.append(txt)
-        if intros_found:
-            out["intro"] = intros_found[0]
-            if _is_water_intro(out["intro"]):
-                print(f"[书籍] ⚠️ 豆瓣 intro 是模板水话", flush=True)
-            if len(intros_found) > 1: out["author_bio"] = intros_found[1]
-            if len(intros_found) > 2: out["summary"] = intros_found[2]
+        # 简介 (微信读书没给才用豆瓣, 但要检测水话)
+        if not out.get("intro"):
+            intros_found = []
+            for m4 in _re.finditer(r'class="intro"[^>]*>(.*?)</div>', text, _re.DOTALL):
+                txt = _re.sub(r'<[^>]+>', '', m4.group(1))
+                txt = _re.sub(r'\s+', ' ', txt).strip()
+                if len(txt) > 30: intros_found.append(txt)
+            if intros_found and not _is_water_intro(intros_found[0]):
+                out["intro"] = intros_found[0]
+                if len(intros_found) > 1: out["author_bio"] = intros_found[1]
 
-        # 热门短评 (从详情页 HTML 直接提, 不用单独请求 comments 页面 — 快得多)
-        comment_list = []
+        out["douban_url"] = subject_url
+        print(f"[书籍] ✅ 豆瓣详情补了: rating={out.get('rating')}, "
+              f"chapters={len(out.get('chapters',''))}字", flush=True)
+
+    # 解析评论子页 (只拿评论)
+    comment_list = []
+    comment_src = comment_text if comment_text else detail_text
+    if comment_src and len(comment_src) > 5000:
         for ci, mci in enumerate(_re.finditer(
                 r'<li class="comment-item"[^>]*>.*?<div class="comment">(.*?)</div>\s*</li>',
-                text, _re.DOTALL)):
+                comment_src, _re.DOTALL)):
             if ci >= 5: break
             c_html = mci.group(1)
             m_short = _re.search(r'class="short"[^>]*>(.*?)</span>', c_html, _re.DOTALL)
@@ -997,10 +1022,6 @@ def _fetch_book_intro_worker(title, author_hint=""):
                     comment_list.append({"vote": vote, "text": c_txt[:300]})
         if comment_list:
             out["comments"] = _json2.dumps(comment_list, ensure_ascii=False)
-
-        out["douban_url"] = subject_url
-        print(f"[书籍] ✅ 豆瓣详情: rating={out.get('rating')}, "
-              f"chapters={len(out.get('chapters',''))}字, comments={len(comment_list)}条", flush=True)
 
     # ═══ 多源兜底合并 ═══
     # intro: 豆瓣 > 百科 > 百度搜索摘要 > smart fallback
