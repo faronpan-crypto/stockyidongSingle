@@ -2596,11 +2596,9 @@ def _quick_open_daily_kline(parent, code6, name):
     canvas = FigureCanvasTkAgg(fig, master=dlg)
     canvas.get_tk_widget().configure(bg=_BG_DEEP)
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-    tb = NavigationToolbar2Tk(canvas, dlg); tb.update()
-    try: tb.pdestroy()
-    except Exception: pass
-    try: tb = None
-    except Exception: pass
+    # 🆕 保留 NavigationToolbar (支持缩放/平移/框选/返回/保存) — 之前被 destroy 了!
+    tb_frame = tk.Frame(dlg, bg=_BG_TOOLBAR); tb_frame.pack(fill=tk.X, side=tk.BOTTOM)
+    tb = NavigationToolbar2Tk(canvas, tb_frame); tb.update()
 
     # 🆕 底部分析文本面板 (隐藏, 勾选时显示)
     import tkinter.scrolledtext as _st
@@ -2614,6 +2612,9 @@ def _quick_open_daily_kline(parent, code6, name):
 
     # 缓存
     _cache = {"data": None, "period": None}
+    # hover tooltip 连接 + 浮动窗口引用 (避免被 gc)
+    _hover_conn = None
+    _hover_win = None
 
     def _fetch(period):
         try:
@@ -2946,7 +2947,6 @@ def _quick_open_daily_kline(parent, code6, name):
     _mark_handles = []   # 保留 artist 引用, 避免被 gc 清除
     def _mark_candle_patterns(OP, HI, LO, CL):
         nonlocal _mark_handles, canvas, fig
-        # 清除旧标注
         for h in _mark_handles:
             try: h.remove()
             except: pass
@@ -2956,20 +2956,21 @@ def _quick_open_daily_kline(parent, code6, name):
         if not pats:
             canvas.draw(); return
 
-        # 硬编码: fig.add_axes 的第一个 axes ([0.08, 0.30, 0.88, 0.55]) 就是 ax1 主图
         ax_main = fig.axes[0] if fig.axes else None
         if ax_main is None: return
 
+        n = len(CL)
+        # 🆕 只标最近 10 根 (不是全图) — 避免文字太多看不清
         for p in pats:
+            if p["idx"] < n - 10: continue   # 只标最近 10 根
             i = p["idx"]
             color = "#EF5350" if p["type"] == "看涨" else "#66BB6A" if p["type"] == "看跌" else "#FFD54F"
-            y_pos = HI[i] * 1.008 if "看跌" in p["type"] or "看" in p["name"] else LO[i] * 0.992
-            xytext = (i, HI[i] * 1.03 if p["type"] in ("看跌", "中性") else LO[i] * 0.97)
             try:
-                ann = ax_main.annotate(p["name"][:6], xy=(i, HI[i] if p["type"] in ("看跌", "中性") else LO[i]),
-                     xytext=xytext, fontsize=6, color=color,
-                     arrowprops=dict(arrowstyle="->", color=color, lw=0.8, connectionstyle="arc3,rad=0.2"),
-                     bbox=dict(boxstyle="round,pad=0.2", fc="#1E1E1E", ec=color, alpha=0.85),
+                y_tip = HI[i] * 1.015 if p["type"] in ("看跌", "中性") else LO[i] * 0.985
+                ann = ax_main.annotate(p["name"][:5], xy=(i, HI[i] if p["type"] in ("看跌", "中性") else LO[i]),
+                     xytext=(i - 1.5, y_tip), fontsize=8, color=color,
+                     arrowprops=dict(arrowstyle="->", color=color, lw=0.9),
+                     bbox=dict(boxstyle="round,pad=0.15", fc="#1E1E1E", ec=color, alpha=0.9),
                      ha="center")
                 _mark_handles.append(ann)
             except Exception: pass
@@ -3153,12 +3154,88 @@ def _quick_open_daily_kline(parent, code6, name):
             canvas.draw()
             status.config(text=f"✅ {len(data)} 根 {period}K, 最新 {dates[-1]}", fg="#66BB6A")
 
-            # 🆕 K 线图时, 如果勾了蜡烛分析, 在新的 ax1 上重新标注
+            # 🆕 注册 hover tooltip (每次 draw 重新注册, 先 disconnect 旧的)
+            nonlocal _hover_conn
+            if _hover_conn is not None:
+                try: canvas.mpl_disconnect(_hover_conn)
+                except: pass
+            if period != "minute":  # 分时图不支持蜡烛形态 hover
+                _hover_conn = canvas.mpl_connect("motion_notify_event",
+                    lambda ev: _hover_tip(ev, closes, opens, highs, lows, vols, dates))
+
+            # 勾了蜡烛分析 → 在新 ax1 上标注
             if candle_var.get():
                 _mark_candle_patterns(opens, highs, lows, closes)
         except Exception as e:
             import traceback; traceback.print_exc()
             status.config(text=f"❌ 渲染失败: {e}", fg="#EF5350")
+
+    # ── hover tooltip: 鼠标移到蜡烛上弹 Tk Toplevel 浮窗 ──
+    def _hover_tip(event, closes, opens, highs, lows, vols, dates):
+        nonlocal _hover_win
+        if not event.inaxes or event.inaxes != (fig.axes[0] if fig.axes else None):
+            if _hover_win is not None:
+                try: _hover_win.destroy()
+                except: pass
+                _hover_win = None
+            return
+        i = int(round(event.xdata))
+        n = len(closes)
+        if i < 0 or i >= n:
+            if _hover_win is not None:
+                try: _hover_win.destroy()
+                except: pass
+                _hover_win = None
+            return
+
+        # 构建 tooltip 文本
+        c, o, h, l = closes[i], opens[i], highs[i], lows[i]
+        v = vols[i]; d = dates[i]
+        body_high = c - o if c >= o else o - c
+        chg_pct = (c / closes[i-1] - 1) * 100 if i > 0 else 0
+        # MA 值
+        ma5_v = np.mean(closes[max(0, i-4):i+1])
+        ma10_v = np.mean(closes[max(0, i-9):i+1])
+        # 蜡烛形态 (只检测单根, 快速)
+        body = abs(c - o); rng = h - l
+        body_pct = body / c * 100 if c > 0 else 0
+        wick_up = h - max(c, o); wick_lo = min(c, o) - l
+        candle_type = "大阳线" if c >= o and body_pct > 3 else \
+                      "大阴线" if c < o and body_pct > 3 else \
+                      "小阳线" if c >= o else \
+                      "小阴线" if c < o else "十字星"
+        if wick_lo >= body * 2 and wick_up < body * 0.5: candle_type = "锤子线 (看涨)"
+        if wick_up >= body * 2 and wick_lo < body * 0.5: candle_type = "射击之星 (看跌)"
+
+        lines = [
+            f"📅 {d}",
+            f"🔖 {candle_type}",
+            f"开 {o:.2f}  收 {c:.2f}  {'📈' if c>=o else '📉'} {chg_pct:+.2f}%",
+            f"高 {h:.2f}  低 {l:.2f}  振幅 {rng/c*100:.2f}%",
+            f"量 {int(v):,}",
+            f"MA5={ma5_v:.2f}  MA10={ma10_v:.2f}",
+        ]
+        text = "\n".join(lines)
+
+        # 浮动窗口 (每帧重建保证最新内容)
+        if _hover_win is not None:
+            try: _hover_win.destroy()
+            except: pass
+        try:
+            _hover_win = tk.Toplevel(dlg)
+            _hover_win.withdraw()
+            _hover_win.overrideredirect(True)
+            _hover_win.configure(bg="#263238", highlightbackground="#FFD54F", highlightthickness=1)
+            tk.Label(_hover_win, text=text, bg="#263238", fg="white", font=("", 9),
+                     justify=tk.LEFT, padx=8, pady=4).pack()
+            # 定位: 鼠标位置右下角
+            mx = dlg.winfo_pointerx() - dlg.winfo_rootx() + 18
+            my = dlg.winfo_pointery() - dlg.winfo_rooty() + 18
+            _hover_win.geometry(f"+{mx}+{my}")
+            _hover_win.deiconify()
+            _hover_win.lift()
+        except Exception:
+            _hover_win = None
 
     def _reload():
         period = period_var.get()
