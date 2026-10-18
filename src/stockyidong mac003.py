@@ -4749,6 +4749,15 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         # 工具标签页(快速爬取里的不常用按钮移过来)
         tools_frame = ttk.Frame(crawler_control_notebook, padding=5)
         crawler_control_notebook.add(tools_frame, text="工具")
+        # ── 📚 书籍 Tab ──
+        books_frame = ttk.Frame(crawler_control_notebook, padding=5)
+        crawler_control_notebook.add(books_frame, text="📚书籍")
+        try:
+            from ui.book_manager import build_books_tab
+            build_books_tab(books_frame, root=self.root)
+        except Exception as _be:
+            import traceback as _tb; _tb.print_exc()
+            ttk.Label(books_frame, text=f"❌ 书籍模块加载失败: {_be}").pack(pady=20)
         # ── 工具 Tab 按钮 ──
         tools_row_a = ttk.Frame(tools_frame); tools_row_a.pack(fill=tk.X, pady=2)
         _tools_pad = {"side": tk.LEFT, "padx": 2, "pady": 2, "fill": tk.X, "expand": True}
