@@ -2728,6 +2728,74 @@ def _quick_open_daily_kline(parent, code6, name):
     # 🕯️ 日本蜡烛技术分析 (16 种经典形态 + 趋势判断)
     # ═══════════════════════════════════════════════════════════════════════════
 
+    # ── 📖 蜡烛形态解释字典 (给 hover 浮窗用) ──
+    _PATTERN_DESC = {
+        "锤子线 Hammer": ("看涨",
+            "下影线≥实体2倍, 上影极短, 实体小",
+            "暗示空方力竭, 多头反击. 在下跌末端出现最有效",
+            "✅ 次日收阳确认, 配合放量更可靠\n❌ 上涨途中出现=中继, 不是反转\n📌 例: 2024.9.24 茅台 1600 附近锤子线后连涨3天"),
+        "射击之星 Shooting Star": ("看跌",
+            "上影线≥实体2倍, 下影极短, 实体小",
+            "暗示多方冲高回落, 空头反扑. 在上涨末端出现最有效",
+            "✅ 次日收阴确认, 放量滞涨更危险\n❌ 下跌途中出现=中继, 不是见顶\n📌 例: 2024.8.5 纳指冲高回落射击之星, 次日暴跌3%"),
+        "十字星 Doji": ("中性",
+            "开盘≈收盘, 上下影线相当",
+            "多空平衡, 犹豫不决. 本身无方向, 看前后文",
+            "✅ 连续大涨后十字=涨势衰竭信号\n✅ 连续大跌后十字=可能企稳\n📌 例: 2024.10.15 宁德时代 198 十字星后次日跳空高开"),
+        "蜻蜓十字 Dragonfly Doji": ("看涨",
+            "下影长, 无上影, 开≈收",
+            "多头尾盘夺回控制权, 下影线是空头被打回的痕迹",
+            "✅ 下跌末端出现强烈看涨信号\n❌ 高位出现=多头最后挣扎\n📌 例: 2024.6.20 比亚迪 245 蜻蜓十字后突破260"),
+        "墓碑十字 Gravestone Doji": ("看跌",
+            "上影长, 无下影, 开≈收",
+            "空头尾盘砸回, 上影线是多头被打压的痕迹",
+            "✅ 上涨末端出现强烈看跌信号\n❌ 低位出现=空头最后宣泄\n📌 例: 2024.9.17 中芯国际 68 墓碑十字后连跌4天"),
+        "纺锤线 Spinning Top": ("中性",
+            "小实体, 上下影线都存在",
+            "多空拉锯战, 方向不明. 比十字星更有波动",
+            "✅ 出现在趋势中=继续当前方向概率大\n✅ 出现在盘整区=无意义\n📌 例: 震荡市中经常出现, 不作为买卖依据"),
+        "看涨吞没 Bullish Engulfing": ("看涨",
+            "小阴线 + 大阳线(实体完全包住前阴线)",
+            "多头彻底翻盘, 吃掉前一天全部空头地盘. 强烈反转信号",
+            "✅ 下跌趋势末端出现=见底信号\n❌ 上涨途中出现=加速信号\n📌 例: 2024.9.25 沪深300大阳线吞没前3阴, 开启反弹"),
+        "看跌吞没 Bearish Engulfing": ("看跌",
+            "小阳线 + 大阴线(实体完全包住前阳线)",
+            "空头彻底翻盘, 吃掉前一天全部多头地盘. 强烈反转信号",
+            "✅ 上涨趋势末端出现=见顶信号\n❌ 下跌途中出现=加速下跌\n📌 例: 2024.10.8 贵州茅台大阴线吞没前阳, 开启回调"),
+        "乌云盖顶 Dark Cloud Cover": ("看跌",
+            "阳线+高开低走阴线(收在阳线实体中位以下)",
+            "多头尝试高开但被空头打回, 信心动摇",
+            "✅ 上涨末端出现=看跌信号\n❌ 要确认阴线收在阳线实体下半部\n📌 例: 2024.7.2 宁德时代乌云盖顶后回调8%"),
+        "刺透形态 Piercing Line": ("看涨",
+            "阴线+低开高走阳线(收在阴线实体中位以上)",
+            "空头尝试低开但被多头拉起, 反击信号",
+            "✅ 下跌末端出现=看涨信号\n❌ 要确认阳线收在阴线实体上半部\n📌 例: 2024.8.12 科大讯飞刺透形态后涨12%"),
+        "早晨之星 Morning Star": ("看涨",
+            "大阴+小实体+大阳(三天组合)",
+            "完整反转结构: 空头力竭→犹豫→多头掌控. 最经典的见底信号之一",
+            "✅ 出现在下跌趋势末端非常可靠\n❌ 第三天阳线实体越大越好\n📌 例: 2024.9.26 科创50早晨之星, 一周涨15%"),
+        "黄昏之星 Evening Star": ("看跌",
+            "大阳+小实体+大阴(三天组合)",
+            "完整反转结构: 多头力竭→犹豫→空头掌控. 最经典的见顶信号之一",
+            "✅ 出现在上涨趋势末端非常可靠\n❌ 第三天阴线实体越大越好\n📌 例: 2024.7.10 招商银行黄昏之星, 一个月跌10%"),
+        "三只白兵 Three White Soldiers": ("看涨",
+            "连续3根阳线, 收↑开, 后阳收盘>前阳收盘",
+            "多头持续进攻, 一浪高过一浪. 极强的上涨趋势确认",
+            "✅ 底部出现=强势启动信号\n❌ 高位连续3阳=过热, 注意回调\n📌 例: 2024.2月初 沪深300三只白兵, 开启春季行情"),
+        "三只黑鸦 Three Black Crows": ("看跌",
+            "连续3根阴线, 收↓开, 后阴收盘<前阴收盘",
+            "空头持续砸盘, 一浪低于一浪. 极强的下跌趋势确认",
+            "✅ 顶部出现=明确见顶信号\n❌ 低位三黑鸦=恐慌宣泄后可能反弹\n📌 例: 2024.8.6~8 恒生科技三只黑鸦, 随后政策救市"),
+        "孕线 Harami (看涨)": ("看涨",
+            "大K线 + 小K线(完全在前一根实体内)",
+            "趋势减速, 酝酿反转. 小K线是方向选择点",
+            "✅ 下跌末端孕线看涨概率大\n✅ 要等小K线后一天方向确认\n📌 例: 2024.9.20 东方财富孕线后涨6%"),
+        "孕线 Harami (看跌)": ("看跌",
+            "大K线 + 小K线(完全在前一根实体内)",
+            "趋势减速, 酝酿反转. 小K线是方向选择点",
+            "✅ 上涨末端孕线看跌概率大\n✅ 要等小K线后一天方向确认\n📌 例: 2024.6.25 药明康德孕线后回调5%"),
+    }
+
     def _analyze_candle(OP, HI, LO, CL):
         """返回 (list_of_pattern_dicts, summary_text)
         dict keys: {'idx', 'name', 'type': '看涨'/'看跌'/'中性', 'strength':0-3, 'desc'}"""
@@ -3455,6 +3523,77 @@ def _quick_open_daily_kline(parent, code6, name):
             f"量 {int(v):,}",
             f"MA5={ma5_v:.2f}  MA10={ma10_v:.2f}",
         ]
+
+        # ── 🆕 蜡烛形态检测 + 解释 (追加到 tooltip 尾部) ──
+        _pat_name = None
+        # 单根形态 (当前 i)
+        if wick_lo >= body * 2 and wick_up < body * 0.5 and body_pct < 1.5:
+            _pat_name = "锤子线 Hammer"
+        elif wick_up >= body * 2 and wick_lo < body * 0.5 and body_pct < 1.5:
+            _pat_name = "射击之星 Shooting Star"
+        elif body_pct < 0.3 and wick_up > 0 and wick_lo > 0:
+            if wick_lo > wick_up * 3: _pat_name = "蜻蜓十字 Dragonfly Doji"
+            elif wick_up > wick_lo * 3: _pat_name = "墓碑十字 Gravestone Doji"
+            else: _pat_name = "十字星 Doji"
+        elif body_pct < 1.5 and wick_up > body * 0.5 and wick_lo > body * 0.5:
+            _pat_name = "纺锤线 Spinning Top"
+
+        # 双根形态 (需要 i>=1)
+        if _pat_name is None and i >= 1:
+            po, pc, ph, pl = opens[i-1], closes[i-1], highs[i-1], lows[i-1]
+            p_body = abs(pc - po); p_rng = ph - pl
+            p_bull = pc >= po
+            cur_bull = c >= o
+            # 看涨吞没
+            if not p_bull and cur_bull and body > p_body * 1.1 and o <= min(po, pc) and c >= max(po, pc):
+                _pat_name = "看涨吞没 Bullish Engulfing"
+            # 看跌吞没
+            elif p_bull and not cur_bull and body > p_body * 1.1 and o >= max(po, pc) and c <= min(po, pc):
+                _pat_name = "看跌吞没 Bearish Engulfing"
+            # 乌云盖顶
+            elif p_bull and not cur_bull and o > pc and c < (po + pc) / 2:
+                _pat_name = "乌云盖顶 Dark Cloud Cover"
+            # 刺透形态
+            elif not p_bull and cur_bull and o < pc and c > (po + pc) / 2:
+                _pat_name = "刺透形态 Piercing Line"
+            # 孕线
+            elif p_rng > 0 and body < p_body * 0.5 and max(o, c) <= max(po, pc) and min(o, c) >= min(po, pc):
+                _pat_name = f"孕线 Harami ({'看涨' if p_bull else '看跌'})"
+
+        # 三根形态 (需要 i>=2, 用 i-2,i-1,i)
+        if _pat_name is None and i >= 2:
+            o1, c1 = opens[i-2], closes[i-2]
+            o2, c2 = opens[i-1], closes[i-1]
+            o3, c3 = opens[i], closes[i]
+            big1 = abs(c1 - o1) > (highs[i-2] - lows[i-2]) * 0.03
+            big2 = abs(c2 - o2) > (highs[i-1] - lows[i-1]) * 0.03
+            big3 = abs(c3 - o3) > (highs[i] - lows[i]) * 0.03
+            small2 = abs(c2 - o2) < (highs[i-1] - lows[i-1]) * 0.015
+            # 早晨之星
+            if c1 < o1 and small2 and c3 > o3 and c3 > (o1 + c1) / 2:
+                _pat_name = "早晨之星 Morning Star"
+            # 黄昏之星
+            elif c1 > o1 and small2 and c3 < o3 and c3 < (o1 + c1) / 2:
+                _pat_name = "黄昏之星 Evening Star"
+            # 三只白兵
+            elif big1 and big2 and big3 and c1 > o1 and c2 > o2 and c3 > o3 and c2 > c1 and c3 > c2:
+                _pat_name = "三只白兵 Three White Soldiers"
+            # 三只黑鸦
+            elif big1 and big2 and big3 and c1 < o1 and c2 < o2 and c3 < o3 and c2 < c1 and c3 < c2:
+                _pat_name = "三只黑鸦 Three Black Crows"
+
+        # 追加解释到 tooltip
+        if _pat_name and _pat_name in _PATTERN_DESC:
+            pt, shape, mean, advice = _PATTERN_DESC[_pat_name]
+            _emoji = "🟢" if pt == "看涨" else "🔴" if pt == "看跌" else "🟡"
+            lines += [
+                "",
+                f"{_emoji} 【{_pat_name}】",
+                f"  形态: {shape}",
+                f"  含义: {mean}",
+                f"  💡 {advice}",
+            ]
+
         text = "\n".join(lines)
 
         # 浮动窗口 (每帧重建保证最新内容)
