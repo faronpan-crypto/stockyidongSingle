@@ -571,25 +571,60 @@ def _open_book_detail(parent, bid):
                  bg="#121212", fg="#546E7A", font=("", 11)).pack(pady=40)
     nb.add(t2, text="🌐 外界声音")
 
-    # Tab6: 我的笔记 (可编辑, 总有)
+    # Tab6: 我的笔记 (可编辑, 总有) — 改用 pack 避免 grid_rowconfigure 干扰
     t3 = tk.Frame(nb, bg="#121212"); tab_frames["notes"] = t3
-    _make_labeled_text(t3, "📝 自我读书概要 / 特色解读", row["user_summary"] or "",
-                       (0, 0), height=7, editable=True, tag="_summary")
-    _make_labeled_text(t3, "🧠 个人笔记 / 读后感 / 划线摘录", row["user_notes"] or "",
-                       (1, 0), height=7, editable=True, tag="_notes")
+    # 用独立的 pack 版本 (不走 grid)
+    def _make_packed_text(parent, label, initial, height=7, editable=True, tag=None):
+        frm = tk.Frame(parent, bg="#121212")
+        frm.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        tk.Label(frm, text=label, bg="#121212", fg="#FFD54F", font=("", 12, "bold")).pack(anchor="w")
+        _me = _make_labeled_text
+        txt = scrolledtext.ScrolledText(frm, bg="#1E1E1E", fg="#E0E0E0",
+                                        font=("", _me._font_size), height=height, wrap=tk.WORD,
+                                        relief=tk.FLAT, padx=6, pady=4)
+        txt.pack(fill=tk.BOTH, expand=True, pady=(2, 0))
+        txt.insert("1.0", initial or "")
+        txt.configure(state=tk.NORMAL if editable else tk.DISABLED)
+        if tag and editable:
+            _editors[tag] = lambda t=txt: t.get("1.0", tk.END).strip()
+        _me._all_texts.append(txt)
+        def _zoom(_e=None, delta=0):
+            cur = _me._font_size
+            if delta: cur = max(9, min(24, cur + delta))
+            elif _e:
+                if _e.delta > 0: cur = min(24, cur + 1)
+                elif _e.delta < 0: cur = max(9, cur - 1)
+            _me._font_size = cur
+            for t in _me._all_texts:
+                try: t.configure(font=("", cur))
+                except: pass
+        txt.bind("<Control-MouseWheel>", _zoom)
+        txt.bind("<Control-Up>", lambda e: _zoom(delta=1))
+        txt.bind("<Control-Down>", lambda e: _zoom(delta=-1))
+        tk.Label(frm, text=f"💡 Ctrl+滚轮 调节字号 (当前 {_me._font_size}号)",
+                 bg="#121212", fg="#546E7A", font=("", 8)).pack(anchor="e")
+
+    _make_packed_text(t3, "📝 自我读书概要 / 特色解读", row["user_summary"] or "",
+                      height=7, editable=True, tag="_summary")
+    _make_packed_text(t3, "🧠 个人笔记 / 读后感 / 划线摘录", row["user_notes"] or "",
+                      height=7, editable=True, tag="_notes")
     nb.add(t3, text="✏️ 我的笔记")
 
     def _save():
         nonlocal row
         try:
-            s_text = _editors.get("_summary")
-            n_text = _editors.get("_notes")
+            # ⚡ _editors 存的是 lambda, 必须 call 才能拿到文本!
+            s_fn = _editors.get("_summary")
+            n_fn = _editors.get("_notes")
+            s_text = s_fn() if callable(s_fn) else (s_fn or "")
+            n_text = n_fn() if callable(n_fn) else (n_fn or "")
             con = _sqlite3.connect(_DB_PATH)
             con.execute("UPDATE books SET user_summary=?, user_notes=?, updated_at=? WHERE id=?",
                         (s_text, n_text, _dt.now().strftime("%Y-%m-%d %H:%M"), bid))
             con.commit(); con.close()
             messagebox.showinfo("保存", "✅ 笔记已保存")
         except Exception as e:
+            import traceback; traceback.print_exc()
             messagebox.showerror("保存失败", str(e))
 
     btn_row = tk.Frame(dlg, bg="#121212"); btn_row.pack(fill=tk.X, padx=6, pady=(0, 4))
