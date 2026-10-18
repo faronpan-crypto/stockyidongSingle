@@ -2566,6 +2566,18 @@ def _quick_open_daily_kline(parent, code6, name):
                        activebackground=_BG_TOOLBAR, activeforeground="white",
                        command=lambda: _reload()).pack(side=tk.LEFT, padx=6)
 
+    # 🆕 两个分析勾选项
+    candle_var = tk.BooleanVar(value=False)
+    futures_var = tk.BooleanVar(value=False)
+    tk.Checkbutton(top, text="🕯️ 蜡烛分析 (日本)", variable=candle_var,
+                   bg=_BG_TOOLBAR, fg="#FFAB91", selectcolor=_BG_DEEP,
+                   activebackground=_BG_TOOLBAR, activeforeground="#FFAB91",
+                   command=lambda: _on_analyze()).pack(side=tk.LEFT, padx=(20, 6))
+    tk.Checkbutton(top, text="📊 期货技术分析", variable=futures_var,
+                   bg=_BG_TOOLBAR, fg="#80CBC4", selectcolor=_BG_DEEP,
+                   activebackground=_BG_TOOLBAR, activeforeground="#80CBC4",
+                   command=lambda: _on_analyze()).pack(side=tk.LEFT, padx=6)
+
     status = tk.Label(top, text="⏳ 加载中...", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9))
     status.pack(side=tk.RIGHT, padx=10)
 
@@ -2578,6 +2590,16 @@ def _quick_open_daily_kline(parent, code6, name):
     except Exception: pass
     try: tb = None
     except Exception: pass
+
+    # 🆕 底部分析文本面板 (隐藏, 勾选时显示)
+    import tkinter.scrolledtext as _st
+    _analysis_frame = tk.Frame(dlg, bg=_BG_PANEL, height=0)
+    _analysis_frame.pack_propagate(False)
+    _analysis_text = _st.ScrolledText(_analysis_frame, bg=_BG_PANEL, fg="#ECEFF1",
+                                       font=("", 10), wrap=tk.WORD,
+                                       insertbackground=_FG_GOLD, relief=tk.FLAT,
+                                       padx=8, pady=6)
+    _analysis_text.pack(fill=tk.BOTH, expand=True)
 
     # 缓存
     _cache = {"data": None, "period": None}
@@ -2616,6 +2638,370 @@ def _quick_open_daily_kline(parent, code6, name):
         out = np.full(len(arr), np.nan)
         out[n - 1:] = (cs[n - 1:] - np.concatenate([[0], cs[:-n]])) / n
         return out
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # 🕯️ 日本蜡烛技术分析 (16 种经典形态 + 趋势判断)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _analyze_candle(OP, HI, LO, CL):
+        """返回 (list_of_pattern_dicts, summary_text)
+        dict keys: {'idx', 'name', 'type': '看涨'/'看跌'/'中性', 'strength':0-3, 'desc'}"""
+        n = len(CL); pats = []
+        if n < 10: return pats, "数据不足 10 根, 无法分析"
+
+        def body(i): return abs(CL[i] - OP[i])
+        def up(i): return CL[i] >= OP[i]
+        def upper_shadow(i): return HI[i] - max(CL[i], OP[i])
+        def lower_shadow(i): return min(CL[i], OP[i]) - LO[i]
+        def full_range(i): return HI[i] - LO[i]
+
+        # 计算平均实体大小 (最近 30 根)
+        recent = min(30, n)
+        avg_body = np.mean([body(i) for i in range(n - recent, n)])
+        avg_range = np.mean([full_range(i) for i in range(n - recent, n)])
+
+        for i in range(3, n):
+            b = body(i); r = full_range(i); ur = upper_shadow(i); lr = lower_shadow(i)
+            up_ = up(i)
+            # ── 单根形态 ──
+            # 1. 锤子线 Hammer (看涨): 下影 > 实体 2x, 上影极短, 跌势中
+            if lr >= 2 * b and ur < b * 0.5 and b > avg_body * 0.3:
+                pats.append({"idx": i, "name": "锤子线 Hammer", "type": "看涨",
+                              "strength": 2, "desc": f"下影 {lr:.2f} > 实体 {b:.2f}×2, 跌势末端典型反转信号"})
+            # 2. 射击之星 Shooting Star (看跌): 上影 > 实体 2x, 下影极短, 涨势中
+            if ur >= 2 * b and lr < b * 0.5 and b > avg_body * 0.3:
+                pats.append({"idx": i, "name": "射击之星 Shooting Star", "type": "看跌",
+                              "strength": 2, "desc": f"上影 {ur:.2f} > 实体 {b:.2f}×2, 涨势末端典型反转信号"})
+            # 3. 十字星 Doji (中性→反转): 实体极小, 上下影都有
+            if b < avg_body * 0.15 and r > avg_body * 0.5:
+                pats.append({"idx": i, "name": "十字星 Doji", "type": "中性",
+                              "strength": 1, "desc": "多空力量均衡, 趋势可能即将选择方向"})
+            # 4. 蜻蜓十字 Dragonfly Doji (看涨): 下影长, 上影极短
+            if b < avg_body * 0.15 and lr > 3 * b and ur < b:
+                pats.append({"idx": i, "name": "蜻蜓十字 Dragonfly Doji", "type": "看涨",
+                              "strength": 2, "desc": "下影线极长, 多方反击信号"})
+            # 5. 墓碑十字 Gravestone Doji (看跌): 上影长, 下影极短
+            if b < avg_body * 0.15 and ur > 3 * b and lr < b:
+                pats.append({"idx": i, "name": "墓碑十字 Gravestone Doji", "type": "看跌",
+                              "strength": 2, "desc": "上影线极长, 空方反击信号"})
+            # 6. 纺锤线 Spinning Top (中性)
+            if b < avg_body * 0.5 and ur > b and lr > b:
+                pats.append({"idx": i, "name": "纺锤线 Spinning Top", "type": "中性",
+                              "strength": 1, "desc": "多空犹豫, 市场进入整理"})
+
+            # ── 双根形态 ──
+            if i >= 1:
+                b0 = body(i - 1); up0 = up(i - 1)
+                # 7. 看涨吞没 Bullish Engulfing: 前阴后阳, 阳实体完全包住阴实体
+                if not up0 and up_ and CL[i] > OP[i - 1] and OP[i] < CL[i - 1] and b > b0:
+                    pats.append({"idx": i, "name": "看涨吞没 Bullish Engulfing", "type": "看涨",
+                                  "strength": 3, "desc": f"阳线实体({b:.2f})完全包住前阴线({b0:.2f}), 强烈反转"})
+                # 8. 看跌吞没 Bearish Engulfing: 前阳后阴, 阴实体完全包住阳实体
+                if up0 and not up_ and CL[i] < OP[i - 1] and OP[i] > CL[i - 1] and b > b0:
+                    pats.append({"idx": i, "name": "看跌吞没 Bearish Engulfing", "type": "看跌",
+                                  "strength": 3, "desc": f"阴线实体({b:.2f})完全包住前阳线({b0:.2f}), 强烈反转"})
+                # 9. 乌云盖顶 Dark Cloud Cover (看跌)
+                if up0 and not up_ and OP[i] > HI[i - 1] and CL[i] < (OP[i - 1] + CL[i - 1]) / 2:
+                    pats.append({"idx": i, "name": "乌云盖顶 Dark Cloud Cover", "type": "看跌",
+                                  "strength": 2, "desc": "高开低走, 收盘价跌破前阳实体中点"})
+                # 10. 刺透形态 Piercing Line (看涨)
+                if not up0 and up_ and OP[i] < LO[i - 1] and CL[i] > (OP[i - 1] + CL[i - 1]) / 2:
+                    pats.append({"idx": i, "name": "刺透形态 Piercing Line", "type": "看涨",
+                                  "strength": 2, "desc": "低开高走, 收盘价升破前阴实体中点"})
+
+            # ── 三根形态 ──
+            if i >= 2:
+                up1 = up(i - 1); up2 = up(i - 2)
+                # 11. 早晨之星 Morning Star (看涨): 阴+小实体+阳, 第三阳深入第一阴
+                if (not up2) and body(i - 1) < avg_body * 0.3 and up_ and CL[i] > (OP[i - 2] + CL[i - 2]) / 2:
+                    pats.append({"idx": i, "name": "早晨之星 Morning Star", "type": "看涨",
+                                  "strength": 3, "desc": "三根组合: 大阴+小实体+大阳, 典型底部反转"})
+                # 12. 黄昏之星 Evening Star (看跌): 阳+小实体+阴, 第三阴深入第一阳
+                if up2 and body(i - 1) < avg_body * 0.3 and (not up_) and CL[i] < (OP[i - 2] + CL[i - 2]) / 2:
+                    pats.append({"idx": i, "name": "黄昏之星 Evening Star", "type": "看跌",
+                                  "strength": 3, "desc": "三根组合: 大阳+小实体+大阴, 典型顶部反转"})
+                # 13. 三只白兵 Three White Soldiers (看涨)
+                if up2 and up1 and up_ and CL[i - 2] < CL[i - 1] < CL[i] and OP[i - 2] < OP[i - 1] < OP[i]:
+                    pats.append({"idx": i, "name": "三只白兵 Three White Soldiers", "type": "看涨",
+                                  "strength": 3, "desc": "连续三根上升阳线, 强势看涨信号"})
+                # 14. 三只黑鸦 Three Black Crows (看跌)
+                if (not up2) and (not up1) and (not up_) and CL[i - 2] > CL[i - 1] > CL[i] and OP[i - 2] > OP[i - 1] > OP[i]:
+                    pats.append({"idx": i, "name": "三只黑鸦 Three Black Crows", "type": "看跌",
+                                  "strength": 3, "desc": "连续三根下降阴线, 强烈看跌信号"})
+
+                # 15. 孕线 Harami (反转预警)
+                big = max(body(i - 2), body(i))
+                if body(i - 1) < big * 0.3 and max(OP[i - 1], CL[i - 1]) < max(OP[i - 2], CL[i - 2]) and min(OP[i - 1], CL[i - 1]) > min(OP[i - 2], CL[i - 2]):
+                    direction = "看涨" if not up2 else "看跌"
+                    pats.append({"idx": i - 1, "name": f"孕线 Harami ({direction})", "type": direction,
+                                  "strength": 2, "desc": f"小实体完全在前大实体内部, 原趋势可能停滞"})
+
+        # ── 趋势判断 ──
+        ma5 = np.mean(CL[-5:]) if n >= 5 else CL[-1]
+        ma20 = np.mean(CL[-20:]) if n >= 20 else CL[-1]
+        ma60 = np.mean(CL[-60:]) if n >= 60 else CL[-1]
+        last = CL[-1]
+        trend = "多头排列 (MA5>MA20>MA60)" if ma5 > ma20 > ma60 else \
+                "空头排列 (MA5<MA20<MA60)" if ma5 < ma20 < ma60 else "均线纠缠"
+
+        # 近 10 根汇总: 多少看涨/看跌形态
+        recent_pats = [p for p in pats if p["idx"] >= n - 10]
+        bull_cnt = sum(1 for p in recent_pats if p["type"] == "看涨")
+        bear_cnt = sum(1 for p in recent_pats if p["type"] == "看跌")
+
+        summary = f"【日本蜡烛技术】最近10根K线检测到 {len(recent_pats)} 个形态\n"
+        summary += f"  看涨形态: {bull_cnt} 个  |  看跌形态: {bear_cnt} 个\n"
+        summary += f"  当前趋势: {trend}\n"
+        summary += f"  最新收盘: {last:.2f}  MA5={ma5:.2f}  MA20={ma20:.2f}  MA60={ma60:.2f}\n\n"
+
+        for p in recent_pats[-15:]:  # 最多显示 15 个
+            date_tag = f"+{n-1-p['idx']}天前" if p["idx"] < n - 1 else "今日/最新"
+            strength_bar = "★" * p["strength"] + "☆" * (3 - p["strength"])
+            summary += f"[{date_tag}] {p['name']} ({p['type']}) {strength_bar}\n    → {p['desc']}\n\n"
+
+        if not recent_pats:
+            summary += "最近 10 根未检测到经典蜡烛形态, 继续观察等待信号\n"
+        elif bull_cnt > bear_cnt * 1.5:
+            summary += "📈 综合判断: 看涨形态占优, 多头反击概率大\n"
+        elif bear_cnt > bull_cnt * 1.5:
+            summary += "📉 综合判断: 看跌形态占优, 空头压制概率大\n"
+        else:
+            summary += "⚖️ 综合判断: 多空形态平衡, 方向不明朗, 等待突破\n"
+
+        return pats, summary
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # 📊 期货技术分析 (John Murphy《期货市场技术分析》核心方法论)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _analyze_futures(OP, HI, LO, CL, VOL):
+        """基于 John Murphy 的技术分析: 趋势/支撑压力/周期/波动率/量价/指标"""
+        n = len(CL)
+        result = []
+        if n < 30: return result, "数据不足 30 根"
+
+        last = CL[-1]
+        result.append("【期货技术分析】(John Murphy 方法论)\n")
+
+        # ① 趋势分析 (ADX + MA 排列)
+        def _ema(arr, period):
+            out = np.zeros_like(arr)
+            k = 2 / (period + 1)
+            out[0] = arr[0]
+            for i in range(1, len(arr)): out[i] = arr[i] * k + out[i - 1] * (1 - k)
+            return out
+
+        # MACD
+        ema12 = _ema(CL, 12); ema26 = _ema(CL, 26)
+        dif = ema12 - ema26; dea = _ema(dif, 9); macd_hist = 2 * (dif - dea)
+
+        ma20 = np.mean(CL[-20:]); ma60 = np.mean(CL[-60:]) if n >= 60 else np.mean(CL)
+        trend_dir = "上升趋势" if last > ma20 > ma60 else "下降趋势" if last < ma20 < ma60 else "震荡整理"
+
+        # ADX (简化版)
+        tr = np.maximum(HI[1:] - LO[1:], np.maximum(abs(HI[1:] - CL[:-1]), abs(LO[1:] - CL[:-1])))
+        dx = np.zeros(n - 1)
+        for i in range(1, n - 1):
+            plus_dm = HI[i] - HI[i - 1] if HI[i] - HI[i - 1] > LO[i - 1] - LO[i] else 0
+            minus_dm = LO[i - 1] - LO[i] if LO[i - 1] - LO[i] > HI[i] - HI[i - 1] else 0
+            atr = np.mean(tr[max(0, i - 14):i + 1])
+            plus_di = 100 * np.mean(plus_dm) / atr if atr > 0 else 0
+            minus_di = 100 * np.mean(minus_dm) / atr if atr > 0 else 0
+            dx[i] = 100 * abs(plus_di - minus_di) / (plus_di + minus_di) if (plus_di + minus_di) > 0 else 0
+        adx = np.mean(dx[-14:])
+        adx_judge = "强趋势" if adx > 25 else "弱趋势" if adx < 20 else "中等趋势强度"
+        result.append(f"① 趋势: {trend_dir}  |  ADX={adx:.1f} ({adx_judge})")
+
+        # ② 支撑/压力 (最近 60 根的高低点 + 整数关口 + MA)
+        recent_hi = max(HI[-60:]); recent_lo = min(LO[-60:])
+        supports = sorted([lo for lo in LO[-60:] if lo == min(LO[max(0, n - 60):n]) or (n > 60 and lo == min(LO))])[:3]
+        resistances = sorted([hi for hi in HI[-60:] if hi == max(HI[max(0, n - 60):n]) or (n > 60 and hi == max(HI))], reverse=True)[:3]
+        # 加上 MA20/60 和整数关口
+        zone_s = sorted(set([ma20, ma60] + [x for x in supports if x < last]))
+        zone_r = sorted(set([ma20, ma60] + [x for x in resistances if x > last]))
+        if last < ma20: zone_s.append(ma20)
+        if last > ma20: zone_r.append(ma20)
+        if last < ma60: zone_s.append(ma60)
+        if last > ma60: zone_r.append(ma60)
+        # 整数关口
+        for level in [round(last, -1), round(last / 50) * 50, round(last / 100) * 100]:
+            if level > 0 and abs(level - last) > last * 0.01:
+                (zone_s if level < last else zone_r).append(level)
+        zone_s = sorted(set(zone_s))[:3]
+        zone_r = sorted(set(zone_r))[:3]
+        zone_s_str = ", ".join([f"{x:.2f}" for x in zone_s])
+        zone_s_pct = ", ".join([f"{(last-x)/last*100:.1f}%" for x in zone_s]) if zone_s else ""
+        zone_r_str = ", ".join([f"{x:.2f}" for x in zone_r])
+        zone_r_pct = ", ".join([f"{(x-last)/last*100:.1f}%" for x in zone_r]) if zone_r else ""
+        result.append(f"② 支撑位: {zone_s_str}  (距当前 {zone_s_pct})")
+        result.append(f"   压力位: {zone_r_str}  (距当前 {zone_r_pct})")
+
+        # ③ 布林带 (20日)
+        bb_mid = ma20
+        bb_std = np.std(CL[-20:])
+        bb_up = bb_mid + 2 * bb_std; bb_lo = bb_mid - 2 * bb_std
+        bb_w = (bb_up - bb_lo) / bb_mid * 100
+        bb_pos = (last - bb_lo) / (bb_up - bb_lo) * 100 if bb_up > bb_lo else 50
+        bb_judge = "触及上轨 (超买)" if bb_pos > 90 else "触及下轨 (超卖)" if bb_pos < 10 else "中上轨区" if bb_pos > 60 else "中下轨区"
+        result.append(f"③ 布林带(20): 上={bb_up:.2f} 中={bb_mid:.2f} 下={bb_lo:.2f}  带宽={bb_w:.1f}%  位置={bb_pos:.0f}% ({bb_judge})")
+
+        # ④ RSI (14)
+        deltas = np.diff(CL)
+        gains = np.where(deltas > 0, deltas, 0); losses = np.where(deltas < 0, -deltas, 0)
+        avg_gain = np.mean(gains[-14:]); avg_loss = np.mean(losses[-14:])
+        rs = avg_gain / avg_loss if avg_loss > 0 else 100
+        rsi = 100 - 100 / (1 + rs)
+        rsi_judge = "超买区 (>70)" if rsi > 70 else "超卖区 (<30)" if rsi < 30 else "正常区"
+        result.append(f"④ RSI(14)={rsi:.1f} ({rsi_judge})")
+
+        # ⑤ 量价背离检测
+        recent_vol = VOL[-14:]
+        vol_ma = np.mean(recent_vol)
+        vol_ratio = VOL[-1] / vol_ma if vol_ma > 0 else 1
+        # 价格新高/新低 + 成交量对比
+        price_new_hi = CL[-1] > max(CL[-20:-1])
+        price_new_lo = CL[-1] < min(CL[-20:-1])
+        vol_rising = np.mean(VOL[-5:]) > np.mean(VOL[-14:-5])
+        divergence = []
+        if price_new_hi and not vol_rising: divergence.append("顶背离 (价新高量没跟上 → 警惕回调)")
+        if price_new_lo and vol_rising: divergence.append("底背离 (价新低量放大 → 恐慌盘, 可能见底)")
+        if not divergence:
+            divergence_desc = "无明显背离"
+        else:
+            divergence_desc = " | ".join(divergence)
+        result.append(f"⑤ 量价: 量比={vol_ratio:.2f}倍 (vs 14日均量)  {divergence_desc}")
+
+        # ⑥ MACD 状态
+        macd_judge = "金叉刚形成" if dif[-1] > dea[-1] and dif[-2] <= dea[-2] else \
+                     "死叉刚形成" if dif[-1] < dea[-1] and dif[-2] >= dea[-2] else \
+                     "红柱放大 (多头加速)" if macd_hist[-1] > macd_hist[-2] > 0 else \
+                     "绿柱放大 (空头加速)" if macd_hist[-1] < macd_hist[-2] < 0 else \
+                     "红柱缩小 (多头减速)" if macd_hist[-1] < macd_hist[-2] and macd_hist[-1] > 0 else \
+                     "绿柱缩小 (空头减速)"
+        result.append(f"⑥ MACD: {macd_judge}  DIF={dif[-1]:.3f} DEA={dea[-1]:.3f}")
+
+        # ⑦ 波动率 (ATR)
+        atr14 = np.mean(np.maximum(HI[-14:] - LO[-14:], np.maximum(abs(HI[-14:] - np.roll(CL[-14:], 1)), abs(LO[-14:] - np.roll(CL[-14:], 1)))))
+        vol_pct = atr14 / last * 100
+        result.append(f"⑦ 波动率: ATR(14)={atr14:.2f} ({vol_pct:.1f}%)  |  近60日振幅={(recent_hi - recent_lo) / ma60 * 100:.1f}%")
+
+        # ── 综合预测 ──
+        result.append("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+        signals = []
+        if trend_dir == "上升趋势": signals.append("趋势向上偏多")
+        elif trend_dir == "下降趋势": signals.append("趋势向下偏空")
+        if rsi > 70: signals.append("⚠️ RSI 超买, 追高风险大")
+        elif rsi < 30: signals.append("💡 RSI 超卖, 可能存在反弹机会")
+        if bb_pos > 90: signals.append("⚠️ 触及布林上轨, 注意回落风险")
+        elif bb_pos < 10: signals.append("💡 触及布林下轨, 关注超跌反弹")
+        if "金叉" in macd_judge: signals.append("🟢 MACD 金叉形成, 买入信号")
+        elif "死叉" in macd_judge: signals.append("🔴 MACD 死叉形成, 卖出信号")
+        for d in divergence:
+            if "顶背离" in d: signals.append("🔴 顶背离, 看跌预警")
+            if "底背离" in d: signals.append("🟢 底背离, 看涨机会")
+        if adx > 30 and trend_dir == "下降趋势": signals.append("⚠️ 强趋势下跌中, 不接飞刀")
+        elif adx < 20: signals.append("⚖️ 趋势较弱, 震荡反复概率高")
+
+        if not signals: signals.append("当前信号不明确, 观望为主")
+
+        result.append("📊 期货技术综合预测:")
+        for s in signals: result.append(f"  → {s}")
+
+        # 操作建议
+        result.append("\n🎯 操作建议:")
+        if trend_dir == "上升趋势" and rsi < 70 and "金叉" not in macd_judge:
+            result.append("  顺势持有多单或回踩支撑位轻仓试多")
+        elif trend_dir == "上升趋势" and rsi > 70:
+            result.append("  趋势虽向上但已超买, 建议等回调再进场或分批止盈")
+        elif trend_dir == "下降趋势":
+            result.append("  空头主导, 建议观望为主或反弹至压力位轻仓试空")
+        else:
+            result.append("  震荡格局, 建议区间操作, 不追涨杀跌")
+
+        return result, "\n".join(result)
+
+    # ── 图上标注蜡烛形态 ──
+    _mark_handles = []   # 保留 artist 引用, 避免被 gc 清除
+    def _mark_candle_patterns(OP, HI, LO, CL):
+        nonlocal _mark_handles, canvas, fig
+        # 清除旧标注
+        for h in _mark_handles:
+            try: h.remove()
+            except: pass
+        _mark_handles = []
+
+        pats, _ = _analyze_candle(OP, HI, LO, CL)
+        if not pats:
+            canvas.draw(); return
+
+        # 找到 ax1 主图 (第一个 axes)
+        ax_main = None
+        for ax in fig.axes:
+            if ax.get_ylabel() == "":  # 主图没 ylabel
+                ax_main = ax; break
+        if ax_main is None and len(fig.axes) > 0:
+            ax_main = fig.axes[0]
+
+        if ax_main is None: return
+
+        for p in pats:
+            i = p["idx"]
+            color = "#EF5350" if p["type"] == "看涨" else "#66BB6A" if p["type"] == "看跌" else "#FFD54F"
+            y_pos = HI[i] * 1.008 if "看跌" in p["type"] or "看" in p["name"] else LO[i] * 0.992
+            xytext = (i, HI[i] * 1.03 if p["type"] in ("看跌", "中性") else LO[i] * 0.97)
+            try:
+                ann = ax_main.annotate(p["name"][:6], xy=(i, HI[i] if p["type"] in ("看跌", "中性") else LO[i]),
+                     xytext=xytext, fontsize=6, color=color,
+                     arrowprops=dict(arrowstyle="->", color=color, lw=0.8, connectionstyle="arc3,rad=0.2"),
+                     bbox=dict(boxstyle="round,pad=0.2", fc="#1E1E1E", ec=color, alpha=0.85),
+                     ha="center")
+                _mark_handles.append(ann)
+            except Exception: pass
+        canvas.draw()
+
+    # ── 分析面板切换 ──
+    def _on_analyze():
+        # 至少勾选了一个
+        want_candle = candle_var.get()
+        want_futures = futures_var.get()
+        if not want_candle and not want_futures:
+            _analysis_frame.pack_forget()
+            dlg.geometry("1100x720"); return
+        # 需要数据
+        data = _cache.get("data")
+        if not data:
+            _analysis_text.delete("1.0", tk.END)
+            _analysis_text.insert(tk.END, "⚠️ 请先加载 K 线数据 (点日线/60分等周期按钮)")
+            _analysis_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+            dlg.geometry("1100x860"); return
+
+        opens_ = np.array([float(d["open"]) for d in data])
+        closes_ = np.array([float(d["close"]) for d in data])
+        highs_ = np.array([float(d["high"]) for d in data])
+        lows_ = np.array([float(d["low"]) for d in data])
+        vols_ = np.array([float(d.get("volume", 0)) for d in data])
+
+        _analysis_text.delete("1.0", tk.END)
+        _analysis_text.insert(tk.END, f"🔍 分析中... ({len(data)} 根K线)\n\n")
+        _analysis_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        dlg.geometry("1100x860")
+
+        import threading
+        def _bg():
+            out_parts = []
+            if want_candle:
+                _, c_sum = _analyze_candle(opens_, highs_, lows_, closes_)
+                out_parts.append(c_sum)
+            if want_futures:
+                _, f_sum = _analyze_futures(opens_, highs_, lows_, closes_, vols_)
+                out_parts.append(f_sum)
+            combined = "\n" + "=" * 60 + "\n\n".join(out_parts) if len(out_parts) > 1 else out_parts[0]
+            dlg.after(0, lambda: _analysis_text.delete("1.0", tk.END) or _analysis_text.insert(tk.END, combined))
+        threading.Thread(target=_bg, daemon=True).start()
+
+        # 同时在图上标注蜡烛形态 (勾选时)
+        if want_candle:
+            _mark_candle_patterns(opens_, highs_, lows_, closes_)
 
     def _draw(data, period):
         nonlocal canvas, fig
@@ -2704,8 +3090,10 @@ def _quick_open_daily_kline(parent, code6, name):
         status.config(text=f"⏳ 加载 {period}K...", fg=_FG_DIM)
         def _bg():
             d = _fetch(period)
-            dlg.after(0, lambda: _draw(d, period) if d else
-                      status.config(text="❌ 拉取失败 (网络/非交易时段)", fg="#EF5350"))
+            if d:
+                _cache["data"] = d; _cache["period"] = period
+            dlg.after(0, lambda: (_draw(d, period) if d else
+                      status.config(text="❌ 拉取失败 (网络/非交易时段)", fg="#EF5350")))
         import threading
         threading.Thread(target=_bg, daemon=True).start()
 
