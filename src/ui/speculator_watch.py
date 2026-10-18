@@ -2194,6 +2194,8 @@ def _show_daily_kline_dialog(parent, title, data, sina_code=None):
 
         cv_colors = ["#EF5350" if c[i] >= o[i] else "#66BB6A" for i in range(len(x))]
         axv.bar(x, v, color=cv_colors, width=0.7, alpha=0.8); axv.set_ylabel("Vol", color="#9E9E9E", fontsize=8)
+        vol_ma10 = _ma_calc(v, 10)
+        axv.plot(x, vol_ma10, color="#FFD54F", lw=1.2, label="VolMA10")
 
         md_colors = ["#EF5350" if m >= 0 else "#66BB6A" for m in macd_hist]
         axm.bar(x, macd_hist, color=md_colors, width=0.6, alpha=0.8)
