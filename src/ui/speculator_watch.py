@@ -1597,52 +1597,116 @@ def _show_zt_logic_popup(parent, row, score, reasons, zt_logic, winrate):
 
 
 def _build_orderbook(parent, win, col=1):
-    """② 涨停强弱排名 — 板块分组 + 多维度算法排序 + ❓涨停详解 + 双击股票弹日K"""
-    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FF6D00",
+    """② 观察盘口 — 恢复原版 (搜索+五档盘口+涨停排队+特定数量) + 新涨停强弱按钮"""
+    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#64B5F6",
                         font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
-    _add_title_row(frm, "② 涨停强弱排名 (游资多维度 · 板块分组)",
-                   "#FF6D00", ZT_RANK_KNOWLEDGE)
+    _add_title_row(frm, "② 观察盘口 (涨停/特定数量/盘口档位)",
+                   "#64B5F6", ORDERBOOK_KNOWLEDGE)
 
-    top = tk.Frame(frm, bg="#1E1E1E"); top.pack(fill=tk.X, pady=(2, 2))
-    win._zt_date_lbl = tk.Label(top, text="⏳ 加载涨停池...", bg="#1E1E1E",
-                                 fg="#BDBDBD", font=("", 8))
-    win._zt_date_lbl.pack(side=tk.LEFT, padx=4)
-    tk.Button(top, text="🔄 刷新", command=lambda: _load_orderbook(win),
-              bg="#37474F", fg="white", font=("", 8), padx=4).pack(side=tk.RIGHT)
+    # 顶部: 搜索 + 档位 + 📊涨停强弱 按钮
+    top = tk.Frame(frm, bg="#1E1E1E"); top.pack(fill=tk.X, pady=(2, 4))
+    tk.Label(top, text="🔍", bg="#1E1E1E", fg="#E0E0E0", font=("", 9)).pack(side=tk.LEFT)
+    win._ob_codes = tk.StringVar()
+    win._ob_cb = ttk.Combobox(top, textvariable=win._ob_codes, width=18,
+                              values=[], state="normal")
+    win._ob_cb.pack(side=tk.LEFT, padx=2)
+    win._ob_cb.bind("<<ComboboxSelected>>", lambda _e: _load_orderbook(win))
+    win._ob_cb.bind("<Return>", lambda _e: _load_orderbook(win))
+    tk.Button(top, text="查", command=lambda: _load_orderbook(win)).pack(side=tk.LEFT)
 
-    # Treeview: 板块分组嵌套 (列更紧凑, 字体更小)
+    win._ob_level = tk.StringVar(value="5档")
+    ttk.Combobox(top, textvariable=win._ob_level, values=["1档", "5档", "10档", "全息"],
+                 width=6, state="readonly").pack(side=tk.LEFT, padx=4)
+
+    # 新按钮: 📊涨停强弱排名 (独立弹窗)
+    tk.Button(top, text="📊涨停强弱",
+              command=lambda: _show_zt_rank_dialog(win),
+              bg="#FF6D00", fg="white", font=("", 8, "bold"),
+              padx=4).pack(side=tk.RIGHT, padx=2)
+
+    # 涨停板排队单
+    tk.Label(frm, text="📌 涨停板排队单 (封单变化)",
+             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(4, 2))
+    tv1 = ttk.Treeview(frm, columns=("代码", "名称", "封单(万手)", "换手率%"),
+                       show="headings", height=5)
+    for c in ("代码", "名称", "封单(万手)", "换手率%"):
+        tv1.heading(c, text=c); tv1.column(c, width=90)
+    tv1.pack(fill=tk.X, padx=2)
+    win._ob_limit_up_tv = tv1
+
+    # 盘口五档
+    top_row = tk.Frame(frm, bg="#1E1E1E"); top_row.pack(fill=tk.X, pady=(6, 2))
+    tk.Label(top_row, text="📌 买卖盘口 (实时)",
+             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(side=tk.LEFT)
+    win._ob_cur_label = tk.Label(top_row, text="(等加载...)", bg="#1E1E1E",
+                                  fg="#BDBDBD", font=("", 9, "bold"))
+    win._ob_cur_label.pack(side=tk.RIGHT)
+    order_frame = tk.Frame(frm, bg="#1E1E1E"); order_frame.pack(fill=tk.X, padx=2)
+    ask_frame = tk.Frame(order_frame, bg="#1E1E1E"); ask_frame.pack(side=tk.RIGHT)
+    win._ob_ask_labels = []
+    for i in range(5):
+        lbl = tk.Label(ask_frame, text="卖5 -", fg="#EF5350", bg="#1E1E1E",
+                       font=("Menlo", 9), anchor="e", width=18)
+        lbl.pack(anchor="e"); win._ob_ask_labels.append(lbl)
+    bid_frame = tk.Frame(order_frame, bg="#1E1E1E"); bid_frame.pack(side=tk.LEFT)
+    win._ob_bid_labels = []
+    for i in range(5):
+        lbl = tk.Label(bid_frame, text="买5 -", fg="#66BB6A", bg="#1E1E1E",
+                       font=("Menlo", 9), anchor="w", width=18)
+        lbl.pack(anchor="w"); win._ob_bid_labels.append(lbl)
+
+    # 特定数量识别
+    tk.Label(frm, text="📌 特定数量规律 (50/500/5000手)",
+             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(6, 2))
+    win._ob_pattern_text = tk.Label(frm, text="(等加载...)", bg="#1E1E1E",
+                                    fg="#CE93D8", font=("", 9), wraplength=350, justify=tk.LEFT)
+    win._ob_pattern_text.pack(fill=tk.X, padx=2)
+
+
+def _show_zt_rank_dialog(parent):
+    """📊 涨停强弱排名 — 独立弹窗, 板块分组 + 多维度算法"""
+    import threading
+    dlg = tk.Toplevel(parent)
+    dlg.title("📊 涨停强弱排名 (游资多维度·板块分组)")
+    dlg.geometry("960x620")
+    dlg.configure(bg="#1E1E1E")
+    dlg.transient(parent)
+
+    # 标题 + 日期 + 刷新
+    top = tk.Frame(dlg, bg="#1E1E1E"); top.pack(fill=tk.X, padx=6, pady=4)
+    tk.Label(top, text="📊 涨停强弱排名  |  游资多维度算法 · 板块分组",
+             bg="#1E1E1E", fg="#FF6D00", font=("", 11, "bold")).pack(side=tk.LEFT)
+    date_lbl = tk.Label(top, text="⏳ 加载中...", bg="#1E1E1E", fg="#BDBDBD", font=("", 9))
+    date_lbl.pack(side=tk.LEFT, padx=10)
+
+    # Treeview: 嵌套板块分组
     cols = ("rank", "name", "logic", "score", "time", "lb", "zb", "hand", "ind", "help")
     headings = [("#", "名称", "💡逻辑", "分", "封板", "板", "炸", "换手", "行业", "❓")]
-    widths = [28, 92, 130, 30, 45, 22, 22, 38, 60, 24]
-    tv = ttk.Treeview(frm, columns=cols, show="headings tree", height=11)
-    tv.configure(rowheight=18)
+    widths = [28, 92, 160, 30, 45, 22, 22, 38, 60, 24]
+    tv = ttk.Treeview(dlg, columns=cols, show="headings tree", height=22)
+    tv.configure(rowheight=20)
     for i, c in enumerate(cols):
         tv.heading(c, text=headings[0][i])
         tv.column(c, width=widths[i], anchor="center", stretch=False)
     tv.column("logic", anchor="w", stretch=True)
-    # 字体缩小到 8pt
     tv.tag_configure("high", foreground="#66BB6A", font=("", 8))
     tv.tag_configure("mid", foreground="#FFA726", font=("", 8))
     tv.tag_configure("low", foreground="#EF5350", font=("", 8))
     tv.tag_configure("rank1", foreground="#FFD54F", font=("", 8, "bold"))
-    tv.tag_configure("sector", foreground="#FF6D00", font=("", 8, "bold"),
-                     background="#263238")  # 板块标题行: 橙字 + 深灰底
+    tv.tag_configure("sector", foreground="#FF6D00", font=("", 9, "bold"), background="#263238")
+    tv.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
 
-    tv.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-
-    win._zt_tv = tv
-    win._zt_by_iid = {}  # iid -> (row, score, reasons, zt_logic, winrate)
+    # 存映射
+    by_iid = {}
 
     def _on_double_click(event):
-        """双击: 股票子行 → 弹日K线; 板块父行 → 切换展开"""
         iid = tv.identify_row(event.y)
         if not iid: return
         parent_iid = tv.parent(iid)
         if parent_iid:
-            # 子行 = 股票 → 弹日K
-            info = win._zt_by_iid.get(iid)
+            info = by_iid.get(iid)
             if not info: return
             row, _s, *_ = info
             try:
@@ -1652,16 +1716,13 @@ def _build_orderbook(parent, win, col=1):
                 elif code.startswith(("0", "3")): sina = "sz" + code
                 elif code.startswith(("4", "8")): sina = "bj" + code
                 else: sina = "sh" + code
-                _show_stock_daily_kline(frm.winfo_toplevel(), sina, name)
-                print(f"[👁️涨停双击] {name}({sina}) → 弹日K", flush=True)
-            except Exception as e:
-                print(f"[👁️涨停双击] err: {e}")
+                _show_stock_daily_kline(dlg, sina, name)
+            except Exception as e: print(f"[涨停弹窗双击] {e}")
         else:
             try: tv.item(iid, open=not tv.item(iid, "open"))
             except Exception: pass
 
     def _on_single_click(event):
-        """单击 ❓ 列 → 涨停详解弹窗"""
         region = tv.identify("region", event.x, event.y)
         if region != "cell": return
         col_id = tv.identify_column(event.x)
@@ -1670,29 +1731,26 @@ def _build_orderbook(parent, win, col=1):
         if not iid: return
         parent_iid = tv.parent(iid)
         if not parent_iid: return
-        info = win._zt_by_iid.get(iid)
+        info = by_iid.get(iid)
         if not info: return
         row, score, reasons, zt_logic, winrate = info
-        _show_zt_logic_popup(frm.winfo_toplevel(), row, score, reasons, zt_logic, winrate)
+        _show_zt_logic_popup(dlg, row, score, reasons, zt_logic, winrate)
 
     tv.bind("<Double-1>", _on_double_click)
     tv.bind("<ButtonRelease-1>", _on_single_click)
 
-    tk.Label(frm, text="💡 双击股票 → 日K线  |  双击板块 → 展开/收起  |  点❓ → 涨停详解",
-             bg="#1E1E1E", fg="#78909C", font=("", 8)).pack(anchor="w", padx=4, pady=(0, 2))
+    tk.Label(dlg, text="💡 双击股票 → 日K线  |  双击板块 → 展开/收起  |  点❓ → 涨停详解",
+             bg="#1E1E1E", fg="#78909C", font=("", 8)).pack(anchor="w", padx=6, pady=(0, 4))
 
-
-def _load_orderbook(win):
-    """后台加载涨停池 → 评分排序 → 渲染"""
+    # 后台加载
     def _bg():
         import datetime
         try:
             import akshare as ak
-        except Exception as e:
-            win.after(0, lambda: win._zt_date_lbl.config(text=f"❌ akshare 不可用: {e}", fg="#EF5350"))
+        except Exception:
+            dlg.after(0, lambda: date_lbl.config(text="❌ akshare 不可用", fg="#EF5350"))
             return
 
-        # 算最近交易日
         today = datetime.date.today(); d = today
         while d.weekday() >= 5: d -= datetime.timedelta(days=1)
         date_str = d.strftime("%Y%m%d")
@@ -1700,57 +1758,44 @@ def _load_orderbook(win):
         try:
             df = ak.stock_zt_pool_em(date=date_str)
         except Exception as e:
-            win.after(0, lambda: win._zt_date_lbl.config(text=f"❌ 涨停池拉取失败: {e}", fg="#EF5350"))
+            dlg.after(0, lambda: date_lbl.config(text=f"❌ {e}", fg="#EF5350"))
             return
 
         if df is None or len(df) == 0:
-            win.after(0, lambda: win._zt_date_lbl.config(
-                text=f"📅 {date_str} 涨停池为空 (非交易日或当日无涨停)", fg="#BDBDBD"))
+            dlg.after(0, lambda: date_lbl.config(text=f"📅 {date_str} 无涨停", fg="#BDBDBD"))
             return
 
-        # 同行业涨停数 → 板块共振
         ind_counts = df["所属行业"].value_counts().to_dict() if "所属行业" in df.columns else {}
-
-        # 评分
         results = []
         for _, r in df.iterrows():
             same_ind = ind_counts.get(r.get("所属行业", ""), 1)
             score, reasons, zt_logic = _calc_zt_strength(r, same_ind)
             winrate = _estimate_zt_next_day_winrate(r)
             results.append((r, score, reasons, zt_logic, winrate))
-
-        # 排序: 分数降序
         results.sort(key=lambda x: -x[1])
 
-        # 按板块分组 (ind -> [results...])
+        # 按板块分组
         by_ind = {}
         for item in results:
             ind = str(item[0].get("所属行业", "其他"))
             by_ind.setdefault(ind, []).append(item)
-
-        # 板块热度: 涨停股数 × 板块平均分数, 取 Top 8
         sector_scores = []
         for ind, items in by_ind.items():
-            n = len(items)
-            avg_s = sum(it[1] for it in items) / max(n, 1)
-            heat = n * avg_s  # 热度分
-            sector_scores.append((ind, n, avg_s, heat))
+            n = len(items); avg_s = sum(it[1] for it in items) / max(n, 1)
+            sector_scores.append((ind, n, avg_s, n * avg_s))
         sector_scores.sort(key=lambda x: -x[3])
-        top_sectors = sector_scores[:8]
+        top_sectors = sector_scores[:10]
 
         def _render():
-            tv = win._zt_tv
-            for i in tv.get_children(): tv.delete(i)
-            win._zt_by_iid = {}  # 清空重建
-
+            tv.delete(*tv.get_children())
+            by_iid.clear()
             for ind, n_stk, avg_s, heat in top_sectors:
                 ind_short = ind[:8]
                 parent_iid = f"sector_{ind}"
-                tv.insert("", tk.END, iid=parent_iid, open=False,
+                tv.insert("", tk.END, iid=parent_iid, open=True,
                           values=("", f"📌 {ind_short}  ({n_stk}只 均分{avg_s:.0f})",
                                   f"🔥 {heat:.0f}", "", "", "", "", "", ind_short, ""),
                           tags=("sector",))
-
                 top3 = by_ind[ind][:3]
                 for child_n, it in enumerate(top3, 1):
                     row, score, reasons, zt_logic, winrate = it
@@ -1766,19 +1811,87 @@ def _load_orderbook(win):
                               values=(child_n, name, zt_logic, f"{score:.0f}",
                                       t_fmt, lb, zb, f"{hand:.1f}", ind_short, "❓"),
                               tags=(tag,))
-                    # 存映射: iid -> info
-                    win._zt_by_iid[child_iid] = (row, score, reasons, zt_logic, winrate)
-
+                    by_iid[child_iid] = (row, score, reasons, zt_logic, winrate)
             n = len(results)
             high = sum(1 for _, s, *_ in results if s >= 70)
-            win._zt_date_lbl.config(
-                text=f"📅 {date_str}  |  共 {n} 只涨停 · {len(top_sectors)} 个板块  |  强势≥70: {high}",
+            date_lbl.config(
+                text=f"📅 {date_str}  |  共 {n} 只 · {len(top_sectors)}板块  |  强势≥70: {high}",
                 fg="#66BB6A" if high >= 5 else "#FFA726")
-            print(f"[👁️涨停] {date_str}: {n}只, {len(top_sectors)}板块, 强势(≥70): {high}只", flush=True)
 
-        win.after(0, _render)
+        dlg.after(0, _render)
 
     threading.Thread(target=_bg, daemon=True).start()
+
+
+def _load_orderbook(win):
+    """加载盘口五档 (新浪 snapshot) + 涨停排队 + 特定数量"""
+    # 盘口 (秒出)
+    def _load_snapshot():
+        try:
+            sel = win._ob_cb.get()
+            import re, requests
+            code_match = re.search(r'[(（](\d{6})[)）]', sel) or re.search(r'([a-z]{2}\d{6})', sel.lower())
+            if not code_match: return
+            raw = code_match.group(1)
+            sina = raw if raw[:2].isalpha() else ("sh" if raw.startswith("6") or raw.startswith("9") else "sz" if raw.startswith("0") or raw.startswith("3") else "bj" if raw.startswith(("4","8")) else "sh") + raw
+            url = f"https://hq.sinajs.cn/list={sina}"
+            r = requests.get(url, headers={"Referer": "https://finance.sina.com.cn"}, timeout=6)
+            if not r.ok or '"' not in r.text: return
+            parts = r.text.split('"')[1].split(',')
+            if len(parts) < 32: return
+            cur = float(parts[3])
+            bid_prices = parts[10:5:-1]   # 买5..买1
+            bid_vols   = parts[15:10:-1]
+            ask_prices = parts[16:21]     # 卖1..卖5
+            ask_vols   = parts[21:26]
+            def _fmt(price, vol):
+                try:
+                    p = float(price); v = int(float(vol))
+                    v_str = f"{v//10000}万" if v >= 10000 else str(v)
+                    return f"{p:.2f}  {v_str}"
+                except: return f"{price}  {vol}"
+            def _fill(lbls, prices, vols, ask=True):
+                for i in range(5):
+                    lbls[i].config(text=f"{'卖' if ask else '买'}{5-i} {_fmt(prices[i], vols[i])}")
+            _fill(win._ob_ask_labels, ask_prices, ask_vols, ask=True)
+            _fill(win._ob_bid_labels, bid_prices, bid_vols, ask=False)
+            pct = (cur - float(parts[2])) / float(parts[2]) * 100 if float(parts[2]) else 0
+            tag = "+" if pct >= 0 else ""
+            win._ob_cur_label.config(text=f"现价 {cur:.2f}  {tag}{pct:.2f}%",
+                                      fg="#EF5350" if pct >= 0 else "#66BB6A")
+        except Exception as e:
+            print(f"[👁️盘口] snapshot err: {e}")
+    _load_snapshot()
+    # 涨停排队 + 特定数量 (后台)
+    def _bg():
+        try:
+            import akshare as ak
+            df = ak.stock_zh_a_spot_em()
+            pct_col = [c for c in df.columns if "涨跌幅" in str(c)][0]
+            hand_col = [c for c in df.columns if "换手率" in str(c)]
+            vol_col = [c for c in df.columns if "成交量" in str(c)]
+            limit_up = df[df[pct_col] >= 9.5].head(10)
+            win.after(0, lambda: _fill_limit_up(win, limit_up, hand_col, vol_col))
+            vols = df[vol_col[0]].astype(float).values
+            v5000 = (vols >= 500000).sum(); v500 = ((vols >= 50000) & (vols < 500000)).sum()
+            v50 = ((vols >= 5000) & (vols < 50000)).sum()
+            msg = f"5万手以上: {v5000}股  |  5000-5万手: {v500}股  |  500-5000手: {v50}股"
+            win.after(0, lambda: win._ob_pattern_text.config(text=msg))
+        except Exception as e:
+            win.after(0, lambda: win._ob_pattern_text.config(text=f"❌ {str(e)[:80]}"))
+    threading.Thread(target=_bg, daemon=True).start()
+
+
+def _fill_limit_up(win, df, hand_col, vol_col):
+    tv = win._ob_limit_up_tv
+    for i in tv.get_children(): tv.delete(i)
+    for _, r in df.iterrows():
+        try:
+            code = r.iloc[1]; name = r.iloc[2]
+            vol = float(r[vol_col[0]]) / 10000
+            hand = r[hand_col[0]] if hand_col else 0
+            tv.insert("", tk.END, values=(code, name, f"{vol:.1f}", f"{hand:.2f}"))
+        except Exception: pass
 
 
 # ═══════════════════════════════════════════════════════════════
