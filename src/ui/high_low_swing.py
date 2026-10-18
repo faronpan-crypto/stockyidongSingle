@@ -24,8 +24,39 @@ _FG_TEXT = "#E0E0E0"
 _FG_DIM = "#9E9E9E"
 
 # ── 5 大流派数据 ──
-# hot_sectors: 该流派最适合分析的板块 (匹配 akshare stock_zt_pool_em 的「所属行业」字段)
+# hot_sectors: 该流派最适合分析的板块 (匹配东财板块 BK 代码)
 # sector_keys: 行业关键词匹配 (更宽松)
+# 东财行业板块 BK 代码 — 2024年申万行业分类
+_SECTOR_BK_MAP = {
+    "半导体及元件": "BK1036",
+    "半导体": "BK1036",
+    "新能源": "BK0493",
+    "光伏设备": "BK1032",
+    "光伏": "BK1032",
+    "医疗器械": "BK1042",
+    "医药生物": "BK0465",
+    "白酒": "BK0477",
+    "食品饮料": "BK0478",
+    "银行": "BK0475",
+    "保险": "BK0480",
+    "通信设备": "BK1047",
+    "互联网服务": "BK0485",
+    "证券": "BK0476",
+    "煤炭能源": "BK0479",
+    "煤炭": "BK0479",
+    "汽车整车": "BK1025",
+    "人工智能": "BK1131",
+    "数字经济": "BK0800",
+    "有色金属": "BK0478",
+    "周期": "BK0471",
+}
+# 东财 push2 API 字段: f12=代码 f14=名称 f3=涨跌幅% f62=成交额(元) f2=最新价
+_EM_HDR = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                  "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://quote.eastmoney.com/",
+}
+
 _SCHOOL_HOT = {
     "形态学": {
         "hot_sectors": ["半导体及元件", "新能源", "光伏设备", "医疗器械"],
@@ -1049,13 +1080,13 @@ def show_high_low_swing(parent, app=None):
 
     def _render_seed_places(body, hot_sectors):
         """种子占位 — 后台数据到了会覆盖"""
-        tk.Label(body, text="⏳ 加载当日涨停池...", bg=_BG_PANEL, fg=_FG_DIM,
+        tk.Label(body, text="⏳ 加载推荐板块龙头...", bg=_BG_PANEL, fg=_FG_DIM,
                  font=("", 9)).pack(anchor="w", pady=8)
         for ind in hot_sectors[:3]:
             sf = tk.Frame(body, bg=_BG_PANEL); sf.pack(fill=tk.X, pady=2)
             tk.Label(sf, text=f"📌 {ind}", bg=_BG_PANEL, fg=_FG_GOLD,
                      font=("", 9, "bold")).pack(anchor="w")
-            tk.Label(sf, text="  · · · 等待涨停池数据 · · ·", bg=_BG_PANEL, fg=_FG_DIM,
+            tk.Label(sf, text="  · · · 等待板块龙头数据 · · ·", bg=_BG_PANEL, fg=_FG_DIM,
                      font=("", 8)).pack(anchor="w")
 
     # ── 流派数据引用 dict — 给后台线程分发 ──
@@ -1069,96 +1100,102 @@ def show_high_low_swing(parent, app=None):
     for sch in _SCHOOLS:
         _make_school_card(body, sch)
 
-    # ── 启动后台线程: 拉 akshare 涨停池 → 分发给每个流派 ──
+    # ── 启动后台线程: 拉东财板块成分股 → 每板块取成交额 Top3 龙头 ──
     def _bg_load_school_hot():
-        import threading
-        import datetime
-        try:
-            import akshare as ak
-            today = datetime.date.today(); d = today
-            while d.weekday() >= 5: d -= datetime.timedelta(days=1)
-            date_str = d.strftime("%Y%m%d")
-            df = ak.stock_zt_pool_em(date=date_str)
-        except Exception as e:
-            print(f"[高抛流派] akshare 拉取失败: {e}, 用种子", flush=True)
-            return
-        if df is None or len(df) == 0:
-            print("[高抛流派] 涨停池空, 用种子", flush=True); return
+        import threading, json, ssl, urllib.request, time
+        ctx = ssl._create_unverified_context()
 
-        # 同行业涨停数
-        ind_counts = df["所属行业"].value_counts().to_dict() if "所属行业" in df.columns else {}
-
-        # 评分 (复用之前的 _calc_zt_strength)
-        # 用简化版: 涨停数 + 连板 + 封板时间
-        results = []
-        for _, r in df.iterrows():
-            ind = str(r.get("所属行业", ""))
-            lb = int(r.get("连板数", 1) or 1)
-            t_str = str(r.get("首次封板时间", "150000")).zfill(6)
-            hhmm = int(t_str[:4]) if len(t_str) >= 4 else 1500
-            score = lb * 10 + (12 if hhmm <= 930 else 8 if hhmm <= 1030 else 3)
-            results.append((r, score, ind))
-
-        # 按流派 hot_sectors 过滤 + 取每板块 Top3 股票 + 跨板块排序取 Top3 板块
-        def _match_sector(row_ind, hot_list):
-            for h in hot_list:
-                if h in row_ind or row_ind in h: return True
-            return False
+        def _fetch_sector_leaders(bk_code, top_n=3):
+            """从东财 push2 拉板块成分股, 按成交额排序取 TopN"""
+            url = ("https://push2.eastmoney.com/api/qt/clist/get"
+                   f"?pn=1&pz={top_n*3}&po=1&np=1"
+                   "&ut=bd1d9ddb04089700cf9c27f6f7426281"
+                   "&fltt=2&invt=2&fid=f62"
+                   f"&fs=b:{bk_code}"
+                   "&fields=f12,f14,f2,f3,f62")
+            try:
+                req = urllib.request.Request(url, headers=_EM_HDR)
+                with urllib.request.urlopen(req, timeout=12, context=ctx) as resp:
+                    d = json.loads(resp.read())
+                items = d.get("data", {}).get("diff", [])
+                # 按成交额 f62 降序
+                items.sort(key=lambda x: -x.get("f62", 0))
+                return items[:top_n]
+            except Exception as e:
+                print(f"[高抛流派] 东财 {bk_code} 失败: {type(e).__name__}", flush=True)
+                return []
 
         for sname, refs in _school_hot_refs.items():
             hot_list = refs["sectors"]
-            # 过滤匹配板块的股票
-            matched = [(r, sc, ind) for (r, sc, ind) in results if _match_sector(ind, hot_list)]
-            if not matched: continue
-            # 按板块分组
-            by_sector = {}
-            for r, sc, ind in matched:
-                by_sector.setdefault(ind, []).append((r, sc))
-            # 板块内按分数排序取 Top3, 板块按股票数×均分排序取 Top3
-            sector_rank = []
-            for ind, items in by_sector.items():
-                items.sort(key=lambda x: -x[1])
-                top3 = items[:3]
-                avg_s = sum(x[1] for x in top3) / max(len(top3), 1)
-                sector_rank.append((ind, top3, len(items), avg_s))
-            sector_rank.sort(key=lambda x: -x[2] * x[3])
-            top_sectors = sector_rank[:3]
+            frame = refs["frame"]
+            # 先秒出加载中
+            try:
+                for w in frame.winfo_children(): w.destroy()
+                tk.Label(frame, text=f"⏳ 正在拉 {sname} 推荐板块龙头...",
+                         bg=_BG_PANEL, fg=_FG_DIM, font=("", 9)).pack(anchor="w", pady=8)
+            except Exception: pass
+
+            sectors_data = []  # [(sector_name, [(code, name, amount, pct)])]
+            for sec_name in hot_list:
+                bk = _SECTOR_BK_MAP.get(sec_name)
+                if not bk:
+                    print(f"[高抛流派] 无 BK 代码: {sec_name}", flush=True)
+                    continue
+                leaders = _fetch_sector_leaders(bk, top_n=3)
+                if leaders:
+                    leaders_clean = []
+                    for it in leaders:
+                        code = str(it.get("f12", ""))
+                        name = str(it.get("f14", ""))[:8]
+                        amt = float(it.get("f62", 0))  # 元
+                        pct = float(it.get("f3", 0))   # %
+                        if code and name:
+                            leaders_clean.append((code, name, amt, pct))
+                    if leaders_clean:
+                        sectors_data.append((sec_name, leaders_clean))
+                time.sleep(0.5)  # 礼貌性延迟
 
             # 切回主线程渲染
-            def _render(_sectors=top_sectors, _body=refs["frame"]):
-                for w in _body.winfo_children(): w.destroy()
-                if not _sectors:
-                    tk.Label(_body, text="❌ 今日涨停无匹配板块",
-                             bg=_BG_PANEL, fg=_FG_DIM, font=("", 9)).pack(anchor="w", pady=8)
-                    return
-                for ind, top3, n_stk, avg_s in _sectors:
-                    sf = tk.Frame(_body, bg=_BG_PANEL); sf.pack(fill=tk.X, pady=(4, 2))
-                    tk.Label(sf, text=f"📌 {ind}  ({n_stk}只均分{avg_s:.0f})", bg=_BG_PANEL,
-                             fg=_FG_GOLD, font=("", 9, "bold")).pack(anchor="w")
-                    for n, (row, sc) in enumerate(top3, 1):
-                        name = str(row.get("名称", ""))[:8]
-                        lb = int(row.get("连板数", 1) or 1)
-                        t = str(row.get("首次封板时间", "")).zfill(6)
-                        t_fmt = f"{t[:2]}:{t[2:4]}" if len(t) >= 4 else "--:--"
-                        code = str(row.get("代码", ""))
-                        row_bg = "#37474F" if n > 1 else "#004D40"
-                        sf2 = tk.Frame(sf, bg=row_bg, cursor="hand2")
-                        sf2.pack(fill=tk.X, pady=1)
-                        sf2.bind("<Button-1>", lambda e, _c=code, _nm=name:
-                                 _quick_open_daily_kline(win.winfo_toplevel(), _c, _nm))
-                        tk.Label(sf2, text=f" {n}  {name}", bg=row_bg, fg="white",
-                                 font=("", 9, "bold")).pack(side=tk.LEFT, padx=4)
-                        tk.Label(sf2, text=f"{lb}板  {t_fmt}  分{sc:.0f}", bg=row_bg, fg="#FFD54F",
-                                 font=("", 8)).pack(side=tk.LEFT, padx=2)
-                        tk.Label(sf2, text="双击→日K", bg=row_bg, fg=_FG_DIM,
-                                 font=("", 8)).pack(side=tk.RIGHT, padx=4)
-                        for w in sf2.winfo_children(): w.bind("<Button-1>", lambda e, _c=code, _nm=name:
-                                 _quick_open_daily_kline(win.winfo_toplevel(), _c, _nm))
-            _body.update_idletasks()
-
-            win.after(0, _render)
-
-        print(f"[高抛流派] akshare 分发给 {len(_school_hot_refs)} 个流派卡片", flush=True)
+            def _render(_sd=sectors_data, _body=frame, _sn=sname):
+                try:
+                    for w in _body.winfo_children(): w.destroy()
+                    if not _sd:
+                        tk.Label(_body, text=f"❌ 网络拉不到 {_sn} 板块数据",
+                                 bg=_BG_PANEL, fg=_FG_DIM, font=("", 9)).pack(anchor="w", pady=8)
+                        return
+                    for sec_name, leaders in _sd:
+                        sf = tk.Frame(_body, bg=_BG_PANEL); sf.pack(fill=tk.X, pady=(4, 2))
+                        # 板块标题 — 算板块总成交额
+                        total_amt = sum(x[2] for x in leaders) / 1e8
+                        avg_pct = sum(x[3] for x in leaders) / max(len(leaders), 1)
+                        tk.Label(sf, text=f"📌 {sec_name}  总成交{total_amt:.0f}亿  均涨{avg_pct:+.1f}%",
+                                 bg=_BG_PANEL, fg=_FG_GOLD, font=("", 9, "bold")).pack(anchor="w")
+                        for n, (code, name, amt, pct) in enumerate(leaders, 1):
+                            amt_yi = amt / 1e8
+                            pct_color = _FG_RED if pct >= 0 else _FG_GREEN  # A股红涨绿跌
+                            row_bg = "#004D40" if n == 1 else "#37474F"
+                            sf2 = tk.Frame(sf, bg=row_bg, cursor="hand2")
+                            sf2.pack(fill=tk.X, pady=1)
+                            # 点击打开日K
+                            _top = sf2.winfo_toplevel() if hasattr(sf2, 'winfo_toplevel') else win
+                            sf2.bind("<Button-1>", lambda e, _c=code, _nm=name, _t=_top:
+                                     _quick_open_daily_kline(_t, _c, _nm))
+                            for child in sf2.winfo_children():
+                                child.bind("<Button-1>", lambda e, _c=code, _nm=name, _t=_top:
+                                           _quick_open_daily_kline(_t, _c, _nm))
+                            tk.Label(sf2, text=f" {n}  {name}", bg=row_bg, fg="white",
+                                     font=("", 9, "bold")).pack(side=tk.LEFT, padx=4)
+                            tk.Label(sf2, text=f"{amt_yi:.1f}亿", bg=row_bg, fg=_FG_DIM,
+                                     font=("", 9)).pack(side=tk.RIGHT, padx=4)
+                            tk.Label(sf2, text=f"{pct:+.1f}%", bg=row_bg, fg=pct_color,
+                                     font=("", 9, "bold")).pack(side=tk.RIGHT, padx=2)
+                except Exception as ex:
+                    print(f"[高抛流派] render err: {ex}", flush=True)
+            # 给 Tk 主线程一点时间渲染种子, 再替换
+            try:
+                frame.after(300, _render)
+            except Exception:
+                _render()
 
     threading.Thread(target=_bg_load_school_hot, daemon=True).start()
 
