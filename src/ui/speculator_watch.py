@@ -1635,6 +1635,22 @@ def _build_orderbook(parent, win, col=1):
         tv1.heading(c, text=c); tv1.column(c, width=90)
     tv1.pack(fill=tk.X, padx=2)
     win._ob_limit_up_tv = tv1
+    # 双击 → 日K线
+    def _on_tv1_double(_e):
+        sel = tv1.selection()
+        if not sel: return
+        try:
+            vals = tv1.item(sel[0], "values")
+            code = str(vals[0]) if vals else ""
+            name = str(vals[1]) if len(vals) > 1 else code
+            if code.startswith(("6", "9")): sina = "sh" + code
+            elif code.startswith(("0", "3")): sina = "sz" + code
+            elif code.startswith(("4", "8")): sina = "bj" + code
+            else: sina = "sh" + code
+            _show_stock_daily_kline(win, sina, name)
+        except Exception as _e2:
+            print(f"[涨停排队双击] {_e2}")
+    tv1.bind("<Double-1>", _on_tv1_double)
 
     # 盘口五档
     top_row = tk.Frame(frm, bg="#1E1E1E"); top_row.pack(fill=tk.X, pady=(6, 2))
@@ -4009,6 +4025,27 @@ def _build_sign_decision_panel(parent, win):
                        font=("", 9, "bold"))
     sum_lbl.pack(padx=6, pady=4, anchor="w")
 
+    # ── 📣 大字信号预警 + 建议仓位 (夸张大字体) ──
+    big_frame = tk.Frame(parent, bg="#1E1E1E", highlightbackground="#FF6D00",
+                          highlightthickness=2)
+    big_frame.pack(fill=tk.X, padx=4, pady=(4, 2))
+    # 左侧: 大字状态
+    big_left = tk.Frame(big_frame, bg="#1E1E1E"); big_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    big_signal_lbl = tk.Label(big_left, text="⏳", bg="#1E1E1E", fg="#FFD54F",
+                              font=("Arial", 22, "bold"), anchor="w")
+    big_signal_lbl.pack(anchor="w", padx=10, pady=(6, 0))
+    big_sub_lbl = tk.Label(big_left, text="等待大盘信号...", bg="#1E1E1E", fg="#BDBDBD",
+                           font=("", 9), anchor="w")
+    big_sub_lbl.pack(anchor="w", padx=10, pady=(0, 6))
+    # 右侧: 大字百分比仓位 (类似 24号 20%)
+    big_right = tk.Frame(big_frame, bg="#1E1E1E"); big_right.pack(side=tk.RIGHT, padx=10, pady=6)
+    big_pct_lbl = tk.Label(big_right, text="—%", bg="#1E1E1E", fg="#FF6D00",
+                           font=("Arial", 32, "bold"))
+    big_pct_lbl.pack()
+    big_pct_sub = tk.Label(big_right, text="建议仓位", bg="#1E1E1E", fg="#78909C",
+                           font=("", 8))
+    big_pct_sub.pack()
+
     quant = tk.Frame(parent, bg="#121212"); quant.pack(fill=tk.X, padx=4, pady=2)
     tk.Label(quant, text="量化决策: 等待 VS 入场", bg="#121212", fg="#90A4AE",
              font=("", 8)).pack(anchor="w")
@@ -4030,7 +4067,9 @@ def _build_sign_decision_panel(parent, win):
     win._sign_ui = {"title": title, "danger": danger_lbls, "opt": opt_lbls,
                     "sum_frame": sum_frame, "sum_lbl": sum_lbl,
                     "act_lbl": act_lbl, "pct_lbl": pct_lbl,
-                    "ma_lbl": ma_lbl, "close_lbl": close_lbl}
+                    "ma_lbl": ma_lbl, "close_lbl": close_lbl,
+                    "big_signal_lbl": big_signal_lbl, "big_sub_lbl": big_sub_lbl,
+                    "big_pct_lbl": big_pct_lbl, "big_frame": big_frame}
 
     # 立刻用种子渲染一次
     _apply_sign_data(win, _calc_sign_decision_from_closes(seed_closes), from_seed=True)
@@ -4127,6 +4166,48 @@ def _apply_sign_data(win, data, from_seed=False):
         ui["sum_lbl"].config(text=data["summary"], bg=summary_bg, fg=data["summary_fg"])
         ui["act_lbl"].config(text=data["action"], fg=data["act_fg"])
         ui["pct_lbl"].config(text=f"建议仓位: {data['pct']}")
+        # ── 大字报刷新 ──
+        try:
+            big_sig = ui.get("big_signal_lbl")
+            big_sub = ui.get("big_sub_lbl")
+            big_pct = ui.get("big_pct_lbl")
+            big_frm = ui.get("big_frame")
+            if big_sig:
+                # 把 text 状态转成 emoji + 大字文字
+                pct_str = data["pct"].replace(" ", "")  # "0-2成" → "0-2成" 取数字
+                # 提取一个中位百分比 (0-2 → 1, 3-5 → 4, 5-8 → 6, 5-6 → 5, 3-5 → 4)
+                import re as _re
+                nums = _re.findall(r'\d+', data["pct"])
+                if nums:
+                    mid_pct = int((int(nums[0]) + int(nums[-1])) / 2) * 10  # "0-2" → (0+2)/2=1, 乘10→10%
+                    # 修正: "0-2 成" → 10%, "3-5 成" → 40%, "5-8 成" → 65%
+                    # 实际 一成=10%
+                    low = int(nums[0]) * 10
+                    high = int(nums[-1]) * 10
+                    mid_pct = (low + high) // 2
+                else:
+                    mid_pct = 0
+                # 状态 emoji + 大字
+                if data["summary_fg"] == "#EF5350":
+                    big_sig.config(text="🚨 危险! 减仓", fg="#EF5350")
+                    if big_frm: big_frm.config(highlightbackground="#EF5350")
+                elif data["summary_fg"] == "#FFA726":
+                    big_sig.config(text="⚠️ 谨慎 控仓", fg="#FFA726")
+                    if big_frm: big_frm.config(highlightbackground="#FFA726")
+                elif data["summary_fg"] == "#66BB6A" or data["summary_fg"] == "#81C784":
+                    big_sig.config(text="🎯 积极 入场!", fg="#66BB6A")
+                    if big_frm: big_frm.config(highlightbackground="#66BB6A")
+                else:
+                    big_sig.config(text="⚖️ 中性 观望", fg="#FFD54F")
+                    if big_frm: big_frm.config(highlightbackground="#FFD54F")
+                if big_sub:
+                    ma60v = data["MA60"] if data["MA60"] else 0
+                    pos_ma60 = "上" if data["close"] > ma60v else "下"
+                    big_sub.config(text=f"大盘收盘 {data['close']:.0f}  MA60={ma60v:.0f}  ({pos_ma60}方)  5/10/15 MA={data['MA5']:.0f}/{data['MA10']:.0f}/{data['MA15']:.0f}")
+                if big_pct:
+                    big_pct.config(text=f"{mid_pct}%")
+        except Exception as _e:
+            print(f"[👁️信号] 大字报刷新 err: {_e}", flush=True)
         ma60v = data["MA60"] if data["MA60"] else 0
         ui["ma_lbl"].config(text=f"MA5={data['MA5']:.0f} MA10={data['MA10']:.0f} MA15={data['MA15']:.0f} MA60={ma60v:.0f}")
         ui["close_lbl"].config(text=f"📊 上证收盘 {data['close']:.0f}")
