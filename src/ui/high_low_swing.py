@@ -2611,11 +2611,11 @@ def _quick_open_daily_kline(parent, code6, name):
             ma5 = _ma(closes, 5); ma10 = _ma(closes, 10)
             ma20 = _ma(closes, 20); ma60 = _ma(closes, 60)
 
-            # 蜡烛 (简化 stub: 高低竖线 + 开收盘方块)
+            # 蜡烛 (中国红涨绿跌)
             w = 0.6
             for i in range(n):
                 c = closes[i]; o = opens[i]; h = highs[i]; l = lows[i]
-                col = "#EF5350" if c < o else "#66BB6A"
+                col = "#EF5350" if c >= o else "#66BB6A"  # 红涨绿跌
                 ax1.plot([x[i], x[i]], [l, h], color=col, linewidth=0.8)
                 ax1.bar(x[i], abs(c - o), bottom=min(c, o), width=w, color=col, edgecolor=col)
 
@@ -2632,9 +2632,9 @@ def _quick_open_daily_kline(parent, code6, name):
             ticks = list(range(0, n, step))
             ax1.set_xticks(ticks); ax1.set_xticklabels([dates[i][-5:] for i in ticks], rotation=30)
 
-            # 副图 1: 成交量
+            # 副图 1: 成交量 (红涨绿跌)
             ax2 = fig.add_axes([0.08, 0.16, 0.88, 0.13], facecolor=_BG_PANEL, sharex=ax1)
-            colors = ["#EF5350" if closes[i] < opens[i] else "#66BB6A" for i in range(n)]
+            colors = ["#EF5350" if closes[i] >= opens[i] else "#66BB6A" for i in range(n)]
             ax2.bar(x, vols, color=colors, width=w)
             ax2.set_facecolor(_BG_PANEL)
             for spine in ax2.spines.values(): spine.set_color(_FG_DIM)
