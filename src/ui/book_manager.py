@@ -505,10 +505,10 @@ def _open_book_detail(parent, bid):
 
     dlg.grab_set()
 
-    # ── 自动联网: intro 太短 (种子模板或空) 就后台抓, 抓到后自动刷新 UI ──
+    # ── 自动联网: intro 太短 (种子模板或空) 或是豆瓣模板水话 就后台抓, 抓到后自动刷新 UI ──
     _intro = row["intro"] or ""
     _rating = row["rating"] or 0
-    _looks_empty = (len(_intro) < 40) or ("AI/联网没抓到" in _intro) or (_rating == 0)
+    _looks_empty = (len(_intro) < 40) or ("AI/联网没抓到" in _intro) or (_rating == 0) or _is_water_intro(_intro)
     if _looks_empty:
         def _auto_fetch():
             summary = _fetch_book_intro_worker(row["title"], row["author"])
@@ -614,6 +614,75 @@ def _make_labeled_text(parent, label, initial, grid_pos, height=6, editable=Fals
 # 4. AI/联网抓取 (可选)
 # ═════════════════════════════════════════════════════════════════════════
 
+def _is_water_intro(text):
+    """检测简介是否是豆瓣模板水话 — 这些词在豆瓣老书简介里高频出现"""
+    WATER_MARKERS = [
+        "全天24小时", "任何金融市场", "检验风险", "资金控制",
+        "这是一个能", "进出有据", "患得患失", "惶惑不安",
+        "淡泊从容", "淡化从容", "培养赢家心态", "建立赢家思维",
+        "具有极强适应能力", "丰富多样的战法",
+        "舵手", "良药妙方",
+    ]
+    if not text or len(text) < 40:
+        return True  # 太短也不行
+    hits = sum(1 for w in WATER_MARKERS if w in text)
+    # 如果 2 个以上水词 → 判定为模板
+    if hits >= 2: return True
+    # 或者整段就是"全天24小时..."那个模板
+    if "全天24小时" in text and "这是一个" in text: return True
+    return False
+
+
+def _build_smart_fallback_intro(title, author_hint=""):
+    """根据书名+作者+分类推断更靠谱的简介 (比豆瓣模板水话好)"""
+    genre = _guess_genre(title)
+    name_author = f" ({author_hint})" if author_hint else ""
+
+    # 从文件名里提取额外信息
+    extra = ""
+    if "高清版" in title: extra += " (高清扫描版)"
+    if ".扫描版" in title or "(扫描版)" in title or "扫描版" in title: extra += " (扫描版)"
+    if "www.com10.cn" in title: extra += " (来源: com10.cn)"
+
+    # 关键词 → 核心内容推断
+    kw_core = [
+        ("N字", "N字形态"), ("MACD", "MACD指标"), ("K线", "K线形态"),
+        ("波浪", "艾略特波浪理论"), ("缠论", "缠中说禅技术理论"),
+        ("海龟", "海龟交易法则"), ("利弗莫尔", "杰西·利弗莫尔作手回忆录"),
+        ("格雷厄姆", "本杰明·格雷厄姆价值投资"), ("巴菲特", "沃伦·巴菲特投资策略"),
+        ("索罗斯", "乔治·索罗斯反身性理论"), ("马克·道格拉斯", "马克·道格拉斯交易心理学"),
+        ("范·撒普", "范·撒普交易系统"), ("阿斯汤加", "阿斯汤加瑜伽"),
+        ("高胜算", "高胜算交易策略"), ("波段", "波段交易方法论"),
+        ("外汇", "外汇交易技术"), ("期货", "期货交易策略"),
+        ("期权", "期权定价与波动率交易"), ("量化", "量化投资与算法交易"),
+        ("机器学习", "机器学习与量化应用"), ("深度学习", "深度学习与金融AI"),
+        ("Python", "Python金融数据分析"),
+    ]
+    core_hint = ""
+    for kw, desc in kw_core:
+        if kw.lower() in title.lower():
+            core_hint = desc
+            break
+
+    genre_intro_map = {
+        "投资": f"《{title}》{name_author}是一本{genre}类经典书籍{extra}。"
+               f"{'核心围绕：' + core_hint if core_hint else '涵盖交易理念、技术方法和实战案例'}。"
+               f"\n\n建议结合自身交易系统阅读, 提取可落地的方法, 不要盲目照搬。",
+        "心理": f"《{title}》{name_author}是一本{genre}类书籍{extra}。"
+               f"探讨投资/交易中的心理偏差、情绪管理和认知提升。"
+               f"\n\n核心价值在于帮助交易者建立稳健的心态, 减少情绪化决策。",
+        "科技": f"《{title}》{name_author}是一本{genre}类书籍{extra}。"
+               f"{'核心主题：' + core_hint if core_hint else '介绍相关技术原理与实践应用'}。",
+        "历史": f"《{title}》{name_author}是一本{genre}类书籍{extra}。",
+        "传记": f"《{title}》{name_author}是一本{genre}类书籍{extra}。",
+        "哲学": f"《{title}》{name_author}是一本{genre}类书籍{extra}。",
+        "方法": f"《{title}》{name_author}是一本{genre}类书籍{extra}。"
+               f"提供可重复执行的方法论和操作框架。",
+        "其他": f"《{title}》{name_author}是一本值得一读的书籍{extra}。",
+    }
+    return genre_intro_map.get(genre, genre_intro_map["其他"])
+
+
 def _fetch_book_intro_worker(title, author_hint=""):
     """后台线程: 豆瓣 suggest → 详情页完整解析 (rating/intro/作者/出版社/页数/ISBN)"""
     import requests
@@ -687,6 +756,10 @@ def _fetch_book_intro_worker(title, author_hint=""):
                     if len(intros_found) > 1:
                         # 第二个通常是作者简介, 拼到 intro 末尾
                         out["intro"] += "\n\n———\n\n📝 " + intros_found[1]
+                    # ⚠️ 检测豆瓣模板水话 —— 太水就丢弃换 smart fallback
+                    if _is_water_intro(out["intro"]):
+                        print(f"[书籍] ⚠️ 豆瓣 intro 被判定为模板水话, 丢弃", flush=True)
+                        del out["intro"]
                 # douban_url
                 out["douban_url"] = subject_url
                 print(f"[书籍] ✅ 豆瓣详情页: rating={out.get('rating')}, intro={len(out.get('intro',''))}字", flush=True)
@@ -716,10 +789,10 @@ def _fetch_book_intro_worker(title, author_hint=""):
         except Exception as e:
             print(f"[书籍] 百度百科失败: {e}", flush=True)
 
-    # ═══ 最终兜底: 种子模板 ═══
+    # ═══ 最终兜底: smart fallback (根据书名推断, 比豆瓣模板水话好) ═══
     if not out.get("intro"):
-        out["intro"] = f"《{title}》是一本{_guess_genre(title)}类书籍。\n\n(AI/联网没抓到 — 请手动补充 👍)"
-        print(f"[书籍] ⚠️ 用种子兜底 (豆瓣/百科全失败)", flush=True)
+        out["intro"] = _build_smart_fallback_intro(title, author_hint)
+        print(f"[书籍] ⚠️ 用 smart fallback", flush=True)
     if not out.get("pros"):
         out["pros"] = f"值得一读的核心理由:\n① 切中{_guess_genre(title)}领域的经典痛点\n② 提供可落地的方法论/案例\n③ 被多位读者/同行推荐"
     if not out.get("related"):
