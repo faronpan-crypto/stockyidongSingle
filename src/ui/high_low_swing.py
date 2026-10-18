@@ -1160,20 +1160,62 @@ def show_high_low_swing(parent, app=None):
         widgets_list.append((v, "body"))
 
     def _render_seed_places(body, hot_sectors):
-        """种子占位 — 后台数据到了会覆盖 (表格式)"""
-        head = tk.Frame(body, bg=_BG_PANEL); head.pack(fill=tk.X, pady=(0, 2))
-        for txt in ["板块", "#", "股票", "成交额", "涨跌幅"]:
-            tk.Label(head, text=txt, bg=_BG_PANEL, fg=_FG_GOLD,
-                     font=("", 9, "bold")).pack(side=tk.LEFT, padx=2)
-        for ind in hot_sectors[:3]:
-            for n in [1, 2, 3]:
-                row = tk.Frame(body, bg=_BG_PANEL); row.pack(fill=tk.X, pady=1)
-                tk.Label(row, text=f" {ind}", bg=_BG_PANEL, fg=_FG_DIM,
-                         font=("", 8)).pack(side=tk.LEFT, padx=2)
-                tk.Label(row, text=f"{n}", bg=_BG_PANEL, fg=_FG_DIM,
-                         font=("", 9, "bold")).pack(side=tk.LEFT, padx=0)
-                tk.Label(row, text="· · · 加载中 · · ·", bg=_BG_PANEL, fg=_FG_DIM,
-                         font=("", 8)).pack(side=tk.LEFT, padx=2)
+        """种子占位 — 直接用预设板块 + 股票名, 用户立刻看到完整结构
+        后台线程数据到了 destroy+渲染刷新涨跌幅和技术标签"""
+        # 预设板块的 Top3 股票名 (硬编码, 秒显示)
+        _SECTOR_NAMES = {
+            "半导体及元件": ["兆易创新", "寒武纪", "紫光国微"],
+            "新能源":      ["宁德时代", "比亚迪", "亿纬锂能"],
+            "光伏设备":    ["隆基绿能", "通威股份", "阳光电源"],
+            "医疗器械":    ["爱尔眼科", "乐普医疗", "科伦药业"],
+            "白酒":        ["贵州茅台", "五粮液", "山西汾酒"],
+            "食品饮料":    ["伊利股份", "中国中免", "美的集团"],
+            "银行":        ["招商银行", "工商银行", "民生银行"],
+            "保险":        ["中国平安", "中国人寿", "中国太保"],
+            "通信设备":    ["中国联通", "光迅科技", "亨通光电"],
+            "互联网服务":  ["同花顺", "用友网络", "科大讯飞"],
+            "证券":        ["中信证券", "华泰证券", "国泰君安"],
+            "煤炭能源":    ["陕西煤业", "中国神华", "大同煤业"],
+        }
+        # 表头 (和 _poll_and_render 一致)
+        tk.Label(body, text="#  股票        涨跌幅   技术复合分析 · 加载中...",
+                 bg=_BG_PANEL, fg=_FG_GOLD, font=("", 9, "bold"),
+                 anchor="w").pack(fill=tk.X, padx=4, pady=(0, 2))
+        for sec_name in hot_sectors[:3]:
+            names = _SECTOR_NAMES.get(sec_name, ["龙头1", "龙头2", "龙头3"])
+            # 板块头部 (蓝条)
+            r0 = tk.Frame(body, bg="#2A3A5A"); r0.pack(fill=tk.X, pady=(6, 1))
+            tk.Label(r0, text=f"📌 {sec_name}", bg="#2A3A5A", fg="#80DEEA",
+                     font=("", 9, "bold"), anchor="w").pack(fill=tk.X, padx=4, pady=1)
+            # 股票占位行 (可点击, 显示 loading, 后台刷新时 destroy+重建)
+            for n, nm in enumerate(names[:3], 1):
+                row_bg = "#1B3A3A" if n == 1 else _BG_PANEL
+                row = tk.Frame(body, bg=row_bg, cursor="hand2"); row.pack(fill=tk.X, pady=1)
+                _code_map = {
+                    "兆易创新":"sh603986","寒武纪":"sh688256","紫光国微":"sz002049",
+                    "宁德时代":"sz300750","比亚迪":"sz002594","亿纬锂能":"sz300014",
+                    "隆基绿能":"sh601012","通威股份":"sh600438","阳光电源":"sz300274",
+                    "爱尔眼科":"sz300015","乐普医疗":"sz300003","科伦药业":"sz002422",
+                    "贵州茅台":"sh600519","五粮液":"sz000858","山西汾酒":"sh600809",
+                    "伊利股份":"sh600887","中国中免":"sh601888","美的集团":"sz000333",
+                    "招商银行":"sh600036","工商银行":"sh601398","民生银行":"sh600016",
+                    "中国平安":"sh601318","中国人寿":"sh601628","中国太保":"sh601601",
+                    "中国联通":"sh600050","光迅科技":"sz002281","亨通光电":"sh600487",
+                    "同花顺":"sz300033","用友网络":"sh600588","科大讯飞":"sz002230",
+                    "中信证券":"sh600030","华泰证券":"sh601688","国泰君安":"sh601211",
+                    "陕西煤业":"sh601225","中国神华":"sh601088","大同煤业":"sh601015",
+                }
+                _c = _code_map.get(nm, "")
+                row.bind("<Button-1>", lambda e, _cc=_c, _nm=nm:
+                         _quick_open_daily_kline(win, _cc, _nm) if _cc else None)
+                tk.Label(row, text=f"{n}", bg=row_bg, fg=_FG_GOLD if n==1 else _FG_DIM,
+                         font=("", 9, "bold"), width=2, anchor="w").pack(side=tk.LEFT, padx=(4,0))
+                tk.Label(row, text=nm, bg=row_bg, fg="white",
+                         font=("", 9, "bold"), width=9, anchor="w").pack(side=tk.LEFT, padx=2)
+                tk.Label(row, text="···", bg=row_bg, fg=_FG_DIM,
+                         font=("", 9), width=8, anchor="w").pack(side=tk.LEFT, padx=2)
+                tk.Label(row, text="加载中...", bg=row_bg, fg=_FG_DIM,
+                         font=("", 8)).pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
 
     # ── 流派数据引用 dict — 给后台线程分发 ──
     _school_hot_refs = {}
@@ -1184,7 +1226,9 @@ def show_high_low_swing(parent, app=None):
     tk.Frame(body, bg=_FG_GOLD, height=2).pack(fill=tk.X, padx=10, pady=(0, 6))
 
     for sch in _SCHOOLS:
+        print(f"[🎯高抛] 正在构建流派卡: {sch['name']}", flush=True)
         _make_school_card(body, sch)
+    print(f"[🎯高抛] 5 张流派卡全部构建完, 启动后台拉数据...", flush=True)
 
     # ── 启动后台线程: 预设成分股 + 新浪批量拉行情 (秒加载) ──
     # ── 启动后台线程: 预设成分股 + 新浪批量拉行情 ──
@@ -1266,6 +1310,7 @@ def show_high_low_swing(parent, app=None):
         _bg_done.set()
 
     threading.Thread(target=_bg_load_school_hot, daemon=True).start()
+    print(f"[🎯高抛] 后台线程已启动, _school_hot_refs keys={list(_school_hot_refs.keys())}", flush=True)
 
     # 🆕 主线程轮询 — 每 200ms 检查一次 _bg_done
     _rendered_names = set()
