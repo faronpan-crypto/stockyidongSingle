@@ -829,21 +829,28 @@ def show_speculator_watch(root=None, app=None):
     row_top = tk.Frame(left_pane, bg="#121212"); row_top.grid(row=0, column=0, columnspan=2, sticky="nsew")
     row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, columnspan=2, sticky="nsew")
     _build_block_grid(row_top, win, 0)
-    _build_orderbook(row_top, win, 1)
+    # 信号决策面板 — 包一个 wrapper Frame grid 到 row_top col=1 (和其他面板统一)
+    sign_wrapper = tk.Frame(row_top, bg="#121212"); sign_wrapper.grid(row=0, column=1, sticky="nsew", padx=3, pady=3)
+    row_top.grid_columnconfigure(1, weight=1, uniform="topcols")
+    _build_sign_decision_panel(sign_wrapper, win)  # ← 从 row_leak 挪上来
     _build_volume_panel(row_top, win, 2)
     _build_futures_grid(row_bot, win, 0)
     _build_cycle_panel(row_bot, win, 1)
     _build_status_panel(row_bot, win, 2)
 
-    # 底部 row_leak 跨两列, 内部左右分栏: 左=捡漏(黑底), 右=信号决策
+    # 底部 row_leak 跨两列, 内部左右分栏: 左=捡漏(黑底), 右=观察窗口(盘口)
     row_leak = tk.Frame(left_pane, bg="#121212", height=230); row_leak.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(2, 0))
     row_leak.pack_propagate(False)
 
     leak_half = tk.Frame(row_leak, bg="#000000"); leak_half.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    sign_half = tk.Frame(row_leak, bg="#1E1E1E"); sign_half.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
+    ob_half = tk.Frame(row_leak, bg="#1E1E1E"); ob_half.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
     _build_leak_panel(leak_half, win)
-    _build_sign_decision_panel(sign_half, win)
+    _build_orderbook(ob_half, win, 0)  # ← 从 row_top 挪下来
+
+    # 信号决策面板原来是 grid col=1 跨 1 行, 现在 pack 到 row_top — 需要调整其内部布局
+    # 让它在 row_top 三列中正确占位
+    # (build_sign_decision_panel 内部用 pack fill=BOTH expand, 父 Frame 是 grid col=1, 应该没问题)
 
     # 右侧: 游资看盘思路分析
     _build_watch_analysis(right_pane, win)
