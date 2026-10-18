@@ -98,6 +98,151 @@ _FUND_TOP_HOLDINGS = [
         ("sh601628","中国人寿"),("sh601318","中国平安")]),
 ]
 
+# ── 📚 基金指南: 风格分类 + 介绍 + 持仓 + 择时笔记 ──
+# 分类: Beta宽基 / Alpha主动 / 成长风格 / 周期行业 / 红利价值 / 行业主题
+_FUND_GUIDE = [
+    {
+        "cat": "🌐 Beta宽基 (赚市场β)",
+        "cat_desc": "纯指数复制,费率低(0.15%~0.5%),透明度高,适合定投/底仓. 核心逻辑: 国运+流动性",
+        "funds": [
+            {"name":"沪深300ETF","code":"510300","style":"宽基大盘",
+             "intro":"A股核心300家龙头,含茅台/宁德/招行/平安,代表中国经济大盘",
+             "holdings":[("sh600519","贵州茅台"),("sz300750","宁德时代"),("sh600036","招商银行"),("sh601318","中国平安"),("sz000858","五粮液")],
+             "timing":"✅ M2增速上行+社融存量同比>10%时加仓\n✅ 美联储加息暂停/转向时加大配置\n❌ CPI-PPI剪刀差收窄至0以下时减仓\n📅 每月定投: 25号前后(股指期权交割日)波动大"},
+            {"name":"中证500ETF","code":"510500","style":"中盘成长",
+             "intro":"剔除沪深300后的中型公司,覆盖先进制造/新材料/医药,弹性大于300",
+             "holdings":[("sz002415","海康威视"),("sh600570","恒生电子"),("sz300014","亿纬锂能"),("sz002024","苏宁易购"),("sh601989","中国重工")],
+             "timing":"✅ 中小企业PMI>50且环比上升时买\n✅ 货币宽松(R007<2%)利好小票\n❌ 大盘蓝筹疯涨时500往往掉队"},
+            {"name":"中证1000ETF","code":"512100","style":"小盘弹性",
+             "intro":"最小的1000只股票,微盘股代表,高波动高收益,适合风险偏好高的投资者",
+             "holdings":[("sz300418","昆仑万维"),("sz002230","科大讯飞"),("sz300454","深信服"),("sz300750","宁德时代"),("sh688036","传音控股")],
+             "timing":"✅ 市场情绪冰点(涨停数<10)时左侧布局\n✅ 政策密集出台(如 Platform经济支持)时\n❌ 连续大涨3天+成交额破2万亿时追高风险大"},
+            {"name":"创业板ETF","code":"159949","style":"科技成长",
+             "intro":"深交所创新企业,新能源+医药+科技,宁德/迈瑞/爱尔为权重",
+             "holdings":[("sz300750","宁德时代"),("sz300760","迈瑞医疗"),("sz300015","爱尔眼科"),("sz300014","亿纬锂能"),("sz300059","东方财富")],
+             "timing":"✅ 新能源汽车月度销量同比>30%时\n✅ 创新药审批加速+医保谈判利好时\n❌ 美联储加息周期中科技股承压"},
+            {"name":"科创50ETF","code":"588000","style":"硬科技",
+             "intro":"上交所科创板,半导体/AI/生物医药硬科技,中芯/寒武纪为权重",
+             "holdings":[("sh688981","中芯国际"),("sh688256","寒武纪"),("sh688012","中微公司"),("sh688111","金山办公"),("sh688008","澜起科技")],
+             "timing":"✅ 国产替代政策加码+半导体周期见底时\n✅ AI大模型落地应用密集发布时\n❌ 美国对华半导体出口管制升级时短期承压"},
+        ]
+    },
+    {
+        "cat": "🏆 Alpha主动 (赚超额α)",
+        "cat_desc": "基金经理选股/择时能力,费率1%~1.5%,适合没时间研究个股的投资者. 关键: 选对基金经理 > 选对赛道",
+        "funds": [
+            {"name":"易方达蓝筹精选","code":"005827","style":"消费+金融+科技",
+             "intro":"张坤管理(已卸任但风格延续),茅台/五粮液/美华为核心持仓,长期持有消费白马",
+             "holdings":[("sh600519","贵州茅台"),("sz000858","五粮液"),("sz000333","美的集团"),("sh601888","中国中免"),("sh600036","招商银行")],
+             "timing":"✅ 白酒批价企稳回升时定投\n✅ 消费升级数据社零同比>8%时加仓\n❌ 白酒行业负面舆情(塑化剂/消费税)时回避"},
+            {"name":"兴全合润","code":"163406","style":"均衡配置",
+             "intro":"谢治宇管理,股债平衡+行业分散,下跌市抗跌,上涨市跟得上,适合保守型",
+             "holdings":[("sh600519","贵州茅台"),("sh600036","招商银行"),("sz300750","宁德时代"),("sz002594","比亚迪"),("sh601318","中国平安")],
+             "timing":"✅ 看不清市场方向时买均衡型\n✅ 股债性价比(沪深300盈利收益率/10Y国债)>2.5时加大仓位\n❌ 单边大牛市中可能跑输主题基金"},
+            {"name":"富国天惠成长","code":"161005","style":"成长精选",
+             "intro":"朱少醒管理15年+穿越牛熊,精选成长股,换手率低,长期持有",
+             "holdings":[("sh600519","贵州茅台"),("sz300750","宁德时代"),("sz002415","海康威视"),("sh600036","招商银行"),("sz002594","比亚迪")],
+             "timing":"✅ 市场恐慌下跌时反向买入\n✅ 基金连续3年跑输沪深300时可能是布局良机(均值回归)\n❌ 明星基金经理离职时谨慎"},
+            {"name":"交银新成长","code":"519736","style":"成长+红利",
+             "intro":"王崇管理,平衡成长确定性和估值安全边际,偏好低估值成长股",
+             "holdings":[("sz000651","格力电器"),("sh600036","招商银行"),("sz300750","宁德时代"),("sh600887","伊利股份"),("sz002475","立讯精密")],
+             "timing":"✅ 风格切换期(价值→成长或成长→价值)配置均衡型\n✅ 市场风格不明朗时的避风港"},
+        ]
+    },
+    {
+        "cat": "🚀 成长风格 (高弹性)",
+        "cat_desc": "押注高增长赛道,新能源/半导体/AI/创新药. 高波动高收益,适合能持有3年+的投资者",
+        "funds": [
+            {"name":"新能源车ETF","code":"515030","style":"新能源",
+             "intro":"宁德/比亚迪/亿纬锂能/隆基,覆盖电池/整车/光伏/风电产业链",
+             "holdings":[("sz300750","宁德时代"),("sz002594","比亚迪"),("sz300014","亿纬锂能"),("sh601012","隆基绿能"),("sz002460","赣锋锂业")],
+             "timing":"✅ 国内新能源汽车销量月同比>20%时\n✅ 锂价见底回升(碳酸锂>10万/吨)时\n❌ 欧盟反补贴调查+关税上涨时出口承压\n📅 Q1/Q3为新能源传统旺季前布局"},
+            {"name":"芯片ETF","code":"159995","style":"半导体",
+             "intro":"兆易/寒武纪/中微/北方华创,设计/制造/封测/设备全产业链",
+             "holdings":[("sh603986","兆易创新"),("sh688256","寒武纪"),("sz002049","紫光国微"),("sh688012","中微公司"),("sz002371","北方华创")],
+             "timing":"✅ WSTS半导体销售额同比转正+上行周期\n✅ 国产替代政策密集出台(大基金三期等)\n✅ AI算力需求爆发时连带芯片上涨\n❌ 美国对华半导体管制升级时短期暴跌"},
+            {"name":"AI ETF","code":"515070","style":"人工智能",
+             "intro":"科大讯飞/寒武纪/海天瑞声,覆盖大模型/算力/应用层",
+             "holdings":[("sz002230","科大讯飞"),("sh688256","寒武纪"),("sh603728","海天瑞声"),("sz300418","昆仑万维"),("sz300454","深信服")],
+             "timing":"✅ 大模型发布+应用落地(AI+医疗/教育/金融)催化时\n✅ 算力基础设施投资加码(东数西算)\n❌ 概念炒作过高(单月涨幅>30%)后获利回吐风险大"},
+            {"name":"医药ETF","code":"512010","style":"创新药",
+             "intro":"恒瑞/迈瑞/药明康德,创新药+医疗器械+医疗服务",
+             "holdings":[("sh600276","恒瑞医药"),("sz300760","迈瑞医疗"),("sh603259","药明康德"),("sz002007","华兰生物"),("sz000538","云南白药")],
+             "timing":"✅ 医保谈判利好(续约不降价/创新药单独通道)\n✅ 新药审批加速+FDA获批时\n❌ 集采扩面覆盖到创新药时回避"},
+        ]
+    },
+    {
+        "cat": "🔄 周期行业 (看供需)",
+        "cat_desc": "强周期,跟随宏观经济/库存周期. 核心: 低买高卖,赚周期波动的钱. 关键指标: PPI/社融/库存天数",
+        "funds": [
+            {"name":"证券ETF","code":"512880","style":"券商",
+             "intro":"中信/华泰/国泰君安,牛市风向标,两市成交额+政策直接影响",
+             "holdings":[("sh600030","中信证券"),("sh601688","华泰证券"),("sh601211","国泰君安"),("sh600837","海通证券"),("sz300059","东方财富")],
+             "timing":"✅ 两市成交额连续3日破万亿时\n✅ 监管出台利好(降印花税/两融扩容/IPO收紧)\n❌ 熊市缩量(日成交<4000亿)时回避\n📅 牛市第一波通常先动"},
+            {"name":"有色金属ETF","code":"512400","style":"资源",
+             "intro":"山东黄金/紫金矿业/中国铝业,黄金/铜/铝/锂,受益美元指数下行",
+             "holdings":[("sh600547","山东黄金"),("sh601899","紫金矿业"),("sh600489","中金黄金"),("sz000878","云南铜业"),("sh601600","中国铝业")],
+             "timing":"✅ 美元指数(DXY)跌破100+实际利率下行时黄金大涨\n✅ LME铜库存低位+供给扰动时\n❌ 美联储鹰派加息周期中黄金承压"},
+            {"name":"煤炭ETF","code":"515220","style":"能源",
+             "intro":"中国神华/陕西煤业/中煤能源,高股息+低估值+碳中和约束下供给刚性",
+             "holdings":[("sh601088","中国神华"),("sh601225","陕西煤业"),("sh601898","中煤能源"),("sh600395","盘江股份"),("sz000983","西山煤电")],
+             "timing":"✅ 冬季供暖需求旺季(11月~次年3月)\n✅ 长协价上调+现货价上涨时\n❌ 碳中和政策加码(供给侧改革)时短期利空但长期供给收缩利好"},
+            {"name":"房地产ETF","code":"512200","style":"地产后周期",
+             "intro":"万科/保利/海螺水泥,政策敏感度极高,看政治局会议定调",
+             "holdings":[("sz000002","万科A"),("sh600048","保利发展"),("sh601155","新城控股"),("sh600585","海螺水泥"),("sz300737","科顺股份")],
+             "timing":"✅ 政治局会议定调'支持合理住房需求'+限购限贷松绑\n✅ 30大中城市商品房成交面积环比转正时\n❌ 房企暴雷+信托违约潮中回避"},
+            {"name":"军工ETF","code":"512660","style":"国防军工",
+             "intro":"航发动力/中航沈飞/中国卫星,订单驱动+改革预期,十四五重点",
+             "holdings":[("sh600893","航发动力"),("sh600760","中航沈飞"),("sh600118","中国卫星"),("sz000768","中航西飞"),("sh600372","中航机载")],
+             "timing":"✅ 两会国防预算增速>7%时\n✅ 新型装备定型/阅兵/航展等事件催化\n❌ 和平预期升温+军费增速下滑时短期承压"},
+        ]
+    },
+    {
+        "cat": "💰 红利价值 (收息+打新)",
+        "cat_desc": "高股息+低估值+稳定现金流. 适合稳健型/养老金/打新底仓. 核心策略: 股息率>5% + 盈利稳定",
+        "funds": [
+            {"name":"红利低波ETF","code":"512890","style":"红利",
+             "intro":"银行+电信+公用事业,波动低股息高,长期复利利器",
+             "holdings":[("sh601398","工商银行"),("sh601939","建设银行"),("sh600036","招商银行"),("sh601628","中国人寿"),("sh600941","中国移动")],
+             "timing":"✅ 市场高估值(沪深300PE>14)时防御价值凸显\n✅ 利率下行周期中红利股相对收益率上升\n❌ 牛市狂热期红利跑输成长\n📅 适合作为打新底仓(门票股)"},
+            {"name":"银行ETF","code":"512800","style":"金融",
+             "intro":"四大行+股份制银行,股息率5%~7%,PB<0.5破净",
+             "holdings":[("sh601398","工商银行"),("sh601939","建设银行"),("sh600036","招商银行"),("sh601288","农业银行"),("sh601328","交通银行")],
+             "timing":"✅ 息差见底回升+不良率见顶时\n✅ 降准后银行负债成本下降\n❌ 地产风险传导+城投债风险时谨慎"},
+            {"name":"电信ETF","code":"515880","style":"公用事业",
+             "intro":"移动/联通/电信,高股息+AI算力需求新增长极",
+             "holdings":[("sh600941","中国移动"),("sh601728","中国电信"),("sh600050","中国联通"),("sh600489","中金黄金"),("sh601857","中国石油")],
+             "timing":"✅ 5G+AI算力基础设施投资加速时\n✅ 央企估值重塑政策(中特估)催化时\n❌ 通信资费下调压力时"},
+        ]
+    },
+    {
+        "cat": "🌟 行业主题 (事件驱动)",
+        "cat_desc": "单一赛道集中持仓,高风险高收益. 核心: 踩对点,见好就收. 适合主动出击的投资者",
+        "funds": [
+            {"name":"招商中证白酒","code":"161725","style":"白酒",
+             "intro":"茅台/五粮液/汾酒/泸州老窖,A股最核心的消费赛道,社交属性+定价权",
+             "holdings":[("sh600519","贵州茅台"),("sz000858","五粮液"),("sh600809","山西汾酒"),("sz002304","洋河股份"),("sz000568","泸州老窖")],
+             "timing":"✅ 春节/中秋旺季批价回升时\n✅ 白酒消费税利空出尽时\n❌ 年轻人喝白酒减少+老龄化长期利空\n📅 每年Q3(中秋)前布局,Q4兑现"},
+            {"name":"游戏ETF","code":"159869","style":"传媒",
+             "intro":"三七互娱/昆仑万维/科大讯飞,版号发放+AI赋能新逻辑",
+             "holdings":[("sz002555","三七互娱"),("sz300418","昆仑万维"),("sz002230","科大讯飞"),("sz300454","深信服"),("sz002602","世纪华通")],
+             "timing":"✅ 游戏版号月度发放正常化(每月≥80款)\n✅ AI+游戏落地(AI NPC/自动生成关卡)催化时\n❌ 未成年人防沉迷政策加码时"},
+            {"name":"纳指ETF","code":"513100","style":"美股科技",
+             "intro":"苹果/微软/英伟达/谷歌,全球最优质科技公司,英伟达占比超10%",
+             "holdings":[("AAPL","苹果"),("MSFT","微软"),("NVDA","英伟达"),("TSLA","特斯拉"),("GOOG","谷歌")],
+             "timing":"✅ 美联储降息周期开启时科技股弹性最大\n✅ AI产业周期(大模型+应用)持续时\n❌ 美元流动性收紧+美债收益率>5%时承压\n⚠️ T+0交易,可日内波段"},
+            {"name":"恒生科技ETF","code":"513130","style":"中概",
+             "intro":"腾讯/阿里/美团/京东,中国互联网核心资产,港股估值洼地",
+             "holdings":[("9988","阿里巴巴"),("9618","京东"),("3690","美团"),("9999","网易"),("0700","腾讯控股")],
+             "timing":"✅ 平台经济监管常态化+绿灯案例落地时\n✅ 港股通资金持续净流入时\n❌ 中美审计监管争端升级+美联储加息时\n⚠️ 港股流动性差,避免追涨杀跌"},
+            {"name":"黄金ETF","code":"518880","style":"避险",
+             "intro":"跟踪伦敦金现货价,避险+抗通胀+对冲美元信用风险",
+             "holdings":[("sh600547","山东黄金"),("sh601899","紫金矿业"),("sh600489","中金黄金"),("sh601600","中国铝业"),("sh601857","中国石油")],
+             "timing":"✅ 地缘冲突升级(战争/制裁)时\n✅ 美联储停止加息+市场开始预期降息\n✅ 央行增持黄金+全球去美元化加速\n❌ 风险偏好上升+美元指数走强时"},
+        ]
+    },
+]
+
 # 板块归类 (和邮票格子保持一致)
 _BLOCK_GROUPS = {
     "银行":   ["sh601398","sh601939","sh601288","sh601988","sh600036","sh601166","sz002142","sh600016","sh601328"],
@@ -222,6 +367,90 @@ def build_fund_holdings_tab(parent, root=None):
     agg_vsb.pack(side=tk.RIGHT, fill=tk.Y)
     agg_canvas.create_window((0, 0), window=agg_inner, anchor="nw")
     agg_inner.bind("<Configure>", lambda e: agg_canvas.configure(scrollregion=agg_canvas.bbox("all")))
+
+    # ── Tab3: 基金指南 (风格分类 + 介绍 + 择时) ──
+    guide_frame = ttk.Frame(nb); nb.add(guide_frame, text="📚 基金指南 (Beta/Alpha/成长/周期)")
+    guide_canvas = tk.Canvas(guide_frame, bg=_BG_DEEP, highlightthickness=0)
+    guide_vsb = ttk.Scrollbar(guide_frame, orient="vertical", command=guide_canvas.yview)
+    guide_inner = ttk.Frame(guide_canvas, style="Dark.TFrame")
+    guide_canvas.configure(yscrollcommand=guide_vsb.set)
+    guide_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    guide_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+    guide_canvas.create_window((0, 0), window=guide_inner, anchor="nw")
+    guide_inner.bind("<Configure>", lambda e: guide_canvas.configure(scrollregion=guide_canvas.bbox("all")))
+
+    # ── Tab3 需要先用, 提前定义 ──
+    def _on_stock_click(e, sina, name):
+        print(f"[基金持仓] 点击股票 sina={sina} name={name}", flush=True)
+        if sina:
+            _open_kline(root, sina, name)
+        else:
+            print(f"[基金持仓] sina 为空, 无法打开K线 name={name}", flush=True)
+
+    for cat in _FUND_GUIDE:
+        # 分类头
+        cat_hd = tk.Frame(guide_inner, bg=_BG_PANEL)
+        cat_hd.pack(fill=tk.X, padx=8, pady=(14, 4))
+        tk.Label(cat_hd, text=cat["cat"], bg=_BG_PANEL, fg=_FG_GOLD,
+                 font=("", 13, "bold")).pack(side=tk.LEFT, padx=10, pady=6)
+        tk.Label(cat_hd, text=cat["cat_desc"], bg=_BG_PANEL, fg=_FG_DIM,
+                 font=("", 9), wraplength=800, justify=tk.LEFT).pack(side=tk.LEFT, padx=10)
+
+        # 该分类下的基金 (横向排列)
+        fund_row = tk.Frame(guide_inner, bg=_BG_DEEP)
+        fund_row.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+        for fi, f in enumerate(cat["funds"]):
+            card = tk.Frame(fund_row, bg=_BG_CARD,
+                            highlightbackground=_FG_BLUE, highlightthickness=1)
+            card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+            # 基金名 + 代码 + 风格
+            hdr = tk.Frame(card, bg=_BG_CARD); hdr.pack(fill=tk.X, padx=6, pady=(6, 2))
+            tk.Label(hdr, text=f"🎯 {f['name']}", bg=_BG_CARD, fg=_FG_GOLD,
+                     font=("", 10, "bold")).pack(side=tk.LEFT)
+            tk.Label(hdr, text=f"({f['code']})", bg=_BG_CARD, fg=_FG_DIM,
+                     font=("", 8)).pack(side=tk.LEFT, padx=3)
+            tk.Label(hdr, text=f"#{f['style']}", bg=_BG_CARD, fg=_FG_CYAN,
+                     font=("", 8)).pack(side=tk.RIGHT)
+
+            tk.Frame(card, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=6, pady=2)
+
+            # 简介
+            tk.Label(card, text=f["intro"], bg=_BG_CARD, fg=_FG_TEXT,
+                     font=("", 9), wraplength=280, justify=tk.LEFT).pack(
+                anchor="w", padx=8, pady=(2, 4))
+
+            # 持仓股票 (可点击)
+            tk.Label(card, text="📦 Top5 持仓 (双击弹日K):", bg=_BG_CARD,
+                     fg=_FG_BLUE, font=("", 8, "bold")).pack(anchor="w", padx=8, pady=(2,0))
+
+            for hi, (code6, nm) in enumerate(f["holdings"]):
+                sina, _ = _lookup_sina(nm, code6)
+                row_bg = "#2A2A3A" if hi % 2 == 0 else _BG_CARD
+                hrow = tk.Frame(card, bg=row_bg, cursor="hand2")
+                hrow.pack(fill=tk.X, padx=4, pady=1)
+
+                def _mk(_s=sina, _n=nm):
+                    return lambda e: _on_stock_click(e, _s, _n)
+                _h = _mk()
+
+                hrow.bind("<ButtonRelease-1>", _h); hrow.bind("<Double-Button-1>", _h)
+                _n_lbl = tk.Label(hrow, text=f"  {hi+1}. {nm}", bg=row_bg, fg=_FG_TEXT,
+                                  font=("", 9))
+                _n_lbl.pack(side=tk.LEFT, padx=4, pady=2)
+                _n_lbl.bind("<ButtonRelease-1>", _h); _n_lbl.bind("<Double-Button-1>", _h)
+                _c_lbl = tk.Label(hrow, text=f"({code6})", bg=row_bg, fg=_FG_DIM,
+                                  font=("", 8))
+                _c_lbl.pack(side=tk.RIGHT, padx=4)
+                _c_lbl.bind("<ButtonRelease-1>", _h); _c_lbl.bind("<Double-Button-1>", _h)
+
+            # 择时笔记
+            tk.Label(card, text="💡 择时笔记:", bg=_BG_CARD, fg=_FG_GREEN,
+                     font=("", 8, "bold")).pack(anchor="w", padx=8, pady=(6, 0))
+            tk.Label(card, text=f["timing"], bg=_BG_CARD, fg=_FG_DIM,
+                     font=("", 8), wraplength=280, justify=tk.LEFT).pack(
+                anchor="w", padx=8, pady=(0, 8))
 
     # Dark theme for Frame
     try:
@@ -416,13 +645,6 @@ def build_fund_holdings_tab(parent, root=None):
             pass
         for c in widget.winfo_children():
             _bind_click_deep(c, handler)
-
-    def _on_stock_click(e, sina, name):
-        print(f"[基金持仓] 点击股票 sina={sina} name={name}", flush=True)
-        if sina:
-            _open_kline(root, sina, name)
-        else:
-            print(f"[基金持仓] sina 为空, 无法打开K线 name={name}", flush=True)
 
     # ── 渲染: 基金卡片 ──
     def _render_fund_cards():
