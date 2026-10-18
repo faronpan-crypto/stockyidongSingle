@@ -889,19 +889,37 @@ def show_speculator_watch(root=None, app=None):
 
 
 def _seed_fill_all(win):
-    """种子数据秒出 — 所有面板先有内容, 再后台替换成真实数据"""
+    """种子数据秒出 — 优先读 sentiment_history 本地数据, 再后台刷新"""
     try:
         # 顶栏日期标签先显示种子状态
         if hasattr(win, '_data_date_lbl'):
             win._data_date_lbl.config(text="⏳ 加载实时数据中...", fg="#BDBDBD")
-        # 右侧分析面板先显示种子结论 (从 SEED 数据推导)
-        ctx = {"pct_mean": -2.85, "up_count": 430, "down_count": 5108,
-               "zt_count": 44, "dt_count": 51, "trade_date": "— (加载中)",
-               "up_ratio": 7.8, "cycle": "P4 退潮", "light": "🔴 红灯",
+
+        # 优先读 sentiment_history 最新 m2_up/m2_down (本地 SQLite 秒出)
+        seed_up = 2300; seed_down = 3200; seed_pct = 0.0; seed_date = "—"
+        rows = _read_local_sentiment(limit=1)
+        if rows and rows[0][3]:
+            r = rows[0]
+            seed_date = str(r[0])
+            seed_up = int(r[3] or 2300)
+            seed_down = int(r[4] or 3200)
+            seed_pct = float(r[1] or 0)
+
+        # 用真实 m2_up 判灯 — 种子不再写死红灯
+        if seed_up < 1600: light = "🔴 红灯"
+        elif seed_up <= 3500: light = "🟡 黄灯"
+        else: light = "🟢 绿灯"
+        total = seed_up + seed_down
+        up_ratio = round(seed_up / total * 100, 1) if total > 0 else 50
+
+        ctx = {"pct_mean": seed_pct, "up_count": seed_up, "down_count": seed_down,
+               "zt_count": None, "dt_count": None, "trade_date": seed_date,
+               "up_ratio": up_ratio, "light": light,
                "block_ranking": [("券商", 0.06), ("银行", -1.07), ("CPO", -4.0)],
-               "spot": {}}
+               "spot": {}, "data_source": "📅 种子 (sentiment_history 本地)"}
         layers, concl = _build_7layer_analysis(ctx)
         _apply_analysis(win, layers, concl)
+        print(f"[👁️看盘] 种子秒出: up={seed_up}, date={seed_date}, light={light}", flush=True)
     except Exception as e:
         print(f"[👁️看盘] 种子填充失败 (不影响): {e}")
 
@@ -2991,7 +3009,7 @@ def _gather_analysis_context(win):
                        for name, info in spot.items()}
         ctx["data_source"] = "🟢 盘中实时 (新浪直连)"
     else:
-        # 收盘: 用 tushare
+        # 收盘: 优先 tushare, 失败回退 sentiment_history
         daily = _TUSHARE_DAILY_CACHE.get("data")
         if daily is not None and len(daily) > 0:
             ctx["trade_date"] = str(sorted(daily["trade_date"].unique())[-1])
@@ -3000,9 +3018,24 @@ def _gather_analysis_context(win):
             ctx["down_count"] = int((daily["pct_chg"] < 0).sum())
             ctx["zt_count"] = int((daily["pct_chg"] >= 9.5).sum())
             ctx["dt_count"] = int((daily["pct_chg"] <= -9.5).sum())
+            ctx["data_source"] = "📅 收盘数据 (tushare)"
         else:
-            ctx.update({"trade_date": "—", "pct_mean": 0, "up_count": 0, "down_count": 0,
-                        "zt_count": 0, "dt_count": 0})
+            # ── 兜底: sentiment_history SQLite 本地数据 ──
+            rows = _read_local_sentiment(limit=1)
+            if rows and rows[0][3]:  # m2_up 有值
+                r = rows[0]
+                ctx["trade_date"] = str(r[0])
+                ctx["up_count"] = int(r[3] or 0)
+                ctx["down_count"] = int(r[4] or 0)
+                ctx["zt_count"] = None
+                ctx["dt_count"] = None
+                ctx["pct_mean"] = float(r[1] or 0)
+                ctx["data_source"] = f"📅 收盘数据 (本地 sentiment_history · {r[0]})"
+                print(f"[👁️看盘] tushare 不可用, 回退 sentiment_history: up={ctx['up_count']}, date={ctx['trade_date']}", flush=True)
+            else:
+                ctx.update({"trade_date": "—", "pct_mean": 0, "up_count": 0, "down_count": 0,
+                            "zt_count": 0, "dt_count": 0})
+                ctx["data_source"] = "⚠️ 无数据"
         sb = _TUSHARE_SB_CACHE.get("data")
         if daily is not None and sb is not None:
             merged = daily.merge(sb, on="ts_code", how="left")
