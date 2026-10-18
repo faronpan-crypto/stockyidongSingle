@@ -609,22 +609,23 @@ def _open_book_detail(parent, bid):
 
     dlg.grab_set()
 
-    # ═══ ⚡ 自动联网: 需要更新就后台抓 ═══
+    # ═══ ⚡ 自动联网: fetched_at 已存在就跳过 (防止无限循环) ═══
     _intro_now = row["intro"] or ""
     _rating_now = row["rating"] or 0
     _chapters_now = row.get("chapters") or ""
     _comments_now = row.get("comments") or ""
     _author_bio_now = row.get("author_bio") or ""
-    # 触发条件: intro 空/太短, 或 rating=0, 或 章节+评论+作者简介 全空
-    _need_fetch = (len(_intro_now) < 40) or (_rating_now == 0) or (
-        not _chapters_now and not _comments_now and not _author_bio_now)
+    _fetched_before = row.get("fetched_at") or ""  # ⚡ 关键: 抓过就不再自动抓
+    _need_fetch = (not _fetched_before) and (
+        (len(_intro_now) < 40) or (_rating_now == 0) or (
+        not _chapters_now and not _comments_now and not _author_bio_now))
 
     # ═══ 后台联网 + 刷新 UI 的闭包 ═══
     def _do_fetch_background(notify_user=False):
-        """后台抓 → 存 DB → 切主线程刷新整个弹窗"""
+        """后台抓 → 存 DB → 切主线程刷新当前弹窗 (不 destroy 重建!)"""
         def _bg():
             try:
-                summary = _fetch_book_intro_worker(row["title"], row["author"])
+                summary = _fetch_book_intro_worker(row["title"], row.get("author") or "")
                 fields = {}
                 for k, v in (summary or {}).items():
                     if v is None: continue
@@ -637,35 +638,53 @@ def _open_book_detail(parent, bid):
                     try:
                         con = _sqlite3.connect(_DB_PATH)
                         now = _dt.now().strftime("%Y-%m-%d %H:%M")
-                        fields["fetched_at"] = now
+                        fields["fetched_at"] = now  # ⚡ 标记已抓过
                         sets = ", ".join(f"{k}=?" for k in fields.keys()) + ", updated_at=?"
                         con.execute(f"UPDATE books SET {sets} WHERE id=?",
                                     list(fields.values()) + [now, bid])
                         con.commit(); con.close()
                     except Exception as ex:
                         print(f"[书籍] fetch db save err: {ex}", flush=True)
-                # 切主线程 — 刷新整个弹窗 (因为 Tab 可能增删)
-                def _refresh_all():
+                # 切主线程 — 刷新当前弹窗的 widget (不 destroy!)
+                def _refresh_safe():
                     try:
                         if not dlg.winfo_exists(): return
-                        # 重新读 DB
                         con2 = _sqlite3.connect(_DB_PATH)
                         con2.row_factory = _sqlite3.Row
                         nr = con2.execute("SELECT * FROM books WHERE id=?", (bid,)).fetchone()
                         con2.close()
                         if not nr: return
-                        # ⚡ 直接 destroy 整个 dialog 重建 — 最简单最稳
-                        dlg.destroy()
-                        _open_book_detail(parent, bid)
+                        nr = dict(nr)
+                        # ⚡ 简单粗暴: 只更新 header 副标题里的 rating 徽章
+                        # 不重建 Notebook/Tab, 避免触发新弹窗
+                        try:
+                            for w in dlg.winfo_children():
+                                if isinstance(w, tk.Frame) and w.cget("bg") == "#1565C0":
+                                    for sub in w.winfo_children():
+                                        for label in sub.winfo_children():
+                                            if isinstance(label, tk.Label) and label.cget("text").startswith("📘"):
+                                                pass  # 大标题不动
+                                            elif isinstance(label, tk.Label) and "✍️" in label.cget("text"):
+                                                # 更新副标题
+                                                sp = []
+                                                if nr.get("author"): sp.append(f"✍️ {nr['author']}")
+                                                if nr.get("rating") and nr["rating"] > 0:
+                                                    sp.append(f"⭐ {nr['rating']:.1f}")
+                                                if nr.get("publisher"): sp.append(f"🏢 {nr['publisher']}")
+                                                if nr.get("pub_year"): sp.append(f"📅 {nr['pub_year']}")
+                                                label.configure(text="  │  ".join(sp))
+                                                break
+                        except Exception as ex1:
+                            print(f"[书籍] header refresh err: {ex1}", flush=True)
                         if notify_user:
                             messagebox.showinfo("✅ 爬取成功",
-                                "已从网络拉取最新数据, 弹窗已刷新!\n\n"
-                                "如果之前目录章节/评论是空的, 现在应该有了。")
+                                "已从网络拉取最新数据!\n\n"
+                                "关闭后重新打开弹窗可看到完整内容。")
                     except Exception as ex:
                         print(f"[书籍] refresh err: {ex}", flush=True)
                         if notify_user:
                             messagebox.showerror("刷新失败", str(ex))
-                dlg.after(0, _refresh_all)
+                dlg.after(0, _refresh_safe)
             except Exception as e:
                 print(f"[书籍] fetch bg err: {e}", flush=True)
                 if notify_user:
