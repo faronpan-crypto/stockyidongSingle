@@ -537,19 +537,26 @@ def _open_book_detail(parent, bid):
     ai_text_widget = {}  # 闭包引用
 
     def _build_ai_tab(initial_text, _gen_time=None):
-        for w in tab_ai.winfo_children(): w.destroy()
-        ai_frame = tk.Frame(tab_ai, bg="#121212"); ai_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-        tk.Label(ai_frame, text=f"🤖 AI 智能解读{' · 生成于 ' + _gen_time if _gen_time else ' (点击右下角 AI 按钮可强制刷新)'}",
-                 bg="#121212", fg="#80DEEA", font=("", 12, "bold")).pack(anchor="w", pady=(0, 4))
-        from tkinter import scrolledtext as _st
-        _ai_txt = _st.ScrolledText(ai_frame, bg="#1E1E2E", fg="#C8E6C9",
-                                   font=("", _me_ai._font_size), wrap=tk.WORD,
-                                   relief=tk.FLAT, padx=8, pady=6, height=20)
-        _ai_txt.pack(fill=tk.BOTH, expand=True)
-        _ai_txt.insert("1.0", initial_text or "⏳ 点击右下角「🔄 AI 重新解读」按钮开始生成...\n\n首次使用时会自动生成, 之后缓存不联网。")
-        _ai_txt.configure(state=tk.DISABLED)
-        _me_ai._all_texts.append(_ai_txt)
-        ai_text_widget["txt"] = _ai_txt
+        import traceback as _tb2
+        try:
+            print(f"[书籍] _build_ai_tab called, initial_text={len(initial_text) if initial_text else 0}字, gen_time={_gen_time}", flush=True)
+            for w in tab_ai.winfo_children(): w.destroy()
+            ai_frame = tk.Frame(tab_ai, bg="#121212"); ai_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+            tk.Label(ai_frame, text=f"🤖 AI 智能解读{' · 生成于 ' + _gen_time if _gen_time else ' (点击右下角 AI 按钮可强制刷新)'}",
+                     bg="#121212", fg="#80DEEA", font=("", 12, "bold")).pack(anchor="w", pady=(0, 4))
+            from tkinter import scrolledtext as _st
+            _ai_txt = _st.ScrolledText(ai_frame, bg="#1E1E2E", fg="#C8E6C9",
+                                       font=("", _me_ai._font_size), wrap=tk.WORD,
+                                       relief=tk.FLAT, padx=8, pady=6, height=20)
+            _ai_txt.pack(fill=tk.BOTH, expand=True)
+            _ai_txt.insert("1.0", initial_text or "⏳ 点击右下角「🔄 AI 重新解读」按钮开始生成...\n\n首次使用时会自动生成, 之后缓存不联网。")
+            _ai_txt.configure(state=tk.DISABLED)
+            _me_ai._all_texts.append(_ai_txt)
+            ai_text_widget["txt"] = _ai_txt
+            print(f"[书籍] ✅ _build_ai_tab 完成, AI Tab 子控件数={len(tab_ai.winfo_children())}", flush=True)
+        except Exception as e:
+            print(f"[书籍] ❌ _build_ai_tab ERR: {e}", flush=True)
+            _tb2.print_exc()
         def _zoom_ai(_e=None, delta=0):
             cur = _me_ai._font_size
             if delta: cur = max(9, min(24, cur + delta))
@@ -685,16 +692,32 @@ def _open_book_detail(parent, bid):
     tk.Button(btn_row, text="关闭", command=dlg.destroy).pack(side=tk.RIGHT)
 
     # ═══ AI 解读: 自动生成 + 手动刷新回调 ═══
-    def _refresh_ai_tab(ai_text):
-        """后台生成完 → 主线程刷新 Tab 内容"""
+    import queue as _queue
+
+    _ai_q = _queue.Queue()  # 线程安全队列 — 后台线程放, 主线程取
+
+    def _poll_ai():
+        """主线程轮询队列 — 后台生成完放队列, 主线程拿出来刷新"""
         try:
-            dlg.after(0, lambda: _build_ai_tab(ai_text, _dt.now().strftime("%Y-%m-%d %H:%M")))
-        except Exception as e: print(f"[书籍] AI refresh err: {e}", flush=True)
+            while True:
+                ai_text = _ai_q.get_nowait()
+                print(f"[书籍] 📥 主线程拿到 AI 结果, 刷新 UI ({len(ai_text)}字)", flush=True)
+                _build_ai_tab(ai_text, _dt.now().strftime("%Y-%m-%d %H:%M"))
+        except _queue.Empty:
+            pass
+        # 只要弹窗还活着就继续轮询
+        try:
+            if dlg.winfo_exists():
+                dlg.after(200, _poll_ai)
+        except Exception: pass
+
+    def _refresh_ai_tab(ai_text):
+        """后台生成完 → 放队列 (不要直接调 Tk!)"""
+        _ai_q.put(ai_text)
 
     def _force_ai_regenerate():
         """用户手动点按钮强制重新解读"""
         _build_ai_tab("⏳ AI 正在重新解读中... (基于最新爬取数据)", "")
-        # 重新读 DB 最新行 (可能刚才爬取更新了)
         try:
             _con = _sqlite3.connect(_DB_PATH); _con.row_factory = _sqlite3.Row
             _fresh = _con.execute("SELECT * FROM books WHERE id=?", (bid,)).fetchone()
@@ -704,9 +727,13 @@ def _open_book_detail(parent, bid):
         except Exception as e:
             print(f"[书籍] AI regenerate err: {e}", flush=True)
 
-    # ⚡ 自动触发: 第一次打开 (ai_summary 为空) → 后台生成
+    # 自动触发: 第一次打开 (ai_summary 为空) → 后台生成
     if not row.get("ai_summary"):
         _bg_generate_ai(bid, dict(row), refresh_ui_fn=_refresh_ai_tab)
+
+    # 主线程启动轮询 (200ms 一次)
+    try: dlg.after(200, _poll_ai)
+    except Exception: pass
 
     dlg.grab_set()
 
