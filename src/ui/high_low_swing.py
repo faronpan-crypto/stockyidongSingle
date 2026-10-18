@@ -1309,12 +1309,9 @@ def show_high_low_swing(parent, app=None):
                             pct_color = _FG_RED if pct >= 0 else _FG_GREEN
                             row = tk.Frame(body, bg=row_bg, cursor="hand2")
                             row.pack(fill=tk.X, pady=1)
-                            _top = row.winfo_toplevel()
-                            def _bind_row(_c=code, _nm=name, _t=_top, _r=row):
-                                _r.bind("<Button-1>", lambda e: _quick_open_daily_kline(_t, _c, _nm))
-                                for ch in _r.winfo_children():
-                                    ch.bind("<Button-1>", lambda e: _quick_open_daily_kline(_t, _c, _nm))
-                            _bind_row()
+                            # 闭包默认参数绑定 — 避免 Python lambda 陷阱
+                            row.bind("<Button-1>", lambda e, _c=code, _nm=name:
+                                     _quick_open_daily_kline(row.winfo_toplevel(), _c, _nm))
                             tk.Label(row, text=f"{n}", bg=row_bg, fg=_FG_GOLD if n==1 else _FG_DIM,
                                      font=("", 9, "bold"), width=3, anchor="w").pack(side=tk.LEFT, padx=2)
                             tk.Label(row, text=name, bg=row_bg, fg="white",
