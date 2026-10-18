@@ -1322,10 +1322,21 @@ def show_high_low_swing(parent, app=None):
             if not refs: continue
             try:
                 body = refs["frame"]
-                for w in body.winfo_children(): w.destroy()
+                # 🆕 sd 为空 (新浪拉不到数据) — 保留种子占位 (有股票名+双击K线), 不 destroy!
                 if not sd:
-                    tk.Label(body, text="❌ 网络拉不到数据", bg=_BG_PANEL, fg=_FG_DIM,
-                             font=("", 9)).pack(pady=8); continue
+                    # 加个底部小字提示即可, 覆盖在种子最后面
+                    _rendered_names.add(sname)
+                    # 如果还没提示过, 在 body 最后追加一行轻提示
+                    if not hasattr(body, "_net_warned"):
+                        try:
+                            tk.Label(body, text=" · (新浪实时数据暂不可用, 点击仍可弹K线)",
+                                     bg=_BG_PANEL, fg="#78909C", font=("", 7)).pack(anchor="w", padx=6, pady=2)
+                            body._net_warned = True
+                        except Exception: pass
+                    continue
+
+                # sd 有数据 → destroy 种子 + 渲染真实数据
+                for w in body.winfo_children(): w.destroy()
                 # 表头
                 tk.Label(body, text="#  股票        涨跌幅   技术复合分析",
                          bg=_BG_PANEL, fg=_FG_GOLD, font=("", 9, "bold"),
