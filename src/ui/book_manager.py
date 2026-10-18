@@ -708,16 +708,23 @@ _editors = {}
 
 
 def _make_labeled_text(parent, label, initial, grid_pos, height=6, editable=False, tag=None):
-    """带标题的多行文本区"""
+    """带标题的多行文本区 — 大字号 + Ctrl滚轮调节"""
     import tkinter as tk
     from tkinter import scrolledtext
     r, c = grid_pos
     parent.grid_rowconfigure(r, weight=1); parent.grid_columnconfigure(c, weight=1)
     frm = tk.Frame(parent, bg="#121212")
     frm.grid(row=r, column=c, sticky="nsew", padx=6, pady=4)
-    tk.Label(frm, text=label, bg="#121212", fg="#FFD54F", font=("", 10, "bold")).pack(anchor="w")
+    tk.Label(frm, text=label, bg="#121212", fg="#FFD54F", font=("", 12, "bold")).pack(anchor="w")
+
+    # ⚡ 字号共享状态 — 所有弹窗文本区跟随调节 (挂在当前函数上)
+    _me = _make_labeled_text
+    if not hasattr(_me, "_font_size"):
+        _me._font_size = 13  # 默认字号 13 (比之前 10 大 3 号)
+        _me._all_texts = []   # 所有文本区列表
+
     txt = scrolledtext.ScrolledText(frm, bg="#1E1E1E", fg="#E0E0E0",
-                                    font=("", 10), height=height, wrap=tk.WORD,
+                                    font=("", _me._font_size), height=height, wrap=tk.WORD,
                                     relief=tk.FLAT, padx=6, pady=4)
     txt.pack(fill=tk.BOTH, expand=True, pady=(2, 0))
     txt.insert("1.0", initial or "")
@@ -727,6 +734,26 @@ def _make_labeled_text(parent, label, initial, grid_pos, height=6, editable=Fals
             _editors[tag] = lambda t=txt: t.get("1.0", tk.END).strip()
     else:
         txt.configure(state=tk.DISABLED)
+
+    # ⚡ Ctrl+滚轮调字号
+    _me._all_texts.append(txt)
+    def _zoom(_e=None, delta=0):
+        cur = _me._font_size
+        if delta:
+            cur = max(9, min(24, cur + delta))
+        elif _e:
+            if _e.delta > 0: cur = min(24, cur + 1)
+            elif _e.delta < 0: cur = max(9, cur - 1)
+        _me._font_size = cur
+        for t in _me._all_texts:
+            try: t.configure(font=("", cur))
+            except: pass
+    txt.bind("<Control-MouseWheel>", _zoom)
+    txt.bind("<Control-Up>", lambda e: _zoom(delta=1))
+    txt.bind("<Control-Down>", lambda e: _zoom(delta=-1))
+    tip = tk.Label(frm, text=f"💡 Ctrl+滚轮 调节字号 (当前 {_me._font_size}号)",
+                   bg="#121212", fg="#546E7A", font=("", 8))
+    tip.pack(anchor="e", pady=(1, 0))
 
 
 # ═════════════════════════════════════════════════════════════════════════
