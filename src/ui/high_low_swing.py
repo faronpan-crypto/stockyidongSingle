@@ -1756,17 +1756,17 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
         t = now.hour * 60 + now.minute
         return (9*60+30 <= t <= 11*60+30) or (13*60 <= t <= 15*60)
     def _schedule_auto_refresh():
-        """盘中定时重拉, 盘后自动停止 (1minK线每60秒刷一次)"""
+        """盘中定时重拉, 盘后自动停止"""
         if not dlg.winfo_exists(): return
         if _is_trading_hours():
             _current_opt = combo_var.get()
             if _current_opt: _on_go()  # 重拉当前标的
-            _auto_refresh_id[0] = dlg.after(60000, _schedule_auto_refresh)
+            _auto_refresh_id[0] = dlg.after(30000, _schedule_auto_refresh)
         else:
             _auto_refresh_id[0] = None
     def _start_auto_refresh():
         if _auto_refresh_id[0] is None and _is_trading_hours():
-            _auto_refresh_id[0] = dlg.after(60000, _schedule_auto_refresh)
+            _auto_refresh_id[0] = dlg.after(30000, _schedule_auto_refresh)
     # 关闭窗口时取消定时器
     _orig_protocol = dlg.protocol("WM_DELETE_WINDOW")
     def _on_close_plus():
@@ -2078,28 +2078,30 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                             bbox=dict(boxstyle="round,pad=0.18", fc="#0D47A1", ec="#29B6F6", alpha=0.9),
                             arrowprops=dict(arrowstyle="->", color="#29B6F6", lw=0.9))
 
-            # ── MA 数值收集 → 状态栏显示 (不画在 chart 上挡K线) ──
+            # ── 最后一根 MA 数值 + 颜色文字标注 (右上角浮窗, 替代 legend) ──
             _ma_items = [
                 ("MA5",  ma5,  "#FFD54F"),
                 ("MA10", ma10, "#42A5F5"),
                 ("MA20", ma20, "#AB47BC"),
                 ("MA60", ma60, "#EF9A9A"),
             ]
+            _ma_txt_lines = []
             _last_x = len(x) - 1
-            _ma_status_parts = []
             for _name, _arr, _col in _ma_items:
                 if _np.isnan(_arr[-1]):
                     continue
-                _ma_status_parts.append(f"{_name}={_arr[-1]:.2f}")
-                # 最后一点画小圆点 (保留视觉标记, 不挡K线)
-                ax.scatter([_last_x], [_arr[-1]], s=18, color=_col, zorder=11,
-                           edgecolors="white", linewidths=0.5)
-            # MA60 虚线锚点
+                _ma_txt_lines.append(f"{_name}={_arr[-1]:.2f}")
+                # 最后一点画小圆点
+                ax.scatter([_last_x], [_arr[-1]], s=20, color=_col, zorder=11, edgecolors="white", linewidths=0.6)
+            # 右上角文本框
+            if _ma_txt_lines:
+                _ma_legend_text = "\n".join(_ma_txt_lines)
+                ax.text(0.995, 0.99, _ma_legend_text, transform=ax.transAxes,
+                        fontsize=8, va="top", ha="right", color="#E0E0E0",
+                        bbox=dict(boxstyle="round,pad=0.3", fc="#1a1a2e", ec="#555", alpha=0.85))
+            # MA60 额外: 虚线 + 文字 (核心锚点)
             if not _np.isnan(ma60[-1]):
                 ax.axhline(ma60[-1], color="#EF9A9A", ls="--", lw=0.7, alpha=0.6)
-            # 追加到状态栏 (最右)
-            if _ma_status_parts:
-                _status_parts.append("  ".join(_ma_status_parts))
 
             # ── BOLL 带 (主图可选) ──
             if _draw_boll_main:
@@ -2638,7 +2640,9 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
             axv.grid(True, alpha=0.15, color=_FG_DIM)
             axv.set_ylabel("量", color=_FG_DIM, fontsize=8, rotation=0, labelpad=16)
 
-            fig.subplots_adjust(top=0.92, bottom=0.18, left=0.08, right=0.94, hspace=0.05)
+            # fig.subplots_adjust 已移除 — 改用 fig.add_axes 动态精确定位, 无需再调
+            # 但 fig 边距仍留一点白
+            fig.subplots_adjust(top=0.95, bottom=0.03, left=0.03, right=0.97)
 
             print("[🎨渲染] → 流派分支完成, 准备 canvas", flush=True)
             # 🆕 最后统一设置状态栏 (不再追加, 彻底解决重影)
@@ -2671,9 +2675,13 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 canvas.mpl_connect("button_press_event", _on_canvas_press)
             except Exception: pass
 
-            # 收盘位置 vs MA60 (只描述位置, MA数值已在顶部)
-            _pos_vs_ma60 = f"收盘{c[-1]:.2f} vs MA60{'📈上' if c[-1] > ma60[-1] else '📉下'}"
-            _status_parts.append(_pos_vs_ma60)
+            # 显示最后几根 MA 值 (右上角浮窗)
+            last_ma_txt = (f"MA5={ma5[-1]:.2f}  MA10={ma10[-1]:.2f}  "
+                           f"MA20={ma20[-1]:.2f}  MA60={ma60[-1]:.2f}\n"
+                           f"最新={c[-1]:.2f}  收盘位置 vs MA60: "
+                           f"{'📈 上方' if c[-1] > ma60[-1] else '📉 下方'}")
+            # 流派分析前先加 MA 概览
+            _status_parts.append(last_ma_txt.split("\n")[1])
 
         except Exception as _e:
             _tb.print_exc()
@@ -2902,12 +2910,12 @@ def _show_multi_kline_comparison(parent_root, app=None):
         if not dlg.winfo_exists(): return
         if _mg_trading() and selected_codes:
             _render_grid()
-            _mg_auto_id[0] = dlg.after(60000, _mg_schedule)
+            _mg_auto_id[0] = dlg.after(30000, _mg_schedule)
         else:
             _mg_auto_id[0] = None
     def _mg_start():
         if _mg_auto_id[0] is None and _mg_trading() and selected_codes:
-            _mg_auto_id[0] = dlg.after(60000, _mg_schedule)
+            _mg_auto_id[0] = dlg.after(30000, _mg_schedule)
     _orig_close = dlg.protocol("WM_DELETE_WINDOW")
     def _mg_close():
         if _mg_auto_id[0]:
@@ -3092,15 +3100,15 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
     if code6.startswith(("sh", "sz", "bj")):
         sina_code = code6
     else:
-        c = code6
-        # 沪市: 6xxxxx + 5xxxxx (所有沪市ETF 50-59) + 58xxxx (科创板ETF)
-        if c.startswith(("6", "50","51","52","53","54","55","56","57","58","59")):
-            sina_code = f"sh{c}"
-        elif c.startswith(("4", "8")):
-            sina_code = f"bj{c}"
+        # 沪市: 6/50/51/52/53/54/55/56/57/58/59 (含所有 ETF)
+        # 深市: 0/1/2/3 + 159xx (深市ETF)
+        # 北交: 4/8
+        if code6.startswith("6") or code6.startswith(("50","51","52","53","54","55","56","57","58","59")):
+            sina_code = f"sh{code6}"
+        elif code6.startswith(("4","8")):
+            sina_code = f"bj{code6}"
         else:
-            # 深市: 0/1/3 (含 15xxxx 深市ETF, 16xxxx LOF)
-            sina_code = f"sz{c}"
+            sina_code = f"sz{code6}"
 
     if _is_embed:
         dlg = embed_frame
@@ -3193,23 +3201,16 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
     _hover_win = None
 
     def _fetch(period):
-        import urllib.request, ssl
-        _ctx = ssl._create_unverified_context()
-        _HDR = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"}
         def _try_scale(scale, datalen=240):
             try:
                 url = f"https://quotes.sina.cn/cn/api/jsonp.php/_/CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen={datalen}"
-                print(f"[📊日K fetch] sina={sina_code} scale={scale} period={period}", flush=True)
-                _req = urllib.request.Request(url, headers=_HDR)
-                with urllib.request.urlopen(_req, timeout=10, context=_ctx) as _resp:
-                    txt = _resp.read().decode("utf-8", errors="ignore")
-                if "([{}])" in txt or len(txt) < 200:
-                    print(f"[📊日K ❌] 空响应 len={len(txt)}", flush=True); return None
+                r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"})
+                if r.status_code != 200: return None
+                txt = r.text
+                if "([{}])" in txt or len(txt) < 200: return None
                 data = json.loads(txt[txt.index("(") + 1:txt.rindex(")")])
-                print(f"[📊日K ✅] {len(data)}根, 最新 {data[-1]['day']}", flush=True)
                 return data if data else None
-            except Exception as _fe:
-                print(f"[📊日K ❌] _try_scale({scale}): {_fe}", flush=True); return None
+            except: return None
 
         try:
             if period == "minute":
