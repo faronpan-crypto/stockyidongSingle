@@ -611,6 +611,23 @@ def build_fund_holdings_tab(parent, root=None):
     btn_timing = ttk.Button(top, text="🤖 🔄更新择时", width=14,
                             command=lambda: _load_timing(force=True))
     btn_timing.pack(side=tk.RIGHT, padx=(6, 0))
+    # 🗔 弹出独立窗口按钮
+    def _popup_window():
+        # 关掉之前弹出的窗口
+        nonlocal _popup_ref
+        if _popup_ref is not None:
+            try: _popup_ref.destroy()
+            except: pass
+        win = tk.Toplevel(root)
+        win.title("📊 基金持仓 - 独立窗口")
+        win.geometry("1400x900")
+        win.configure(bg=_BG_DEEP)
+        # 顶栏放个关闭按钮 (原生窗口按钮已经有, 这里只是提示)
+        build_fund_holdings_tab(win, root)  # 重建完整内容
+        _popup_ref = win
+    _popup_ref = None
+    btn_popup = ttk.Button(top, text="🗔 弹出", width=6, command=_popup_window)
+    btn_popup.pack(side=tk.RIGHT, padx=(6, 0))
 
     # Notebook 分成两部分
     nb = ttk.Notebook(parent)
