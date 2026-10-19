@@ -14163,6 +14163,16 @@ class DapanMixin:
         except Exception as e:
             print(f"[📈1minK❌] {e}", flush=True); _tb.print_exc()
 
+    def _show_multi_compare_dialog(self):
+        """🔍 多股并排对比 — 复用高抛低吸里的 _show_multi_kline_comparison"""
+        import traceback as _tb
+        print("[🔍多股对比] 按钮被点击!", flush=True)
+        try:
+            from ui.high_low_swing import _show_multi_kline_comparison as _mc
+            _mc(getattr(self, 'root', None) or getattr(self, '_root', None), app=self)
+        except Exception as e:
+            print(f"[🔍多股对比❌] {e}", flush=True); _tb.print_exc()
+
     def _show_wechat_dialog(self):
         """📱 微信日报生成 — lazy import"""
         import traceback as _tb
