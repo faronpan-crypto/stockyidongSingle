@@ -99,75 +99,72 @@ class CaochuanMixin:
     def _show_caochuan_panel(self):
         win = tk.Toplevel(self.root)
         win.title("📋 操盘面板 (模拟)")
-        win.geometry("1200x680")
+        win.geometry("1100x660")
         win.attributes("-topmost", True)
 
         # === 顶部风险提示 ===
-        risk = tk.Label(win, text="⚠️ 模拟交易 — 不会真实下单, 仅供盘前盘后练习 / 持仓记录",
-                        bg="#fff3cd", fg="#856404", font=("TkDefaultFont", 11, "bold"))
-        risk.pack(fill=tk.X, padx=8, pady=(6, 4))
+        risk = tk.Label(win, text="⚠️ 模拟交易 — 不会真实下单",
+                        bg="#fff3cd", fg="#856404", font=("TkDefaultFont", 9))
+        risk.pack(fill=tk.X, padx=8, pady=(4, 2))
 
-        # === 工具栏 ===
-        tb = ttk.Frame(win)
-        tb.pack(fill=tk.X, padx=8, pady=2)
-        ttk.Button(tb, text="➕ 加持仓", command=lambda: self._cc_add_position(tree, quote_map, _log_view)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(tb, text="🗑️ 删选中", command=lambda: self._cc_delete_selected(tree, _log_view)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(tb, text="✏️ 改数量", command=lambda: self._cc_edit_qty(tree, quote_map, _log_view)).pack(side=tk.LEFT, padx=2)
-        ttk.Separator(tb, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
-        ttk.Button(tb, text="📈 全部卖出", command=lambda: self._cc_bulk_sell(tree, quote_map, _log_view, "全部")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(tb, text="💰 盈利卖出", command=lambda: self._cc_bulk_sell(tree, quote_map, _log_view, "盈利")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(tb, text="📉 亏损卖出", command=lambda: self._cc_bulk_sell(tree, quote_map, _log_view, "亏损")).pack(side=tk.LEFT, padx=2)
-        ttk.Separator(tb, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
-        ttk.Button(tb, text="🔄 刷新行情", command=lambda: self._cc_refresh_quotes(tree, quote_map)).pack(side=tk.LEFT, padx=2)
-        ttk.Button(tb, text="💾 保存", command=lambda: (_save_positions(_cc_positions), messagebox.showinfo("保存", "已保存持仓", parent=win))).pack(side=tk.LEFT, padx=2)
-
-        # 百分比加减仓（针对选中）
-        pct_frame = ttk.Frame(tb)
-        pct_frame.pack(side=tk.RIGHT, padx=4)
-        ttk.Label(pct_frame, text="选中股:").pack(side=tk.LEFT)
+        # === 工具栏 (拆两行避免挤压) ===
+        tb1 = ttk.Frame(win)
+        tb1.pack(fill=tk.X, padx=8, pady=1)
+        ttk.Button(tb1, text="➕加", width=5, command=lambda: self._cc_add_position(tree, quote_map, _log_view)).pack(side=tk.LEFT, padx=1)
+        ttk.Button(tb1, text="🗑️删", width=5, command=lambda: self._cc_delete_selected(tree, _log_view)).pack(side=tk.LEFT, padx=1)
+        ttk.Button(tb1, text="✏️改", width=5, command=lambda: self._cc_edit_qty(tree, quote_map, _log_view)).pack(side=tk.LEFT, padx=1)
+        ttk.Separator(tb1, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+        ttk.Button(tb1, text="全部卖", width=6, command=lambda: self._cc_bulk_sell(tree, quote_map, _log_view, "全部")).pack(side=tk.LEFT, padx=1)
+        ttk.Button(tb1, text="盈利卖", width=6, command=lambda: self._cc_bulk_sell(tree, quote_map, _log_view, "盈利")).pack(side=tk.LEFT, padx=1)
+        ttk.Button(tb1, text="亏损卖", width=6, command=lambda: self._cc_bulk_sell(tree, quote_map, _log_view, "亏损")).pack(side=tk.LEFT, padx=1)
+        ttk.Separator(tb1, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+        ttk.Button(tb1, text="🔄刷", width=4, command=lambda: self._cc_refresh_quotes(tree, quote_map)).pack(side=tk.LEFT, padx=1)
+        ttk.Button(tb1, text="💾存", width=4, command=lambda: (_save_positions(_cc_positions), messagebox.showinfo("保存", "已保存持仓", parent=win))).pack(side=tk.LEFT, padx=1)
+        ttk.Separator(tb1, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+        # 百分比买卖放第一行最右
         self._cc_pct_var = tk.StringVar(value="50")
-        ttk.Entry(pct_frame, textvariable=self._cc_pct_var, width=5).pack(side=tk.LEFT, padx=2)
-        ttk.Label(pct_frame, text="%").pack(side=tk.LEFT)
-        ttk.Button(pct_frame, text="买入%", width=6, command=lambda: self._cc_pct_trade(tree, quote_map, _log_view, "buy")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(pct_frame, text="卖出%", width=6, command=lambda: self._cc_pct_trade(tree, quote_map, _log_view, "sell")).pack(side=tk.LEFT, padx=2)
+        ttk.Label(tb1, text="%:").pack(side=tk.RIGHT, padx=(0, 1))
+        ttk.Button(tb1, text="卖出%", width=6, command=lambda: self._cc_pct_trade(tree, quote_map, _log_view, "sell")).pack(side=tk.RIGHT, padx=1)
+        ttk.Button(tb1, text="买入%", width=6, command=lambda: self._cc_pct_trade(tree, quote_map, _log_view, "buy")).pack(side=tk.RIGHT, padx=1)
+        ttk.Entry(tb1, textvariable=self._cc_pct_var, width=4).pack(side=tk.RIGHT, padx=1)
 
         # === 账户概览 ===
-        summary = tk.LabelFrame(win, text="账户概览", padding=4)
-        summary.pack(fill=tk.X, padx=8, pady=4)
-        self._cc_total_var = tk.StringVar(value="持仓市值: 0")
+        summary = tk.LabelFrame(win, text="账户概览", padding=2)
+        summary.pack(fill=tk.X, padx=8, pady=2)
+        self._cc_total_var = tk.StringVar(value="市值: 0")
         self._cc_pnl_var = tk.StringVar(value="总盈亏: 0")
         self._cc_pnl_pct_var = tk.StringVar(value="盈亏比: 0%")
-        self._cc_count_var = tk.StringVar(value="持仓数量: 0")
-        ttk.Label(summary, textvariable=self._cc_total_var, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, padx=12)
-        ttk.Label(summary, textvariable=self._cc_pnl_var, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=1, padx=12)
-        ttk.Label(summary, textvariable=self._cc_pnl_pct_var, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=2, padx=12)
-        ttk.Label(summary, textvariable=self._cc_count_var).grid(row=0, column=3, padx=12)
+        self._cc_count_var = tk.StringVar(value="持仓: 0")
+        ttk.Label(summary, textvariable=self._cc_total_var, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, padx=8)
+        ttk.Label(summary, textvariable=self._cc_pnl_var, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=1, padx=8)
+        ttk.Label(summary, textvariable=self._cc_pnl_pct_var, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=2, padx=8)
+        ttk.Label(summary, textvariable=self._cc_count_var, font=("TkDefaultFont", 9)).grid(row=0, column=3, padx=8)
 
         # === 主区域: 持仓表格 + 交易日志 ===
         main = ttk.Panedwindow(win, orient=tk.VERTICAL)
-        main.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        main.pack(fill=tk.BOTH, expand=True, padx=8, pady=3)
 
-        # 持仓表格
+        # 持仓表格 (列宽更紧凑)
         pos_frame = ttk.Frame(main)
-        cols = ("code", "name", "qty", "cost", "cur", "market_value", "pnl", "pnl_pct", "pct", "date")
+        cols = ("code", "name", "qty", "cost", "cur", "mv", "pnl", "pnl%", "today%", "date")
         tree = ttk.Treeview(pos_frame, columns=cols, show="headings", selectmode="extended", height=12)
         for c, t, w in [
-            ("code", "代码", 80), ("name", "名称", 90),
-            ("qty", "持仓", 70), ("cost", "成本", 80),
-            ("cur", "现价", 80), ("market_value", "市值", 100),
-            ("pnl", "盈亏", 100), ("pnl_pct", "盈亏%", 80),
-            ("pct", "今日%", 70), ("date", "数据日", 90),
+            ("code", "代码", 70), ("name", "名称", 70),
+            ("qty", "持仓", 55), ("cost", "成本", 60),
+            ("cur", "现价", 60), ("mv", "市值", 75),
+            ("pnl", "盈亏", 80), ("pnl%", "盈亏%", 65),
+            ("today%", "今日%", 60), ("date", "数据日", 75),
         ]:
             tree.heading(c, text=t)
-            tree.column(c, width=w, anchor=tk.CENTER)
+            tree.column(c, width=w, anchor=tk.CENTER, stretch=False)
         vsb = ttk.Scrollbar(pos_frame, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
 
         # 日志
-        log_frame = ttk.LabelFrame(main, text="交易日志 (点击自动记录)", padding=4)
-        _log_view = tk.Text(log_frame, height=8, font=("Menlo", 10))
+        log_frame = ttk.LabelFrame(main, text="交易日志", padding=2)
+        _log_view = tk.Text(log_frame, height=6, font=("Menlo", 9))
         _log_view.pack(fill=tk.BOTH, expand=True)
         _log_view.insert("end", "🟢 操盘面板已启动\n")
         for rec in _load_log()[-20:]:
