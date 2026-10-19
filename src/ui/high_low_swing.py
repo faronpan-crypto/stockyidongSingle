@@ -3030,7 +3030,7 @@ def _show_multi_kline_comparison(parent_root, app=None):
                 ax.text(0.98, 0.95, f"MA60={ma60[-1]:.2f} {pos}", transform=ax.transAxes,
                         color="#EF9A9A", fontsize=7, ha="right", va="top")
 
-        fig.subplots_adjust(top=0.95, bottom=0.05, left=0.05, right=0.95, hspace=0.45, wspace=0.3)
+        fig.subplots_adjust(top=0.95, bottom=0.05, left=0.05, right=0.95, hspace=0.35, wspace=0.2)
 
         canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
         canvas.draw()
@@ -3738,7 +3738,6 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 color_t = "#EF5350" if chg_pct >= 0 else "#66BB6A"
                 ax1.set_title(f"{name} ({code6})  分时图  现价 {last_p:.2f}  {chg_pct:+.2f}%",
                               color=color_t, fontsize=11, pad=8)
-                fig.subplots_adjust(hspace=0.05, wspace=0.02)
                 canvas.draw()
                 status.config(text=f"✅ 分时图 {len(data)} 根, 最新 {dates[-1]}", fg="#66BB6A")
                 return
@@ -3983,7 +3982,7 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             ax1.set_title(f"{name} ({code6})  {period}K  最新 {last_p:.2f}  {chg:+.2f}%",
                           color=_FG_GOLD, fontsize=11, pad=8)
 
-            fig.subplots_adjust(hspace=0.05, wspace=0.02)
+            fig.subplots_adjust(top=0.97, bottom=0.02, left=0.02, right=0.98)  # 只留边距
             canvas.draw()
             status.config(text=f"✅ {len(data)} 根 {period}K, 最新 {dates[-1]}", fg="#66BB6A")
 
