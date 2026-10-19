@@ -2078,30 +2078,28 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                             bbox=dict(boxstyle="round,pad=0.18", fc="#0D47A1", ec="#29B6F6", alpha=0.9),
                             arrowprops=dict(arrowstyle="->", color="#29B6F6", lw=0.9))
 
-            # ── 最后一根 MA 数值 + 颜色文字标注 (右上角浮窗, 替代 legend) ──
+            # ── MA 数值收集 → 状态栏显示 (不画在 chart 上挡K线) ──
             _ma_items = [
                 ("MA5",  ma5,  "#FFD54F"),
                 ("MA10", ma10, "#42A5F5"),
                 ("MA20", ma20, "#AB47BC"),
                 ("MA60", ma60, "#EF9A9A"),
             ]
-            _ma_txt_lines = []
             _last_x = len(x) - 1
+            _ma_status_parts = []
             for _name, _arr, _col in _ma_items:
                 if _np.isnan(_arr[-1]):
                     continue
-                _ma_txt_lines.append(f"$\\bf{{{_name}}}$={_arr[-1]:.2f}")
-                # 最后一点画小圆点
-                ax.scatter([_last_x], [_arr[-1]], s=20, color=_col, zorder=11, edgecolors="white", linewidths=0.6)
-            # 右上角文本框
-            if _ma_txt_lines:
-                _ma_legend_text = "\n".join(_ma_txt_lines)
-                ax.text(0.995, 0.99, _ma_legend_text, transform=ax.transAxes,
-                        fontsize=8, va="top", ha="right", color="#E0E0E0",
-                        bbox=dict(boxstyle="round,pad=0.3", fc="#1a1a2e", ec="#555", alpha=0.85))
-            # MA60 额外: 虚线 + 文字 (核心锚点)
+                _ma_status_parts.append(f"{_name}={_arr[-1]:.2f}")
+                # 最后一点画小圆点 (保留视觉标记, 不挡K线)
+                ax.scatter([_last_x], [_arr[-1]], s=18, color=_col, zorder=11,
+                           edgecolors="white", linewidths=0.5)
+            # MA60 虚线锚点
             if not _np.isnan(ma60[-1]):
                 ax.axhline(ma60[-1], color="#EF9A9A", ls="--", lw=0.7, alpha=0.6)
+            # 追加到状态栏 (最右)
+            if _ma_status_parts:
+                _status_parts.append("  ".join(_ma_status_parts))
 
             # ── BOLL 带 (主图可选) ──
             if _draw_boll_main:
@@ -2673,13 +2671,9 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 canvas.mpl_connect("button_press_event", _on_canvas_press)
             except Exception: pass
 
-            # 显示最后几根 MA 值 (右上角浮窗)
-            last_ma_txt = (f"MA5={ma5[-1]:.2f}  MA10={ma10[-1]:.2f}  "
-                           f"MA20={ma20[-1]:.2f}  MA60={ma60[-1]:.2f}\n"
-                           f"最新={c[-1]:.2f}  收盘位置 vs MA60: "
-                           f"{'📈 上方' if c[-1] > ma60[-1] else '📉 下方'}")
-            # 流派分析前先加 MA 概览
-            _status_parts.append(last_ma_txt.split("\n")[1])
+            # 收盘位置 vs MA60 (只描述位置, MA数值已在顶部)
+            _pos_vs_ma60 = f"收盘{c[-1]:.2f} vs MA60{'📈上' if c[-1] > ma60[-1] else '📉下'}"
+            _status_parts.append(_pos_vs_ma60)
 
         except Exception as _e:
             _tb.print_exc()
