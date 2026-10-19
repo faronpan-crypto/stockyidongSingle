@@ -3193,21 +3193,23 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
     _hover_win = None
 
     def _fetch(period):
+        import urllib.request, ssl
+        _ctx = ssl._create_unverified_context()
+        _HDR = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"}
         def _try_scale(scale, datalen=240):
             try:
                 url = f"https://quotes.sina.cn/cn/api/jsonp.php/_/CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen={datalen}"
-                print(f"[📊日K fetch] sina={sina_code} scale={scale} period={period} → {url}", flush=True)
-                r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"})
-                if r.status_code != 200:
-                    print(f"[📊日K ❌] HTTP {r.status_code}", flush=True); return None
-                txt = r.text
+                print(f"[📊日K fetch] sina={sina_code} scale={scale} period={period}", flush=True)
+                _req = urllib.request.Request(url, headers=_HDR)
+                with urllib.request.urlopen(_req, timeout=10, context=_ctx) as _resp:
+                    txt = _resp.read().decode("utf-8", errors="ignore")
                 if "([{}])" in txt or len(txt) < 200:
-                    print(f"[📊日K ❌] 空响应 len={len(txt)} txt前120={txt[:120]!r}", flush=True); return None
+                    print(f"[📊日K ❌] 空响应 len={len(txt)}", flush=True); return None
                 data = json.loads(txt[txt.index("(") + 1:txt.rindex(")")])
                 print(f"[📊日K ✅] {len(data)}根, 最新 {data[-1]['day']}", flush=True)
                 return data if data else None
             except Exception as _fe:
-                print(f"[📊日K ❌] _try_scale({scale}) 异常: {_fe}", flush=True); return None
+                print(f"[📊日K ❌] _try_scale({scale}): {_fe}", flush=True); return None
 
         try:
             if period == "minute":
