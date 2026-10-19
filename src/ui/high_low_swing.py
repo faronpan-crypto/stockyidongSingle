@@ -1733,6 +1733,20 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                               textvariable=_diag_var, state="readonly")
     diag_combo.pack(side=tk.LEFT, pady=8)
 
+    # 副图指标下拉 (单选, 支持组合)
+    _SUB_OPTIONS = ["MACD", "RSI", "KDJ", "BOLL", "MACD+RSI", "MACD+KDJ", "全部"]
+    tk.Label(r1, text="|", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT, padx=4, pady=8)
+    tk.Label(r1, text="副图", bg=_BG_TOOLBAR, fg=_FG_BLUE, font=("", 9)).pack(side=tk.LEFT, pady=8)
+    _sub_var = tk.StringVar(value="MACD")
+    sub_combo = ttk.Combobox(r1, values=_SUB_OPTIONS, width=10, textvariable=_sub_var, state="readonly")
+    sub_combo.pack(side=tk.LEFT, pady=8)
+
+    # 支撑阻力开关
+    _sr_var = tk.BooleanVar(value=True)
+    tk.Checkbutton(r1, text="支撑阻力", variable=_sr_var, bg=_BG_TOOLBAR, fg=_FG_DIM,
+                   activebackground=_BG_TOOLBAR, selectcolor=_BG_PANEL,
+                   font=("", 9)).pack(side=tk.LEFT, padx=(6, 0), pady=8)
+
     # ── 🆕 盘中自动刷新 (每 30 秒) ──
     _auto_refresh_id = [None]
     def _is_trading_hours():
@@ -1889,6 +1903,19 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
 
             # MA 计算
             ma5 = _ma(c, 5); ma10 = _ma(c, 10); ma20 = _ma(c, 20); ma60 = _ma(c, 60)
+            # BOLL 主图用
+            boll_mid = _ma(c, 20)
+            boll_std2 = _np.array([_np.std(c[max(0, i-19):i+1]) for i in range(len(c))])
+            boll_upper = boll_mid + 2 * boll_std2
+            boll_lower = boll_mid - 2 * boll_std2
+
+            # ── 副图选择解析 ──
+            _sub_choice = _sub_var.get()  # "MACD" / "MACD+RSI" / "全部" ...
+            _draw_boll_main = _sub_choice in ("BOLL", "全部")  # BOLL 带画在主图
+            _draw_macd = "MACD" in _sub_choice or _sub_choice == "全部"
+            _draw_rsi = "RSI" in _sub_choice or _sub_choice == "全部"
+            _draw_kdj = "KDJ" in _sub_choice
+            _n_subs = sum([_draw_macd, _draw_rsi, _draw_kdj])  # 副图数量
 
             # ── 清旧图 (安全版: destroy 后 update_idletasks 让 Tk 真正清理) ──
             print("[🎨渲染] → 清旧图 fig.clear()", flush=True)
@@ -1904,15 +1931,46 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 except Exception: pass
                 _toolbar = None
 
-            # 上: K线图 (55%)
-            print("[🎨渲染] → add_axes K线", flush=True)
-            ax = fig.add_axes([0.06, 0.32, 0.88, 0.58], facecolor=_BG_PANEL)
-            # 中: MACD (18%)
-            print("[🎨渲染] → add_axes MACD", flush=True)
-            axm = fig.add_axes([0.06, 0.15, 0.88, 0.15], sharex=ax, facecolor=_BG_PANEL)
-            # 下: 成交量 (12%)
-            print("[🎨渲染] → add_axes 成交量", flush=True)
-            axv = fig.add_axes([0.06, 0.02, 0.88, 0.11], sharex=ax, facecolor=_BG_PANEL)
+            # ── 动态布局 ──
+            # 主图区间, 副图1区间, 副图2区间, 成交量区间
+            if _n_subs == 0:
+                # 只有 BOLL 主图 + 成交量
+                _main_bot, _main_top = 0.20, 0.88
+                _sub1_bot, _sub1_top = 0, 0
+                _sub2_bot, _sub2_top = 0, 0
+            elif _n_subs == 1:
+                _main_bot, _main_top = 0.32, 0.90
+                _sub1_bot, _sub1_top = 0.16, 0.30
+                _sub2_bot, _sub2_top = 0, 0
+            else:  # 2个副图
+                _main_bot, _main_top = 0.42, 0.92
+                _sub2_bot, _sub2_top = 0.28, 0.40
+                _sub1_bot, _sub1_top = 0.14, 0.26
+            _vol_bot, _vol_top = 0.02, 0.12
+
+            print(f"[🎨渲染] → 布局 _n_subs={_n_subs} {_sub_choice}", flush=True)
+            ax = fig.add_axes([0.06, _main_bot, 0.88, _main_top - _main_bot], facecolor=_BG_PANEL)
+            axv = fig.add_axes([0.06, _vol_bot, 0.88, _vol_top - _vol_bot], sharex=ax, facecolor=_BG_PANEL)
+            axm1 = None
+            axm2 = None
+            # 按 MACD → RSI → KDJ 顺序填入副图槽
+            _sub_slot1 = None  # "MACD" / "RSI" / "KDJ"
+            _sub_slot2 = None
+            if _draw_macd:
+                if _sub_slot1 is None: _sub_slot1 = "MACD"
+                else: _sub_slot2 = "MACD"
+            if _draw_rsi:
+                if _sub_slot1 is None: _sub_slot1 = "RSI"
+                elif _sub_slot2 is None: _sub_slot2 = "RSI"
+            if _draw_kdj:
+                if _sub_slot1 is None: _sub_slot1 = "KDJ"
+                elif _sub_slot2 is None: _sub_slot2 = "KDJ"
+            if _sub_slot1 and _sub1_top > 0:
+                axm1 = fig.add_axes([0.06, _sub1_bot, 0.88, _sub1_top - _sub1_bot],
+                                    sharex=ax, facecolor=_BG_PANEL)
+            if _sub_slot2 and _sub2_top > 0:
+                axm2 = fig.add_axes([0.06, _sub2_bot, 0.88, _sub2_top - _sub2_bot],
+                                    sharex=ax, facecolor=_BG_PANEL)
 
             x = _np.arange(len(times))
             # 蜡烛图简化版 (涨跌着色)
@@ -2020,92 +2078,234 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                             bbox=dict(boxstyle="round,pad=0.18", fc="#0D47A1", ec="#29B6F6", alpha=0.9),
                             arrowprops=dict(arrowstyle="->", color="#29B6F6", lw=0.9))
 
-            # 最后一根画 MA60 数值 (用户核心关注)
+            # ── 最后一根 MA 数值 + 颜色文字标注 (右上角浮窗, 替代 legend) ──
+            _ma_items = [
+                ("MA5",  ma5,  "#FFD54F"),
+                ("MA10", ma10, "#42A5F5"),
+                ("MA20", ma20, "#AB47BC"),
+                ("MA60", ma60, "#EF9A9A"),
+            ]
+            _ma_txt_lines = []
+            _last_x = len(x) - 1
+            for _name, _arr, _col in _ma_items:
+                if _np.isnan(_arr[-1]):
+                    continue
+                _ma_txt_lines.append(f"$\\bf{{{_name}}}$={_arr[-1]:.2f}")
+                # 最后一点画小圆点
+                ax.scatter([_last_x], [_arr[-1]], s=20, color=_col, zorder=11, edgecolors="white", linewidths=0.6)
+            # 右上角文本框
+            if _ma_txt_lines:
+                _ma_legend_text = "\n".join(_ma_txt_lines)
+                ax.text(0.995, 0.99, _ma_legend_text, transform=ax.transAxes,
+                        fontsize=8, va="top", ha="right", color="#E0E0E0",
+                        bbox=dict(boxstyle="round,pad=0.3", fc="#1a1a2e", ec="#555", alpha=0.85))
+            # MA60 额外: 虚线 + 文字 (核心锚点)
             if not _np.isnan(ma60[-1]):
-                ax.axhline(ma60[-1], color="#EF9A9A", ls="--", lw=0.8, alpha=0.7)
-                ax.text(x[-1] - 2, ma60[-1], f"  MA60={ma60[-1]:.2f}",
-                        color="#EF9A9A", fontsize=8, va="bottom", ha="right")
+                ax.axhline(ma60[-1], color="#EF9A9A", ls="--", lw=0.7, alpha=0.6)
+
+            # ── BOLL 带 (主图可选) ──
+            if _draw_boll_main:
+                _boll_valid = ~_np.isnan(boll_upper) & ~_np.isnan(boll_lower)
+                ax.fill_between(x, boll_upper, boll_lower, where=_boll_valid,
+                                color="#607D8B", alpha=0.15)
+                ax.plot(x, boll_upper, color="#78909C", lw=0.8, ls="--", label="BOLL上")
+                ax.plot(x, boll_mid, color="#8D6E63", lw=0.8, ls=":", label="BOLL中")
+                ax.plot(x, boll_lower, color="#78909C", lw=0.8, ls="--", label="BOLL下")
+
+            # ── 支撑阻力线 (可选) ──
+            if _sr_var.get():
+                _sr_lines = []  # (price, label, color, ls)
+                # 1) BOLL 上/下轨最近有效值
+                if not _np.isnan(boll_upper[-1]):
+                    _sr_lines.append((boll_upper[-1], "BOLL上", "#78909C", "--"))
+                if not _np.isnan(boll_lower[-1]):
+                    _sr_lines.append((boll_lower[-1], "BOLL下", "#78909C", "--"))
+                # 2) 整数关口 (根据当前价找上下各一个)
+                _cur = c[-1]
+                _step = 1.0 if _cur < 20 else 5.0 if _cur < 100 else 10.0 if _cur < 500 else 50.0
+                for _mult in (-1, 1):
+                    _gk = round(int(_cur / _step + _mult) * _step, 2)
+                    if _gk > 0:
+                        _sr_lines.append((_gk, f"{_gk:g}", "#FF9800", ":"))
+                # 3) 近期高低点 (order=10, 只看最近120根)
+                _sr_lo = max(0, len(c) - 120)
+                _sr_hi = len(c)
+                for _oi in range(10, min(_sr_hi, len(c) - 10)):
+                    if _oi < _sr_lo: continue
+                    if h[_oi] == max(h[max(0, _oi-10):_oi+11]):
+                        _sr_lines.append((h[_oi], f"高{h[_oi]:.2f}", "#EF5350", "-."))
+                    if l[_oi] == min(l[max(0, _oi-10):_oi+11]):
+                        _sr_lines.append((l[_oi], f"低{l[_oi]:.2f}", "#22C55E", "-."))
+                # 去重 + 画
+                _seen_sr = set()
+                for _sp, _sl, _sc, _ss in _sr_lines:
+                    _key = round(_sp, 2)
+                    if _key in _seen_sr: continue
+                    _seen_sr.add(_key)
+                    ax.axhline(_sp, color=_sc, ls=_ss, lw=0.7, alpha=0.7)
+                    ax.text(_last_x + 1, _sp, f" {_sl}", color=_sc, fontsize=7, va="center")
 
             # ═══════════════════════════════════════════════
-            # 🆕 MACD 副图 + 顶/底背离检测
+            # 🆕 动态副图: MACD / RSI / KDJ — 根据 _sub_slot1 / _sub_slot2 分配
             # ═══════════════════════════════════════════════
             def _ema(arr, n):
                 out = _np.zeros_like(arr, dtype=float); out[0] = arr[0]; k = 2 / (n + 1)
                 for ii in range(1, len(arr)): out[ii] = arr[ii] * k + out[ii - 1] * (1 - k)
                 return out
-            ema12 = _ema(c, 12); ema26 = _ema(c, 26)
-            dif = ema12 - ema26; dea = _ema(dif, 9)
-            macd_h = 2 * (dif - dea)
-            # 画 MACD 副图
-            h_colors = ["#EF5350" if v >= 0 else "#66BB6A" for v in macd_h]
-            axm.bar(x, macd_h, color=h_colors, width=0.7, alpha=0.85)
-            axm.plot(x, dif, color="#42A5F5", lw=0.9, label="DIF")
-            axm.plot(x, dea, color="#FFB74D", lw=0.9, label="DEA")
-            axm.axhline(y=0, color=_FG_DIM, lw=0.5, ls=":")
-            axm.set_ylabel("MACD", color=_FG_DIM, fontsize=8)
-            axm.tick_params(colors=_FG_DIM, labelsize=7)
-            for _sp in axm.spines.values(): _sp.set_color(_FG_DIM)
-            axm.grid(True, alpha=0.1, color=_FG_DIM)
 
-            # 背离检测: 比较两段最近的同向极值
-            #   底背离: 价格创新低, 但 MACD 绿柱/低点没创新低 → 看涨 (金叉确认)
-            #   顶背离: 价格创新高, 但 MACD 红柱/高点没创新高 → 看跌 (死叉确认)
-            def _find_macd_segments(hist, min_bar=5):
-                """把 MACD 柱分成同号的连续段"""
-                segs = []  # (start, end, sign, peak_val)
-                i = 0
-                while i < len(hist):
-                    if abs(hist[i]) < 1e-9: i += 1; continue
-                    sign = 1 if hist[i] > 0 else -1
-                    j = i
-                    while j < len(hist) and hist[j] * sign >= 0: j += 1
-                    if j - i >= min_bar:
-                        peak = sign * _np.max(abs(hist[i:j]))
-                        peak_idx = i + _np.argmax(abs(hist[i:j]))
-                        segs.append((i, j - 1, sign, peak, peak_idx))
-                    i = j
-                return segs
-            _segs = _find_macd_segments(macd_h, min_bar=3)
-            # 只看最近的同方向两段
+            # ── MACD 计算 (只在需要时算) ──
+            ema12 = ema26 = dif = dea = macd_h = None
+            if _draw_macd:
+                ema12 = _ema(c, 12); ema26 = _ema(c, 26)
+                dif = ema12 - ema26; dea = _ema(dif, 9)
+                macd_h = 2 * (dif - dea)
+
+            # ── RSI 计算 ──
+            rsi6 = rsi14 = None
+            if _draw_rsi:
+                _delta = _np.diff(c, prepend=c[0])
+                rsi6 = _np.zeros_like(c)
+                rsi14 = _np.zeros_like(c)
+                for _ni, _w in ((6, rsi6), (14, rsi14)):
+                    _ga = _np.where(_delta > 0, _delta, 0)
+                    _la = _np.where(_delta < 0, -_delta, 0)
+                    for _i in range(_ni, len(c)):
+                        _ag = _np.mean(_ga[_i-_ni:_i])
+                        _al = _np.mean(_la[_i-_ni:_i])
+                        if _al + _ag > 0:
+                            _w[_i] = 100 * _ag / (_ag + _al)
+                        else:
+                            _w[_i] = 50
+
+            # ── KDJ 计算 ──
+            k_k = k_d = k_j = None
+            if _draw_kdj:
+                k_k = _np.zeros_like(c); k_d = _np.zeros_like(c); k_j = _np.zeros_like(c)
+                _rsv = _np.zeros_like(c)
+                for _i in range(8, len(c)):
+                    _ll = _np.min(l[_i-8:_i+1])
+                    _hh = _np.max(h[_i-8:_i+1])
+                    _rsv[_i] = 100 * (c[_i] - _ll) / (_hh - _ll) if _hh > _ll else 50
+                k_k[0] = 50; k_d[0] = 50
+                for _i in range(1, len(c)):
+                    k_k[_i] = 2/3 * k_k[_i-1] + 1/3 * _rsv[_i]
+                    k_d[_i] = 2/3 * k_d[_i-1] + 1/3 * k_k[_i]
+                    k_j[_i] = 3 * k_k[_i] - 2 * k_d[_i]
+
+            # ── 画副图1 ──
+            def _setup_sub(axm, label):
+                axm.set_ylabel(label, color=_FG_DIM, fontsize=8)
+                axm.tick_params(colors=_FG_DIM, labelsize=7)
+                for _sp in axm.spines.values(): _sp.set_color(_FG_DIM)
+                axm.grid(True, alpha=0.1, color=_FG_DIM)
+
+            if _sub_slot1 == "MACD" and axm1 is not None and macd_h is not None:
+                h_colors = ["#EF5350" if v >= 0 else "#66BB6A" for v in macd_h]
+                axm1.bar(x, macd_h, color=h_colors, width=0.7, alpha=0.85)
+                axm1.plot(x, dif, color="#42A5F5", lw=0.9, label="DIF")
+                axm1.plot(x, dea, color="#FFB74D", lw=0.9, label="DEA")
+                axm1.axhline(y=0, color=_FG_DIM, lw=0.5, ls=":")
+                _setup_sub(axm1, "MACD")
+            elif _sub_slot1 == "RSI" and axm1 is not None and rsi14 is not None:
+                axm1.plot(x, rsi14, color="#AB47BC", lw=1.0, label="RSI14")
+                axm1.plot(x, rsi6, color="#FFD54F", lw=0.8, label="RSI6")
+                axm1.axhline(y=70, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
+                axm1.axhline(y=30, color="#22C55E", lw=0.5, ls="--", alpha=0.6)
+                axm1.axhline(y=50, color=_FG_DIM, lw=0.5, ls=":")
+                axm1.set_ylim(0, 100)
+                _setup_sub(axm1, "RSI")
+            elif _sub_slot1 == "KDJ" and axm1 is not None and k_k is not None:
+                axm1.plot(x, k_k, color="#42A5F5", lw=0.9, label="K")
+                axm1.plot(x, k_d, color="#FFB74D", lw=0.9, label="D")
+                axm1.plot(x, k_j, color="#AB47BC", lw=0.8, label="J")
+                axm1.axhline(y=80, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
+                axm1.axhline(y=20, color="#22C55E", lw=0.5, ls="--", alpha=0.6)
+                _setup_sub(axm1, "KDJ")
+
+            # ── 画副图2 ──
+            if _sub_slot2 == "MACD" and axm2 is not None and macd_h is not None:
+                h_colors = ["#EF5350" if v >= 0 else "#66BB6A" for v in macd_h]
+                axm2.bar(x, macd_h, color=h_colors, width=0.7, alpha=0.85)
+                axm2.plot(x, dif, color="#42A5F5", lw=0.9, label="DIF")
+                axm2.plot(x, dea, color="#FFB74D", lw=0.9, label="DEA")
+                axm2.axhline(y=0, color=_FG_DIM, lw=0.5, ls=":")
+                _setup_sub(axm2, "MACD")
+            elif _sub_slot2 == "RSI" and axm2 is not None and rsi14 is not None:
+                axm2.plot(x, rsi14, color="#AB47BC", lw=1.0, label="RSI14")
+                axm2.plot(x, rsi6, color="#FFD54F", lw=0.8, label="RSI6")
+                axm2.axhline(y=70, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
+                axm2.axhline(y=30, color="#22C55E", lw=0.5, ls="--", alpha=0.6)
+                axm2.axhline(y=50, color=_FG_DIM, lw=0.5, ls=":")
+                axm2.set_ylim(0, 100)
+                _setup_sub(axm2, "RSI")
+            elif _sub_slot2 == "KDJ" and axm2 is not None and k_k is not None:
+                axm2.plot(x, k_k, color="#42A5F5", lw=0.9, label="K")
+                axm2.plot(x, k_d, color="#FFB74D", lw=0.9, label="D")
+                axm2.plot(x, k_j, color="#AB47BC", lw=0.8, label="J")
+                axm2.axhline(y=80, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
+                axm2.axhline(y=20, color="#22C55E", lw=0.5, ls="--", alpha=0.6)
+                _setup_sub(axm2, "KDJ")
+
+            # ═══════════════════════════════════════════════
+            # MACD 背离检测 — 标记画到主图 + MACD 副图 axes
+            # ═══════════════════════════════════════════════
             top_divs, bot_divs = [], []
-            if len(_segs) >= 4:
-                # 找最近两段红柱 (sign=1) → 顶背离候选
-                _reds = [s for s in _segs if s[2] == 1][-2:]
-                _greens = [s for s in _segs if s[2] == -1][-2:]
-                if len(_reds) == 2:
-                    s1, s2 = _reds
-                    # 价格高点
-                    p1 = _np.max(h[s1[0]:s1[1] + 1]); p1_idx = s1[0] + _np.argmax(h[s1[0]:s1[1] + 1])
-                    p2 = _np.max(h[s2[0]:s2[1] + 1]); p2_idx = s2[0] + _np.argmax(h[s2[0]:s2[1] + 1])
-                    m1, m2 = s1[3], s2[3]  # 红柱峰值
-                    if p2 > p1 and m2 < m1:  # 价新高但 MACD 没新高 → 顶背离
-                        top_divs.append((p2_idx, p2, m2))
-                if len(_greens) == 2:
-                    s1, s2 = _greens
-                    p1 = _np.min(l[s1[0]:s1[1] + 1]); p1_idx = s1[0] + _np.argmin(l[s1[0]:s1[1] + 1])
-                    p2 = _np.min(l[s2[0]:s2[1] + 1]); p2_idx = s2[0] + _np.argmin(l[s2[0]:s2[1] + 1])
-                    m1, m2 = s1[3], s2[3]  # 绿柱峰值 (负数)
-                    if p2 < p1 and m2 > m1:  # 价新低但 MACD 没新低 → 底背离
-                        bot_divs.append((p2_idx, p2, m2))
-            # 画顶背离标记 (红) — 小三角 + 简短文字
-            for idx, price, m_peak in top_divs:
-                ax.scatter([x[idx]], [price * 1.003], marker="v", s=90,
-                           color="#EF5350", zorder=11, edgecolors="white", linewidths=1.0)
-                ax.annotate("顶背离", xy=(x[idx], price),
-                            xytext=(x[idx], price * 1.02), ha="center", fontsize=7,
-                            color="#EF5350", fontweight="bold")
-                axm.scatter([x[idx]], [dif[idx]], marker="v", s=60,
-                            color="#EF5350", zorder=11, edgecolors="white", linewidths=0.8)
-            # 画底背离标记 (绿)
-            for idx, price, m_peak in bot_divs:
-                ax.scatter([x[idx]], [price * 0.997], marker="^", s=90,
-                           color="#22C55E", zorder=11, edgecolors="white", linewidths=1.0)
-                ax.annotate("底背离", xy=(x[idx], price),
-                            xytext=(x[idx], price * 0.98), ha="center", fontsize=7,
-                            color="#22C55E", fontweight="bold")
-                axm.scatter([x[idx]], [dif[idx]], marker="^", s=60,
-                            color="#22C55E", zorder=11, edgecolors="white", linewidths=0.8)
-            # 状态栏追加背离信息
+            if macd_h is not None:
+                def _find_macd_segments(hist, min_bar=5):
+                    segs = []
+                    i = 0
+                    while i < len(hist):
+                        if abs(hist[i]) < 1e-9: i += 1; continue
+                        sign = 1 if hist[i] > 0 else -1
+                        j = i
+                        while j < len(hist) and hist[j] * sign >= 0: j += 1
+                        if j - i >= min_bar:
+                            peak = sign * _np.max(abs(hist[i:j]))
+                            peak_idx = i + _np.argmax(abs(hist[i:j]))
+                            segs.append((i, j - 1, sign, peak, peak_idx))
+                        i = j
+                    return segs
+                _segs = _find_macd_segments(macd_h, min_bar=3)
+                if len(_segs) >= 4:
+                    _reds = [s for s in _segs if s[2] == 1][-2:]
+                    _greens = [s for s in _segs if s[2] == -1][-2:]
+                    if len(_reds) == 2:
+                        s1, s2 = _reds
+                        p1 = _np.max(h[s1[0]:s1[1]+1]); p1_idx = s1[0] + _np.argmax(h[s1[0]:s1[1]+1])
+                        p2 = _np.max(h[s2[0]:s2[1]+1]); p2_idx = s2[0] + _np.argmax(h[s2[0]:s2[1]+1])
+                        m1, m2 = s1[3], s2[3]
+                        if p2 > p1 and m2 < m1:
+                            top_divs.append((p2_idx, p2, m2))
+                    if len(_greens) == 2:
+                        s1, s2 = _greens
+                        p1 = _np.min(l[s1[0]:s1[1]+1]); p1_idx = s1[0] + _np.argmin(l[s1[0]:s1[1]+1])
+                        p2 = _np.min(l[s2[0]:s2[1]+1]); p2_idx = s2[0] + _np.argmin(l[s2[0]:s2[1]+1])
+                        m1, m2 = s1[3], s2[3]
+                        if p2 < p1 and m2 > m1:
+                            bot_divs.append((p2_idx, p2, m2))
+
+                # 找 MACD 画在哪个副图 axes 上
+                _macd_axm = None
+                if _sub_slot1 == "MACD": _macd_axm = axm1
+                elif _sub_slot2 == "MACD": _macd_axm = axm2
+                for idx, price, m_peak in top_divs:
+                    ax.scatter([x[idx]], [price * 1.003], marker="v", s=90,
+                               color="#EF5350", zorder=11, edgecolors="white", linewidths=1.0)
+                    ax.annotate("顶背离", xy=(x[idx], price),
+                                xytext=(x[idx], price * 1.02), ha="center", fontsize=7,
+                                color="#EF5350", fontweight="bold")
+                    if _macd_axm is not None and dif is not None:
+                        _macd_axm.scatter([x[idx]], [dif[idx]], marker="v", s=60,
+                                          color="#EF5350", zorder=11, edgecolors="white", linewidths=0.8)
+                for idx, price, m_peak in bot_divs:
+                    ax.scatter([x[idx]], [price * 0.997], marker="^", s=90,
+                               color="#22C55E", zorder=11, edgecolors="white", linewidths=1.0)
+                    ax.annotate("底背离", xy=(x[idx], price),
+                                xytext=(x[idx], price * 0.98), ha="center", fontsize=7,
+                                color="#22C55E", fontweight="bold")
+                    if _macd_axm is not None and dif is not None:
+                        _macd_axm.scatter([x[idx]], [dif[idx]], marker="^", s=60,
+                                          color="#22C55E", zorder=11, edgecolors="white", linewidths=0.8)
             _status_parts.append(f"顶背离{len(top_divs)}次/底背离{len(bot_divs)}次")
 
             # ═══════════════════════════════════════════════
