@@ -556,11 +556,18 @@ def _lookup_sina(name, code6):
     return None, None
 
 
+# ── 内嵌 K 线模式 (模块级, 让 _open_kline 和 build_fund_holdings_tab 共享) ──
+_EMBED_STATE = {"mode": False, "holder": None}
+
+
 def _open_kline(parent, sina_code, name):
-    """双击股票 → 日K线弹窗 (复用 high_low_swing 里的秒开)"""
+    """双击股票 → 日K线弹窗 (复用 high_low_swing 里的秒开)
+    支持内嵌模式: 如果 _EMBED_STATE["mode"]=True, 把 K 线内嵌到 holder
+    """
     try:
+        _holder = _EMBED_STATE["holder"] if _EMBED_STATE["mode"] else None
         from ui.high_low_swing import _quick_open_daily_kline
-        _quick_open_daily_kline(parent, sina_code, name)
+        _quick_open_daily_kline(parent, sina_code, name, embed_frame=_holder)
     except Exception as e:
         print(f"[基金持仓] 打开K线失败: {e}", flush=True)
 
@@ -629,8 +636,62 @@ def build_fund_holdings_tab(parent, root=None):
     btn_popup = ttk.Button(top, text="🗔 弹出", width=6, command=_popup_window)
     btn_popup.pack(side=tk.RIGHT, padx=(6, 0))
 
-    # Notebook 分成两部分
-    nb = ttk.Notebook(parent)
+    # 📌 内嵌日K线区域 (点击后基金Tab右侧出现 K 线容器, 双击股票内嵌到此处)
+    _body_frame_ref = [None]    # [Frame] 主体容器 (Notebook 外层)
+    btn_embed = None
+    def _toggle_embed():
+        global btn_embed
+        if not _EMBED_STATE["mode"]:
+            # ── 开启内嵌: parent 改成 grid, 左边主体, 右边容器 ──
+            _EMBED_STATE["mode"] = True
+            btn_embed.configure(text="🔽退出")
+            body = _body_frame_ref[0]
+            if body is None: return
+            # 把 pack 改成 grid
+            body.pack_forget()
+            parent.rowconfigure(0, weight=1)
+            parent.columnconfigure(0, weight=3, uniform="c")  # 3:1 比例
+            parent.columnconfigure(1, weight=1, uniform="c")
+            body.grid(row=0, column=0, sticky="nsew")
+            # 内嵌容器
+            holder = tk.Frame(parent, bg=_BG_DEEP)
+            holder.grid(row=0, column=1, sticky="nsew", padx=(0, 2))
+            # 顶栏 + 关闭按钮
+            htop = tk.Frame(holder, bg=_BG_TOOLBAR, height=32); htop.pack(fill=tk.X)
+            htop.pack_propagate(False)
+            tk.Label(htop, text="📈 日K线内嵌区 (单击任意股票)", bg=_BG_TOOLBAR,
+                     fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT, padx=8, pady=5)
+            def _close_embed():
+                _toggle_embed()
+            ttk.Button(htop, text="✕ 关闭", width=6, command=_close_embed).pack(side=tk.RIGHT, padx=4)
+            # 实际 K 线容器 (在 htop 下方)
+            inner = tk.Frame(holder, bg=_BG_DEEP)
+            inner.pack(fill=tk.BOTH, expand=True)
+            _EMBED_STATE["holder"] = inner
+        else:
+            # ── 退出内嵌: 恢复 pack ──
+            _EMBED_STATE["mode"] = False
+            _EMBED_STATE["holder"] = None
+            btn_embed.configure(text="📌内嵌")
+            body = _body_frame_ref[0]
+            if body is None: return
+            try:
+                # 找到 holder 的 master 并销毁整个右侧区域
+                holder_frame = body.master.grid_slaves(column=1)
+                if holder_frame:
+                    holder_frame[0].destroy()
+            except Exception:
+                pass
+            # 恢复 pack
+            body.grid_remove()
+            body.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+    btn_embed = ttk.Button(top, text="📌内嵌", width=7, command=_toggle_embed)
+    btn_embed.pack(side=tk.RIGHT, padx=(6, 0))
+
+    # Notebook 分成两部分 — 套一层 body_frame 方便内嵌切换 (grid/pack)
+    _body_frame_ref[0] = tk.Frame(parent, bg=_BG_DEEP)
+    _body_frame_ref[0].pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+    nb = ttk.Notebook(_body_frame_ref[0])
     nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
     # ── Tab1: 基金卡片 ──

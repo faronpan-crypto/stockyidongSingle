@@ -2564,8 +2564,8 @@ def _show_multi_kline_comparison(parent_root, app=None):
 # 数据源: 新浪 CN_MarketData.getKLineData
 # ═════════════════════════════════════════════════════════════════════════
 
-def _quick_open_daily_kline(parent, code6, name):
-    """双击股票弹日K线 — 轻量版, 支持周期切换"""
+def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
+    """双击股票弹日K线 — 轻量版, 支持周期切换. 传 embed_frame 则内嵌而非弹窗"""
     import tkinter as tk
     from tkinter import ttk, messagebox
     import requests
@@ -2573,14 +2573,19 @@ def _quick_open_daily_kline(parent, code6, name):
     from matplotlib.figure import Figure
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
-    # 单例: 关掉之前已打开的日K窗口
+    _is_embed = embed_frame is not None
+
+    # 单例: 关掉之前已打开的日K窗口 (内嵌则清掉 embed_frame 里残留)
     global _active_kline_win
     try:
-        if '_active_kline_win' in dir() and _active_kline_win is not None:
+        if not _is_embed and '_active_kline_win' in dir() and _active_kline_win is not None:
             try:
                 _active_kline_win.destroy()
             except Exception:
                 pass
+        if _is_embed and embed_frame is not None:
+            for _w in embed_frame.winfo_children():
+                _w.destroy()
     except Exception:
         pass
     _active_kline_win = None
@@ -2599,17 +2604,21 @@ def _quick_open_daily_kline(parent, code6, name):
         else:
             sina_code = f"sz{code6}"
 
-    dlg = tk.Toplevel(parent)
-    dlg.title(f"📊 {name}({code6}) 日K线")
-    dlg.geometry("1100x720")
-    dlg.configure(bg=_BG_DEEP)
-    _active_kline_win = dlg
+    if _is_embed:
+        dlg = embed_frame
+        dlg.configure(bg=_BG_DEEP)
+    else:
+        dlg = tk.Toplevel(parent)
+        dlg.title(f"📊 {name}({code6}) 日K线")
+        dlg.geometry("1100x720")
+        dlg.configure(bg=_BG_DEEP)
+        _active_kline_win = dlg
 
-    def _on_close():
-        global _active_kline_win
-        _active_kline_win = None
-        dlg.destroy()
-    dlg.protocol("WM_DELETE_WINDOW", _on_close)
+        def _on_close():
+            global _active_kline_win
+            _active_kline_win = None
+            dlg.destroy()
+        dlg.protocol("WM_DELETE_WINDOW", _on_close)
 
     # 顶栏: 周期切换
     top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=42); top.pack(fill=tk.X)
