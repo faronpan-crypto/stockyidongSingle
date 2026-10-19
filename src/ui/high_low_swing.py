@@ -3507,10 +3507,12 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
         result = []
         if n < 30: return result, "数据不足 30 根"
 
-        last = CL[-1]
-        result.append("【期货技术分析】(John Murphy 方法论)\n")
+        try:
+            last = CL[-1]
+            result.append("【期货技术分析】(John Murphy 方法论)\n")
+        except Exception as e:
+            return result, f"❌ 初始化失败: {e}"
 
-        # ① 趋势分析 (ADX + MA 排列)
         def _ema(arr, period):
             out = np.zeros_like(arr)
             k = 2 / (period + 1)
@@ -3518,12 +3520,22 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             for i in range(1, len(arr)): out[i] = arr[i] * k + out[i - 1] * (1 - k)
             return out
 
-        # MACD
-        ema12 = _ema(CL, 12); ema26 = _ema(CL, 26)
-        dif = ema12 - ema26; dea = _ema(dif, 9); macd_hist = 2 * (dif - dea)
+        # MACD / MA
+        try:
+            ema12 = _ema(CL, 12); ema26 = _ema(CL, 26)
+            dif = ema12 - ema26; dea = _ema(dif, 9); macd_hist = 2 * (dif - dea)
+        except Exception as e:
+            result.append(f"⚠️ MACD 计算异常: {e}")
+            ema12 = ema26 = dif = dea = macd_hist = None
 
-        ma20 = np.mean(CL[-20:]); ma60 = np.mean(CL[-60:]) if n >= 60 else np.mean(CL)
-        trend_dir = "上升趋势" if last > ma20 > ma60 else "下降趋势" if last < ma20 < ma60 else "震荡整理"
+        try:
+            ma20 = float(np.mean(CL[-20:]))
+            ma60 = float(np.mean(CL[-60:])) if n >= 60 else float(np.mean(CL))
+            trend_dir = "上升趋势" if last > ma20 > ma60 else "下降趋势" if last < ma20 < ma60 else "震荡整理"
+        except Exception as e:
+            result.append(f"⚠️ MA 计算异常: {e}")
+            trend_dir = "未知"
+            ma20 = ma60 = last
 
         # ADX (简化版)
         tr = np.maximum(HI[1:] - LO[1:], np.maximum(abs(HI[1:] - CL[:-1]), abs(LO[1:] - CL[:-1])))
@@ -3714,15 +3726,27 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
 
         import threading
         def _bg():
-            out_parts = []
-            if want_candle:
-                _, c_sum = _analyze_candle(opens_, highs_, lows_, closes_)
-                out_parts.append(c_sum)
-            if want_futures:
-                _, f_sum = _analyze_futures(opens_, highs_, lows_, closes_, vols_)
-                out_parts.append(f_sum)
-            combined = "\n" + "=" * 60 + "\n\n".join(out_parts) if len(out_parts) > 1 else out_parts[0]
-            dlg.after(0, lambda: _analysis_text.delete("1.0", tk.END) or _analysis_text.insert(tk.END, combined))
+            try:
+                out_parts = []
+                if want_candle:
+                    _, c_sum = _analyze_candle(opens_, highs_, lows_, closes_)
+                    out_parts.append(c_sum)
+                if want_futures:
+                    _, f_sum = _analyze_futures(opens_, highs_, lows_, closes_, vols_)
+                    out_parts.append(f_sum)
+                if not out_parts:
+                    combined = "⚠️ 请至少勾选一项分析"
+                elif len(out_parts) == 1:
+                    combined = out_parts[0]
+                else:
+                    combined = "\n" + "=" * 60 + "\n\n".join(out_parts)
+                dlg.after(0, lambda: (_analysis_text.delete("1.0", tk.END),
+                                       _analysis_text.insert(tk.END, combined)))
+            except Exception as _e:
+                import traceback
+                traceback.print_exc()
+                dlg.after(0, lambda: (_analysis_text.delete("1.0", tk.END),
+                                       _analysis_text.insert(tk.END, f"❌ 分析异常: {_e}\n\n{traceback.format_exc()}")))
         threading.Thread(target=_bg, daemon=True).start()
 
         # 同时在图上标注蜡烛形态 (勾选时)
