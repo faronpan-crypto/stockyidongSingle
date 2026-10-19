@@ -326,6 +326,24 @@ def _open_kline(parent, sina_code, name):
 def build_fund_holdings_tab(parent, root=None):
     """🎯 构建基金持仓 Tab"""
     from collections import defaultdict
+    import webbrowser
+
+    # ── 字体大小 (A-/A+ 按钮调节) ──
+    _FUND_FONT_SIZE = [10]  # 用列表让闭包能修改
+    def _fs(delta=0):
+        _FUND_FONT_SIZE[0] = max(8, min(18, _FUND_FONT_SIZE[0] + delta))
+        return _FUND_FONT_SIZE[0]
+    def _font(bold=False):
+        return ("", _FUND_FONT_SIZE[0], "bold" if bold else "normal")
+
+    def _open_fund_web(code):
+        """双击基金名 → 天天基金对应页面"""
+        try:
+            url = f"https://fund.eastmoney.com/{code}.html"
+            webbrowser.open(url, new=2)
+            print(f"[基金持仓] 打开基金网页 {url}", flush=True)
+        except Exception as e:
+            print(f"[基金持仓] 打开网页失败: {e}", flush=True)
 
     if root is None:
         root = parent.winfo_toplevel()
@@ -339,6 +357,14 @@ def build_fund_holdings_tab(parent, root=None):
     btn_refresh = ttk.Button(top, text="🔄 刷新", width=10,
                               command=lambda: _load_data(force=True))
     btn_refresh.pack(side=tk.RIGHT)
+    # 字体调节
+    tk.Label(top, text=" 字体:", bg=_BG_PANEL, fg=_FG_DIM, font=("", 9)).pack(side=tk.RIGHT)
+    def _do_font_plus():
+        _fs(1); _rerender_all()
+    def _do_font_minus():
+        _fs(-1); _rerender_all()
+    ttk.Button(top, text="A+", width=3, command=_do_font_plus).pack(side=tk.RIGHT, padx=(2,1))
+    ttk.Button(top, text="A-", width=3, command=_do_font_minus).pack(side=tk.RIGHT)
 
     # Notebook 分成两部分
     nb = ttk.Notebook(parent)
@@ -387,70 +413,70 @@ def build_fund_holdings_tab(parent, root=None):
         else:
             print(f"[基金持仓] sina 为空, 无法打开K线 name={name}", flush=True)
 
-    for cat in _FUND_GUIDE:
-        # 分类头
-        cat_hd = tk.Frame(guide_inner, bg=_BG_PANEL)
-        cat_hd.pack(fill=tk.X, padx=8, pady=(14, 4))
-        tk.Label(cat_hd, text=cat["cat"], bg=_BG_PANEL, fg=_FG_GOLD,
-                 font=("", 13, "bold")).pack(side=tk.LEFT, padx=10, pady=6)
-        tk.Label(cat_hd, text=cat["cat_desc"], bg=_BG_PANEL, fg=_FG_DIM,
-                 font=("", 9), wraplength=800, justify=tk.LEFT).pack(side=tk.LEFT, padx=10)
+    def _render_guide():
+        for w in guide_inner.winfo_children():
+            w.destroy()
+        for cat in _FUND_GUIDE:
+            cat_hd = tk.Frame(guide_inner, bg=_BG_PANEL)
+            cat_hd.pack(fill=tk.X, padx=8, pady=(14, 4))
+            tk.Label(cat_hd, text=cat["cat"], bg=_BG_PANEL, fg=_FG_GOLD,
+                     font=_font(bold=True)).pack(side=tk.LEFT, padx=10, pady=6)
+            tk.Label(cat_hd, text=cat["cat_desc"], bg=_BG_PANEL, fg=_FG_DIM,
+                     font=_font(), wraplength=800, justify=tk.LEFT).pack(side=tk.LEFT, padx=10)
 
-        # 该分类下的基金 (横向排列)
-        fund_row = tk.Frame(guide_inner, bg=_BG_DEEP)
-        fund_row.pack(fill=tk.X, padx=8, pady=(0, 6))
+            fund_row = tk.Frame(guide_inner, bg=_BG_DEEP)
+            fund_row.pack(fill=tk.X, padx=8, pady=(0, 6))
 
-        for fi, f in enumerate(cat["funds"]):
-            card = tk.Frame(fund_row, bg=_BG_CARD,
-                            highlightbackground=_FG_BLUE, highlightthickness=1)
-            card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
+            for fi, f in enumerate(cat["funds"]):
+                card = tk.Frame(fund_row, bg=_BG_CARD,
+                                highlightbackground=_FG_BLUE, highlightthickness=1)
+                card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-            # 基金名 + 代码 + 风格
-            hdr = tk.Frame(card, bg=_BG_CARD); hdr.pack(fill=tk.X, padx=6, pady=(6, 2))
-            tk.Label(hdr, text=f"🎯 {f['name']}", bg=_BG_CARD, fg=_FG_GOLD,
-                     font=("", 10, "bold")).pack(side=tk.LEFT)
-            tk.Label(hdr, text=f"({f['code']})", bg=_BG_CARD, fg=_FG_DIM,
-                     font=("", 8)).pack(side=tk.LEFT, padx=3)
-            tk.Label(hdr, text=f"#{f['style']}", bg=_BG_CARD, fg=_FG_CYAN,
-                     font=("", 8)).pack(side=tk.RIGHT)
+                fund_code = f["code"]
+                hdr = tk.Frame(card, bg=_BG_CARD); hdr.pack(fill=tk.X, padx=6, pady=(6, 2))
+                _gf = tk.Label(hdr, text=f"🎯 {f['name']}", bg=_BG_CARD, fg=_FG_GOLD,
+                         font=_font(bold=True), cursor="hand2")
+                _gf.pack(side=tk.LEFT)
+                _gc = tk.Label(hdr, text=f"({fund_code})", bg=_BG_CARD, fg=_FG_DIM,
+                         font=_font(), cursor="hand2")
+                _gc.pack(side=tk.LEFT, padx=3)
+                tk.Label(hdr, text=f"#{f['style']}", bg=_BG_CARD, fg=_FG_CYAN,
+                         font=_font()).pack(side=tk.RIGHT)
+                for w in [_gf, _gc, hdr]:
+                    w.bind("<Double-Button-1>", lambda e, _c=fund_code: _open_fund_web(_c))
 
-            tk.Frame(card, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=6, pady=2)
+                tk.Frame(card, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=6, pady=2)
 
-            # 简介
-            tk.Label(card, text=f["intro"], bg=_BG_CARD, fg=_FG_TEXT,
-                     font=("", 9), wraplength=280, justify=tk.LEFT).pack(
-                anchor="w", padx=8, pady=(2, 4))
+                tk.Label(card, text=f["intro"], bg=_BG_CARD, fg=_FG_TEXT,
+                         font=_font(), wraplength=280, justify=tk.LEFT).pack(
+                    anchor="w", padx=8, pady=(2, 4))
 
-            # 持仓股票 (可点击)
-            tk.Label(card, text="📦 Top5 持仓 (双击弹日K):", bg=_BG_CARD,
-                     fg=_FG_BLUE, font=("", 8, "bold")).pack(anchor="w", padx=8, pady=(2,0))
+                tk.Label(card, text="📦 Top5 持仓 (双击弹日K):", bg=_BG_CARD,
+                         fg=_FG_BLUE, font=_font(bold=True)).pack(anchor="w", padx=8, pady=(2,0))
 
-            for hi, (code6, nm) in enumerate(f["holdings"]):
-                sina, _ = _lookup_sina(nm, code6)
-                row_bg = "#2A2A3A" if hi % 2 == 0 else _BG_CARD
-                hrow = tk.Frame(card, bg=row_bg, cursor="hand2")
-                hrow.pack(fill=tk.X, padx=4, pady=1)
+                for hi, (code6, nm) in enumerate(f["holdings"]):
+                    sina, _ = _lookup_sina(nm, code6)
+                    row_bg = "#2A2A3A" if hi % 2 == 0 else _BG_CARD
+                    hrow = tk.Frame(card, bg=row_bg, cursor="hand2")
+                    hrow.pack(fill=tk.X, padx=4, pady=1)
+                    def _mk(_s=sina, _n=nm):
+                        return lambda e: _on_stock_click(e, _s, _n)
+                    _h = _mk()
+                    hrow.bind("<ButtonRelease-1>", _h); hrow.bind("<Double-Button-1>", _h)
+                    _n_lbl = tk.Label(hrow, text=f"  {hi+1}. {nm}", bg=row_bg, fg=_FG_TEXT,
+                                      font=_font())
+                    _n_lbl.pack(side=tk.LEFT, padx=4, pady=2)
+                    _n_lbl.bind("<ButtonRelease-1>", _h); _n_lbl.bind("<Double-Button-1>", _h)
+                    _c_lbl = tk.Label(hrow, text=f"({code6})", bg=row_bg, fg=_FG_DIM,
+                                      font=_font())
+                    _c_lbl.pack(side=tk.RIGHT, padx=4)
+                    _c_lbl.bind("<ButtonRelease-1>", _h); _c_lbl.bind("<Double-Button-1>", _h)
 
-                def _mk(_s=sina, _n=nm):
-                    return lambda e: _on_stock_click(e, _s, _n)
-                _h = _mk()
-
-                hrow.bind("<ButtonRelease-1>", _h); hrow.bind("<Double-Button-1>", _h)
-                _n_lbl = tk.Label(hrow, text=f"  {hi+1}. {nm}", bg=row_bg, fg=_FG_TEXT,
-                                  font=("", 9))
-                _n_lbl.pack(side=tk.LEFT, padx=4, pady=2)
-                _n_lbl.bind("<ButtonRelease-1>", _h); _n_lbl.bind("<Double-Button-1>", _h)
-                _c_lbl = tk.Label(hrow, text=f"({code6})", bg=row_bg, fg=_FG_DIM,
-                                  font=("", 8))
-                _c_lbl.pack(side=tk.RIGHT, padx=4)
-                _c_lbl.bind("<ButtonRelease-1>", _h); _c_lbl.bind("<Double-Button-1>", _h)
-
-            # 择时笔记
-            tk.Label(card, text="💡 择时笔记:", bg=_BG_CARD, fg=_FG_GREEN,
-                     font=("", 8, "bold")).pack(anchor="w", padx=8, pady=(6, 0))
-            tk.Label(card, text=f["timing"], bg=_BG_CARD, fg=_FG_DIM,
-                     font=("", 8), wraplength=280, justify=tk.LEFT).pack(
-                anchor="w", padx=8, pady=(0, 8))
+                tk.Label(card, text="💡 择时笔记:", bg=_BG_CARD, fg=_FG_GREEN,
+                         font=_font(bold=True)).pack(anchor="w", padx=8, pady=(6, 0))
+                tk.Label(card, text=f["timing"], bg=_BG_CARD, fg=_FG_DIM,
+                         font=_font(), wraplength=280, justify=tk.LEFT).pack(
+                    anchor="w", padx=8, pady=(0, 8))
 
     # Dark theme for Frame
     try:
@@ -664,14 +690,22 @@ def build_fund_holdings_tab(parent, root=None):
             card.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
             card_inner.grid_columnconfigure(c, weight=1)
 
-            # 标题行
+            # 标题行 (基金名可双击跳天天基金)
             hd = tk.Frame(card, bg=_BG_CARD); hd.pack(fill=tk.X, padx=6, pady=(6, 2))
-            tk.Label(hd, text=f"🏦 {f['name']}", bg=_BG_CARD, fg=_FG_GOLD,
-                     font=("", 10, "bold")).pack(side=tk.LEFT)
-            tk.Label(hd, text=f"({f['code']})", bg=_BG_CARD, fg=_FG_DIM,
-                     font=("", 8)).pack(side=tk.LEFT, padx=4)
-            tk.Label(hd, text=f"#{f['industry']}", bg=_BG_CARD, fg=_FG_CYAN,
-                     font=("", 8)).pack(side=tk.RIGHT)
+            fund_code = f.get("code", "")
+            _nm_lbl = tk.Label(hd, text=f"🏦 {f['name']}", bg=_BG_CARD, fg=_FG_GOLD,
+                     font=_font(bold=True), cursor="hand2")
+            _nm_lbl.pack(side=tk.LEFT)
+            _code_lbl = tk.Label(hd, text=f"({fund_code})", bg=_BG_CARD, fg=_FG_DIM,
+                     font=_font(), cursor="hand2")
+            _code_lbl.pack(side=tk.LEFT, padx=4)
+            _ind_lbl = tk.Label(hd, text=f"#{f['industry']}", bg=_BG_CARD, fg=_FG_CYAN,
+                     font=_font())
+            _ind_lbl.pack(side=tk.RIGHT)
+            # 双击基金名 → 跳网页
+            def _open(_c=fund_code): _open_fund_web(_c)
+            for w in [_nm_lbl, _code_lbl, hd]:
+                w.bind("<Double-Button-1>", lambda e, _c=fund_code: _open_fund_web(_c))
 
             tk.Frame(card, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=6, pady=2)
 
@@ -690,17 +724,17 @@ def build_fund_holdings_tab(parent, root=None):
                 row.bind("<Double-Button-1>", _h)
 
                 _idx_lbl = tk.Label(row, text=f"{hi+1}.", bg=row_bg, fg=_FG_DIM,
-                                    font=("", 8), width=2)
+                                    font=_font(), width=2)
                 _idx_lbl.pack(side=tk.LEFT)
                 _idx_lbl.bind("<ButtonRelease-1>", _h); _idx_lbl.bind("<Double-Button-1>", _h)
 
                 _nm_lbl = tk.Label(row, text=h["name"], bg=row_bg, fg=_FG_TEXT,
-                                   font=("", 9))
+                                   font=_font())
                 _nm_lbl.pack(side=tk.LEFT, padx=2)
                 _nm_lbl.bind("<ButtonRelease-1>", _h); _nm_lbl.bind("<Double-Button-1>", _h)
 
                 _pct_lbl = tk.Label(row, text=f"占{h['total_pct']:.1f}%", bg=row_bg,
-                                    fg=_FG_GOLD, font=("", 8))
+                                    fg=_FG_GOLD, font=_font())
                 _pct_lbl.pack(side=tk.RIGHT, padx=6)
                 _pct_lbl.bind("<ButtonRelease-1>", _h); _pct_lbl.bind("<Double-Button-1>", _h)
 
@@ -747,28 +781,34 @@ def build_fund_holdings_tab(parent, root=None):
                         _bind_all(c, _h2)
 
                 _idx = tk.Label(row, text=f"{hi+1}.", bg=row_bg, fg=_FG_DIM,
-                               font=("", 9, "bold"), width=3)
+                               font=_font(bold=True), width=3)
                 _idx.pack(side=tk.LEFT, padx=(4,0))
                 _nm = tk.Label(row, text=s["name"], bg=row_bg, fg=_FG_TEXT,
-                               font=("", 9, "bold"))
+                               font=_font(bold=True))
                 _nm.pack(side=tk.LEFT, padx=2)
                 _code = tk.Label(row, text=f"({s['code6']})", bg=row_bg, fg=_FG_DIM,
-                                 font=("", 8))
+                                 font=_font())
                 _code.pack(side=tk.LEFT)
                 _fc = tk.Label(row, text=f"{s['fund_count']}只基金持有", bg=row_bg,
-                               fg=_FG_BLUE, font=("", 8))
+                               fg=_FG_BLUE, font=_font())
                 _fc.pack(side=tk.LEFT, padx=10)
                 _mv = tk.Label(row, text=f"{s['total_mv']:.1f}亿", bg=row_bg,
-                               fg=_FG_CYAN, font=("", 8))
+                               fg=_FG_CYAN, font=_font())
                 _mv.pack(side=tk.RIGHT, padx=8)
                 _pct = tk.Label(row, text=f"{s['total_pct']:.1f}%", bg=row_bg,
-                                fg=_FG_GOLD, font=("", 8), width=6, anchor="e")
+                                fg=_FG_GOLD, font=_font(), width=6, anchor="e")
                 _pct.pack(side=tk.RIGHT)
 
                 # 给 row + 所有子 Label 都绑
                 for w in [row, _idx, _nm, _code, _fc, _mv, _pct]:
                     w.bind("<ButtonRelease-1>", _h)
                     w.bind("<Double-Button-1>", _h)
+
+    def _rerender_all():
+        """字体调节后重绘所有 Tab"""
+        _render_fund_cards()
+        _render_agg()
+        _render_guide()
 
     def _render_all():
         _render_fund_cards()
