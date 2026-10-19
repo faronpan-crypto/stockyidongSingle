@@ -1266,24 +1266,26 @@ def show_high_low_swing(parent, app=None):
                     all_codes.add(c)
         all_codes = list(all_codes)
 
-        # 1) 🆕 先验证日线最新日期 — 不是今天就放弃显示实时板块数据
+        # 1) 🆕 验证实时行情日期 — 不是今天就不渲染实时板块数据
+        #    ⚠️ 注意: 日线接口要收盘后才更新, 盘中永远是上一个交易日, 不能用日线判断!
         _today_str = datetime.now().strftime("%Y-%m-%d")
         _is_fresh = False
-        for _probe in ("sh600519", "sz300750", "sh000001"):
+        for _probe_code in ("sh600519", "sz300750", "sh000001"):
             try:
-                url = (f"https://quotes.sina.cn/cn/api/jsonp.php/_/CN_MarketData.getKLineData"
-                       f"?symbol={_probe}&scale=240&ma=no&datalen=3")
-                with urllib.request.urlopen(urllib.request.Request(url, headers=_EM_HDR),
-                                           timeout=6, context=ctx) as resp:
-                    _txt = resp.read()
-                if b"(" not in _txt: continue
-                _probe_data = json.loads(_txt[_txt.index(b"(")+1:_txt.rindex(b")")])
-                if _probe_data and _probe_data[-1].get("day", "") == _today_str:
+                _url = f"https://hq.sinajs.cn/list={_probe_code}"
+                with urllib.request.urlopen(urllib.request.Request(_url, headers=_EM_HDR),
+                                           timeout=6, context=ctx) as _resp:
+                    _text = _resp.read().decode("gbk", errors="ignore")
+                if "=" not in _text: continue
+                _f = _text.split('"')[1].split(",")
+                if len(_f) < 31: continue
+                # f[30] = "2026-10-19", f[31] = "11:30:00"
+                _quote_date = _f[30].strip()
+                if _quote_date == _today_str:
                     _is_fresh = True; break
-            except: pass
-        print(f"[🎯流派热榜] 日线新鲜度检查: today={_today_str} fresh={_is_fresh}", flush=True)
+            except Exception as _e: pass
+        print(f"[🎯流派热榜] 实时行情新鲜度: today={_today_str} fresh={_is_fresh}", flush=True)
         if not _is_fresh:
-            # 非当前交易日 → 清空所有 sd, 让 _poll_and_render 走种子占位 + 等待提示
             _bg_result["_frozen"] = True
             _bg_done.set()
             return
