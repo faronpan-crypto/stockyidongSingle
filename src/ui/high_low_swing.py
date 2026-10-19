@@ -2600,17 +2600,28 @@ def _show_multi_kline_comparison(parent_root, app=None):
     canvas = None
 
     def _fetch_one(sina_code, n=240):
-        """拉一个标的的 1min K 线 (统一 1min, 新浪 ETF/指数/个股都支持)"""
-        scale = 1
-        try:
+        """拉一个标的 K 线 (优先 1min, 失败 fallback 日线)"""
+        def _try(scale, datalen):
             url = (f"https://quotes.sina.cn/cn/api/jsonp.php/var%20{sina_code}=/"
-                   f"CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen={n}")
+                   f"CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen={datalen}")
             r = requests.get(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"},
                              timeout=8)
-            start = r.text.index("(") + 1; end = r.text.rindex(");")
-            return _json.loads(r.text[start:end]), False, None
+            txt = r.text
+            if "([{}])" in txt or len(txt) < 200:
+                return None
+            start = txt.index("(") + 1; end = txt.rindex(");")
+            try: return _json.loads(txt[start:end])
+            except: return None
+        try:
+            # 先试 1min
+            data = _try(1, min(n, 240))
+            if data: return data, False, None
+            # fallback: 日线 (ETF/指数都支持)
+            data = _try(240, min(n, 240))
+            if data: return data, True, None
+            return None, False, "sina返回空"
         except Exception as e:
-            return None, False, str(e)
+            return None, False, str(e)[:80]
 
     def _ma(arr, n):
         out = np.full_like(arr, np.nan, dtype=float)
@@ -2928,26 +2939,29 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
     _hover_win = None
 
     def _fetch(period):
+        def _try_scale(scale, datalen=240):
+            try:
+                url = f"https://quotes.sina.cn/cn/api/jsonp.php/_/CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen={datalen}"
+                r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"})
+                if r.status_code != 200: return None
+                txt = r.text
+                if "([{}])" in txt or len(txt) < 200: return None
+                data = json.loads(txt[txt.index("(") + 1:txt.rindex(")")])
+                return data if data else None
+            except: return None
+
         try:
             if period == "minute":
-                # 🆕 分时图: 新浪 intraday 接口
-                url = f"https://quotes.sina.cn/cn/api/jsonp.php/_/CN_MarketData.getKLineData?symbol={sina_code}&scale=1&ma=no&datalen=240"
-                r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-                if r.status_code != 200: return None
-                txt = r.text[r.text.index("(") + 1:r.text.rindex(")")]
-                import json
-                data = json.loads(txt)
-                if not data: return None
-                return data
+                # 先试 1min, 失败 fallback 日线
+                data = _try_scale(1)
+                if data: return data
+                return _try_scale(240)  # fallback
 
             scale_map = {"60": "60", "day": "240", "week": "240", "month": "240"}
             scale = scale_map.get(period, "240")
-            url = f"https://quotes.sina.cn/cn/api/jsonp.php/var{np.random.randint(999)}/CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen=240"
-            r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-            if r.status_code != 200: return None
-            txt = r.text[r.text.index("(") + 1:r.text.rindex(")")]
-            import json
-            data = json.loads(txt)
+            data = _try_scale(scale)
+            if not data and scale != "240":
+                data = _try_scale(240)  # fallback 日线
             if not data: return None
             # 日线: pandas resample 合成周/月
             if period in ("week", "month"):
