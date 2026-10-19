@@ -1898,23 +1898,16 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                     strength = "强" if ma60_slope > 0 else "弱"
                     sell_signals.append((i, c[i], strength))
 
-            # 画买入标记 🟢 (MA60 上方)
+            # 画买入标记 🟢 (MA60 上方) — 只画三角, 不画文字标签 (跟 PAN 区分)
             for idx, price, strength in buy_signals:
-                ax.scatter([x[idx]], [price * 0.997], marker="^", s=80,
-                           color="#66BB6A", zorder=10, edgecolors="white", linewidths=0.5)
-                ax.annotate(f"🟢买{strength}", xy=(x[idx], price),
-                            xytext=(x[idx], price * 1.008), ha="center", fontsize=7,
-                            color="#66BB6A", fontweight="bold",
-                            arrowprops=dict(arrowstyle="->", color="#66BB6A", lw=0.8))
+                ax.scatter([x[idx]], [price * 0.997], marker="^", s=60,
+                           color="#66BB6A", zorder=10, alpha=0.8, linewidths=0)
+                # strength 追加到 PAN 信号里显示, 这里不单独标
 
-            # 画卖出标记 🔴 (MA60 下方)
+            # 画卖出标记 🔴 (MA60 下方) — 只画三角, 不画文字标签
             for idx, price, strength in sell_signals:
-                ax.scatter([x[idx]], [price * 1.003], marker="v", s=80,
-                           color="#EF5350", zorder=10, edgecolors="white", linewidths=0.5)
-                ax.annotate(f"🔴卖{strength}", xy=(x[idx], price),
-                            xytext=(x[idx], price * 0.992), ha="center", fontsize=7,
-                            color="#EF5350", fontweight="bold",
-                            arrowprops=dict(arrowstyle="->", color="#EF5350", lw=0.8))
+                ax.scatter([x[idx]], [price * 1.003], marker="v", s=60,
+                           color="#EF5350", zorder=10, alpha=0.8, linewidths=0)
 
             # ═══════════════════════════════════════════════
             # 🆕 PAN 买点 / PAN 卖点 — BIAS(60) + 局部极值
@@ -1926,37 +1919,46 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
             BIAS_BUY = -2.0   # 买点 BIAS 阈值 (%)
             BIAS_SELL = 2.0   # 卖点 BIAS 阈值 (%)
             PAN_RECENT = 120  # 只看最近 N 根
-            pan_buy, pan_sell = [], []
+            PAN_MIN_GAP = 8   # 两个同方向 PAN 信号最小间隔 (K线根数)
+            _all_pan = []     # (idx, price, bias, is_buy)
             _start = max(61, len(c) - PAN_RECENT)
             for i in range(_start, len(c)):
                 if _np.isnan(ma60[i]) or ma60[i] <= 0: continue
                 bias = (c[i] - ma60[i]) / ma60[i] * 100.0
-                # 局部最低 = 支撑 (买点候选)
                 _lo = max(0, i - PAN_WIN); _hi = min(len(c), i + PAN_WIN + 1)
                 is_local_low = c[i] == _np.min(c[_lo:_hi])
                 is_local_high = c[i] == _np.max(c[_lo:_hi])
                 if bias <= BIAS_BUY and is_local_low:
-                    pan_buy.append((i, c[i], bias))
+                    _all_pan.append((i, c[i], bias, True))
                 elif bias >= BIAS_SELL and is_local_high:
-                    pan_sell.append((i, c[i], bias))
-            # 画 PAN 买点 🟡 (在 MA60 下方的支撑)
+                    _all_pan.append((i, c[i], bias, False))
+            # 按 idx 排序 + 间隔过滤
+            _all_pan.sort()
+            pan_buy, pan_sell = [], []
+            _last_idx = -PAN_MIN_GAP * 2
+            for idx, price, bias, is_buy in _all_pan:
+                if idx - _last_idx < PAN_MIN_GAP: continue
+                _last_idx = idx
+                if is_buy: pan_buy.append((idx, price, bias))
+                else: pan_sell.append((idx, price, bias))
+            # 画 PAN 买点 🟡 (在 MA60 下方的支撑) — 标签紧贴三角上方
             for idx, price, bias in pan_buy:
-                ax.scatter([x[idx]], [price * 0.995], marker="^", s=120,
-                           color="#FFC107", zorder=11, edgecolors="white", linewidths=1.2)
-                ax.annotate(f"🟡PAN买 BIAS{bias:.1f}%", xy=(x[idx], price),
-                            xytext=(x[idx], price * 0.97), ha="center", fontsize=7,
+                ax.scatter([x[idx]], [price * 0.995], marker="^", s=140,
+                           color="#FFC107", zorder=12, edgecolors="white", linewidths=1.5)
+                ax.annotate(f"🟡PAN买{bias:.1f}%", xy=(x[idx], price),
+                            xytext=(x[idx], price * 0.985), ha="center", fontsize=8,
                             color="#FFC107", fontweight="bold",
-                            bbox=dict(boxstyle="round,pad=0.15", fc="#3E2723", ec="#FFC107", alpha=0.85),
-                            arrowprops=dict(arrowstyle="->", color="#FFC107", lw=0.8))
-            # 画 PAN 卖点 🔵 (在 MA60 上方的压力)
+                            bbox=dict(boxstyle="round,pad=0.18", fc="#3E2723", ec="#FFC107", alpha=0.9),
+                            arrowprops=dict(arrowstyle="->", color="#FFC107", lw=0.9))
+            # 画 PAN 卖点 🔵 (在 MA60 上方的压力) — 标签紧贴三角下方
             for idx, price, bias in pan_sell:
-                ax.scatter([x[idx]], [price * 1.005], marker="v", s=120,
-                           color="#29B6F6", zorder=11, edgecolors="white", linewidths=1.2)
-                ax.annotate(f"🔵PAN卖 BIAS+{bias:.1f}%", xy=(x[idx], price),
-                            xytext=(x[idx], price * 1.03), ha="center", fontsize=7,
+                ax.scatter([x[idx]], [price * 1.005], marker="v", s=140,
+                           color="#29B6F6", zorder=12, edgecolors="white", linewidths=1.5)
+                ax.annotate(f"🔵PAN卖+{bias:.1f}%", xy=(x[idx], price),
+                            xytext=(x[idx], price * 1.018), ha="center", fontsize=8,
                             color="#29B6F6", fontweight="bold",
-                            bbox=dict(boxstyle="round,pad=0.15", fc="#0D47A1", ec="#29B6F6", alpha=0.85),
-                            arrowprops=dict(arrowstyle="->", color="#29B6F6", lw=0.8))
+                            bbox=dict(boxstyle="round,pad=0.18", fc="#0D47A1", ec="#29B6F6", alpha=0.9),
+                            arrowprops=dict(arrowstyle="->", color="#29B6F6", lw=0.9))
 
             # 最后一根画 MA60 数值 (用户核心关注)
             if not _np.isnan(ma60[-1]):
@@ -2025,36 +2027,24 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                     m1, m2 = s1[3], s2[3]  # 绿柱峰值 (负数)
                     if p2 < p1 and m2 > m1:  # 价新低但 MACD 没新低 → 底背离
                         bot_divs.append((p2_idx, p2, m2))
-            # 画顶背离标记 (红) — 主图画价格高点, MACD 图画 DIF 高点连线
+            # 画顶背离标记 (红) — 小三角 + 简短文字
             for idx, price, m_peak in top_divs:
-                # 主图: 画顶背离箭头
-                ax.scatter([x[idx]], [price * 1.003], marker="v", s=130,
-                           color="#EF5350", zorder=11, edgecolors="white", linewidths=1.2)
-                ax.annotate("🔴顶背离", xy=(x[idx], price),
-                            xytext=(x[idx], price * 1.025), ha="center", fontsize=7,
-                            color="#EF5350", fontweight="bold",
-                            bbox=dict(boxstyle="round,pad=0.15", fc="#3E2723", ec="#EF5350", alpha=0.85),
-                            arrowprops=dict(arrowstyle="->", color="#EF5350", lw=0.8))
-                # MACD 图: 标 DIF 高点
-                axm.scatter([x[idx]], [dif[idx]], marker="v", s=80,
-                            color="#EF5350", zorder=11, edgecolors="white", linewidths=1.0)
-                axm.annotate("顶背离", xy=(x[idx], dif[idx]),
-                             xytext=(x[idx], dif[idx] * 1.3), ha="center", fontsize=6,
-                             color="#EF5350", fontweight="bold")
+                ax.scatter([x[idx]], [price * 1.003], marker="v", s=90,
+                           color="#EF5350", zorder=11, edgecolors="white", linewidths=1.0)
+                ax.annotate("顶背离", xy=(x[idx], price),
+                            xytext=(x[idx], price * 1.02), ha="center", fontsize=7,
+                            color="#EF5350", fontweight="bold")
+                axm.scatter([x[idx]], [dif[idx]], marker="v", s=60,
+                            color="#EF5350", zorder=11, edgecolors="white", linewidths=0.8)
             # 画底背离标记 (绿)
             for idx, price, m_peak in bot_divs:
-                ax.scatter([x[idx]], [price * 0.997], marker="^", s=130,
-                           color="#22C55E", zorder=11, edgecolors="white", linewidths=1.2)
-                ax.annotate("🟢底背离", xy=(x[idx], price),
-                            xytext=(x[idx], price * 0.97), ha="center", fontsize=7,
-                            color="#22C55E", fontweight="bold",
-                            bbox=dict(boxstyle="round,pad=0.15", fc="#1B5E20", ec="#22C55E", alpha=0.85),
-                            arrowprops=dict(arrowstyle="->", color="#22C55E", lw=0.8))
-                axm.scatter([x[idx]], [dif[idx]], marker="^", s=80,
-                            color="#22C55E", zorder=11, edgecolors="white", linewidths=1.0)
-                axm.annotate("底背离", xy=(x[idx], dif[idx]),
-                             xytext=(x[idx], dif[idx] * 0.7), ha="center", fontsize=6,
-                             color="#22C55E", fontweight="bold")
+                ax.scatter([x[idx]], [price * 0.997], marker="^", s=90,
+                           color="#22C55E", zorder=11, edgecolors="white", linewidths=1.0)
+                ax.annotate("底背离", xy=(x[idx], price),
+                            xytext=(x[idx], price * 0.98), ha="center", fontsize=7,
+                            color="#22C55E", fontweight="bold")
+                axm.scatter([x[idx]], [dif[idx]], marker="^", s=60,
+                            color="#22C55E", zorder=11, edgecolors="white", linewidths=0.8)
             # 状态栏追加背离信息
             _status_parts.append(f"顶背离{len(top_divs)}次/底背离{len(bot_divs)}次")
 
