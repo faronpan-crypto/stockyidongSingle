@@ -1673,6 +1673,35 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                               textvariable=_diag_var, state="readonly")
     diag_combo.pack(side=tk.LEFT, pady=8)
 
+    # ── 🆕 盘中自动刷新 (每 30 秒) ──
+    _auto_refresh_id = [None]
+    def _is_trading_hours():
+        """判断是否在 A 股交易时间 (周一~周五 9:30-11:30, 13:00-15:00)"""
+        now = datetime.now()
+        if now.weekday() >= 5: return False
+        t = now.hour * 60 + now.minute
+        return (9*60+30 <= t <= 11*60+30) or (13*60 <= t <= 15*60)
+    def _schedule_auto_refresh():
+        """盘中定时重拉, 盘后自动停止"""
+        if not dlg.winfo_exists(): return
+        if _is_trading_hours():
+            _current_opt = combo_var.get()
+            if _current_opt: _on_go()  # 重拉当前标的
+            _auto_refresh_id[0] = dlg.after(30000, _schedule_auto_refresh)
+        else:
+            _auto_refresh_id[0] = None
+    def _start_auto_refresh():
+        if _auto_refresh_id[0] is None and _is_trading_hours():
+            _auto_refresh_id[0] = dlg.after(30000, _schedule_auto_refresh)
+    # 关闭窗口时取消定时器
+    _orig_protocol = dlg.protocol("WM_DELETE_WINDOW")
+    def _on_close_plus():
+        if _auto_refresh_id[0]:
+            try: dlg.after_cancel(_auto_refresh_id[0])
+            except: pass
+        dlg.destroy()
+    dlg.protocol("WM_DELETE_WINDOW", _on_close_plus)
+
     # 右侧: 时间 + MA (单行最右)
     _time_lbl = tk.Label(r1, text="⏳ 等待加载...", bg=_BG_TOOLBAR, fg=_FG_GOLD,
                          font=("", 9))
@@ -1764,6 +1793,7 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 _cached_data = data
                 try:
                     _do_render(data, opt)
+                    _start_auto_refresh()  # 🆕 首次加载成功后启动盘中自动刷新
                 except Exception as _e:
                     import traceback as _tb; _tb.print_exc()
                     _time_lbl.config(text=f"❌ 渲染异常: {_e}", fg="#EF5350")
@@ -2451,6 +2481,31 @@ def _show_multi_kline_comparison(parent_root, app=None):
                 return o.replace(" " + code, "")
         return code
 
+    # ── 🆕 多股盘中自动刷新 ──
+    _mg_auto_id = [None]
+    def _mg_trading():
+        now = datetime.now()
+        if now.weekday() >= 5: return False
+        t = now.hour * 60 + now.minute
+        return (9*60+30 <= t <= 11*60+30) or (13*60 <= t <= 15*60)
+    def _mg_schedule():
+        if not dlg.winfo_exists(): return
+        if _mg_trading() and selected_codes:
+            _render_grid()
+            _mg_auto_id[0] = dlg.after(30000, _mg_schedule)
+        else:
+            _mg_auto_id[0] = None
+    def _mg_start():
+        if _mg_auto_id[0] is None and _mg_trading() and selected_codes:
+            _mg_auto_id[0] = dlg.after(30000, _mg_schedule)
+    _orig_close = dlg.protocol("WM_DELETE_WINDOW")
+    def _mg_close():
+        if _mg_auto_id[0]:
+            try: dlg.after_cancel(_mg_auto_id[0])
+            except: pass
+        dlg.destroy()
+    dlg.protocol("WM_DELETE_WINDOW", _mg_close)
+
     def _render_grid():
         nonlocal fig, canvas
         if not selected_codes:
@@ -2555,6 +2610,7 @@ def _show_multi_kline_comparison(parent_root, app=None):
 
         status_lbl.config(text=f"✅ {len(codes)} 个标的, {rows}×{cols} 网格", fg="#66BB6A")
         print(f"[🔍多股] ✅ 渲染完成 {len(codes)} 个", flush=True)
+        _mg_start()  # 🆕 首次渲染成功后启动盘中自动刷新
 
     dlg.after(300, lambda: (None))  # 延迟显示
 
