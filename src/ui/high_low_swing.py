@@ -1306,7 +1306,9 @@ def show_high_low_swing(parent, app=None):
                     if len(f) < 5: continue
                     try: pct = (float(f[3]) - float(f[2])) / float(f[2]) * 100 if float(f[2]) > 0 else 0
                     except: pct = 0
-                    sina_data[code] = {"name": f[0][:8], "pct": round(pct, 2)}
+                    try: cur_price = float(f[3])
+                    except: cur_price = 0
+                    sina_data[code] = {"name": f[0][:8], "pct": round(pct, 2), "cur": cur_price}
             except Exception: pass
             _time.sleep(0.03)
 
@@ -1328,6 +1330,11 @@ def show_high_low_swing(parent, app=None):
             c = _kline(code)
             if c is not None: kline_cache[code] = c
             _time.sleep(0.02)
+
+        # 🆕 盘中把日线最后一个 close 替换成实时 cur 价格 → MA 实时化
+        for code, info in sina_data.items():
+            if info.get("cur", 0) > 0 and code in kline_cache:
+                kline_cache[code][-1] = info["cur"]
 
         # 3) 组装结果 → 全局 dict
         for sname, refs in _school_hot_refs.items():
