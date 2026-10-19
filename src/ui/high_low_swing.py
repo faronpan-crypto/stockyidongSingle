@@ -1844,12 +1844,15 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 except Exception: pass
                 _toolbar = None
 
-            # 上: K线图 (70%)
+            # 上: K线图 (55%)
             print("[🎨渲染] → add_axes K线", flush=True)
-            ax = fig.add_axes([0.06, 0.26, 0.88, 0.65], facecolor=_BG_PANEL)
-            # 下: 成交量 (15%)
+            ax = fig.add_axes([0.06, 0.32, 0.88, 0.58], facecolor=_BG_PANEL)
+            # 中: MACD (18%)
+            print("[🎨渲染] → add_axes MACD", flush=True)
+            axm = fig.add_axes([0.06, 0.15, 0.88, 0.15], sharex=ax, facecolor=_BG_PANEL)
+            # 下: 成交量 (12%)
             print("[🎨渲染] → add_axes 成交量", flush=True)
-            axv = fig.add_axes([0.06, 0.08, 0.88, 0.15], sharex=ax, facecolor=_BG_PANEL)
+            axv = fig.add_axes([0.06, 0.02, 0.88, 0.11], sharex=ax, facecolor=_BG_PANEL)
 
             x = _np.arange(len(times))
             # 蜡烛图简化版 (涨跌着色)
@@ -1960,6 +1963,100 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 ax.axhline(ma60[-1], color="#EF9A9A", ls="--", lw=0.8, alpha=0.7)
                 ax.text(x[-1] - 2, ma60[-1], f"  MA60={ma60[-1]:.2f}",
                         color="#EF9A9A", fontsize=8, va="bottom", ha="right")
+
+            # ═══════════════════════════════════════════════
+            # 🆕 MACD 副图 + 顶/底背离检测
+            # ═══════════════════════════════════════════════
+            def _ema(arr, n):
+                out = _np.zeros_like(arr, dtype=float); out[0] = arr[0]; k = 2 / (n + 1)
+                for ii in range(1, len(arr)): out[ii] = arr[ii] * k + out[ii - 1] * (1 - k)
+                return out
+            ema12 = _ema(c, 12); ema26 = _ema(c, 26)
+            dif = ema12 - ema26; dea = _ema(dif, 9)
+            macd_h = 2 * (dif - dea)
+            # 画 MACD 副图
+            h_colors = ["#EF5350" if v >= 0 else "#66BB6A" for v in macd_h]
+            axm.bar(x, macd_h, color=h_colors, width=0.7, alpha=0.85)
+            axm.plot(x, dif, color="#42A5F5", lw=0.9, label="DIF")
+            axm.plot(x, dea, color="#FFB74D", lw=0.9, label="DEA")
+            axm.axhline(y=0, color=_FG_DIM, lw=0.5, ls=":")
+            axm.set_ylabel("MACD", color=_FG_DIM, fontsize=8)
+            axm.tick_params(colors=_FG_DIM, labelsize=7)
+            for _sp in axm.spines.values(): _sp.set_color(_FG_DIM)
+            axm.grid(True, alpha=0.1, color=_FG_DIM)
+
+            # 背离检测: 比较两段最近的同向极值
+            #   底背离: 价格创新低, 但 MACD 绿柱/低点没创新低 → 看涨 (金叉确认)
+            #   顶背离: 价格创新高, 但 MACD 红柱/高点没创新高 → 看跌 (死叉确认)
+            def _find_macd_segments(hist, min_bar=5):
+                """把 MACD 柱分成同号的连续段"""
+                segs = []  # (start, end, sign, peak_val)
+                i = 0
+                while i < len(hist):
+                    if abs(hist[i]) < 1e-9: i += 1; continue
+                    sign = 1 if hist[i] > 0 else -1
+                    j = i
+                    while j < len(hist) and hist[j] * sign >= 0: j += 1
+                    if j - i >= min_bar:
+                        peak = sign * _np.max(abs(hist[i:j]))
+                        peak_idx = i + _np.argmax(abs(hist[i:j]))
+                        segs.append((i, j - 1, sign, peak, peak_idx))
+                    i = j
+                return segs
+            _segs = _find_macd_segments(macd_h, min_bar=3)
+            # 只看最近的同方向两段
+            top_divs, bot_divs = [], []
+            if len(_segs) >= 4:
+                # 找最近两段红柱 (sign=1) → 顶背离候选
+                _reds = [s for s in _segs if s[2] == 1][-2:]
+                _greens = [s for s in _segs if s[2] == -1][-2:]
+                if len(_reds) == 2:
+                    s1, s2 = _reds
+                    # 价格高点
+                    p1 = _np.max(h[s1[0]:s1[1] + 1]); p1_idx = s1[0] + _np.argmax(h[s1[0]:s1[1] + 1])
+                    p2 = _np.max(h[s2[0]:s2[1] + 1]); p2_idx = s2[0] + _np.argmax(h[s2[0]:s2[1] + 1])
+                    m1, m2 = s1[3], s2[3]  # 红柱峰值
+                    if p2 > p1 and m2 < m1:  # 价新高但 MACD 没新高 → 顶背离
+                        top_divs.append((p2_idx, p2, m2))
+                if len(_greens) == 2:
+                    s1, s2 = _greens
+                    p1 = _np.min(l[s1[0]:s1[1] + 1]); p1_idx = s1[0] + _np.argmin(l[s1[0]:s1[1] + 1])
+                    p2 = _np.min(l[s2[0]:s2[1] + 1]); p2_idx = s2[0] + _np.argmin(l[s2[0]:s2[1] + 1])
+                    m1, m2 = s1[3], s2[3]  # 绿柱峰值 (负数)
+                    if p2 < p1 and m2 > m1:  # 价新低但 MACD 没新低 → 底背离
+                        bot_divs.append((p2_idx, p2, m2))
+            # 画顶背离标记 (红) — 主图画价格高点, MACD 图画 DIF 高点连线
+            for idx, price, m_peak in top_divs:
+                # 主图: 画顶背离箭头
+                ax.scatter([x[idx]], [price * 1.003], marker="v", s=130,
+                           color="#EF5350", zorder=11, edgecolors="white", linewidths=1.2)
+                ax.annotate("🔴顶背离", xy=(x[idx], price),
+                            xytext=(x[idx], price * 1.025), ha="center", fontsize=7,
+                            color="#EF5350", fontweight="bold",
+                            bbox=dict(boxstyle="round,pad=0.15", fc="#3E2723", ec="#EF5350", alpha=0.85),
+                            arrowprops=dict(arrowstyle="->", color="#EF5350", lw=0.8))
+                # MACD 图: 标 DIF 高点
+                axm.scatter([x[idx]], [dif[idx]], marker="v", s=80,
+                            color="#EF5350", zorder=11, edgecolors="white", linewidths=1.0)
+                axm.annotate("顶背离", xy=(x[idx], dif[idx]),
+                             xytext=(x[idx], dif[idx] * 1.3), ha="center", fontsize=6,
+                             color="#EF5350", fontweight="bold")
+            # 画底背离标记 (绿)
+            for idx, price, m_peak in bot_divs:
+                ax.scatter([x[idx]], [price * 0.997], marker="^", s=130,
+                           color="#22C55E", zorder=11, edgecolors="white", linewidths=1.2)
+                ax.annotate("🟢底背离", xy=(x[idx], price),
+                            xytext=(x[idx], price * 0.97), ha="center", fontsize=7,
+                            color="#22C55E", fontweight="bold",
+                            bbox=dict(boxstyle="round,pad=0.15", fc="#1B5E20", ec="#22C55E", alpha=0.85),
+                            arrowprops=dict(arrowstyle="->", color="#22C55E", lw=0.8))
+                axm.scatter([x[idx]], [dif[idx]], marker="^", s=80,
+                            color="#22C55E", zorder=11, edgecolors="white", linewidths=1.0)
+                axm.annotate("底背离", xy=(x[idx], dif[idx]),
+                             xytext=(x[idx], dif[idx] * 0.7), ha="center", fontsize=6,
+                             color="#22C55E", fontweight="bold")
+            # 状态栏追加背离信息
+            _status_parts.append(f"顶背离{len(top_divs)}次/底背离{len(bot_divs)}次")
 
             # ═══════════════════════════════════════════════
             # 🩺 流派差异化诊断覆盖层
