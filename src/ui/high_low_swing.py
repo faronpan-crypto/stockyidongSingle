@@ -1913,6 +1913,48 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                             color="#EF5350", fontweight="bold",
                             arrowprops=dict(arrowstyle="->", color="#EF5350", lw=0.8))
 
+            # ═══════════════════════════════════════════════
+            # 🆕 PAN 买点 / PAN 卖点 — BIAS(60) + 局部极值
+            #   买点: close < MA60 偏离 ≥ 2% + close 是前后 5 根最低 (支撑位)
+            #   卖点: close > MA60 偏离 ≥ 2% + close 是前后 5 根最高 (压力位)
+            #   只标记最近 120 根, 避免太早的过期信号
+            # ═══════════════════════════════════════════════
+            PAN_WIN = 5       # 窗口: 前后 N 根
+            BIAS_BUY = -2.0   # 买点 BIAS 阈值 (%)
+            BIAS_SELL = 2.0   # 卖点 BIAS 阈值 (%)
+            PAN_RECENT = 120  # 只看最近 N 根
+            pan_buy, pan_sell = [], []
+            _start = max(61, len(c) - PAN_RECENT)
+            for i in range(_start, len(c)):
+                if _np.isnan(ma60[i]) or ma60[i] <= 0: continue
+                bias = (c[i] - ma60[i]) / ma60[i] * 100.0
+                # 局部最低 = 支撑 (买点候选)
+                _lo = max(0, i - PAN_WIN); _hi = min(len(c), i + PAN_WIN + 1)
+                is_local_low = c[i] == _np.min(c[_lo:_hi])
+                is_local_high = c[i] == _np.max(c[_lo:_hi])
+                if bias <= BIAS_BUY and is_local_low:
+                    pan_buy.append((i, c[i], bias))
+                elif bias >= BIAS_SELL and is_local_high:
+                    pan_sell.append((i, c[i], bias))
+            # 画 PAN 买点 🟡 (在 MA60 下方的支撑)
+            for idx, price, bias in pan_buy:
+                ax.scatter([x[idx]], [price * 0.995], marker="^", s=120,
+                           color="#FFC107", zorder=11, edgecolors="white", linewidths=1.2)
+                ax.annotate(f"🟡PAN买 BIAS{bias:.1f}%", xy=(x[idx], price),
+                            xytext=(x[idx], price * 0.97), ha="center", fontsize=7,
+                            color="#FFC107", fontweight="bold",
+                            bbox=dict(boxstyle="round,pad=0.15", fc="#3E2723", ec="#FFC107", alpha=0.85),
+                            arrowprops=dict(arrowstyle="->", color="#FFC107", lw=0.8))
+            # 画 PAN 卖点 🔵 (在 MA60 上方的压力)
+            for idx, price, bias in pan_sell:
+                ax.scatter([x[idx]], [price * 1.005], marker="v", s=120,
+                           color="#29B6F6", zorder=11, edgecolors="white", linewidths=1.2)
+                ax.annotate(f"🔵PAN卖 BIAS+{bias:.1f}%", xy=(x[idx], price),
+                            xytext=(x[idx], price * 1.03), ha="center", fontsize=7,
+                            color="#29B6F6", fontweight="bold",
+                            bbox=dict(boxstyle="round,pad=0.15", fc="#0D47A1", ec="#29B6F6", alpha=0.85),
+                            arrowprops=dict(arrowstyle="->", color="#29B6F6", lw=0.8))
+
             # 最后一根画 MA60 数值 (用户核心关注)
             if not _np.isnan(ma60[-1]):
                 ax.axhline(ma60[-1], color="#EF9A9A", ls="--", lw=0.8, alpha=0.7)
@@ -2598,6 +2640,21 @@ def _show_multi_kline_comparison(parent_root, app=None):
                 elif c[i-1] > ma60[i-1] and c[i] <= ma60[i]:
                     ax.scatter([x[i]], [c[i] * 1.002], marker="v", s=40,
                                color="#EF5350", zorder=10)
+
+            # 🆕 mini PAN 买点/卖点 (BIAS + 局部极值, 只看最近 80 根)
+            _start_p = max(61, len(c) - 80)
+            for i in range(_start_p, len(c)):
+                if np.isnan(ma60[i]) or ma60[i] <= 0: continue
+                bias = (c[i] - ma60[i]) / ma60[i] * 100.0
+                _lo2 = max(0, i - 5); _hi2 = min(len(c), i + 6)
+                is_lo = c[i] == np.min(c[_lo2:_hi2])
+                is_hi = c[i] == np.max(c[_lo2:_hi2])
+                if bias <= -2.0 and is_lo:
+                    ax.scatter([x[i]], [c[i] * 0.995], marker="^", s=60,
+                               color="#FFC107", zorder=11, edgecolors="white", linewidths=0.8)
+                elif bias >= 2.0 and is_hi:
+                    ax.scatter([x[i]], [c[i] * 1.005], marker="v", s=60,
+                               color="#29B6F6", zorder=11, edgecolors="white", linewidths=0.8)
 
             # 标题 (周期 + 最新 MA)
             title_txt = f"{label} (1min)"
