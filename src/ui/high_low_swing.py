@@ -3083,7 +3083,7 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
     """双击股票弹日K线 — 轻量版, 支持周期切换. 传 embed_frame 则内嵌而非弹窗"""
     import tkinter as tk
     from tkinter import ttk, messagebox
-    import requests
+    import requests, json
     import numpy as np
     from matplotlib.figure import Figure
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -3227,7 +3227,7 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                        f"?secid={_dfm_secid}&fields1=f1,f2,f3,f4,f5,f6"
                        f"&fields2=f51,f52,f53,f54,f55,f56,f57,f58"
                        f"&klt={klt}&fqt=1&beg=0&end=20500101")
-                r = requests.get(url, timeout=10,
+                r = requests.get(url, timeout=4,
                                  headers={"User-Agent": "Mozilla/5.0",
                                           "Referer": "https://quote.eastmoney.com"})
                 if r.status_code != 200: return None
