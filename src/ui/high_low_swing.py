@@ -1257,6 +1257,7 @@ def show_high_low_swing(parent, app=None):
     def _bg_load_school_hot():
         import json, ssl, urllib.request, time as _time, numpy as np
         ctx = ssl._create_unverified_context()
+        _bg_result.clear()  # 🆕 每次重跑清空旧数据 (包括上次的 _frozen 标记)
 
         all_codes = set()
         for refs in _school_hot_refs.values():
@@ -1265,7 +1266,29 @@ def show_high_low_swing(parent, app=None):
                     all_codes.add(c)
         all_codes = list(all_codes)
 
-        # 1) 新浪批量实时行情
+        # 1) 🆕 先验证日线最新日期 — 不是今天就放弃显示实时板块数据
+        _today_str = datetime.now().strftime("%Y-%m-%d")
+        _is_fresh = False
+        for _probe in ("sh600519", "sz300750", "sh000001"):
+            try:
+                url = (f"https://quotes.sina.cn/cn/api/jsonp.php/_/CN_MarketData.getKLineData"
+                       f"?symbol={_probe}&scale=240&ma=no&datalen=3")
+                with urllib.request.urlopen(urllib.request.Request(url, headers=_EM_HDR),
+                                           timeout=6, context=ctx) as resp:
+                    _txt = resp.read()
+                if b"(" not in _txt: continue
+                _probe_data = json.loads(_txt[_txt.index(b"(")+1:_txt.rindex(b")")])
+                if _probe_data and _probe_data[-1].get("day", "") == _today_str:
+                    _is_fresh = True; break
+            except: pass
+        print(f"[🎯流派热榜] 日线新鲜度检查: today={_today_str} fresh={_is_fresh}", flush=True)
+        if not _is_fresh:
+            # 非当前交易日 → 清空所有 sd, 让 _poll_and_render 走种子占位 + 等待提示
+            _bg_result["_frozen"] = True
+            _bg_done.set()
+            return
+
+        # 2) 新浪批量实时行情
         sina_data = {}
         for bi in range(0, len(all_codes), 40):
             batch = all_codes[bi:bi+40]
@@ -1334,21 +1357,23 @@ def show_high_low_swing(parent, app=None):
     _rendered_names = set()
     def _poll_and_render():
         # 对已经有结果的流派直接渲染 (主线程安全)
+        _is_frozen = _bg_result.get("_frozen", False)
         for sname, sd in _bg_result.items():
+            if sname.startswith("_"): continue  # 跳过内部标记
             if sname in _rendered_names: continue
             refs = _school_hot_refs.get(sname)
             if not refs: continue
             try:
                 body = refs["frame"]
-                # 🆕 sd 为空 (新浪拉不到数据) — 保留种子占位 (有股票名+双击K线), 不 destroy!
-                if not sd:
-                    # 加个底部小字提示即可, 覆盖在种子最后面
+                # 🆕 日线不是今天 (非当前交易日/盘前等待) → 显示占位 + 等待提示
+                if _is_frozen or not sd:
                     _rendered_names.add(sname)
-                    # 如果还没提示过, 在 body 最后追加一行轻提示
+                    _warn_text = ("⏳ 今日交易日数据尚未更新, 等待开盘后自动刷新..." if _is_frozen
+                                  else " · (新浪实时数据暂不可用, 点击仍可弹K线)")
                     if not hasattr(body, "_net_warned"):
                         try:
-                            tk.Label(body, text=" · (新浪实时数据暂不可用, 点击仍可弹K线)",
-                                     bg=_BG_PANEL, fg="#78909C", font=("", 7)).pack(anchor="w", padx=6, pady=2)
+                            tk.Label(body, text=_warn_text,
+                                     bg=_BG_PANEL, fg="#78909C", font=("", 8)).pack(anchor="w", padx=6, pady=2)
                             body._net_warned = True
                         except Exception: pass
                     continue
@@ -1409,7 +1434,7 @@ def show_high_low_swing(parent, app=None):
         if _is_trading_time():
             print("[🔄流派热榜] 盘中定时重拉新浪行情...", flush=True)
             _bg_done.clear()  # 允许后台线程重跑
-            _rendered_names.clear()  # 🆕 允许重渲染所有流派 (清掉旧标记)
+            _rendered_names.clear()  # 允许重渲染所有流派
             threading.Thread(target=_bg_load_school_hot, daemon=True).start()
             _poll_and_render()
             _auto_refresh_id[0] = win.after(60000, _schedule_refresh)
