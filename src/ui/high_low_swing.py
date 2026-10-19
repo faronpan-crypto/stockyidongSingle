@@ -1266,10 +1266,15 @@ def show_high_low_swing(parent, app=None):
                     all_codes.add(c)
         all_codes = list(all_codes)
 
-        # 1) 🆕 验证实时行情日期 — 不是今天就不渲染实时板块数据
-        #    ⚠️ 注意: 日线接口要收盘后才更新, 盘中永远是上一个交易日, 不能用日线判断!
+        # 1) 🆕 验证实时行情日期 — 只有工作日盘前才 frozen, 盘后/周末用最后交易日数据
         _today_str = datetime.now().strftime("%Y-%m-%d")
+        _now = datetime.now()
+        _is_weekday = _now.weekday() < 5
+        _is_morning_session = _is_weekday and (9*60 <= _now.hour*60+_now.minute <= 11*60+30)
+        _is_afternoon_session = _is_weekday and (13*60 <= _now.hour*60+_now.minute <= 15*60)
+        _is_trading_session = _is_morning_session or _is_afternoon_session
         _is_fresh = False
+        _quote_date = None
         for _probe_code in ("sh600519", "sz300750", "sh000001"):
             try:
                 _url = f"https://hq.sinajs.cn/list={_probe_code}"
@@ -1284,11 +1289,15 @@ def show_high_low_swing(parent, app=None):
                 if _quote_date == _today_str:
                     _is_fresh = True; break
             except Exception as _e: pass
-        print(f"[🎯流派热榜] 实时行情新鲜度: today={_today_str} fresh={_is_fresh}", flush=True)
-        if not _is_fresh:
+        print(f"[🎯流派热榜] 实时行情新鲜度: today={_today_str} quote={_quote_date} fresh={_is_fresh} session={_is_trading_session}", flush=True)
+        # frozen 逻辑: 只有在交易日盘中, 实时行情不是今天才 frozen (等开盘)
+        # 周末 / 盘后 / 非交易时段 → 用最后交易日数据, 不 frozen
+        if _is_weekday and not _is_fresh and _now.hour < 9:
+            # 工作日盘前 (9点前) — 今天交易日但实时行情还没更新 → 等开盘
             _bg_result["_frozen"] = True
             _bg_done.set()
             return
+        # 其他情况 (盘中 fresh / 盘后 / 周末) → 继续加载, 用实时最后一笔或收盘数据
 
         # 2) 新浪批量实时行情
         sina_data = {}
