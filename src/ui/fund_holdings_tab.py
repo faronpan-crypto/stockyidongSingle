@@ -750,6 +750,9 @@ def build_fund_holdings_tab(parent, root=None):
                 card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
 
                 fund_code = f["code"]
+                fund_sina, _ = _lookup_sina(f["name"], fund_code)
+                if not fund_sina and fund_code and fund_code.isdigit() and len(fund_code) == 6:
+                    fund_sina = ("sh" if fund_code.startswith("6") else "bj" if fund_code.startswith(("4","8")) else "sz") + fund_code
                 hdr = tk.Frame(card, bg=_BG_CARD); hdr.pack(fill=tk.X, padx=6, pady=(6, 2))
                 _gf = tk.Label(hdr, text=f"🎯 {f['name']}", bg=_BG_CARD, fg=_FG_GOLD,
                          font=_font(bold=True), cursor="hand2")
@@ -759,8 +762,21 @@ def build_fund_holdings_tab(parent, root=None):
                 _gc.pack(side=tk.LEFT, padx=3)
                 tk.Label(hdr, text=f"#{f['style']}", bg=_BG_CARD, fg=_FG_CYAN,
                          font=_font()).pack(side=tk.RIGHT)
+                # 单击 → 日K / 双击 → 天天基金
+                _p2 = [None]
+                def _gclick(_s=fund_sina, _n=f["name"]):
+                    if _p2[0] is not None:
+                        try: root.after_cancel(_p2[0])
+                        except: pass
+                    _p2[0] = root.after(250, lambda: _open_kline(root, _s, _n) if _s else _open_fund_web(fund_code))
+                def _gdbl(_c=fund_code):
+                    if _p2[0] is not None:
+                        try: root.after_cancel(_p2[0])
+                        except: pass
+                    _open_fund_web(_c)
                 for w in [_gf, _gc, hdr]:
-                    w.bind("<Double-Button-1>", lambda e, _c=fund_code: _open_fund_web(_c))
+                    w.bind("<Button-1>", lambda e: _gclick())
+                    w.bind("<Double-Button-1>", lambda e: _gdbl())
 
                 tk.Frame(card, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=6, pady=2)
 
@@ -1051,9 +1067,13 @@ def build_fund_holdings_tab(parent, root=None):
             card.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
             card_inner.grid_columnconfigure(c, weight=1)
 
-            # 标题行 (基金名可双击跳天天基金)
+            # 标题行: 单击弹日K / 双击跳天天基金
             hd = tk.Frame(card, bg=_BG_CARD); hd.pack(fill=tk.X, padx=6, pady=(6, 2))
             fund_code = f.get("code", "")
+            fund_sina, _ = _lookup_sina(f['name'], fund_code)
+            # A股 6位 code 构造 sina
+            if not fund_sina and fund_code and fund_code.isdigit() and len(fund_code) == 6:
+                fund_sina = ("sh" if fund_code.startswith("6") else "bj" if fund_code.startswith(("4","8")) else "sz") + fund_code
             _nm_lbl = tk.Label(hd, text=f"🏦 {f['name']}", bg=_BG_CARD, fg=_FG_GOLD,
                      font=_font(bold=True), cursor="hand2")
             _nm_lbl.pack(side=tk.LEFT)
@@ -1063,10 +1083,27 @@ def build_fund_holdings_tab(parent, root=None):
             _ind_lbl = tk.Label(hd, text=f"#{f['industry']}", bg=_BG_CARD, fg=_FG_CYAN,
                      font=_font())
             _ind_lbl.pack(side=tk.RIGHT)
-            # 双击基金名 → 跳网页
-            def _open(_c=fund_code): _open_fund_web(_c)
+            # 单击 → 日K (延迟 250ms 判断不是双击)
+            _pending = [None]
+            def _click(_s=fund_sina, _n=f['name']):
+                if _pending[0] is not None:
+                    try: root.after_cancel(_pending[0])
+                    except: pass
+                if _s: _open_kline(root, _s, _n)
+                else: _open_fund_web(fund_code)
+            def _dbl(_c=fund_code):
+                if _pending[0] is not None:
+                    try: root.after_cancel(_pending[0])
+                    except: pass
+                _open_fund_web(_c)
+            def _on_btn1(_s=fund_sina, _n=f['name']):
+                if _pending[0] is not None:
+                    try: root.after_cancel(_pending[0])
+                    except: pass
+                _pending[0] = root.after(250, lambda: _open_kline(root, _s, _n) if _s else _open_fund_web(fund_code))
             for w in [_nm_lbl, _code_lbl, hd]:
-                w.bind("<Double-Button-1>", lambda e, _c=fund_code: _open_fund_web(_c))
+                w.bind("<Button-1>", lambda e: _on_btn1())
+                w.bind("<Double-Button-1>", lambda e: _dbl())
 
             tk.Frame(card, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=6, pady=2)
 
