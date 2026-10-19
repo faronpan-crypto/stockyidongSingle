@@ -2589,8 +2589,15 @@ def _quick_open_daily_kline(parent, code6, name):
     if code6.startswith(("sh", "sz", "bj")):
         sina_code = code6
     else:
-        ex_map = ("sh" if code6.startswith("6") else "bj" if code6.startswith(("4", "8")) else "sz")
-        sina_code = f"{ex_map}{code6}"
+        # 沪市: 6/50/51/52/53/54/55/56/57/58/59 (含所有 ETF)
+        # 深市: 0/1/2/3 + 159xx (深市ETF)
+        # 北交: 4/8
+        if code6.startswith("6") or code6.startswith(("50","51","52","53","54","55","56","57","58","59")):
+            sina_code = f"sh{code6}"
+        elif code6.startswith(("4","8")):
+            sina_code = f"bj{code6}"
+        else:
+            sina_code = f"sz{code6}"
 
     dlg = tk.Toplevel(parent)
     dlg.title(f"📊 {name}({code6}) 日K线")

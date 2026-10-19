@@ -758,7 +758,9 @@ def build_fund_holdings_tab(parent, root=None):
                 fund_code = f["code"]
                 fund_sina, _ = _lookup_sina(f["name"], fund_code)
                 if not fund_sina and fund_code and fund_code.isdigit() and len(fund_code) == 6:
-                    fund_sina = ("sh" if fund_code.startswith("6") else "bj" if fund_code.startswith(("4","8")) else "sz") + fund_code
+                    if fund_code.startswith("6") or fund_code.startswith(("50","51","52","53","54","55","56","57","58","59")): fund_sina = "sh" + fund_code
+                    elif fund_code.startswith(("4","8")): fund_sina = "bj" + fund_code
+                    else: fund_sina = "sz" + fund_code
                 hdr = tk.Frame(card, bg=_BG_CARD); hdr.pack(fill=tk.X, padx=6, pady=(6, 2))
                 _gf = tk.Label(hdr, text=f"🎯 {f['name']}", bg=_BG_CARD, fg=_FG_GOLD,
                          font=_font(bold=True), cursor="hand2")
