@@ -550,9 +550,15 @@ def _lookup_sina(name, code6):
         return code6.lower(), name
     if code6:
         c = str(code6).zfill(6)
-        if c.startswith("6"): return "sh" + c, name
-        if c.startswith(("0","3")): return "sz" + c, name
-        if c.startswith(("4","8")): return "bj" + c, name
+        # 沪市: 6xxxxx / 5xxxxx (含所有沪市ETF 51-59) / 58xxxx (科创板ETF)
+        if c.startswith(("6", "50","51","52","53","54","55","56","57","58","59")):
+            return "sh" + c, name
+        # 深市: 0/3xxxxx + 15xxxx/16xxxx (深市ETF/LOF)
+        if c.startswith(("0","1","3")):
+            return "sz" + c, name
+        # 北交: 4/8
+        if c.startswith(("4","8")):
+            return "bj" + c, name
     return None, None
 
 
