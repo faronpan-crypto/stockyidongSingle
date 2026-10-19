@@ -1756,17 +1756,17 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
         t = now.hour * 60 + now.minute
         return (9*60+30 <= t <= 11*60+30) or (13*60 <= t <= 15*60)
     def _schedule_auto_refresh():
-        """盘中定时重拉, 盘后自动停止"""
+        """盘中定时重拉, 盘后自动停止 (1minK线每60秒刷一次)"""
         if not dlg.winfo_exists(): return
         if _is_trading_hours():
             _current_opt = combo_var.get()
             if _current_opt: _on_go()  # 重拉当前标的
-            _auto_refresh_id[0] = dlg.after(30000, _schedule_auto_refresh)
+            _auto_refresh_id[0] = dlg.after(60000, _schedule_auto_refresh)
         else:
             _auto_refresh_id[0] = None
     def _start_auto_refresh():
         if _auto_refresh_id[0] is None and _is_trading_hours():
-            _auto_refresh_id[0] = dlg.after(30000, _schedule_auto_refresh)
+            _auto_refresh_id[0] = dlg.after(60000, _schedule_auto_refresh)
     # 关闭窗口时取消定时器
     _orig_protocol = dlg.protocol("WM_DELETE_WINDOW")
     def _on_close_plus():
@@ -2902,12 +2902,12 @@ def _show_multi_kline_comparison(parent_root, app=None):
         if not dlg.winfo_exists(): return
         if _mg_trading() and selected_codes:
             _render_grid()
-            _mg_auto_id[0] = dlg.after(30000, _mg_schedule)
+            _mg_auto_id[0] = dlg.after(60000, _mg_schedule)
         else:
             _mg_auto_id[0] = None
     def _mg_start():
         if _mg_auto_id[0] is None and _mg_trading() and selected_codes:
-            _mg_auto_id[0] = dlg.after(30000, _mg_schedule)
+            _mg_auto_id[0] = dlg.after(60000, _mg_schedule)
     _orig_close = dlg.protocol("WM_DELETE_WINDOW")
     def _mg_close():
         if _mg_auto_id[0]:
