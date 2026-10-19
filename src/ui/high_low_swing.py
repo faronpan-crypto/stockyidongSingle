@@ -1397,6 +1397,32 @@ def show_high_low_swing(parent, app=None):
 
     win.after(200, _poll_and_render)
 
+    # ── 🆕 盘中定时刷新 (每 60 秒重拉新浪实时行情) ──
+    def _is_trading_time():
+        now = datetime.now()
+        if now.weekday() >= 5: return False
+        t = now.hour * 60 + now.minute
+        return (9*60+15 <= t <= 11*60+30) or (13*60 <= t <= 15*60)
+    _auto_refresh_id = [None]
+    def _schedule_refresh():
+        if not win.winfo_exists(): return
+        if _is_trading_time():
+            print("[🔄流派热榜] 盘中定时重拉新浪行情...", flush=True)
+            _bg_done.clear()  # 允许后台线程重跑
+            _rendered_names.clear()  # 🆕 允许重渲染所有流派 (清掉旧标记)
+            threading.Thread(target=_bg_load_school_hot, daemon=True).start()
+            _poll_and_render()
+            _auto_refresh_id[0] = win.after(60000, _schedule_refresh)
+        else:
+            _auto_refresh_id[0] = None
+    # 等初始完成后启动
+    def _start_after_init():
+        if _bg_done.is_set() and _is_trading_time():
+            _auto_refresh_id[0] = win.after(60000, _schedule_refresh)
+        elif not _bg_done.is_set():
+            win.after(1000, _start_after_init)
+    win.after(1000, _start_after_init)
+
     # ═══════════════════════════════════════════════
     # 做 T 三层模型 (LabelFrame)
     # ═══════════════════════════════════════════════
