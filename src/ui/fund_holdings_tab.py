@@ -667,15 +667,21 @@ def build_fund_holdings_tab(parent, root=None):
         if _fund_timing_running: return
         _fund_timing_running = True
 
-        # 1) 读缓存 (非 force)
+        # 1) 读缓存 (非 force) — 但缓存必须是成功的 (score 非全 None)
         if not force and _os2.path.exists(_timing_cache_path):
             try:
                 with open(_timing_cache_path, "r", encoding="utf-8") as f:
-                    _fund_timing_cache = _json2.load(f)
-                print(f"[基金择时] 读缓存 OK ({len(_fund_timing_cache)} 只基金)", flush=True)
-                _fund_timing_running = False
-                _render_timing_boxes()
-                return
+                    _cached = _json2.load(f)
+                # 检查是不是成功缓存 (至少一只 score 不是 None)
+                _any_ok = any(v.get("score") is not None for v in _cached.values())
+                if _any_ok:
+                    _fund_timing_cache = _cached
+                    print(f"[基金择时] 读成功缓存 OK ({len(_fund_timing_cache)} 只基金)", flush=True)
+                    _fund_timing_running = False
+                    _render_timing_boxes()
+                    return
+                else:
+                    print("[基金择时] 缓存是失败的, 忽略, 重算", flush=True)
             except Exception as e:
                 print(f"[基金择时] 缓存读取失败: {e}", flush=True)
 
