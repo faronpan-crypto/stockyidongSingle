@@ -2268,6 +2268,22 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
             _toolbar.update()
             _toolbar.pack(side=tk.BOTTOM, fill=tk.X)
 
+            # 🆕 双击 canvas 弹出日K线 (当前标的)
+            def _on_canvas_press(e):
+                if e.dblclick:
+                    try:
+                        _cur_opt = combo_var.get()
+                        _cur_sina = _sina_code_from_option(_cur_opt)
+                        if _cur_sina:
+                            _cur_name = _cur_opt.replace(f" {_cur_sina}", "").strip()
+                            print(f"[📊1min双击] {_cur_name}({_cur_sina}) → 弹日K", flush=True)
+                            _quick_open_daily_kline(dlg, _cur_sina, _cur_name)
+                    except Exception as _de:
+                        print(f"[📊1min双击❌] {_de}", flush=True)
+            try:
+                canvas.mpl_connect("button_press_event", _on_canvas_press)
+            except Exception: pass
+
             # 显示最后几根 MA 值 (右上角浮窗)
             last_ma_txt = (f"MA5={ma5[-1]:.2f}  MA10={ma10[-1]:.2f}  "
                            f"MA20={ma20[-1]:.2f}  MA60={ma60[-1]:.2f}\n"
@@ -2607,6 +2623,23 @@ def _show_multi_kline_comparison(parent_root, app=None):
         tb = NavigationToolbar2Tk(canvas, canvas_frame)
         tb.update()
         tb.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # 🆕 多股 canvas 双击 → 弹对应子图标的日K
+        # 把 ax 和 sina code 建立映射 (用 _ax_code_map)
+        _ax_code_map = {}
+        for i, (data, is_etf, err, code) in enumerate(results):
+            ax_i = fig.axes[i]
+            _ax_code_map[id(ax_i)] = code
+        def _mg_press(e):
+            if e.dblclick and e.inaxes is not None:
+                _code = _ax_code_map.get(id(e.inaxes))
+                if _code:
+                    _label = _find_label(_code)
+                    print(f"[🔍多股双击] {_label}({_code}) → 弹日K", flush=True)
+                    _quick_open_daily_kline(dlg, _code, _label)
+        try:
+            canvas.mpl_connect("button_press_event", _mg_press)
+        except Exception: pass
 
         status_lbl.config(text=f"✅ {len(codes)} 个标的, {rows}×{cols} 网格", fg="#66BB6A")
         print(f"[🔍多股] ✅ 渲染完成 {len(codes)} 个", flush=True)
