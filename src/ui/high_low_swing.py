@@ -3210,7 +3210,47 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
     _hover_win = None
 
     def _fetch(period):
-        def _try_scale(scale, datalen=240):
+        """多数据源: 东方财富(主) → 新浪(fallback)"""
+        # sina_code → 东方财富 secid: sh→1, sz→0, bj→0
+        _prefix = sina_code[:2]
+        _code6 = sina_code[2:]
+        _secid_map = {"sh": "1", "sz": "0", "bj": "0"}
+        _dfm_secid = f"{_secid_map.get(_prefix, '1')}.{_code6}"
+
+        def _try_eastmoney(period):
+            """东方财富 push2his: 日/周/月/60分/分时"""
+            try:
+                # klt: 101=日K, 102=周K, 103=月K, 60=60分, 1=分时
+                _klt_map = {"day": "101", "week": "102", "month": "103", "60": "60", "minute": "1"}
+                klt = _klt_map.get(period, "101")
+                url = (f"https://push2his.eastmoney.com/api/qt/stock/kline/get"
+                       f"?secid={_dfm_secid}&fields1=f1,f2,f3,f4,f5,f6"
+                       f"&fields2=f51,f52,f53,f54,f55,f56,f57,f58"
+                       f"&klt={klt}&fqt=1&beg=0&end=20500101")
+                r = requests.get(url, timeout=10,
+                                 headers={"User-Agent": "Mozilla/5.0",
+                                          "Referer": "https://quote.eastmoney.com"})
+                if r.status_code != 200: return None
+                d = r.json()
+                klines = d.get("data", {}).get("klines") or d.get("data", {}).get("minurl", [])
+                if not klines: return None
+                # 解析: "2026-10-19,1322.50,1324.97,1348.60,1321.00,39729,..."
+                result = []
+                for line in klines:
+                    parts = line.split(",")
+                    if len(parts) < 6: continue
+                    result.append({
+                        "day": parts[0] if period in ("day", "week", "month") else parts[0],
+                        "open": parts[1], "close": parts[2],
+                        "high": parts[3], "low": parts[4],
+                        "volume": parts[5],
+                    })
+                print(f"[日K_fetch] 🟢东方财富 {period} {sina_code}: {len(result)} 条", flush=True)
+                return result
+            except Exception as _e:
+                print(f"[日K_fetch] 东方财富 {period} err={_e}", flush=True); return None
+
+        def _try_sina(scale, datalen=240):
             try:
                 url = f"https://quotes.sina.cn/cn/api/jsonp.php/_/CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen={datalen}"
                 r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"})
@@ -3218,39 +3258,39 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 txt = r.text
                 if "([{}])" in txt or len(txt) < 200: return None
                 data = json.loads(txt[txt.index("(") + 1:txt.rindex(")")])
+                print(f"[日K_fetch] 🟡新浪 scale={scale}: {len(data)} 条", flush=True)
                 return data if data else None
-            except: return None
+            except Exception as _e:
+                print(f"[日K_fetch] 新浪 scale={scale} err={_e}", flush=True); return None
 
-        try:
+        # 主路径: 东方财富
+        data = _try_eastmoney(period)
+        if not data:
+            # fallback: 新浪
             if period == "minute":
-                # 先试 1min, 失败 fallback 日线
-                data = _try_scale(1)
-                if data: return data
-                return _try_scale(240)  # fallback
+                data = _try_sina(1) or _try_sina(240)
+            elif period == "60":
+                data = _try_sina(60) or _try_sina(240)
+            elif period in ("week", "month"):
+                # 先拉日线再合成
+                daily = _try_eastmoney("day") or _try_sina(240)
+                if daily:
+                    import pandas as pd
+                    df = pd.DataFrame(daily)
+                    df["day"] = pd.to_datetime(df["day"])
+                    df = df.sort_values("day")
+                    for col in ("open", "close", "high", "low", "volume"):
+                        df[col] = df[col].astype(float)
+                    rule = "W-MON" if period == "week" else "ME"
+                    agg = {"open": "first", "close": "last", "high": "max", "low": "min", "volume": "sum"}
+                    df2 = df.set_index("day").resample(rule).agg(agg).dropna()
+                    df2 = df2.reset_index()
+                    df2["day"] = df2["day"].dt.strftime("%Y-%m-%d")
+                    data = df2.to_dict("records")
+            else:  # day
+                data = _try_sina(240)
 
-            scale_map = {"60": "60", "day": "240", "week": "240", "month": "240"}
-            scale = scale_map.get(period, "240")
-            data = _try_scale(scale)
-            if not data and scale != "240":
-                data = _try_scale(240)  # fallback 日线
-            if not data: return None
-            # 日线: pandas resample 合成周/月
-            if period in ("week", "month"):
-                import pandas as pd
-                df = pd.DataFrame(data)
-                df["day"] = pd.to_datetime(df["day"])
-                df = df.sort_values("day")
-                for col in ("open", "close", "high", "low", "volume"):
-                    df[col] = df[col].astype(float)
-                rule = "W-MON" if period == "week" else "ME"
-                agg = {"open": "first", "close": "last", "high": "max", "low": "min", "volume": "sum"}
-                df2 = df.set_index("day").resample(rule).agg(agg).dropna()
-                df2 = df2.reset_index()
-                df2["day"] = df2["day"].dt.strftime("%Y-%m-%d")
-                data = df2.to_dict("records")
-            return data
-        except Exception as e:
-            print(f"[日K] fetch err: {e}", flush=True); return None
+        return data
 
     def _ma(arr, n):
         cs = np.cumsum(arr)
