@@ -14153,6 +14153,16 @@ class DapanMixin:
         except Exception as e:
             print(f"[🎯高抛低吸❌] {e}", flush=True); _tb.print_exc()
 
+    def _show_1min_kline_dialog(self):
+        """📈 1min K线图 — 复用高抛低吸里的 _show_minute_kline_dialog"""
+        import traceback as _tb
+        print("[📈1minK] 按钮被点击!", flush=True)
+        try:
+            from ui.high_low_swing import _show_minute_kline_dialog as _mk
+            _mk(getattr(self, 'root', None) or getattr(self, '_root', None), app=self)
+        except Exception as e:
+            print(f"[📈1minK❌] {e}", flush=True); _tb.print_exc()
+
     def _show_wechat_dialog(self):
         """📱 微信日报生成 — lazy import"""
         import traceback as _tb

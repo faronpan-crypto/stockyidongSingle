@@ -4720,15 +4720,13 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         batch_crawl_news_btn.pack(side=tk.LEFT, padx=(0, tp))
         self.batch_crawl_news_btn = batch_crawl_news_btn
         for txt, w, cmd in [
-            ("信号", 4, self.show_signal_all_holdings_detection),
-            ("回测", 6, self.show_backtest_dialog),
             ("五星跟随", 7, self.show_five_star_follow_dialog),
-            ("新闻搜索", 7, self.launch_keyword_search_app),
             ("K线图", 6, self.show_kline_dialog),
             ("📊分析深度", 8, self._show_stock_analysis_dialog),
             ("📊比价横向", 8, self._show_stock_compare_dialog),
             ("👁️看盘", 7, self._show_speculator_watch),
             ("🎯高抛低吸", 8, self._show_high_low_swing),
+            ("📈1minK", 7, self._show_1min_kline_dialog),
         ]:
             ttk.Button(toolbar_row2, text=txt, width=w, command=cmd).pack(side=tk.LEFT, padx=(0, tp))
         # 快速爬取/文本控制标签页控件框(共用一块区域,可以切换)
@@ -4774,6 +4772,11 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         ttk.Button(tools_row_a, text="📊 机构重仓追踪", command=self._show_institution_holdings, width=14).pack(**_tools_pad)
         ttk.Button(tools_row_a, text="🎯 量化因子体系", command=self._show_factor_catalog_dialog, width=14).pack(**_tools_pad)
         ttk.Button(tools_row_a, text="📚 机构知识体系", command=self._show_institution_knowledge_dialog, width=14).pack(**_tools_pad)
+        # 从左侧工具栏迁移过来的 3 个按钮
+        tools_row_b = ttk.Frame(tools_frame); tools_row_b.pack(fill=tk.X, pady=2)
+        ttk.Button(tools_row_b, text="🔔 信号检测", command=self.show_signal_all_holdings_detection, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_b, text="🔄 回测/回撤分析", command=self.show_backtest_dialog, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_b, text="🔍 新闻搜索", command=self.launch_keyword_search_app, width=14).pack(**_tools_pad)
         # 将咨询分析、投资、系统、赌博、交易体系、交割单分析按钮移到交易标签页
         trading_buttons_frame = ttk.LabelFrame(trading_tab, text="交易功能", padding=3)
         trading_buttons_frame.pack(fill=tk.X, expand=False, pady=2)
