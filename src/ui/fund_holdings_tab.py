@@ -243,6 +243,248 @@ _FUND_GUIDE = [
     },
 ]
 
+# ── 🤖 AI 择时判断引擎 ──
+
+def _fetch_macro_data():
+    """后台一次性拉所有宏观指标, 返回 dict"""
+    import akshare as ak, numpy as np
+    out = {}
+    try:  # 沪深300 PE
+        df = ak.stock_index_pe_lg(symbol="沪深300")
+        out["hs300_pe"] = float(df["滚动市盈率"].iloc[-1])
+    except Exception: out["hs300_pe"] = None
+    try:  # 沪深300 近20日涨跌幅
+        df = ak.stock_zh_index_daily(symbol="sh000300")
+        last20 = df.tail(20)
+        out["hs300_20d_pct"] = round((float(last20["close"].iloc[-1]) / float(last20["close"].iloc[0]) - 1) * 100, 2)
+    except Exception: out["hs300_20d_pct"] = None
+    try:  # 沪深300 近60日涨跌幅
+        df = ak.stock_zh_index_daily(symbol="sh000300")
+        last60 = df.tail(60)
+        out["hs300_60d_pct"] = round((float(last60["close"].iloc[-1]) / float(last60["close"].iloc[0]) - 1) * 100, 2)
+    except Exception: out["hs300_60d_pct"] = None
+    try:  # PMI 制造业最新
+        df = ak.macro_china_pmi()
+        out["pmi"] = float(df["制造业-指数"].iloc[0])
+        out["pmi_non_mfg"] = float(df["非制造业-指数"].iloc[0])
+        out["pmi_prev"] = float(df["制造业-指数"].iloc[1])
+    except Exception: out["pmi"] = None
+    try:  # PPI 当月同比增长
+        df = ak.macro_china_ppi()
+        out["ppi"] = float(df["当月同比增长"].iloc[0])
+    except Exception: out["ppi"] = None
+    try:  # CPI 当月同比增长
+        df = ak.macro_china_cpi()
+        out["cpi"] = float(df["当月同比增长"].iloc[0])
+    except Exception: out["cpi"] = None
+    try:  # 10Y国债收益率 (最新一个交易日)
+        df = ak.bond_china_yield(start_date="20261001", end_date="20991231")
+        out["bond10y"] = float(df["10年"].iloc[0])
+    except Exception: out["bond10y"] = None
+    try:  # DXY 美元指数
+        df = ak.index_us_stock_sina(symbol=".DXY")
+        out["dxy"] = float(df["close"].iloc[-1])
+    except Exception: out["dxy"] = None
+    try:  # 两市成交额 + 涨停数
+        df = ak.stock_market_activity_legu()
+        for _, r in df.iterrows():
+            if r["item"] == "真实涨停": out["limit_up"] = int(float(r["value"]))
+            if r["item"] == "上涨": out["up_count"] = int(float(r["value"]))
+            if r["item"] == "下跌": out["down_count"] = int(float(r["value"]))
+        out["total_turnover_yi"] = None  # legu 接口没成交额
+    except Exception: out["limit_up"] = None
+    return out
+
+
+def _assess_timing(macro, fund_style, fund_name=""):
+    """单个基金择时判断
+    返回 {"score": 0-100, "bull": [...], "bear": [...], "summary": str, "signals": [...]}"""
+    if not macro or macro.get("hs300_pe") is None:
+        return {"score": None, "bull": [], "bear": [], "summary": "⚠️ 宏观数据拉取失败, 请检查网络后点 🔄更新择时", "signals": []}
+
+    bull, bear, signals = [], [], []
+
+    def _check(condition_bull, label_bull, detail, bull_list, bear_list, score_dir):
+        """统一检查 + 追加结果"""
+        if score_dir > 0 and condition_bull:
+            bull_list.append(f"✅ {label_bull} ({detail})")
+            return 1
+        elif score_dir < 0 and not condition_bull:
+            bear_list.append(f"❌ 非 {label_bull} ({detail})")
+            return -1
+        elif score_dir < 0 and condition_bull:
+            bull_list.append(f"⚠️ 虽然 {label_bull}, 但对{fund_name or '该风格'}偏空 ({detail})")
+            return 0
+        else:
+            bear_list.append(f"❌ 未达 {label_bull} ({detail})")
+            return 0
+
+    hs300_pe = macro.get("hs300_pe") or 0
+    hs300_20d = macro.get("hs300_20d_pct") or 0
+    hs300_60d = macro.get("hs300_60d_pct") or 0
+    pmi = macro.get("pmi")
+    pmi_prev = macro.get("pmi_prev")
+    ppi = macro.get("ppi")
+    cpi = macro.get("cpi")
+    bond10y = macro.get("bond10y")
+    dxy = macro.get("dxy")
+    limit_up = macro.get("limit_up")
+
+    score = 50  # 中性
+
+    # ── 全局条件 ──
+    # 沪深300 PE 估值
+    if hs300_pe and hs300_pe < 12:
+        bull.append(f"✅ 沪深300 PE {hs300_pe:.1f} 低估区 (<12), 安全垫厚")
+        score += 8
+    elif hs300_pe and hs300_pe > 15:
+        bear.append(f"❌ 沪深300 PE {hs300_pe:.1f} 偏高 (>15), 估值有压力")
+        score -= 6
+    else:
+        bull.append(f"🟡 沪深300 PE {hs300_pe:.1f} 中性 (12~15)")
+
+    # 20日涨跌
+    if hs300_20d and hs300_20d < -5:
+        bull.append(f"✅ 沪深300 20日跌 {hs300_20d:.1f}%, 可能超跌反弹")
+        score += 5
+    elif hs300_20d and hs300_20d > 8:
+        bear.append(f"❌ 沪深300 20日涨 {hs300_20d:.1f}%, 短期过热")
+        score -= 4
+
+    # PMI
+    if pmi is not None:
+        if pmi > 50.5:
+            bull.append(f"✅ 制造业PMI {pmi:.1f} 荣枯线以上, 经济扩张")
+            score += 6
+        elif pmi < 49.5:
+            bear.append(f"❌ 制造业PMI {pmi:.1f} 荣枯线以下, 经济收缩")
+            score -= 5
+        else:
+            bull.append(f"🟡 制造业PMI {pmi:.1f} 临界区 (49.5~50.5)")
+        if pmi_prev and pmi > pmi_prev:
+            bull.append(f"✅ PMI 环比回升 (上月 {pmi_prev:.1f} → 本月 {pmi:.1f})")
+            score += 3
+
+    # ── 风格特定条件 ──
+    style = fund_style
+
+    # Beta宽基 / 宽基大盘 / 宽基小盘 / 中盘成长 / 小盘弹性 / 科技成长 / 硬科技
+    if "宽基" in style or style in ("中盘成长", "小盘弹性", "科技成长", "硬科技"):
+        if ppi is not None and ppi > 0:
+            bull.append(f"✅ PPI {ppi:.1f}% 转正, 工业利润改善 (利好周期+宽基)")
+            score += 4
+        elif ppi is not None and ppi < -1:
+            bear.append(f"❌ PPI {ppi:.1f}% 通缩区, 工业利润承压")
+            score -= 3
+        # 利率对成长的影响
+        if bond10y is not None and bond10y < 2.0:
+            bull.append(f"✅ 10Y国债 {bond10y:.2f}% 低位, 成长股估值压力小")
+            score += 5
+
+    # 成长 / 新能源 / 半导体 / AI / 创新药 / 科技成长 / 硬科技
+    if style in ("新能源", "半导体", "人工智能", "创新药", "科技成长", "硬科技", "高弹性") or "成长" in style or style in ("消费成长", "成长精选", "成长+红利"):
+        if bond10y is not None and bond10y < 2.0:
+            bull.append(f"✅ 利率低位 ({bond10y:.2f}%), 成长股贴现率低, 估值有支撑")
+            score += 5
+        if dxy is not None and dxy < 105:
+            bull.append(f"✅ DXY {dxy:.1f} 偏弱, 外资流入A股成长板块")
+            score += 4
+        # 超跌反弹
+        if hs300_20d and hs300_20d < -8:
+            bull.append(f"✅ 指数超跌 {hs300_20d:.1f}%, 成长弹性大, 反弹空间足")
+            score += 4
+
+    # 周期行业 / 券商 / 资源 / 能源 / 地产后周期 / 国防军工
+    if style in ("券商", "资源", "能源", "地产后周期", "国防军工") or "周期" in style:
+        if ppi is not None and ppi > 0.5:
+            bull.append(f"✅ PPI {ppi:.1f}% 上行, 周期品提价, 企业盈利改善")
+            score += 7
+        elif ppi is not None and ppi < -1.5:
+            bear.append(f"❌ PPI {ppi:.1f}% 深度通缩, 周期股业绩承压")
+            score -= 6
+        # 券商看市场情绪
+        if limit_up is not None and limit_up >= 50:
+            bull.append(f"✅ 涨停 {limit_up} 只, 情绪偏热, 券商受益")
+            score += 3
+
+    # 红利 / 金融 / 公用事业
+    if style in ("红利", "金融", "公用事业") or "红利" in style:
+        if bond10y is not None and bond10y < 2.0:
+            bull.append(f"✅ 10Y国债 {bond10y:.2f}% 低位, 红利股相对收益率上升")
+            score += 6
+        if hs300_pe and hs300_pe < 12:
+            bull.append(f"✅ 大盘低估区 (PE {hs300_pe:.1f}), 红利价值凸显")
+            score += 3
+
+    # 白酒 / 消费白马 / 消费成长
+    if style in ("白酒", "消费白马", "消费成长"):
+        if pmi is not None and pmi > 50:
+            bull.append(f"✅ PMI {pmi:.1f}>50, 消费景气, 白酒可选消费预期改善")
+            score += 4
+        if cpi is not None and 1 < cpi < 3:
+            bull.append(f"✅ CPI {cpi:.1f}% 温和通胀, 白酒具备定价权")
+            score += 3
+        if hs300_pe and hs300_pe < 12:
+            bull.append(f"✅ 大盘低估时消费龙头性价比高")
+            score += 2
+
+    # 美股科技 / 中概
+    if style in ("美股科技", "中概"):
+        if dxy is not None and dxy < 105:
+            bull.append(f"✅ DXY {dxy:.1f}<105, 美元弱利好美股/港股")
+            score += 6
+        if bond10y is not None and bond10y < 2.5:
+            bull.append(f"✅ 10Y美债收益率低位 (对应中国国债 {bond10y:.2f}%), 科技估值支撑")
+            score += 4
+
+    # 避险 (黄金)
+    if style == "避险":
+        if dxy is not None and dxy < 102:
+            bull.append(f"✅ DXY {dxy:.1f}<102 弱美元周期, 黄金看涨")
+            score += 7
+        if bond10y is not None and bond10y < 2.0:
+            bull.append(f"✅ 实际利率 = 名义 - 通胀预期, 当前 {bond10y:.2f}% 低位, 黄金机会")
+            score += 5
+
+    # 均衡类 / 宽基大盘
+    if "均衡" in style or style == "宽基大盘":
+        if hs300_pe and hs300_pe < 13 and (pmi or 50) >= 49.5:
+            bull.append(f"✅ 估值合理 + 经济平稳, 均衡型基金适合当前环境")
+            score += 4
+
+    # 综合打分
+    score = max(0, min(100, score))
+    if score >= 70:
+        verdict = "🟢 当下时机较佳, 可考虑加仓"
+    elif score >= 55:
+        verdict = "🟡 条件中性偏多, 持有为主, 不急追"
+    elif score >= 45:
+        verdict = "⚪ 条件中性, 方向不明朗"
+    elif score >= 30:
+        verdict = "🟠 条件中性偏空, 谨慎操作"
+    else:
+        verdict = "🔴 当下条件不利, 观望或减仓"
+
+    # 格式化 summary
+    macro_summary_parts = []
+    if hs300_pe is not None: macro_summary_parts.append(f"沪深300PE={hs300_pe:.1f}")
+    if hs300_20d is not None: macro_summary_parts.append(f"20日={hs300_20d:.1f}%")
+    if pmi is not None: macro_summary_parts.append(f"PMI={pmi:.1f}")
+    if ppi is not None: macro_summary_parts.append(f"PPI={ppi:.1f}%")
+    if bond10y is not None: macro_summary_parts.append(f"10Y债={bond10y:.2f}%")
+    if dxy is not None: macro_summary_parts.append(f"DXY={dxy:.1f}")
+    macro_line = " | ".join(macro_summary_parts)
+
+    summary = f"{verdict}\n📊 当日宏观: {macro_line}"
+
+    return {
+        "score": score,
+        "bull": bull[:6],
+        "bear": bear[:4],
+        "summary": summary,
+    }
+
+
 # 板块归类 (和邮票格子保持一致)
 _BLOCK_GROUPS = {
     "银行":   ["sh601398","sh601939","sh601288","sh601988","sh600036","sh601166","sz002142","sh600016","sh601328"],
@@ -365,6 +607,10 @@ def build_fund_holdings_tab(parent, root=None):
         _fs(-1); _rerender_all()
     ttk.Button(top, text="A+", width=3, command=_do_font_plus).pack(side=tk.RIGHT, padx=(2,1))
     ttk.Button(top, text="A-", width=3, command=_do_font_minus).pack(side=tk.RIGHT)
+    # 择时更新按钮
+    btn_timing = ttk.Button(top, text="🤖 🔄更新择时", width=14,
+                            command=lambda: _load_timing(force=True))
+    btn_timing.pack(side=tk.RIGHT, padx=(6, 0))
 
     # Notebook 分成两部分
     nb = ttk.Notebook(parent)
@@ -404,6 +650,77 @@ def build_fund_holdings_tab(parent, root=None):
     guide_vsb.pack(side=tk.RIGHT, fill=tk.Y)
     guide_canvas.create_window((0, 0), window=guide_inner, anchor="nw")
     guide_inner.bind("<Configure>", lambda e: guide_canvas.configure(scrollregion=guide_canvas.bbox("all")))
+
+    # ── 🤖 择时缓存 ──
+    _fund_timing_cache = {}  # {fund_code: {"score":, "bull":, "bear":, "summary":}}
+    _fund_timing_running = False
+    import threading as _th2, json as _json2, os as _os2
+    from datetime import datetime as _dt2
+    _TODAY = _dt2.now().strftime("%Y%m%d")
+    _timing_cache_path = _os2.path.join(_os2.path.dirname(_os2.path.abspath(__file__)),
+                                          "..", "..", "data", f"fund_timing_cache_{_TODAY}.json")
+    _timing_cache_path = _os2.path.normpath(_timing_cache_path)
+
+    def _load_timing(force=False):
+        """加载/重算所有基金的择时判断"""
+        nonlocal _fund_timing_cache, _fund_timing_running
+        if _fund_timing_running: return
+        _fund_timing_running = True
+
+        # 1) 读缓存 (非 force)
+        if not force and _os2.path.exists(_timing_cache_path):
+            try:
+                with open(_timing_cache_path, "r", encoding="utf-8") as f:
+                    _fund_timing_cache = _json2.load(f)
+                print(f"[基金择时] 读缓存 OK ({len(_fund_timing_cache)} 只基金)", flush=True)
+                _fund_timing_running = False
+                _render_timing_boxes()
+                return
+            except Exception as e:
+                print(f"[基金择时] 缓存读取失败: {e}", flush=True)
+
+        # 2) 后台线程联网计算
+        status.configure(text="🤖 择时计算中... (拉宏观数据)", foreground=_FG_GOLD)
+        print("[基金择时] 开始拉宏观数据...", flush=True)
+
+        def _bg():
+            nonlocal _fund_timing_cache
+            try:
+                macro = _fetch_macro_data()
+                print(f"[基金择时] 宏观数据拉完: {list(macro.keys())}", flush=True)
+                results = {}
+                for cat in _FUND_GUIDE:
+                    for f in cat["funds"]:
+                        key = f"{f['code']}|{f['name']}"
+                        results[key] = _assess_timing(macro, f["style"], f["name"])
+                _fund_timing_cache = results
+                # 写缓存
+                try:
+                    _os2.makedirs(_os2.path.dirname(_timing_cache_path), exist_ok=True)
+                    with open(_timing_cache_path, "w", encoding="utf-8") as f:
+                        _json2.dump(results, f, ensure_ascii=False, indent=2)
+                    print(f"[基金择时] 缓存写入 OK ({len(results)} 只)", flush=True)
+                except Exception as e:
+                    print(f"[基金择时] 缓存写入失败: {e}", flush=True)
+                root.after(0, _render_timing_boxes)
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                print(f"[基金择时] 计算失败: {e}", flush=True)
+                root.after(0, lambda: status.configure(text=f"❌ 择时计算失败: {e}", foreground="#EF5350"))
+            finally:
+                _fund_timing_running = False
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _render_timing_boxes():
+        """把 _fund_timing_cache 数据渲染到所有卡片底部 (重绘整个 Tab3)"""
+        # 重新渲染 Tab3 (guide) — 因为 _render_guide 已经会自动读 _fund_timing_cache
+        _render_guide()
+        # 也更新状态
+        if _fund_timing_cache:
+            status.configure(text=f"🤖 择时 OK ({len(_fund_timing_cache)} 只)", foreground=_FG_GREEN)
+        else:
+            status.configure(text="🤖 择时无数据", foreground=_FG_DIM)
 
     # ── Tab3 需要先用, 提前定义 ──
     def _on_stock_click(e, sina, name):
@@ -476,7 +793,51 @@ def build_fund_holdings_tab(parent, root=None):
                          font=_font(bold=True)).pack(anchor="w", padx=8, pady=(6, 0))
                 tk.Label(card, text=f["timing"], bg=_BG_CARD, fg=_FG_DIM,
                          font=_font(), wraplength=280, justify=tk.LEFT).pack(
-                    anchor="w", padx=8, pady=(0, 8))
+                    anchor="w", padx=8, pady=(0, 4))
+
+                # 🤖 AI 择时判断
+                _tkey = f"{f['code']}|{f['name']}"
+                _timing = _fund_timing_cache.get(_tkey)
+                if _timing:
+                    _score = _timing.get("score")
+                    _score_str = f"{_score}/100" if _score is not None else "N/A"
+                    if _score is not None:
+                        if _score >= 70: _score_color = "#66BB6A"
+                        elif _score >= 55: _score_color = "#FFD54F"
+                        elif _score >= 45: _score_color = "#AAAAAA"
+                        elif _score >= 30: _score_color = "#FF8A65"
+                        else: _score_color = "#EF5350"
+                    else:
+                        _score_color = _FG_DIM
+                    _ai = tk.Frame(card, bg="#1A2525", highlightbackground=_FG_BLUE, highlightthickness=1)
+                    _ai.pack(fill=tk.X, padx=4, pady=(2, 6))
+                    _score_row = tk.Frame(_ai, bg="#1A2525")
+                    _score_row.pack(fill=tk.X, padx=6, pady=(4, 0))
+                    tk.Label(_score_row, text="🤖 AI 择时", bg="#1A2525", fg=_FG_BLUE,
+                             font=_font(bold=True)).pack(side=tk.LEFT)
+                    tk.Label(_score_row, text=_score_str, bg="#1A2525", fg=_score_color,
+                             font=_font(bold=True)).pack(side=tk.RIGHT)
+                    # summary
+                    _summary = _timing.get("summary", "")
+                    if _summary:
+                        tk.Label(_ai, text=_summary, bg="#1A2525", fg=_FG_TEXT,
+                                 font=_font(), wraplength=280, justify=tk.LEFT).pack(
+                            anchor="w", padx=6, pady=(2, 2))
+                    # 符合 / 不符合
+                    _lines = []
+                    for _b in _timing.get("bull", [])[:3]:
+                        _lines.append(_b)
+                    for _b in _timing.get("bear", [])[:2]:
+                        _lines.append(_b)
+                    if _lines:
+                        tk.Label(_ai, text="\n".join(_lines), bg="#1A2525", fg=_FG_DIM,
+                                 font=_font(), wraplength=280, justify=tk.LEFT).pack(
+                            anchor="w", padx=6, pady=(0, 6))
+                else:
+                    tk.Label(card, text="🤖 AI 择时: 加载中... (顶栏点🤖🔄更新择时)",
+                             bg=_BG_CARD, fg=_FG_DIM, font=_font(),
+                             wraplength=280, justify=tk.LEFT).pack(
+                        anchor="w", padx=8, pady=(2, 6))
 
     # Dark theme for Frame
     try:
@@ -816,3 +1177,4 @@ def build_fund_holdings_tab(parent, root=None):
 
     # ── 自动触发 ──
     parent.after(300, lambda: _load_data(force=False))
+    parent.after(2000, lambda: _load_timing(force=False))  # 择时等宏观数据
