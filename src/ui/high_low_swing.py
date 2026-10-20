@@ -24,6 +24,9 @@ _FG_RED = "#FF8A80"       # 涨
 _FG_GREEN = "#69F0AE"     # 跌
 _FG_GOLD = "#FFD54F"      # 金
 _FG_BLUE = "#90CAF9"
+_FG_CYAN = "#80DEEA"      # 青
+_FG_PURPLE = "#CE93D8"
+_FG_ORANGE = "#FFB74D"
 _FG_TEXT = "#E0E0E0"
 _FG_DIM = "#9E9E9E"
 
