@@ -3,6 +3,7 @@
 """
 import tkinter as tk
 import tkinter.ttk as ttk
+import math
 
 # ── 全局字号 (可变: A- / A+ 按钮修改后 refresh config) ──
 _FONT_BASE = [15]           # 正文字号 (用户反馈调大, 默认 15pt)
@@ -2126,51 +2127,27 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 ax.scatter([_last_x], [ma60[-1]], s=25, color="#EF9A9A", zorder=12, marker="_", linewidths=2.0)
                 ax.text(_last_x + 1, ma60[-1], f" MA60={ma60[-1]:.2f}", color="#EF9A9A", fontsize=7, va="center")
 
-            # ── BOLL 带 (主图可选) ──
-            if _draw_boll_main:
-                _boll_valid = ~_np.isnan(boll_upper) & ~_np.isnan(boll_lower)
-                ax.fill_between(x, boll_upper, boll_lower, where=_boll_valid,
-                                color="#607D8B", alpha=0.15)
-                ax.plot(x, boll_upper, color="#78909C", lw=0.8, ls="--", label="BOLL上")
-                ax.plot(x, boll_mid, color="#8D6E63", lw=0.8, ls=":", label="BOLL中")
-                ax.plot(x, boll_lower, color="#78909C", lw=0.8, ls="--", label="BOLL下")
+            # ── BOLL 主图已砍 (副图 BOLL%B 足够) ──
 
-            # ── 支撑阻力线 (可选) ──
+            # ── 支撑阻力线 — 只画整数关口 (step 根据价格动态定) ──
             if _sr_var.get():
-                _sr_lines = []  # (price, label, color, ls)
-                # 1) BOLL 上/下轨最近有效值
-                if not _np.isnan(boll_upper[-1]):
-                    _sr_lines.append((boll_upper[-1], "BOLL上", "#78909C", "--"))
-                if not _np.isnan(boll_lower[-1]):
-                    _sr_lines.append((boll_lower[-1], "BOLL下", "#78909C", "--"))
-                # 2) 整数关口 (根据当前价找上下各一个)
                 _cur = c[-1]
-                _step = 1.0 if _cur < 20 else 5.0 if _cur < 100 else 10.0 if _cur < 500 else 50.0
-                for _mult in (-1, 1):
-                    _gk = round(int(_cur / _step + _mult) * _step, 2)
-                    if _gk > 0:
-                        _sr_lines.append((_gk, f"{_gk:g}", "#FF9800", ":"))
-                # 3) 近期高低点 (order=10, 只看最近 30 根 — 远的没用还挤)
-                _sr_lo = max(0, len(c) - 30)
-                _sr_hi = len(c)
-                for _oi in range(10, min(_sr_hi, len(c) - 10)):
-                    if _oi < _sr_lo: continue
-                    if h[_oi] == max(h[max(0, _oi-10):_oi+11]):
-                        _sr_lines.append((h[_oi], f"高{h[_oi]:.2f}", "#EF5350", "-."))
-                    if l[_oi] == min(l[max(0, _oi-10):_oi+11]):
-                        _sr_lines.append((l[_oi], f"低{l[_oi]:.2f}", "#22C55E", "-."))
-                # 去重 + 画 (S/R 标签只画最近 3 条, 用 transAxes 左侧避开右上 MA 浮窗)
-                _seen_sr = set()
-                _sr_draw = []
-                for _sp, _sl, _sc, _ss in _sr_lines:
-                    _key = round(_sp, 2)
-                    if _key in _seen_sr: continue
-                    _seen_sr.add(_key)
-                    _sr_draw.append((_sp, _sl, _sc, _ss))
-                    ax.axhline(_sp, color=_sc, ls=_ss, lw=0.7, alpha=0.7)
-                # 标签最多画 3 条, 用 ax 坐标左偏 (x=2)
-                for _sp, _sl, _sc, _ss in _sr_draw[-3:]:
-                    ax.text(2, _sp, f" {_sl}", color=_sc, fontsize=7, va="center")
+                if _cur < 5: _step = 0.5
+                elif _cur < 20: _step = 1.0
+                elif _cur < 100: _step = 5.0
+                elif _cur < 500: _step = 10.0
+                else: _step = 50.0
+                _gk_lines = []
+                # 当前价上下各 1 个整数关口
+                _gk_lo = math.floor(_cur / _step) * _step
+                _gk_hi = _gk_lo + _step
+                if _gk_lo > 0:
+                    _gk_lines.append((_gk_lo, _step, "#FF9800"))  # 橙=支撑
+                if _gk_hi > _cur:
+                    _gk_lines.append((_gk_hi, _step, "#FF8A80"))  # 红=压力
+                for _sp, _st, _sc in _gk_lines:
+                    ax.axhline(y=_sp, color=_sc, ls=":", lw=0.6, alpha=0.5)
+                    ax.text(2, _sp, f" {_sp:g}", color=_sc, fontsize=7, va="center")
 
             # ═══════════════════════════════════════════════
             # 🆕 动态副图: MACD / RSI / KDJ — 根据 _sub_slot1 / _sub_slot2 分配
