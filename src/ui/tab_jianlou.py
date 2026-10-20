@@ -135,7 +135,7 @@ class JianLouMixin:
 
         dlg = tk.Toplevel(getattr(self, "win", None) or self.root)
         dlg.title("⚠️ 异常扫描")
-        dlg.geometry("1280x780")
+        dlg.geometry("1440x860")
         dlg.configure(bg=_BG_DEEP)
 
         # ── 顶部工具栏 ──
@@ -143,15 +143,15 @@ class JianLouMixin:
         top.pack_propagate(False)
 
         tk.Label(top, text="⚠️ 异常扫描", bg=_BG_TOOLBAR, fg=_FG_GOLD,
-                 font=("Menlo", 12, "bold")).pack(side=tk.LEFT, padx=12)
+                 font=("Menlo", 14, "bold")).pack(side=tk.LEFT, padx=12)
         status = tk.Label(top, text="⏳ 加载股票池...", bg=_BG_TOOLBAR, fg=_FG_DIM,
-                          font=("Menlo", 10))
+                          font=("Menlo", 12))
         status.pack(side=tk.RIGHT, padx=12)
 
         def _btn(text, cmd, fg=_FG_GREEN):
             b = tk.Button(top, text=text, command=cmd, bg=_BG_PANEL, fg=fg,
                           activebackground=_BG_CARD, activeforeground=fg,
-                          font=("Menlo", 10), relief=tk.FLAT, padx=8, pady=2,
+                          font=("Menlo", 12), relief=tk.FLAT, padx=8, pady=2,
                           cursor="hand2")
             return b
 
@@ -162,9 +162,63 @@ class JianLouMixin:
         add_btn.pack(side=tk.LEFT, padx=4, pady=6)
 
         tk.Label(top, text="  🔴跌≥8%  🟢涨≥10%  💥量比≥3  ⚠️振幅≥12%  🟡昨跌今稳",
-                 bg=_BG_TOOLBAR, fg=_FG_DIM, font=("Menlo", 9)).pack(side=tk.LEFT, padx=10)
+                 bg=_BG_TOOLBAR, fg=_FG_DIM, font=("Menlo", 11)).pack(side=tk.LEFT, padx=10)
 
-        # ── 滚动容器工厂 (先定义, 后面要用到) ──
+        # ── 主容器: 左右分栏 ──
+        main_split = tk.Frame(dlg, bg=_BG_DEEP); main_split.pack(fill=tk.BOTH, expand=True)
+
+        # 左侧 (列表区 ~55%)
+        left_panel = tk.Frame(main_split, bg=_BG_DEEP)
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 3), pady=6)
+
+        # 右侧 (K线区 ~45%)
+        right_panel = tk.Frame(main_split, bg=_BG_DEEP, width=560)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(3, 6), pady=6)
+        right_panel.pack_propagate(False)
+
+        # 右侧 K线标题栏
+        kline_top = tk.Frame(right_panel, bg=_BG_TOOLBAR, height=30); kline_top.pack(fill=tk.X)
+        kline_top.pack_propagate(False)
+        kline_title = tk.Label(kline_top, text="📊 点击左侧股票查看日K",
+                               bg=_BG_TOOLBAR, fg=_FG_DIM, font=("Menlo", 12))
+        kline_title.pack(side=tk.LEFT, padx=10, pady=4)
+
+        # 右侧 K线嵌入区
+        _kline_embed = tk.Frame(right_panel, bg=_BG_PANEL)
+        _kline_embed.pack(fill=tk.BOTH, expand=True)
+
+        # ── Notebook 分类展示 (放到 left_panel 里) ──
+        nb = ttk.Notebook(left_panel)
+        nb.pack(fill=tk.BOTH, expand=True)
+
+        # ttk 深色主题
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+            style.configure("TNotebook", background=_BG_DEEP, borderwidth=0)
+            style.configure("TNotebook.Tab", background=_BG_PANEL, foreground=_FG_TEXT,
+                            padding=(14, 4), font=("Menlo", 12))
+            style.map("TNotebook.Tab", background=[("selected", _BG_CARD)],
+                      foreground=[("selected", _FG_GOLD)])
+            style.configure("TFrame", background=_BG_DEEP)
+        except Exception:
+            pass
+
+        # 5 个分类 Tab
+        tabs = {
+            "drops": ("🔴 大跌预警", _FG_RED),
+            "surges": ("🟢 大涨龙头", _FG_GREEN),
+            "volume": ("💥 放量异动", _FG_ORANGE),
+            "swing": ("⚠️ 振幅异常", _FG_PURPLE),
+            "bottom": ("🟡 昨跌今稳", _FG_GOLD),
+        }
+        tab_frames = {}
+        for key, (label, color) in tabs.items():
+            f = ttk.Frame(nb)
+            nb.add(f, text=label)
+            tab_frames[key] = {"frame": f, "color": color, "rows": []}
+
+        # ── 滚动容器: 每个 tab 里放一个可滚动 Frame ──
         def _make_scrollable(parent):
             cv = tk.Canvas(parent, bg=_BG_DEEP, highlightthickness=0)
             vsb = tk.Scrollbar(parent, orient="vertical", command=cv.yview)
@@ -174,71 +228,15 @@ class JianLouMixin:
             cv.configure(yscrollcommand=vsb.set)
             cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             vsb.pack(side=tk.RIGHT, fill=tk.Y)
+            # 鼠标滚轮
             def _wheel(e): cv.yview_scroll(-1 * (e.delta // 120), "units")
             cv.bind_all("<MouseWheel>", _wheel)
             return inner, cv
 
         scroll_inners = {}
-
-        # ── 主容器: PanedWindow (可拖拽调整左右宽度) ──
-        paned = tk.PanedWindow(dlg, orient=tk.HORIZONTAL,
-                               bg=_BG_DEEP, sashbg=_BG_CARD, sashrelief=tk.FLAT,
-                               sashwidth=6, bd=0)
-        paned.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-
-        # 左侧 (列表区) — 先 pack 内部控件再 add
-        left_panel = tk.Frame(paned, bg=_BG_DEEP)
-        nb = ttk.Notebook(left_panel)
-        nb.pack(fill=tk.BOTH, expand=True)
-        tab_frames = {}
-        tabs_meta = {
-            "drops": ("🔴 大跌预警", _FG_RED),
-            "surges": ("🟢 大涨龙头", _FG_GREEN),
-            "volume": ("💥 放量异动", _FG_ORANGE),
-            "swing": ("⚠️ 振幅异常", _FG_PURPLE),
-            "bottom": ("🟡 昨跌今稳", _FG_GOLD),
-        }
-        for key, (label, color) in tabs_meta.items():
-            f = ttk.Frame(nb)
-            nb.add(f, text=label)
-            tab_frames[key] = {"frame": f, "color": color, "rows": []}
-            inner, _ = _make_scrollable(f)
+        for key in tab_frames:
+            inner, cv = _make_scrollable(tab_frames[key]["frame"])
             scroll_inners[key] = inner
-
-        # 右侧 (K线区) — 先 pack 内部控件再 add
-        right_panel = tk.Frame(paned, bg=_BG_DEEP)
-        kline_top = tk.Frame(right_panel, bg=_BG_TOOLBAR, height=30)
-        kline_top.pack(fill=tk.X)
-        kline_top.pack_propagate(False)
-        kline_title = tk.Label(kline_top, text="📊 点击左侧股票查看日K",
-                               bg=_BG_TOOLBAR, fg=_FG_DIM, font=("Menlo", 10))
-        kline_title.pack(side=tk.LEFT, padx=10, pady=4)
-        _kline_embed = tk.Frame(right_panel, bg=_BG_PANEL)
-        _kline_embed.pack(fill=tk.BOTH, expand=True)
-
-        # 两个子 frame 都 pack 完了, 再 add 到 PanedWindow
-        paned.add(left_panel)
-        paned.add(right_panel)
-        # 设置初始分隔位置 (窗口宽度的 40%)
-        dlg.update_idletasks()
-        try:
-            _w = dlg.winfo_width()
-            paned.sash_place(0, int(_w * 0.4), 0)
-        except Exception:
-            pass
-
-        # ttk 深色主题
-        style = ttk.Style()
-        try:
-            style.theme_use("clam")
-            style.configure("TNotebook", background=_BG_DEEP, borderwidth=0)
-            style.configure("TNotebook.Tab", background=_BG_PANEL, foreground=_FG_TEXT,
-                            padding=(14, 4), font=("Menlo", 10))
-            style.map("TNotebook.Tab", background=[("selected", _BG_CARD)],
-                      foreground=[("selected", _FG_GOLD)])
-            style.configure("TFrame", background=_BG_DEEP)
-        except Exception:
-            pass
 
         # ── 数据存储 ──
         _scan_data = {"results": {}, "stock_pool": [], "loading": False}
@@ -323,7 +321,7 @@ class JianLouMixin:
             header = tk.Frame(inner, bg=_BG_PANEL, height=28); header.pack(fill=tk.X, pady=(4, 2))
             header.pack_propagate(False)
             def _hcol(text, w, fg=_FG_DIM):
-                tk.Label(header, text=text, bg=_BG_PANEL, fg=fg, font=("Menlo", 9, "bold"),
+                tk.Label(header, text=text, bg=_BG_PANEL, fg=fg, font=("Menlo", 11, "bold"),
                          width=w, anchor="w").pack(side=tk.LEFT, padx=2)
             _hcol("股票", 18, _FG_GOLD)
             _hcol("日期", 7, _FG_CYAN)
@@ -332,11 +330,11 @@ class JianLouMixin:
             _hcol("量比", 6)
             _hcol("来源", 8, _FG_BLUE)
             tk.Label(header, text="❓", bg=_BG_PANEL, fg=_FG_DIM,
-                     font=("Menlo", 9), width=3).pack(side=tk.RIGHT, padx=4)
+                     font=("Menlo", 11), width=3).pack(side=tk.RIGHT, padx=4)
 
             if not items:
                 tk.Label(inner, text="（暂无符合条件的股票）", bg=_BG_DEEP, fg=_FG_DIM,
-                         font=("Menlo", 10)).pack(pady=24)
+                         font=("Menlo", 12)).pack(pady=24)
                 return
 
             # 按 chg_pct 排序 (大跌升序, 大涨降序)
@@ -362,36 +360,36 @@ class JianLouMixin:
                 amp_txt = f"{amp:.1f}%"
 
                 l_name = tk.Label(row, text=f"  {nm[:8]}({sina[2:]})", bg=row_bg, fg=_FG_TEXT,
-                                  font=("Menlo", 10, "bold"), anchor="w")
+                                  font=("Menlo", 12, "bold"), anchor="w")
                 l_name.pack(side=tk.LEFT, padx=2)
 
                 date_tag = it.get("date_tag", "")
                 l_date = tk.Label(row, text=date_tag, bg=row_bg, fg=_FG_CYAN,
-                                  font=("Menlo", 10), width=7, anchor="w")
+                                  font=("Menlo", 12), width=7, anchor="w")
                 l_date.pack(side=tk.LEFT, padx=2)
 
                 l_chg = tk.Label(row, text=chg_txt, bg=row_bg, fg=chg_fg,
-                                 font=("Menlo", 11, "bold"), width=8, anchor="w")
+                                 font=("Menlo", 13, "bold"), width=8, anchor="w")
                 l_chg.pack(side=tk.LEFT, padx=2)
 
                 l_amp = tk.Label(row, text=amp_txt, bg=row_bg,
                                  fg=_FG_PURPLE if amp >= 12 else _FG_DIM,
-                                 font=("Menlo", 10), width=7, anchor="w")
+                                 font=("Menlo", 12), width=7, anchor="w")
                 l_amp.pack(side=tk.LEFT, padx=2)
 
                 l_vr = tk.Label(row, text=vr_txt, bg=row_bg,
                                 fg=_FG_ORANGE if (vr and vr >= 3) else _FG_DIM,
-                                font=("Menlo", 10), width=6, anchor="w")
+                                font=("Menlo", 12), width=6, anchor="w")
                 l_vr.pack(side=tk.LEFT, padx=2)
 
                 l_src = tk.Label(row, text=src, bg=row_bg, fg=_FG_BLUE,
-                                 font=("Menlo", 9), width=8)
+                                 font=("Menlo", 11), width=8)
                 l_src.pack(side=tk.LEFT, padx=2)
 
                 # ❓ 帮助按钮
                 help_key = tab_key_to_help(tab_key)
                 l_help = tk.Label(row, text="❓", bg=row_bg, fg=_FG_GOLD,
-                                  font=("Menlo", 11), cursor="hand2")
+                                  font=("Menlo", 13), cursor="hand2")
                 l_help.pack(side=tk.RIGHT, padx=6)
 
                 # 点击 → 右侧嵌入日K
@@ -436,9 +434,9 @@ class JianLouMixin:
             win.transient(parent)
 
             tk.Label(win, text=f"❓ {help_key} — 特征解读", bg=_BG_DEEP, fg=_FG_GOLD,
-                     font=("Menlo", 12, "bold")).pack(pady=(12, 6))
+                     font=("Menlo", 14, "bold")).pack(pady=(12, 6))
 
-            txt = tk.Text(win, bg=_BG_PANEL, fg=_FG_TEXT, font=("Menlo", 10),
+            txt = tk.Text(win, bg=_BG_PANEL, fg=_FG_TEXT, font=("Menlo", 12),
                           wrap=tk.WORD, relief=tk.FLAT, padx=14, pady=10,
                           height=18)
             txt.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
@@ -446,7 +444,7 @@ class JianLouMixin:
             txt.config(state=tk.DISABLED)
 
             tk.Button(win, text="关闭", command=win.destroy, bg=_BG_PANEL, fg=_FG_CYAN,
-                      relief=tk.FLAT, padx=20, pady=4, font=("Menlo", 10)).pack(pady=10)
+                      relief=tk.FLAT, padx=20, pady=4, font=("Menlo", 12)).pack(pady=10)
 
         # ── 主扫描流程 (全市场多日榜 + 近5天K线扫单日异常) ──
         def _do_scan():
@@ -639,8 +637,8 @@ class JianLouMixin:
             win.transient(dlg)
 
             tk.Label(win, text="输入6位股票代码 (多个用逗号分隔):",
-                     bg=_BG_DEEP, fg=_FG_TEXT, font=("Menlo", 10)).pack(pady=(12, 4))
-            ent = tk.Entry(win, font=("Menlo", 12), bg=_BG_PANEL, fg=_FG_TEXT,
+                     bg=_BG_DEEP, fg=_FG_TEXT, font=("Menlo", 12)).pack(pady=(12, 4))
+            ent = tk.Entry(win, font=("Menlo", 14), bg=_BG_PANEL, fg=_FG_TEXT,
                            insertbackground=_FG_TEXT, relief=tk.FLAT)
             ent.pack(padx=20, pady=4, fill=tk.X)
             ent.focus_set()
@@ -670,7 +668,7 @@ class JianLouMixin:
                 _do_scan()
 
             tk.Button(win, text="添加并扫描", command=_ok, bg=_FG_GOLD, fg=_BG_DEEP,
-                      relief=tk.FLAT, font=("Menlo", 10, "bold"), padx=16, pady=4).pack(pady=10)
+                      relief=tk.FLAT, font=("Menlo", 12, "bold"), padx=16, pady=4).pack(pady=10)
             ent.bind("<Return>", lambda e: _ok())
 
         add_btn.config(command=_add_stock)
