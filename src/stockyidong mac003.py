@@ -394,6 +394,7 @@ from ui.tab_thread import ThreadMixin
 from ui.tab_format import FormatMixin
 from ui.tab_holdings import HoldingsMixin
 from ui.tab_caochuan import CaochuanMixin
+from ui.tab_jianlou import JianLouMixin
 
 # Phase 5c: Builders/Nav/Spider/Realtime/Checks/Math/Getters/Trade/EmoDeep/Token/Schedule/Buttons
 from ui.tab_builders import BuildersMixin
@@ -424,7 +425,7 @@ from ui.tab_rest import RestMixin
 from ui.tab_toplevel import ToplevelMixin
 from ui.tab_web import WebMixin
 
-class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, ExportMixin, FileIoMixin, FinanceMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IndicatorMixin, InnerClassMixin, KellyMixin, LeaderMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, WarningMixin, WebMixin, WencaiMixin, WordcloudMixin):
+class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, ExportMixin, FileIoMixin, FinanceMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, WarningMixin, WebMixin, WencaiMixin, WordcloudMixin):
 
     def __init__(self, root):
         self.root = root
@@ -4728,6 +4729,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("👁️看盘", 7, self._show_speculator_watch),
             ("🎯高抛低吸", 8, self._show_high_low_swing),
             ("📋操盘", 7, self._show_caochuan_panel),
+            ("🧲捡漏", 7, self._show_jianlou),
             ("📈1minK", 7, self._show_1min_kline_dialog),
             ("🔍多股对比", 8, self._show_multi_compare_dialog),
         ]:
