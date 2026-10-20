@@ -3830,7 +3830,13 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 ax1.bar(x[i], abs(c - o), bottom=min(c, o), width=w, color=col, edgecolor=col)
 
             ax1.plot(x, ma5, color="#FF8A65", lw=0.9, label="MA5")
-            ax1.plot(x, ma10, color="#42A5F5", lw=0.9, label="MA10")
+            # 日K/周K/月K: MA10 挤 MA5, 换成 MA60 更有长期意义
+            if period in ("minute", "60"):
+                ax1.plot(x, ma10, color="#42A5F5", lw=0.9, label="MA10")
+            else:
+                # 周/月K额外画 MA10 作为中期, 日线跳过
+                if period in ("week", "month"):
+                    ax1.plot(x, ma10, color="#42A5F5", lw=0.9, label="MA10")
             ax1.plot(x, ma20, color="#AB47BC", lw=0.9, label="MA20")
             ax1.plot(x, ma60, color="#EF5350", lw=1.0, label="MA60")
             ax1.legend(loc="upper left", fontsize=8, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
@@ -3844,18 +3850,13 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
 
             # 🆕 支撑/阻力水平线 (局部极值聚类)
             if sup_var.get() and n >= 20:
-                # 找最近 120 根的局部峰谷
                 _lookback = min(n, 120)
                 _slice = slice(n - _lookback, n)
                 _h_sl, _l_sl = highs[_slice], lows[_slice]
-                _local_max = []
-                _local_min = []
+                _local_max = []; _local_min = []
                 for i in range(2, _lookback - 2):
-                    if _h_sl[i] >= max(_h_sl[i-2:i+3]):
-                        _local_max.append(_h_sl[i])
-                    if _l_sl[i] <= min(_l_sl[i-2:i+3]):
-                        _local_min.append(_l_sl[i])
-                # 聚类合并 (阈值 1.5%)
+                    if _h_sl[i] >= max(_h_sl[i-2:i+3]): _local_max.append(_h_sl[i])
+                    if _l_sl[i] <= min(_l_sl[i-2:i+3]): _local_min.append(_l_sl[i])
                 def _cluster(peaks, thr=0.015):
                     if not peaks: return []
                     peaks = sorted(peaks)
@@ -3863,80 +3864,93 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                     for p in peaks[1:]:
                         if (p - groups[-1][-1]) / groups[-1][-1] <= thr:
                             groups[-1].append(p)
-                        else:
-                            groups.append([p])
+                        else: groups.append([p])
                     return [float(np.mean(g)) for g in groups if len(g) >= 2]
                 _supports = _cluster(_local_min, 0.015)
                 _resistances = _cluster(_local_max, 0.015)
-                # 过滤: 只画在当前价格上下 20% 范围内
                 _cur = closes[-1]
+                # 日线只画最近的 2 条支撑/2 条压力 (1min/60min 画 3 条)
+                _sr_limit = 2 if period not in ("minute", "60") else 3
+                _sr_drawn = set()
                 for s in _supports:
+                    if s in _sr_drawn: continue
                     if _cur * 0.8 < s < _cur * 1.02:
+                        _sr_drawn.add(s)
                         ax1.axhline(y=s, color="#81D4FA", lw=0.7, ls="--", alpha=0.7)
-                        ax1.text(n - 0.5, s, f"S {s:.2f}", color="#81D4FA", fontsize=7, va="bottom", ha="right")
                 for r in _resistances:
+                    if r in _sr_drawn: continue
                     if _cur * 0.98 < r < _cur * 1.2:
+                        _sr_drawn.add(r)
                         ax1.axhline(y=r, color="#FF8A80", lw=0.7, ls="--", alpha=0.7)
-                        ax1.text(n - 0.5, r, f"R {r:.2f}", color="#FF8A80", fontsize=7, va="bottom", ha="right")
+                # 标签只画最靠近当前价的各 1 条
+                def _nearest(vals, target):
+                    return min(vals, key=lambda v: abs(v - target)) if vals else None
+                _near_s = _nearest([s for s in _supports if _cur * 0.8 < s < _cur * 1.02], _cur)
+                _near_r = _nearest([r for r in _resistances if _cur * 0.98 < r < _cur * 1.2], _cur)
+                if _near_s is not None:
+                    ax1.text(n - 0.5, _near_s, f"S {_near_s:.2f}", color="#81D4FA", fontsize=7, va="bottom", ha="right")
+                if _near_r is not None:
+                    ax1.text(n - 0.5, _near_r, f"R {_near_r:.2f}", color="#FF8A80", fontsize=7, va="bottom", ha="right")
 
-            # 🆕 买卖点标记
+            # 🆕 买卖点标记 (日K: 只留金叉/死叉 + 最近20根)
             if bsp_var.get() and n >= 30:
-                _bs = []  # (idx, price, 'buy'/'sell', label)
-                # 金叉/死叉 (MA5 vs MA10)
+                _bs = []  # (idx, price, 'buy'/'sell')
+                # 金叉/死叉 (MA5 vs MA20, 日线用 MA20 更可靠, MA10 太敏感)
+                _ma_fast = ma5
+                _ma_slow = ma20 if period not in ("minute", "60") else ma10
                 for i in range(1, n):
-                    if np.isnan(ma5[i]) or np.isnan(ma10[i]) or np.isnan(ma5[i-1]) or np.isnan(ma10[i-1]):
+                    if np.isnan(_ma_fast[i]) or np.isnan(_ma_slow[i]) or np.isnan(_ma_fast[i-1]) or np.isnan(_ma_slow[i-1]):
                         continue
-                    if ma5[i-1] < ma10[i-1] and ma5[i] >= ma10[i]:
-                        _bs.append((i, lows[i], "buy", "金叉"))
-                    elif ma5[i-1] > ma10[i-1] and ma5[i] <= ma10[i]:
-                        _bs.append((i, highs[i], "sell", "死叉"))
-                # BOLL 突破 (如果副图选了 BOLL, 主图也画带)
-                _boll_upper = None
-                # 锤子线 (看涨) / 射击之星 (看跌) — 只用最近 60 根避免太密
-                _recent = range(max(10, n - 60), n)
-                for i in _recent:
-                    if i < 1 or i >= n: continue
-                    bdy = abs(closes[i] - opens[i])
-                    if bdy < 0.001 * closes[i]: continue
-                    full_r = highs[i] - lows[i]
-                    if full_r < 0.005 * closes[i]: continue
-                    ur = highs[i] - max(closes[i], opens[i])
-                    lr = min(closes[i], opens[i]) - lows[i]
-                    # 锤子线: 下影长
-                    if lr >= 2 * bdy and ur < bdy * 0.5 and closes[i] > opens[i]:
-                        _bs.append((i, lows[i], "buy", "锤子"))
-                    # 射击之星: 上影长
-                    if ur >= 2 * bdy and lr < bdy * 0.5 and closes[i] < opens[i]:
-                        _bs.append((i, highs[i], "sell", "射击"))
-                # BOLL 计算 (后面主图也要画)
-                _boll_mid = _ma(closes, 20)
-                _boll_std = np.full(n, np.nan)
-                for i in range(19, n):
-                    _boll_std[i] = np.std(closes[i-19:i+1])
-                _boll_upper = _boll_mid + 2 * _boll_std
-                _boll_lower = _boll_mid - 2 * _boll_std
-                # BOLL 突破上轨 → 卖点候选
-                for i in range(max(20, n - 60), n):
-                    if np.isnan(_boll_upper[i]): continue
-                    if closes[i-1] < _boll_upper[i-1] and closes[i] >= _boll_upper[i]:
-                        _bs.append((i, highs[i], "sell", "破上轨"))
-                    if closes[i-1] > _boll_lower[i-1] and closes[i] <= _boll_lower[i]:
-                        _bs.append((i, lows[i], "buy", "破下轨"))
+                    if _ma_fast[i-1] < _ma_slow[i-1] and _ma_fast[i] >= _ma_slow[i]:
+                        _bs.append((i, lows[i], "buy"))
+                    elif _ma_fast[i-1] > _ma_slow[i-1] and _ma_fast[i] <= _ma_slow[i]:
+                        _bs.append((i, highs[i], "sell"))
+                # 蜡烛形态只在 1min/60min 画, 日线过滤 (太密)
+                if period in ("minute", "60"):
+                    _recent = range(max(10, n - 60), n)
+                    for i in _recent:
+                        if i < 1 or i >= n: continue
+                        bdy = abs(closes[i] - opens[i])
+                        if bdy < 0.001 * closes[i]: continue
+                        full_r = highs[i] - lows[i]
+                        if full_r < 0.005 * closes[i]: continue
+                        ur = highs[i] - max(closes[i], opens[i])
+                        lr = min(closes[i], opens[i]) - lows[i]
+                        if lr >= 2 * bdy and ur < bdy * 0.5 and closes[i] > opens[i]:
+                            _bs.append((i, lows[i], "buy"))
+                        if ur >= 2 * bdy and lr < bdy * 0.5 and closes[i] < opens[i]:
+                            _bs.append((i, highs[i], "sell"))
+                # BOLL 突破只在 1min/60min
+                if period in ("minute", "60"):
+                    _boll_mid = _ma(closes, 20)
+                    _boll_std = np.full(n, np.nan)
+                    for i in range(19, n): _boll_std[i] = np.std(closes[i-19:i+1])
+                    _boll_upper = _boll_mid + 2 * _boll_std
+                    _boll_lower = _boll_mid - 2 * _boll_std
+                    for i in range(max(20, n - 60), n):
+                        if np.isnan(_boll_upper[i]): continue
+                        if closes[i-1] < _boll_upper[i-1] and closes[i] >= _boll_upper[i]:
+                            _bs.append((i, highs[i], "sell"))
+                        if closes[i-1] > _boll_lower[i-1] and closes[i] <= _boll_lower[i]:
+                            _bs.append((i, lows[i], "buy"))
                 # 去重 (同一 idx 只保留第一个)
                 _seen_idx = set()
                 _bs_u = []
                 for b in _bs:
                     if b[0] not in _seen_idx:
                         _bs_u.append(b); _seen_idx.add(b[0])
-                # 过滤太远的 (只画最近 60 根)
-                _bs_u = [b for b in _bs_u if b[0] >= n - 60]
-                for _idx, _pr, _typ, _lbl in _bs_u:
+                # 只画最近 20 根 (旧历史标记太密没用)
+                _bs_u = [b for b in _bs_u if b[0] >= n - 20]
+                for _idx, _pr, _typ in _bs_u:
                     _col_b = "#66BB6A" if _typ == "buy" else "#EF5350"
                     _ym = lows[_idx] * 0.985 if _typ == "buy" else highs[_idx] * 1.015
                     _mkr = "^" if _typ == "buy" else "v"
-                    ax1.plot(x[_idx], _ym, marker=_mkr, color=_col_b, markersize=8, zorder=10)
-                    ax1.annotate(_lbl, (x[_idx], _ym), xytext=(0, 6 if _typ == "buy" else -12),
-                                 textcoords="offset points", fontsize=7, color=_col_b, ha="center")
+                    ax1.plot(x[_idx], _ym, marker=_mkr, color=_col_b, markersize=7, zorder=10)
+                    # 日线不画标签 (三角已经够了)
+                    if period in ("minute", "60"):
+                        ax1.annotate("买" if _typ == "buy" else "卖", (x[_idx], _ym),
+                                     xytext=(0, 5 if _typ == "buy" else -10),
+                                     textcoords="offset points", fontsize=7, color=_col_b, ha="center")
 
             # 副图 1: 成交量 + MA5/MA10
             ax2 = fig.add_axes([0.08, 0.20, 0.88, 0.12], facecolor=_BG_PANEL, sharex=ax1)
