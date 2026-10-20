@@ -164,9 +164,32 @@ class JianLouMixin:
         tk.Label(top, text="  🔴跌≥8%  🟢涨≥10%  💥量比≥3  ⚠️振幅≥12%  🟡昨跌今稳",
                  bg=_BG_TOOLBAR, fg=_FG_DIM, font=("Menlo", 9)).pack(side=tk.LEFT, padx=10)
 
-        # ── Notebook 分类展示 ──
-        nb = ttk.Notebook(dlg)
-        nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        # ── 主容器: 左右分栏 ──
+        main_split = tk.Frame(dlg, bg=_BG_DEEP); main_split.pack(fill=tk.BOTH, expand=True)
+
+        # 左侧 (列表区 ~55%)
+        left_panel = tk.Frame(main_split, bg=_BG_DEEP)
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 3), pady=6)
+
+        # 右侧 (K线区 ~45%)
+        right_panel = tk.Frame(main_split, bg=_BG_DEEP, width=560)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(3, 6), pady=6)
+        right_panel.pack_propagate(False)
+
+        # 右侧 K线标题栏
+        kline_top = tk.Frame(right_panel, bg=_BG_TOOLBAR, height=30); kline_top.pack(fill=tk.X)
+        kline_top.pack_propagate(False)
+        kline_title = tk.Label(kline_top, text="📊 点击左侧股票查看日K",
+                               bg=_BG_TOOLBAR, fg=_FG_DIM, font=("Menlo", 10))
+        kline_title.pack(side=tk.LEFT, padx=10, pady=4)
+
+        # 右侧 K线嵌入区
+        _kline_embed = tk.Frame(right_panel, bg=_BG_PANEL)
+        _kline_embed.pack(fill=tk.BOTH, expand=True)
+
+        # ── Notebook 分类展示 (放到 left_panel 里) ──
+        nb = ttk.Notebook(left_panel)
+        nb.pack(fill=tk.BOTH, expand=True)
 
         # ttk 深色主题
         style = ttk.Style()
@@ -369,13 +392,16 @@ class JianLouMixin:
                                   font=("Menlo", 11), cursor="hand2")
                 l_help.pack(side=tk.RIGHT, padx=6)
 
-                # 点击 → 弹日K
+                # 点击 → 右侧嵌入日K
                 def _open_kline(_s=sina, _n=nm):
-                    print(f"[捡漏_dblclick] sina={_s} name={_n} parent={dlg}", flush=True)
                     try:
                         from ui.high_low_swing import _quick_open_daily_kline
-                        _quick_open_daily_kline(dlg, _s, _n)
-                        print(f"[捡漏_dblclick] ✅ 已调 _quick_open_daily_kline", flush=True)
+                        # 更新右侧标题
+                        kline_title.config(text=f"📊 {_n} ({_s[2:]})", fg=_FG_CYAN)
+                        # 内嵌模式 — 清掉旧 canvas 再画新的
+                        for _w in _kline_embed.winfo_children():
+                            _w.destroy()
+                        _quick_open_daily_kline(dlg, _s, _n, embed_frame=_kline_embed)
                     except Exception as e:
                         import traceback
                         traceback.print_exc()
