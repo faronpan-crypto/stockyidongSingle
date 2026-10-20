@@ -1742,8 +1742,15 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
     def _open_same_daily():
         try:
             from ui.high_low_swing import _quick_open_daily_kline
-            _c6 = combo_var.get().split(" ")[0]
-            _quick_open_daily_kline(dlg, _c6, combo_var.get())
+            # ALL_OPTIONS 格式: "贵州茅台 sh600519" — 找带 sh/sz/bj 的那个 token
+            _opt = combo_var.get()
+            _tokens = _opt.split()
+            _sina = next((t for t in _tokens if t.lower().startswith(("sh","sz","bj"))), "")
+            _name = _tokens[0] if _tokens else _opt
+            if not _sina:
+                print(f"[1minK_daily] 无法从 '{_opt}' 解析 sina code", flush=True); return
+            print(f"[1minK_daily] → sina={_sina} name={_name}", flush=True)
+            _quick_open_daily_kline(dlg, _sina, _name)
         except Exception as _e:
             import traceback; traceback.print_exc()
     _btn_daily.config(command=_open_same_daily)
