@@ -3152,11 +3152,45 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             dlg.destroy()
         dlg.protocol("WM_DELETE_WINDOW", _on_close)
 
-    # 顶栏: 周期切换
+    # 顶栏: 股票切换 + 周期切换
     top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=42); top.pack(fill=tk.X)
     top.pack_propagate(False)
-    tk.Label(top, text=f"📊 {name} ({code6})", bg=_BG_TOOLBAR, fg=_FG_GOLD,
-             font=("", 11, "bold")).pack(side=tk.LEFT, padx=10, pady=8)
+
+    # 🆕 代码输入框 + 名称显示 (支持回车重拉)
+    tk.Label(top, text="📊", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+             font=("", 12)).pack(side=tk.LEFT, padx=(10, 2))
+    _code_input = tk.StringVar(value=code6)
+    code_entry = tk.Entry(top, textvariable=_code_input, width=8,
+                          bg=_BG_DEEP, fg=_FG_GOLD, insertbackground=_FG_GOLD,
+                          font=("Menlo", 11, "bold"), relief=tk.FLAT, justify="center")
+    code_entry.pack(side=tk.LEFT, padx=2)
+    _name_lbl = tk.Label(top, text=name, bg=_BG_TOOLBAR, fg=_FG_CYAN,
+                         font=("", 11))
+    _name_lbl.pack(side=tk.LEFT, padx=(0, 8))
+
+    def _sina_of(c6):
+        if c6.startswith("6") or c6.startswith(("50","51","52","53","54","55","56","57","58","59")):
+            return f"sh{c6}"
+        elif c6.startswith(("4","8")):
+            return f"bj{c6}"
+        return f"sz{c6}"
+
+    def _switch_code(c6):
+        """切换到新代码 — 更新 sina_code + 重拉"""
+        nonlocal sina_code, code6, name
+        c6 = c6.strip()
+        if not c6.isdigit() or len(c6) != 6:
+            status.config(text="❌ 请输入6位数字代码", fg="#EF5350")
+            return
+        code6 = c6
+        sina_code = _sina_of(c6)
+        name = sina_code  # 默认, fetch 完再用行情补
+        _name_lbl.config(text=sina_code)
+        dlg.title(f"📊 {c6} 日K线")
+        _cache.clear()
+        _reload()
+
+    code_entry.bind("<Return>", lambda e: _switch_code(_code_input.get()))
 
     period_var = tk.StringVar(value="day")
     for txt, val in [("分时", "minute"), ("60分", "60"), ("日线", "day"), ("周线", "week"), ("月线", "month")]:
