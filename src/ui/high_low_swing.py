@@ -3888,16 +3888,11 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 ax1.bar(x[i], abs(c - o), bottom=min(c, o), width=w, color=col, edgecolor=col)
 
             ax1.plot(x, ma5, color="#FF8A65", lw=0.9, label="MA5")
-            # 日K/周K/月K: MA10 挤 MA5, 换成 MA60 更有长期意义
             if period in ("minute", "60"):
                 ax1.plot(x, ma10, color="#42A5F5", lw=0.9, label="MA10")
-            else:
-                # 周/月K额外画 MA10 作为中期, 日线跳过
-                if period in ("week", "month"):
-                    ax1.plot(x, ma10, color="#42A5F5", lw=0.9, label="MA10")
             ax1.plot(x, ma20, color="#AB47BC", lw=0.9, label="MA20")
             ax1.plot(x, ma60, color="#EF5350", lw=1.0, label="MA60")
-            ax1.legend(loc="upper left", fontsize=8, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
+            # 标题简化 — 短名称 + 周期 + 最新价，不单独 ax1.legend (MA 颜色已区分)
             ax1.set_facecolor(_BG_PANEL)
             for spine in ax1.spines.values(): spine.set_color(_FG_DIM)
             ax1.tick_params(colors=_FG_DIM, labelsize=8)
@@ -3940,15 +3935,17 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                     if _cur * 0.98 < r < _cur * 1.2:
                         _sr_drawn.add(r)
                         ax1.axhline(y=r, color="#FF8A80", lw=0.7, ls="--", alpha=0.7)
-                # 标签只画最靠近当前价的各 1 条
+                # 标签只画最靠近当前价的各 1 条, 字号 7, 右对齐 (不占主图空间)
                 def _nearest(vals, target):
                     return min(vals, key=lambda v: abs(v - target)) if vals else None
                 _near_s = _nearest([s for s in _supports if _cur * 0.8 < s < _cur * 1.02], _cur)
                 _near_r = _nearest([r for r in _resistances if _cur * 0.98 < r < _cur * 1.2], _cur)
                 if _near_s is not None:
-                    ax1.text(n - 0.5, _near_s, f"S {_near_s:.2f}", color="#81D4FA", fontsize=7, va="bottom", ha="right")
+                    ax1.text(0.99, _near_s, f"S {_near_s:.2f}", transform=ax1.get_yaxis_transform(),
+                             fontsize=7, va="center", ha="right", color="#81D4FA")
                 if _near_r is not None:
-                    ax1.text(n - 0.5, _near_r, f"R {_near_r:.2f}", color="#FF8A80", fontsize=7, va="bottom", ha="right")
+                    ax1.text(0.99, _near_r, f"R {_near_r:.2f}", transform=ax1.get_yaxis_transform(),
+                             fontsize=7, va="center", ha="right", color="#FF8A80")
 
             # 🆕 买卖点标记 (日K: 只留金叉/死叉 + 最近20根)
             if bsp_var.get() and n >= 30:
@@ -3997,8 +3994,8 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 for b in _bs:
                     if b[0] not in _seen_idx:
                         _bs_u.append(b); _seen_idx.add(b[0])
-                # 只画最近 20 根 (旧历史标记太密没用)
-                _bs_u = [b for b in _bs_u if b[0] >= n - 20]
+                # 只画最近 15 根 (旧历史标记太密没用)
+                _bs_u = [b for b in _bs_u if b[0] >= n - 15]
                 for _idx, _pr, _typ in _bs_u:
                     _col_b = "#66BB6A" if _typ == "buy" else "#EF5350"
                     _ym = lows[_idx] * 0.985 if _typ == "buy" else highs[_idx] * 1.015
@@ -4010,15 +4007,14 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                                      xytext=(0, 5 if _typ == "buy" else -10),
                                      textcoords="offset points", fontsize=7, color=_col_b, ha="center")
 
-            # 副图 1: 成交量 + MA5/MA10
+            # 副图 1: 成交量 + MA5/MA10 (不画 legend, VMA 颜色够区分)
             ax2 = fig.add_axes([0.08, 0.20, 0.88, 0.12], facecolor=_BG_PANEL, sharex=ax1)
             colors = ["#EF5350" if closes[i] >= opens[i] else "#66BB6A" for i in range(n)]
             ax2.bar(x, vols, color=colors, width=w)
             vol_ma5 = _ma(vols, 5)
             vol_ma10 = _ma(vols, 10)
-            ax2.plot(x, vol_ma5, color="#FF8A65", lw=0.8, label="VMA5")
-            ax2.plot(x, vol_ma10, color="#42A5F5", lw=0.8, label="VMA10")
-            ax2.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
+            ax2.plot(x, vol_ma5, color="#FF8A65", lw=0.7)
+            ax2.plot(x, vol_ma10, color="#42A5F5", lw=0.7)
             ax2.set_facecolor(_BG_PANEL)
             for spine in ax2.spines.values(): spine.set_color(_FG_DIM)
             ax2.tick_params(colors=_FG_DIM, labelsize=7)
@@ -4039,10 +4035,9 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 hist = 2 * (dif - dea)
                 h_colors = ["#EF5350" if h >= 0 else "#66BB6A" for h in hist]
                 ax3.bar(x, hist, color=h_colors, width=w)
-                ax3.plot(x, dif, color="#42A5F5", lw=0.8, label="DIF")
-                ax3.plot(x, dea, color="#FFB74D", lw=0.8, label="DEA")
+                ax3.plot(x, dif, color="#42A5F5", lw=0.8)
+                ax3.plot(x, dea, color="#FFB74D", lw=0.8)
                 ax3.axhline(y=0, color=_FG_DIM, lw=0.6)
-                ax3.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
                 ax3.set_ylabel("MACD", color=_FG_DIM, fontsize=8)
             elif sub_name == "RSI":
                 # Wilder RSI(14)
@@ -4059,15 +4054,13 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                         avg_gain = (avg_gain * (rsi_n - 1) + gain[i-1]) / rsi_n
                         avg_loss = (avg_loss * (rsi_n - 1) + loss[i-1]) / rsi_n
                         rsi[i] = 100 - 100 / (1 + avg_gain / avg_loss) if avg_loss > 0 else 100
-                ax3.plot(x, rsi, color="#CE93D8", lw=1.0, label="RSI(14)")
+                ax3.plot(x, rsi, color="#CE93D8", lw=1.0)
                 ax3.axhline(y=70, color="#EF5350", lw=0.6, ls="--", alpha=0.7)
                 ax3.axhline(y=30, color="#66BB6A", lw=0.6, ls="--", alpha=0.7)
                 ax3.axhline(y=50, color=_FG_DIM, lw=0.5, ls=":")
                 ax3.set_ylim(0, 100)
-                ax3.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
                 ax3.set_ylabel("RSI", color=_FG_DIM, fontsize=8)
             elif sub_name == "KDJ":
-                # KDJ(9,3,3)
                 kdj_n = 9
                 kd_low = np.full(n, np.nan)
                 kd_high = np.full(n, np.nan)
@@ -4083,15 +4076,13 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                     k[i] = k[i-1] * 2/3 + rsv[i] * 1/3
                     d[i] = d[i-1] * 2/3 + k[i] * 1/3
                     j[i] = 3 * k[i] - 2 * d[i]
-                ax3.plot(x, k, color="#42A5F5", lw=0.9, label="K")
-                ax3.plot(x, d, color="#FFB74D", lw=0.9, label="D")
-                ax3.plot(x, j, color="#CE93D8", lw=0.8, label="J")
+                ax3.plot(x, k, color="#42A5F5", lw=0.9)
+                ax3.plot(x, d, color="#FFB74D", lw=0.9)
+                ax3.plot(x, j, color="#CE93D8", lw=0.8)
                 ax3.axhline(y=80, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
                 ax3.axhline(y=20, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
-                ax3.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
                 ax3.set_ylabel("KDJ", color=_FG_DIM, fontsize=8)
             elif sub_name == "BOLL":
-                # BOLL 带 (在副图里画 MID, UPPER, LOWER 和 %B)
                 boll_mid = _ma(closes, 20)
                 boll_std = np.full(n, np.nan)
                 for i in range(19, n):
@@ -4099,12 +4090,11 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 boll_up = boll_mid + 2 * boll_std
                 boll_lo = boll_mid - 2 * boll_std
                 pct_b = (closes - boll_lo) / np.maximum(boll_up - boll_lo, 0.001)
-                ax3.plot(x, pct_b, color="#80CBC4", lw=0.9, label="%B")
+                ax3.plot(x, pct_b, color="#80CBC4", lw=0.9)
                 ax3.axhline(y=1.0, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
                 ax3.axhline(y=0.5, color=_FG_DIM, lw=0.5, ls=":")
                 ax3.axhline(y=0.0, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
                 ax3.set_ylim(-0.1, 1.1)
-                ax3.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
                 ax3.set_ylabel("BOLL%B", color=_FG_DIM, fontsize=8)
             elif sub_name == "OBV":
                 obv = np.zeros(n)
@@ -4113,19 +4103,29 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                     elif closes[i] < closes[i-1]: obv[i] = obv[i-1] - vols[i]
                     else: obv[i] = obv[i-1]
                 obv_ma5 = _ma(obv, 5)
-                ax3.plot(x, obv, color="#42A5F5", lw=0.9, label="OBV")
-                ax3.plot(x, obv_ma5, color="#FFB74D", lw=0.8, label="OBV_MA5")
-                ax3.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
+                ax3.plot(x, obv, color="#42A5F5", lw=0.9)
+                ax3.plot(x, obv_ma5, color="#FFB74D", lw=0.8)
                 ax3.set_ylabel("OBV", color=_FG_DIM, fontsize=8)
             ax3.set_facecolor(_BG_PANEL)
             for spine in ax3.spines.values(): spine.set_color(_FG_DIM)
             ax3.tick_params(colors=_FG_DIM, labelsize=7)
 
-            # 标题
+            # 标题简化 (短名称 + 周期)
             last_p = closes[-1] if n else 0
             chg = (closes[-1] / closes[-2] - 1) * 100 if n > 1 else 0
-            ax1.set_title(f"{name} ({code6})  {period}K  最新 {last_p:.2f}  {chg:+.2f}%",
-                          color=_FG_GOLD, fontsize=11, pad=8)
+            _chg_col = "#EF5350" if chg >= 0 else "#66BB6A"
+            ax1.set_title(f"{name} ({code6})  {period}K", color=_FG_GOLD, fontsize=11, pad=8)
+            # 右下角浮窗: 最新价 + 涨跌% (替代 legend, 省空间)
+            _sub_lbl = {"MACD": "MACD", "RSI": "RSI(14)", "KDJ": "KDJ(9,3,3)", "BOLL": "BOLL%B", "OBV": "OBV"}.get(sub_name, sub_name)
+            _ma_lbls = []
+            _ma_colors = [("#FF8A65", "MA5"), ("#42A5F5", "MA10"), ("#AB47BC", "MA20"), ("#EF5350", "MA60")]
+            for _c, _n in _ma_colors:
+                if period in ("minute", "60") or _n != "MA10":  # 日线跳过 MA10
+                    _ma_lbls.append(f"{_n}={_c}")
+            # 简洁单行: 最新 + 涨跌
+            _rt = f"  {last_p:.2f}  {chg:+.2f}%"
+            ax1.text(1.0, 1.0, _rt, transform=ax1.transAxes,
+                     fontsize=10, va="top", ha="right", color=_chg_col, fontweight="bold")
 
             fig.subplots_adjust(top=0.97, bottom=0.02, left=0.02, right=0.98)  # 只留边距
             canvas.draw()
