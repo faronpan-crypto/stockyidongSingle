@@ -2115,15 +2115,16 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 _ma_txt_lines.append(f"{_name}={_arr[-1]:.2f}")
                 # 最后一点画小圆点
                 ax.scatter([_last_x], [_arr[-1]], s=20, color=_col, zorder=11, edgecolors="white", linewidths=0.6)
-            # 右上角文本框
+            # MA 文本框 — 左上 (右上留给最新价浮窗 + S/R)
             if _ma_txt_lines:
                 _ma_legend_text = "\n".join(_ma_txt_lines)
-                ax.text(0.995, 0.99, _ma_legend_text, transform=ax.transAxes,
-                        fontsize=8, va="top", ha="right", color="#E0E0E0",
+                ax.text(0.005, 0.99, _ma_legend_text, transform=ax.transAxes,
+                        fontsize=8, va="top", ha="left", color="#E0E0E0",
                         bbox=dict(boxstyle="round,pad=0.3", fc="#1a1a2e", ec="#555", alpha=0.85))
-            # MA60 额外: 虚线 + 文字 (核心锚点)
+            # MA60 单独标记 — 不画整条虚线, 只在最右端画小横 + 价
             if not _np.isnan(ma60[-1]):
-                ax.axhline(ma60[-1], color="#EF9A9A", ls="--", lw=0.7, alpha=0.6)
+                ax.scatter([_last_x], [ma60[-1]], s=25, color="#EF9A9A", zorder=12, marker="_", linewidths=2.0)
+                ax.text(_last_x + 1, ma60[-1], f" MA60={ma60[-1]:.2f}", color="#EF9A9A", fontsize=7, va="center")
 
             # ── BOLL 带 (主图可选) ──
             if _draw_boll_main:
@@ -2314,21 +2315,33 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 _macd_axm = None
                 if _sub_slot1 == "MACD": _macd_axm = axm1
                 elif _sub_slot2 == "MACD": _macd_axm = axm2
-                for idx, price, m_peak in top_divs:
+                # 画背离标记 — 只限最近 30 根, 标签各只画最新 1 个, 其他只画三角
+                _cutoff_div = len(c) - 30
+                _top_u = [(i, p, m) for i, p, m in top_divs if i >= _cutoff_div]
+                _bot_u = [(i, p, m) for i, p, m in bot_divs if i >= _cutoff_div]
+                _top_label = _top_u[-1] if _top_u else None
+                _bot_label = _bot_u[-1] if _bot_u else None
+                for idx, price, m_peak in _top_u:
+                    _show_lbl = (idx, price) == (_top_label[0], _top_label[1])
                     ax.scatter([x[idx]], [price * 1.003], marker="v", s=90,
                                color="#EF5350", zorder=11, edgecolors="white", linewidths=1.0)
-                    ax.annotate("顶背离", xy=(x[idx], price),
-                                xytext=(x[idx], price * 1.02), ha="center", fontsize=7,
-                                color="#EF5350", fontweight="bold")
+                    if _show_lbl:
+                        ax.annotate("顶背离", xy=(x[idx], price),
+                                    xytext=(x[idx], price * 1.02), ha="center", fontsize=7,
+                                    color="#EF5350", fontweight="bold",
+                                    bbox=dict(boxstyle="round,pad=0.15", fc="#5d1a1a", ec="#EF5350", alpha=0.85))
                     if _macd_axm is not None and dif is not None:
                         _macd_axm.scatter([x[idx]], [dif[idx]], marker="v", s=60,
                                           color="#EF5350", zorder=11, edgecolors="white", linewidths=0.8)
-                for idx, price, m_peak in bot_divs:
+                for idx, price, m_peak in _bot_u:
+                    _show_lbl = (idx, price) == (_bot_label[0], _bot_label[1])
                     ax.scatter([x[idx]], [price * 0.997], marker="^", s=90,
                                color="#22C55E", zorder=11, edgecolors="white", linewidths=1.0)
-                    ax.annotate("底背离", xy=(x[idx], price),
-                                xytext=(x[idx], price * 0.98), ha="center", fontsize=7,
-                                color="#22C55E", fontweight="bold")
+                    if _show_lbl:
+                        ax.annotate("底背离", xy=(x[idx], price),
+                                    xytext=(x[idx], price * 0.98), ha="center", fontsize=7,
+                                    color="#22C55E", fontweight="bold",
+                                    bbox=dict(boxstyle="round,pad=0.15", fc="#1a4d1a", ec="#22C55E", alpha=0.85))
                     if _macd_axm is not None and dif is not None:
                         _macd_axm.scatter([x[idx]], [dif[idx]], marker="^", s=60,
                                           color="#22C55E", zorder=11, edgecolors="white", linewidths=0.8)
