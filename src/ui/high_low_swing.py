@@ -3238,6 +3238,79 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
     canvas = FigureCanvasTkAgg(fig, master=dlg)
     canvas.get_tk_widget().configure(bg=_BG_DEEP)
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    # ── 鼠标滚轮缩放 x 轴 (K线根数) + 中键拖动平移 ──
+    _xlim_state = {}  # 存各子图的 xlim: {ax: (xmin, xmax)}
+    _dragging = {"active": False, "ax": None, "start_xdata": 0, "orig_xlim": None}
+
+    def _record_xlims():
+        """保存当前所有带 x 轴的 ax 的 xlim"""
+        _xlim_state.clear()
+        for _ax in fig.axes:
+            try:
+                _xlim_state[_ax] = _ax.get_xlim()
+            except Exception: pass
+
+    def _on_scroll(event):
+        """滚轮: 向上缩 (看更多), 向下放 (看更少/放大)"""
+        if event.inaxes is None: return
+        step = 0.25  # 每次缩放 25%
+        for _ax in fig.axes:
+            try:
+                _ax.set_xlim(*_xlim_state.get(_ax, _ax.get_xlim()))
+            except Exception: pass
+        ax = event.inaxes
+        xmin, xmax = ax.get_xlim()
+        cur = event.xdata
+        if cur is None: return
+        # 向上 (button_up): 放大 1/(1+step), 以鼠标位置为中心
+        if event.button == "up":
+            new_half = (xmax - xmin) / 2 * (1 - step)
+        else:  # down
+            new_half = (xmax - xmin) / 2 * (1 + step)
+        new_xmin = cur - new_half
+        new_xmax = cur + new_half
+        # 同步所有同 sharex 的 ax
+        for _ax in fig.axes:
+            if _ax.get_shared_x_axes().joined(ax, _ax) or _ax is ax:
+                _ax.set_xlim(new_xmin, new_xmax)
+                _xlim_state[_ax] = (new_xmin, new_xmax)
+        canvas.draw_idle()
+
+    def _on_press(event):
+        """按下左键: 记录拖动起点"""
+        if event.button != 1 or event.inaxes is None: return
+        ax = event.inaxes
+        _dragging["active"] = True
+        _dragging["ax"] = ax
+        _dragging["start_xdata"] = event.xdata if event.xdata else 0
+        _dragging["orig_xlim"] = ax.get_xlim()
+
+    def _on_release(event):
+        _dragging["active"] = False
+
+    def _on_move(event):
+        """拖动中键/左键: 平移 x 轴"""
+        if not _dragging["active"] or _dragging["ax"] is None: return
+        if event.xdata is None: return
+        ax = _dragging["ax"]
+        orig_xmin, orig_xmax = _dragging["orig_xlim"]
+        dx = _dragging["start_xdata"] - event.xdata
+        new_xmin = orig_xmin + dx
+        new_xmax = orig_xmax + dx
+        for _ax in fig.axes:
+            if _ax.get_shared_x_axes().joined(ax, _ax) or _ax is ax:
+                _ax.set_xlim(new_xmin, new_xmax)
+                _xlim_state[_ax] = (new_xmin, new_xmax)
+        canvas.draw_idle()
+
+    canvas.mpl_connect("scroll_event", _on_scroll)
+    canvas.mpl_connect("button_press_event", _on_press)
+    canvas.mpl_connect("button_release_event", _on_release)
+    canvas.mpl_connect("motion_notify_event", _on_move)
+
+    # 在 _draw 完成后记录初始 xlim
+    _post_draw_hooks = [_record_xlims]
     # 🆕 保留 NavigationToolbar (支持缩放/平移/框选/返回/保存) — 之前被 destroy 了!
     tb_frame = tk.Frame(dlg, bg=_BG_TOOLBAR); tb_frame.pack(fill=tk.X, side=tk.BOTTOM)
     tb = NavigationToolbar2Tk(canvas, tb_frame); tb.update()
@@ -4124,6 +4197,8 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
 
             fig.subplots_adjust(top=0.97, bottom=0.02, left=0.02, right=0.98)  # 只留边距
             canvas.draw()
+            # 🆕 draw 完记录 xlim, 滚轮缩放需要
+            _record_xlims()
             status.config(text=f"✅ {len(data)} 根 {period}K, 最新 {dates[-1]}", fg="#66BB6A")
 
             # 🆕 注册 hover tooltip (每次 draw 重新注册, 先 disconnect 旧的)
