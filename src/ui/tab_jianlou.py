@@ -164,17 +164,19 @@ class JianLouMixin:
         tk.Label(top, text="  🔴跌≥8%  🟢涨≥10%  💥量比≥3  ⚠️振幅≥12%  🟡昨跌今稳",
                  bg=_BG_TOOLBAR, fg=_FG_DIM, font=("Menlo", 9)).pack(side=tk.LEFT, padx=10)
 
-        # ── 主容器: 左右分栏 ──
-        main_split = tk.Frame(dlg, bg=_BG_DEEP); main_split.pack(fill=tk.BOTH, expand=True)
+        # ── 主容器: PanedWindow (可拖拽调整左右宽度) ──
+        paned = tk.PanedWindow(dlg, orient=tk.HORIZONTAL,
+                               bg=_BG_DEEP, sashbg=_BG_CARD, sashrelief=tk.FLAT,
+                               sashwidth=6, bd=0)
+        paned.pack(fill=tk.BOTH, expand=True)
 
-        # 左侧 (列表区 ~55%)
-        left_panel = tk.Frame(main_split, bg=_BG_DEEP)
-        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 3), pady=6)
+        # 左侧 (列表区)
+        left_panel = tk.Frame(paned, bg=_BG_DEEP)
+        paned.add(left_panel, weight=3)  # 默认占 60%
 
-        # 右侧 (K线区 ~45%)
-        right_panel = tk.Frame(main_split, bg=_BG_DEEP, width=560)
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(3, 6), pady=6)
-        right_panel.pack_propagate(False)
+        # 右侧 (K线区)
+        right_panel = tk.Frame(paned, bg=_BG_DEEP)
+        paned.add(right_panel, weight=7)  # 默认占 70% (比左宽)
 
         # 右侧 K线标题栏
         kline_top = tk.Frame(right_panel, bg=_BG_TOOLBAR, height=30); kline_top.pack(fill=tk.X)
@@ -189,7 +191,7 @@ class JianLouMixin:
 
         # ── Notebook 分类展示 (放到 left_panel 里) ──
         nb = ttk.Notebook(left_panel)
-        nb.pack(fill=tk.BOTH, expand=True)
+        nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
         # ttk 深色主题
         style = ttk.Style()
