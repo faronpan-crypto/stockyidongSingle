@@ -4729,7 +4729,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("👁️看盘", 7, self._show_speculator_watch),
             ("🎯高抛低吸", 8, self._show_high_low_swing),
             ("📋操盘", 7, self._show_caochuan_panel),
-            ("🧲捡漏", 7, self._show_jianlou),
+            ("⚠️异常", 7, self._show_jianlou),
             ("📈1minK", 7, self._show_1min_kline_dialog),
             ("🔍多股对比", 8, self._show_multi_compare_dialog),
         ]:
