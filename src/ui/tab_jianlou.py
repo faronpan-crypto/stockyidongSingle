@@ -371,11 +371,14 @@ class JianLouMixin:
 
                 # 点击 → 弹日K
                 def _open_kline(_s=sina, _n=nm):
+                    print(f"[捡漏_dblclick] sina={_s} name={_n} parent={dlg}", flush=True)
                     try:
                         from ui.high_low_swing import _quick_open_daily_kline
                         _quick_open_daily_kline(dlg, _s, _n)
+                        print(f"[捡漏_dblclick] ✅ 已调 _quick_open_daily_kline", flush=True)
                     except Exception as e:
-                        print(f"[捡漏] 开K线失败: {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
 
                 def _show_help(_k=help_key):
                     _show_help_popup(dlg, _k)
