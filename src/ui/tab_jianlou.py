@@ -164,34 +164,68 @@ class JianLouMixin:
         tk.Label(top, text="  🔴跌≥8%  🟢涨≥10%  💥量比≥3  ⚠️振幅≥12%  🟡昨跌今稳",
                  bg=_BG_TOOLBAR, fg=_FG_DIM, font=("Menlo", 9)).pack(side=tk.LEFT, padx=10)
 
+        # ── 滚动容器工厂 (先定义, 后面要用到) ──
+        def _make_scrollable(parent):
+            cv = tk.Canvas(parent, bg=_BG_DEEP, highlightthickness=0)
+            vsb = tk.Scrollbar(parent, orient="vertical", command=cv.yview)
+            inner = tk.Frame(cv, bg=_BG_DEEP)
+            inner.bind("<Configure>", lambda e, c=cv: c.configure(scrollregion=c.bbox("all")))
+            cv.create_window((0, 0), window=inner, anchor="nw")
+            cv.configure(yscrollcommand=vsb.set)
+            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+            def _wheel(e): cv.yview_scroll(-1 * (e.delta // 120), "units")
+            cv.bind_all("<MouseWheel>", _wheel)
+            return inner, cv
+
+        scroll_inners = {}
+
         # ── 主容器: PanedWindow (可拖拽调整左右宽度) ──
         paned = tk.PanedWindow(dlg, orient=tk.HORIZONTAL,
                                bg=_BG_DEEP, sashbg=_BG_CARD, sashrelief=tk.FLAT,
                                sashwidth=6, bd=0)
-        paned.pack(fill=tk.BOTH, expand=True)
+        paned.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
-        # 左侧 (列表区)
+        # 左侧 (列表区) — 先 pack 内部控件再 add
         left_panel = tk.Frame(paned, bg=_BG_DEEP)
-        paned.add(left_panel, weight=3)  # 默认占 60%
+        nb = ttk.Notebook(left_panel)
+        nb.pack(fill=tk.BOTH, expand=True)
+        tab_frames = {}
+        tabs_meta = {
+            "drops": ("🔴 大跌预警", _FG_RED),
+            "surges": ("🟢 大涨龙头", _FG_GREEN),
+            "volume": ("💥 放量异动", _FG_ORANGE),
+            "swing": ("⚠️ 振幅异常", _FG_PURPLE),
+            "bottom": ("🟡 昨跌今稳", _FG_GOLD),
+        }
+        for key, (label, color) in tabs_meta.items():
+            f = ttk.Frame(nb)
+            nb.add(f, text=label)
+            tab_frames[key] = {"frame": f, "color": color, "rows": []}
+            inner, _ = _make_scrollable(f)
+            scroll_inners[key] = inner
 
-        # 右侧 (K线区)
+        # 右侧 (K线区) — 先 pack 内部控件再 add
         right_panel = tk.Frame(paned, bg=_BG_DEEP)
-        paned.add(right_panel, weight=7)  # 默认占 70% (比左宽)
-
-        # 右侧 K线标题栏
-        kline_top = tk.Frame(right_panel, bg=_BG_TOOLBAR, height=30); kline_top.pack(fill=tk.X)
+        kline_top = tk.Frame(right_panel, bg=_BG_TOOLBAR, height=30)
+        kline_top.pack(fill=tk.X)
         kline_top.pack_propagate(False)
         kline_title = tk.Label(kline_top, text="📊 点击左侧股票查看日K",
                                bg=_BG_TOOLBAR, fg=_FG_DIM, font=("Menlo", 10))
         kline_title.pack(side=tk.LEFT, padx=10, pady=4)
-
-        # 右侧 K线嵌入区
         _kline_embed = tk.Frame(right_panel, bg=_BG_PANEL)
         _kline_embed.pack(fill=tk.BOTH, expand=True)
 
-        # ── Notebook 分类展示 (放到 left_panel 里) ──
-        nb = ttk.Notebook(left_panel)
-        nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        # 两个子 frame 都 pack 完了, 再 add 到 PanedWindow
+        paned.add(left_panel)
+        paned.add(right_panel)
+        # 设置初始分隔位置 (窗口宽度的 40%)
+        dlg.update_idletasks()
+        try:
+            _w = dlg.winfo_width()
+            paned.sash_place(0, int(_w * 0.4), 0)
+        except Exception:
+            pass
 
         # ttk 深色主题
         style = ttk.Style()
@@ -205,40 +239,6 @@ class JianLouMixin:
             style.configure("TFrame", background=_BG_DEEP)
         except Exception:
             pass
-
-        # 5 个分类 Tab
-        tabs = {
-            "drops": ("🔴 大跌预警", _FG_RED),
-            "surges": ("🟢 大涨龙头", _FG_GREEN),
-            "volume": ("💥 放量异动", _FG_ORANGE),
-            "swing": ("⚠️ 振幅异常", _FG_PURPLE),
-            "bottom": ("🟡 昨跌今稳", _FG_GOLD),
-        }
-        tab_frames = {}
-        for key, (label, color) in tabs.items():
-            f = ttk.Frame(nb)
-            nb.add(f, text=label)
-            tab_frames[key] = {"frame": f, "color": color, "rows": []}
-
-        # ── 滚动容器: 每个 tab 里放一个可滚动 Frame ──
-        def _make_scrollable(parent):
-            cv = tk.Canvas(parent, bg=_BG_DEEP, highlightthickness=0)
-            vsb = tk.Scrollbar(parent, orient="vertical", command=cv.yview)
-            inner = tk.Frame(cv, bg=_BG_DEEP)
-            inner.bind("<Configure>", lambda e, c=cv: c.configure(scrollregion=c.bbox("all")))
-            cv.create_window((0, 0), window=inner, anchor="nw")
-            cv.configure(yscrollcommand=vsb.set)
-            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            vsb.pack(side=tk.RIGHT, fill=tk.Y)
-            # 鼠标滚轮
-            def _wheel(e): cv.yview_scroll(-1 * (e.delta // 120), "units")
-            cv.bind_all("<MouseWheel>", _wheel)
-            return inner, cv
-
-        scroll_inners = {}
-        for key in tab_frames:
-            inner, cv = _make_scrollable(tab_frames[key]["frame"])
-            scroll_inners[key] = inner
 
         # ── 数据存储 ──
         _scan_data = {"results": {}, "stock_pool": [], "loading": False}
