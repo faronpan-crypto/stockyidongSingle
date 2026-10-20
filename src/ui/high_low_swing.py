@@ -1735,6 +1735,18 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
     _btn_redraw = tk.Button(r1, text="🎨", bg="#00695C", fg="white", font=("", 9, "bold"),
                             padx=6, pady=1, cursor="hand2")
     _btn_redraw.pack(side=tk.LEFT, padx=2, pady=8)
+    # ── 🆕 日K按钮 (点一下弹同股票日K窗口) ──
+    _btn_daily = tk.Button(r1, text="📅日K", bg="#1565C0", fg="white", font=("", 9, "bold"),
+                           padx=8, pady=1, cursor="hand2")
+    _btn_daily.pack(side=tk.LEFT, padx=(6, 2), pady=8)
+    def _open_same_daily():
+        try:
+            from ui.high_low_swing import _quick_open_daily_kline
+            _c6 = combo_var.get().split(" ")[0]
+            _quick_open_daily_kline(dlg, _c6, combo_var.get())
+        except Exception as _e:
+            import traceback; traceback.print_exc()
+    _btn_daily.config(command=_open_same_daily)
 
     tk.Label(r1, text="|", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT, padx=4, pady=8)
     tk.Label(r1, text="🩺", bg=_BG_TOOLBAR, fg=_FG_BLUE, font=("", 10, "bold")).pack(side=tk.LEFT, pady=8)
