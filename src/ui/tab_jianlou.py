@@ -386,11 +386,17 @@ class JianLouMixin:
                                  font=("Menlo", 11), width=8)
                 l_src.pack(side=tk.LEFT, padx=2)
 
-                # ❓ 帮助按钮
+                # ❓ 帮助按钮 (最右)
                 help_key = tab_key_to_help(tab_key)
                 l_help = tk.Label(row, text="❓", bg=row_bg, fg=_FG_GOLD,
                                   font=("Menlo", 13), cursor="hand2")
                 l_help.pack(side=tk.RIGHT, padx=6)
+
+                # 📊 日K按钮 (❓ 左边) — 单击直接嵌右边
+                l_kline = tk.Label(row, text="📊", bg=row_bg, fg=_FG_BLUE,
+                                   font=("Menlo", 14), cursor="hand2")
+                l_kline.pack(side=tk.RIGHT, padx=(0, 4))
+                l_kline.bind("<Button-1>", lambda e, fn=_open_kline: fn())
 
                 # 点击 → 右侧嵌入日K
                 def _open_kline(_s=sina, _n=nm):
