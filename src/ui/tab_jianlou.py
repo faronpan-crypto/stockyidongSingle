@@ -218,60 +218,61 @@ class JianLouMixin:
         # ── 数据存储 ──
         _scan_data = {"results": {}, "stock_pool": [], "loading": False}
 
-        # ── 解析股票池 ──
-        def _load_stock_pool():
-            pool = {}
+        # ── 从新浪全市场榜单拉异常股票 (主源, 不再依赖持仓文件) ──
+        def _fetch_sina_rank(sort_key, asc, num=50):
+            """sort: changepercent / turnoverratio(换手率即量比) / volume(成交额)
+               asc: 0=降序(Top), 1=升序(Bottom)"""
+            try:
+                url = (f"https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+                       f"Market_Center.getHQNodeData?page=1&num={num}&sort={sort_key}&asc={asc}"
+                       f"&node=hs_a&symbol=&_s_r_a=auto")
+                r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+                if r.status_code != 200: return []
+                return json.loads(r.text)
+            except Exception as e:
+                print(f"[捡漏] 新浪榜单 {sort_key} asc={asc} err: {e}", flush=True)
+                return []
 
-            # 1) 持仓 tab
+        # ── 同时维护持仓/龙头 → 用来打标签 "我的持仓" / "龙头" ──
+        def _load_my_tags():
+            """返回 dict {sina_code: tag}"""
+            tags = {}
             pos_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                     "..", "data", "trading_positions.json")
             pos_path = os.path.abspath(pos_path)
             if os.path.exists(pos_path):
                 try:
-                    with open(pos_path, "r") as f:
-                        positions = json.load(f)
-                    for p in positions:
+                    for p in json.load(open(pos_path)):
                         code6 = str(p.get("code", ""))
                         if not code6: continue
                         sina = code6 if code6.startswith(("sh", "sz", "bj")) else _sina_from_code(code6)
-                        pool[sina] = {"name": p.get("name", code6), "source": "持仓", "code6": code6}
+                        tags[sina] = "持仓"
                 except Exception:
                     pass
 
-            # 2) 龙头股: 解析 data/stockyidong
             syd_path = None
             for cand in [
                 os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "data", "stockyidong"),
                 os.path.expanduser("~/Desktop/stockyidong"),
                 os.path.expanduser("~/stockyidong"),
             ]:
-                if os.path.exists(cand):
-                    syd_path = cand; break
+                if os.path.exists(cand): syd_path = cand; break
             if syd_path:
                 try:
-                    with open(syd_path, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
-                    # 找 【龙头股】 板块
+                    content = open(syd_path, "r", encoding="utf-8", errors="ignore").read()
                     m = re.search(r"【龙头股】\s*\n(.*?)(?=【|\Z)", content, re.S)
                     if m:
-                        block = m.group(1)
-                        # 每行业一行, 格式: "行业A: 600519茅台, 000858五粮液"
-                        for line in block.split("\n"):
-                            line = line.strip()
-                            if not line or ":" not in line: continue
+                        for line in m.group(1).split("\n"):
+                            if ":" not in line: continue
                             _, stocks = line.split(":", 1)
                             for item in re.split(r"[,，\s]+", stocks):
-                                item = item.strip()
-                                if not item: continue
-                                cm = re.match(r"(\d{6})(\D+)?", item)
+                                cm = re.match(r"(\d{6})", item.strip())
                                 if cm:
-                                    code6, nm = cm.group(1), cm.group(2) or code6
-                                    sina = _sina_from_code(code6)
-                                    pool[sina] = {"name": nm, "source": "龙头", "code6": code6}
+                                    sina = _sina_from_code(cm.group(1))
+                                    tags[sina] = "龙头"
                 except Exception:
                     pass
-
-            return pool
+            return tags
 
         def _sina_from_code(code6):
             """6位代码 → sina code"""
@@ -285,84 +286,6 @@ class JianLouMixin:
             elif first in ("4", "8"):
                 return "bj" + code6
             return "sz" + code6
-
-        # ── 批量拉实时行情 (hq.sinajs.cn) ──
-        def _fetch_realtime(codes):
-            """codes: sina_code list → dict {sina: info}"""
-            if not codes: return {}
-            ctx = ssl._create_unverified_context()
-            batch_size = 60
-            results = {}
-            for i in range(0, len(codes), batch_size):
-                batch = codes[i:i + batch_size]
-                url = "https://hq.sinajs.cn/list=" + ",".join(batch)
-                try:
-                    req = urllib.request.Request(url,
-                                                 headers={"User-Agent": "Mozilla/5.0",
-                                                          "Referer": "https://finance.sina.com.cn"})
-                    with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
-                        text = resp.read().decode("gbk", errors="ignore")
-                    for line in text.strip().split("\n"):
-                        if "=" not in line or '"' not in line: continue
-                        var, val = line.split("=", 1)
-                        sina_code = var.replace("var hq_str_", "").strip()
-                        flds = val.strip().strip(";").strip('"').split(",")
-                        if len(flds) < 40: continue
-                        try:
-                            info = {
-                                "name": flds[0],
-                                "open": float(flds[1]),
-                                "prev_close": float(flds[2]),
-                                "cur": float(flds[3]),
-                                "high": float(flds[4]),
-                                "low": float(flds[5]),
-                                "vol_hand": float(flds[36]),  # 手
-                                "amount": float(flds[37]),    # 元
-                                "date": flds[30],
-                                "time": flds[31],
-                            }
-                            info["chg_pct"] = (info["cur"] / info["prev_close"] - 1) * 100 if info["prev_close"] > 0 else 0
-                            info["amplitude"] = (info["high"] - info["low"]) / info["prev_close"] * 100 if info["prev_close"] > 0 else 0
-                            info["vol_wan"] = info["vol_hand"] / 100  # 万手
-                            results[sina_code] = info
-                        except (ValueError, IndexError):
-                            pass
-                except Exception as e:
-                    print(f"[捡漏] hq batch err: {e}", flush=True)
-                time.sleep(0.15)
-            return results
-
-        # ── 拉日线算均量 (东方财富) ──
-        def _fetch_ma_vol(sina_code, days=10):
-            """返回近 days 日均量 (万手)"""
-            if requests is None: return None
-            prefix = sina_code[:2]
-            code6 = sina_code[2:]
-            secid_map = {"sh": "1", "sz": "0", "bj": "0"}
-            secid = f"{secid_map.get(prefix, '1')}.{code6}"
-            try:
-                url = (f"https://push2his.eastmoney.com/api/qt/stock/kline/get"
-                       f"?secid={secid}&fields1=f1,f2,f3,f4,f5,f6"
-                       f"&fields2=f51,f52,f53,f54,f55,f56,f57,f58"
-                       f"&klt=101&fqt=1&beg=0&end=20500101")
-                r = requests.get(url, timeout=5,
-                                 headers={"User-Agent": "Mozilla/5.0",
-                                          "Referer": "https://quote.eastmoney.com"})
-                if r.status_code != 200: return None
-                d = r.json()
-                klines = d.get("data", {}).get("klines") or []
-                if len(klines) < 3: return None
-                vols = []
-                for line in klines[-days:]:
-                    parts = line.split(",")
-                    if len(parts) >= 6:
-                        try: vols.append(float(parts[5]) / 100)  # 股→手→万手 (除以10000)
-                        except: pass
-                if vols:
-                    return sum(vols) / len(vols)
-            except Exception:
-                pass
-            return None
 
         # ── 渲染一个分类 tab ──
         def _render_tab(tab_key, items):
@@ -489,7 +412,7 @@ class JianLouMixin:
             tk.Button(win, text="关闭", command=win.destroy, bg=_BG_PANEL, fg=_FG_CYAN,
                       relief=tk.FLAT, padx=20, pady=4, font=("Menlo", 10)).pack(pady=10)
 
-        # ── 主扫描流程 ──
+        # ── 主扫描流程 (全市场榜单, 不再依赖本地股票池) ──
         def _do_scan():
             if _scan_data["loading"]: return
             _scan_data["loading"] = True
@@ -497,53 +420,112 @@ class JianLouMixin:
 
             def _bg():
                 try:
-                    # 1) 加载股票池
-                    pool = _load_stock_pool()
-                    sina_list = list(pool.keys())
-                    if not sina_list:
-                        dlg.after(0, lambda: status.config(text="⚠️ 没有股票池 (持仓空 + 龙头文件没找到)", fg=_FG_ORANGE))
-                        return
+                    dlg.after(0, lambda: status.config(text="📡 拉取全市场榜单...", fg=_FG_TEXT))
+
+                    # 1) 拉 4 个榜单
+                    drops_raw = _fetch_sina_rank("changepercent", asc=1, num=50)  # 跌幅榜 Top50
+                    surges_raw = _fetch_sina_rank("changepercent", asc=0, num=50)  # 涨幅榜 Top50
+                    vol_raw = _fetch_sina_rank("turnoverratio", asc=0, num=50)     # 换手率(量比)榜
+                    # 振幅榜用 hq 实时拉: 取跌幅榜+涨幅榜前30只的振幅
+
                     dlg.after(0, lambda: status.config(
-                        text=f"📊 股票池 {len(sina_list)} 只, 拉实时行情...", fg=_FG_TEXT))
+                        text=f"📊 跌幅{len(drops_raw)} 涨幅{len(surges_raw)} 换手{len(vol_raw)}, 去重合并...",
+                        fg=_FG_TEXT))
 
-                    # 2) 拉实时行情
-                    realtime = _fetch_realtime(sina_list)
-                    if not realtime:
-                        dlg.after(0, lambda: status.config(text="❌ 实时行情拉取失败", fg=_FG_RED))
-                        return
-                    dlg.after(0, lambda: status.config(
-                        text=f"📡 实时行情 {len(realtime)} 只, 拉均量...", fg=_FG_TEXT))
+                    # 2) 从持仓/龙头拿标签
+                    my_tags = _load_my_tags()
 
-                    # 3) 拉均量 (逐只, 但并行多线程)
-                    ma_vols = {}
-                    def _fetch_one(s):
-                        ma_vols[s] = _fetch_ma_vol(s, 10)
-
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-                        list(ex.map(_fetch_one, [s for s in sina_list if s in realtime]))
-
-                    # 4) 组装完整数据 + 分类
+                    # 3) 合并 + 去重 + 分类
                     results = {"drops": [], "surges": [], "volume": [], "swing": [], "bottom": []}
-                    for sina, info in realtime.items():
-                        it = {"sina": sina, "source": pool.get(sina, {}).get("source", ""), **info}
-                        # 量比
-                        ma_v = ma_vols.get(sina)
-                        if ma_v and info["vol_wan"] > 0:
-                            it["vol_ratio"] = info["vol_wan"] / ma_v
-                        else:
-                            it["vol_ratio"] = None
+                    seen = set()
 
-                        chg = info["chg_pct"]
-                        amp = info["amplitude"]
-                        vr = it["vol_ratio"] or 0
+                    def _item_from_sina_raw(raw, default_chg=None):
+                        """新浪榜单 raw item → dict"""
+                        if not raw: return None
+                        sina = raw.get("symbol", "")
+                        if not sina or sina in seen: return None
+                        seen.add(sina)
+                        chg = float(raw.get("changepercent", 0) or 0)
+                        cur = float(raw.get("trade", 0) or 0)
+                        # sina 榜单的 turnoverratio 是换手率(%), 不是量比.
+                        # 新浪榜单没有直接给振幅, 需要额外 hq 拉
+                        return {
+                            "sina": sina,
+                            "name": raw.get("name", sina[2:]),
+                            "code6": sina[2:],
+                            "cur": cur,
+                            "chg_pct": chg,
+                            "amplitude": None,  # 待 hq 补
+                            "vol_ratio": None,  # 新浪榜单没有量比, 用换手率粗略替代
+                            "turnover": float(raw.get("turnoverratio", 0) or 0),
+                            "vol_wan": float(raw.get("volume", 0) or 0) / 10000,  # 万股
+                            "source": my_tags.get(sina, ""),
+                        }
 
-                        if chg <= -8: results["drops"].append(it)
-                        if chg >= 10: results["surges"].append(it)
-                        if vr >= 3: results["volume"].append(it)
-                        if amp >= 12: results["swing"].append(it)
-                        # 昨跌今稳: 需要昨收 < 前日收 (昨跌≥7%) → 简化: 用 chg_pct
-                        # 昨跌 = 今日 prev_close 相对前日收盘. 实时 hq 拿不到前日收盘, 跳过
+                    # 分类 (新浪榜单只给了 chg, 用阈值过滤)
+                    for raw in drops_raw:
+                        it = _item_from_sina_raw(raw)
+                        if it and it["chg_pct"] <= -8:
+                            results["drops"].append(it)
+                    for raw in surges_raw:
+                        it = _item_from_sina_raw(raw)
+                        if it and it["chg_pct"] >= 10:
+                            results["surges"].append(it)
+                    # 换手率榜 → 当作"放量异动"的近似 (换手 > 15%)
+                    for raw in vol_raw:
+                        it = _item_from_sina_raw(raw)
+                        if it and it.get("turnover", 0) >= 15:
+                            results["volume"].append(it)
+
+                    # 4) 拉 hq 实时行情补振幅 + 量比 (对已收集的异常股)
+                    all_sina = []
+                    for k in results:
+                        for it in results[k]:
+                            if it["sina"] not in all_sina:
+                                all_sina.append(it["sina"])
+
+                    if all_sina:
+                        ctx = ssl._create_unverified_context()
+                        for i in range(0, len(all_sina), 60):
+                            batch = all_sina[i:i + 60]
+                            url = "https://hq.sinajs.cn/list=" + ",".join(batch)
+                            try:
+                                req = urllib.request.Request(url,
+                                        headers={"User-Agent": "Mozilla/5.0",
+                                                 "Referer": "https://finance.sina.com.cn"})
+                                with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
+                                    text = resp.read().decode("gbk", errors="ignore")
+                                hq_map = {}
+                                for line in text.strip().split("\n"):
+                                    if "=" not in line or '"' not in line: continue
+                                    var, val = line.split("=", 1)
+                                    sc = var.replace("var hq_str_", "").strip()
+                                    f = val.strip().strip(";").strip('"').split(",")
+                                    if len(f) < 38: continue
+                                    try:
+                                        hq_map[sc] = {
+                                            "prev": float(f[2]), "cur": float(f[3]),
+                                            "hi": float(f[4]), "lo": float(f[5]),
+                                            "vol_hand": float(f[36]),
+                                        }
+                                    except: pass
+                                # 回写振幅 + 量比
+                                for k in results:
+                                    for it in results[k]:
+                                        hq = hq_map.get(it["sina"])
+                                        if hq and hq["prev"] > 0:
+                                            amp = (hq["hi"] - hq["lo"]) / hq["prev"] * 100
+                                            it["amplitude"] = round(amp, 2)
+                                            # 振幅≥12% 补进 swing tab
+                                            if amp >= 12 and k != "swing":
+                                                # 但别重复加
+                                                if not any(x["sina"] == it["sina"] for x in results["swing"]):
+                                                    results["swing"].append({**it})
+                                            # 换手率粗略当量比 (经验值: 换手率 / 3 ≈ 量比)
+                                            it["vol_ratio"] = round(it.get("turnover", 0) / 3, 2)
+                            except Exception as e:
+                                print(f"[捡漏] hq补数据 err: {e}", flush=True)
+                            time.sleep(0.2)
 
                     # 5) 渲染
                     total = sum(len(v) for v in results.values())
