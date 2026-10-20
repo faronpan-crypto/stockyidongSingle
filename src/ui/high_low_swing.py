@@ -3319,33 +3319,35 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             except Exception as _e:
                 print(f"[日K_fetch] 新浪 scale={scale} err={_e}", flush=True); return None
 
-        # 主路径: 东方财富
-        data = _try_eastmoney(period)
+        # 主路径: 新浪 (秒级稳定, 东方财富常挂)
+        scale_map = {"day": 240, "week": 240, "month": 240, "60": 60, "minute": 1}
+        if period == "minute":
+            data = _try_sina(1) or _try_sina(240)
+        elif period == "60":
+            data = _try_sina(60) or _try_sina(240)
+        elif period in ("week", "month"):
+            daily = _try_sina(240) or _try_eastmoney("day")
+            if daily:
+                import pandas as pd
+                df = pd.DataFrame(daily)
+                df["day"] = pd.to_datetime(df["day"])
+                df = df.sort_values("day")
+                for col in ("open", "close", "high", "low", "volume"):
+                    df[col] = df[col].astype(float)
+                rule = "W-MON" if period == "week" else "ME"
+                agg = {"open": "first", "close": "last", "high": "max", "low": "min", "volume": "sum"}
+                df2 = df.set_index("day").resample(rule).agg(agg).dropna()
+                df2 = df2.reset_index()
+                df2["day"] = df2["day"].dt.strftime("%Y-%m-%d")
+                data = df2.to_dict("records")
+            else:
+                data = None
+        else:  # day
+            data = _try_sina(240)
+        # 新浪也挂了 → 东方财富 fallback
         if not data:
-            # fallback: 新浪
-            if period == "minute":
-                data = _try_sina(1) or _try_sina(240)
-            elif period == "60":
-                data = _try_sina(60) or _try_sina(240)
-            elif period in ("week", "month"):
-                # 先拉日线再合成
-                daily = _try_eastmoney("day") or _try_sina(240)
-                if daily:
-                    import pandas as pd
-                    df = pd.DataFrame(daily)
-                    df["day"] = pd.to_datetime(df["day"])
-                    df = df.sort_values("day")
-                    for col in ("open", "close", "high", "low", "volume"):
-                        df[col] = df[col].astype(float)
-                    rule = "W-MON" if period == "week" else "ME"
-                    agg = {"open": "first", "close": "last", "high": "max", "low": "min", "volume": "sum"}
-                    df2 = df.set_index("day").resample(rule).agg(agg).dropna()
-                    df2 = df2.reset_index()
-                    df2["day"] = df2["day"].dt.strftime("%Y-%m-%d")
-                    data = df2.to_dict("records")
-            else:  # day
-                data = _try_sina(240)
-
+            data = _try_eastmoney(period)
+        print(f"[日K_fetch] 最终 {sina_code} period={period}: {len(data) if data else 0} 条", flush=True)
         return data
 
     def _ma(arr, n):
