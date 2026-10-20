@@ -4728,7 +4728,6 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("📊比价横向", 8, self._show_stock_compare_dialog),
             ("👁️看盘", 7, self._show_speculator_watch),
             ("🎯高抛低吸", 8, self._show_high_low_swing),
-            ("📋操盘", 7, self._show_caochuan_panel),
             ("⚠️异常", 7, self._show_jianlou),
             ("📈1minK", 7, self._show_1min_kline_dialog),
             ("🔍多股对比", 8, self._show_multi_compare_dialog),
@@ -4782,6 +4781,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         ttk.Button(tools_row_b, text="🔔 信号检测", command=self.show_signal_all_holdings_detection, width=14).pack(**_tools_pad)
         ttk.Button(tools_row_b, text="🔄 回测/回撤分析", command=self.show_backtest_dialog, width=14).pack(**_tools_pad)
         ttk.Button(tools_row_b, text="🔍 新闻搜索", command=self.launch_keyword_search_app, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_b, text="📋 操盘面板", command=self._show_caochuan_panel, width=14).pack(**_tools_pad)
         # 将咨询分析、投资、系统、赌博、交易体系、交割单分析按钮移到交易标签页
         trading_buttons_frame = ttk.LabelFrame(trading_tab, text="交易功能", padding=3)
         trading_buttons_frame.pack(fill=tk.X, expand=False, pady=2)
