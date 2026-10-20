@@ -1904,6 +1904,42 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                              command=lambda: None)  # _on_refresh 后面定义, 先占位
     refresh_btn.pack(side=tk.LEFT, padx=(0,6))
     ttk.Button(top, text="🔍 分析", command=lambda: None).pack(side=tk.LEFT, padx=4)
+
+    # ===== 🔤 字号缩放 =====
+    _win_font = [13]  # 默认 13 — 用户觉得之前 11 太小
+    def _apply_win_font(delta):
+        _win_font[0] = max(8, min(24, _win_font[0] + delta))
+        cur = _win_font[0]
+        def _walk(parent):
+            try:
+                for w in parent.winfo_children():
+                    try:
+                        _f = w.cget("font")
+                        if isinstance(_f, tuple) and len(_f) >= 2 and isinstance(_f[1], int):
+                            new_f = (_f[0], cur) + _f[2:]
+                            try: w.configure(font=new_f)
+                            except Exception: pass
+                        elif isinstance(_f, str):
+                            # ttk 控件: 字符串, 用无 family font
+                            try: w.configure(font=("", cur))
+                            except Exception: pass
+                    except Exception: pass
+                    _walk(w)
+            except Exception: pass
+        _walk(win)
+        _font_lbl.config(text=str(cur))
+    tk.Label(top, text="🔤", bg="#283593", fg="#FFD54F",
+             font=("", 11, "bold")).pack(side=tk.RIGHT, padx=(4, 0))
+    _font_lbl = tk.Label(top, text=str(_win_font[0]), bg="#283593", fg="#FFD54F",
+                         font=("", 10, "bold"))
+    _font_lbl.pack(side=tk.RIGHT, padx=2)
+    tk.Button(top, text="A+", command=lambda: _apply_win_font(1),
+              relief=tk.FLAT, bg="#FFD54F", fg="#1A237E", font=("", 10, "bold"),
+              padx=8, cursor="hand2").pack(side=tk.RIGHT, padx=2)
+    tk.Button(top, text="A-", command=lambda: _apply_win_font(-1),
+              relief=tk.FLAT, bg="#FFD54F", fg="#1A237E", font=("", 9, "bold"),
+              padx=8, cursor="hand2").pack(side=tk.RIGHT, padx=2)
+
     status_var = tk.StringVar(value="⏳ 加载候选列表...")
     tk.Label(top, textvariable=status_var, bg="#283593", fg="#90A4AE",
              font=("", 8)).pack(side=tk.RIGHT, padx=14)
