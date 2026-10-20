@@ -2292,7 +2292,7 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                             segs.append((i, j - 1, sign, peak, peak_idx))
                         i = j
                     return segs
-                _segs = _find_macd_segments(macd_h, min_bar=3)
+                _segs = _find_macd_segments(macd_h, min_bar=5)
                 if len(_segs) >= 4:
                     _reds = [s for s in _segs if s[2] == 1][-2:]
                     _greens = [s for s in _segs if s[2] == -1][-2:]
