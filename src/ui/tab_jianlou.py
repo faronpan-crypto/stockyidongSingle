@@ -548,12 +548,18 @@ class JianLouMixin:
                                     var, val = line.split("=", 1)
                                     sc = var.replace("var hq_str_", "").strip()
                                     f = val.strip().strip(";").strip('"').split(",")
-                                    if len(f) < 38: continue
+                                    if len(f) < 9: continue  # 只要够取 f[0..8]
                                     try:
-                                        hq_map[sc] = {"name": f[0], "cur": float(f[3]),
-                                                      "chg_pct_hq": (float(f[3])/float(f[2])-1)*100 if float(f[2])>0 else 0,
-                                                      "vol_hand": float(f[36])}
-                                    except: pass
+                                        _pre_close = float(f[2]) if f[2] else 0
+                                        _cur = float(f[3]) if f[3] else 0
+                                        hq_map[sc] = {
+                                            "name": f[0],
+                                            "cur": _cur,
+                                            "chg_pct_hq": (_cur / _pre_close - 1) * 100 if _pre_close > 0 else 0,
+                                            "vol_hand": float(f[8]) / 100.0,  # f[8]=股数, 转手
+                                        }
+                                    except Exception:
+                                        pass
                                 time.sleep(0.15)
                             except Exception:
                                 pass
