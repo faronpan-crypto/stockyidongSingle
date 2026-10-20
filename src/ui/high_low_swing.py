@@ -3257,6 +3257,8 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
     # hover tooltip 连接 + 浮动窗口引用 (避免被 gc)
     _hover_conn = None
     _hover_win = None
+    # generation counter — embed 模式下防止旧 bg draw 到新 canvas
+    _gen = [0]
 
     def _fetch(period):
         """多数据源: 东方财富(主) → 新浪(fallback)"""
@@ -4279,11 +4281,16 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             _hover_win = None
 
     def _reload():
+        _gen[0] += 1
+        _my_gen = _gen[0]
         period = period_var.get()
         status.config(text=f"⏳ 加载 {period}K ({sina_code})...", fg=_FG_DIM)
         print(f"[日K] _reload → sina_code={sina_code} period={period}", flush=True)
         def _bg():
             d = _fetch(period)
+            if _my_gen != _gen[0]:
+                print(f"[日K] stale bg result (gen {_my_gen} vs current {_gen[0]}), skip draw", flush=True)
+                return
             if d:
                 _cache["data"] = d; _cache["period"] = period
             dlg.after(0, lambda: (_draw(d, period) if d else
@@ -4292,5 +4299,6 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
         threading.Thread(target=_bg, daemon=True).start()
 
     _reload()
-    dlg.grab_set()
+    if not _is_embed:
+        dlg.grab_set()
     return dlg

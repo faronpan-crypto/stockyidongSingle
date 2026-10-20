@@ -396,15 +396,19 @@ class JianLouMixin:
                 def _open_kline(_s=sina, _n=nm):
                     try:
                         from ui.high_low_swing import _quick_open_daily_kline
-                        # 更新右侧标题
-                        kline_title.config(text=f"📊 {_n} ({_s[2:]})", fg=_FG_CYAN)
-                        # 内嵌模式 — 清掉旧 canvas 再画新的
+                        kline_title.config(text=f"📊 加载 {_n}...", fg=_FG_ORANGE)
+                        # 清掉旧 canvas + 所有子控件, update_idletasks 确保完成
                         for _w in _kline_embed.winfo_children():
-                            _w.destroy()
+                            try: _w.destroy()
+                            except Exception: pass
+                        _kline_embed.update_idletasks()
+                        # 画新的
+                        kline_title.config(text=f"📊 {_n} ({_s[2:]})", fg=_FG_CYAN)
                         _quick_open_daily_kline(dlg, _s, _n, embed_frame=_kline_embed)
                     except Exception as e:
                         import traceback
                         traceback.print_exc()
+                        kline_title.config(text=f"❌ 加载失败: {e}", fg=_FG_RED)
 
                 def _show_help(_k=help_key):
                     _show_help_popup(dlg, _k)
