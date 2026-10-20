@@ -2026,13 +2026,16 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                     sell_signals.append((i, c[i], strength))
 
             # 画买入标记 🟢 (MA60 上方) — 只画三角, 不画文字标签 (跟 PAN 区分)
+            # 只画最近 40 根 (早的历史标记太密没用)
+            _cutoff = len(c) - 40
             for idx, price, strength in buy_signals:
+                if idx < _cutoff: continue
                 ax.scatter([x[idx]], [price * 0.997], marker="^", s=60,
                            color="#66BB6A", zorder=10, alpha=0.8, linewidths=0)
-                # strength 追加到 PAN 信号里显示, 这里不单独标
 
             # 画卖出标记 🔴 (MA60 下方) — 只画三角, 不画文字标签
             for idx, price, strength in sell_signals:
+                if idx < _cutoff: continue
                 ax.scatter([x[idx]], [price * 1.003], marker="v", s=60,
                            color="#EF5350", zorder=10, alpha=0.8, linewidths=0)
 
@@ -2045,8 +2048,10 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
             PAN_WIN = 5       # 窗口: 前后 N 根
             BIAS_BUY = -2.0   # 买点 BIAS 阈值 (%)
             BIAS_SELL = 2.0   # 卖点 BIAS 阈值 (%)
-            PAN_RECENT = 120  # 只看最近 N 根
-            PAN_MIN_GAP = 8   # 两个同方向 PAN 信号最小间隔 (K线根数)
+            PAN_RECENT = 120  # 只看最近 N 根扫描
+            PAN_MIN_GAP = 15  # 两个同方向 PAN 信号最小间隔 (K线根数) ↑从8加
+            PAN_DRAW_CUTOFF = len(c) - 60  # 只画最近 60 根的 PAN (早的挤)
+            PAN_LABEL_LAST = 3  # 标签只画最新的 3 个 (其他只画三角)
             _all_pan = []     # (idx, price, bias, is_buy)
             _start = max(61, len(c) - PAN_RECENT)
             for i in range(_start, len(c)):
@@ -2068,24 +2073,32 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 _last_idx = idx
                 if is_buy: pan_buy.append((idx, price, bias))
                 else: pan_sell.append((idx, price, bias))
-            # 画 PAN 买点 🟡 (在 MA60 下方的支撑) — 标签紧贴三角上方
+            # 画 PAN 买点 🟡 — 只画三角，标签只画最新 3 个
+            _pan_buy_label = pan_buy[-PAN_LABEL_LAST:]
             for idx, price, bias in pan_buy:
+                if idx < PAN_DRAW_CUTOFF: continue
+                _has_label = (idx, price, bias) in _pan_buy_label
                 ax.scatter([x[idx]], [price * 0.995], marker="^", s=140,
                            color="#FFC107", zorder=12, edgecolors="white", linewidths=1.5)
-                ax.annotate(f"🟡PAN买{bias:.1f}%", xy=(x[idx], price),
-                            xytext=(x[idx], price * 0.985), ha="center", fontsize=8,
-                            color="#FFC107", fontweight="bold",
-                            bbox=dict(boxstyle="round,pad=0.18", fc="#3E2723", ec="#FFC107", alpha=0.9),
-                            arrowprops=dict(arrowstyle="->", color="#FFC107", lw=0.9))
-            # 画 PAN 卖点 🔵 (在 MA60 上方的压力) — 标签紧贴三角下方
+                if _has_label:
+                    ax.annotate(f"🟡PAN买{bias:.1f}%", xy=(x[idx], price),
+                                xytext=(x[idx], price * 0.985), ha="center", fontsize=8,
+                                color="#FFC107", fontweight="bold",
+                                bbox=dict(boxstyle="round,pad=0.18", fc="#3E2723", ec="#FFC107", alpha=0.9),
+                                arrowprops=dict(arrowstyle="->", color="#FFC107", lw=0.9))
+            # 画 PAN 卖点 🔵 — 只画三角，标签只画最新 3 个
+            _pan_sell_label = pan_sell[-PAN_LABEL_LAST:]
             for idx, price, bias in pan_sell:
+                if idx < PAN_DRAW_CUTOFF: continue
+                _has_label = (idx, price, bias) in _pan_sell_label
                 ax.scatter([x[idx]], [price * 1.005], marker="v", s=140,
                            color="#29B6F6", zorder=12, edgecolors="white", linewidths=1.5)
-                ax.annotate(f"🔵PAN卖+{bias:.1f}%", xy=(x[idx], price),
-                            xytext=(x[idx], price * 1.018), ha="center", fontsize=8,
-                            color="#29B6F6", fontweight="bold",
-                            bbox=dict(boxstyle="round,pad=0.18", fc="#0D47A1", ec="#29B6F6", alpha=0.9),
-                            arrowprops=dict(arrowstyle="->", color="#29B6F6", lw=0.9))
+                if _has_label:
+                    ax.annotate(f"🔵PAN卖+{bias:.1f}%", xy=(x[idx], price),
+                                xytext=(x[idx], price * 1.018), ha="center", fontsize=8,
+                                color="#29B6F6", fontweight="bold",
+                                bbox=dict(boxstyle="round,pad=0.18", fc="#0D47A1", ec="#29B6F6", alpha=0.9),
+                                arrowprops=dict(arrowstyle="->", color="#29B6F6", lw=0.9))
 
             # ── 最后一根 MA 数值 + 颜色文字标注 (右上角浮窗, 替代 legend) ──
             _ma_items = [
@@ -2136,8 +2149,8 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                     _gk = round(int(_cur / _step + _mult) * _step, 2)
                     if _gk > 0:
                         _sr_lines.append((_gk, f"{_gk:g}", "#FF9800", ":"))
-                # 3) 近期高低点 (order=10, 只看最近120根)
-                _sr_lo = max(0, len(c) - 120)
+                # 3) 近期高低点 (order=10, 只看最近 30 根 — 远的没用还挤)
+                _sr_lo = max(0, len(c) - 30)
                 _sr_hi = len(c)
                 for _oi in range(10, min(_sr_hi, len(c) - 10)):
                     if _oi < _sr_lo: continue
@@ -2145,14 +2158,18 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                         _sr_lines.append((h[_oi], f"高{h[_oi]:.2f}", "#EF5350", "-."))
                     if l[_oi] == min(l[max(0, _oi-10):_oi+11]):
                         _sr_lines.append((l[_oi], f"低{l[_oi]:.2f}", "#22C55E", "-."))
-                # 去重 + 画
+                # 去重 + 画 (S/R 标签只画最近 3 条, 用 transAxes 左侧避开右上 MA 浮窗)
                 _seen_sr = set()
+                _sr_draw = []
                 for _sp, _sl, _sc, _ss in _sr_lines:
                     _key = round(_sp, 2)
                     if _key in _seen_sr: continue
                     _seen_sr.add(_key)
+                    _sr_draw.append((_sp, _sl, _sc, _ss))
                     ax.axhline(_sp, color=_sc, ls=_ss, lw=0.7, alpha=0.7)
-                    ax.text(_last_x + 1, _sp, f" {_sl}", color=_sc, fontsize=7, va="center")
+                # 标签最多画 3 条, 用 ax 坐标左偏 (x=2)
+                for _sp, _sl, _sc, _ss in _sr_draw[-3:]:
+                    ax.text(2, _sp, f" {_sl}", color=_sc, fontsize=7, va="center")
 
             # ═══════════════════════════════════════════════
             # 🆕 动态副图: MACD / RSI / KDJ — 根据 _sub_slot1 / _sub_slot2 分配
