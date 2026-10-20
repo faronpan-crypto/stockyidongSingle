@@ -3188,9 +3188,14 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
         _name_lbl.config(text=sina_code)
         dlg.title(f"📊 {c6} 日K线")
         _cache.clear()
+        print(f"[日K] 🔄 切换代码 → code6={code6} sina_code={sina_code}", flush=True)
         _reload()
 
     code_entry.bind("<Return>", lambda e: _switch_code(_code_input.get()))
+    code_entry.bind("<FocusOut>", lambda e: _switch_code(_code_input.get()))
+    tk.Button(top, text="🔄", command=lambda: _switch_code(_code_input.get()),
+              bg=_BG_DEEP, fg=_FG_GOLD, relief=tk.FLAT, font=("", 11),
+              padx=4).pack(side=tk.LEFT, padx=2)
 
     period_var = tk.StringVar(value="day")
     for txt, val in [("分时", "minute"), ("60分", "60"), ("日线", "day"), ("周线", "week"), ("月线", "month")]:
@@ -4280,7 +4285,8 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
 
     def _reload():
         period = period_var.get()
-        status.config(text=f"⏳ 加载 {period}K...", fg=_FG_DIM)
+        status.config(text=f"⏳ 加载 {period}K ({sina_code})...", fg=_FG_DIM)
+        print(f"[日K] _reload → sina_code={sina_code} period={period}", flush=True)
         def _bg():
             d = _fetch(period)
             if d:
