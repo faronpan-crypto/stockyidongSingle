@@ -860,8 +860,8 @@ class JianLouMixin:
                                  font=("Menlo", 10), padx=6, pady=1)
                 badge.pack(side=tk.LEFT, padx=3, pady=6)
 
-            # 右侧按钮区 (pack right 顺序反过来, ❓最右, 📊在左)
-            # ❓ 帮助
+            # 右侧按钮区
+            # ❓ 帮助 (最右)
             reason_text = _format_reasons(name, signals)
             def _show_help(_t=reason_text):
                 _top = tk.Toplevel(dlg)
@@ -882,13 +882,41 @@ class JianLouMixin:
             l_help.pack(side=tk.RIGHT, padx=8, pady=6)
             l_help.bind("<Button-1>", lambda e, fn=_show_help: fn())
 
-            # 📊 日K
-            l_kline = tk.Label(row, text="📊", bg=row_bg, fg=_FG_BLUE, cursor="hand2",
-                               font=("Menlo", 14))
-            l_kline.pack(side=tk.RIGHT, padx=(0, 2), pady=6)
-            l_kline.bind("<Button-1>", lambda e, sc=sina, nm=name: _embed_daily(sc, nm))
+            # 🆕 双击整行 → 嵌日K (递归绑所有子控件)
+            def _bind_dbl(widget):
+                widget.bind("<Double-Button-1>", lambda e, sc=sina, nm=name: _embed_daily(sc, nm))
+                for child in widget.winfo_children():
+                    _bind_dbl(child)
+            _bind_dbl(row)
+
+            # 鼠标悬停高亮
+            def _on_enter(e, bg=_BG_CARD):
+                e.widget.master.configure(bg="#3A3A3A")
+                for c in e.widget.master.winfo_children():
+                    if isinstance(c, tk.Label):
+                        cur_bg = c.cget("bg")
+                        if cur_bg not in ("#1B5E20", "#B71C1C"):  # 不动信号 badge
+                            c.configure(bg="#3A3A3A")
+            def _on_leave(e, bg=row_bg):
+                e.widget.master.configure(bg=bg)
+                for c in e.widget.master.winfo_children():
+                    if isinstance(c, tk.Label):
+                        cur_bg = c.cget("bg")
+                        if cur_bg not in ("#1B5E20", "#B71C1C"):
+                            c.configure(bg=bg)
+            _bind_hover(row, _on_enter, _on_leave)
 
             return row
+
+        def _bind_hover(widget, enter_fn, leave_fn):
+            """递归给所有子控件绑 enter/leave — 高亮整行"""
+            try:
+                widget.bind("<Enter>", enter_fn)
+                widget.bind("<Leave>", leave_fn)
+            except:
+                pass
+            for child in widget.winfo_children():
+                _bind_hover(child, enter_fn, leave_fn)
 
         def _format_reasons(name, signals):
             if not signals:
