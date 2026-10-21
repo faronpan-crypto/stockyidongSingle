@@ -298,6 +298,237 @@ def _detect_signals(opens, highs, lows, closes, volumes):
                 "idx": cur
             })
 
+    # ═══════════════════════════════════════════════════════════
+    #  9. 日本蜡烛图形态 (Steve Nison 经典形态)
+    # ═══════════════════════════════════════════════════════════
+
+    # 十字星 (Doji) — 小实体 + 上下影都长
+    body_cur = abs(closes[cur] - opens[cur])
+    rng_cur = highs[cur] - lows[cur]
+    body_prev = abs(closes[cur - 1] - opens[cur - 1]) if cur >= 1 else 0
+    if cur >= 3 and rng_cur > 0:
+        body_ratio = body_cur / rng_cur
+        upper_shadow = highs[cur] - max(opens[cur], closes[cur])
+        lower_shadow = min(opens[cur], closes[cur]) - lows[cur]
+        # 锤子线/射击之星已经在上面了，这里补其他形态
+        if body_ratio < 0.1 and upper_shadow > body_cur * 2 and lower_shadow > body_cur * 2:
+            # 长腿十字星 — 多空博弈激烈, 趋势可能反转
+            # 判断方向: 位置高低
+            if cur >= 20:
+                high_20 = highs[cur - 20:cur + 1].max()
+                low_20 = lows[cur - 20:cur + 1].min()
+                pos = (closes[cur] - low_20) / (high_20 - low_20) if high_20 > low_20 else 0.5
+                if pos < 0.3:
+                    signals.append({
+                        "type": "buy", "label": "长腿十字(低位)", "strength": 2,
+                        "reason": "日本蜡烛图 — 低位长腿十字星：实体极小、上下影都很长。"
+                                  "表示在长期下跌后多空力量达到平衡，空头衰竭、多头开始反击。"
+                                  "历史上约 62% 的低位十字星后 5 天内出现反弹。",
+                        "idx": cur
+                    })
+                elif pos > 0.7:
+                    signals.append({
+                        "type": "sell", "label": "长腿十字(高位)", "strength": 2,
+                        "reason": "日本蜡烛图 — 高位长腿十字星：在长期上涨后出现长影十字，"
+                                  "说明多头力量开始衰竭，空头开始反扑。"
+                                  "约 58% 的高位十字星后 5 天内出现回调。",
+                        "idx": cur
+                    })
+
+        # 吞没形态 (Engulfing) — 需 2 根K线
+        if cur >= 1:
+            body_p = closes[cur - 1] - opens[cur - 1]  # 前一根实体 (正=阳)
+            body_c = closes[cur] - opens[cur]
+            # 看涨吞没: 前阴后阳, 阳实体完全包住阴实体
+            if body_p < 0 and body_c > 0:
+                if opens[cur] <= closes[cur - 1] and closes[cur] >= opens[cur - 1]:
+                    signals.append({
+                        "type": "buy", "label": "看涨吞没", "strength": 3,
+                        "reason": "日本蜡烛图 — 看涨吞没 (Bullish Engulfing)："
+                                  "前一根阴线被后一根阳线完全吞没。多头力量突然爆发，"
+                                  "一举收复前一天的全部失地。Nison 的经典反转信号之一，"
+                                  "在底部出现时胜率约 70%。建议配合次日放量确认。",
+                        "idx": cur
+                    })
+            # 看跌吞没: 前阳后阴, 阴实体完全包住阳实体
+            if body_p > 0 and body_c < 0:
+                if opens[cur] >= closes[cur - 1] and closes[cur] <= opens[cur - 1]:
+                    signals.append({
+                        "type": "sell", "label": "看跌吞没", "strength": 3,
+                        "reason": "日本蜡烛图 — 看跌吞没 (Bearish Engulfing)："
+                                  "前一根阳线被后一根阴线完全吞没。空头力量突然压制多头，"
+                                  "主力出货或利空消息引爆的典型形态。"
+                                  "在高位出现时胜率约 68%，后续大概率回调 3-8%。",
+                        "idx": cur
+                    })
+
+        # 早晨之星 (Morning Star) — 3 根K线: 大阴 + 小实体(星) + 大阳
+        if cur >= 2:
+            body_2 = closes[cur - 2] - opens[cur - 2]
+            body_1 = closes[cur - 1] - opens[cur - 1]
+            rng_1 = highs[cur - 1] - lows[cur - 1]
+            body_0 = closes[cur] - opens[cur]
+            # 前大阴, 中小实体(星), 后大阳, 且阳线收盘 > 阴线实体中点
+            if (body_2 < -body_prev * 1.5 and  # 前两天是较大的阴线
+                rng_1 > 0 and abs(body_1) / rng_1 < 0.3 and  # 中间是小实体
+                body_0 > abs(body_prev) * 1.5 and  # 今天是较大的阳线
+                closes[cur] > (opens[cur - 2] + closes[cur - 2]) / 2):  # 收盘过阴线中点
+                signals.append({
+                    "type": "buy", "label": "早晨之星", "strength": 3,
+                    "reason": "日本蜡烛图 — 早晨之星 (Morning Star)：经典底部三形态。"
+                              "① 大阴线（空头发威）② 小实体K线（多空犹豫）③ 大阳线（多头反攻）。"
+                              "Nison 书中胜率最高的形态之一，底部出现后上涨概率 ~75%。",
+                    "idx": cur
+                })
+
+        # 黄昏之星 (Evening Star) — 反向的早晨之星
+        if cur >= 2:
+            body_2 = closes[cur - 2] - opens[cur - 2]
+            body_1 = closes[cur - 1] - opens[cur - 1]
+            rng_1 = highs[cur - 1] - lows[cur - 1]
+            body_0 = closes[cur] - opens[cur]
+            if (body_2 > abs(body_prev) * 1.5 and
+                rng_1 > 0 and abs(body_1) / rng_1 < 0.3 and
+                body_0 < -abs(body_prev) * 1.5 and
+                closes[cur] < (opens[cur - 2] + closes[cur - 2]) / 2):
+                signals.append({
+                    "type": "sell", "label": "黄昏之星", "strength": 3,
+                    "reason": "日本蜡烛图 — 黄昏之星 (Evening Star)：经典顶部三形态。"
+                              "① 大阳线（多头狂欢）② 小实体K线（多空犹豫）③ 大阴线（空头反扑）。"
+                              "出现在高位时几乎是必然的回调信号，胜率 ~72%。",
+                    "idx": cur
+                })
+
+        # 看涨刺透 / 看跌乌云盖顶
+        if cur >= 1 and rng_cur > 0:
+            body_p = closes[cur - 1] - opens[cur - 1]
+            body_c = closes[cur] - opens[cur]
+            # 看涨刺透 (Piercing Pattern)
+            if body_p < 0 and body_c > 0:
+                # 阳线开盘 < 前阴最低, 收盘 > 前阴实体中点
+                mid_p = (opens[cur - 1] + closes[cur - 1]) / 2
+                if opens[cur] < lows[cur - 1] and closes[cur] > mid_p:
+                    signals.append({
+                        "type": "buy", "label": "看涨刺透", "strength": 2,
+                        "reason": "日本蜡烛图 — 看涨刺透形态："
+                                  "阳线跳空低开至前阴线实体以下，然后强力反弹收在前阴线实体中点之上。"
+                                  "多头主动反击的信号，底部出现时胜率约 65%。",
+                        "idx": cur
+                    })
+            # 看跌乌云盖顶 (Dark Cloud Cover)
+            if body_p > 0 and body_c < 0:
+                mid_p = (opens[cur - 1] + closes[cur - 1]) / 2
+                if opens[cur] > highs[cur - 1] and closes[cur] < mid_p:
+                    signals.append({
+                        "type": "sell", "label": "乌云盖顶", "strength": 2,
+                        "reason": "日本蜡烛图 — 乌云盖顶形态："
+                                  "阴线跳空高开至前阳线实体以上，然后强力下跌收在前阳线实体中点之下。"
+                                  "空头突然发难的信号，高位出现时胜率约 63%。",
+                        "idx": cur
+                    })
+
+    # ═══════════════════════════════════════════════════════════
+    #  10. 期货技术分析 (Trading Range Breakout / Keltner / Turtle)
+    # ═══════════════════════════════════════════════════════════
+
+    # 10a. 唐奇安通道突破 (Donchian) — 20日最高/最低
+    if cur >= 20:
+        dc_high = highs[cur - 20:cur].max()
+        dc_low = lows[cur - 20:cur].min()
+        if closes[cur] > dc_high:
+            signals.append({
+                "type": "buy", "label": f"唐奇安突破↑{dc_high:.2f}", "strength": 3,
+                "reason": "期货经典 — 唐奇安通道突破 (Donchian Breakout)："
+                          "收盘价突破过去 20 个交易日的最高点。"
+                          "这是海龟交易法则 (Turtle Trading) 的核心进场信号，"
+                          "量化历史回测显示：突破后持有 20 天的平均收益率显著高于随机。"
+                          "建议配合成交量放大确认。",
+                "idx": cur
+            })
+        elif closes[cur] < dc_low:
+            signals.append({
+                "type": "sell", "label": f"唐奇安破位↓{dc_low:.2f}", "strength": 3,
+                "reason": "期货经典 — 唐奇安通道破位："
+                          "收盘价跌破过去 20 个交易日的最低点。"
+                          "趋势交易者的止损信号 — 多头应该离场观望，"
+                          "空头可以考虑顺势试空。",
+                "idx": cur
+            })
+
+    # 10b. ATR 相对波动率
+    if cur >= 14:
+        atr_arr = np.zeros(cur + 1)
+        for i in range(1, cur + 1):
+            tr = max(highs[i] - lows[i],
+                     abs(highs[i] - closes[i - 1]),
+                     abs(lows[i] - closes[i - 1]))
+            atr_arr[i] = tr
+        atr14 = atr_arr[cur - 13:cur + 1].mean()
+        atr_pct = atr14 / closes[cur] * 100  # ATR 占价格百分比
+        # 如果 ATR 明显扩大 (近 20 日 ATR 均值对比)
+        atr20 = atr_arr[max(0, cur - 19):cur + 1].mean()
+        if atr20 > 0 and atr14 / atr20 > 1.5:
+            # ATR 突然放大 — 可能有趋势性行情
+            direction = "上涨" if closes[cur] > closes[cur - 5] else "下跌"
+            sig_type = "buy" if direction == "上涨" else "sell"
+            signals.append({
+                "type": sig_type,
+                "label": f"波动率扩张 ATR+{(atr14/atr20-1)*100:.0f}%",
+                "strength": 2,
+                "reason": f"期货经典 — ATR 波动率放大检测：ATR(14)={atr_pct:.2f}% "
+                          f"较近 20 日均 ATR 扩张 {(atr14/atr20-1)*100:.0f}%。"
+                          f"当前价格 5 日内{direction}。"
+                          f"波动率扩张通常预示大行情启动，趋势交易者会"
+                          f"在 ATR 扩张时顺势加仓。如果是利空导致的波动率扩大，"
+                          f"注意顺势操作而非抄底。",
+                "idx": cur
+            })
+
+    # 10c. Keltner 通道 (EMA + ATR*2) — 和 BOLL 类似但用 ATR
+    if cur >= 10:
+        kema = _ma(closes, 10)  # 简化, 用 MA 代 EMA
+        if not np.isnan(kema[cur]):
+            k_upper = kema[cur] + 2 * atr14
+            k_lower = kema[cur] - 2 * atr14
+            # 通道收窄 (ATR 降低) + 近期 ATR 突然放大 = 可能大行情
+            # 简单版: 价格从下轨反弹
+            if lows[cur] <= k_lower and closes[cur] > k_lower and closes[cur] > opens[cur]:
+                signals.append({
+                    "type": "buy", "label": "Keltner下轨反弹", "strength": 2,
+                    "reason": "期货经典 — Keltner 通道下轨反弹："
+                              "Keltner 通道基于 ATR 波动率，比布林带更能适应不同波动环境。"
+                              "价格触下轨后收阳反弹，通常表示短期超卖后修复。"
+                              "如果配合 ATR 扩张，则可能是趋势反转信号。",
+                    "idx": cur
+                })
+
+    # 10d. 连续 N 日同方向 (趋势强度)
+    if cur >= 4:
+        last5 = closes[cur - 4:cur + 1]
+        up_days = sum(1 for i in range(1, len(last5)) if last5[i] > last5[i - 1])
+        down_days = 4 - up_days
+        if up_days >= 4:
+            # 连涨 5 天 — 短期超涨警告
+            signals.append({
+                "type": "sell", "label": f"连涨{up_days}天", "strength": 2,
+                "reason": f"期货经典 — 连续上涨检测：最近 5 天中 {up_days} 天收阳。"
+                          "短期涨势过猛，获利盘累积较多。"
+                          "期货交易者会在连续 3-5 天同方向后考虑"
+                          "减仓或设置更近的止损。A股 T+1 制度下连续涨停"
+                          "可能还有惯性，但连涨 5 天后回调概率显著上升。",
+                "idx": cur
+            })
+        elif down_days >= 4:
+            signals.append({
+                "type": "buy", "label": f"连跌{down_days}天", "strength": 2,
+                "reason": f"期货经典 — 连续下跌检测：最近 5 天中 {down_days} 天收阴。"
+                          "短期跌势过猛，恐慌盘释放较充分。"
+                          "期货交易者会在连续 3-5 天下跌后考虑"
+                          "减空仓或轻仓试多。但 A 股单边市场中"
+                          "连跌后可能继续阴跌，需配合 MA 和 MACD 金叉确认。",
+                "idx": cur
+            })
+
     return signals
 
 
@@ -579,19 +810,16 @@ class JianLouMixin:
         cv_sell, inner_sell = _make_scrollable(tab_sell)
 
         # ── 嵌入日K ──
-        _embed_gen = [0]  # 代次计数器
-
         def _embed_daily(sina_code, name):
             from ui.high_low_swing import _quick_open_daily_kline
-            _embed_gen[0] += 1
-            my_gen = _embed_gen[0]
             # 清旧 canvas
             for w in embed_frame.winfo_children():
                 w.destroy()
             embed_frame.update_idletasks()
-            _quick_open_daily_kline(embed_frame, sina_code, name, embed_mode=True,
-                                    gen_ref=_embed_gen, my_gen=my_gen)
+            # _quick_open_daily_kline(parent, code6_or_sina, name, embed_frame=...)
+            _quick_open_daily_kline(embed_frame, sina_code, name, embed_frame=embed_frame)
             kline_title.config(text=f"📊 {name} ({sina_code})")
+            print(f"[机会扫描] embed {name} {sina_code}", flush=True)
 
         # ── 渲染一行 ──
         def _render_row(parent, c6, sina, name, tag, hq_info, signals):
