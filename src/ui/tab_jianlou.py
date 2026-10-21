@@ -376,48 +376,104 @@ def _fetch_hq_batch(codes):
 
 
 def _load_watchlist():
-    """加载关注池 — 持仓 + 龙头 + 资讯股"""
+    """加载关注池 — 持仓 + 龙头 + 资讯股(淘股吧/韭研) + 基金持仓"""
     pool = []
+    seen_codes = set()  # 用 sina code (带前缀) 去重
 
-    # 1. 持仓
+    def _add(sina_or_c6, tag):
+        raw = str(sina_or_c6).strip()
+        # 已经是 sina code
+        if raw.lower().startswith(("sh", "sz", "bj")):
+            sina = raw.lower()
+            c6 = sina[2:]
+        else:
+            c6 = raw
+            sina = _c6_to_sina(c6)
+        if sina in seen_codes:
+            return
+        seen_codes.add(sina)
+        pool.append((c6, sina, tag))
+
+    # 1. 持仓 (trading_positions.json)
     pos_path = os.path.join("data", "trading_positions.json")
     if os.path.exists(pos_path):
         try:
             with open(pos_path) as f:
                 positions = json.load(f)
             for p in positions:
-                c6 = str(p.get("code", ""))
-                if c6:
-                    pool.append((c6, "持仓"))
+                c = p.get("code", "")
+                if c:
+                    _add(c, "持仓")
         except:
             pass
 
-    # 2. 龙头股 (硬编码 + stockyidong 龙头文件)
+    # 2. 龙头股 (硬编码)
     leaders = [
         "600519", "300750", "002594", "601318", "600036",
         "000858", "688256", "688981", "000333", "601012",
         "300059", "300308", "603259",
     ]
     for c6 in leaders:
-        if c6 not in [x[0] for x in pool]:
-            pool.append((c6, "龙头"))
+        _add(c6, "龙头")
 
-    # 3. stockyidong 龙头板块文件
-    sd_path = os.path.join("data", "stockyidong")
-    if os.path.isdir(sd_path):
-        for fname in os.listdir(sd_path):
-            fpath = os.path.join(sd_path, fname)
-            try:
-                with open(fpath) as f:
-                    content = f.read()
-                import re
-                for m in re.finditer(r"\b(\d{6})\b", content):
-                    c6 = m.group(1)
-                    if c6 not in [x[0] for x in pool]:
-                        pool.append((c6, "龙头"))
-            except:
-                pass
+    # 3. 资讯股 — 淘股吧 + 韭研 stamp_cache (取最新日期文件)
+    def _load_stamp_cache(prefix, tag):
+        data_dir = "data"
+        files = sorted([f for f in os.listdir(data_dir)
+                        if f.startswith(prefix) and f.endswith(".json")], reverse=True)
+        if not files:
+            return
+        fpath = os.path.join(data_dir, files[0])
+        try:
+            with open(fpath) as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        code = item.get("code", "")
+                        if code:
+                            _add(code, tag)
+            elif isinstance(data, dict):
+                for v in data.values():
+                    if isinstance(v, list):
+                        for item in v:
+                            if isinstance(item, dict):
+                                code = item.get("code", "")
+                                if code:
+                                    _add(code, tag)
+        except Exception as e:
+            print(f"[_load_stamp_cache] {prefix} error: {e}")
 
+    _load_stamp_cache("stamp_cache_taoguba", "资讯")
+    _load_stamp_cache("stamp_cache_jiuyan", "资讯")
+
+    # 4. 基金持仓 (fund_holdings_cache — 取最新日期文件)
+    def _load_fund_holdings():
+        data_dir = "data"
+        files = sorted([f for f in os.listdir(data_dir)
+                        if f.startswith("fund_holdings_cache_") and f.endswith(".json")], reverse=True)
+        if not files:
+            return
+        fpath = os.path.join(data_dir, files[0])
+        try:
+            with open(fpath) as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                # 结构可能是 {基金名: [{code, name, weight}, ...]}
+                for v in data.values():
+                    if isinstance(v, list):
+                        for item in v:
+                            if isinstance(item, dict):
+                                code = item.get("code", "")
+                                # 基金持仓里可能是 ETF 纯 6 位
+                                if code and len(str(code)) == 6:
+                                    _add(code, "基金")
+        except Exception as e:
+            print(f"[_load_fund_holdings] error: {e}")
+
+    _load_fund_holdings()
+
+    print(f"[_load_watchlist] total: {len(pool)}", flush=True)
     return pool
 
 
@@ -638,14 +694,13 @@ class JianLouMixin:
             total = len(watchlist)
             dlg.after(0, lambda: status.config(text=f"📥 加载股票池 {total} 只..."))
 
-            sina_codes = [_c6_to_sina(c6) for c6, _ in watchlist]
+            sina_codes = [sina for _, sina, _ in watchlist]
 
             # 并行拉日K
             results = {}
             lock = threading.Lock()
 
-            def _work(idx, c6, tag):
-                sina = sina_codes[idx]
+            def _work(idx, c6, sina, tag):
                 kdata = _fetch_kline_sina(sina, scale=240, datalen=120)
                 if kdata is None or len(kdata["closes"]) < 30:
                     return
@@ -655,8 +710,8 @@ class JianLouMixin:
                     results[c6] = {"sina": sina, "tag": tag, "signals": sigs}
 
             threads = []
-            for i, (c6, tag) in enumerate(watchlist):
-                t = threading.Thread(target=_work, args=(i, c6, tag), daemon=True)
+            for i, (c6, sina, tag) in enumerate(watchlist):
+                t = threading.Thread(target=_work, args=(i, c6, sina, tag), daemon=True)
                 t.start()
                 threads.append(t)
             for t in threads:
