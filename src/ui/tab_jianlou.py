@@ -533,6 +533,134 @@ def _detect_signals(opens, highs, lows, closes, volumes):
 
 
 # ═══════════════════════════════════════════════════════════
+#  量化打分 + 历史回测
+# ═══════════════════════════════════════════════════════════
+
+# 每个信号的基础分值 (strength 1/2/3 会 × 系数)
+_SCORE_TABLE = {
+    # ── MA 类 ──
+    "MA金叉": 12, "MA死叉": 12,
+    "站上MA60": 18, "跌破MA60": 18,
+    # ── BOLL / RSI / MACD ──
+    "BOLL下轨反弹": 10, "BOLL上轨回落": 10,
+    "RSI超卖": 8, "RSI超买": 8,
+    "MACD金叉": 10, "MACD死叉": 10,
+    # ── 日本蜡烛图 (胜率较高, 分值高) ──
+    "锤子线": 14, "射击之星": 14,
+    "长腿十字(低位)": 10, "长腿十字(高位)": 10,
+    "看涨吞没": 15, "看跌吞没": 15,
+    "早晨之星": 16, "黄昏之星": 16,
+    "看涨刺透": 12, "乌云盖顶": 12,
+    # ── 期货技术 ──
+    "唐奇安突破": 18, "唐奇安破位": 18,
+    "Keltner下轨反弹": 10,
+    "波动率扩张": 12,
+    "放量突破": 14, "放量下跌": 14,
+    "连涨": 8, "连跌": 8,
+    # ── 整数关口 ──
+    "接近支撑": 6, "接近压力": 6,
+}
+
+
+def _compute_scores(signals):
+    """算买入/卖出总分, 归一化到 100"""
+    raw_buy = 0.0
+    raw_sell = 0.0
+    for s in signals:
+        base = _SCORE_TABLE.get(s["label"].split(" ")[0], 8)  # 默认 8
+        # 带参数的 label (如"接近支撑 6") 也能匹配前缀
+        strength_mult = {1: 0.6, 2: 1.0, 3: 1.5}.get(s.get("strength", 2), 1.0)
+        pts = base * strength_mult
+        if s["type"] == "buy":
+            raw_buy += pts
+        else:
+            raw_sell += pts
+
+    total = raw_buy + raw_sell
+    if total == 0:
+        return 50, 50, raw_buy, raw_sell
+    buy_100 = round(raw_buy / total * 100)
+    sell_100 = 100 - buy_100
+    return buy_100, sell_100, raw_buy, raw_sell
+
+
+def _backtest_pattern(closes, highs, lows, signal_type="buy", lookback=500):
+    """
+    简化版历史回测: 扫描过去 lookback 根K线,
+    找到所有可能的"类似触发点" (定义见下),
+    统计未来 5/10/20 天的涨跌分布.
+
+    为了不依赖具体形态 (避免和 _detect_signals 耦合),
+    对买信号简化成: 收盘价 < MA20 (超卖区) 且 当日收阳
+    对卖信号简化成: 收盘价 > MA20 (超买区) 且 当日收阴
+
+    返回: {"win5": 胜率%, "avg5": 平均收益%, "win10": ..., "max_dd": 最大回撤%}
+    """
+    N = len(closes)
+    if N < 100:
+        return None
+
+    ma20 = _ma(closes, 20)
+    start = max(21, N - lookback)
+    trades = []
+    fwd = [5, 10, 20]
+
+    for i in range(start, N - 25):  # 留够后续天数
+        if np.isnan(ma20[i]):
+            continue
+        # 简化触发条件
+        if signal_type == "buy":
+            # 超卖 + 收阳
+            if closes[i] < ma20[i] and closes[i] > closes[i - 1]:
+                trades.append(i)
+        else:
+            # 超买 + 收阴
+            if closes[i] > ma20[i] and closes[i] < closes[i - 1]:
+                trades.append(i)
+
+    if len(trades) < 5:
+        return None  # 样本太少
+
+    result = {"count": len(trades)}
+    for f in fwd:
+        rets = []
+        for idx in trades:
+            if idx + f >= N:
+                continue
+            ret = (closes[idx + f] - closes[idx]) / closes[idx] * 100
+            rets.append(ret)
+        if not rets:
+            continue
+        # 对"买信号" ret>0 算赢; "卖信号" ret<0 算赢 (做空视角)
+        if signal_type == "buy":
+            wins = sum(1 for r in rets if r > 0)
+        else:
+            wins = sum(1 for r in rets if r < 0)
+        avg = np.mean(rets)
+        # 最大不利波动
+        mdd = min(rets)
+        result[f"win{f}"] = round(wins / len(rets) * 100)
+        result[f"avg{f}"] = round(avg, 2)
+        result[f"mdd{f}"] = round(mdd, 2)
+
+    # 盈亏比 (简化)
+    all_rets = []
+    for idx in trades:
+        if idx + 10 < N:
+            all_rets.append((closes[idx + 10] - closes[idx]) / closes[idx] * 100)
+    if all_rets:
+        if signal_type == "buy":
+            avg_win = np.mean([r for r in all_rets if r > 0]) if any(r > 0 for r in all_rets) else 0
+            avg_loss = abs(np.mean([r for r in all_rets if r < 0])) if any(r < 0 for r in all_rets) else 0.01
+        else:
+            avg_win = abs(np.mean([r for r in all_rets if r < 0])) if any(r < 0 for r in all_rets) else 0
+            avg_loss = np.mean([r for r in all_rets if r > 0]) if any(r > 0 for r in all_rets) else 0.01
+        result["profit_loss_ratio"] = round(avg_win / avg_loss, 2) if avg_loss > 0 else 0
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════
 #  数据获取
 # ═══════════════════════════════════════════════════════════
 
@@ -809,21 +937,110 @@ class JianLouMixin:
         cv_buy, inner_buy = _make_scrollable(tab_buy)
         cv_sell, inner_sell = _make_scrollable(tab_sell)
 
-        # ── 嵌入日K ──
-        def _embed_daily(sina_code, name):
+        # ── 嵌入日K + 可移动浮窗 ──
+        def _embed_daily(sina_code, name, buy100=50, sell100=50,
+                         bt_buy=None, bt_sell=None, signals=None, tag=""):
             from ui.high_low_swing import _quick_open_daily_kline
-            # 清旧 canvas
+            import tkinter as tk
+
+            # 清旧 canvas 和浮窗
             for w in embed_frame.winfo_children():
                 w.destroy()
-            embed_frame.update_idletasks()
-            # _quick_open_daily_kline(parent, code6_or_sina, name, embed_frame=...)
+
+            # 先画日K
             _quick_open_daily_kline(embed_frame, sina_code, name, embed_frame=embed_frame)
             kline_title.config(text=f"📊 {name} ({sina_code})")
-            print(f"[机会扫描] embed {name} {sina_code}", flush=True)
+            embed_frame.update_idletasks()
+
+            # ── 可移动浮窗 ──
+            float_win = tk.Toplevel(dlg)
+            float_win.overrideredirect(True)  # 去掉窗口边框
+            float_win.configure(bg=_BG_PANEL)
+            float_win.attributes("-topmost", True)
+            # 放到 embed_frame 附近 (右下)
+            dlg.update_idletasks()
+            bx = embed_frame.winfo_rootx() + 8
+            by = embed_frame.winfo_rooty() + 8
+            float_win.geometry(f"+{bx}+{by}")
+
+            # 标题栏 (可拖动)
+            title_bar = tk.Frame(float_win, bg=_BG_TOOLBAR, height=28)
+            title_bar.pack(fill=tk.X)
+            _close_lbl = tk.Label(title_bar, text="✕", bg=_BG_TOOLBAR, fg=_FG_DIM,
+                                  font=("Menlo", 11), cursor="hand2")
+            _close_lbl.pack(side=tk.RIGHT, padx=6)
+            _close_lbl.bind("<Button-1>", lambda e: float_win.destroy())
+
+            _verdict = "🔴买入" if buy100 > sell100 else ("🟢卖出" if sell100 > buy100 else "⚪中性")
+            _verdict_fg = _FG_RED if buy100 > sell100 else (_FG_GREEN if sell100 > buy100 else _FG_DIM)
+            tk.Label(title_bar, text=f"🎯 {name} {_verdict} [{tag}]",
+                     bg=_BG_TOOLBAR, fg=_verdict_fg,
+                     font=("Menlo", 11, "bold")).pack(side=tk.LEFT, padx=8, pady=2)
+
+            # 拖动逻辑
+            _drag = {"x": 0, "y": 0}
+            def _on_press(e):
+                _drag["x"] = e.x_root - float_win.winfo_x()
+                _drag["y"] = e.y_root - float_win.winfo_y()
+            def _on_move(e):
+                float_win.geometry(f"+{e.x_root - _drag['x']}+{e.y_root - _drag['y']}")
+            title_bar.bind("<ButtonPress-1>", _on_press)
+            title_bar.bind("<B1-Motion>", _on_move)
+            for c in title_bar.winfo_children():
+                c.bind("<ButtonPress-1>", _on_press)
+                c.bind("<B1-Motion>", _on_move)
+
+            # 内容区
+            body = tk.Frame(float_win, bg=_BG_PANEL)
+            body.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+
+            # 打分条
+            tk.Label(body, text=f"🎯 买入{buy100} / 卖出{sell100}", bg=_BG_PANEL, fg=_FG_GOLD,
+                     font=("Menlo", 10, "bold")).pack(anchor="w")
+            bar = tk.Canvas(body, width=180, height=10, bg=_BG_DEEP, highlightthickness=0)
+            bar.pack(anchor="w", pady=2)
+            bw = int(buy100)
+            bar.create_rectangle(0, 0, bw, 10, fill="#5D1F1F", outline="")
+            if bw < 100:
+                bar.create_rectangle(bw, 0, 100, 10, fill="#1F3D1F", outline="")
+
+            # 回测
+            bt_txts = []
+            for lbl, bt in [("📈买入回测", bt_buy), ("📉卖出回测", bt_sell)]:
+                if bt and bt.get("count", 0) >= 5:
+                    w5 = bt.get("win5", 0); plr = bt.get("profit_loss_ratio", 0)
+                    bt_txts.append(f"{lbl}: 胜率{w5}% 盈亏{plr:.1f}")
+                else:
+                    bt_txts.append(f"{lbl}: 样本不足")
+            for t in bt_txts:
+                tk.Label(body, text=t, bg=_BG_PANEL, fg=_FG_BLUE,
+                         font=("Menlo", 9)).pack(anchor="w")
+
+            # 信号列表 (最近触发)
+            if signals:
+                tk.Label(body, text="─ 信号明细 ─", bg=_BG_PANEL, fg=_FG_DIM,
+                         font=("Menlo", 9)).pack(anchor="w", pady=(4, 2))
+                for s in signals[:6]:  # 最多 6 条
+                    sig_icon = "🔴" if s["type"] == "buy" else "🟢"
+                    sig_fg = _FG_RED if s["type"] == "buy" else _FG_GREEN
+                    star = "★" * s["strength"]
+                    tk.Label(body, text=f"{sig_icon} {s['label']} [{star}]",
+                             bg=_BG_PANEL, fg=sig_fg,
+                             font=("Menlo", 9)).pack(anchor="w")
+            else:
+                tk.Label(body, text="当前无技术信号触发", bg=_BG_PANEL, fg=_FG_DIM,
+                         font=("Menlo", 9)).pack(anchor="w", pady=(4, 0))
+
+            # 底部 "双击日K区域 或点✕关闭"
+            tip = tk.Label(body, text="↔ 拖动标题栏移动浮窗  ✕关闭",
+                           bg=_BG_PANEL, fg=_FG_DIM, font=("Menlo", 8))
+            tip.pack(anchor="w", pady=(6, 0))
+            print(f"[机会扫描] embed {name} {sina_code} float_win", flush=True)
 
         # ── 渲染一行 ──
-        def _render_row(parent, c6, sina, name, tag, hq_info, signals):
-            """在 parent 里放一行: [股票信息] [🟢买信号标签] [🔴卖信号标签] [📊] [❓]"""
+        def _render_row(parent, c6, sina, name, tag, hq_info, signals,
+                        buy100=50, sell100=50, bt_buy=None, bt_sell=None):
+            """在 parent 里放一行: [股票信息] [分数条] [🟢买/🔴卖信号] [回测] [❓]"""
             row_bg = _BG_CARD if parent in (inner_all, inner_buy, inner_sell) else _BG_PANEL
             row = tk.Frame(parent, bg=row_bg)
             row.pack(fill=tk.X, padx=4, pady=2)
@@ -836,37 +1053,56 @@ class JianLouMixin:
                      font=("Menlo", 13, "bold")).pack(side=tk.LEFT, padx=(8, 4), pady=6)
             tk.Label(row, text=f"{c6}", bg=row_bg, fg=_FG_DIM,
                      font=("Menlo", 11)).pack(side=tk.LEFT, pady=6)
-            tk.Label(row, text=f"  ¥{price:.2f}  {chg:+.2f}%", bg=row_bg, fg=chg_fg,
-                     font=("Menlo", 12)).pack(side=tk.LEFT, padx=6, pady=6)
+            tk.Label(row, text=f" ¥{price:.2f}  {chg:+.2f}%", bg=row_bg, fg=chg_fg,
+                     font=("Menlo", 12)).pack(side=tk.LEFT, padx=4, pady=6)
 
             # 池标签
-            tag_color = {"持仓": _FG_GOLD, "龙头": _FG_PURPLE, "资讯": _FG_PINK}.get(tag, _FG_DIM)
+            tag_color = {"持仓": _FG_GOLD, "龙头": _FG_PURPLE, "资讯": _FG_PINK,
+                         "基金": _FG_CYAN}.get(tag, _FG_DIM)
             tk.Label(row, text=f"[{tag}]", bg=row_bg, fg=tag_color,
                      font=("Menlo", 10)).pack(side=tk.LEFT, padx=2, pady=6)
 
-            # 🟢 买入信号
+            # 🎯 打分条 (暗灰底 + 迷你色块, 不铺满)
+            score_frame = tk.Frame(row, bg=row_bg)
+            score_frame.pack(side=tk.LEFT, padx=6, pady=6)
+            bar = tk.Canvas(score_frame, width=90, height=10, bg=_BG_DEEP,
+                            highlightthickness=0)
+            bar.pack(side=tk.LEFT, padx=2)
+            bar_buy_w = int(buy100)
+            bar.create_rectangle(0, 0, bar_buy_w, 10, fill="#5D1F1F", outline="")  # 暗深红
+            if bar_buy_w < 100:
+                bar.create_rectangle(bar_buy_w, 0, 100, 10, fill="#1F3D1F", outline="")  # 暗深绿
+            tk.Label(score_frame, text=f"🔴{buy100} 🟢{sell100}", bg=row_bg,
+                     fg=_FG_DIM, font=("Menlo", 9)).pack(side=tk.LEFT, padx=2)
+
+            # 信号标签 (暗灰底 + emoji + 亮色文字, 不再纯色填充)
             buys = [s for s in signals if s["type"] == "buy"]
             sells = [s for s in signals if s["type"] == "sell"]
 
             for sig in buys:
-                badge_bg = "#1B5E20"  # 深绿底
-                badge = tk.Label(row, text=f"🟢 {sig['label']}", bg=badge_bg, fg=_FG_GREEN,
-                                 font=("Menlo", 10), padx=6, pady=1)
-                badge.pack(side=tk.LEFT, padx=3, pady=6)
+                badge = tk.Label(row, text=f" 🔴 {sig['label']} ",
+                                 bg=_BG_CARD, fg="#FF7043", font=("Menlo", 10))
+                badge.pack(side=tk.LEFT, padx=2, pady=6)
 
             for sig in sells:
-                badge_bg = "#B71C1C"  # 深红底
-                badge = tk.Label(row, text=f"🔴 {sig['label']}", bg=badge_bg, fg=_FG_RED,
-                                 font=("Menlo", 10), padx=6, pady=1)
-                badge.pack(side=tk.LEFT, padx=3, pady=6)
+                badge = tk.Label(row, text=f" 🟢 {sig['label']} ",
+                                 bg=_BG_CARD, fg="#66BB6A", font=("Menlo", 10))
+                badge.pack(side=tk.LEFT, padx=2, pady=6)
+
+            # 📊 回测摘要 (如果有)
+            if bt_buy and bt_buy.get("count", 0) >= 5:
+                w5 = bt_buy.get("win5", 0); plr = bt_buy.get("profit_loss_ratio", 0)
+                bt_txt = f"📈10日胜率{w5}% 盈亏{plr:.1f}"
+                tk.Label(row, text=bt_txt, bg=row_bg, fg=_FG_BLUE,
+                         font=("Menlo", 10)).pack(side=tk.LEFT, padx=4, pady=6)
 
             # 右侧按钮区
-            # ❓ 帮助 (最右)
-            reason_text = _format_reasons(name, signals)
+            # ❓ 帮助 (最右) — 带打分+回测
+            reason_text = _format_reasons(name, signals, buy100, sell100, bt_buy, bt_sell)
             def _show_help(_t=reason_text):
                 _top = tk.Toplevel(dlg)
                 _top.title(f"💡 {name} — 信号逻辑")
-                _top.geometry("620x520")
+                _top.geometry("640x580")
                 _top.configure(bg=_BG_DEEP)
                 tk.Label(_top, text=f"💡 {name} 的技术信号逻辑",
                          bg=_BG_DEEP, fg=_FG_GOLD,
@@ -882,28 +1118,26 @@ class JianLouMixin:
             l_help.pack(side=tk.RIGHT, padx=8, pady=6)
             l_help.bind("<Button-1>", lambda e, fn=_show_help: fn())
 
-            # 🆕 双击整行 → 嵌日K (递归绑所有子控件)
+            # 🆕 双击整行 → 嵌日K + 传 scores/bt 给浮窗
             def _bind_dbl(widget):
-                widget.bind("<Double-Button-1>", lambda e, sc=sina, nm=name: _embed_daily(sc, nm))
+                widget.bind("<Double-Button-1>",
+                            lambda e, sc=sina, nm=name:
+                                _embed_daily(sc, nm, buy100, sell100, bt_buy, bt_sell, signals, tag))
                 for child in widget.winfo_children():
                     _bind_dbl(child)
             _bind_dbl(row)
 
             # 鼠标悬停高亮
-            def _on_enter(e, bg=_BG_CARD):
+            def _on_enter(e):
                 e.widget.master.configure(bg="#3A3A3A")
                 for c in e.widget.master.winfo_children():
-                    if isinstance(c, tk.Label):
-                        cur_bg = c.cget("bg")
-                        if cur_bg not in ("#1B5E20", "#B71C1C"):  # 不动信号 badge
-                            c.configure(bg="#3A3A3A")
+                    if isinstance(c, tk.Label) and c.cget("bg") not in ("#1B5E20", "#B71C1C"):
+                        c.configure(bg="#3A3A3A")
             def _on_leave(e, bg=row_bg):
                 e.widget.master.configure(bg=bg)
                 for c in e.widget.master.winfo_children():
-                    if isinstance(c, tk.Label):
-                        cur_bg = c.cget("bg")
-                        if cur_bg not in ("#1B5E20", "#B71C1C"):
-                            c.configure(bg=bg)
+                    if isinstance(c, tk.Label) and c.cget("bg") not in ("#1B5E20", "#B71C1C"):
+                        c.configure(bg=bg)
             _bind_hover(row, _on_enter, _on_leave)
 
             return row
@@ -918,22 +1152,45 @@ class JianLouMixin:
             for child in widget.winfo_children():
                 _bind_hover(child, enter_fn, leave_fn)
 
-        def _format_reasons(name, signals):
-            if not signals:
-                return f"📊 {name}\n\n当前技术指标未触发明显的买入或卖出信号。\n\n" \
-                       f"建议继续观望，或查看 60min / 1min 周期寻找更短线的机会。"
-            lines = [f"📊 {name} — 技术信号详解\n", "═" * 50, ""]
+        def _format_reasons(name, signals, buy100=50, sell100=50, bt_buy=None, bt_sell=None):
+            lines = [f"📊 {name} — 信号详解", "═" * 50, ""]
+            # ── 量化打分 ──
+            verdict = "🟢 买入机会" if buy100 > sell100 else ("🔴 卖出警告" if sell100 > buy100 else "⚪ 中性")
+            lines.append(f"🎯 量化打分: {verdict}")
+            lines.append(f"   买入分 = {buy100}   卖出分 = {sell100}")
+            lines.append(f"   （多信号叠加强度×系数后归一化到 100）")
+            lines.append("")
+
+            # ── 回测统计 ──
+            def _bt_lines(label, bt):
+                if not bt or bt.get("count", 0) < 5:
+                    return [f"📊 {label}: 历史样本不足"]
+                out = [f"📊 {label}: 过去 {bt.get('count', 0)} 次类似形态"]
+                for f in (5, 10, 20):
+                    if f"win{f}" in bt:
+                        out.append(f"   {f}日: 胜率{bt[f'win{f}']}% 均收{bt.get(f'avg{f}', 0):+.2f}%")
+                plr = bt.get("profit_loss_ratio")
+                if plr is not None:
+                    out.append(f"   盈亏比 = {plr:.2f}")
+                return out
+
+            lines.extend(_bt_lines("买入回测", bt_buy))
+            lines.extend(_bt_lines("卖出回测", bt_sell))
+            lines.append("")
+
             buys = [s for s in signals if s["type"] == "buy"]
             sells = [s for s in signals if s["type"] == "sell"]
             if buys:
-                lines.append("🟢 买入机会:")
+                lines.append("─" * 30)
+                lines.append("🟢 买入机会明细:")
                 lines.append("─" * 30)
                 for i, s in enumerate(buys, 1):
                     lines.append(f"  {i}. {s['label']} (强度 {'★' * s['strength']})")
                     lines.append(f"     {s['reason']}")
                     lines.append("")
             if sells:
-                lines.append("🔴 卖出警告:")
+                lines.append("─" * 30)
+                lines.append("🔴 卖出警告明细:")
                 lines.append("─" * 30)
                 for i, s in enumerate(sells, 1):
                     lines.append(f"  {i}. {s['label']} (强度 {'★' * s['strength']})")
@@ -941,7 +1198,6 @@ class JianLouMixin:
                     lines.append("")
             lines.append("═" * 50)
             lines.append("⚠️ 以上为纯技术面分析结果，仅供参考。")
-            lines.append("   实际操作请结合基本面、消息面和市场环境综合判断。")
             return "\n".join(lines)
 
         # ── 背景扫描 ──
@@ -962,8 +1218,17 @@ class JianLouMixin:
                     return
                 sigs = _detect_signals(kdata["opens"], kdata["highs"], kdata["lows"],
                                        kdata["closes"], kdata["volumes"])
+                # ── 量化打分 ──
+                buy100, sell100, raw_b, raw_s = _compute_scores(sigs)
+                # ── 历史回测 ──
+                bt_buy = _backtest_pattern(kdata["closes"], kdata["highs"], kdata["lows"], "buy")
+                bt_sell = _backtest_pattern(kdata["closes"], kdata["highs"], kdata["lows"], "sell")
                 with lock:
-                    results[c6] = {"sina": sina, "tag": tag, "signals": sigs}
+                    results[c6] = {
+                        "sina": sina, "tag": tag, "signals": sigs,
+                        "buy100": buy100, "sell100": sell100,
+                        "bt_buy": bt_buy, "bt_sell": bt_sell,
+                    }
 
             threads = []
             for i, (c6, sina, tag) in enumerate(watchlist):
@@ -991,17 +1256,19 @@ class JianLouMixin:
                 sina = info["sina"]
                 hq = hq_map.get(sina, {})
                 name = hq.get("name", sina)
-                row_data = (c6, sina, name, info["tag"], hq, info["signals"])
+                row_data = (c6, sina, name, info["tag"], hq, info["signals"],
+                            info.get("buy100", 50), info.get("sell100", 50),
+                            info.get("bt_buy"), info.get("bt_sell"))
                 all_rows.append(row_data)
-                if any(s["type"] == "buy" for s in info["signals"]):
+                if info.get("buy100", 50) > 50:
                     buy_rows.append(row_data)
-                if any(s["type"] == "sell" for s in info["signals"]):
+                if info.get("sell100", 50) > 50:
                     sell_rows.append(row_data)
 
-            # 按信号数排序 (多信号的排前面)
-            all_rows.sort(key=lambda x: len(x[5]), reverse=True)
-            buy_rows.sort(key=lambda x: sum(s["strength"] for s in x[5] if s["type"] == "buy"), reverse=True)
-            sell_rows.sort(key=lambda x: sum(s["strength"] for s in x[5] if s["type"] == "sell"), reverse=True)
+            # 按分数排序
+            all_rows.sort(key=lambda x: x[6] - x[7], reverse=True)  # buy100 - sell100
+            buy_rows.sort(key=lambda x: x[6], reverse=True)
+            sell_rows.sort(key=lambda x: x[7], reverse=True)
 
             for rd in all_rows:
                 _render_row(inner_all, *rd)
@@ -1023,6 +1290,12 @@ class JianLouMixin:
 
             buy_count = len(buy_rows)
             sell_count = len(sell_rows)
+            # Tab 标题按分数动态改
+            def _update_tabs():
+                nb.tab(tab_all, text=f"📋 全部 ({len(all_rows)})")
+                nb.tab(tab_buy, text=f"🟢 买入机会 ({buy_count})")
+                nb.tab(tab_sell, text=f"🔴 卖出警告 ({sell_count})")
+            dlg.after(0, _update_tabs)
             dlg.after(0, lambda: status.config(
                 text=f"✅ 扫描完成 {len(results)}只 | 🟢{buy_count} 🔴{sell_count}"))
 

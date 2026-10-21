@@ -395,6 +395,8 @@ from ui.tab_format import FormatMixin
 from ui.tab_holdings import HoldingsMixin
 from ui.tab_caochuan import CaochuanMixin
 from ui.tab_jianlou import JianLouMixin
+from ui.tab_chouma import ChouMaMixin
+from ui.tab_learning import LearningMixin
 
 # Phase 5c: Builders/Nav/Spider/Realtime/Checks/Math/Getters/Trade/EmoDeep/Token/Schedule/Buttons
 from ui.tab_builders import BuildersMixin
@@ -425,7 +427,7 @@ from ui.tab_rest import RestMixin
 from ui.tab_toplevel import ToplevelMixin
 from ui.tab_web import WebMixin
 
-class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, ExportMixin, FileIoMixin, FinanceMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, WarningMixin, WebMixin, WencaiMixin, WordcloudMixin):
+class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ConfigMixin, CrawlerMixin, ChouMaMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, ExportMixin, FileIoMixin, FinanceMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, WarningMixin, WebMixin, WencaiMixin, WordcloudMixin):
 
     def __init__(self, root):
         self.root = root
@@ -4690,8 +4692,8 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         tp = 2
         for idx_btn, (txt, w, cmd) in enumerate([
             ("全", 3, self.show_market_situation),
-            ("自选股管理", 8, self.show_stock_management_dialog),
-            ("最新N条分析", 9, self.analyze_latest_n_stocks),
+            # ("自选股管理", 8, self.show_stock_management_dialog),  # 迁入工具 Tab
+            # ("最新N条分析", 9, self.analyze_latest_n_stocks),    # 迁入工具 Tab
             ("📊 批量股票分析", 9, self.show_batch_stock_analyzer),
             ("龙虎榜", 6, self.show_top_list_dialog),
             ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
@@ -4729,6 +4731,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("👁️看盘", 7, self._show_speculator_watch),
             ("🎯高抛低吸", 8, self._show_high_low_swing),
             ("🎯机会", 7, self._show_jianlou),
+            ("🪙筹码", 7, self._show_chouma),
             ("📈1minK", 7, self._show_1min_kline_dialog),
             ("🔍多股对比", 8, self._show_multi_compare_dialog),
         ]:
@@ -4782,6 +4785,13 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         ttk.Button(tools_row_b, text="🔄 回测/回撤分析", command=self.show_backtest_dialog, width=14).pack(**_tools_pad)
         ttk.Button(tools_row_b, text="🔍 新闻搜索", command=self.launch_keyword_search_app, width=14).pack(**_tools_pad)
         ttk.Button(tools_row_b, text="📋 操盘面板", command=self._show_caochuan_panel, width=14).pack(**_tools_pad)
+        # 从 toolbar_row1 迁入的按钮
+        tools_row_c = ttk.Frame(tools_frame); tools_row_c.pack(fill=tk.X, pady=2)
+        ttk.Button(tools_row_c, text="📋自选股管理", command=self.show_stock_management_dialog, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_c, text="🔍最新N条分析", command=self.analyze_latest_n_stocks, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_c, text="🌱成长扫描",
+                   command=lambda: crawler_control_notebook.select(growth_tab),
+                   width=14).pack(**_tools_pad)
         # 将咨询分析、投资、系统、赌博、交易体系、交割单分析按钮移到交易标签页
         trading_buttons_frame = ttk.LabelFrame(trading_tab, text="交易功能", padding=3)
         trading_buttons_frame.pack(fill=tk.X, expand=False, pady=2)
@@ -5655,6 +5665,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         # 成长标签页(放在等待后)
         growth_tab = ttk.Frame(crawler_control_notebook, padding=10)
         crawler_control_notebook.add(growth_tab, text="成长")
+        crawler_control_notebook.hide(growth_tab)  # 隐藏, 入口改到工具 Tab 的 "🌱成长扫描" 按钮
         # ── 淘股吧 Tab (邮票格子) ──
         taoguba_tab = ttk.Frame(crawler_control_notebook, padding=8)
         crawler_control_notebook.add(taoguba_tab, text="📯 淘股吧")
@@ -5663,6 +5674,12 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         jiuyan_tab = ttk.Frame(crawler_control_notebook, padding=8)
         crawler_control_notebook.add(jiuyan_tab, text="🧭 韭研公社")
         self._build_jiuyan_stamp_tab(jiuyan_tab)
+
+        # ── 🎓 学习 Tab ──
+        learning_tab = ttk.Frame(crawler_control_notebook, padding=6)
+        crawler_control_notebook.add(learning_tab, text="🎓学习")
+        self._build_learning_tab(learning_tab)
+
 
         growth_top = ttk.Frame(growth_tab)
         growth_top.pack(fill=tk.X, pady=(0, 8))

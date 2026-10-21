@@ -1766,7 +1766,7 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
     diag_combo.pack(side=tk.LEFT, pady=8)
 
     # 副图指标下拉 (单选, 支持组合)
-    _SUB_OPTIONS = ["MACD", "RSI", "KDJ", "BOLL", "MACD+RSI", "MACD+KDJ", "全部"]
+    _SUB_OPTIONS = ["MACD", "RSI", "KDJ", "BOLL", "OBV", "MACD+RSI", "MACD+KDJ", "全部"]
     tk.Label(r1, text="|", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT, padx=4, pady=8)
     tk.Label(r1, text="副图", bg=_BG_TOOLBAR, fg=_FG_BLUE, font=("", 9)).pack(side=tk.LEFT, pady=8)
     _sub_var = tk.StringVar(value="MACD")
@@ -1947,7 +1947,8 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
             _draw_macd = "MACD" in _sub_choice or _sub_choice == "全部"
             _draw_rsi = "RSI" in _sub_choice or _sub_choice == "全部"
             _draw_kdj = "KDJ" in _sub_choice
-            _n_subs = sum([_draw_macd, _draw_rsi, _draw_kdj])  # 副图数量
+            _draw_obv = "OBV" in _sub_choice or _sub_choice == "全部"
+            _n_subs = sum([_draw_macd, _draw_rsi, _draw_kdj, _draw_obv])
 
             # ── 清旧图 (安全版: destroy 后 update_idletasks 让 Tk 真正清理) ──
             print("[🎨渲染] → 清旧图 fig.clear()", flush=True)
@@ -1997,6 +1998,9 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
             if _draw_kdj:
                 if _sub_slot1 is None: _sub_slot1 = "KDJ"
                 elif _sub_slot2 is None: _sub_slot2 = "KDJ"
+            if _draw_obv:
+                if _sub_slot1 is None: _sub_slot1 = "OBV"
+                elif _sub_slot2 is None: _sub_slot2 = "OBV"
             if _sub_slot1 and _sub1_top > 0:
                 axm1 = fig.add_axes([0.06, _sub1_bot, 0.88, _sub1_top - _sub1_bot],
                                     sharex=ax, facecolor=_BG_PANEL)
@@ -2149,27 +2153,167 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 ax.scatter([_last_x], [ma60[-1]], s=25, color="#EF9A9A", zorder=12, marker="_", linewidths=2.0)
                 ax.text(_last_x + 1, ma60[-1], f" MA60={ma60[-1]:.2f}", color="#EF9A9A", fontsize=7, va="center")
 
-            # ── BOLL 主图已砍 (副图 BOLL%B 足够) ──
+            # ═══════════════════════════════════════════════
+            # 🆕 BOLL 带画主图 — 恢复 L2152 原来砍掉的
+            # ═══════════════════════════════════════════════
+            if _draw_boll_main:
+                _xb = _np.arange(len(c))
+                ax.plot(_xb, boll_upper, color="#CE93D8", lw=0.9, ls="--", alpha=0.7, label="BOLL上轨")
+                ax.plot(_xb, boll_mid,   color="#FFD54F", lw=0.7, ls=":",  alpha=0.6, label="BOLL中轨")
+                ax.plot(_xb, boll_lower, color="#CE93D8", lw=0.9, ls="--", alpha=0.7, label="BOLL下轨")
+                # BOLL 区域半透明填充
+                ax.fill_between(_xb, boll_upper, boll_lower, color="#CE93D8", alpha=0.06, zorder=0)
+                # BOLL 收窄/扩张提示 — 宽度 < 最近 50 根均值 50% 是收口信号
+                _boll_w = boll_upper - boll_lower
+                _boll_w_ma = _ma(_boll_w[~_np.isnan(_boll_w)], 50) if _np.sum(~_np.isnan(_boll_w)) >= 50 else _np.mean(_boll_w[~_np.isnan(_boll_w)])
+                _cur_w = _boll_w[-1] if not _np.isnan(_boll_w[-1]) else 0
+                if _boll_w_ma > 0 and _cur_w < _boll_w_ma * 0.5:
+                    ax.text(0.995, 0.95, "📦BOLL收口 酝酿变盘", transform=ax.transAxes,
+                            fontsize=8, color="#FFC107", ha="right", va="top",
+                            bbox=dict(boxstyle="round,pad=0.25", fc="#3E2723", ec="#FFC107", alpha=0.9))
+                elif _boll_w_ma > 0 and _cur_w > _boll_w_ma * 1.5:
+                    ax.text(0.995, 0.95, "📊BOLL开口 趋势加速", transform=ax.transAxes,
+                            fontsize=8, color="#EF5350", ha="right", va="top",
+                            bbox=dict(boxstyle="round,pad=0.25", fc="#1b0000", ec="#EF5350", alpha=0.9))
 
-            # ── 支撑阻力线 — 只画整数关口 (step 根据价格动态定) ──
+            # ═══════════════════════════════════════════════
+            # 🆕 VWAP 分时均价线 (成交量加权) — 高抛低吸基准
+            #   从每根K线 volume 累积, cum_vol_price / cum_vol
+            # ═══════════════════════════════════════════════
+            _vol_price = v * (c + h + l + o) / 4  # 用典型价
+            _cum_vp = _np.cumsum(_vol_price)
+            _cum_v  = _np.cumsum(v)
+            vwap = _np.where(_cum_v > 0, _cum_vp / _cum_v, _np.nan)
+            ax.plot(x, vwap, color="#26C6DA", lw=1.3, alpha=0.85, label="VWAP", zorder=8)
+            # VWAP 最后一点标记
+            if not _np.isnan(vwap[-1]):
+                ax.scatter([_last_x], [vwap[-1]], s=20, color="#26C6DA", zorder=11)
+                ax.text(_last_x + 1, vwap[-1], f" VWAP={vwap[-1]:.2f}", color="#26C6DA", fontsize=7, va="center")
+                # 当前价 vs VWAP 浮窗提示 (右下)
+                _vwap_diff = (c[-1] - vwap[-1]) / vwap[-1] * 100 if vwap[-1] > 0 else 0
+                _vwap_hint = f"📊 {_vwap_diff:+.2f}% {'🟢' if _vwap_diff > 0 else '🔴'}"
+                ax.text(0.995, 0.03, _vwap_hint, transform=ax.transAxes,
+                        fontsize=8, color="#26C6DA", ha="right", va="bottom",
+                        bbox=dict(boxstyle="round,pad=0.25", fc="#002d3a", ec="#26C6DA", alpha=0.9))
+
+            # ═══════════════════════════════════════════════
+            # 🆕 开盘价基准线 + 涨跌停线
+            #   取最后一个交易日的第一个 open (240 根通常覆盖 1~2 天)
+            #   涨停/跌停默认 10%, 科创/创业板 20% — 简化统一用 10% + 20% 辅助线
+            # ═══════════════════════════════════════════════
+            _today_open = o[0]  # 用整段第一根开盘价近似 (足够用)
+            _zt = _today_open * 1.10  # 涨停
+            _dt = _today_open * 0.90  # 跌停
+            _zt20 = _today_open * 1.20  # 20% 涨停线
+            _dt20 = _today_open * 0.80
+            # 开盘价基准线 (淡灰)
+            ax.axhline(y=_today_open, color=_FG_DIM, lw=0.6, ls=":", alpha=0.5)
+            ax.text(2, _today_open, f" 开盘 {_today_open:.2f}", color=_FG_DIM, fontsize=7, va="center")
+            # 涨跌停辅助线 — 只有在当前价附近才画, 远了不画 (减少噪音)
+            _cur_rng = c.max() - c.min() if c.max() > c.min() else 1
+            for _zl, _zc, _ztxt in [(_zt, "#EF5350", "涨停10%"), (_dt, "#66BB6A", "跌停10%"),
+                                     (_zt20, "#FF8A80", "涨停20%"), (_dt20, "#81C784", "跌停20%")]:
+                if abs(_zl - c[-1]) < _cur_rng * 1.5:  # 在图的价格范围附近才画
+                    ax.axhline(y=_zl, color=_zc, lw=0.5, ls="-.", alpha=0.55)
+                    ax.text(len(x)-3, _zl, f" {_ztxt} {_zl:.2f}", color=_zc, fontsize=6, va="center")
+
+            # ═══════════════════════════════════════════════
+            # 🆕 局部极值 — 自动找出近期高低点作为动态支撑/压力
+            #   扫描 close 数组, 找前后 5 根内最高/最低 (窗口小=1minK 信号灵敏)
+            #   合并接近的点 (间距 < 3 根), 只画最近 80 根
+            # ═══════════════════════════════════════════════
             if _sr_var.get():
+                PEAK_WIN = 5
+                RECENT = 80
+                EXT_MIN_GAP = 3  # 合并间距
+                _start_sr = max(PEAK_WIN, len(c) - RECENT)
+                _peaks, _troughs = [], []
+                for _i in range(_start_sr, len(c) - PEAK_WIN):
+                    _lo = max(0, _i - PEAK_WIN); _hi = min(len(c), _i + PEAK_WIN + 1)
+                    if c[_i] == _np.max(c[_lo:_hi]) and c[_i] > c[_i-1] and c[_i] > c[_i+1]:
+                        _peaks.append((_i, c[_i]))
+                    elif c[_i] == _np.min(c[_lo:_hi]) and c[_i] < c[_i-1] and c[_i] < c[_i+1]:
+                        _troughs.append((_i, c[_i]))
+                # 合并接近的峰值 (取最高)
+                def _merge_near(points, is_peak=True):
+                    if not points: return []
+                    merged = [points[0]]
+                    for _idx, _val in points[1:]:
+                        if _idx - merged[-1][0] <= EXT_MIN_GAP:
+                            # 同组取极值
+                            _keep = (_idx, max(_val, merged[-1][1])) if is_peak else (_idx, min(_val, merged[-1][1]))
+                            merged[-1] = _keep
+                        else:
+                            merged.append((_idx, _val))
+                    return merged
+                _peaks = _merge_near(_peaks, is_peak=True)
+                _troughs = _merge_near(_troughs, is_peak=False)
+                # 画峰值 (红色虚线压力) — 只画最近 4 个
+                for _idx, _val in _peaks[-4:]:
+                    ax.axhline(y=_val, color="#EF5350", lw=0.6, ls="--", alpha=0.45, xmin=0, xmax=1)
+                    ax.text(2, _val, f" P{_val:.2f}", color="#EF5350", fontsize=6, va="center",
+                            bbox=dict(boxstyle="round,pad=0.15", fc="#1b0000", ec="#EF5350", alpha=0.7))
+                # 画谷值 (绿色虚线支撑) — 只画最近 4 个
+                for _idx, _val in _troughs[-4:]:
+                    ax.axhline(y=_val, color="#66BB6A", lw=0.6, ls="--", alpha=0.45, xmin=0, xmax=1)
+                    ax.text(2, _val, f" S{_val:.2f}", color="#66BB6A", fontsize=6, va="center",
+                            bbox=dict(boxstyle="round,pad=0.15", fc="#001b00", ec="#66BB6A", alpha=0.7))
+
+                # ── 整数关口支撑阻力 (原有逻辑保留) ──
                 _cur = c[-1]
                 if _cur < 5: _step = 0.5
                 elif _cur < 20: _step = 1.0
                 elif _cur < 100: _step = 5.0
                 elif _cur < 500: _step = 10.0
                 else: _step = 50.0
-                _gk_lines = []
-                # 当前价上下各 1 个整数关口
                 _gk_lo = math.floor(_cur / _step) * _step
                 _gk_hi = _gk_lo + _step
                 if _gk_lo > 0:
-                    _gk_lines.append((_gk_lo, _step, "#FF9800"))  # 橙=支撑
+                    ax.axhline(y=_gk_lo, color="#FF9800", ls=":", lw=0.6, alpha=0.5)
+                    ax.text(len(x)-5, _gk_lo, f"整数支撑 {_gk_lo:g}", color="#FF9800", fontsize=7, va="center", ha="right")
                 if _gk_hi > _cur:
-                    _gk_lines.append((_gk_hi, _step, "#FF8A80"))  # 红=压力
-                for _sp, _st, _sc in _gk_lines:
-                    ax.axhline(y=_sp, color=_sc, ls=":", lw=0.6, alpha=0.5)
-                    ax.text(2, _sp, f" {_sp:g}", color=_sc, fontsize=7, va="center")
+                    ax.axhline(y=_gk_hi, color="#FF8A80", ls=":", lw=0.6, alpha=0.5)
+                    ax.text(len(x)-5, _gk_hi, f"整数压力 {_gk_hi:g}", color="#FF8A80", fontsize=7, va="center", ha="right")
+
+            # ═══════════════════════════════════════════════
+            # 🆕 量价背离检测 — 标记画在主图
+            #   顶背离: 价格新高 + 成交量没新高 → 🔴 顶部警示
+            #   底背离: 价格新低 + 成交量没新低 → 🟢 底部支撑
+            # ═══════════════════════════════════════════════
+            _div_win = 30  # 在最近 30 根内找两个峰/谷比较
+            _div_start = max(10, len(c) - _div_win)
+            _vol_ma5 = _ma(v.astype(float), 5)
+            for _side, _color, _label in [(+1, "#EF5350", "顶背离"), (-1, "#22C55E", "底背离")]:
+                # 找局部极值 (用 peak/trough 检测, 窗口 5)
+                _exts = []
+                for _i in range(_div_start + 5, len(c) - 5):
+                    _lo = max(0, _i - 5); _hi = min(len(c), _i + 6)
+                    if _side > 0 and c[_i] == _np.max(c[_lo:_hi]) and c[_i] > c[_i-1] and c[_i] > c[_i+1]:
+                        _exts.append(_i)
+                    elif _side < 0 and c[_i] == _np.min(c[_lo:_hi]) and c[_i] < c[_i-1] and c[_i] < c[_i+1]:
+                        _exts.append(_i)
+                # 比较最近两个同方向极值
+                if len(_exts) >= 2:
+                    _a, _b = _exts[-2], _exts[-1]  # 更早的, 更近的
+                    if _side > 0:
+                        # 顶背离: 价更高, 量更低
+                        if c[_b] > c[_a] and _vol_ma5[_b] < _vol_ma5[_a] * 0.85:
+                            ax.scatter([x[_b]], [h[_b] * 1.008], marker="v", s=100,
+                                       color=_color, zorder=13, edgecolors="white", linewidths=1.5)
+                            ax.annotate(f"🆘{_label}", xy=(x[_b], h[_b]),
+                                        xytext=(x[_b], h[_b] * 1.025),
+                                        ha="center", fontsize=7, color=_color, fontweight="bold",
+                                        bbox=dict(boxstyle="round,pad=0.2", fc="#1b0000" if _side > 0 else "#001b00",
+                                                  ec=_color, alpha=0.9))
+                    else:
+                        # 底背离: 价更低, 量更低 → 缩量恐慌衰竭
+                        if c[_b] < c[_a] and _vol_ma5[_b] < _vol_ma5[_a] * 0.7:
+                            ax.scatter([x[_b]], [l[_b] * 0.992], marker="^", s=100,
+                                       color=_color, zorder=13, edgecolors="white", linewidths=1.5)
+                            ax.annotate(f"🛡️{_label}", xy=(x[_b], l[_b]),
+                                        xytext=(x[_b], l[_b] * 0.975),
+                                        ha="center", fontsize=7, color=_color, fontweight="bold",
+                                        bbox=dict(boxstyle="round,pad=0.2", fc="#001b00", ec=_color, alpha=0.9))
 
             # ═══════════════════════════════════════════════
             # 🆕 动态副图: MACD / RSI / KDJ — 根据 _sub_slot1 / _sub_slot2 分配
@@ -2218,6 +2362,20 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                     k_d[_i] = 2/3 * k_d[_i-1] + 1/3 * k_k[_i]
                     k_j[_i] = 3 * k_k[_i] - 2 * k_d[_i]
 
+            # ── OBV 计算 ──
+            obv = None
+            if _draw_obv:
+                obv = _np.zeros(len(c))
+                for _i in range(1, len(c)):
+                    if c[_i] > c[_i-1]:
+                        obv[_i] = obv[_i-1] + v[_i]
+                    elif c[_i] < c[_i-1]:
+                        obv[_i] = obv[_i-1] - v[_i]
+                    else:
+                        obv[_i] = obv[_i-1]
+                # OBV 均线 (5 根)
+                obv_ma = _ma(obv.astype(float), 5)
+
             # ── 画副图1 ──
             def _setup_sub(axm, label):
                 axm.set_ylabel(label, color=_FG_DIM, fontsize=8)
@@ -2247,6 +2405,15 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 axm1.axhline(y=80, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
                 axm1.axhline(y=20, color="#22C55E", lw=0.5, ls="--", alpha=0.6)
                 _setup_sub(axm1, "KDJ")
+            elif _sub_slot1 == "OBV" and axm1 is not None and obv is not None:
+                axm1.plot(x, obv, color="#42A5F5", lw=0.9, label="OBV")
+                axm1.plot(x, obv_ma, color="#FFB74D", lw=0.7, ls=":", label="OBV_MA5")
+                axm1.axhline(y=obv[0], color=_FG_DIM, lw=0.4, ls=":", alpha=0.4)  # 起点基准
+                axm1.fill_between(x, obv, obv[0], where=obv > obv[0],
+                                  color="#EF5350", alpha=0.08)
+                axm1.fill_between(x, obv, obv[0], where=obv < obv[0],
+                                  color="#66BB6A", alpha=0.08)
+                _setup_sub(axm1, "OBV")
 
             # ── 画副图2 ──
             if _sub_slot2 == "MACD" and axm2 is not None and macd_h is not None:
@@ -2271,6 +2438,11 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
                 axm2.axhline(y=80, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
                 axm2.axhline(y=20, color="#22C55E", lw=0.5, ls="--", alpha=0.6)
                 _setup_sub(axm2, "KDJ")
+            elif _sub_slot2 == "OBV" and axm2 is not None and obv is not None:
+                axm2.plot(x, obv, color="#42A5F5", lw=0.9, label="OBV")
+                axm2.plot(x, obv_ma, color="#FFB74D", lw=0.7, ls=":", label="OBV_MA5")
+                axm2.axhline(y=obv[0], color=_FG_DIM, lw=0.4, ls=":", alpha=0.4)
+                _setup_sub(axm2, "OBV")
 
             # ═══════════════════════════════════════════════
             # MACD 背离检测 — 标记画到主图 + MACD 副图 axes
@@ -3210,11 +3382,12 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
               padx=4).pack(side=tk.LEFT, padx=2)
 
     period_var = tk.StringVar(value="day")
-    for txt, val in [("分时", "minute"), ("60分", "60"), ("日线", "day"), ("周线", "week"), ("月线", "month")]:
+    for txt, val in [("1分", "1"), ("5分", "5"), ("15分", "15"), ("30分", "30"),
+                     ("60分", "60"), ("日线", "day"), ("周线", "week"), ("月线", "month")]:
         tk.Radiobutton(top, text=txt, variable=period_var, value=val,
                        bg=_BG_TOOLBAR, fg="white", selectcolor=_BG_DEEP,
                        activebackground=_BG_TOOLBAR, activeforeground="white",
-                       command=lambda: _reload()).pack(side=tk.LEFT, padx=6)
+                       command=lambda: _reload()).pack(side=tk.LEFT, padx=4)
 
     # 🆕 两个分析勾选项
     candle_var = tk.BooleanVar(value=False)
@@ -3291,7 +3464,8 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             """东方财富 push2his: 日/周/月/60分/分时"""
             try:
                 # klt: 101=日K, 102=周K, 103=月K, 60=60分, 1=分时
-                _klt_map = {"day": "101", "week": "102", "month": "103", "60": "60", "minute": "1"}
+                _klt_map = {"day": "101", "week": "102", "month": "103",
+                            "60": "60", "30": "30", "15": "15", "5": "5", "1": "1", "minute": "1"}
                 klt = _klt_map.get(period, "101")
                 url = (f"https://push2his.eastmoney.com/api/qt/stock/kline/get"
                        f"?secid={_dfm_secid}&fields1=f1,f2,f3,f4,f5,f6"
@@ -3334,11 +3508,13 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 print(f"[日K_fetch] 新浪 scale={scale} err={_e}", flush=True); return None
 
         # 主路径: 新浪 (秒级稳定, 东方财富常挂)
-        scale_map = {"day": 240, "week": 240, "month": 240, "60": 60, "minute": 1}
-        if period == "minute":
-            data = _try_sina(1) or _try_sina(240)
-        elif period == "60":
-            data = _try_sina(60) or _try_sina(240)
+        scale_map = {"day": 240, "week": 240, "month": 240,
+                     "60": 60, "30": 30, "15": 15, "5": 5, "1": 1, "minute": 1}
+        _is_tick = period in ("1", "minute")
+        _is_intraday = period.isdigit()  # "1"/"5"/"15"/"30"/"60"
+
+        if _is_intraday:
+            data = _try_sina(int(period)) or _try_eastmoney(period)
         elif period in ("week", "month"):
             daily = _try_sina(240) or _try_eastmoney("day")
             if daily:
@@ -3774,7 +3950,7 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             dlg.geometry("1280x840"); return
         # 分时图不支持蜡烛形态 (没有 open/high/low 的蜡烛结构)
         current_period = period_var.get()
-        if current_period == "minute" and want_candle:
+        if current__is_tick_p and want_candle:
             candle_var.set(False); want_candle = False
             messagebox.showinfo("提示", "分时图不支持蜡烛形态分析, 请切换到日线/60分等周期")
         # 需要数据
@@ -3846,9 +4022,12 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             dates = [d["day"] for d in data]
             n = len(closes)
             x = np.arange(n)
+            # 🆕 统一周期判断 (兼容旧 "minute" 和新 "1"/"5"/"15"/"30"/"60" 数字)
+            _is_tick_p = period in ("1", "minute")
+            _is_intra_p = period.isdigit()
 
             # ── 分时图特殊处理 (折线 + 均价线 + 前收盘参考) ──
-            if period == "minute":
+            if _is_tick_p:
                 ax1 = fig.add_axes([0.08, 0.28, 0.88, 0.58], facecolor=_BG_PANEL)
                 # 前收盘价 (今天第一根的 open 或昨日收盘)
                 prev_close = opens[0] if opens[0] > 0 else closes[0]
@@ -3893,6 +4072,36 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             ma5 = _ma(closes, 5); ma10 = _ma(closes, 10)
             ma20 = _ma(closes, 20); ma60 = _ma(closes, 60)
 
+            # 🆕 提前算好 MACD / RSI / BOLL — 后面综合判断和买卖点都要用
+            # MACD
+            ema12 = np.array(closes, dtype=float); ema26 = np.array(closes, dtype=float)
+            for i in range(1, n):
+                ema12[i] = closes[i] * 2 / 13 + ema12[i - 1] * (1 - 2 / 13)
+                ema26[i] = closes[i] * 2 / 27 + ema26[i - 1] * (1 - 2 / 27)
+            dif = ema12 - ema26
+            dea = np.array(dif, dtype=float)
+            for i in range(1, n): dea[i] = dif[i] * 2 / 10 + dea[i - 1] * (1 - 2 / 10)
+            hist = 2 * (dif - dea)
+            # RSI(14)
+            rsi_n = 14
+            delta = np.diff(closes.astype(float))
+            gain = np.where(delta > 0, delta, 0.0)
+            loss = np.where(delta < 0, -delta, 0.0)
+            rsi = np.full(n, np.nan)
+            if len(gain) >= rsi_n:
+                avg_gain = np.mean(gain[:rsi_n]); avg_loss = np.mean(loss[:rsi_n])
+                rsi[rsi_n] = 100 - 100 / (1 + avg_gain / avg_loss) if avg_loss > 0 else 100
+                for i in range(rsi_n + 1, n):
+                    avg_gain = (avg_gain * (rsi_n - 1) + gain[i-1]) / rsi_n
+                    avg_loss = (avg_loss * (rsi_n - 1) + loss[i-1]) / rsi_n
+                    rsi[i] = 100 - 100 / (1 + avg_gain / avg_loss) if avg_loss > 0 else 100
+            # BOLL(20)
+            _boll_mid = _ma(closes, 20)
+            _boll_std = np.full(n, np.nan)
+            for i in range(19, n): _boll_std[i] = np.std(closes[i-19:i+1])
+            _boll_upper = _boll_mid + 2 * _boll_std
+            _boll_lower = _boll_mid - 2 * _boll_std
+
             # 蜡烛 (中国红涨绿跌)
             w = 0.6
             for i in range(n):
@@ -3902,11 +4111,14 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 ax1.bar(x[i], abs(c - o), bottom=min(c, o), width=w, color=col, edgecolor=col)
 
             ax1.plot(x, ma5, color="#FF8A65", lw=0.9, label="MA5")
-            if period in ("minute", "60"):
+            if _is_intra_p:
                 ax1.plot(x, ma10, color="#42A5F5", lw=0.9, label="MA10")
             ax1.plot(x, ma20, color="#AB47BC", lw=0.9, label="MA20")
             ax1.plot(x, ma60, color="#EF5350", lw=1.0, label="MA60")
-            # 标题简化 — 短名称 + 周期 + 最新价，不单独 ax1.legend (MA 颜色已区分)
+            # 🆕 MA 图例 (左上角, 半透明底, 7号字)
+            ax1.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM,
+                       labelcolor=["#FF8A65","#42A5F5","#AB47BC","#EF5350"][:4 if _is_intra_p else 3],
+                       framealpha=0.85, ncol=4 if _is_intra_p else 3)
             ax1.set_facecolor(_BG_PANEL)
             for spine in ax1.spines.values(): spine.set_color(_FG_DIM)
             ax1.tick_params(colors=_FG_DIM, labelsize=8)
@@ -3937,7 +4149,7 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 _resistances = _cluster(_local_max, 0.015)
                 _cur = closes[-1]
                 # 日线只画最近的 2 条支撑/2 条压力 (1min/60min 画 3 条)
-                _sr_limit = 2 if period not in ("minute", "60") else 3
+                _sr_limit = 2 if not _is_intra_p else 3
                 _sr_drawn = set()
                 for s in _supports:
                     if s in _sr_drawn: continue
@@ -3961,23 +4173,49 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                     ax1.text(0.99, _near_r, f"R {_near_r:.2f}", transform=ax1.get_yaxis_transform(),
                              fontsize=7, va="center", ha="right", color="#FF8A80")
 
-            # 🆕 买卖点标记 (日K: 只留金叉/死叉 + 最近20根)
+            # 🆕 买卖点标记 (增强版: MA金叉/死叉 + MACD金叉/死叉 + BOLL穿越 + RSI超买超卖 + 蜡烛形态)
             if bsp_var.get() and n >= 30:
-                _bs = []  # (idx, price, 'buy'/'sell')
-                # 金叉/死叉 (MA5 vs MA20, 日线用 MA20 更可靠, MA10 太敏感)
+                _bs = []  # (idx, price, 'buy'/'sell', 标签)
+                _bs_recent_start = max(10, n - 60)
+
+                # ① MA 金叉/死叉 (快速 vs 慢速)
                 _ma_fast = ma5
-                _ma_slow = ma20 if period not in ("minute", "60") else ma10
+                _ma_slow = ma20 if not _is_intra_p else ma10
                 for i in range(1, n):
                     if np.isnan(_ma_fast[i]) or np.isnan(_ma_slow[i]) or np.isnan(_ma_fast[i-1]) or np.isnan(_ma_slow[i-1]):
                         continue
                     if _ma_fast[i-1] < _ma_slow[i-1] and _ma_fast[i] >= _ma_slow[i]:
-                        _bs.append((i, lows[i], "buy"))
+                        _bs.append((i, lows[i], "buy", "MA金叉"))
                     elif _ma_fast[i-1] > _ma_slow[i-1] and _ma_fast[i] <= _ma_slow[i]:
-                        _bs.append((i, highs[i], "sell"))
-                # 蜡烛形态只在 1min/60min 画, 日线过滤 (太密)
-                if period in ("minute", "60"):
-                    _recent = range(max(10, n - 60), n)
-                    for i in _recent:
+                        _bs.append((i, highs[i], "sell", "MA死叉"))
+
+                # ② MACD 金叉/死叉 (DIF vs DEA) — 所有周期都画
+                for i in range(1, n):
+                    if np.isnan(dif[i]) or np.isnan(dea[i]): continue
+                    if dif[i-1] < dea[i-1] and dif[i] >= dea[i]:
+                        _bs.append((i, lows[i], "buy", "MACD金叉"))
+                    elif dif[i-1] > dea[i-1] and dif[i] <= dea[i]:
+                        _bs.append((i, highs[i], "sell", "MACD死叉"))
+
+                # ③ BOLL 穿越 — 所有周期都画 (分钟级 + 日线)
+                for i in range(20, n):
+                    if np.isnan(_boll_upper[i]) or np.isnan(_boll_lower[i]): continue
+                    if closes[i-1] > _boll_lower[i-1] and closes[i] <= _boll_lower[i]:
+                        _bs.append((i, lows[i], "buy", "BOLL下轨"))
+                    if closes[i-1] < _boll_upper[i-1] and closes[i] >= _boll_upper[i]:
+                        _bs.append((i, highs[i], "sell", "BOLL上轨"))
+
+                # ④ RSI 超买/超卖 — 所有周期都画
+                for i in range(14, n):
+                    if np.isnan(rsi[i]) or np.isnan(rsi[i-1]): continue
+                    if rsi[i-1] > 70 and rsi[i] <= 70:
+                        _bs.append((i, highs[i], "sell", "RSI超买"))
+                    if rsi[i-1] < 30 and rsi[i] >= 30:
+                        _bs.append((i, lows[i], "buy", "RSI超卖"))
+
+                # ⑤ 蜡烛形态 (锤子/射击之星) — 所有周期都画
+                for i in _bs_recent_start, n - 1:  # 只看最后几根
+                    for i in range(_bs_recent_start, n):
                         if i < 1 or i >= n: continue
                         bdy = abs(closes[i] - opens[i])
                         if bdy < 0.001 * closes[i]: continue
@@ -3986,40 +4224,81 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                         ur = highs[i] - max(closes[i], opens[i])
                         lr = min(closes[i], opens[i]) - lows[i]
                         if lr >= 2 * bdy and ur < bdy * 0.5 and closes[i] > opens[i]:
-                            _bs.append((i, lows[i], "buy"))
+                            _bs.append((i, lows[i], "buy", "锤子"))
                         if ur >= 2 * bdy and lr < bdy * 0.5 and closes[i] < opens[i]:
-                            _bs.append((i, highs[i], "sell"))
-                # BOLL 突破只在 1min/60min
-                if period in ("minute", "60"):
-                    _boll_mid = _ma(closes, 20)
-                    _boll_std = np.full(n, np.nan)
-                    for i in range(19, n): _boll_std[i] = np.std(closes[i-19:i+1])
-                    _boll_upper = _boll_mid + 2 * _boll_std
-                    _boll_lower = _boll_mid - 2 * _boll_std
-                    for i in range(max(20, n - 60), n):
-                        if np.isnan(_boll_upper[i]): continue
-                        if closes[i-1] < _boll_upper[i-1] and closes[i] >= _boll_upper[i]:
-                            _bs.append((i, highs[i], "sell"))
-                        if closes[i-1] > _boll_lower[i-1] and closes[i] <= _boll_lower[i]:
-                            _bs.append((i, lows[i], "buy"))
-                # 去重 (同一 idx 只保留第一个)
-                _seen_idx = set()
-                _bs_u = []
+                            _bs.append((i, highs[i], "sell", "射击之星"))
+
+                # 去重 (同一 idx 只保留第一个) + 只画最近 20 根
+                _seen_idx = set(); _bs_u = []
                 for b in _bs:
                     if b[0] not in _seen_idx:
                         _bs_u.append(b); _seen_idx.add(b[0])
-                # 只画最近 15 根 (旧历史标记太密没用)
-                _bs_u = [b for b in _bs_u if b[0] >= n - 15]
-                for _idx, _pr, _typ in _bs_u:
+                _bs_u = [b for b in _bs_u if b[0] >= n - 20]
+                for _idx, _pr, _typ, _lbl in _bs_u:
                     _col_b = "#66BB6A" if _typ == "buy" else "#EF5350"
                     _ym = lows[_idx] * 0.985 if _typ == "buy" else highs[_idx] * 1.015
                     _mkr = "^" if _typ == "buy" else "v"
-                    ax1.plot(x[_idx], _ym, marker=_mkr, color=_col_b, markersize=7, zorder=10)
-                    # 日线不画标签 (三角已经够了)
-                    if period in ("minute", "60"):
-                        ax1.annotate("买" if _typ == "buy" else "卖", (x[_idx], _ym),
-                                     xytext=(0, 5 if _typ == "buy" else -10),
-                                     textcoords="offset points", fontsize=7, color=_col_b, ha="center")
+                    ax1.plot(x[_idx], _ym, marker=_mkr, color=_col_b, markersize=8, zorder=10,
+                             markeredgecolor="white", markeredgewidth=0.5)
+                    # 标签 (所有周期都画, 简短)
+                    _short = _lbl[:2]  # "MA" / "MACD" / "BOLL" / "RSI" / "锤子" / "射击"
+                    ax1.annotate(f"{'↑' if _typ=='buy' else '↓'}{_short}", (x[_idx], _ym),
+                                 xytext=(0, 6 if _typ == "buy" else -11),
+                                 textcoords="offset points", fontsize=6.5, color=_col_b,
+                                 ha="center", fontweight="bold")
+
+            # 🆕 顶部综合判断浮窗 (右上角 — 看多/看空/中性 + 信号明细)
+            try:
+                _cs = 0; _reasons = []
+                _last_c = closes[-1]
+                # 均线多头/空头
+                if not _is_intra_p and not np.isnan(ma60[-1]):
+                    if ma5[-1] > ma10[-1] > ma20[-1] > ma60[-1]:
+                        _cs += 3; _reasons.append("✅均线多头排列")
+                    elif ma5[-1] < ma10[-1] < ma20[-1] < ma60[-1]:
+                        _cs -= 3; _reasons.append("❌均线空头排列")
+                    if ma5[-1] > ma20[-1]: _cs += 1
+                    else: _cs -= 1
+                    if _last_c > ma60[-1]: _cs += 1; _reasons.append(f"✅收在MA60上")
+                    else: _cs -= 1; _reasons.append(f"❌跌破MA60")
+                else:
+                    if ma5[-1] > ma20[-1]: _cs += 1.5
+                    else: _cs -= 1.5
+                # MACD
+                if dif[-1] > dea[-1]: _cs += 1; _reasons.append("✅MACD多头")
+                else: _cs -= 1; _reasons.append("❌MACD空头")
+                if dif[-1] > 0: _cs += 0.5; _reasons.append("零轴上")
+                else: _cs -= 0.5; _reasons.append("零轴下")
+                # RSI
+                if not np.isnan(rsi[-1]):
+                    if rsi[-1] < 30: _cs += 1; _reasons.append(f"RSI{rsi[-1]:.0f}超卖")
+                    elif rsi[-1] > 75: _cs -= 1.5; _reasons.append(f"RSI{rsi[-1]:.0f}超买")
+                    elif 40 <= rsi[-1] <= 65: _cs += 0.5
+                # BOLL
+                if not np.isnan(_boll_mid[-1]):
+                    if _last_c > _boll_mid[-1]: _cs += 0.5
+                    else: _cs -= 0.5
+                    if _last_c > _boll_upper[-1]: _reasons.append("⚠️BOLL上轨外")
+                    if _last_c < _boll_lower[-1]: _reasons.append("⚠️BOLL下轨外")
+                # 量能
+                vol_ma5_arr = _ma(vols, 5)
+                if not np.isnan(vol_ma5_arr[-1]) and vol_ma5_arr[-1] > 0:
+                    vr = vols[-1] / vol_ma5_arr[-1]
+                    if vr > 1.5 and _last_c >= closes[-2]: _cs += 0.5; _reasons.append(f"放量{vr:.1f}x")
+                    elif vr < 0.6: _reasons.append(f"缩量{vr:.1f}x")
+                # 判定
+                if _cs >= 3.5:
+                    _verdict, _v_col, _v_bg = "🟢 看多", "#66BB6A", "#1B3A1B"
+                elif _cs <= -2.5:
+                    _verdict, _v_col, _v_bg = "🔴 看空", "#EF5350", "#3A1B1B"
+                else:
+                    _verdict, _v_col, _v_bg = "⚪ 中性震荡", "#FFD54F", "#3A3A1B"
+                _summary = f"{_verdict}  得分{_cs:+.1f}\n" + "  ".join(_reasons[:4])
+                ax1.text(0.98, 0.98, _summary, transform=ax1.transAxes,
+                         fontsize=7.5, color=_v_col, ha="right", va="top",
+                         bbox=dict(boxstyle="round,pad=0.4", fc=_v_bg, ec=_v_col, alpha=0.9))
+            except Exception as _e:
+                print(f"[综合判断] err={_e}", flush=True)
 
             # 副图 1: 成交量 + MA5/MA10 (不画 legend, VMA 颜色够区分)
             ax2 = fig.add_axes([0.08, 0.20, 0.88, 0.12], facecolor=_BG_PANEL, sharex=ax1)
@@ -4034,19 +4313,10 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             ax2.tick_params(colors=_FG_DIM, labelsize=7)
             ax2.set_ylabel("VOL", color=_FG_DIM, fontsize=8)
 
-            # 副图 2: 可切换指标
+            # 副图 2: 可切换指标 (复用上面提前算好的 MACD/RSI/BOLL)
             sub_name = sub_indic.get()
             ax3 = fig.add_axes([0.08, 0.04, 0.88, 0.14], facecolor=_BG_PANEL, sharex=ax1)
             if sub_name == "MACD":
-                ema12 = np.array(closes)
-                ema26 = np.array(closes)
-                for i in range(1, n):
-                    ema12[i] = closes[i] * 2 / 13 + ema12[i - 1] * (1 - 2 / 13)
-                    ema26[i] = closes[i] * 2 / 27 + ema26[i - 1] * (1 - 2 / 27)
-                dif = ema12 - ema26
-                dea = np.array(dif)
-                for i in range(1, n): dea[i] = dif[i] * 2 / 10 + dea[i - 1] * (1 - 2 / 10)
-                hist = 2 * (dif - dea)
                 h_colors = ["#EF5350" if h >= 0 else "#66BB6A" for h in hist]
                 ax3.bar(x, hist, color=h_colors, width=w)
                 ax3.plot(x, dif, color="#42A5F5", lw=0.8)
@@ -4054,24 +4324,10 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 ax3.axhline(y=0, color=_FG_DIM, lw=0.6)
                 ax3.set_ylabel("MACD", color=_FG_DIM, fontsize=8)
             elif sub_name == "RSI":
-                # Wilder RSI(14)
-                rsi_n = 14
-                delta = np.diff(closes)
-                gain = np.where(delta > 0, delta, 0.0)
-                loss = np.where(delta < 0, -delta, 0.0)
-                rsi = np.full(n, np.nan)
-                if len(gain) >= rsi_n:
-                    avg_gain = np.mean(gain[:rsi_n])
-                    avg_loss = np.mean(loss[:rsi_n])
-                    rsi[rsi_n] = 100 - 100 / (1 + avg_gain / avg_loss) if avg_loss > 0 else 100
-                    for i in range(rsi_n + 1, n):
-                        avg_gain = (avg_gain * (rsi_n - 1) + gain[i-1]) / rsi_n
-                        avg_loss = (avg_loss * (rsi_n - 1) + loss[i-1]) / rsi_n
-                        rsi[i] = 100 - 100 / (1 + avg_gain / avg_loss) if avg_loss > 0 else 100
                 ax3.plot(x, rsi, color="#CE93D8", lw=1.0)
-                ax3.axhline(y=70, color="#EF5350", lw=0.6, ls="--", alpha=0.7)
-                ax3.axhline(y=30, color="#66BB6A", lw=0.6, ls="--", alpha=0.7)
-                ax3.axhline(y=50, color=_FG_DIM, lw=0.5, ls=":")
+                ax3.axhline(y=70, color="#EF5350", lw=0.5, ls="--")
+                ax3.axhline(y=30, color="#66BB6A", lw=0.5, ls="--")
+                ax3.axhline(y=50, color=_FG_DIM, lw=0.4, ls=":")
                 ax3.set_ylim(0, 100)
                 ax3.set_ylabel("RSI", color=_FG_DIM, fontsize=8)
             elif sub_name == "KDJ":
@@ -4134,7 +4390,7 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             _ma_lbls = []
             _ma_colors = [("#FF8A65", "MA5"), ("#42A5F5", "MA10"), ("#AB47BC", "MA20"), ("#EF5350", "MA60")]
             for _c, _n in _ma_colors:
-                if period in ("minute", "60") or _n != "MA10":  # 日线跳过 MA10
+                if _is_intra_p or _n != "MA10":  # 日线跳过 MA10
                     _ma_lbls.append(f"{_n}={_c}")
             # 简洁单行: 最新 + 涨跌
             _rt = f"  {last_p:.2f}  {chg:+.2f}%"
@@ -4150,7 +4406,7 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             if _hover_conn is not None:
                 try: canvas.mpl_disconnect(_hover_conn)
                 except: pass
-            if period != "minute":  # 分时图不支持蜡烛形态 hover
+            if not _is_tick_p:  # 分时图不支持蜡烛形态 hover
                 _hover_conn = canvas.mpl_connect("motion_notify_event",
                     lambda ev: _hover_tip(ev, closes, opens, highs, lows, vols, dates))
 
