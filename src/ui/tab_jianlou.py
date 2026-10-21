@@ -134,7 +134,7 @@ class JianLouMixin:
         from datetime import datetime as _DT
 
         dlg = tk.Toplevel(getattr(self, "win", None) or self.root)
-        dlg.title("⚠️ 异常扫描")
+        dlg.title("🎯 机会扫描")
         dlg.geometry("1440x860")
         dlg.configure(bg=_BG_DEEP)
 
@@ -142,7 +142,7 @@ class JianLouMixin:
         top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=40); top.pack(fill=tk.X)
         top.pack_propagate(False)
 
-        tk.Label(top, text="⚠️ 异常扫描", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+        tk.Label(top, text="🎯 机会扫描", bg=_BG_TOOLBAR, fg=_FG_GOLD,
                  font=("Menlo", 14, "bold")).pack(side=tk.LEFT, padx=12)
         status = tk.Label(top, text="⏳ 加载股票池...", bg=_BG_TOOLBAR, fg=_FG_DIM,
                           font=("Menlo", 12))
@@ -398,6 +398,23 @@ class JianLouMixin:
                 l_kline.pack(side=tk.RIGHT, padx=(0, 4))
                 l_kline.bind("<Button-1>", lambda e, fn=_open_kline: fn())
 
+                # 🆕 技术机会信号 (📊 左边)
+                tech = it.get("tech", {})
+                b_cnt = len(tech.get("buy", []))
+                s_cnt = len(tech.get("sell", []))
+                if b_cnt >= 2:
+                    sig_bg, sig_fg, sig_txt = "#1B5E20", "#A5D6A7", f"🟢买{b_cnt}"
+                elif s_cnt >= 2:
+                    sig_bg, sig_fg, sig_txt = "#B71C1C", "#EF9A9A", f"🔴卖{s_cnt}"
+                elif b_cnt >= 1 or s_cnt >= 1:
+                    sig_bg, sig_fg, sig_txt = "#4E342E", "#FFAB91", f"🟡观察"
+                else:
+                    sig_bg, sig_fg, sig_txt = "#333333", "#666666", "·"
+                l_sig = tk.Label(row, text=sig_txt, bg=row_bg, fg=sig_fg,
+                                 font=("Menlo", 12, "bold"), cursor="hand2")
+                l_sig.pack(side=tk.RIGHT, padx=(0, 8))
+                l_sig.bind("<Button-1>", lambda e, fn=_show_help: fn())
+
                 # 点击 → 右侧嵌入日K
                 def _open_kline(_s=sina, _n=nm):
                     try:
@@ -416,8 +433,8 @@ class JianLouMixin:
                         traceback.print_exc()
                         kline_title.config(text=f"❌ 加载失败: {e}", fg=_FG_RED)
 
-                def _show_help(_k=help_key):
-                    _show_help_popup(dlg, _k)
+                def _show_help(_k=help_key, _it=it):
+                    _show_help_popup(dlg, _k, _it)
 
                 # 给 row + 所有子控件绑双击
                 for w in [row, l_name, l_date, l_chg, l_amp, l_vr, l_src]:
@@ -431,11 +448,24 @@ class JianLouMixin:
             return {"drops": "大跌", "surges": "大涨", "volume": "放量",
                     "swing": "振幅", "bottom": "昨跌今稳"}.get(k, "")
 
-        def _show_help_popup(parent, help_key):
+        def _show_help_popup(parent, help_key, item=None):
             content = _HELP_DB.get(help_key, "暂无说明")
+            tech = (item or {}).get("tech", {})
+            if tech:
+                content += f"\n\n📊 技术面机会 ({tech.get('summary', '')})\n"
+                buys = tech.get("buy", [])
+                sells = tech.get("sell", [])
+                if buys:
+                    content += "\n🟢 买入机会:\n"
+                    for b in buys: content += f"  • {b}\n"
+                if sells:
+                    content += "\n🔴 卖出警告:\n"
+                    for s in sells: content += f"  • {s}\n"
+                if not buys and not sells:
+                    content += "\n⚪ 暂无明显技术信号\n"
             win = tk.Toplevel(parent)
             win.title(f"❓ {help_key} 解读")
-            win.geometry("520x460")
+            win.geometry("520x560")
             win.configure(bg=_BG_DEEP)
             win.transient(parent)
 
@@ -488,27 +518,105 @@ class JianLouMixin:
                     results = {"drops": [], "surges": [], "volume": [], "swing": [], "bottom": []}
                     seen_in_result = set()
 
+                    def _calc_tech(closes, highs, lows, vols):
+                        """输入 list, 输出 dict: {buy_points: [...], sell_points: [...], summary_txt}"""
+                        import numpy as np
+                        arr = np.array(closes, dtype=float)
+                        buylist = []
+                        selllist = []
+
+                        # MA20 / MA60 / MA5
+                        def ma(n): return float(np.mean(arr[-n:])) if len(arr) >= n else None
+                        ma20 = ma(20); ma60 = ma(60); ma5 = ma(5)
+                        cur = float(arr[-1])
+
+                        # BIAS(20) / BIAS(60)
+                        if ma20:
+                            b20 = (cur / ma20 - 1) * 100
+                            if b20 <= -8: buylist.append(f"BIAS20={b20:.1f}% 超卖(<-8%)")
+                            if b20 >= 10: selllist.append(f"BIAS20={b20:.1f}% 超买(>10%)")
+                        if ma60:
+                            b60 = (cur / ma60 - 1) * 100
+                            if b60 <= -12: buylist.append(f"BIAS60={b60:.1f}% 深度超卖(<-12%)")
+                            if b60 >= 15: selllist.append(f"BIAS60={b60:.1f}% 严重超买(>15%)")
+
+                        # 价格 vs MA
+                        if ma20 and cur > ma20 and arr[-2] <= (arr[-3] if len(arr) >= 3 else ma20):
+                            buylist.append("MA20上方首次站上")
+                        if ma20 and cur < ma20 and arr[-2] >= ma20:
+                            selllist.append("跌破MA20支撑")
+
+                        # BOLL (20日)
+                        if len(arr) >= 20:
+                            boll_mid = float(np.mean(arr[-20:]))
+                            boll_std = float(np.std(arr[-20:]))
+                            boll_up = boll_mid + 2 * boll_std
+                            boll_lo = boll_mid - 2 * boll_std
+                            pctb = (cur - boll_lo) / (boll_up - boll_lo) if boll_up > boll_lo else 0.5
+                            if cur <= boll_lo: buylist.append(f"触BOLL下轨({boll_lo:.2f})")
+                            if cur >= boll_up: selllist.append(f"触BOLL上轨({boll_up:.2f})")
+
+                        # MACD (12,26,9)
+                        if len(arr) >= 35:
+                            def _ema(a, n):
+                                k = 2 / (n + 1); out = [a[0]]
+                                for x in a[1:]: out.append(x * k + out[-1] * (1 - k))
+                                return np.array(out)
+                            ema12 = _ema(arr, 12); ema26 = _ema(arr, 26)
+                            dif = ema12 - ema26
+                            dea = _ema(dif, 9)
+                            macd_bar = 2 * (dif - dea)
+                            # 底背离: 价新低但MACD柱没新低
+                            if len(macd_bar) >= 10 and cur <= float(np.min(arr[-20:])) * 1.02:
+                                recent_low_idx = int(np.argmin(arr[-20:]))
+                                if macd_bar[-1] > macd_bar[-20 + recent_low_idx]:
+                                    buylist.append("MACD底背离(价新低柱没新低)")
+                            # 顶背离
+                            if len(macd_bar) >= 10 and cur >= float(np.max(arr[-20:])) * 0.98:
+                                recent_high_idx = int(np.argmax(arr[-20:]))
+                                if macd_bar[-1] < macd_bar[-20 + recent_high_idx]:
+                                    selllist.append("MACD顶背离(价新高柱没新高)")
+                            # MACD金叉/死叉
+                            if dif[-1] > dea[-1] and dif[-2] <= dea[-2]:
+                                buylist.append("MACD金叉")
+                            if dif[-1] < dea[-1] and dif[-2] >= dea[-2]:
+                                selllist.append("MACD死叉")
+
+                        # 量价: 近3天均量 vs 近10天均量
+                        if len(vols) >= 10:
+                            v3 = np.mean(vols[-3:]); v10 = np.mean(vols[-10:])
+                            price_3d_chg = (arr[-1] / arr[-4] - 1) * 100 if len(arr) >= 4 else 0
+                            if v3 > v10 * 1.5 and price_3d_chg < -3:
+                                buylist.append("缩量急跌后放量企稳(量价底背离)")
+                            if v3 > v10 * 1.5 and price_3d_chg > 5:
+                                selllist.append("放量滞涨(量价顶背离)")
+
+                        summary = f"MA5={ma5:.2f} MA20={ma20:.2f} MA60={ma60:.2f}" if ma5 and ma20 and ma60 else ""
+                        return {"buy": buylist, "sell": selllist, "summary": summary, "cur": cur}
+
                     def _scan_kline(sina):
-                        """拉新浪日线, 扫近5天单日异常, 返回 list of events"""
+                        """拉60根日线, 扫近5天单日异常, 返回 (events, tech)"""
                         try:
                             url = (f"https://quotes.sina.cn/cn/api/jsonp.php/_/"
-                                   f"CN_MarketData.getKLineData?symbol={sina}&scale=240&ma=no&datalen=5")
+                                   f"CN_MarketData.getKLineData?symbol={sina}&scale=240&ma=no&datalen=60")
                             r = requests.get(url, timeout=6,
                                            headers={"User-Agent": "Mozilla/5.0",
                                                     "Referer": "https://finance.sina.com.cn"})
-                            if r.status_code != 200: return []
+                            if r.status_code != 200: return ([], {})
                             txt = r.text
-                            if "([{}])" in txt or len(txt) < 200: return []
+                            if "([{}])" in txt or len(txt) < 200: return ([], {})
                             data = json.loads(txt[txt.index("(") + 1:txt.rindex(")")])
                         except Exception:
-                            return []
+                            return ([], {})
 
+                        closes, highs, lows, vols = [], [], [], []
                         events = []
                         for d in data:
                             try:
                                 op = float(d["open"]); cl = float(d["close"])
                                 hi = float(d["high"]); lo = float(d["low"])
                                 vol = float(d.get("volume", 0))
+                                closes.append(cl); highs.append(hi); lows.append(lo); vols.append(vol)
                                 chg = (cl / op - 1) * 100 if op > 0 else 0
                                 amp = (hi - lo) / op * 100 if op > 0 else 0
                                 ev = {"date": d["day"], "op": op, "cl": cl, "hi": hi, "lo": lo,
@@ -516,7 +624,9 @@ class JianLouMixin:
                                 events.append(ev)
                             except (ValueError, KeyError):
                                 pass
-                        return events
+
+                        tech = _calc_tech(closes, highs, lows, vols) if closes else {}
+                        return (events, tech)
 
                     all_sina = list(sina_set)
                     # 并发拉 (12 线程)
@@ -525,7 +635,7 @@ class JianLouMixin:
                         future_map = {ex.submit(_scan_kline, s): s for s in all_sina}
                         for idx, fut in enumerate(concurrent.futures.as_completed(future_map)):
                             sina = future_map[fut]
-                            events = fut.result()
+                            events, tech = fut.result()
                             if not events: continue
 
                             # 只取最后 (最旧) 的 3 个交易日异常记录
@@ -554,6 +664,7 @@ class JianLouMixin:
                                     "source": my_tags.get(sina, ""),
                                     "date_tag": ev["date"][5:],  # MM-DD
                                     "date_full": ev["date"],
+                                    "tech": tech,
                                 }
 
                                 # 同时放多个 tab (一只股票可能同时大跌+振幅大)
