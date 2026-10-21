@@ -625,7 +625,11 @@ class JianLouMixin:
                             except (ValueError, KeyError):
                                 pass
 
-                        tech = _calc_tech(closes, highs, lows, vols) if closes else {}
+                        try:
+                            tech = _calc_tech(closes, highs, lows, vols) if closes else {}
+                        except Exception as _te:
+                            import traceback; traceback.print_exc()
+                            tech = {}
                         return (events, tech)
 
                     all_sina = list(sina_set)
@@ -724,6 +728,7 @@ class JianLouMixin:
 
                     # 5) 渲染
                     total = sum(len(v) for v in results.values())
+                    print(f"[🎯机会] 渲染前: drops={len(results['drops'])} surges={len(results['surges'])} swing={len(results['swing'])} total={total}", flush=True)
                     def _render_all():
                         for k in results:
                             _render_tab(k, results[k])
