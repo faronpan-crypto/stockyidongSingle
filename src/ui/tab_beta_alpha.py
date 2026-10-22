@@ -526,16 +526,21 @@ class BetaAlphaMixin:
                     elif tag == "资讯": mktcap = 50
                     elif tag == "基金": mktcap = 150
                     holdings.append({
-                        "name": name, "sina": sina, "tag": tag,
-                        "cur": cur, "volume": vol,
-                        "ret_ytd": ret_ytd, "mktcap": mktcap,
-                    })
+                    "name": name, "sina": sina, "tag": tag,
+                    "cur": cur, "volume": vol,
+                    "ret_ytd": ret_ytd, "mktcap": mktcap,
+                })
 
-                # 5. 中位数
+                # 5. 中位数 (过滤 None)
                 rets_valid = [h["ret_ytd"] for h in holdings if h.get("ret_ytd") is not None]
                 median_ret = float(np.median(rets_valid)) if rets_valid else 0
                 up_cnt = sum(1 for r in rets_valid if r > 0)
                 down_cnt = sum(1 for r in rets_valid if r <= 0)
+
+                # 🆕 统一兜底: ret_ytd 为 None 的全部设为 0 —— 防止 NoneType 比较
+                for h in holdings:
+                    if h.get("ret_ytd") is None:
+                        h["ret_ytd"] = 0.0
 
                 # 6. K型分化 = 最大指数涨幅 - 个股中位数
                 valid_idx = [d for d in idx_res if d]
@@ -547,7 +552,6 @@ class BetaAlphaMixin:
                     try:
                         _render_temp(tab_temp, idx_res, median_ret, up_cnt, down_cnt)
                         _render_exp(tab_exp, holdings)
-                        # ETF对照 — 需要实时再拉一次, 但为了快, 用沪深300的ret代替
                         hs300 = next((d for d in idx_res if d and "000300" in d["sina"]), None)
                         hs300_ret = hs300["ret"] if hs300 else 0
                         _render_etf(tab_etf, hs300_ret, holdings)
@@ -558,8 +562,17 @@ class BetaAlphaMixin:
                             fg=_FG_GREEN)
                     except Exception as _e:
                         import traceback
-                        traceback.print_exc()
-                        status.config(text=f"❌ 渲染异常: {_e}", fg=_FG_RED)
+                        tb = traceback.format_exc()
+                        print(f"[β-α] 渲染异常:\n{tb}", flush=True)
+                        # 状态栏显示前100字符
+                        short = str(_e)[:80]
+                        status.config(text=f"❌ 渲染异常: {short}", fg=_FG_RED)
+                        # 主窗口也显示
+                        tk.Label(tab_diag,
+                                 text=f"❌ 渲染异常\n\n{tb}",
+                                 bg=_BG_DEEP, fg=_FG_RED,
+                                 font=("Menlo", 9), justify="left").pack(anchor="w", padx=12, pady=12)
+
                     scan_btn.config(state=tk.NORMAL, text="🔄一键诊断")
 
                 dlg.after(0, _ui)
