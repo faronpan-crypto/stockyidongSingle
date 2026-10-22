@@ -271,6 +271,39 @@ class BetaAlphaMixin:
             ax.text(0.98, 0.98, verdict, transform=ax.transAxes, fontsize=8,
                     color=verdict_color, ha="right", va="top",
                     bbox=dict(boxstyle="round,pad=0.4", fc=verdict_bg, ec=verdict_color, alpha=0.9))
+            # ❓ K型分化 悬浮解释
+            _tips_temp = {
+                "K型分化": "指数YTD最大值 − 全A个股YTD中位数\n\ngap 越大 → 巨头绑架指数越严重。\n>30pct = 典型K型, 指数涨多数股跌\n15-30pct = 中度分化\n<15pct = 市场风格均衡",
+                "个股中位数": "全A自选股里YTD涨幅的第50百分位\n\n一半股票涨得比这好, 一半比这差。\n和指数涨幅比 → 暴露市场是否在少数巨头手里。",
+            }
+            _tip_annot_temp = [None]
+            def _show_tip_temp(ax_m, key, x, y):
+                if _tip_annot_temp[0]:
+                    try: _tip_annot_temp[0].remove()
+                    except Exception: pass
+                _tip_annot_temp[0] = ax_m.annotate(
+                    _tips_temp[key], xy=(x, y), xycoords="data",
+                    xytext=(6, 6), textcoords="offset points",
+                    fontsize=9, color=_FG_TEXT, zorder=99,
+                    bbox=dict(boxstyle="round,pad=0.4", fc=_BG_CARD, ec=_FG_CYAN, lw=1.2, alpha=0.95))
+                fig.canvas.draw_idle()
+            def _hide_temp():
+                if _tip_annot_temp[0]:
+                    try: _tip_annot_temp[0].remove()
+                    except Exception: pass
+                    _tip_annot_temp[0] = None
+                    fig.canvas.draw_idle()
+            def _on_hover_temp(event):
+                if event.inaxes != ax or event.xdata is None: _hide_temp(); return
+                # 检测是否在某个 "指数" 或 "中位数" 柱附近
+                for i, (bar_idx, bar_med) in enumerate(zip(bars_idx, bars_med)):
+                    cx_idx = bar_idx.get_x() + bar_idx.get_width() / 2
+                    if abs(event.xdata - cx_idx) < bar_w / 2 and abs(event.ydata - (bar_idx.get_height() or 0)) < 15:
+                        _show_tip_temp(ax, "K型分化", cx_idx, event.ydata); return
+                    cx_med = bar_med.get_x() + bar_med.get_width() / 2
+                    if abs(event.xdata - cx_med) < bar_w / 2 and abs(event.ydata - (bar_med.get_height() or 0)) < 15:
+                        _show_tip_temp(ax, "个股中位数", cx_med, event.ydata); return
+                _hide_temp()
 
             fig.suptitle("📈 2026 YTD 指数 vs 全A个股中位数涨幅",
                          color=_FG_GOLD, fontsize=11, x=0.5)
@@ -278,9 +311,7 @@ class BetaAlphaMixin:
             canvas = FigureCanvasTkAgg(fig, master=tab)
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
             canvas.draw()
-
-        # ═══════════════════════════════════════════════════════
-        #  FR2 · 我的β暴露
+            canvas.mpl_connect("motion_notify_event", _on_hover_temp)
         # ═══════════════════════════════════════════════════════
         def _render_exp(tab, holdings):
             _clear_tab(tab)
@@ -544,34 +575,84 @@ class BetaAlphaMixin:
             ax_b.axhline(y=60, color=_FG_RED, lw=0.5, ls="--", alpha=0.5)
             ax_b.axhline(y=30, color=_FG_GREEN, lw=0.5, ls="--", alpha=0.5)
 
-            # 诊断要点 (底部文字)
-            ax_t = fig.add_axes([0.05, 0.05, 0.92, 0.35], facecolor=_BG_PANEL)
-            ax_t.axis("off")
-            lines = [
-                f"📊 β暴露分 {beta_exp_score}/100 → 题材票 {theme_cnt}/{total_h}只, 蓝筹β {blue_cnt}/{total_h}只",
-                f"📈 α质量分 {alpha_q_score}/100 → 蓝筹YTD均 {blue_avg:+.1f}%, 题材YTD均 {theme_avg:+.1f}%",
-                f"🌡️ 行为/环境分 {behavior_score}/100 → K型分化 {k_gap:.1f}pct (指数vs中位数)",
-                f"",
-            ]
-            if composite > 60:
-                lines += [f"🔴 综合风险指数 {composite} → 红牌!"]
-                lines += [f"   建议: ① 逐步减仓题材票 ② 转配沪深300ETF/中证A500ETF ③ 等市场风格切换再回来"]
-            elif composite > 30:
-                lines += [f"🟡 综合风险指数 {composite} → 黄牌"]
-                lines += [f"   建议: 控制题材票仓位在40%以内, 新增仓位优先蓝筹/ETF"]
-            else:
-                lines += [f"🟢 综合风险指数 {composite} → 健康"]
-                lines += [f"   建议: 保持当前配置, 做好止盈止损"]
+            # ── ❓ 悬浮解释标记 ──
+            # 三项分 ❓ 在 x 轴标签上方 (用 ax_b.text)
+            _TIPS = {
+                "β暴露分": "你的持仓里题材股/小盘股占比。\n公式: min(100, 题材股数/总持仓×100)\n\n分越高 → 越暴露在题材/小盘风格。\n>60 = 题材超一半 → 指数涨你未必涨。\n蓝筹=市值>100亿, 题材=市值<70亿。",
+                "α质量分": "蓝筹 vs 题材股的 YTD 收益差。\n公式: min(100, max(0, -题材YTD均×2+50))\n\n分越高 → 你的选股审美越拖后腿。\n蓝筹正收益、题材负收益 → α质量差。\n<30 = 选股审美健康; >60 = 要反思选股逻辑。",
+                "行为/环境分": "全市场 K 型分化程度。\n公式: min(100, 领涨指数YTD − 个股中位数YTD)\n\ngap 越大 → 越少数巨头拉指数。\n>100 = 指数被巨头绑架, 多数散户股跑输。\n0-30 = 市场普涨/普跌, 风格均衡。",
+                "综合风险": "β×0.4 + α×0.3 + 行为分×0.3\n\n>60 🔴红牌 = 题材暴露+选股审美+市场分化三项全红\n   → 建议: 减仓题材, 转配沪深300ETF/中证A500ETF\n30-60 🟡黄牌 = 中等风险, 题材仓位控40%内\n<30 🟢健康 = 风格均衡, 做好止盈止损即可",
+            }
+            # 在柱状图 x 轴标签上方放 ❓
+            _tip_markers = []  # [(ax, artist, label_key), ...]
+            for i, cat in enumerate(cats):
+                _q = ax_b.text(i, -10, "❓", ha="center", va="top",
+                               fontsize=11, color=_FG_CYAN, picker=True)
+                _tip_markers.append((ax_b, _q, cat))
 
-            for i, ln in enumerate(lines):
-                c = _FG_GOLD if i == 0 else (_FG_RED if composite > 60 else (_FG_ORANGE if composite > 30 else _FG_GREEN))
-                ax_t.text(0.02, 0.92 - i * 0.12, ln, transform=ax_t.transAxes,
-                              fontsize=10, color=_FG_TEXT if i < 4 else c,
-                              va="top", ha="left")
+            # 仪表盘 "风险指数" 下面加 ❓
+            _q_total = ax_g.text(0.5, -0.28, "❓ 综合风险", transform=ax_g.transAxes,
+                                 fontsize=9, color=_FG_CYAN, ha="center", picker=True)
+            _tip_markers.append((ax_g, _q_total, "综合风险"))
+
+            # ── 悬浮提示 (matplotlib annotation) ──
+            _tip_annot = [None]  # 列表包装让闭包可改
+
+            def _show_tip(ax, label_key, x_data, y_data):
+                if _tip_annot[0]:
+                    try: _tip_annot[0].remove()
+                    except Exception: pass
+                    _tip_annot[0] = None
+                tip_text = _TIPS.get(label_key, label_key)
+                _tip_annot[0] = ax.annotate(
+                    tip_text, xy=(x_data, y_data), xycoords="data",
+                    xytext=(6, 6), textcoords="offset points",
+                    fontsize=9, color=_FG_TEXT,
+                    bbox=dict(boxstyle="round,pad=0.4", fc=_BG_CARD, ec=_FG_CYAN, lw=1.2, alpha=0.95),
+                    va="bottom", ha="left", zorder=99)
+                fig.canvas.draw_idle()
+
+            def _hide_tip():
+                if _tip_annot[0]:
+                    try: _tip_annot[0].remove()
+                    except Exception: pass
+                    _tip_annot[0] = None
+                    fig.canvas.draw_idle()
+
+            def _on_hover(event):
+                if event.inaxes is None or event.button: _hide_tip(); return
+                if event.xdata is None or event.ydata is None: _hide_tip(); return
+                for (ax_m, artist, label_key) in _tip_markers:
+                    if event.inaxes != ax_m: continue
+                    # 检测鼠标是否在 marker 附近 (axes 坐标 ± 0.15)
+                    try:
+                        if hasattr(artist, 'get_position'):
+                            pos = artist.get_position()
+                        else:
+                            pos = (artist.get_x(), artist.get_y())
+                        dx = abs(event.xdata - pos[0])
+                        dy = abs(event.ydata - pos[1])
+                        # 极坐标 (仪表盘) 用不同容差
+                        if ax_m == ax_g:
+                            if dx < 0.15 and dy < 0.15:
+                                _show_tip(ax_m, label_key, pos[0], pos[1])
+                                return
+                        else:
+                            if dx < 0.3 and dy < 15:
+                                _show_tip(ax_m, label_key, pos[0], pos[1])
+                                return
+                    except Exception:
+                        pass
+                _hide_tip()
+
+            def _on_leave(_event):
+                _hide_tip()
 
             canvas = FigureCanvasTkAgg(fig, master=tab)
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
             canvas.draw()
+            canvas.mpl_connect("motion_notify_event", _on_hover)
+            canvas.mpl_connect("axes_leave_event", _on_leave)
 
         # ═══════════════════════════════════════════════════════
         #  🦞 龙虾分析 (独立Tab + 字体调节)
