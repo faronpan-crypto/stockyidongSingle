@@ -21,6 +21,12 @@
 每行: [股票信息] [筹码分数条] [🟢吸筹/🔴派发信号] [回测] [❓]
 双击日K → 嵌日K + 可移动筹码浮窗
 """
+import matplotlib
+# 🆕 Mac 中文字体优先: PingFang SC / Heiti SC / STHeiti
+matplotlib.rcParams["font.sans-serif"] = [
+    "PingFang SC", "Heiti SC", "STHeiti", "Hiragino Sans GB",
+    "Arial Unicode MS", "SimHei", "Microsoft YaHei", "DejaVu Sans"]
+matplotlib.rcParams["axes.unicode_minus"] = False
 import json
 import os
 import ssl

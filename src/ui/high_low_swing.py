@@ -3,6 +3,12 @@
 """
 import tkinter as tk
 import tkinter.ttk as ttk
+import matplotlib
+# 🆕 Mac 中文字体优先: PingFang SC / Heiti SC / STHeiti
+matplotlib.rcParams["font.sans-serif"] = [
+    "PingFang SC", "Heiti SC", "STHeiti", "Hiragino Sans GB",
+    "Arial Unicode MS", "SimHei", "Microsoft YaHei", "DejaVu Sans"]
+matplotlib.rcParams["axes.unicode_minus"] = False
 import math
 
 # ── 全局字号 (可变: A- / A+ 按钮修改后 refresh config) ──

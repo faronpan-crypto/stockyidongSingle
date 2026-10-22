@@ -19,6 +19,13 @@ import urllib.request
 from datetime import datetime
 
 import numpy as np
+import matplotlib
+matplotlib.use("TkAgg")
+# 🆕 Mac 中文字体优先: PingFang SC / Heiti SC / STHeiti
+matplotlib.rcParams["font.sans-serif"] = [
+    "PingFang SC", "Heiti SC", "STHeiti", "Hiragino Sans GB",
+    "Arial Unicode MS", "SimHei", "Microsoft YaHei", "DejaVu Sans"]
+matplotlib.rcParams["axes.unicode_minus"] = False
 
 from ui.tab_jianlou import _fetch_kline_sina, _fetch_hq_batch, _load_watchlist
 
@@ -46,6 +53,81 @@ _ETFS = [
     ("sz159915", "创业板ETF"),
     ("sh588000", "科创50ETF"),
 ]
+
+# ── 🦞 龙虾分析原文: 散户为什么亏钱 ──
+_LOBSTER_ANALYSIS = """🦞 龙虾团队 · 散户亏钱三大根因分析
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+一、指数涨60% ≠ 多数股票涨60% (被平均)
+───────────────────────────────────────────
+指数按市值加权: 少数巨头(宁德/中际旭创/新易盛)各涨200%,
+剩下90只平/跌, 指数仍涨60%。
+
+指数还会"自动汰弱留强"定期调仓, 你的自选股不会自己换血。
+
+真实数据: 2024-09-24底至今 上证+37%/创业板+91%/科创50+107%,
+但 2026YTD 全A个股中位数是 -12.4%。
+
+翻译: 指数牛市里, 一半以上的股票其实在跌。
+你买指数ETF能赚到那37%~107%, 但随手挑的小盘题材股,
+大概率是那批"中位数 -12%"里的。
+
+二、你的选股审美, 系统性指向跑输指数的那批
+──────────────────────────────────────────────
+散户本能偏好: 小盘、题材、高波动、有故事、便宜、业绩差、高换手。
+
+而这两年真正涨的是大盘蓝筹 + 科技龙头(指数成分、机构抱团)。
+
+你偏好的那一类, 恰恰是"中位数 -12%"的制造机。
+不是"没买蓝筹", 是"审美错配"。
+
+三、怎么买, 比买什么更毁收益 (行为偏差)
+──────────────────────────────────────────
+即使蒙对了股票, 散户行为也会把收益吃光:
+
+  追高 → 买在已涨100%+的P3出货区, 一调整就套
+         "追高总是亏钱"
+  频繁做T → 手续费+滑点+被量化反收割
+         "做T做不过量化"
+  高买低卖 → 涨一点拿不住卖飞, 跌了死扛
+         "底部拿不住, 后来涨3-7倍"
+  杠杆融资 → 波动放大, 去杠杆时被迫砍在最低
+         这周融资净流出559亿就是这么来的
+
+算笔账 (假设指数这一年+60%):
+  买沪深300ETF: 10万 → 约16万  ✅
+  买小盘题材(中位数-12%): 10万 → 8.8万  ❌
+  追高买后回撤40%: 10万 → 6万  ❌❌
+  再叠加频繁交易摩擦成本: 再砍几个点
+
+四、破局两条路 (二选一或结合)
+────────────────────────────────
+想稳稳赚指数那60% → 直接买宽基ETF
+  (沪深300/中证A500), 别挑个股, 别做T
+
+想赚个股超额(α) → 必须靠段基+P阶段纪律挑对票、
+  控好仓位, 否则个股比指数更难赚
+
+五、你自己8月悟出来的纪律 (正好回答今天)
+───────────────────────────────────────────
+"把临时起意改成 提前列观察池 → 等回踩买点 →
+按计划仓位 → 到点机械执行"
+
+这句话的本质就是: 用纪律消灭上面第三层的行为偏差;
+而你的段基(DJ)+P阶段(PP)+芒格(MG)系统,
+就是用框架解决第二层的选股错配。
+
+散户亏, 从来不是"看不懂大盘",
+而是 看得懂大盘、管不住手、选不对票。
+你现在已经把"管住手"的系统搭起来了, 方向是对的。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📐 功能对照: 本Tab顶部图表就是把上面逻辑量化打分
+  🌡️ 市场β体温  ← 根因一 (指数 vs 中位数 K型分化)
+  🎯 我的β暴露  ← 根因二 (你的持仓是蓝筹β还是题材票)
+  💹 ETF对照    ← 根因三 (挑个股 vs 买ETF 实际差距)
+  🏥 总诊断     ← 综合风险指数 0-100 (>60红牌建议减仓)
+"""
 
 
 def _fetch_closes_ytd(sina_code, start_str="2026-01-01", scale=240, datalen=300):
@@ -483,12 +565,44 @@ class BetaAlphaMixin:
             for i, ln in enumerate(lines):
                 c = _FG_GOLD if i == 0 else (_FG_RED if composite > 60 else (_FG_ORANGE if composite > 30 else _FG_GREEN))
                 ax_t.text(0.02, 0.92 - i * 0.12, ln, transform=ax_t.transAxes,
-                          fontsize=10, color=_FG_TEXT if i < 4 else c,
-                          va="top", ha="left", family="Menlo")
+                              fontsize=10, color=_FG_TEXT if i < 4 else c,
+                              va="top", ha="left", family="Menlo")
 
             canvas = FigureCanvasTkAgg(fig, master=tab)
-            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 4))
             canvas.draw()
+
+            # 🆕 底部龙虾分析文字 (可滚动)
+            txt_frame = tk.Frame(tab, bg=_BG_DEEP)
+            txt_frame.pack(fill=tk.BOTH, expand=False, padx=8, pady=(2, 8))
+            _lobster_text = tk.Text(txt_frame, height=14, bg=_BG_PANEL, fg=_FG_TEXT,
+                                    font=("Menlo", 10), wrap="word", relief="flat",
+                                    padx=12, pady=10, cursor="arrow")
+            _lobster_scroll = tk.Scrollbar(txt_frame, command=_lobster_text.yview)
+            _lobster_text.configure(yscrollcommand=_lobster_scroll.set)
+            _lobster_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            _lobster_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            _lobster_text.insert("1.0", _LOBSTER_ANALYSIS)
+            # 分段着色
+            _lobster_text.tag_configure("title", foreground=_FG_GOLD, font=("Menlo", 11, "bold"))
+            _lobster_text.tag_configure("section", foreground=_FG_CYAN, font=("Menlo", 10, "bold"))
+            _lobster_text.tag_configure("divider", foreground=_FG_DIM)
+            _lobster_text.tag_configure("red", foreground=_FG_RED)
+            _lobster_text.tag_configure("green", foreground=_FG_GREEN)
+            _lobster_text.tag_add("title", "1.0", "1.end")
+            try:
+                for kw, tag in [("一、", "section"), ("二、", "section"),
+                                ("三、", "section"), ("四、", "section"),
+                                ("五、", "section"), ("━━━━━", "divider")]:
+                    _s = "1.0"
+                    while True:
+                        _i = _lobster_text.search(kw, _s, stopindex="end")
+                        if not _i: break
+                        _e = f"{_i}+{len(kw)}c"
+                        _lobster_text.tag_add(tag, _i, _e)
+                        _s = _e
+            except Exception: pass
+            _lobster_text.configure(state="disabled")
 
         # ── 一键诊断流程 ──
         def _run_diag():

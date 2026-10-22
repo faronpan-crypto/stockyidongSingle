@@ -1,3 +1,5 @@
+import matplotlib
+
 """
 🎯 机会扫描器 — 对持仓/龙头/资讯股逐个做技术分析
 
@@ -7,6 +9,12 @@
 
 每行右侧: 信号标签 + 📊日K + ❓逻辑理由
 """
+import matplotlib
+# 🆕 Mac 中文字体优先: PingFang SC / Heiti SC / STHeiti
+matplotlib.rcParams["font.sans-serif"] = [
+    "PingFang SC", "Heiti SC", "STHeiti", "Hiragino Sans GB",
+    "Arial Unicode MS", "SimHei", "Microsoft YaHei", "DejaVu Sans"]
+matplotlib.rcParams["axes.unicode_minus"] = False
 import json
 import os
 import ssl
