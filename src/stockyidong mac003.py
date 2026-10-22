@@ -282,8 +282,12 @@ DEFAULT_MARKET_NAV_CONFIG = {
 }
 # 全局设置matplotlib中文字体,避免字体警告
 try:
-    # 使用Windows系统常见的中文字体,避免使用不存在的字体
-    matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'KaiTi', 'FangSong', 'Arial Unicode MS', 'DejaVu Sans']
+    # 跨平台字体: Mac优先PingFang SC/Heiti SC, Windows用SimHei, Linux用Arial Unicode
+    matplotlib.rcParams['font.sans-serif'] = [
+        'PingFang SC', 'Heiti SC', 'STHeiti', 'Hiragino Sans GB',   # Mac
+        'SimHei', 'Microsoft YaHei', 'SimSun', 'KaiTi', 'FangSong', # Windows
+        'Arial Unicode MS', 'Noto Sans CJK SC',                     # Linux/兜底
+        'DejaVu Sans']
     matplotlib.rcParams['axes.unicode_minus'] = False
     # 禁用matplotlib字体查找警告
     warnings.filterwarnings('ignore', message='findfont: Font family.*not found', category=UserWarning)

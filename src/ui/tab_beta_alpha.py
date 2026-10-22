@@ -200,6 +200,7 @@ class BetaAlphaMixin:
         tab_temp = tk.Frame(nb, bg=_BG_DEEP); nb.add(tab_temp, text="🌡️市场β体温")
         tab_exp  = tk.Frame(nb, bg=_BG_DEEP); nb.add(tab_exp,  text="🎯我的β暴露")
         tab_etf  = tk.Frame(nb, bg=_BG_DEEP); nb.add(tab_etf,  text="💹ETF对照")
+        tab_lob  = tk.Frame(nb, bg=_BG_DEEP); nb.add(tab_lob,  text="🦞龙虾分析")
 
         # ── 扫描结果容器 ──
         def _clear_tab(parent):
@@ -569,31 +570,83 @@ class BetaAlphaMixin:
                               va="top", ha="left", family="Menlo")
 
             canvas = FigureCanvasTkAgg(fig, master=tab)
-            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 4))
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
             canvas.draw()
 
-            # 🆕 底部龙虾分析文字 (可滚动)
+        # ═══════════════════════════════════════════════════════
+        #  🦞 龙虾分析 (独立Tab + 字体调节)
+        # ═══════════════════════════════════════════════════════
+        def _render_lobster(tab):
+            _clear_tab(tab)
+
+            # 顶栏: 标题 + 字体调节 A- A+
+            top = tk.Frame(tab, bg=_BG_DEEP)
+            top.pack(fill=tk.X, padx=10, pady=(10, 4))
+            tk.Label(top, text="🦞 龙虾团队 · 散户亏钱三大根因分析",
+                     bg=_BG_DEEP, fg=_FG_GOLD,
+                     font=("", 13, "bold")).pack(side=tk.LEFT)
+            tk.Label(top, text="  ← A-    A+ →",
+                     bg=_BG_DEEP, fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT, padx=10)
+
+            # 字体调节变量 (闭包)
+            _font_size = [12]  # 列表包装让嵌套函数能改
+
+            def _apply_font():
+                _lobster_text.configure(font=("Menlo", _font_size[0]))
+
+            def _zoom_down():
+                _font_size[0] = max(8, _font_size[0] - 2); _apply_font()
+
+            def _zoom_up():
+                _font_size[0] = min(24, _font_size[0] + 2); _apply_font()
+
+            tk.Button(top, text="A-", bg=_BG_CARD, fg=_FG_TEXT,
+                      relief="flat", font=("", 11, "bold"), padx=10,
+                      command=_zoom_down).pack(side=tk.RIGHT, padx=2)
+            tk.Button(top, text="A+", bg=_BG_CARD, fg=_FG_TEXT,
+                      relief="flat", font=("", 11, "bold"), padx=10,
+                      command=_zoom_up).pack(side=tk.RIGHT, padx=2)
+            tk.Label(top, text=f"字体 {_font_size[0]}pt",
+                     bg=_BG_DEEP, fg=_FG_DIM, font=("", 9)).pack(side=tk.RIGHT, padx=6)
+
+            # 文本区 (可滚动, 自动高度, 按窗口自适应)
             txt_frame = tk.Frame(tab, bg=_BG_DEEP)
-            txt_frame.pack(fill=tk.BOTH, expand=False, padx=8, pady=(2, 8))
-            _lobster_text = tk.Text(txt_frame, height=14, bg=_BG_PANEL, fg=_FG_TEXT,
-                                    font=("Menlo", 10), wrap="word", relief="flat",
-                                    padx=12, pady=10, cursor="arrow")
+            txt_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(4, 10))
+            _lobster_text = tk.Text(txt_frame, height=30, bg=_BG_PANEL, fg=_FG_TEXT,
+                                    font=("Menlo", _font_size[0]), wrap="word", relief="flat",
+                                    padx=16, pady=14, cursor="arrow")
             _lobster_scroll = tk.Scrollbar(txt_frame, command=_lobster_text.yview)
             _lobster_text.configure(yscrollcommand=_lobster_scroll.set)
             _lobster_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             _lobster_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
             _lobster_text.insert("1.0", _LOBSTER_ANALYSIS)
-            # 分段着色
-            _lobster_text.tag_configure("title", foreground=_FG_GOLD, font=("Menlo", 11, "bold"))
-            _lobster_text.tag_configure("section", foreground=_FG_CYAN, font=("Menlo", 10, "bold"))
-            _lobster_text.tag_configure("divider", foreground=_FG_DIM)
-            _lobster_text.tag_configure("red", foreground=_FG_RED)
-            _lobster_text.tag_configure("green", foreground=_FG_GREEN)
+
+            # 分段着色 (title=金色大, section=青色加粗, divider=灰色, red/green/emoji)
+            _lobster_text.tag_configure("title", foreground=_FG_GOLD,
+                                        font=("Menlo", _font_size[0] + 2, "bold"))
+            _lobster_text.tag_configure("section", foreground=_FG_CYAN,
+                                        font=("Menlo", _font_size[0], "bold"))
+            _lobster_text.tag_configure("divider", foreground=_FG_DIM,
+                                        font=("Menlo", _font_size[0]))
+            _lobster_text.tag_configure("red", foreground=_FG_RED,
+                                        font=("Menlo", _font_size[0], "bold"))
+            _lobster_text.tag_configure("green", foreground=_FG_GREEN,
+                                        font=("Menlo", _font_size[0], "bold"))
+            _lobster_text.tag_configure("gold", foreground=_FG_GOLD,
+                                        font=("Menlo", _font_size[0]))
+
+            # 标题整段金色
             _lobster_text.tag_add("title", "1.0", "1.end")
+            # 分节/分隔线/emoji 着色 (循环搜索)
             try:
-                for kw, tag in [("一、", "section"), ("二、", "section"),
-                                ("三、", "section"), ("四、", "section"),
-                                ("五、", "section"), ("━━━━━", "divider")]:
+                _patterns = [
+                    ("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "divider"),
+                    ("一、", "section"), ("二、", "section"),
+                    ("三、", "section"), ("四、", "section"),
+                    ("五、", "section"),
+                ]
+                for kw, tag in _patterns:
                     _s = "1.0"
                     while True:
                         _i = _lobster_text.search(kw, _s, stopindex="end")
@@ -601,7 +654,30 @@ class BetaAlphaMixin:
                         _e = f"{_i}+{len(kw)}c"
                         _lobster_text.tag_add(tag, _i, _e)
                         _s = _e
-            except Exception: pass
+                # 表情符号着色 (emoji 后面数字+% 也金色)
+                for kw, tag in [("✅", "green"), ("❌", "red"), ("⚠️", "red")]:
+                    _s = "1.0"
+                    while True:
+                        _i = _lobster_text.search(kw, _s, stopindex="end")
+                        if not _i: break
+                        _e = f"{_i}+{len(kw)}c"
+                        _lobster_text.tag_add(tag, _i, _e)
+                        _s = _e
+            except Exception:
+                pass
+
+            # 键盘快捷键: Ctrl/Cmd - / = 调节字体
+            def _bind_keys(_evt):
+                _zoom_down()
+            def _bind_keys_up(_evt):
+                _zoom_up()
+            _lobster_text.bind("<Control-underscore>", _bind_keys)
+            _lobster_text.bind("<Control-plus>", _bind_keys_up)
+            import platform
+            if platform.system() == "Darwin":
+                _lobster_text.bind("<Command-minus>", _bind_keys)
+                _lobster_text.bind("<Command-equal>", _bind_keys_up)
+
             _lobster_text.configure(state="disabled")
 
         # ── 一键诊断流程 ──
@@ -670,6 +746,7 @@ class BetaAlphaMixin:
                         hs300_ret = hs300["ret"] if hs300 else 0
                         _render_etf(tab_etf, hs300_ret, holdings)
                         _render_diag(tab_diag, idx_res, median_ret, holdings, k_gap)
+                        _render_lobster(tab_lob)
                         status.config(
                             text=f"✅ 诊断完成  中位数{median_ret:+.1f}%  K型{k_gap:.1f}pct  "
                                  f"题材票{sum(1 for h in holdings if h['mktcap']<=70)}/{len(holdings)}",
