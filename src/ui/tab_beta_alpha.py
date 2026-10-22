@@ -567,7 +567,7 @@ class BetaAlphaMixin:
                 c = _FG_GOLD if i == 0 else (_FG_RED if composite > 60 else (_FG_ORANGE if composite > 30 else _FG_GREEN))
                 ax_t.text(0.02, 0.92 - i * 0.12, ln, transform=ax_t.transAxes,
                               fontsize=10, color=_FG_TEXT if i < 4 else c,
-                              va="top", ha="left", family="Menlo")
+                              va="top", ha="left")
 
             canvas = FigureCanvasTkAgg(fig, master=tab)
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
