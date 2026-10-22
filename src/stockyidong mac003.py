@@ -396,6 +396,7 @@ from ui.tab_holdings import HoldingsMixin
 from ui.tab_caochuan import CaochuanMixin
 from ui.tab_jianlou import JianLouMixin
 from ui.tab_chouma import ChouMaMixin
+from ui.tab_beta_alpha import BetaAlphaMixin
 from ui.tab_learning import LearningMixin
 
 # Phase 5c: Builders/Nav/Spider/Realtime/Checks/Math/Getters/Trade/EmoDeep/Token/Schedule/Buttons
@@ -427,7 +428,7 @@ from ui.tab_rest import RestMixin
 from ui.tab_toplevel import ToplevelMixin
 from ui.tab_web import WebMixin
 
-class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ConfigMixin, CrawlerMixin, ChouMaMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, ExportMixin, FileIoMixin, FinanceMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, WarningMixin, WebMixin, WencaiMixin, WordcloudMixin):
+class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ConfigMixin, CrawlerMixin, ChouMaMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, ExportMixin, FileIoMixin, FinanceMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, WarningMixin, WebMixin, WencaiMixin, WordcloudMixin, BetaAlphaMixin):
 
     def __init__(self, root):
         self.root = root
@@ -4732,6 +4733,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("🎯高抛低吸", 8, self._show_high_low_swing),
             ("🎯机会", 7, self._show_jianlou),
             ("🪙筹码", 7, self._show_chouma),
+            ("📐β-α", 7, self._show_beta_alpha),
             ("📈1minK", 7, self._show_1min_kline_dialog),
             ("🔍多股对比", 8, self._show_multi_compare_dialog),
         ]:

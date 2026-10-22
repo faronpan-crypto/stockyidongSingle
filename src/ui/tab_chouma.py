@@ -750,19 +750,27 @@ class ChouMaMixin:
                     def _handle():
                         if my_gen != _gen_counter[0]:
                             return  # 代次不匹配, 丢弃
-                        if kdata_local is None or len(kdata_local["closes"]) < 10:
-                            _period_lbl.config(text=f"❌ {period_label} 数据加载失败", fg="#EF5350")
-                            tk.Label(main_container,
-                                     text=f"❌ {period_label} K线数据加载失败 (可能该周期无数据)",
+                        try:
+                            if kdata_local is None or len(kdata_local["closes"]) < 10:
+                                _period_lbl.config(text=f"❌ {period_label} 数据加载失败", fg="#EF5350")
+                                tk.Label(main_container,
+                                         text=f"❌ {period_label} K线数据加载失败 (可能该周期无数据)",
+                                         bg=_BG_DEEP, fg=_FG_RED,
+                                         font=("Menlo", 12)).pack(pady=40)
+                                return
+                            _period_lbl.config(text=f"✅ {period_label}  {len(kdata_local['closes'])}根")
+                            _draw_chip_figure(kdata_local, period_label, period)
+                        except Exception as _e:
+                            import traceback
+                            traceback.print_exc(); print(f"[筹码] _handle 异常: {_e}", flush=True)
+                            _period_lbl.config(text=f"❌ 绘图异常: {_e}", fg="#EF5350")
+                            tk.Label(main_container, text=f"❌ 绘图异常: {_e}",
                                      bg=_BG_DEEP, fg=_FG_RED,
                                      font=("Menlo", 12)).pack(pady=40)
-                            return
-                        _period_lbl.config(text=f"✅ {period_label}  {len(kdata_local['closes'])}根")
-                        _draw_chip_figure(kdata_local, period_label)
                     embed_frame.after(0, _handle)
                 threading.Thread(target=_bg, daemon=True).start()
 
-            def _draw_chip_figure(kdata, period_label):
+            def _draw_chip_figure(kdata, period_label, period="day"):
                 nonlocal chip_metrics, chip_kdata  # 允许重绘覆盖
 
                 opens = kdata["opens"]; highs = kdata["highs"]
