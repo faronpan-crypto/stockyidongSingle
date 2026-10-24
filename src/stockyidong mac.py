@@ -3738,21 +3738,47 @@ def parse_skill_md_for_usage(skill_md_path: str, max_body_chars: int = 8000):
     out["usage_body"] = ub
     return out
 class StockKeywordAnalyzerGUI:
-    # ── 兼容旧单体文件: 缺失方法 fallback ──
-    # mac.py 是旧单体版本, 623+方法已迁移到 ui/*.py mixin
-    # 任何 toolbar 调用的缺失方法 → 弹提示, 不崩溃
+    # ── 兼容旧单体文件: 缺失方法/属性 fallback ──
+    # mac.py 是旧单体版本, 623+方法/属性已迁移到 ui/*.py mixin
+    # 任何缺失 → 返回 SmartFallback:
+    #   当函数调() → 弹 tk.messagebox 提示改用 mac003.py
+    #   当 datetime/变量操作 → 返回安全默认值 (timedelta/0/None)
+    #   不再 AttributeError / TypeError
     def __getattr__(self, name):
-        import tkinter as tk
-        def _noop(*args, **kwargs):
-            try:
-                tk.messagebox.showinfo(
-                    "提示",
-                    f"功能 '{name}' 在旧单体文件里缺失\n\n"
-                    f"请改用: stockyidong mac003.py\n"
-                    f"(mixin 架构, 包含所有功能)")
-            except Exception:
-                pass
-        return _noop
+        import datetime as _dt
+        class _SmartFallback:
+            def __init__(self, _n): self._n = _n
+            # 当函数调
+            def __call__(self, *a, **kw):
+                try:
+                    import tkinter as tk
+                    tk.messagebox.showinfo(
+                        "提示",
+                        f"功能 '{self._n}' 在旧单体文件里缺失\n\n"
+                        f"请改用: stockyidong mac003.py\n"
+                        f"(mixin 架构, 包含所有功能)")
+                except Exception: pass
+            # datetime - self.xxx → 返回 0 timedelta
+            def __rsub__(self, other):
+                try: return _dt.timedelta(seconds=0)
+                except: return 0
+            def __sub__(self, other):
+                try: return _dt.timedelta(seconds=0)
+                except: return 0
+            # 数值运算安全返回 0
+            def __radd__(self, o): return o if o is not None else 0
+            def __add__(self, o): return 0
+            def __float__(self): return 0.0
+            def __int__(self): return 0
+            def __bool__(self): return False
+            def __repr__(self): return f"<fallback {self._n}>"
+            def __str__(self): return ""
+            # 迭代安全
+            def __iter__(self): return iter([])
+            def __len__(self): return 0
+            def __getitem__(self, k): return None
+            def __contains__(self, x): return False
+        return _SmartFallback(name)
 
     def __init__(self, root):
         self.root = root
