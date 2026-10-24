@@ -3738,6 +3738,22 @@ def parse_skill_md_for_usage(skill_md_path: str, max_body_chars: int = 8000):
     out["usage_body"] = ub
     return out
 class StockKeywordAnalyzerGUI:
+    # ── 兼容旧单体文件: 缺失方法 fallback ──
+    # mac.py 是旧单体版本, 623+方法已迁移到 ui/*.py mixin
+    # 任何 toolbar 调用的缺失方法 → 弹提示, 不崩溃
+    def __getattr__(self, name):
+        import tkinter as tk
+        def _noop(*args, **kwargs):
+            try:
+                tk.messagebox.showinfo(
+                    "提示",
+                    f"功能 '{name}' 在旧单体文件里缺失\n\n"
+                    f"请改用: stockyidong mac003.py\n"
+                    f"(mixin 架构, 包含所有功能)")
+            except Exception:
+                pass
+        return _noop
+
     def __init__(self, root):
         self.root = root
         # 安全更新窗口方法 - macOS上直接跳过
