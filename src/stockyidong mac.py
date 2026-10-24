@@ -3747,8 +3747,16 @@ class StockKeywordAnalyzerGUI:
     def __getattr__(self, name):
         import datetime as _dt
         class _SmartFallback:
-            def __init__(self, _n): self._n = _n
-            # 当函数调
+            """黑洞代理: 任何缺失属性 → 永远返回安全默认值, 绝不崩溃"""
+            def __init__(self, _n="<anon>"): self._n = _n
+            # ── 递归链式访问: self.xxx.yyy.zzz 每层都安全 ──
+            def __getattr__(self, k): return _SmartFallback(f"{self._n}.{k}")
+            def __dir__(self): return list("values keys items get pop update append extend "
+                                           "strip lower upper replace find startswith endswith "
+                                           "split join format encode decode "
+                                           "append insert remove clear sort reverse "
+                                           "to_dict to_list to_json sum count".split())
+            # ── 当函数调: 弹提示 ──
             def __call__(self, *a, **kw):
                 try:
                     import tkinter as tk
@@ -3758,26 +3766,59 @@ class StockKeywordAnalyzerGUI:
                         f"请改用: stockyidong mac003.py\n"
                         f"(mixin 架构, 包含所有功能)")
                 except Exception: pass
-            # datetime - self.xxx → 返回 0 timedelta
-            def __rsub__(self, other):
-                try: return _dt.timedelta(seconds=0)
-                except: return 0
-            def __sub__(self, other):
-                try: return _dt.timedelta(seconds=0)
-                except: return 0
-            # 数值运算安全返回 0
+                return _SmartFallback(f"{self._n}()")
+            # ── dict 接口 (values/keys/items/get/pop) ──
+            def values(self): return []
+            def keys(self): return []
+            def items(self): return []
+            def get(self, *a, **kw): return None
+            def pop(self, *a, **kw): return None
+            def update(self, *a, **kw): pass
+            # ── list 接口 (append/extend/sort) ──
+            def append(self, *a, **kw): pass
+            def extend(self, *a, **kw): pass
+            def sort(self, *a, **kw): pass
+            def reverse(self, *a, **kw): pass
+            def insert(self, *a, **kw): pass
+            def remove(self, *a, **kw): pass
+            def clear(self, *a, **kw): pass
+            # ── str 接口 ──
+            def strip(self, *a, **kw): return ""
+            def lower(self, *a, **kw): return ""
+            def upper(self, *a, **kw): return ""
+            def replace(self, *a, **kw): return ""
+            def find(self, *a, **kw): return -1
+            def startswith(self, *a, **kw): return False
+            def endswith(self, *a, **kw): return False
+            def split(self, *a, **kw): return []
+            def join(self, *a, **kw): return ""
+            def format(self, *a, **kw): return ""
+            def encode(self, *a, **kw): return b""
+            def decode(self, *a, **kw): return ""
+            # ── datetime 运算 ──
+            def __rsub__(self, o): return _dt.timedelta(0)
+            def __sub__(self, o): return _dt.timedelta(0)
             def __radd__(self, o): return o if o is not None else 0
-            def __add__(self, o): return 0
+            def __add__(self, o): return _SmartFallback()
+            # ── 数值/布尔/迭代 ──
             def __float__(self): return 0.0
             def __int__(self): return 0
             def __bool__(self): return False
             def __repr__(self): return f"<fallback {self._n}>"
             def __str__(self): return ""
-            # 迭代安全
             def __iter__(self): return iter([])
             def __len__(self): return 0
-            def __getitem__(self, k): return None
+            def __getitem__(self, k): return _SmartFallback(f"{self._n}[{k}]")
+            def __setitem__(self, k, v): pass
             def __contains__(self, x): return False
+            # ── 比较运算 ──
+            def __eq__(self, o): return False
+            def __ne__(self, o): return True
+            def __lt__(self, o): return False
+            def __le__(self, o): return False
+            def __gt__(self, o): return False
+            def __ge__(self, o): return False
+            def __hash__(self): return 0
         return _SmartFallback(name)
 
     def __init__(self, root):
