@@ -2123,12 +2123,28 @@ class StockDetailMixin:
         ax.plot(extended_x, sen_b, color='#ff9800', linewidth=1.0, alpha=0.7, label='先行带B (Senkou B)', linestyle='--')
 
         # 转换线 (Tenkan-sen): 红色
+        tenkan_line = None
         if not np.all(np.isnan(ich['tenkan_sen'])):
-            ax.plot(x_arr, ich['tenkan_sen'], color='#e91e63', linewidth=1.2, label='转换线 (Tenkan)')
+            tenkan_line = ax.plot(x_arr, ich['tenkan_sen'], color='#e91e63', linewidth=1.2, label='转换线 (Tenkan)')
+            # 末端加中文标签
+            last_valid_idx = n - 1
+            while last_valid_idx >= 0 and np.isnan(ich['tenkan_sen'][last_valid_idx]):
+                last_valid_idx -= 1
+            if last_valid_idx >= 0:
+                ax.annotate('转', xy=(last_valid_idx, ich['tenkan_sen'][last_valid_idx]),
+                            xytext=(5, 6), textcoords='offset points',
+                            fontsize=8, color='#e91e63', fontweight='bold', alpha=0.85)
 
         # 基准线 (Kijun-sen): 蓝色
         if not np.all(np.isnan(ich['kijun_sen'])):
             ax.plot(x_arr, ich['kijun_sen'], color='#1565c0', linewidth=1.2, label='基准线 (Kijun)')
+            last_valid_idx = n - 1
+            while last_valid_idx >= 0 and np.isnan(ich['kijun_sen'][last_valid_idx]):
+                last_valid_idx -= 1
+            if last_valid_idx >= 0:
+                ax.annotate('基', xy=(last_valid_idx, ich['kijun_sen'][last_valid_idx]),
+                            xytext=(5, -10), textcoords='offset points',
+                            fontsize=8, color='#1565c0', fontweight='bold', alpha=0.85)
 
         # 迟行带 (Chikou): 收盘价后移 26 根 — 画在后面
         if not np.all(np.isnan(ich['chikou'])):
@@ -2675,9 +2691,52 @@ class StockDetailMixin:
             # 控件
             ttk.Label(top_frame, text="📌 标的:").pack(side=tk.LEFT, padx=(0, 4))
             symbol_var = tk.StringVar(value="上证指数")
-            sym_combo = ttk.Combobox(top_frame, values=display_names, width=22, state="readonly",
+            sym_combo = ttk.Combobox(top_frame, values=display_names, width=22, state="normal",
                                      textvariable=symbol_var)
             sym_combo.pack(side=tk.LEFT, padx=2)
+
+            def _resolve_and_draw():
+                """解析输入: 纯代码/名称/名称(代码) 都能识别"""
+                raw = symbol_var.get().strip()
+                if not raw:
+                    messagebox.showwarning("提示", "请输入股票名称或代码", parent=win)
+                    return
+                # 1) 精确匹配现有选项
+                if raw in sym_map:
+                    redraw()
+                    return
+                # 2) 名称模糊匹配 (只匹配本地已有的)
+                hits = [name for name in sym_map if raw in name]
+                if hits:
+                    if len(hits) == 1:
+                        symbol_var.set(hits[0]); redraw(); return
+                    best = max(hits, key=len)
+                    symbol_var.set(best); redraw(); return
+                # 3) 输入是6位A股代码
+                import re
+                m_code = re.search(r'[036]\d{5}', raw)
+                if m_code:
+                    code6 = m_code.group()
+                    # 先在已有下拉里反查
+                    for dn in display_names:
+                        if code6 in dn:
+                            symbol_var.set(dn); redraw(); return
+                    # 把新代码塞进 sym_map, 再 redraw
+                    sym_map[code6] = (code6, False)
+                    symbol_var.set(code6)
+                    redraw(); return
+                # 4) 名称(代码) 格式
+                m2 = re.match(r'([\u4e00-\u9fa5A-Za-z·]{2,12})\s*[\(（]\s*([036]\d{5})\s*[\)）]', raw)
+                if m2:
+                    sym_code = m2.group(2)
+                    sym_map[raw] = (sym_code, False)
+                    redraw(); return
+                # 兜底: 直接把输入当代码查
+                sym_map[raw] = (raw, False)
+                redraw()
+
+            sym_combo.bind("<Return>", lambda e: (_resolve_and_draw(), "break"))
+            sym_combo.bind("<FocusOut>", lambda e: _resolve_and_draw())
 
             ttk.Label(top_frame, text="  ⏱ 周期:").pack(side=tk.LEFT, padx=(10, 4))
             period_var = tk.StringVar(value="daily")
@@ -3055,6 +3114,25 @@ class StockDetailMixin:
                                  color='#26a69a', linewidth=1.8, label='SuperTrend↑(支撑)', alpha=0.85)
                     ax_main.plot(x_arr[mask_dn], st['supertrend'][mask_dn],
                                  color='#ef5350', linewidth=1.8, label='SuperTrend↓(压力)', alpha=0.85)
+                    # 末端加中文标签 (在最后一个有效点)
+                    last_i = n - 1
+                    # 找最后一个上涨段末端
+                    up_mask_end = -1
+                    for ii in range(n - 1, -1, -1):
+                        if mask_up[ii]:
+                            up_mask_end = ii; break
+                    if up_mask_end >= 0:
+                        ax_main.annotate('↑支撑', xy=(up_mask_end, st['supertrend'][up_mask_end]),
+                                         xytext=(6, 8), textcoords='offset points',
+                                         fontsize=8, color='#26a69a', fontweight='bold', alpha=0.9)
+                    dn_mask_end = -1
+                    for ii in range(n - 1, -1, -1):
+                        if mask_dn[ii]:
+                            dn_mask_end = ii; break
+                    if dn_mask_end >= 0:
+                        ax_main.annotate('↓压力', xy=(dn_mask_end, st['supertrend'][dn_mask_end]),
+                                         xytext=(6, -12), textcoords='offset points',
+                                         fontsize=8, color='#ef5350', fontweight='bold', alpha=0.9)
 
                 # 3) VWAP + σ 带
                 vwap_band = None
@@ -3126,6 +3204,16 @@ class StockDetailMixin:
                             color, ls, lbl = '#ff9800', '-.', f'Pivot {level:.2f}'
                         ax_main.axhline(y=level, color=color, linestyle=ls,
                                         linewidth=1.0, alpha=0.7, label=lbl)
+                        # 在线右端加小标签 (只有主图范围内)
+                        right_edge = n - 1
+                        if level > last_c:
+                            ax_main.annotate(f'压 {level:.0f}', xy=(right_edge, level),
+                                             xytext=(-3, 5), textcoords='offset points',
+                                             fontsize=7, color=color, ha='right', alpha=0.85)
+                        elif level < last_c:
+                            ax_main.annotate(f'支 {level:.0f}', xy=(right_edge, level),
+                                             xytext=(-3, -10), textcoords='offset points',
+                                             fontsize=7, color=color, ha='right', alpha=0.85)
 
                 # 主图装饰 (动态标题: 根据勾选的指标名)
                 active_inds = []
