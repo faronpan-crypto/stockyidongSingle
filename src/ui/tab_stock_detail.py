@@ -2046,15 +2046,19 @@ class StockDetailMixin:
         n = len(c)
 
         def _period_high(arr, period):
+            """滚动窗口最高, min_periods=1: 窗口不满也用已有数据算, 从第 1 根起就有值。"""
             out = np.full(len(arr), np.nan)
-            for i in range(period - 1, len(arr)):
-                out[i] = np.max(arr[i - period + 1:i + 1])
+            for i in range(len(arr)):
+                start = max(0, i - period + 1)
+                out[i] = np.max(arr[start:i + 1])
             return out
 
         def _period_low(arr, period):
+            """滚动窗口最低, min_periods=1: 窗口不满也用已有数据算。"""
             out = np.full(len(arr), np.nan)
-            for i in range(period - 1, len(arr)):
-                out[i] = np.min(arr[i - period + 1:i + 1])
+            for i in range(len(arr)):
+                start = max(0, i - period + 1)
+                out[i] = np.min(arr[start:i + 1])
             return out
 
         # 1. 转换线 (Tenkan-sen): 短期 (9 期) 最高价和最低价的中点
@@ -3155,7 +3159,7 @@ class StockDetailMixin:
                 ("vwap_band", "VWAP+σ带", False, "主图·量价通道"),
                 ("td_seq", "TD序列", False, "主图·衰竭反转计数"),
                 ("camarilla", "Camarilla", False, "主图·动态S/R水平线"),
-                ("ma", "MA均线", True, "主图·MA5/10/20/60"),
+                ("ma", "MA均线", False, "主图·MA5/10/20/60"),
                 ("boll", "BOLL布林", False, "主图·中轨±2σ"),
             ]
             ind_vars = {}
