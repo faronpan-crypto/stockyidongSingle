@@ -257,7 +257,7 @@ def _draw_sentiment_chart(dates, m1, up, down, zt_counts, cb):
         ax1.set_ylim(0, 100)
         ax1.set_title('情绪周期 (近60天)', color='#eee', fontsize=13, pad=10)
         ax1.tick_params(colors='#aaa')
-        ax1.legend(loc='upper right', fontsize=8, facecolor='#1a1a2e', labelcolor='#eee')
+        ax1.legend(loc='upper right', fontsize=8, facecolor='#1a1a2e', edgecolor='#333')
         ax1.grid(True, alpha=0.2, color='#444')
 
         # 中: 涨跌家数
@@ -267,7 +267,7 @@ def _draw_sentiment_chart(dates, m1, up, down, zt_counts, cb):
         ax2.bar([i + width/2 for i in x_idx], down, width, color='#4CAF50', label='下跌', alpha=0.8)
         ax2.set_title('涨跌家数', color='#eee', fontsize=10)
         ax2.tick_params(colors='#aaa')
-        ax2.legend(loc='upper right', fontsize=8, facecolor='#1a1a2e', labelcolor='#eee')
+        ax2.legend(loc='upper right', fontsize=8, facecolor='#1a1a2e', edgecolor='#333')
         ax2.grid(True, alpha=0.2, color='#444')
 
         # 下: 涨停数

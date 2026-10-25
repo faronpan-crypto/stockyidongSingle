@@ -4046,7 +4046,7 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 # 涨跌底色
                 pct_range = max(abs(closes.max() - prev_close), abs(closes.min() - prev_close)) / prev_close * 100 + 1
                 ax1.set_ylim(prev_close * (1 - pct_range/100), prev_close * (1 + pct_range/100))
-                ax1.legend(loc="upper left", fontsize=8, facecolor=_BG_PANEL, edgecolor=_FG_DIM, labelcolor="white")
+                ax1.legend(loc="upper left", fontsize=8, facecolor=_BG_PANEL, edgecolor=_FG_DIM)
                 ax1.set_facecolor(_BG_PANEL)
                 for spine in ax1.spines.values(): spine.set_color(_FG_DIM)
                 ax1.tick_params(colors=_FG_DIM, labelsize=8)

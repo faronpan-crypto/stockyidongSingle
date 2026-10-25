@@ -12878,7 +12878,7 @@ class DapanMixin:
                 if len(closes) < ma_p: continue
                 ma_vals = [None if i + 1 < ma_p else sum(closes[i + 1 - ma_p:i + 1]) / ma_p for i in range(len(closes))]
                 ax.plot(x, ma_vals, color=MA_COLORS[ma_p], linewidth=1.2, label=f"MA{ma_p}")
-            ax.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", labelcolor="#FFF", ncol=5)
+            ax.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", ncol=5)
             ax.set_title("日K (MA 1/5/10/20/60)", color="#FFF", fontsize=11)
             ax.tick_params(colors="#CCC", labelsize=8)
             for sp in ax.spines.values(): sp.set_color("#444")
@@ -12904,7 +12904,7 @@ class DapanMixin:
                 ax3.axhline(0, color="#666", linewidth=0.5)
                 ax3.set_ylabel("MACD", color="#888", fontsize=8)
                 ax3.tick_params(colors="#888", labelsize=7)
-                ax3.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", labelcolor="#FFF", ncol=3)
+                ax3.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", ncol=3)
                 ax3.grid(True, alpha=0.1, color="#666")
 
         def _redraw():
@@ -26667,7 +26667,7 @@ class DapanMixin:
                 if len(closes) < ma_p: continue
                 ma_vals = [None if i + 1 < ma_p else sum(closes[i + 1 - ma_p:i + 1]) / ma_p for i in range(len(closes))]
                 ax.plot(x, ma_vals, color=MA_COLORS[ma_p], linewidth=0.9, alpha=0.7, zorder=3, label=f"MA{ma_p}")
-            ax.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", labelcolor="#FFF", ncol=3)
+            ax.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", ncol=3)
             ax.set_title("日K (MA 5/10/20)", color="#FFF", fontsize=11)
             ax.tick_params(colors="#CCC", labelsize=8)
             for sp in ax.spines.values(): sp.set_color("#444")
@@ -26693,7 +26693,7 @@ class DapanMixin:
                 ax3.axhline(0, color="#666", linewidth=0.5)
                 ax3.set_ylabel("MACD", color="#888", fontsize=8)
                 ax3.tick_params(colors="#888", labelsize=7)
-                ax3.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", labelcolor="#FFF", ncol=3)
+                ax3.legend(loc="upper left", fontsize=7, facecolor="#1E1E2E", edgecolor="#444", ncol=3)
                 ax3.grid(True, alpha=0.1, color="#666")
 
         def _redraw():
@@ -58981,7 +58981,7 @@ class DapanMixin:
                 _formatter = _md.DateFormatter("%Y-%m")
                 ax.xaxis.set_major_locator(_locator); ax.xaxis.set_major_formatter(_formatter)
                 fig.autofmt_xdate(rotation=30)
-                ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555", labelcolor="#DDD")
+                ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555")
                 ax.set_title(f"{val_name_var.get()} 估值  分位数 {pct:.1f}% {'🟢低估' if pct<30 else '🔴高估' if pct>70 else '🟡合理'}  |  {val_per_var.get()}数据",
                              color="#FFD700", fontsize=11, pad=8)
                 canvas = FigureCanvasTkAgg(fig, master=val_fig_frame); canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -59121,7 +59121,7 @@ class DapanMixin:
             _loc = AutoDateLocator(minticks=6, maxticks=12); _fmt = DateFormatter("%Y-%m")
             ax.xaxis.set_major_locator(_loc); ax.xaxis.set_major_formatter(_fmt)
             fig.autofmt_xdate(rotation=30)
-            ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555", labelcolor="#DDD")
+            ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555")
             ax.set_title(f"🪨 周期ETF 归一化走势  ({cyc_per_var.get()})", color="#FFD700", fontsize=11, pad=8)
             for w in cyc_fig_frame.winfo_children(): w.destroy()
             canvas = FigureCanvasTkAgg(fig, master=cyc_fig_frame); canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -59235,7 +59235,7 @@ class DapanMixin:
             _loc = AutoDateLocator(minticks=6, maxticks=12); _fmt = DateFormatter("%Y-%m")
             ax.xaxis.set_major_locator(_loc); ax.xaxis.set_major_formatter(_fmt)
             fig.autofmt_xdate(rotation=30)
-            ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555", labelcolor="#DDD")
+            ax.legend(fontsize=8, loc="upper left", facecolor="#1E1E2E", edgecolor="#555")
             ax.set_title(f"🌱 成长ETF 归一化走势  ({gro_per_var.get()})", color="#FFD700", fontsize=11, pad=8)
             for w in gro_fig_frame.winfo_children(): w.destroy()
             canvas = FigureCanvasTkAgg(fig, master=gro_fig_frame); canvas.draw(); canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -60423,7 +60423,7 @@ class DapanMixin:
             ax_i.set_title(f"{sym_code} · 一目均衡", fontsize=10, fontweight='bold', color='#212121')
             ax_i.set_ylabel("价格", fontsize=9, color='#424242')
             ax_i.tick_params(colors='#424242')
-            ax_i.legend(fontsize=7, loc='upper left', labelcolor='#212121',
+            ax_i.legend(fontsize=7, loc='upper left',
                         facecolor='#FFFFFF', edgecolor='#CCCCCC')
             ax_i.grid(True, alpha=0.15); ax_i.tick_params(labelbottom=False)
             ax_i.set_xlim(0, n - 1)
@@ -60448,7 +60448,7 @@ class DapanMixin:
                 ax_ivw.plot(x, vw_dea, color='#ff6f00', linewidth=0.8, label='VW-DEA')
                 ax_ivw.set_ylabel("VW-MACD", fontsize=9, color='#424242')
                 ax_ivw.tick_params(colors='#424242')
-                ax_ivw.legend(fontsize=7, loc='upper left', labelcolor='#212121',
+                ax_ivw.legend(fontsize=7, loc='upper left',
                               facecolor='#FFFFFF', edgecolor='#CCCCCC')
                 ax_ivw.grid(True, alpha=0.15)
             ax_ivw.tick_params(labelbottom=False)
@@ -60464,7 +60464,7 @@ class DapanMixin:
                 ax_iv.plot(x, vol_ma10, color='#2196f3', linewidth=0.8, label='VOL_MA10')
             ax_iv.set_ylabel("成交量", fontsize=9, color='#424242')
             ax_iv.tick_params(colors='#424242')
-            ax_iv.legend(fontsize=7, loc='upper left', labelcolor='#212121',
+            ax_iv.legend(fontsize=7, loc='upper left',
                          facecolor='#FFFFFF', edgecolor='#CCCCCC')
             ax_iv.grid(True, alpha=0.15)
             step = max(1, n // 12)

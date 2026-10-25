@@ -3386,7 +3386,7 @@ class StockDetailMixin:
                 ax_main.set_title(f"📈 {sym_name} — {period_label} | " + " · ".join(active_inds) + " + VW-MACD",
                                   fontsize=13, fontweight='bold', pad=10, color='#212121')
                 ax_main.legend(loc='upper left', fontsize=7, ncol=3,
-                               labelcolor='#212121', facecolor='#FFFFFF', edgecolor='#CCCCCC')
+                               facecolor='#FFFFFF', edgecolor='#CCCCCC')
                 ax_main.tick_params(colors='#424242')
                 ax_main.grid(True, alpha=0.3)
                 ax_main.tick_params(axis="x", labelbottom=False)
@@ -3523,9 +3523,9 @@ class StockDetailMixin:
                 ax_sub1.set_ylabel('VW-MACD', fontsize=9, color='#424242')
                 ax_sub1.tick_params(colors='#424242')
                 ax_sub1.legend(loc='upper left', fontsize=7,
-                               labelcolor='#212121', facecolor='#FFFFFF', edgecolor='#CCCCCC')
+                               facecolor='#FFFFFF', edgecolor='#CCCCCC')
                 ax_sub1b.legend(loc='upper right', fontsize=7,
-                                labelcolor='#212121', facecolor='#FFFFFF', edgecolor='#CCCCCC')
+                                facecolor='#FFFFFF', edgecolor='#CCCCCC')
                 ax_sub1.grid(True, alpha=0.3)
 
                 # ─── 副图2: 成交量 (固定) ───
@@ -3537,7 +3537,7 @@ class StockDetailMixin:
                 ax_sub2.set_ylabel('量', fontsize=9, color='#424242')
                 ax_sub2.tick_params(colors='#424242')
                 ax_sub2.legend(loc='upper left', fontsize=7,
-                               labelcolor='#212121', facecolor='#FFFFFF', edgecolor='#CCCCCC')
+                               facecolor='#FFFFFF', edgecolor='#CCCCCC')
                 ax_sub2.grid(True, alpha=0.3)
 
                 # 日期轴 (副图2 显示)

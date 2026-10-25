@@ -780,10 +780,15 @@ def build_fund_holdings_tab(parent, root=None):
                ri_ma_var, ri_boll_var, ri_bias_var, ri_vwmacd_var, ri_volma_var):
         _v.trace_add('write', _ri_redraw_on_toggle)
 
-    # Tab C: 📊 财务
+    # Tab C: 📊 财务 (3行 subplots: 利润率 + 增长率 + 比率)
     tab_rf = ttk.Frame(right_nb); right_nb.add(tab_rf, text="📊 财务")
-    rf_text = tk.Text(tab_rf, height=14, font=("Menlo", 9), wrap=tk.WORD, bg=_BG_PANEL, fg=_FG_TEXT, insertbackground=_FG_TEXT, bd=0)
-    rf_text.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+    rf_fig = Figure(figsize=(7, 7), facecolor=_BG_PANEL)
+    rf_ax1 = rf_fig.add_subplot(311); rf_ax2 = rf_fig.add_subplot(312, sharex=rf_ax1)
+    rf_ax3 = rf_fig.add_subplot(313, sharex=rf_ax1)
+    for ax in (rf_ax1, rf_ax2, rf_ax3): ax.set_facecolor(_BG_PANEL)
+    rf_canvas = FigureCanvasTkAgg(rf_fig, master=tab_rf)
+    rf_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    NavigationToolbar2Tk(rf_canvas, tab_rf, pack_toolbar=False).update()
 
     # Tab D: 😤 情绪
     tab_rs = ttk.Frame(right_nb); right_nb.add(tab_rs, text="😤 情绪")
@@ -841,7 +846,8 @@ def build_fund_holdings_tab(parent, root=None):
             rk_ax1.bar(x[i], max(body_hi - body_lo, 0.001), bottom=body_lo, width=0.6,
                        color=_FG_RED if closes[i] >= opens[i] else _FG_GREEN)
         rk_ax1.set_title(f"{name}({sina}) · 日K", color=_FG_TEXT, fontsize=10)
-        rk_ax1.tick_params(colors=_FG_DIM); rk_ax1.legend(fontsize=7, loc='upper left', labelcolor=_FG_TEXT)
+        rk_ax1.tick_params(colors=_FG_DIM); rk_ax1.legend(fontsize=7, loc='upper left',
+                                                         facecolor=_BG_PANEL, edgecolor=_FG_DIM)
         rk_ax1.grid(True, alpha=0.15, color=_FG_DIM)
         cv = [_FG_RED if closes[i] >= opens[i] else _FG_GREEN for i in range(n)]
         rk_ax2.bar(x, vols, color=cv, width=0.6, alpha=0.7)
@@ -959,7 +965,8 @@ def build_fund_holdings_tab(parent, root=None):
                         bbox=dict(boxstyle='round,pad=0.3',facecolor=_BG_DEEP,alpha=0.8))
 
         ri_ax1.set_title(f"{name}({sina}) · 一目均衡",color=_FG_TEXT,fontsize=10)
-        ri_ax1.tick_params(colors=_FG_DIM); ri_ax1.legend(fontsize=6,loc='upper left',labelcolor=_FG_TEXT)
+        ri_ax1.tick_params(colors=_FG_DIM); ri_ax1.legend(fontsize=6,loc='upper left',
+                                                          facecolor=_BG_PANEL, edgecolor=_FG_DIM)
         ri_ax1.grid(True,alpha=0.15,color=_FG_DIM); ri_ax1.tick_params(labelbottom=False)
 
         if ri_vwmacd_var.get():
@@ -976,7 +983,8 @@ def build_fund_holdings_tab(parent, root=None):
             ri_ax2.bar(x,vw_h,color=[_FG_RED if vw_h[i]>=0 else _FG_GREEN for i in range(n)],width=0.7,alpha=0.7,label='VW-MACD')
             ri_ax2.plot(x,vw_dif,color=_FG_BLUE,linewidth=0.8,label='VW-DIF')
             ri_ax2.plot(x,vw_dea,color='#ff6f00',linewidth=0.8,label='VW-DEA')
-            ri_ax2.tick_params(colors=_FG_DIM); ri_ax2.legend(fontsize=6,loc='upper left',labelcolor=_FG_TEXT)
+            ri_ax2.tick_params(colors=_FG_DIM); ri_ax2.legend(fontsize=6,loc='upper left',
+                                                              facecolor=_BG_PANEL, edgecolor=_FG_DIM)
             ri_ax2.grid(True,alpha=0.15,color=_FG_DIM); ri_ax2.tick_params(labelbottom=False)
 
         cv=[_FG_RED if closes[i]>=closes[max(0,i-1)] else _FG_GREEN for i in range(n)]
@@ -984,16 +992,18 @@ def build_fund_holdings_tab(parent, root=None):
         if ri_volma_var.get():
             ri_ax3.plot(x,pd.Series(vols).rolling(5,min_periods=1).mean().values,color=_FG_GOLD,linewidth=0.8,label='VOL_MA5')
             ri_ax3.plot(x,pd.Series(vols).rolling(10,min_periods=1).mean().values,color=_FG_BLUE,linewidth=0.8,label='VOL_MA10')
-        ri_ax3.tick_params(colors=_FG_DIM); ri_ax3.legend(fontsize=6,loc='upper left',labelcolor=_FG_TEXT)
+        ri_ax3.tick_params(colors=_FG_DIM); ri_ax3.legend(fontsize=6,loc='upper left',
+                                                          facecolor=_BG_PANEL, edgecolor=_FG_DIM)
         ri_ax3.grid(True,alpha=0.15,color=_FG_DIM)
         step=max(1,n//10); ri_ax3.set_xticks(x[::step])
 
         ri_fig.tight_layout(); ri_canvas.draw()
 
     def _draw_rf_tab(sina, name):
-        rf_text.config(state=tk.NORMAL); rf_text.delete("1.0", tk.END)
-        rf_text.insert("1.0", f"⏳ 正在拉取 {name}({sina}) 财务指标 (Tushare)...")
-        rf_text.config(state=tk.DISABLED)
+        """📊 财务 Tab — 3 行 subplots: 利润率(ROE/EPS) + 增长率(营收/净利同比) + 比率(毛利率/负债率)."""
+        rf_ax1.clear(); rf_ax2.clear(); rf_ax3.clear()
+        rf_ax1.text(0.5, 0.5, f"加载 {name}({sina})...", transform=rf_ax1.transAxes, ha='center', color=_FG_DIM)
+        rf_canvas.draw()
         def _w():
             import tushare as ts, queue as _q, os
             try:
@@ -1014,29 +1024,76 @@ def build_fund_holdings_tab(parent, root=None):
         def _pll():
             if not q.empty():
                 r = q.get()
-                rf_text.config(state=tk.NORMAL); rf_text.delete("1.0", tk.END)
-                if 'err' in r: rf_text.insert("1.0", f"❌ {r['err']}")
-                else:
-                    lines = [f"📊 {name}({sina}) 财务指标"]
-                    if r.get('db') is not None and len(r['db']) > 0:
-                        b = r['db'].sort_values('trade_date').iloc[-1]
-                        lines.append(f"  总市值: {float(b.get('total_mv', np.nan))/1e4:.2f}亿" if pd.notna(b.get('total_mv')) else "  总市值: -")
-                        lines.append(f"  PE: {float(b.get('pe', np.nan)):.2f}" if pd.notna(b.get('pe')) else "  PE: -")
-                        lines.append(f"  PB: {float(b.get('pb', np.nan)):.2f}" if pd.notna(b.get('pb')) else "  PB: -")
-                        lines.append(f"  股息率: {float(b.get('dv_ratio', np.nan)):.2f}%" if pd.notna(b.get('dv_ratio')) else "  股息率: -")
-                        lines.append(f"  换手率: {float(b.get('turnover_rate', np.nan)):.2f}%" if pd.notna(b.get('turnover_rate')) else "  换手率: -")
-                    if r.get('fi') is not None and len(r['fi']) > 0:
-                        fi = r['fi'].sort_values('end_date').iloc[-1]
-                        lines.append(f"\n  ═ {fi.get('end_date','')[:7]} ═")
-                        lines.append(f"  ROE: {float(fi.get('roe', np.nan)):.2f}%" if pd.notna(fi.get('roe')) else "  ROE: -")
-                        lines.append(f"  ROA: {float(fi.get('roa', np.nan)):.2f}%" if pd.notna(fi.get('roa')) else "  ROA: -")
-                        lines.append(f"  EPS: {float(fi.get('basic_eps', np.nan)):.2f}" if pd.notna(fi.get('basic_eps')) else "  EPS: -")
-                        lines.append(f"  净利同比: {float(fi.get('dt_net_profit_yoy', np.nan)):+.2f}%" if pd.notna(fi.get('dt_net_profit_yoy')) else "  净利增长: -")
-                        lines.append(f"  营收同比: {float(fi.get('or_yoy', np.nan)):+.2f}%" if pd.notna(fi.get('or_yoy')) else "  营收增长: -")
-                        lines.append(f"  毛利率: {float(fi.get('grossprofit_margin', np.nan)):.2f}%" if pd.notna(fi.get('grossprofit_margin')) else "  毛利率: -")
-                        lines.append(f"  负债率: {float(fi.get('debt_to_assets', np.nan)):.2f}%" if pd.notna(fi.get('debt_to_assets')) else "  负债率: -")
-                    rf_text.insert("1.0", "\n".join(lines))
-                rf_text.config(state=tk.DISABLED)
+                rf_ax1.clear(); rf_ax2.clear(); rf_ax3.clear()
+                if 'err' in r:
+                    rf_ax1.text(0.5, 0.5, f"❌ {r['err']}", transform=rf_ax1.transAxes, ha='center', color=_FG_DIM)
+                    rf_canvas.draw(); return
+                fi = r.get('fi')
+                if fi is None or len(fi) == 0:
+                    rf_ax1.text(0.5, 0.5, "无财务数据", transform=rf_ax1.transAxes, ha='center', color=_FG_DIM)
+                    rf_canvas.draw(); return
+
+                df = fi.sort_values('end_date').reset_index(drop=True)
+                periods = df['end_date'].astype(str).tolist()
+                x = np.arange(len(periods))
+
+                def _arr(col):
+                    if col not in df.columns: return np.array([])
+                    vals = pd.to_numeric(df[col], errors='coerce').values
+                    return vals
+
+                # ── 上图: ROE + ROA + EPS (折线, 右轴EPS) ──
+                roe = _arr('roe'); roa = _arr('roa'); eps = _arr('basic_eps')
+                if len(roe) > 0 and not np.all(np.isnan(roe)):
+                    rf_ax1.plot(x, roe, color=_FG_GOLD, linewidth=1.2, marker='o', markersize=3, label='ROE(%)')
+                if len(roa) > 0 and not np.all(np.isnan(roa)):
+                    rf_ax1.plot(x, roa, color=_FG_BLUE, linewidth=1.0, marker='s', markersize=2.5, label='ROA(%)')
+                if len(eps) > 0 and not np.all(np.isnan(eps)):
+                    ax1r = rf_ax1.twinx()
+                    ax1r.plot(x, eps, color='#ba68c8', linewidth=1.0, marker='^', markersize=2.5, label='EPS')
+                    ax1r.tick_params(axis='y', colors='#ba68c8', labelsize=8)
+                    ax1r.set_ylabel('EPS', color='#ba68c8', fontsize=8)
+                rf_ax1.axhline(y=0, color=_FG_DIM, linewidth=0.5)
+                rf_ax1.set_title(f"{name}({sina}) · 财务指标趋势", color=_FG_TEXT, fontsize=9)
+                rf_ax1.set_ylabel('ROE/ROA(%)', color=_FG_DIM, fontsize=8)
+                rf_ax1.tick_params(colors=_FG_DIM, labelsize=8)
+                rf_ax1.legend(fontsize=7, loc='upper left', facecolor=_BG_PANEL, edgecolor=_FG_DIM)
+                rf_ax1.grid(True, alpha=0.15, color=_FG_DIM)
+                rf_ax1.tick_params(labelbottom=False)
+
+                # ── 中图: 营收同比 + 净利同比 (柱图, 红涨绿跌) ──
+                or_yoy = _arr('or_yoy'); np_yoy = _arr('dt_net_profit_yoy')
+                bar_w = 0.35
+                if len(or_yoy) > 0 or len(np_yoy) > 0:
+                    x_off = np.arange(len(periods))
+                    if len(or_yoy) > 0 and not np.all(np.isnan(or_yoy)):
+                        or_c = [_FG_RED if v >= 0 else _FG_GREEN for v in or_yoy]
+                        rf_ax2.bar(x_off - bar_w/2, np.nan_to_num(or_yoy, nan=0), bar_w, color=or_c, label='营收同比(%)', alpha=0.8)
+                    if len(np_yoy) > 0 and not np.all(np.isnan(np_yoy)):
+                        np_c = [_FG_RED if v >= 0 else _FG_GREEN for v in np_yoy]
+                        rf_ax2.bar(x_off + bar_w/2, np.nan_to_num(np_yoy, nan=0), bar_w, color=np_c, label='净利同比(%)', alpha=0.8)
+                    rf_ax2.axhline(y=0, color=_FG_DIM, linewidth=0.5)
+                rf_ax2.set_ylabel('增长率(%)', color=_FG_DIM, fontsize=8)
+                rf_ax2.tick_params(colors=_FG_DIM, labelsize=8)
+                rf_ax2.legend(fontsize=7, loc='upper left', facecolor=_BG_PANEL, edgecolor=_FG_DIM)
+                rf_ax2.grid(True, alpha=0.15, color=_FG_DIM)
+                rf_ax2.tick_params(labelbottom=False)
+
+                # ── 下图: 毛利率 + 资产负债率 (折线) ──
+                gpm = _arr('grossprofit_margin'); da = _arr('debt_to_assets')
+                if len(gpm) > 0 and not np.all(np.isnan(gpm)):
+                    rf_ax3.plot(x, gpm, color='#66bb6a', linewidth=1.2, marker='o', markersize=3, label='毛利率(%)')
+                if len(da) > 0 and not np.all(np.isnan(da)):
+                    rf_ax3.plot(x, da, color='#ef5350', linewidth=1.0, marker='s', markersize=2.5, linestyle='--', label='负债率(%)')
+                rf_ax3.set_ylabel('比率(%)', color=_FG_DIM, fontsize=8)
+                rf_ax3.tick_params(colors=_FG_DIM, labelsize=8)
+                rf_ax3.legend(fontsize=7, loc='upper left', facecolor=_BG_PANEL, edgecolor=_FG_DIM)
+                rf_ax3.grid(True, alpha=0.15, color=_FG_DIM)
+                step = max(1, len(periods) // 8)
+                rf_ax3.set_xticks(x[::step])
+                rf_ax3.set_xticklabels([p[:7] for p in periods[::step]], rotation=30, fontsize=7, color=_FG_DIM)
+
+                rf_fig.tight_layout(); rf_canvas.draw()
             else: root.after(300, _pll)
         root.after(300, _pll)
 

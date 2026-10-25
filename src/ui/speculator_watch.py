@@ -2215,7 +2215,7 @@ def _show_daily_kline_dialog(parent, title, data, sina_code=None):
         ticks = x[::step]; lbls = [dates[i][:10] for i in ticks]
         for a in (ax, axv, axm): a.set_xticks(ticks); a.set_xticklabels([])
         axk.set_xticks(ticks); axk.set_xticklabels(lbls, rotation=30, fontsize=7, color="#9E9E9E")
-        ax.legend(loc="upper left", fontsize=8, facecolor="#2A2A2A", edgecolor="#555", labelcolor="#E0E0E0")
+        ax.legend(loc="upper left", fontsize=8, facecolor="#2A2A2A", edgecolor="#555")
 
         _canvas_ref["canvas"].draw_idle()
         info_lbl.config(text=f"{len(dates)} bars | latest {dates[-1]} | close {c[-1]:.2f} | {new_data.get('src','?')}")
@@ -3818,7 +3818,7 @@ def _open_kline_fallback(win, code, name):
         ax.plot(dates[4:], ma5, color="#FFD54F", linewidth=1, label="MA5")
         ax.plot(dates[9:], ma10, color="#64B5F6", linewidth=1, label="MA10")
         ax.plot(dates[19:], ma20, color="#CE93D8", linewidth=1, label="MA20")
-        ax.legend(loc="upper left", fontsize=8, facecolor="#121212", labelcolor="#E0E0E0")
+        ax.legend(loc="upper left", fontsize=8, facecolor="#121212", edgecolor="#555")
         ax.tick_params(colors="#BDBDBD"); ax.spines[:].set_color("#424242")
         ax.set_title(f"{name}({code}) 近 {len(df)} 日 K线 | 收盘 {closes[-1]:.2f} ({df['pct_chg'].iloc[-1]:+.2f}%)",
                      color="#FFD54F", fontsize=12)
