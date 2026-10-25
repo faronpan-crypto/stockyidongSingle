@@ -59748,6 +59748,65 @@ class DapanMixin:
     # ═══════════════════════════════════════════════════════════════
 
     _macro_cache = None  # 宏观指标全局缓存
+    _name_code_map = None  # {name: sh/sz/bj+code, ...} 全量名称→代码映射
+
+    def _get_name_code_map(self, timeout=5):
+        """构建 {中文名: 带前缀代码} 映射, 缓存一天。"""
+        import threading, queue, os, datetime as dt
+
+        today = dt.date.today().isoformat()
+        if self._name_code_map and self._name_code_map.get('date') == today:
+            return self._name_code_map['data']
+
+        cache_dir = os.path.expanduser('~/.qclaw')
+        cache_path = os.path.join(cache_dir, 'name_code_map.json')
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path) as f:
+                    c = json.load(f)
+                if c.get('date') == today and c.get('data'):
+                    self._name_code_map = c
+                    return c['data']
+            except Exception: pass
+
+        result_q = queue.Queue(maxsize=1)
+        def _worker():
+            try:
+                import tushare as ts
+                token_path = os.path.expanduser('~/.tushare/token')
+                if not os.path.exists(token_path): result_q.put({}); return
+                ts.set_token(open(token_path).read().strip()); pro = ts.pro_api()
+                df = pro.stock_basic(exchange='', list_status='L',
+                                     fields='ts_code,symbol,name,market')
+                if df is None or len(df) == 0:
+                    result_q.put({}); return
+                m = {}
+                for _, row in df.iterrows():
+                    code = str(row['symbol'])
+                    name = str(row['name']).strip()
+                    market = row.get('market', '')
+                    # 推断前缀
+                    prefix = 'sh' if code[0] in ('5','6','9') or str(market).find('沪') >= 0 \
+                             else ('sz' if code[0] in ('0','3','2') or str(market).find('深') >= 0 else 'bj')
+                    m[name] = prefix + code  # 全名精确映射
+                    if len(name) >= 2:
+                        m.setdefault(name[-2:], prefix + code)  # 后两字缩写 (贵州茅台→茅台)
+                result_q.put(m)
+            except Exception: result_q.put({})
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start(); t.join(timeout=max(timeout, 3))
+        if t.is_alive() or result_q.empty(): return {}
+        data = result_q.get()
+        if not data: return {}
+        self._name_code_map = {'date': today, 'data': data}
+        # 写缓存
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            with open(cache_path, 'w') as f:
+                json.dump({'date': today, 'data': data}, f, ensure_ascii=False)
+        except Exception: pass
+        return data
 
     def _fetch_macro(self, timeout=5):
         """拉 CPI + PPI 月度同比数据, 返回 dict 或 None。"""
@@ -59907,6 +59966,7 @@ class DapanMixin:
         import numpy as np, pandas as pd
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        import matplotlib.pyplot as plt
 
         win = self._safe_toplevel(self.root)
         win.title("📉 通缩通胀分析 · 资产负债表思维")
@@ -59962,108 +60022,67 @@ class DapanMixin:
         ttk.Button(top_frame, text="❓ 解释", command=_show_help, width=10).pack(side=tk.RIGHT)
 
         # ════════════════════════════════════════
-        # 中间: 左=个股分析 / 右=宏观指标
+        # 先声明所有内部函数 (避免 UnboundLocalError)
         # ════════════════════════════════════════
-        mid_paned = ttk.Panedwindow(win, orient=tk.HORIZONTAL)
-        mid_paned.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
-
-        # ─── 左侧: 个股通胀/通缩判断 ───
-        left_frame = ttk.LabelFrame(mid_paned, text="🔍 个股/ETF 通胀通缩判断", padding=6)
-        mid_paned.add(left_frame, weight=2)
-
-        input_row = ttk.Frame(left_frame); input_row.pack(fill=tk.X, pady=(0,6))
-        ttk.Label(input_row, text="代码/名称:").pack(side=tk.LEFT)
-        sym_var = tk.StringVar()
-        sym_entry = ttk.Entry(input_row, textvariable=sym_var, width=18)
-        sym_entry.pack(side=tk.LEFT, padx=4)
-        sym_entry.insert(0, "600519")
-
-        # 快速选择
-        QUICK_LIST = [
-            ("600519", "茅台(白酒-通胀资产)"),
-            ("000001", "平安银行(金融)"),
-            ("601318", "中国平安(保险)"),
-            ("000858", "五粮液(白酒)"),
-            ("300750", "宁德时代(新能源)"),
-            ("601899", "紫金矿业(有色-通胀)"),
-            ("510300", "沪深300ETF"),
-        ]
-        for code, tip in QUICK_LIST:
-            ttk.Button(input_row, text=code, width=6,
-                       command=lambda c=code: (sym_var.set(c), _go())).pack(side=tk.LEFT, padx=2)
-
-        result_frame = ttk.Frame(left_frame); result_frame.pack(fill=tk.BOTH, expand=True)
-
-        verdict_var = tk.StringVar(value="等待输入...")
-        verdict_label = ttk.Label(result_frame, textvariable=verdict_var,
-                                   font=("Menlo", 14, "bold"), anchor="w")
-        verdict_label.pack(fill=tk.X, pady=(0,6))
-
-        detail_text = tk.Text(result_frame, height=10, font=("Menlo", 10),
-                              wrap=tk.WORD, padx=8, pady=6)
-        detail_text.pack(fill=tk.BOTH, expand=True)
-
-        mini_fig = Figure(figsize=(6, 3.5), facecolor="#FAFAFA")
-        mini_ax = mini_fig.add_subplot(111)
-        mini_canvas = FigureCanvasTkAgg(mini_fig, master=result_frame)
-        mini_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, pady=(6,0))
-        mini_ax.set_title("量价趋势 (近60日)", fontsize=10)
-
-        # ─── 右侧: 宏观指标 mini chart ───
-        right_frame = ttk.LabelFrame(mid_paned, text="🌐 宏观指标 · CPI / PPI 同比", padding=6)
-        mid_paned.add(right_frame, weight=3)
-
-        macro_fig = Figure(figsize=(7, 6), facecolor="#FAFAFA")
-        gs = macro_fig.add_gridspec(2, 1, hspace=0.35)
-        ax_cpi = macro_fig.add_subplot(gs[0])
-        ax_ppi = macro_fig.add_subplot(gs[1])
-        macro_canvas = FigureCanvasTkAgg(macro_fig, master=right_frame)
-        macro_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        macro_canvas_toolbar = NavigationToolbar2Tk(macro_canvas, right_frame, pack_toolbar=False)
-        macro_canvas_toolbar.update()
-
-        # ════════════════════════════════════════
-        # 底部: 付鹏框架总结 (动态)
-        # ════════════════════════════════════════
-        bottom_frame = ttk.LabelFrame(win, text="📖 付鹏资产负债表 · 当前阶段判断", padding=6)
-        bottom_frame.pack(fill=tk.X, padx=6, pady=(0,6))
-        stage_text = tk.Text(bottom_frame, height=6, font=("Menlo", 10),
-                             wrap=tk.WORD, padx=8, pady=6)
-        stage_text.pack(fill=tk.X)
-
-        # ════════════════════════════════════════
-        # 逻辑
-        # ════════════════════════════════════════
+        def _resolve_code(input_text, all_opts, n2c):
+            """把输入文本 (下拉选项/中文名/纯代码) 解析成带前缀代码."""
+            # 下拉框精确匹配
+            if input_text in n2c: return n2c[input_text]
+            # 模糊匹配下拉框
+            fuzzy = [(n, c) for n, c in all_opts if input_text in n or input_text in c]
+            if fuzzy: return fuzzy[0][1]
+            # 全量中文名懒加载
+            if hasattr(self, '_get_name_code_map'):
+                try:
+                    nm = self._get_name_code_map(timeout=3)
+                    if input_text in nm: return nm[input_text]
+                except Exception: pass
+            # _parse_stock_text
+            if hasattr(self, '_parse_stock_text'):
+                _parsed = self._parse_stock_text(input_text)
+                if _parsed:
+                    pc = _parsed[0]['code']
+                    m = pc[0]
+                    prefix = 'sh' if m in ('5','6','9') else ('sz' if m in ('0','3','2') else 'bj')
+                    return prefix + pc
+            # 纯 6 位数字补前缀
+            if len(input_text) == 6 and input_text[0].isdigit() \
+                    and not input_text.startswith(('sh','sz','bj')):
+                m = input_text[0]
+                prefix = 'sh' if m in ('5','6','9') else ('sz' if m in ('0','3','2') else 'bj')
+                return prefix + input_text
+            return input_text
 
         def _go():
-            code = sym_var.get().strip()
-            if not code: return
+            """个股/ETF 通胀通缩分析."""
+            code_input = sym_var.get().strip()
+            if not code_input: return
             try:
-                # 拉 K 线
-                if hasattr(self, '_parse_stock_text'):
-                    _parsed = self._parse_stock_text(code)
-                    sym_code = _parsed[0]['code'] if _parsed else code
-                else:
-                    sym_code = code
-                if len(sym_code) == 6 and not sym_code.startswith(('sh','sz','bj')):
-                    market = sym_code[0]
-                    prefix = 'sh' if market in ('5','6','9') else ('sz' if market in ('0','3','2') else 'bj')
-                    sym_code = prefix + sym_code
+                sym_code = _resolve_code(code_input, all_options, name_to_code)
+                if not sym_code:
+                    verdict_var.set("❌ 解析代码失败"); return
 
-                # 优先拉指数/ETF (新浪接口), 个股用最近日线
+                # 拉 K 线 (新浪接口, 个股/指数/ETF 通吃)
                 df = None
                 if hasattr(self, '_fetch_index_daily'):
                     df = self._fetch_index_daily(symbol=sym_code, days=120)
-                if not df and hasattr(self, '_fetch_recent_daily_ohlcv'):
-                    pure_code = sym_code[2:] if len(sym_code) == 8 else sym_code
-                    df = self._fetch_recent_daily_ohlcv(stock_code=pure_code, days=120)
                 if not df:
-                    verdict_var.set("❌ 数据拉不到"); return
+                    verdict_var.set(f"❌ {sym_code} 数据拉不到 (新浪断连)"); return
 
                 closes = [float(d.get('close', d.get('close_price', 0))) for d in df] if isinstance(df, list) else df['close'].astype(float).values.tolist()
                 volumes = [float(d.get('volume', d.get('vol', 0))) for d in df] if isinstance(df, list) else df['volume'].astype(float).values.tolist()
 
                 j = self._judge_asset_inflation(closes, volumes)
+                # 右侧 2 个 Tab 同步绘制
+                try: _draw_kline_tab(df, sym_code)
+                except Exception as _e: pass
+                _ichi_df_cache['df'] = df; _ichi_df_cache['sym'] = sym_code
+                try: _draw_ichimoku_tab(df, sym_code)
+                except Exception as _e: pass
+                try: _draw_financial_tab(sym_code)
+                except Exception as _e: pass
+                try: _draw_sentiment_tab(sym_code, df)
+                except Exception as _e: pass
                 verdict_var.set(f"{'📉' if '通缩' in j['label'] or '抛压' in j['label'] else '📈' if '通胀' in j['label'] else '⚠️' if '警惕' in j['label'] else '⚖️'}  {j['label']}  ·  评分 {j['score']}/100")
                 verdict_label.config(foreground={
                     'inflation': '#2e7d32', 'deflation': '#c62828',
@@ -60107,6 +60126,7 @@ class DapanMixin:
                 verdict_var.set(f"❌ {e}")
 
         def _draw_macro():
+            """宏观 CPI/PPI 折线 + 底部阶段判断."""
             data = self._fetch_macro(timeout=5)
             ax_cpi.clear(); ax_ppi.clear()
             if data is None:
@@ -60168,16 +60188,526 @@ class DapanMixin:
             macro_fig.tight_layout()
             macro_canvas.draw()
 
-        # 刷新按钮 + Enter 触发
-        go_btn = ttk.Button(input_row, text="🔍 分析", command=_go, width=8)
-        go_btn.pack(side=tk.LEFT, padx=(6,0))
-        sym_entry.bind("<Return>", lambda e: _go())
+        def _draw_kline_tab(df, sym_code):
+            """📈 日K Tab — 蜡烛图 + MA5/10/20 + 成交量."""
+            import matplotlib.dates as mdates
+            from matplotlib.patches import FancyBboxPatch
+            ax_k.clear(); ax_kv.clear()
+            if not df:
+                ax_k.text(0.5, 0.5, "请先在左侧选择标的\n点 🔍 分析",
+                          transform=ax_k.transAxes, ha='center', fontsize=12, color='#999')
+                kline_canvas.draw(); return
+
+            # 统一字段
+            if isinstance(df, list):
+                opens = np.array([float(d.get('open', 0)) for d in df])
+                highs = np.array([float(d.get('high', 0)) for d in df])
+                lows  = np.array([float(d.get('low', 0)) for d in df])
+                closes = np.array([float(d.get('close', 0)) for d in df])
+                vols  = np.array([float(d.get('volume', d.get('vol', 0))) for d in df])
+            else:
+                opens = df['open'].astype(float).values
+                highs = df['high'].astype(float).values
+                lows  = df['low'].astype(float).values
+                closes = df['close'].astype(float).values
+                vols  = df['volume'].astype(float).values
+
+            n = len(closes); x = np.arange(n)
+            # MA
+            ma5 = pd.Series(closes).rolling(5, min_periods=1).mean().values
+            ma10 = pd.Series(closes).rolling(10, min_periods=1).mean().values
+            ma20 = pd.Series(closes).rolling(20, min_periods=1).mean().values
+
+            # 蜡烛: 红涨绿跌 (A股风格)
+            colors = ['#d32f2f' if closes[i] >= opens[i] else '#388e3c' for i in range(n)]
+            # 影线
+            ax_k.vlines(x, lows, highs, colors=colors, linewidth=0.8)
+            # 实体
+            for i in range(n):
+                body_lo = min(opens[i], closes[i])
+                body_hi = max(opens[i], closes[i])
+                rect = plt.Rectangle((x[i] - 0.35, body_lo), 0.7, max(body_hi - body_lo, 0.001),
+                                     facecolor=colors[i], edgecolor=colors[i], linewidth=0.5)
+                ax_k.add_patch(rect)
+
+            ax_k.plot(x, ma5, color='#ff9800', linewidth=0.8, label='MA5')
+            ax_k.plot(x, ma10, color='#2196f3', linewidth=0.8, label='MA10')
+            ax_k.plot(x, ma20, color='#9c27b0', linewidth=0.9, label='MA20')
+            ax_k.set_title(f"{sym_code} · 日K (近{n}日)", fontsize=11, fontweight='bold')
+            ax_k.set_ylabel("价格", fontsize=9); ax_k.legend(fontsize=7, loc='upper left')
+            ax_k.grid(True, alpha=0.15)
+            ax_k.tick_params(labelbottom=False)
+
+            # 成交量
+            vol_colors = ['#d32f2f' if closes[i] >= opens[i] else '#388e3c' for i in range(n)]
+            ax_kv.bar(x, vols, color=vol_colors, width=0.7, alpha=0.7)
+            vol_ma5 = pd.Series(vols).rolling(5, min_periods=1).mean().values
+            ax_kv.plot(x, vol_ma5, color='#ff9800', linewidth=0.7, label='VOL_MA5')
+            ax_kv.set_ylabel("成交量", fontsize=9); ax_kv.legend(fontsize=7, loc='upper left')
+            ax_kv.grid(True, alpha=0.15)
+            # X轴日期
+            step = max(1, n // 12)
+            ax_kv.set_xticks(x[::step])
+            dates_label = [df[i].get('day', '') if isinstance(df, list) else '' for i in range(n)]
+            ax_kv.set_xticklabels(dates_label[::step], rotation=30, fontsize=7)
+
+            kline_fig.tight_layout()
+            kline_canvas.draw()
+
+        def _draw_ichimoku_tab(df, sym_code):
+            """🌈 一目均衡 Tab — 3 行: 一目均衡云 + VW-MACD + 成交量MA5/MA10."""
+            ax_i.clear(); ax_ivw.clear(); ax_iv.clear()
+            if not df:
+                ax_i.text(0.5, 0.5, "请先在左侧选择标的\n点 🔍 分析",
+                          transform=ax_i.transAxes, ha='center', fontsize=12, color='#999')
+                ichi_canvas.draw(); return
+
+            if isinstance(df, list):
+                highs = np.array([float(d.get('high', 0)) for d in df])
+                lows  = np.array([float(d.get('low', 0)) for d in df])
+                closes = np.array([float(d.get('close', 0)) for d in df])
+                vols  = np.array([float(d.get('volume', d.get('vol', 0))) for d in df])
+            else:
+                highs = df['high'].astype(float).values
+                lows  = df['low'].astype(float).values
+                closes = df['close'].astype(float).values
+                vols  = df['volume'].astype(float).values
+            n = len(closes); x = np.arange(n)
+
+            def _period_hilo(h, l, period):
+                out_h = np.full(len(h), np.nan); out_l = np.full(len(l), np.nan)
+                for i in range(len(h)):
+                    start = max(0, i - period + 1)
+                    out_h[i] = np.max(h[start:i+1]); out_l[i] = np.min(l[start:i+1])
+                return (out_h + out_l) / 2
+
+            tenkan = _period_hilo(highs, lows, 9); kijun = _period_hilo(highs, lows, 26)
+            senkou_a = (tenkan + kijun) / 2; senkou_b = _period_hilo(highs, lows, 52)
+            chikou_x = x[:-26] + 26 if n > 26 else x
+            chikou_y = closes[:-26] if n > 26 else closes
+
+            # ── 云 (toggle) ──
+            if ichi_cloud_var.get():
+                senkou_a_plot = np.concatenate([senkou_a, [senkou_a[-1]] * 26])
+                senkou_b_plot = np.concatenate([senkou_b, [senkou_b[-1]] * 26])
+                ax_i.fill_between(x, senkou_a_plot[:n], senkou_b_plot[:n],
+                                  where=(senkou_b_plot[:n] >= senkou_a_plot[:n]),
+                                  color='#26a69a', alpha=0.25, label='绿云(看跌)')
+                ax_i.fill_between(x, senkou_a_plot[:n], senkou_b_plot[:n],
+                                  where=(senkou_b_plot[:n] < senkou_a_plot[:n]),
+                                  color='#ef5350', alpha=0.25, label='红云(看涨)')
+            # 转换线/基准线 (toggle)
+            if ichi_tenkan_var.get():
+                ax_i.plot(x, tenkan, color='#ff9800', linewidth=0.9, label='转换线(9)')
+            if ichi_kijun_var.get():
+                ax_i.plot(x, kijun, color='#2196f3', linewidth=1.0, label='基准线(26)')
+            ax_i.plot(x, closes, color='#333', linewidth=1.0, label='收盘价', zorder=5)
+            # 迟行带 (toggle)
+            if ichi_chikou_var.get() and len(chikou_y) > 0:
+                ax_i.plot(chikou_x, chikou_y, color='#9c27b0', linewidth=0.8,
+                          linestyle='--', label='迟行带(26)')
+            ax_i.set_title(f"{sym_code} · 一目均衡", fontsize=10, fontweight='bold')
+            ax_i.set_ylabel("价格", fontsize=9); ax_i.legend(fontsize=7, loc='upper left')
+            ax_i.grid(True, alpha=0.15); ax_i.tick_params(labelbottom=False)
+            ax_i.set_xlim(0, n - 1)
+
+            # ── VW-MACD (toggle) ──
+            if ichi_vwmacd_var.get():
+                def _ema(a, p):
+                    out = np.zeros_like(a, dtype=float); out[0] = a[0]
+                    alpha = 2.0 / (p + 1)
+                    for i in range(1, len(a)): out[i] = out[i-1] * (1 - alpha) + a[i] * alpha
+                    return out
+                ema12 = _ema(closes, 12); ema26 = _ema(closes, 26)
+                dif = ema12 - ema26; dea = _ema(dif, 9)
+                vma20 = pd.Series(vols).rolling(20, min_periods=1).mean().values
+                vr = np.where(vma20 > 0, vols / vma20, 1.0); vr = np.clip(vr, 0.1, 5.0)
+                vw_dif = dif * (0.5 + 0.5 * np.sqrt(vr)); vw_dea = _ema(vw_dif, 9)
+                vw_macdh = 2 * (vw_dif - vw_dea) * np.sqrt(vr)
+                ax_ivw.axhline(y=0, color='gray', linewidth=0.5)
+                bar_colors = ['#d32f2f' if vw_macdh[i] >= 0 else '#388e3c' for i in range(n)]
+                ax_ivw.bar(x, vw_macdh, color=bar_colors, width=0.7, alpha=0.7, label='VW-MACD柱')
+                ax_ivw.plot(x, vw_dif, color='#1565c0', linewidth=0.8, label='VW-DIF')
+                ax_ivw.plot(x, vw_dea, color='#ff6f00', linewidth=0.8, label='VW-DEA')
+                ax_ivw.set_ylabel("VW-MACD", fontsize=9); ax_ivw.legend(fontsize=7, loc='upper left')
+                ax_ivw.grid(True, alpha=0.15)
+            ax_ivw.tick_params(labelbottom=False)
+
+            # ── 成交量 + MA5/MA10 (toggle) ──
+            vol_colors = ['#d32f2f' if closes[i] >= closes[max(0,i-1)] else '#388e3c'
+                          for i in range(n)]
+            ax_iv.bar(x, vols, color=vol_colors, width=0.7, alpha=0.6)
+            if ichi_volma_var.get():
+                vol_ma5 = pd.Series(vols).rolling(5, min_periods=1).mean().values
+                vol_ma10 = pd.Series(vols).rolling(10, min_periods=1).mean().values
+                ax_iv.plot(x, vol_ma5, color='#ff9800', linewidth=0.8, label='VOL_MA5')
+                ax_iv.plot(x, vol_ma10, color='#2196f3', linewidth=0.8, label='VOL_MA10')
+            ax_iv.set_ylabel("成交量", fontsize=9); ax_iv.legend(fontsize=7, loc='upper left')
+            ax_iv.grid(True, alpha=0.15)
+            step = max(1, n // 12)
+            ax_iv.set_xticks(x[::step])
+            dates_label = [df[i].get('day', '') if isinstance(df, list) else '' for i in range(n)]
+            ax_iv.set_xticklabels(dates_label[::step], rotation=30, fontsize=7)
+
+            ichi_fig.tight_layout(); ichi_canvas.draw()
+
+        def _draw_financial_tab(sym_code):
+            """📊 财务指标 Tab — Tushre fina_indicator: ROE/营收增长/净利增长/毛利率/资产负债率."""
+            import threading, queue, os
+            ax_fin1.clear(); ax_fin2.clear()
+            fin_text.config(state=tk.NORMAL); fin_text.delete("1.0", tk.END)
+            fin_text.insert("1.0", f"⏳ 正在拉取 {sym_code} 的财务指标...")
+            fin_text.config(state=tk.DISABLED)
+            fin_fig.tight_layout(); fin_canvas.draw()
+
+            def _worker():
+                try:
+                    import tushare as ts
+                    token_path = os.path.expanduser('~/.tushare/token')
+                    if not os.path.exists(token_path):
+                        result_q.put({'error': '缺少 Tushare Token'})
+                        return
+                    ts.set_token(open(token_path).read().strip()); pro = ts.pro_api()
+                    # 推断 ts_code
+                    ts_code = sym_code
+                    if len(sym_code) == 8 and sym_code[:2] in ('sh','sz','bj'):
+                        market = sym_code[:2]
+                        pure = sym_code[2:]
+                        ts_code = f"{pure}.SH" if market == 'sh' else (f"{pure}.SZ" if market == 'sz' else f"{pure}.BJ")
+                    # 指数无财务数据
+                    if sym_code.startswith(('sh000','sz399')) or (len(sym_code)==8 and sym_code[2:5]=='000'):
+                        result_q.put({'error': f"{sym_code} 是指数, 无个股财务数据"})
+                        return
+                    df = pro.fina_indicator(ts_code=ts_code, fields='ts_code,end_date,roe,dt_net_profit_yoy,or_yoy,grossprofit_margin,debt_to_assets')
+                    if df is None or len(df) == 0:
+                        result_q.put({'error': f"{sym_code} 财务数据为空"})
+                        return
+                    result_q.put({'ok': True, 'df': df})
+                except Exception as e:
+                    result_q.put({'error': str(e)})
+
+            result_q = queue.Queue(maxsize=1)
+            t = threading.Thread(target=_worker, daemon=True); t.start()
+            def _poll():
+                if not result_q.empty():
+                    r = result_q.get()
+                    fin_text.config(state=tk.NORMAL); fin_text.delete("1.0", tk.END)
+                    if 'error' in r:
+                        ax_fin1.text(0.5, 0.5, r['error'], transform=ax_fin1.transAxes,
+                                     ha='center', fontsize=11, color='#888')
+                        fin_text.insert("1.0", f"❌ {r['error']}")
+                        fin_text.config(state=tk.DISABLED)
+                        fin_canvas.draw(); return
+                    df = r['df']
+                    df = df.sort_values('end_date').reset_index(drop=True)
+                    periods = df['end_date'].astype(str).tolist()
+                    # 表格文本
+                    latest = df.iloc[-1]
+                    lines = [f"📊 {sym_code} 最新季度 {latest.get('end_date','')[:7]} 财务指标:"]
+                    lines.append(f"  ROE(加权): {latest.get('roe', np.nan):.2f}%" if pd.notna(latest.get('roe')) else "  ROE: -")
+                    lines.append(f"  净利润同比: {latest.get('dt_net_profit_yoy', np.nan):+.2f}%" if pd.notna(latest.get('dt_net_profit_yoy')) else "  净利增长: -")
+                    lines.append(f"  营收同比: {latest.get('or_yoy', np.nan):+.2f}%" if pd.notna(latest.get('or_yoy')) else "  营收增长: -")
+                    lines.append(f"  毛利率: {latest.get('grossprofit_margin', np.nan):.2f}%" if pd.notna(latest.get('grossprofit_margin')) else "  毛利率: -")
+                    lines.append(f"  资产负债率: {latest.get('debt_to_assets', np.nan):.2f}%" if pd.notna(latest.get('debt_to_assets')) else "  负债率: -")
+                    fin_text.insert("1.0", "\n".join(lines))
+                    fin_text.config(state=tk.DISABLED)
+                    # 趋势图
+                    y_roe = df['roe'].astype(float).values
+                    y_or = df['or_yoy'].astype(float).values
+                    ax_fin1.clear(); ax_fin2.clear()
+                    if y_roe[-20:].shape[0] > 0:
+                        ax_fin1.plot(periods[-20:], y_roe[-20:], 'o-', color='#1565c0', linewidth=1.5, label='ROE(%)')
+                        ax_fin1.set_title('ROE 趋势', fontsize=10); ax_fin1.grid(True, alpha=0.15)
+                        ax_fin1.tick_params(axis='x', rotation=45, labelsize=7)
+                    if y_or[-20:].shape[0] > 0:
+                        ax_fin2.bar(periods[-20:], y_or[-20:], color=['#d32f2f' if v >= 0 else '#388e3c' for v in y_or[-20:]])
+                        ax_fin2.axhline(y=0, color='gray', linewidth=0.5)
+                        ax_fin2.set_title('营收同比增长(%)', fontsize=10); ax_fin2.grid(True, alpha=0.15)
+                        ax_fin2.tick_params(axis='x', rotation=45, labelsize=7)
+                    fin_fig.tight_layout(); fin_canvas.draw()
+                elif t.is_alive():
+                    win.after(300, _poll)
+                else:
+                    ax_fin1.text(0.5, 0.5, "加载超时", transform=ax_fin1.transAxes,
+                                 ha='center', fontsize=11, color='#888')
+                    fin_canvas.draw()
+            win.after(300, _poll)
+
+        def _draw_sentiment_tab(sym_code, df=None):
+            """😤 情绪指标 Tab — ARMS广度 + 北向资金 + 个股量比/换手率."""
+            import threading, queue, os
+            ax_sent1.clear(); ax_sent2.clear()
+            sent_text.config(state=tk.NORMAL); sent_text.delete("1.0", tk.END)
+            sent_text.insert("1.0", f"⏳ 正在拉取 {sym_code} 的情绪指标 (ARMS + 北向资金)...")
+            sent_text.config(state=tk.DISABLED)
+            sent_fig.tight_layout(); sent_canvas.draw()
+
+            result_q = queue.Queue(maxsize=1)
+            def _worker():
+                try:
+                    out = {}
+                    # 1) ARMS
+                    if hasattr(self, '_calc_arms_index'):
+                        arms = self._calc_arms_index(timeout=5)
+                        if arms: out['arms'] = arms
+                    # 2) 北向资金 (市场级)
+                    if hasattr(self, '_fetch_money_market'):
+                        try:
+                            mm = self._fetch_money_market(timeout=5)
+                            if mm: out['money'] = mm
+                        except Exception: pass
+                    # 3) 个股量比 (用 df 最近 20 日数据)
+                    if df:
+                        if isinstance(df, list):
+                            vols = np.array([float(d.get('volume', d.get('vol', 0))) for d in df])
+                            closes = np.array([float(d.get('close', 0)) for d in df])
+                            opens = np.array([float(d.get('open', 0)) for d in df])
+                        else:
+                            vols = df['volume'].astype(float).values
+                            closes = df['close'].astype(float).values
+                            opens = df['open'].astype(float).values
+                        if len(vols) >= 20:
+                            vma5 = np.mean(vols[-5:]); vma10 = np.mean(vols[-10:]); vma20 = np.mean(vols[-20:])
+                            vr_today = vols[-1] / vma20 if vma20 > 0 else 1.0
+                            ret_5 = (closes[-1] / closes[-6] - 1) * 100 if len(closes) >= 6 else 0
+                            out['stock'] = {'vr': vr_today, 'vma5': vma5, 'vma20': vma20,
+                                            'ret_5d': ret_5, 'vols': vols[-60:], 'closes': closes[-60:]}
+                    result_q.put(out)
+                except Exception as e:
+                    result_q.put({'error': str(e)})
+            t = threading.Thread(target=_worker, daemon=True); t.start()
+
+            def _poll():
+                if not result_q.empty():
+                    r = result_q.get()
+                    sent_text.config(state=tk.NORMAL); sent_text.delete("1.0", tk.END)
+                    lines = [f"😤 {sym_code} 情绪面板:"]
+                    # ARMS
+                    if 'arms' in r:
+                        a = r['arms']
+                        verdict = "🧪强势" if a < 0.7 else "🔷偏强" if a < 0.9 else "⚪均衡" if a < 1.1 else "🔴抛压" if a < 1.5 else "💣恐慌"
+                        lines.append(f"  🧭 ARMS广度: {a:.2f} {verdict}")
+                    # 北向资金
+                    if 'money' in r:
+                        m = r['money']
+                        if 'northbound_net' in m:
+                            lines.append(f"  💴 北向资金净流入: {m['northbound_net']/1e8:+.1f}亿")
+                        if 'margin_balance' in m:
+                            lines.append(f"  💰 融资余额: {m['margin_balance']/1e8:.0f}亿")
+                    # 个股
+                    if 'stock' in r:
+                        s = r['stock']
+                        lines.append(f"  📊 量比(20日): {s['vr']:.2f}  5日涨幅: {s['ret_5d']:+.1f}%")
+                        lines.append(f"    解读: {'放量上涨' if s['vr']>1.2 and s['ret_5d']>0 else '缩量调整' if s['vr']<0.8 and s['ret_5d']<0 else '量能正常'}")
+                    sent_text.insert("1.0", "\n".join(lines))
+                    sent_text.config(state=tk.DISABLED)
+                    # ── 画图 ──
+                    ax_sent1.clear(); ax_sent2.clear()
+                    # 上图: 量比柱
+                    if 'stock' in r:
+                        vols = r['stock']['vols']; closes_s = r['stock']['closes']
+                        n = len(vols); x = np.arange(n)
+                        vma20 = pd.Series(vols).rolling(20, min_periods=1).mean().values
+                        vr = np.where(vma20 > 0, vols / vma20, 1.0)
+                        colors = ['#d32f2f' if vr[i] > 1.2 else '#388e3c' if vr[i] < 0.8 else '#757575' for i in range(n)]
+                        ax_sent1.bar(x, vr, color=colors, width=0.8, alpha=0.8)
+                        ax_sent1.axhline(y=1.0, color='gray', linewidth=0.5, linestyle='--')
+                        ax_sent1.axhline(y=1.2, color='#d32f2f', linewidth=0.4, linestyle=':')
+                        ax_sent1.axhline(y=0.8, color='#388e3c', linewidth=0.4, linestyle=':')
+                        ax_sent1.set_title(f"{sym_code} · 量比 (近{n}日)", fontsize=10)
+                        ax_sent1.set_ylabel("量比 (vs 20日均量)", fontsize=9); ax_sent1.grid(True, alpha=0.15)
+                    # 下图: 价格走势
+                    if 'stock' in r:
+                        ax_sent2.plot(x, closes_s, color='#1565c0', linewidth=1.2)
+                        ax_sent2.fill_between(x, closes_s, alpha=0.1, color='#1565c0')
+                        ma20 = pd.Series(closes_s).rolling(20, min_periods=1).mean().values
+                        ax_sent2.plot(x, ma20, color='#9c27b0', linewidth=0.8, linestyle='--', label='MA20')
+                        ax_sent2.set_title("价格走势", fontsize=10)
+                        ax_sent2.set_ylabel("价格", fontsize=9); ax_sent2.legend(fontsize=7); ax_sent2.grid(True, alpha=0.15)
+                    sent_fig.tight_layout(); sent_canvas.draw()
+                elif t.is_alive():
+                    win.after(300, _poll)
+                else:
+                    sent_text.insert("1.0", "❌ 加载失败")
+                    sent_text.config(state=tk.DISABLED)
+            win.after(300, _poll)
+
+        # ════════════════════════════════════════
+        # 中间: 左=个股分析 / 右=宏观指标
+        # ════════════════════════════════════════
+        mid_paned = ttk.Panedwindow(win, orient=tk.HORIZONTAL)
+        mid_paned.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+
+        # ─── 左侧: 个股通胀/通缩判断 ───
+        left_frame = ttk.LabelFrame(mid_paned, text="🔍 个股/ETF 通胀通缩判断", padding=6)
+        mid_paned.add(left_frame, weight=2)
+
+        # 标的下拉框 (指数 + ETF + 持仓股 + 龙头股 + 热门)
+        INDEX_LIST = [
+            ("sh000001", "上证指数"), ("sz399001", "深证成指"), ("sz399006", "创业板指"),
+            ("sh000300", "沪深300"), ("sh000905", "中证500"), ("sh000016", "上证50"),
+        ]
+        ETF_LIST = [
+            ("sh510300", "沪深300ETF"), ("sh510500", "中证500ETF"), ("sh510050", "上证50ETF"),
+            ("sz159915", "创业板ETF"), ("sh512880", "证券ETF"), ("sh518880", "黄金ETF"),
+        ]
+        HOLDING_LIST = []
+        if hasattr(self, '_get_all_holding_stocks'):
+            try:
+                for sname, scode, gidx, _pos in self._get_all_holding_stocks():
+                    if scode and len(scode) == 6:
+                        tag = "持仓" if gidx == 1 else ("龙头" if gidx == 2 else "其他")
+                        HOLDING_LIST.append((scode, f"{sname}({scode})[{tag}]"))
+            except Exception: pass
+        HOT_LIST = [
+            ("sh600519", "贵州茅台(600519)"), ("sh601318", "中国平安(601318)"),
+            ("sz000858", "五粮液(000858)"), ("sz300750", "宁德时代(300750)"),
+            ("sh601899", "紫金矿业(601899)"), ("sz002594", "比亚迪(002594)"),
+        ]
+        # 注: NAME_CODE_MAP (全量名称映射) 在 _go() 里懒加载, 不阻塞 UI
+        all_options = []  # (显示文本, code_with_prefix)
+        for code, name in INDEX_LIST: all_options.append((f"📊 {name}({code})", code))
+        for code, name in ETF_LIST: all_options.append((f"📈 {name}", code))
+        for code, name in HOLDING_LIST[:25]:
+            market = code[0]
+            prefix = 'sh' if market in ('5','6','9') else ('sz' if market in ('0','3','2') else 'bj')
+            all_options.append((name, prefix + code))
+        for code, name in HOT_LIST: all_options.append((f"🔥 {name}", code))
+        display_names = [n for n, _ in all_options]
+        name_to_code = {n: c for n, c in all_options}
+
+        input_row = ttk.Frame(left_frame); input_row.pack(fill=tk.X, pady=(0,6))
+        ttk.Label(input_row, text="代码/名称:").pack(side=tk.LEFT)
+        sym_var = tk.StringVar()
+        sym_combo = ttk.Combobox(input_row, textvariable=sym_var, values=display_names,
+                                 width=26, state="normal")
+        sym_combo.pack(side=tk.LEFT, padx=4)
+        sym_combo.set("📊 上证指数(sh000001)")
+        sym_combo.bind("<Return>", lambda e: _go())
+        sym_combo.bind("<<ComboboxSelected>>", lambda e: _go())
+
+        ttk.Button(input_row, text="🔍 分析", command=_go, width=8).pack(side=tk.LEFT, padx=(4,0))
+
+        result_frame = ttk.Frame(left_frame); result_frame.pack(fill=tk.BOTH, expand=True)
+
+        verdict_var = tk.StringVar(value="等待输入...")
+        verdict_label = ttk.Label(result_frame, textvariable=verdict_var,
+                                   font=("Menlo", 14, "bold"), anchor="w")
+        verdict_label.pack(fill=tk.X, pady=(0,6))
+
+        detail_text = tk.Text(result_frame, height=10, font=("Menlo", 10),
+                              wrap=tk.WORD, padx=8, pady=6)
+        detail_text.pack(fill=tk.BOTH, expand=True)
+
+        mini_fig = Figure(figsize=(6, 3.5), facecolor="#FAFAFA")
+        mini_ax = mini_fig.add_subplot(111)
+        mini_canvas = FigureCanvasTkAgg(mini_fig, master=result_frame)
+        mini_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, pady=(6,0))
+        mini_ax.set_title("量价趋势 (近60日)", fontsize=10)
+
+        # ─── 右侧: 3 Tab Notebook ───
+        right_frame = ttk.LabelFrame(mid_paned, text="📊 分析面板", padding=4)
+        mid_paned.add(right_frame, weight=3)
+        right_nb = ttk.Notebook(right_frame)
+        right_nb.pack(fill=tk.BOTH, expand=True)
+
+        # Tab 1: 🌐 宏观指标 (CPI/PPI)
+        tab_macro = ttk.Frame(right_nb); right_nb.add(tab_macro, text="🌐 宏观指标")
+        macro_fig = Figure(figsize=(7, 6), facecolor="#FAFAFA")
+        gs = macro_fig.add_gridspec(2, 1, hspace=0.35)
+        ax_cpi = macro_fig.add_subplot(gs[0])
+        ax_ppi = macro_fig.add_subplot(gs[1])
+        macro_canvas = FigureCanvasTkAgg(macro_fig, master=tab_macro)
+        macro_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        macro_tb = NavigationToolbar2Tk(macro_canvas, tab_macro, pack_toolbar=False)
+        macro_tb.update()
+
+        # Tab 2: 📈 日K周期
+        tab_kline = ttk.Frame(right_nb); right_nb.add(tab_kline, text="📈 日K周期")
+        kline_fig = Figure(figsize=(7, 6), facecolor="#FAFAFA")
+        ax_k = kline_fig.add_subplot(211)
+        ax_kv = kline_fig.add_subplot(212, sharex=ax_k)
+        kline_canvas = FigureCanvasTkAgg(kline_fig, master=tab_kline)
+        kline_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        kline_tb = NavigationToolbar2Tk(kline_canvas, tab_kline, pack_toolbar=False)
+        kline_tb.update()
+
+        # Tab 3: 🌈 一目均衡 (3 行: 主图 + VW-MACD + 成交量) + 指标 toggle 栏
+        tab_ichi = ttk.Frame(right_nb); right_nb.add(tab_ichi, text="🌈 一目均衡")
+        # 指标 toggle 栏
+        ichi_toggle_row = ttk.Frame(tab_ichi); ichi_toggle_row.pack(fill=tk.X, padx=4, pady=(4,0))
+        ichi_cloud_var = tk.BooleanVar(value=True)
+        ichi_tenkan_var = tk.BooleanVar(value=True)
+        ichi_kijun_var = tk.BooleanVar(value=True)
+        ichi_chikou_var = tk.BooleanVar(value=True)
+        ichi_vwmacd_var = tk.BooleanVar(value=True)
+        ichi_volma_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(ichi_toggle_row, text="☁️云", variable=ichi_cloud_var).pack(side=tk.LEFT)
+        ttk.Checkbutton(ichi_toggle_row, text="转换线", variable=ichi_tenkan_var).pack(side=tk.LEFT, padx=(6,0))
+        ttk.Checkbutton(ichi_toggle_row, text="基准线", variable=ichi_kijun_var).pack(side=tk.LEFT, padx=(6,0))
+        ttk.Checkbutton(ichi_toggle_row, text="迟行带", variable=ichi_chikou_var).pack(side=tk.LEFT, padx=(6,0))
+        ttk.Checkbutton(ichi_toggle_row, text="VW-MACD", variable=ichi_vwmacd_var).pack(side=tk.LEFT, padx=(12,0))
+        ttk.Checkbutton(ichi_toggle_row, text="量MA5/10", variable=ichi_volma_var).pack(side=tk.LEFT, padx=(6,0))
+
+        ichi_fig = Figure(figsize=(7, 7.5), facecolor="#FAFAFA")
+        ax_i = ichi_fig.add_subplot(311)
+        ax_ivw = ichi_fig.add_subplot(312, sharex=ax_i)
+        ax_iv = ichi_fig.add_subplot(313, sharex=ax_i)
+        ichi_canvas = FigureCanvasTkAgg(ichi_fig, master=tab_ichi)
+        ichi_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        ichi_tb = NavigationToolbar2Tk(ichi_canvas, tab_ichi, pack_toolbar=False)
+        ichi_tb.update()
+
+        # toggle 变化时自动重画 (需要 df, 存在 _ichi_df_cache)
+        _ichi_df_cache = {'df': None, 'sym': ''}
+        def _ichi_redraw_on_toggle(*_):
+            if _ichi_df_cache['df'] is not None:
+                try: _draw_ichimoku_tab(_ichi_df_cache['df'], _ichi_df_cache['sym'])
+                except Exception: pass
+        for _v in (ichi_cloud_var, ichi_tenkan_var, ichi_kijun_var,
+                   ichi_chikou_var, ichi_vwmacd_var, ichi_volma_var):
+            _v.trace_add('write', _ichi_redraw_on_toggle)
+
+        # Tab 4: 📊 财务指标
+        tab_fin = ttk.Frame(right_nb); right_nb.add(tab_fin, text="📊 财务指标")
+        fin_fig = Figure(figsize=(7, 6), facecolor="#FAFAFA")
+        ax_fin1 = fin_fig.add_subplot(211)
+        ax_fin2 = fin_fig.add_subplot(212)
+        fin_canvas = FigureCanvasTkAgg(fin_fig, master=tab_fin)
+        fin_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        fin_tb = NavigationToolbar2Tk(fin_canvas, tab_fin, pack_toolbar=False)
+        fin_tb.update()
+        # 财务指标文本框 (指标表格)
+        fin_text = tk.Text(tab_fin, height=5, font=("Menlo", 9), wrap=tk.WORD)
+        fin_text.pack(fill=tk.X, padx=4, pady=(2,4))
+
+        # Tab 5: 😤 情绪指标
+        tab_sent = ttk.Frame(right_nb); right_nb.add(tab_sent, text="😤 情绪指标")
+        sent_fig = Figure(figsize=(7, 6), facecolor="#FAFAFA")
+        ax_sent1 = sent_fig.add_subplot(211)
+        ax_sent2 = sent_fig.add_subplot(212)
+        sent_canvas = FigureCanvasTkAgg(sent_fig, master=tab_sent)
+        sent_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        sent_tb = NavigationToolbar2Tk(sent_canvas, tab_sent, pack_toolbar=False)
+        sent_tb.update()
+        sent_text = tk.Text(tab_sent, height=5, font=("Menlo", 9), wrap=tk.WORD)
+        sent_text.pack(fill=tk.X, padx=4, pady=(2,4))
+
+        # ════════════════════════════════════════
+        # 底部: 付鹏框架总结 (动态)
+        # ════════════════════════════════════════
+        bottom_frame = ttk.LabelFrame(win, text="📖 付鹏资产负债表 · 当前阶段判断", padding=6)
+        bottom_frame.pack(fill=tk.X, padx=6, pady=(0,6))
+        stage_text = tk.Text(bottom_frame, height=6, font=("Menlo", 10),
+                             wrap=tk.WORD, padx=8, pady=6)
+        stage_text.pack(fill=tk.X)
 
         # 初始加载宏观
         win.after(100, _draw_macro)
 
         # 窗口关闭清理
         win.protocol("WM_DELETE_WINDOW", win.destroy)
+
 
     def _show_main_trend_dialog(self):
         """💡 主力趋势: K 线主图 + MA/MACD/KDJ/BOLL/RSI/OBV 叠加 + 副图切换 + hover 评分"""
