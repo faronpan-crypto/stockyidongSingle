@@ -3155,6 +3155,8 @@ class StockDetailMixin:
                 ("vwap_band", "VWAP+σ带", False, "主图·量价通道"),
                 ("td_seq", "TD序列", False, "主图·衰竭反转计数"),
                 ("camarilla", "Camarilla", False, "主图·动态S/R水平线"),
+                ("ma", "MA均线", True, "主图·MA5/10/20/60"),
+                ("boll", "BOLL布林", False, "主图·中轨±2σ"),
             ]
             ind_vars = {}
             for key, label, default, tip in INDICATOR_LIST:
@@ -3208,11 +3210,12 @@ class StockDetailMixin:
                 dates = list(range(n))
                 trade_dates = df.get('日期', [''] * n)
 
-                # 构建图表 (主图: 一目均衡 + K线; 副图: VW-MACD)
-                fig = Figure(figsize=(14, 10), dpi=100, facecolor='#FAFAFA')
-                gs = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[3, 1], hspace=0.08)
+                # 构建图表 (主图: K线+叠加; 副图1: VW-MACD; 副图2: 成交量)
+                fig = Figure(figsize=(14, 11), dpi=100, facecolor='#FAFAFA')
+                gs = gridspec.GridSpec(3, 1, figure=fig, height_ratios=[4, 1, 1], hspace=0.06)
                 ax_main = fig.add_subplot(gs[0, 0])
-                ax_sub = fig.add_subplot(gs[1, 0], sharex=ax_main)
+                ax_sub1 = fig.add_subplot(gs[1, 0], sharex=ax_main)
+                ax_sub2 = fig.add_subplot(gs[2, 0], sharex=ax_main)
 
                 # ─── 主图: K 线 ───
                 for i in range(n):
@@ -3349,6 +3352,26 @@ class StockDetailMixin:
                                              xytext=(-3, -10), textcoords='offset points',
                                              fontsize=7, color=color, ha='right', alpha=0.85)
 
+                # 6) MA 均线 (MA5/10/20/60)
+                if ind_vars["ma"].get():
+                    _ma_c = {'ma5':'#ff9800','ma10':'#2196f3','ma20':'#9c27b0','ma60':'#607d8b'}
+                    for ma_n, ma_c in [(5,'ma5'),(10,'ma10'),(20,'ma20'),(60,'ma60')]:
+                        ma_vals = pd.Series(closes).rolling(ma_n, min_periods=1).mean().values
+                        ax_main.plot(x_arr, ma_vals, color=_ma_c[ma_c], linewidth=0.9, alpha=0.8, label=f'MA{ma_n}')
+                        ind_data[f'ma{ma_n}'] = ma_vals
+
+                # 7) BOLL 布林带 (中轨 + ±2σ)
+                if ind_vars["boll"].get():
+                    c_s = pd.Series(closes, dtype=float)
+                    mid = c_s.rolling(20, min_periods=1).mean()
+                    std = c_s.rolling(20, min_periods=1).std()
+                    up = (mid + 2*std).values; dn = (mid - 2*std).values; mid_v = mid.values
+                    ax_main.plot(x_arr, mid_v, color='#ff9800', linewidth=0.8, alpha=0.7, label='BOLL中轨')
+                    ax_main.plot(x_arr, up, color='#4caf50', linewidth=0.7, alpha=0.6, linestyle='--', label='BOLL上轨')
+                    ax_main.plot(x_arr, dn, color='#4caf50', linewidth=0.7, alpha=0.6, linestyle='--', label='BOLL下轨')
+                    ax_main.fill_between(x_arr, dn, up, color='#4caf50', alpha=0.07)
+                    ind_data['boll_mid'] = mid_v; ind_data['boll_up'] = up; ind_data['boll_dn'] = dn
+
                 # 主图装饰 (动态标题: 根据勾选的指标名)
                 active_inds = []
                 if ind_vars["ichimoku"].get(): active_inds.append("一目均衡")
@@ -3475,29 +3498,42 @@ class StockDetailMixin:
                 except Exception:
                     pass
 
-                # ─── 副图: VW-MACD ───
+                # ─── 副图1: VW-MACD (固定) ───
                 x = np.asarray(dates)
-                ax_sub.plot(x, vw['dif'], label='VW-DIF', linewidth=1.0, color='#1565c0')
-                ax_sub.plot(x, vw['dea'], label='VW-DEA', linewidth=1.0, color='#c62828')
+                ax_sub1.plot(x, vw['dif'], label='VW-DIF', linewidth=1.0, color='#1565c0')
+                ax_sub1.plot(x, vw['dea'], label='VW-DEA', linewidth=1.0, color='#c62828')
                 bar_colors = ['#d32f2f' if v >= 0 else '#388e3c' for v in vw['macdh']]
-                ax_sub.bar(x, vw['macdh'], color=bar_colors, alpha=0.45, width=0.55)
-                ax_sub.axhline(0, color="gray", linewidth=0.6)
-
-                # 成交量比率提示线 (量能信号)
+                ax_sub1.bar(x, vw['macdh'], color=bar_colors, alpha=0.45, width=0.55)
+                ax_sub1.axhline(0, color="gray", linewidth=0.6)
+                # 量比
                 vol_ratio = vw['vol_ratio']
-                ax_sub2 = ax_sub.twinx()
-                ax_sub2.plot(x, vol_ratio, color='#ff9800', linewidth=0.7,
-                             alpha=0.5, linestyle=':', label='量比')
-                ax_sub2.axhline(1.5, color='#ff9800', linestyle='--', linewidth=0.5, alpha=0.5)
-                ax_sub2.axhline(0.7, color='#ff9800', linestyle='--', linewidth=0.5, alpha=0.5)
-                ax_sub2.set_ylabel('量比', fontsize=8, color='#ff9800')
-                ax_sub2.tick_params(axis='y', labelcolor='#ff9800', labelsize=8)
-                ax_sub2.set_ylim(0, max(3.0, np.nanmax(vol_ratio) * 1.1))
+                ax_sub1b = ax_sub1.twinx()
+                ax_sub1b.plot(x, vol_ratio, color='#ff9800', linewidth=0.7, alpha=0.5, linestyle=':', label='量比')
+                ax_sub1b.axhline(1.5, color='#ff9800', linestyle='--', linewidth=0.5, alpha=0.5)
+                ax_sub1b.axhline(0.7, color='#ff9800', linestyle='--', linewidth=0.5, alpha=0.5)
+                ax_sub1b.set_ylabel('量比', fontsize=8, color='#ff9800')
+                ax_sub1b.tick_params(axis='y', labelcolor='#ff9800', labelsize=8)
+                ax_sub1b.set_ylim(0, max(3.0, np.nanmax(vol_ratio) * 1.1))
+                ax_sub1.set_ylabel('VW-MACD', fontsize=9)
+                ax_sub1.legend(loc='upper left', fontsize=7); ax_sub1b.legend(loc='upper right', fontsize=7)
+                ax_sub1.grid(True, alpha=0.3)
 
-                ax_sub.set_ylabel('VW-MACD', fontsize=9)
-                ax_sub.legend(loc='upper left', fontsize=7)
-                ax_sub2.legend(loc='upper right', fontsize=7)
-                ax_sub.grid(True, alpha=0.3)
+                # ─── 副图2: 成交量 (固定) ───
+                def _ma_series(s, n): return pd.Series(s).rolling(n, min_periods=1).mean().values
+                vol_colors = ['#d32f2f' if closes[i] >= opens[i] else '#2e7d32' for i in range(n)]
+                vol_ma5 = _ma_series(vol, 5)
+                ax_sub2.bar(x, vol, color=vol_colors, width=0.55, alpha=0.7)
+                ax_sub2.plot(x, vol_ma5, color='#ff9800', linewidth=0.8, label='VOL_MA5')
+                ax_sub2.set_ylabel('量', fontsize=9); ax_sub2.legend(loc='upper left', fontsize=7)
+                ax_sub2.grid(True, alpha=0.3)
+
+                # 日期轴 (副图2 显示)
+                tick_idx = np.linspace(0, n-1, min(12, n), dtype=int)
+                ax_sub2.set_xticks(tick_idx)
+                ax_sub2.set_xticklabels([str(trade_dates[i])[-10:] if i < len(trade_dates) else '' for i in tick_idx],
+                                        rotation=30, fontsize=7)
+                ax_sub1.tick_params(axis='x', labelbottom=False)
+                ax_main.tick_params(axis='x', labelbottom=False)
 
                 fig.tight_layout()
                 canvas = FigureCanvasTkAgg(fig, chart_inner)

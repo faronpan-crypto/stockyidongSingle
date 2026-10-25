@@ -59411,578 +59411,846 @@ class DapanMixin:
         return _fa._show_fed_analysis_dialog(self)
 
     # ═══════════════════════════════════════════════════════════════
-    # 💡 主力趋势分析: 多指数 + 多指标 + 广度 + 聪明钱
+    # 💡 主力趋势 K 线弹窗 (matplotlib, 参考一目均衡结构)
     # ═══════════════════════════════════════════════════════════════
 
-    def _show_main_trend_dialog(self):
-        """主力趋势弹窗: 四大指数 × 6 指标 + 广度情绪 + 综合判断"""
-        import tkinter as tk
-        from tkinter import ttk, messagebox
-        import numpy as np, pandas as pd
-        from datetime import datetime, timedelta
+    # ═══════════════════════════════════════════════════════════════
+    # 🧭 阿姆氏指标 (Arms Index / TRIN) — 全市场广度
+    #   ARMS = (上涨家数/下跌家数) / (上涨总成交量/下跌总成交量)
+    #   < 1: 资金主动买入, 强势; > 1: 资金主动卖出, 抛压; 1: 均衡
+    #
+    #   多级 fallback 链:
+    #   1) 本地 JSON 缓存 (~/.qclaw/arms_cache.json) — 秒级
+    #   2) 东方财富直接 HTTP API (push2.eastmoney.com) — 实时全市场
+    #   3) Tushare pro.daily (最近交易日) — 兜底
+    #   4) 都不行 → None
+    # ═══════════════════════════════════════════════════════════════
 
-        win = tk.Toplevel(self.root)
-        win.title("💡 主力趋势分析 (多指数 · 多指标 · 聪明钱)")
-        win.geometry("1200x860")
-        win.configure(bg="#ECEFF1")
+    _arms_mem_cache = None  # 进程内缓存
 
-        # 顶栏: 目标指数
-        INDICES = [
-            ("sh000001", "上证指数"),
-            ("sz399001", "深证成指"),
-            ("sz399006", "创业板指"),
-            ("sh000300", "沪深300"),
-        ]
+    def _calc_arms_index(self, timeout=8):
+        """返回 ARMS dict 或 None (全 fallback 失败)。
 
-        top = ttk.Frame(win); top.pack(fill=tk.X, padx=10, pady=(8, 4))
-        ttk.Label(top, text="📌 分析指数:", font=("Microsoft YaHei", 10, "bold")).pack(side=tk.LEFT)
-        idx_vars = {}
-        for code, name in INDICES:
-            v = tk.BooleanVar(value=True)
-            ttk.Checkbutton(top, text=name, variable=v).pack(side=tk.LEFT, padx=4)
-            idx_vars[code] = (name, v)
+        fallback 链:
+          0) 进程内缓存 → 1ms
+          1) 本地 JSON 文件缓存 → <5ms
+          2) Tushare pro.daily (最近交易日全市场) → 0.5-3s
+          3) 东方财富直接 HTTP (超时更短, 快速失败) → 1-6s
+          4) 都不行 → None
+        """
+        import numpy as np, pandas as pd, datetime as dt
+        import os, json, threading, queue
 
-        ttk.Button(top, text="🔄 刷新分析", command=lambda: _run_analysis(),
-                   style="Accent.TButton").pack(side=tk.RIGHT)
-        date_lbl = ttk.Label(top, text="", foreground="#555")
-        date_lbl.pack(side=tk.RIGHT, padx=8)
+        # ── 0) 进程内缓存 ──
+        today = dt.date.today().isoformat()
+        if self._arms_mem_cache and self._arms_mem_cache.get('date') == today:
+            return self._arms_mem_cache['data']
 
-        # 主区: Notebook 每个指数一个 Tab + 广度 + 综合
-        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-
-        # ═══════════════════════════════════════════════════════════════
-        # 指标计算工具 (闭包里复用)
-        # ═══════════════════════════════════════════════════════════════
-
-        def _ma(series, n):
-            return pd.Series(series).rolling(n, min_periods=1).mean().values
-
-        def _ema(series, n):
-            return pd.Series(series).ewm(span=n, adjust=False).mean().values
-
-        def _calc_macd(closes, fast=12, slow=26, signal=9):
-            c = np.asarray(closes, dtype=float)
-            dif = _ema(c, fast) - _ema(c, slow)
-            dea = _ema(dif, signal)
-            macdh = 2 * (dif - dea)
-            return dif, dea, macdh
-
-        def _calc_kdj(highs, lows, closes, n=9, m1=3, m2=3):
-            h = pd.Series(highs); l = pd.Series(lows); c = pd.Series(closes)
-            low_n = l.rolling(n, min_periods=1).min()
-            high_n = h.rolling(n, min_periods=1).max()
-            rsv = (c - low_n) / (high_n - low_n + 1e-9) * 100
-            k = rsv.ewm(com=m1 - 1, adjust=False).mean()
-            d = k.ewm(com=m2 - 1, adjust=False).mean()
-            j = 3 * k - 2 * d
-            return k.values, d.values, j.values
-
-        def _calc_boll(closes, n=20, k=2):
-            c = pd.Series(closes, dtype=float)
-            mid = c.rolling(n, min_periods=1).mean()
-            std = c.rolling(n, min_periods=1).std()
-            return mid.values, (mid + k * std).values, (mid - k * std).values
-
-        def _calc_rsi(closes, n=14):
-            c = np.asarray(closes, dtype=float)
-            delta = np.diff(c, prepend=c[0])
-            gain = np.where(delta > 0, delta, 0.0)
-            loss = np.where(delta < 0, -delta, 0.0)
-            avg_gain = pd.Series(gain).ewm(alpha=1/n, adjust=False).mean()
-            avg_loss = pd.Series(loss).ewm(alpha=1/n, adjust=False).mean()
-            rs = avg_gain / (avg_loss + 1e-9)
-            return (100 - 100 / (1 + rs)).values
-
-        def _calc_obv(closes, vol):
-            c = np.asarray(closes, dtype=float); v = np.asarray(vol, dtype=float)
-            obv = np.zeros(len(c))
-            for i in range(1, len(c)):
-                obv[i] = obv[i-1] + (v[i] if c[i] > c[i-1] else (-v[i] if c[i] < c[i-1] else 0))
-            return obv
-
-        def _analyze_index(code, name):
-            """拉数据 + 算指标 + 返回分析 dict"""
+        # ── 1) 本地 JSON 文件缓存 ──
+        cache_dir = os.path.expanduser('~/.qclaw')
+        cache_path = os.path.join(cache_dir, 'arms_cache.json')
+        if os.path.exists(cache_path):
             try:
-                # 拉日线
-                days = 200
-                df = self._fetch_index_daily(symbol=code, days=days)
-                if df is None or len(df) < 30:
-                    return {"code": code, "name": name, "error": f"数据不足 ({len(df) if df is not None else 0}根)"}
-
-                df = pd.DataFrame(df)
-                closes = df['close'].astype(float).values
-                highs = df['high'].astype(float).values
-                lows = df['low'].astype(float).values
-                opens = df['open'].astype(float).values
-                vol = df.get('volume', df.get('amount', pd.Series([0]*len(df)))).astype(float).values
-
-                n = len(closes)
-                last_c = closes[-1]
-                last_h = highs[-1]; last_l = lows[-1]
-                prev_c = closes[-2] if n > 1 else last_c
-
-                # ── 趋势类 ──
-                ma5 = _ma(closes, 5)[-1]
-                ma10 = _ma(closes, 10)[-1]
-                ma20 = _ma(closes, 20)[-1]
-                ma60 = _ma(closes, 60)[-1]
-                # MA 多头/空头排列
-                ma_arrangement = ""
-                if ma5 > ma10 > ma20 > ma60:
-                    ma_arrangement = "🟢 多头排列"
-                elif ma5 < ma10 < ma20 < ma60:
-                    ma_arrangement = "🔴 空头排列"
-                else:
-                    ma_arrangement = "🟡 交叉纠缠"
-
-                # MA 金叉死叉 (最近 5 天)
-                ma_cross = ""
-                dif_fast = _ma(closes, 5) - _ma(closes, 10)
-                if dif_fast[-1] > 0 and dif_fast[-2] <= 0:
-                    ma_cross = "🟢 MA5上穿MA10 金叉"
-                elif dif_fast[-1] < 0 and dif_fast[-2] >= 0:
-                    ma_cross = "🔴 MA5下穿MA10 死叉"
-
-                # MACD
-                dif, dea, macdh = _calc_macd(closes)
-                macd_label = ""
-                if dif[-1] > dea[-1] and dif[-2] <= dea[-2]:
-                    macd_label = "🟢 MACD金叉"
-                elif dif[-1] < dea[-1] and dif[-2] >= dea[-2]:
-                    macd_label = "🔴 MACD死叉"
-                elif dif[-1] > dea[-1]:
-                    macd_label = "🟢 DIF>DEA"
-                else:
-                    macd_label = "🔴 DIF<DEA"
-                # MACD 柱背离
-                price_new_high = last_c >= max(closes[-60:-1]) if n > 60 else False
-                macd_new_high = macdh[-1] >= max(macdh[-60:-1]) if n > 60 else False
-                divergence = ""
-                if price_new_high and not macd_new_high:
-                    divergence = "⚠️ 顶背离 (价新高但MACD未新高)"
-                elif not price_new_high and last_c <= min(closes[-60:-1]) and macdh[-1] > max(macdh[-60:-1]):
-                    divergence = "⚠️ 底背离 (价新低但MACD未新低)"
-
-                # ── 震荡类 ──
-                k, d, j = _calc_kdj(highs, lows, closes)
-                kdj_label = ""
-                if k[-1] > 80 and d[-1] > 80:
-                    kdj_label = f"🔴 超买区 K={k[-1]:.1f} D={d[-1]:.1f}"
-                elif k[-1] < 20 and d[-1] < 20:
-                    kdj_label = f"🟢 超卖区 K={k[-1]:.1f} D={d[-1]:.1f}"
-                else:
-                    kdj_label = f"🟡 K={k[-1]:.1f} D={d[-1]:.1f} J={j[-1]:.1f}"
-
-                mid, up, dn = _calc_boll(closes)
-                boll_label = ""
-                boll_w = (up[-1] - dn[-1]) / mid[-1] * 100  # 带宽 %
-                if last_c >= up[-1]:
-                    boll_label = f"🔴 触上轨 (带宽{boll_w:.1f}%)"
-                elif last_c <= dn[-1]:
-                    boll_label = f"🟢 触下轨 (带宽{boll_w:.1f}%)"
-                else:
-                    pos = (last_c - dn[-1]) / (up[-1] - dn[-1]) * 100
-                    boll_label = f"🟡 带内 {pos:.0f}% (带宽{boll_w:.1f}%)"
-
-                rsi = _calc_rsi(closes)
-                rsi_label = ""
-                if rsi[-1] > 70:
-                    rsi_label = f"🔴 RSI={rsi[-1]:.1f} 超买"
-                elif rsi[-1] < 30:
-                    rsi_label = f"🟢 RSI={rsi[-1]:.1f} 超卖"
-                else:
-                    rsi_label = f"🟡 RSI={rsi[-1]:.1f}"
-
-                # ── 成交量类 ──
-                obv = _calc_obv(closes, vol)
-                # OBV 斜率 vs 价格斜率 (最近 10 天)
-                obv_slope = (obv[-1] - obv[-10]) / (abs(obv[-10]) + 1e-9) if n > 10 else 0
-                price_slope = (closes[-1] - closes[-10]) / (closes[-10] + 1e-9) if n > 10 else 0
-                obv_label = ""
-                if price_slope > 0 and obv_slope < 0:
-                    obv_label = "⚠️ 顶背离 (价涨量跌)"
-                elif price_slope < 0 and obv_slope > 0:
-                    obv_label = "⚠️ 底背离 (价跌量涨)"
-                elif price_slope > 0 and obv_slope > 0:
-                    obv_label = "🟢 量价齐升"
-                elif price_slope < 0 and obv_slope < 0:
-                    obv_label = "🔴 量价齐跌"
-                else:
-                    obv_label = "🟡 量价配合平"
-
-                # 量比 (今日量 / 20日均量)
-                vol_ma20 = np.mean(vol[-20:]) if n >= 20 else np.mean(vol)
-                vr = vol[-1] / (vol_ma20 + 1e-9)
-                vol_label = f"量比 {vr:.2f}" + (" 放量" if vr > 1.5 else (" 缩量" if vr < 0.7 else " 正常"))
-
-                # ── 综合趋势评分 ──
-                score = 50  # 基准
-                # MA 排列
-                if ma_arrangement == "🟢 多头排列": score += 15
-                elif ma_arrangement == "🔴 空头排列": score -= 15
-                # MACD
-                if dif[-1] > dea[-1]: score += 8
-                else: score -= 8
-                if macdh[-1] > 0 and macdh[-1] > macdh[-2]: score += 4
-                elif macdh[-1] < 0 and macdh[-1] < macdh[-2]: score -= 4
-                # RSI
-                if 40 <= rsi[-1] <= 60: score += 3  # 健康区
-                elif rsi[-1] > 70: score -= 5  # 超买风险
-                elif rsi[-1] < 30: score += 5  # 超卖机会
-                # 量价
-                if price_slope > 0 and vr > 1.2: score += 6
-                elif price_slope < 0 and vr > 1.2: score -= 6
-                # 背离扣分
-                if "顶背离" in divergence or "顶背离" in obv_label: score -= 10
-                if "底背离" in divergence or "底背离" in obv_label: score += 10
-
-                score = max(0, min(100, score))
-                if score >= 70:
-                    verdict = "🟢 偏多 · 可持有/顺势"
-                elif score >= 45:
-                    verdict = "🟡 中性 · 观望/轻仓"
-                else:
-                    verdict = "🔴 偏空 · 谨慎/减仓"
-
-                return {
-                    "code": code, "name": name, "date": str(df.iloc[-1].get('day', df.index[-1])),
-                    "last_close": last_c, "change_pct": (last_c - prev_c) / prev_c * 100,
-                    "ma_arrangement": ma_arrangement, "ma_cross": ma_cross,
-                    "macd_label": macd_label, "divergence": divergence,
-                    "kdj_label": kdj_label, "boll_label": boll_label,
-                    "rsi_label": rsi_label,
-                    "obv_label": obv_label, "vol_label": vol_label,
-                    "score": score, "verdict": verdict,
-                }
-            except Exception as e:
-                return {"code": code, "name": name, "error": str(e)}
-
-        def _fetch_breadth():
-            """获取市场广度: 涨跌家数比 (先本地缓存, akshare 作为第二级)"""
-            # 1) 先试本地缓存 (秒级)
-            try:
-                import sqlite3, os as _os
-                db_path = _os.path.expanduser("~/.qclaw/workspace-agent-85985980/market_breadth_daily.sqlite")
-                if _os.path.exists(db_path):
-                    conn = sqlite3.connect(db_path)
-                    cur = conn.cursor()
-                    cur.execute("SELECT up_n, down_n, flat_n FROM breadth ORDER BY date DESC LIMIT 1")
-                    row = cur.fetchone(); conn.close()
-                    if row:
-                        up, down, flat = row
-                        return {"up": up, "down": down, "flat": flat, "total": up + down + flat,
-                                "ratio": up / (down + 1), "amount_yi": 0, "cached": True}
+                with open(cache_path) as f:
+                    cached = json.load(f)
+                if cached.get('date') == today:
+                    cd = cached.get('data', {})
+                    if cd.get('arms_today') and cd.get('adv', 0) > 0:
+                        self._arms_mem_cache = {'date': today, 'data': cd}
+                        return cd
             except Exception:
                 pass
-            # 2) 再试 akshare (可能慢/超时)
+
+        result_q = queue.Queue(maxsize=1)
+
+        def _label(arms):
+            if arms < 0.7: return '🧪 强势'
+            if arms < 0.9: return '🔷 偏强'
+            if arms <= 1.1: return '⚪ 均衡'
+            if arms <= 1.5: return '🔴 抛压'
+            return '💣 恐慌'
+
+        def _make_result(adv, decl, flat, adv_vol, decl_vol, trade_date):
+            if adv <= 0 or decl <= 0 or adv_vol <= 0 or decl_vol <= 0:
+                return None
+            arms = (adv / decl) / (adv_vol / decl_vol)
+            arms_f = float(arms)
+            return {
+                'arms_today': arms_f,
+                'arms_series': np.full(21, arms_f),
+                'adv': int(adv), 'decl': int(decl), 'flat': int(flat),
+                'adv_vol': float(adv_vol), 'decl_vol': float(decl_vol),
+                'trade_date': trade_date,
+                'label': _label(arms_f),
+                'source': '',
+            }
+
+        def _fetch_tushare():
+            """Tushare pro.daily — 最快最稳的兜底 (0.5-3s)。"""
             try:
-                import threading, queue
-                result_q = queue.Queue()
-                def _do_fetch():
+                import tushare as ts
+                token_path = os.path.expanduser('~/.tushare/token')
+                if not os.path.exists(token_path): return None
+                token = open(token_path).read().strip()
+                ts.set_token(token); pro = ts.pro_api()
+                cal = pro.trade_cal(exchange='SSE',
+                                    start_date=(dt.date.today()-dt.timedelta(days=30)).isoformat().replace('-',''),
+                                    end_date=today.replace('-',''))
+                open_days = cal[cal['is_open']==1]['cal_date'].tolist()
+                if not open_days: return None
+                last_trade = open_days[-1]
+                df = pro.daily(trade_date=last_trade)
+                if df is None or len(df) == 0: return None
+                adv = int((df['pct_chg'] > 0).sum())
+                decl = int((df['pct_chg'] < 0).sum())
+                flat = int((df['pct_chg'] == 0).sum())
+                adv_vol = float(df.loc[df['pct_chg'] > 0, 'vol'].sum())
+                decl_vol = float(df.loc[df['pct_chg'] < 0, 'vol'].sum())
+                res = _make_result(adv, decl, flat, adv_vol, decl_vol, last_trade)
+                if res: res['source'] = f'Tushare({last_trade})'
+                return res
+            except Exception: return None
+
+        def _fetch_em_direct():
+            """东方财富直接 HTTP — 只尝试 1 次, timeout=3s, 快速失败。"""
+            try:
+                import requests
+                session = requests.Session()
+                session.headers.update({
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                    "Referer": "https://quote.eastmoney.com/",
+                })
+                all_items = []
+                for fs_tok in ["m:0+t:6,m:0+t:80", "m:1+t:2,m:1+t:23"]:
                     try:
-                        import akshare as ak
-                        df = ak.stock_zh_a_spot_em()
-                        if df is not None and len(df) > 1000:
-                            up = int((df['涨跌幅'] > 0).sum())
-                            down = int((df['涨跌幅'] < 0).sum())
-                            flat = int((df['涨跌幅'] == 0).sum())
-                            total = len(df); ratio = up / (down + 1)
-                            amt = float(df['成交额'].sum()) / 1e8 if '成交额' in df.columns else 0
-                            result_q.put({"up": up, "down": down, "flat": flat, "total": total,
-                                          "ratio": ratio, "amount_yi": amt})
+                        r = session.get(
+                            "https://push2.eastmoney.com/api/qt/clist/get",
+                            params={"pn":1, "pz":5000, "po":1, "np":1, "fltt":2, "invt":2,
+                                    "fid":"f3", "fs":fs_tok, "fields":"f2,f3,f5,f6"},
+                            timeout=3)
+                        j = r.json()
+                        items = j.get('data',{}).get('diff',[]) or []
+                        all_items.extend(items)
                     except Exception:
+                        # 断连/超时 → 跳过此分片, 不重试
                         pass
-                t = threading.Thread(target=_do_fetch, daemon=True); t.start()
+                if not all_items: return None
+                adv = decl = flat = 0; adv_vol = decl_vol = 0.0
+                for item in all_items:
+                    pct = item.get('f3'); vol = item.get('f5', 0)
+                    if pct is None or vol is None: continue
+                    vol = float(vol)
+                    if pct > 0: adv += 1; adv_vol += vol
+                    elif pct < 0: decl += 1; decl_vol += vol
+                    else: flat += 1
+                res = _make_result(adv, decl, flat, adv_vol, decl_vol, today)
+                if res: res['source'] = '东方财富'
+                return res
+            except Exception: return None
+
+        def _fetch_worker():
+            # Tushare 优先 (最快最稳), 东方财富次之
+            res = _fetch_tushare()
+            if res: result_q.put(res); return
+            res = _fetch_em_direct()
+            if res: result_q.put(res); return
+            result_q.put(None)
+
+        t = threading.Thread(target=_fetch_worker, daemon=True)
+        t.start(); t.join(timeout=max(timeout, 6))
+        if t.is_alive() or result_q.empty(): return None
+        data = result_q.get()
+        if data is None: return None
+
+        # ── 缓存 (np.array → list, 防 json 损坏) ──
+        self._arms_mem_cache = {'date': today, 'data': data}
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            cacheable = {}
+            for k, v in data.items():
+                if isinstance(v, np.ndarray):
+                    cacheable[k] = [float(x) for x in v]
+                elif isinstance(v, (np.integer,)):
+                    cacheable[k] = int(v)
+                elif isinstance(v, (np.floating,)):
+                    cacheable[k] = float(v)
+                else:
+                    cacheable[k] = v
+            tmp_path = cache_path + '.tmp'
+            with open(tmp_path, 'w') as f:
+                json.dump({'date': today, 'data': cacheable}, f)
+            os.replace(tmp_path, cache_path)  # 原子写入
+        except Exception:
+            try: os.remove(cache_path + '.tmp')
+            except Exception: pass
+        return data
+
+    # ═══════════════════════════════════════════════════════════════
+    # 💰 资金面数据 (北向资金 / 融资融券 / 资产负债率)
+    #   市场级 → 全局缓存, 个股级 → 按需拉取
+    # ═══════════════════════════════════════════════════════════════
+
+    _money_market_cache = None  # 市场级资金面全局缓存
+
+    def _fetch_money_market(self, timeout=5):
+        """获取市场级资金面数据 (北向资金 + 融资融券汇总)。
+        返回 dict 或 None: {
+            'hsgt_dates': [...],        # 北向资金 20 个交易日 (YYYY-MM-DD)
+            'hsgt_net': [...],          # 北向净流入 (百万元)
+            'hsgt_hgt': [...],          # 沪股通净流入
+            'hsgt_sgt': [...],          # 深股通净流入
+            'margin_dates': [...],      # 融资融券交易日
+            'margin_rzye': [...],       # 融资余额 (亿元)
+            'margin_rqye': [...],       # 融券余额 (亿元)
+            'margin_rzmre': [...],      # 融资买入额 (亿元)
+            'source': 'Tushare',
+        }
+        """
+        import datetime as dt, threading, queue, os
+        import numpy as np
+
+        today = dt.date.today().isoformat()
+        if self._money_market_cache and self._money_market_cache.get('date') == today:
+            return self._money_market_cache['data']
+
+        result_q = queue.Queue(maxsize=1)
+
+        def _worker():
+            try:
+                import tushare as ts
+                token_path = os.path.expanduser('~/.tushare/token')
+                if not os.path.exists(token_path):
+                    result_q.put(None); return
+                ts.set_token(open(token_path).read().strip()); pro = ts.pro_api()
+
+                hsgt_dates, hsgt_net, hsgt_hgt, hsgt_sgt = [], [], [], []
+                margin_dates, margin_rzye, margin_rqye, margin_rzmre = [], [], [], []
+
+                # 1) 北向资金 (近 40 交易日)
                 try:
-                    return result_q.get(timeout=8)  # 8秒超时
-                except Exception:
-                    return None
+                    start = (dt.date.today() - dt.timedelta(days=60)).isoformat().replace('-','')
+                    end = today.replace('-','')
+                    df = pro.moneyflow_hsgt(start_date=start, end_date=end)
+                    if df is not None and len(df) > 0:
+                        df = df.sort_values('trade_date').tail(40)
+                        hsgt_dates = [f"{d[:4]}-{d[4:6]}-{d[6:]}" for d in df['trade_date']]
+                        # north_money 是累计? 不, 是当日净流入 (百万元)
+                        hsgt_net = df['north_money'].astype(float).tolist()
+                        hsgt_hgt = df['hgt'].astype(float).tolist()
+                        hsgt_sgt = df['sgt'].astype(float).tolist()
+                except Exception: pass
+
+                # 2) 融资融券市场汇总 (近 40 交易日, SSE+SZSE 合并)
+                try:
+                    start = (dt.date.today() - dt.timedelta(days=60)).isoformat().replace('-','')
+                    end = today.replace('-','')
+                    df = pro.margin(start_date=start, end_date=end)
+                    if df is not None and len(df) > 0:
+                        # SSE + SZSE 合并
+                        agg = df.groupby('trade_date').agg({
+                            'rzye': 'sum', 'rqye': 'sum', 'rzmre': 'sum'
+                        }).reset_index().sort_values('trade_date').tail(40)
+                        margin_dates = [f"{d[:4]}-{d[4:6]}-{d[6:]}" for d in agg['trade_date']]
+                        margin_rzye = (agg['rzye'] / 1e8).astype(float).tolist()   # → 亿元
+                        margin_rqye = (agg['rqye'] / 1e8).astype(float).tolist()
+                        margin_rzmre = (agg['rzmre'] / 1e8).astype(float).tolist()
+                except Exception: pass
+
+                if not hsgt_net and not margin_rzye:
+                    result_q.put(None); return
+
+                result_q.put({
+                    'hsgt_dates': hsgt_dates, 'hsgt_net': hsgt_net,
+                    'hsgt_hgt': hsgt_hgt, 'hsgt_sgt': hsgt_sgt,
+                    'margin_dates': margin_dates, 'margin_rzye': margin_rzye,
+                    'margin_rqye': margin_rqye, 'margin_rzmre': margin_rzmre,
+                    'source': 'Tushare',
+                })
             except Exception:
-                pass
-            return None
+                result_q.put(None)
 
-        def _color_for_score(s):
-            if s >= 70: return "#2e7d32"  # 红 (A股偏多=红)
-            if s >= 45: return "#f57f17"  # 橙
-            return "#c62828"  # 绿 (偏空=绿)
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start(); t.join(timeout=max(timeout, 3))
+        if t.is_alive() or result_q.empty(): return None
+        data = result_q.get()
+        if data is None: return None
 
-        def _run_analysis():
+        self._money_market_cache = {'date': today, 'data': data}
+        return data
+
+    def _fetch_stock_money(self, ts_code, timeout=5):
+        """获取个股资金面数据 (融资融券 + 资产负债率)。
+        返回 dict 或 None: {
+            'margin_dates': [...], 'margin_rzye': [...], 'margin_rqye': [...],
+            'debt_ratio': float or None,      # 最新季度资产负债率 %
+            'debt_date': str or None,          # 季度 YYYYMMDD
+            'source': 'Tushare',
+        }
+        """
+        import datetime as dt, threading, queue, os
+
+        result_q = queue.Queue(maxsize=1)
+
+        def _worker():
             try:
-                # 清空旧 Tab
-                for tab in nb.tabs():
-                    nb.forget(tab)
+                import tushare as ts
+                token_path = os.path.expanduser('~/.tushare/token')
+                if not os.path.exists(token_path):
+                    result_q.put(None); return
+                ts.set_token(open(token_path).read().strip()); pro = ts.pro_api()
 
-                selected = [(c, n) for c, (n, v) in INDICES if v.get()]
-                if not selected:
-                    messagebox.showwarning("提示", "请至少选一个指数", parent=win)
-                    return
+                margin_dates, margin_rzye, margin_rqye = [], [], []
+                debt_ratio, debt_date = None, None
 
-                date_lbl.config(text=f"⏳ 正在分析 {len(selected)} 个指数...")
-                win.update_idletasks()
+                # 1) 个股融资融券 (近 60 交易日)
+                try:
+                    start = (dt.date.today() - dt.timedelta(days=90)).isoformat().replace('-','')
+                    end = dt.date.today().isoformat().replace('-','')
+                    df = pro.margin_detail(ts_code=ts_code, start_date=start, end_date=end)
+                    if df is not None and len(df) > 0:
+                        df = df.sort_values('trade_date').tail(60)
+                        margin_dates = [f"{d[:4]}-{d[4:6]}-{d[6:]}" for d in df['trade_date']]
+                        margin_rzye = (df['rzye'] / 1e8).astype(float).tolist()  # 亿元
+                        margin_rqye = (df['rqye'] / 1e8).astype(float).tolist()
+                except Exception: pass
 
-                results = []
-                for code, name in selected:
-                    date_lbl.config(text=f"⏳ 正在分析 {name}..."); win.update_idletasks()
-                    r = _analyze_index(code, name)
-                    results.append(r)
-                    _build_index_tab(r)
+                # 2) 资产负债率 (最近季度)
+                try:
+                    fi = pro.fina_indicator(ts_code=ts_code,
+                                            fields='ts_code,end_date,debt_to_assets,roe,netprofit_margin')
+                    if fi is not None and len(fi) > 0:
+                        fi = fi.sort_values('end_date', ascending=False).iloc[0]
+                        d = fi.get('debt_to_assets')
+                        if d is not None:
+                            debt_ratio = float(d)
+                            debt_date = str(fi['end_date'])
+                except Exception: pass
 
-                # 广度 Tab
-                date_lbl.config(text=f"⏳ 获取广度数据..."); win.update_idletasks()
-                breadth = _fetch_breadth()
-                _build_breadth_tab(breadth)
+                if not margin_rzye and debt_ratio is None:
+                    result_q.put(None); return
 
-                # 综合判断 Tab
-                _build_overall_tab(results, breadth)
-
-                date_lbl.config(text=f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')} | ✅ 已分析 {len(results)} 指数")
-            except Exception as e:
-                import traceback
-                err_win = tk.Toplevel(win); err_win.title("❌ 错误详情"); err_win.geometry("700x500")
-                err_txt = tk.Text(err_win, font=("Menlo", 10), bg="#ffebee", fg="#b71c1c")
-                err_txt.pack(fill=tk.BOTH, expand=True)
-                err_txt.insert(tk.END, traceback.format_exc())
-                err_txt.config(state=tk.DISABLED)
-                date_lbl.config(text=f"❌ 出错: {e}")
-
-        def _build_index_tab(r):
-            code = r["code"]; name = r["name"]
-            frame = ttk.Frame(nb); nb.add(frame, text=f"📊 {name}")
-
-            if "error" in r:
-                ttk.Label(frame, text=f"❌ {r['error']}", foreground="red").pack(pady=20)
-                return
-
-            # 头部卡片: 价格 + 涨跌 + 评分
-            header = tk.Frame(frame, bg="#263238", padx=14, pady=10)
-            header.pack(fill=tk.X, padx=10, pady=(10, 6))
-            tk.Label(header, text=f"{name}  ({code})", bg="#263238", fg="white",
-                     font=("Microsoft YaHei", 12, "bold")).pack(side=tk.LEFT)
-            chg = r['change_pct']
-            chg_color = "#ef5350" if chg >= 0 else "#66bb6a"
-            tk.Label(header, text=f"  {r['last_close']:.2f}  {chg:+.2f}%", bg="#263238", fg=chg_color,
-                     font=("Microsoft YaHei", 13, "bold")).pack(side=tk.LEFT, padx=12)
-            tk.Label(header, text=f"🎯 评分 {r['score']}/100", bg="#263238", fg="#ffd54f",
-                     font=("Microsoft YaHei", 11, "bold")).pack(side=tk.LEFT, padx=12)
-            tk.Label(header, text=r['verdict'], bg="#263238", fg="white",
-                     font=("Microsoft YaHei", 11)).pack(side=tk.LEFT)
-
-            # 指标网格
-            grid = tk.Frame(frame, bg="#ECEFF1"); grid.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
-            for c in range(3): grid.columnconfigure(c, weight=1)
-
-            def _card(parent, row, col, title, items, color="#37474f"):
-                f = tk.Frame(parent, bg=color, padx=10, pady=8, bd=0)
-                f.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
-                tk.Label(f, text=title, bg=color, fg="white",
-                         font=("Microsoft YaHei", 10, "bold")).pack(anchor="w")
-                for txt in items:
-                    tk.Label(f, text=txt, bg=color, fg="#eceff1",
-                             font=("Microsoft YaHei", 10)).pack(anchor="w", pady=1)
-
-            # Row 0: 趋势类
-            _card(grid, 0, 0, "📈 趋势类 (MA + MACD)", [
-                f"MA排列: {r['ma_arrangement']}",
-                f"MA交叉: {r['ma_cross'] or '—'}",
-                f"MACD: {r['macd_label']}",
-                f"背离: {r['divergence'] or '无'}",
-            ], "#1565c0")
-
-            # Row 0: 震荡类
-            _card(grid, 0, 1, "📊 震荡类 (KDJ + BOLL + RSI)", [
-                f"KDJ: {r['kdj_label']}",
-                f"布林: {r['boll_label']}",
-                f"RSI: {r['rsi_label']}",
-            ], "#2e7d32")
-
-            # Row 0: 成交量类
-            _card(grid, 0, 2, "📦 成交量类 (OBV + 量比)", [
-                f"OBV: {r['obv_label']}",
-                f"{r['vol_label']}",
-            ], "#6a1b9a")
-
-            # Row 1: 综合判定
-            color = _color_for_score(r['score'])
-            _card(grid, 1, 0, "🎯 综合判定", [
-                f"趋势评分: {r['score']}/100",
-                f"核心结论: {r['verdict']}",
-            ], color)
-
-            # 操作建议
-            suggestions = []
-            if r['score'] >= 70:
-                suggestions = ["✅ 多头排列 + MACD金叉 → 顺势持有",
-                               "✅ 回调至 MA20 / 云边 → 可加仓",
-                               "⚠️ 若 RSI>70 + 顶背离 → 警惕短期回调"]
-            elif r['score'] >= 45:
-                suggestions = ["➖ 震荡格局 → 高抛低吸为主",
-                               "➖ 关注 MA 交叉方向选择",
-                               "⚠️ 轻仓操作, 等待突破确认"]
-            else:
-                suggestions = ["🔴 空头排列 + MACD死叉 → 谨慎",
-                               "🔴 反弹至 MA10 → 考虑减仓",
-                               "⚠️ 若 RSI<30 + 底背离 → 可能超跌反弹"]
-            _card(grid, 1, 1, "💡 操作建议", suggestions, "#ef6c00")
-
-            # 关键价位
-            try:
-                df_back = self._fetch_index_daily(symbol=code, days=250)
-                if df_back and len(df_back) > 60:
-                    closes_all = pd.DataFrame(df_back)['close'].astype(float).values
-                    highs_all = pd.DataFrame(df_back)['high'].astype(float).values
-                    lows_all = pd.DataFrame(df_back)['low'].astype(float).values
-                    ma20_val = _ma(closes_all, 20)[-1]
-                    ma60_val = _ma(closes_all, 60)[-1]
-                    high_60 = np.max(highs_all[-60:])
-                    low_60 = np.min(lows_all[-60:])
-                    _card(grid, 1, 2, "📍 关键价位", [
-                        f"MA20: {ma20_val:.2f}",
-                        f"MA60: {ma60_val:.2f}",
-                        f"60日高: {high_60:.2f}",
-                        f"60日低: {low_60:.2f}",
-                    ], "#4527a0")
+                result_q.put({
+                    'margin_dates': margin_dates,
+                    'margin_rzye': margin_rzye, 'margin_rqye': margin_rqye,
+                    'debt_ratio': debt_ratio, 'debt_date': debt_date,
+                    'source': 'Tushare',
+                })
             except Exception:
-                pass
+                result_q.put(None)
 
-        def _build_breadth_tab(b):
-            frame = ttk.Frame(nb)
-            nb.add(frame, text="🌐 广度情绪")
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start(); t.join(timeout=max(timeout, 3))
+        if t.is_alive() or result_q.empty(): return None
+        return result_q.get()
 
-            if b is None:
-                ttk.Label(frame, text="⚠️ 广度数据暂不可用 (akshare / 本地缓存均无)",
-                          foreground="#666").pack(pady=40)
-                return
+    def _show_main_trend_dialog(self):
+        """💡 主力趋势: K 线主图 + MA/MACD/KDJ/BOLL/RSI/OBV 叠加 + 副图切换 + hover 评分"""
+        import traceback as _tb
+        try:
+            import tkinter as tk
+            from tkinter import ttk, messagebox
+            import numpy as np, pandas as pd
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+            from matplotlib import gridspec
+            from matplotlib.figure import Figure
 
-            header = tk.Frame(frame, bg="#37474f", padx=14, pady=10)
-            header.pack(fill=tk.X, padx=10, pady=(10, 6))
-            cached_tag = " (缓存)" if b.get("cached") else ""
-            tk.Label(header, text=f"🌐 市场广度 (涨跌家数) {cached_tag}", bg="#37474f", fg="white",
-                     font=("Microsoft YaHei", 12, "bold")).pack(side=tk.LEFT)
+            win = self._safe_toplevel(self.root)
+            win.title("💡 主力趋势分析 (MA · MACD · KDJ · BOLL · RSI · OBV)")
+            try:
+                win.state("zoomed")
+            except Exception:
+                try: win.attributes("-zoomed", True)
+                except Exception: win.geometry("1300x900")
 
-            grid = tk.Frame(frame, bg="#ECEFF1"); grid.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
-            for c in range(4): grid.columnconfigure(c, weight=1)
+            # ─── 指数 + ETF 列表 ───
+            INDEX_LIST = [
+                ("sh000001", "上证指数"),
+                ("sz399001", "深证成指"),
+                ("sz399006", "创业板指"),
+                ("sh000300", "沪深300"),
+                ("sh000905", "中证500"),
+                ("sh000016", "上证50"),
+            ]
+            ETF_LIST = [
+                ("510300", "沪深300ETF"),
+                ("510500", "中证500ETF"),
+                ("510050", "上证50ETF"),
+                ("159915", "创业板ETF"),
+                ("512880", "证券ETF"),
+            ]
 
-            total = b['total']; up = b['up']; down = b['down']; flat = b['flat']
-            ratio = b['ratio']
-            pct_up = up / total * 100; pct_down = down / total * 100
+            # 持仓股
+            stock_options = []; seen = set()
+            try:
+                all_holdings = self._get_all_holding_stocks() if hasattr(self, '_get_all_holding_stocks') else []
+                for sname, scode, gidx, _pos in all_holdings:
+                    if scode not in seen:
+                        seen.add(scode)
+                        tag = "持仓" if gidx == 1 else ("龙头" if gidx == 2 else "其他")
+                        stock_options.append((scode, f"{sname}({scode})[{tag}]"))
+            except Exception: pass
 
-            # 广度条
-            bar_frame = tk.Frame(grid, bg="#ECEFF1"); bar_frame.grid(row=0, column=0, columnspan=4, sticky="ew", pady=8)
-            bar_canvas = tk.Canvas(bar_frame, height=36, bg="#ECEFF1", highlightthickness=0)
-            bar_canvas.pack(fill=tk.X)
-            def _draw_bar():
-                bar_canvas.delete("all")
-                w = bar_canvas.winfo_width() or 800
-                up_w = int(w * pct_up / 100); down_w = int(w * pct_down / 100); flat_w = w - up_w - down_w
-                bar_canvas.create_rectangle(0, 4, up_w, 32, fill="#ef5350", outline="")
-                bar_canvas.create_rectangle(up_w, 4, up_w + flat_w, 32, fill="#9e9e9e", outline="")
-                bar_canvas.create_rectangle(up_w + flat_w, 4, w, 32, fill="#66bb6a", outline="")
-                bar_canvas.create_text(w//2, 20, text=f"上涨 {up}({pct_up:.0f}%)  |  平盘 {flat}  |  下跌 {down}({pct_down:.0f}%)",
-                                       font=("Microsoft YaHei", 11, "bold"), fill="white")
-            bar_canvas.after(100, _draw_bar)
+            all_options = INDEX_LIST + ETF_LIST + stock_options
+            display_names = [name for _, name in all_options]
+            sym_map = {name: code for code, name in all_options}
 
-            # 广度分析
-            if ratio > 2:
-                breadth_verdict = "🟢 普涨格局, 多头占优"
-            elif ratio > 1.2:
-                breadth_verdict = "🟡 偏多, 但分化"
-            elif ratio > 0.8:
-                breadth_verdict = "➖ 多空均衡"
-            elif ratio > 0.5:
-                breadth_verdict = "🟠 偏空, 谨慎"
-            else:
-                breadth_verdict = "🔴 普跌格局, 空头占优"
+            # ─── 指标计算 (闭包) ───
+            def _ma(series, n): return pd.Series(series).rolling(n, min_periods=1).mean().values
+            def _ema(series, n): return pd.Series(series).ewm(span=n, adjust=False).mean().values
+            def _calc_macd(closes):
+                c = np.asarray(closes, dtype=float)
+                dif = _ema(c, 12) - _ema(c, 26); dea = _ema(dif, 9); macdh = 2*(dif-dea)
+                return dif, dea, macdh
+            def _calc_kdj(highs, lows, closes):
+                h=pd.Series(highs); l=pd.Series(lows); c=pd.Series(closes)
+                ln=l.rolling(9,min_periods=1).min(); hn=h.rolling(9,min_periods=1).max()
+                rsv=(c-ln)/(hn-ln+1e-9)*100
+                k=rsv.ewm(com=2,adjust=False).mean(); d=k.ewm(com=2,adjust=False).mean(); j=3*k-2*d
+                return k.values, d.values, j.values
+            def _calc_boll(closes):
+                c=pd.Series(closes,dtype=float); mid=c.rolling(20,min_periods=1).mean(); std=c.rolling(20,min_periods=1).std()
+                return mid.values, (mid+2*std).values, (mid-2*std).values
+            def _calc_rsi(closes):
+                c=np.asarray(closes,dtype=float); delta=np.diff(c,prepend=c[0])
+                gain=np.where(delta>0,delta,0.0); loss=np.where(delta<0,-delta,0.0)
+                ag=pd.Series(gain).ewm(alpha=1/14,adjust=False).mean()
+                al=pd.Series(loss).ewm(alpha=1/14,adjust=False).mean()
+                rs=ag/(al+1e-9); return (100-100/(1+rs)).values
+            def _calc_obv(closes,vol):
+                c=np.asarray(closes,dtype=float); v=np.asarray(vol,dtype=float); obv=np.zeros(len(c))
+                for i in range(1,len(c)): obv[i]=obv[i-1]+(v[i] if c[i]>c[i-1] else (-v[i] if c[i]<c[i-1] else 0))
+                return obv
 
-            def _card(parent, row, col, colspan, title, items, color):
-                f = tk.Frame(parent, bg=color, padx=10, pady=8)
-                f.grid(row=row, column=col, columnspan=colspan, sticky="nsew", padx=4, pady=4)
-                tk.Label(f, text=title, bg=color, fg="white",
-                         font=("Microsoft YaHei", 10, "bold")).pack(anchor="w")
-                for txt in items:
-                    tk.Label(f, text=txt, bg=color, fg="#eceff1",
-                             font=("Microsoft YaHei", 10)).pack(anchor="w", pady=1)
+            # ─── UI: 顶部控件 ───
+            top_frame = ttk.Frame(win, padding=4); top_frame.pack(fill=tk.X)
 
-            _card(grid, 1, 0, 2, "📊 广度数据", [
-                f"上涨家数: {up} ({pct_up:.1f}%)",
-                f"下跌家数: {down} ({pct_down:.1f}%)",
-                f"平盘家数: {flat}",
-                f"涨跌比: {ratio:.2f}",
-            ], "#1565c0")
+            ttk.Label(top_frame, text="📌 标的:").pack(side=tk.LEFT, padx=(0, 4))
+            symbol_var = tk.StringVar(value="上证指数")
+            sym_combo = ttk.Combobox(top_frame, values=display_names, width=20, state="normal", textvariable=symbol_var)
+            sym_combo.pack(side=tk.LEFT, padx=2)
 
-            _card(grid, 1, 2, 2, "🎯 广度判断", [
-                f"结论: {breadth_verdict}",
-                f"成交额: {b.get('amount_yi', 0):.0f} 亿" if b.get('amount_yi', 0) > 0 else "成交额: —",
-                "⚠️ 广度 = 市场情绪温度计, 领先指数涨跌",
-                "💡 普涨但指数滞涨 → 关注大盘蓝筹是否拖后腿",
-                "💡 普跌但指数抗跌 → 可能是少数权重撑盘",
-            ], "#ef6c00")
+            # 周期
+            ttk.Label(top_frame, text="周期:").pack(side=tk.LEFT, padx=(12, 2))
+            period_var = tk.StringVar(value="日线")
+            ttk.Combobox(top_frame, values=["日线", "60分钟", "30分钟", "15分钟"], width=8, state="readonly", textvariable=period_var).pack(side=tk.LEFT)
 
-        def _build_overall_tab(results, breadth):
-            frame = ttk.Frame(nb); nb.add(frame, text="🏆 综合判断")
+            # 指标 toggle
+            ind_frame = ttk.Frame(win); ind_frame.pack(fill=tk.X, padx=4, pady=(2,4))
+            ind_vars = {}
+            for ind_name, ind_label, default in [
+                ("ma", "MA均线", True), ("macd", "MACD", True),
+                ("boll", "BOLL布林", True), ("rsi", "RSI", True),
+                ("kdj", "KDJ", True), ("obv", "OBV", True),
+                ("arms", "🧭ARMS", False), ("money", "💰资金面", False),
+            ]:
+                v = tk.BooleanVar(value=default)
+                ttk.Checkbutton(ind_frame, text=ind_label, variable=v).pack(side=tk.LEFT, padx=3)
+                ind_vars[ind_name] = v
 
-            valid = [r for r in results if "error" not in r]
-            if not valid:
-                ttk.Label(frame, text="❌ 所有指数数据获取失败", foreground="red").pack(pady=40)
-                return
+            # 副图选择
+            ttk.Label(ind_frame, text="副图:").pack(side=tk.LEFT, padx=(10,2))
+            sub_var = tk.StringVar(value="MACD")
+            ttk.Combobox(ind_frame, values=["MACD", "RSI", "KDJ", "OBV", "🧭ARMS", "💰资金面"], width=10, state="readonly", textvariable=sub_var).pack(side=tk.LEFT)
 
-            avg_score = np.mean([r['score'] for r in valid])
+            # 主图上方广度实时条 (ARMS 当天值)
+            breadth_frame = ttk.Frame(win); breadth_frame.pack(fill=tk.X, padx=4)
+            breadth_var = tk.StringVar(value="🧭 广度: 未加载 (勾选 🧭ARMS 自动加载)")
+            ttk.Label(breadth_frame, textvariable=breadth_var, foreground="#333",
+                      font=("Menlo", 9), anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-            header = tk.Frame(frame, bg="#1a237e", padx=16, pady=14)
-            header.pack(fill=tk.X, padx=10, pady=(10, 6))
-            tk.Label(header, text="🏆 主力趋势综合判断", bg="#1a237e", fg="white",
-                     font=("Microsoft YaHei", 14, "bold")).pack(side=tk.LEFT)
-            tk.Label(header, text=f"  平均评分: {avg_score:.0f}/100", bg="#1a237e", fg="#ffd54f",
-                     font=("Microsoft YaHei", 13, "bold")).pack(side=tk.LEFT, padx=14)
+            # 状态
+            status_var = tk.StringVar(value="就绪")
+            ttk.Label(ind_frame, textvariable=status_var, foreground="#555").pack(side=tk.RIGHT, padx=6)
 
-            # 各指数评分条
-            body = tk.Frame(frame, bg="#ECEFF1"); body.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
-            for c in range(2): body.columnconfigure(c, weight=1)
+            # ─── 图表区域 ───
+            chart_inner = tk.Frame(win, bg="#f5f5f5"); chart_inner.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-            for i, r in enumerate(valid):
-                row, col = divmod(i, 2)
-                f = tk.Frame(body, bg="white", bd=1, relief=tk.GROOVE, padx=10, pady=8)
-                f.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
-                tk.Label(f, text=f"{r['name']} ({r['code']})", bg="white",
-                         font=("Microsoft YaHei", 11, "bold")).pack(anchor="w")
-                # 评分条
-                bar_bg = tk.Canvas(f, height=20, bg="#eee", highlightthickness=0)
-                bar_bg.pack(fill=tk.X, pady=4)
-                sc = r['score']; color = _color_for_score(sc)
-                bar_bg.bind("<Configure>", lambda e, c=bar_bg, s=sc, col=color: (
-                    c.delete("all"),
-                    c.create_rectangle(0, 0, int(e.width * s / 100), 20, fill=col, outline=""),
-                    c.create_text(e.width//2, 10, text=f"{s}", fill="white",
-                                  font=("Microsoft YaHei", 9, "bold"))
-                ))
-                chg = r['change_pct']; chg_c = "#ef5350" if chg >= 0 else "#66bb6a"
-                tk.Label(f, text=f"  {r['last_close']:.2f}  {chg:+.2f}%  |  {r['verdict']}",
-                         bg="white", fg=chg_c, font=("Microsoft YaHei", 10)).pack(anchor="w")
+            fig = Figure(figsize=(14, 8), facecolor="#FAFAFA")
+            gs = gridspec.GridSpec(3, 1, height_ratios=[4, 1, 1], hspace=0.06)
+            ax_main = fig.add_subplot(gs[0])
+            ax_sub1 = fig.add_subplot(gs[1], sharex=ax_main)
+            ax_sub2 = fig.add_subplot(gs[2], sharex=ax_main)
 
-            # 底部综合结论
-            bottom = tk.Frame(frame, bg="#E8EAF6", padx=14, pady=12)
-            bottom.pack(fill=tk.X, padx=10, pady=(0, 10))
-            if avg_score >= 65:
-                overall = "🟢 多头主导 · 顺势操作"
-                detail = "主要指数 MA 多头排列 + MACD 金叉 → 主力资金持续进场, 可逢低布局"
-            elif avg_score >= 45:
-                overall = "🟡 多空交织 · 观望为主"
-                detail = "指数涨跌互现, 无统一方向 → 控制仓位, 等待明确信号"
-            else:
-                overall = "🔴 空头主导 · 谨慎防守"
-                detail = "主要指数 MA 空头排列 + MACD 死叉 → 主力资金撤退, 以防御为主"
+            # K 线绘制函数
+            def _draw_candles(ax, opens, highs, lows, closes):
+                n = len(closes)
+                colors = ['#d32f2f' if closes[i] >= opens[i] else '#2e7d32' for i in range(n)]
+                # 影线
+                for i in range(n):
+                    ax.plot([i, i], [lows[i], highs[i]], color=colors[i], linewidth=0.6)
+                # 实体
+                width = 0.6
+                for i in range(n):
+                    body_bottom = min(opens[i], closes[i])
+                    body_height = abs(closes[i] - opens[i]) or 0.01
+                    ax.bar(i, body_height, bottom=body_bottom, width=width,
+                           color=colors[i], edgecolor=colors[i], linewidth=0.5)
 
-            tk.Label(bottom, text=f"🎯 {overall}", bg="#E8EAF6", fg="#1a237e",
-                     font=("Microsoft YaHei", 13, "bold")).pack(anchor="w")
-            tk.Label(bottom, text=detail, bg="#E8EAF6", fg="#333",
-                     font=("Microsoft YaHei", 10), wraplength=1100, justify="left").pack(anchor="w", pady=4)
+            def _redraw():
+                try:
+                    sym_name = symbol_var.get().strip()
+                    if sym_name not in sym_map:
+                        # 尝试模糊匹配
+                        hits = [n for n in sym_map if sym_name in n]
+                        if hits: sym_name = hits[0]; symbol_var.set(sym_name)
+                        else: status_var.set(f"❌ 找不到 {sym_name}"); return
 
-            # 广度联动
-            if breadth:
-                tk.Label(bottom,
-                         text=f"🌐 广度参考: 涨跌比 {breadth['ratio']:.2f}  {'(普涨)' if breadth['ratio']>1.5 else ('(普跌)' if breadth['ratio']<0.7 else '(均衡)')}",
-                         bg="#E8EAF6", fg="#555", font=("Microsoft YaHei", 10)).pack(anchor="w", pady=2)
+                    sym_code = sym_map[sym_name]
+                    status_var.set(f"⏳ 拉取 {sym_name} ({sym_code})..."); win.update_idletasks()
 
-        _run_analysis()
+                    # 拉数据
+                    try:
+                        df = self._fetch_index_daily(symbol=sym_code, days=200)
+                    except Exception: df = None
+                    if not df:
+                        try:
+                            df = self._fetch_daily_kline(symbol=sym_code, days=200)
+                        except Exception: df = None
+                    if not df or len(df) < 30:
+                        status_var.set("❌ 数据不足"); return
+
+                    df = pd.DataFrame(df)
+                    opens = df['open'].astype(float).values
+                    highs = df['high'].astype(float).values
+                    lows = df['low'].astype(float).values
+                    closes = df['close'].astype(float).values
+                    vol = df.get('volume', pd.Series([0]*len(closes))).astype(float).values
+                    trade_dates = df.get('day', df.index.astype(str)).tolist()
+                    n = len(closes); x = np.arange(n)
+
+                    # ═══ 加载 ARMS 广度数据 (后台线程, 不阻塞 UI) ═══
+                    arms_data = None
+                    need_arms = ind_vars.get("arms", tk.BooleanVar()).get() or sub_var.get() == "🧭ARMS"
+                    if need_arms and self._arms_mem_cache:
+                        arms_data = self._arms_mem_cache.get('data')
+
+                    # ═══ 加载资金面数据 (北向 + 融资融券 + 资产负债率) ═══
+                    money_mkt_data = None   # 市场级 (北向+融资融券汇总)
+                    money_stk_data = None   # 个股级 (融资融券+资产负债率)
+                    need_money = ind_vars.get("money", tk.BooleanVar()).get() or sub_var.get() == "💰资金面"
+                    if need_money and self._money_market_cache:
+                        money_mkt_data = self._money_market_cache.get('data')
+                    # 判断是否个股/ETF (代码含 sh/sz/bj 前缀或纯 6 位非指数)
+                    is_stock = not sym_code.startswith('sh000') and not sym_code.startswith('sz399') \
+                               and not sym_code.startswith('sh399') and len(sym_code) == 6
+                    ts_code = None
+                    if is_stock:
+                        market = sym_code[0]
+                        suffix = '.SH' if market in ('5', '6', '9') else ('.SZ' if market in ('0', '3', '2') else '.BJ')
+                        ts_code = sym_code + suffix
+
+                    # 清除旧图
+                    for ax in [ax_main, ax_sub1, ax_sub2]: ax.clear()
+
+                    # ═══ 主图: K 线 + 叠加指标 ═══
+                    _draw_candles(ax_main, opens, highs, lows, closes)
+
+                    # MA
+                    if ind_vars["ma"].get():
+                        for ma_n, ma_c, ma_l in [(5,'#ff9800','MA5'),(10,'#2196f3','MA10'),(20,'#9c27b0','MA20'),(60,'#607d8b','MA60')]:
+                            ma_vals = _ma(closes, ma_n)
+                            ax_main.plot(x, ma_vals, color=ma_c, linewidth=0.9, alpha=0.8, label=ma_l)
+
+                    # BOLL
+                    if ind_vars["boll"].get():
+                        mid, up, dn = _calc_boll(closes)
+                        ax_main.plot(x, mid, color='#ff9800', linewidth=0.8, alpha=0.7, label='BOLL中轨')
+                        ax_main.plot(x, up, color='#4caf50', linewidth=0.7, alpha=0.6, linestyle='--', label='BOLL上轨')
+                        ax_main.plot(x, dn, color='#4caf50', linewidth=0.7, alpha=0.6, linestyle='--', label='BOLL下轨')
+                        ax_main.fill_between(x, dn, up, color='#4caf50', alpha=0.07)
+
+                    # 主图装饰
+                    ax_main.set_title(f"💡 {sym_name} — 主力趋势分析", fontsize=13, fontweight='bold', pad=10)
+                    ax_main.legend(loc='upper left', fontsize=7, ncol=4)
+                    ax_main.grid(True, alpha=0.3)
+                    ax_main.tick_params(axis="x", labelbottom=False)
+
+                    # ═══ 副图 (根据选择切换) ═══
+                    sub_choice = sub_var.get()
+                    if sub_choice == "MACD":
+                        if ind_vars["macd"].get():
+                            dif, dea, macdh = _calc_macd(closes)
+                            colors = ['#d32f2f' if v >= 0 else '#2e7d32' for v in macdh]
+                            ax_sub1.bar(x, macdh, color=colors, width=0.6, alpha=0.8)
+                            ax_sub1.plot(x, dif, color='#2196f3', linewidth=0.9, label='DIF')
+                            ax_sub1.plot(x, dea, color='#ff9800', linewidth=0.9, label='DEA')
+                            ax_sub1.legend(loc='upper left', fontsize=7, ncol=3)
+                            ax_sub1.set_ylabel("MACD", fontsize=8)
+                    elif sub_choice == "RSI":
+                        if ind_vars["rsi"].get():
+                            rsi = _calc_rsi(closes)
+                            ax_sub1.plot(x, rsi, color='#9c27b0', linewidth=1.0, label='RSI(14)')
+                            ax_sub1.axhline(y=70, color='#d32f2f', linestyle='--', linewidth=0.6, alpha=0.7)
+                            ax_sub1.axhline(y=30, color='#2e7d32', linestyle='--', linewidth=0.6, alpha=0.7)
+                            ax_sub1.axhline(y=50, color='#9e9e9e', linestyle=':', linewidth=0.5, alpha=0.5)
+                            ax_sub1.fill_between(x, 70, 100, color='#d32f2f', alpha=0.08)
+                            ax_sub1.fill_between(x, 0, 30, color='#2e7d32', alpha=0.08)
+                            ax_sub1.set_ylim(0, 100); ax_sub1.set_ylabel("RSI", fontsize=8)
+                            ax_sub1.legend(loc='upper left', fontsize=7)
+                    elif sub_choice == "KDJ":
+                        if ind_vars["kdj"].get():
+                            k, d, j = _calc_kdj(highs, lows, closes)
+                            ax_sub1.plot(x, k, color='#2196f3', linewidth=0.9, label='K')
+                            ax_sub1.plot(x, d, color='#ff9800', linewidth=0.9, label='D')
+                            ax_sub1.plot(x, j, color='#9c27b0', linewidth=0.8, alpha=0.7, label='J')
+                            ax_sub1.axhline(y=80, color='#d32f2f', linestyle='--', linewidth=0.6, alpha=0.7)
+                            ax_sub1.axhline(y=20, color='#2e7d32', linestyle='--', linewidth=0.6, alpha=0.7)
+                            ax_sub1.set_ylabel("KDJ", fontsize=8); ax_sub1.legend(loc='upper left', fontsize=7, ncol=3)
+                    elif sub_choice == "OBV":
+                        if ind_vars["obv"].get():
+                            obv = _calc_obv(closes, vol)
+                            obv_norm = obv / (abs(obv[-1]) + 1e-9) * 100  # 归一化
+                            ax_sub1.plot(x, obv_norm, color='#6a1b9a', linewidth=1.0, label='OBV')
+                            ax_sub1.fill_between(x, 0, obv_norm, color='#6a1b9a', alpha=0.15)
+                            ax_sub1.set_ylabel("OBV", fontsize=8); ax_sub1.legend(loc='upper left', fontsize=7)
+                    elif sub_choice == "🧭ARMS":
+                        if arms_data:
+                            arms_s = arms_data['arms_series']
+                            # ARMS 副图: 用 n 根 K 线区域填充
+                            if len(arms_s) >= n:
+                                arms_vis = arms_s[-n:]
+                            else:
+                                arms_vis = np.pad(arms_s, (n-len(arms_s), 0), mode='edge')
+                            ax_sub1.plot(x, arms_vis, color='#e91e63', linewidth=1.3, label='ARMS')
+                            ax_sub1.axhline(y=1.0, color='gray', linestyle='-', linewidth=0.7, alpha=0.5)
+                            ax_sub1.axhline(y=0.7, color='#2e7d32', linestyle='--', linewidth=0.6, alpha=0.7, label='0.7 强势')
+                            ax_sub1.axhline(y=1.5, color='#d32f2f', linestyle='--', linewidth=0.6, alpha=0.7, label='1.5 抛压')
+                            ax_sub1.fill_between(x, arms_vis, 1.0, where=arms_vis<1.0, color='#2e7d32', alpha=0.12)
+                            ax_sub1.fill_between(x, arms_vis, 1.0, where=arms_vis>=1.0, color='#d32f2f', alpha=0.12)
+                            ax_sub1.set_ylabel("ARMS", fontsize=8)
+                            ax_sub1.legend(loc='upper left', fontsize=7, ncol=4)
+                            breadth_var.set(
+                                f"🧭 ARMS={arms_data['arms_today']:.3f} {arms_data['label']} | "
+                                f"涨{arms_data['adv']} 跌{arms_data['decl']} 平{arms_data['flat']} | "
+                                f"上涨成交 {arms_data['adv_vol']/1e8:.1f}亿 下跌 {arms_data['decl_vol']/1e8:.1f}亿"
+                            )
+                        else:
+                            ax_sub1.text(0.5, 0.5, "🧭 ARMS 未加载\n(勾 🧭ARMS 自动拉取, 8s超时)",
+                                         transform=ax_sub1.transAxes, ha='center', va='center',
+                                         fontsize=9, color='#888')
+                            breadth_var.set("🧭 ARMS 未加载 (数据拉取超时或 akshare 不可用)")
+
+                    elif sub_choice == "💰资金面":
+                        # ── 北向资金 (市场级, 始终可用) ──
+                        if money_mkt_data and money_mkt_data.get('hsgt_net'):
+                            import matplotlib.dates as mdates
+                            hsgt_net = money_mkt_data['hsgt_net']  # 百万元
+                            hsgt_dates_list = money_mkt_data['hsgt_dates']
+                            # 归一化到 [-1, 1] 让折线适配 K 线 x 轴 (取最近 n 个)
+                            n_hsgt = min(len(hsgt_net), n)
+                            hsgt_vis = np.array(hsgt_net[-n_hsgt:])
+                            hsgt_x = x[-n_hsgt:]
+                            # 北向净流入 (亿元) 直接画柱状 + 折线
+                            hsgt_yi = hsgt_vis / 100.0  # 百万元→亿元
+                            colors_hsgt = ['#d32f2f' if v >= 0 else '#2e7d32' for v in hsgt_yi]
+                            ax_sub1.bar(hsgt_x, hsgt_yi, color=colors_hsgt, width=0.55, alpha=0.6, label='北向净流入')
+                            # 7 日移动均线
+                            if len(hsgt_yi) >= 5:
+                                hsgt_ma5 = pd.Series(hsgt_yi).rolling(5, min_periods=1).mean().values
+                                ax_sub1.plot(hsgt_x, hsgt_ma5, color='#ff9800', linewidth=0.9, label='北向MA5')
+                            ax_sub1.axhline(y=0, color='gray', linewidth=0.5, alpha=0.7)
+                            ax_sub1.set_ylabel("北向(亿)", fontsize=8)
+                            ax_sub1.legend(loc='upper left', fontsize=7, ncol=2)
+                            ax_sub1.grid(True, alpha=0.2)
+                            # 更新广度条 (加北向最新)
+                            latest_net = hsgt_yi[-1] if len(hsgt_yi) > 0 else 0
+                            breadth_var.set(
+                                f"💰 北向净流入 {latest_net:+.1f}亿 | "
+                                f"近5日: {hsgt_yi[-5:].sum() if len(hsgt_yi)>=5 else hsgt_yi.sum():+.1f}亿 | "
+                                f"来源: {money_mkt_data.get('source','?')}"
+                            )
+                        elif not need_money:
+                            ax_sub1.text(0.5, 0.5, "💰 资金面\n(勾 💰资金面 自动拉取)",
+                                         transform=ax_sub1.transAxes, ha='center', va='center',
+                                         fontsize=10, color='#888')
+                        else:
+                            ax_sub1.text(0.5, 0.5, "💰 资金面未加载\n(后台拉取中, 3-5s 超时)",
+                                         transform=ax_sub1.transAxes, ha='center', va='center',
+                                         fontsize=10, color='#888')
+
+                    # 副图2: 成交量 (如勾 ARMS 则双轴显示 ARMS + 成交量)
+                    vol_ma5 = _ma(vol, 5)
+                    colors_vol = ['#d32f2f' if closes[i] >= opens[i] else '#2e7d32' for i in range(n)]
+                    ax_sub2.bar(x, vol, color=colors_vol, width=0.6, alpha=0.7)
+                    ax_sub2.plot(x, vol_ma5, color='#ff9800', linewidth=0.8, label='VOL_MA5')
+                    ax_sub2.set_ylabel("量", fontsize=8)
+                    ax_sub2.grid(True, alpha=0.2)
+
+                    # 综合评分 bbox 里加广度行 + 资金面行
+                    breadth_line = ""
+                    if arms_data:
+                        breadth_line += f"\n  🧭广度: ARMS={arms_data['arms_today']:.2f} {arms_data['label']}"
+                    # 资金面摘要行
+                    money_line = ""
+                    if money_mkt_data:
+                        parts = []
+                        if money_mkt_data.get('hsgt_net'):
+                            net_yi = money_mkt_data['hsgt_net'][-1] / 100.0 if money_mkt_data['hsgt_net'] else 0
+                            parts.append(f"北向{net_yi:+.1f}亿")
+                        if money_mkt_data.get('margin_rzye'):
+                            rzye = money_mkt_data['margin_rzye'][-1] if money_mkt_data['margin_rzye'] else 0
+                            parts.append(f"融资余额{rzye:.0f}亿")
+                        if parts:
+                            money_line = f"\n  💰资金面: {' | '.join(parts)}"
+                    if money_stk_data and money_stk_data.get('debt_ratio') is not None:
+                        dr = money_stk_data['debt_ratio']
+                        dr_label = "偏低" if dr < 40 else ("适中" if dr < 60 else ("偏高" if dr < 75 else "高杠杆⚠️"))
+                        money_line += f"\n  📊资产负债率: {dr:.1f}% ({dr_label})"
+                    breadth_line += money_line
+
+                    # 日期轴
+                    tick_idx = np.linspace(0, n-1, min(12, n), dtype=int)
+                    ax_sub2.set_xticks(tick_idx)
+                    ax_sub2.set_xticklabels([str(trade_dates[i])[-10:] if i < len(trade_dates) else '' for i in tick_idx],
+                                            rotation=30, fontsize=7)
+                    ax_sub2.tick_params(axis='x', labelbottom=True)
+
+                    # ═══ 综合评分 bbox ═══
+                    last_c = closes[-1]; last_o = opens[-1]
+                    ma5_v = _ma(closes,5)[-1]; ma20_v = _ma(closes,20)[-1]; ma60_v = _ma(closes,60)[-1]
+                    dif, dea, macdh = _calc_macd(closes)
+                    rsi = _calc_rsi(closes)
+
+                    # MA 排列
+                    if ma5_v > _ma(closes,10)[-1] > ma20_v > ma60_v: ma_arr = "多头排列"
+                    elif ma5_v < _ma(closes,10)[-1] < ma20_v < ma60_v: ma_arr = "空头排列"
+                    else: ma_arr = "交叉纠缠"
+
+                    # MACD 状态
+                    if dif[-1] > dea[-1]: macd_st = "DIF>DEA"
+                    else: macd_st = "DIF<DEA"
+
+                    # RSI
+                    if rsi[-1] > 70: rsi_st = f"RSI={rsi[-1]:.1f} 超买"
+                    elif rsi[-1] < 30: rsi_st = f"RSI={rsi[-1]:.1f} 超卖"
+                    else: rsi_st = f"RSI={rsi[-1]:.1f}"
+
+                    # 综合评分
+                    sc = 50
+                    if "多头" in ma_arr: sc += 15
+                    elif "空头" in ma_arr: sc -= 15
+                    sc += 8 if dif[-1] > dea[-1] else -8
+                    sc += 3 if 40<=rsi[-1]<=60 else (-5 if rsi[-1]>70 else 5 if rsi[-1]<30 else 0)
+                    sc = max(0, min(100, sc))
+                    verdict = "偏多" if sc >= 65 else ("中性" if sc >= 40 else "偏空")
+
+                    analysis = (f"═══ 主力趋势 ═══\n"
+                                f"🎯 评分 {sc}/100 → {verdict}\n"
+                                f"─── 指标 ───\n"
+                                f"  MA: {ma_arr}\n"
+                                f"  MACD: {macd_st}\n"
+                                f"  {rsi_st}"
+                                f"{breadth_line}")
+                    ax_main.text(0.02, 0.98, analysis, transform=ax_main.transAxes,
+                                fontsize=8.5, va='top', ha='left',
+                                bbox=dict(boxstyle='round,pad=0.4', facecolor='#E8EAF6',
+                                          edgecolor='#1565c0', alpha=0.92, linewidth=0.8),
+                                linespacing=1.4)
+
+                    fig.tight_layout()
+                    canvas.draw()
+                    status_var.set(f"✅ {sym_name} | 评分 {sc}/100 ({verdict}) | {trade_dates[-1]}")
+
+                    # ═══ ARMS 异步刷新 (如果没命中缓存且需要 ARMS) ═══
+                    if need_arms and not arms_data:
+                        breadth_var.set("🧭 广度: ⏳ 后台加载中 (东方财富 → Tushare, 8s 超时)...")
+                        import threading, queue
+                        _arms_q = queue.Queue(maxsize=1)
+                        def _arms_bg():
+                            try:
+                                _r = self._calc_arms_index(timeout=8)
+                                _arms_q.put(_r)
+                            except Exception: _arms_q.put(None)
+                        threading.Thread(target=_arms_bg, daemon=True).start()
+                        def _arms_check():
+                            try:
+                                _r = _arms_q.get_nowait()
+                                if _r:
+                                    breadth_var.set(
+                                        f"🧭 ARMS={_r['arms_today']:.3f} {_r['label']} | "
+                                        f"涨{_r['adv']} 跌{_r['decl']} 平{_r.get('flat',0)} | "
+                                        f"来源: {_r.get('source','?')}"
+                                    )
+                                    # ARMS 拉完 → 自动重画 (bbox + 副图1 ARMS 模式)
+                                    try: _redraw()
+                                    except Exception: pass
+                                else:
+                                    breadth_var.set("🧭 广度: ❌ 东方财富 + Tushare 都不可用")
+                            except queue.Empty:
+                                win.after(500, _arms_check)
+                        win.after(500, _arms_check)
+                    elif arms_data:
+                        # 命中缓存, 直接更新广度条
+                        breadth_var.set(
+                            f"🧭 ARMS={arms_data['arms_today']:.3f} {arms_data['label']} | "
+                            f"涨{arms_data['adv']} 跌{arms_data['decl']} 平{arms_data.get('flat',0)} | "
+                            f"来源: {arms_data.get('source','?')} (缓存命中)"
+                        )
+
+                    # ═══ 资金面异步刷新 (市场级 + 个股级) ═══
+                    if need_money and not money_mkt_data:
+                        import threading, queue
+                        _money_q = queue.Queue(maxsize=2)  # [mkt_data, stk_data]
+                        def _money_bg():
+                            try:
+                                _mkt = self._fetch_money_market(timeout=5)
+                                _stk = None
+                                if ts_code:
+                                    try: _stk = self._fetch_stock_money(ts_code, timeout=5)
+                                    except Exception: _stk = None
+                                _money_q.put((_mkt, _stk))
+                            except Exception:
+                                _money_q.put((None, None))
+                        threading.Thread(target=_money_bg, daemon=True).start()
+                        def _money_check():
+                            try:
+                                _m, _s = _money_q.get_nowait()
+                                self._money_market_cache = {'date': today, 'data': _m} if _m else None
+                                # 重画 → 副图💰/bbox 都会更新
+                                try: _redraw()
+                                except Exception: pass
+                            except queue.Empty:
+                                win.after(500, _money_check)
+                        win.after(500, _money_check)
+
+                except Exception as e:
+                    import traceback as _tb2
+                    status_var.set(f"❌ {e}")
+                    print(_tb2.format_exc())
+
+            # ─── Combobox 交互 ───
+            def _resolve_and_go():
+                raw = symbol_var.get().strip()
+                hits = [n for n in sym_map if raw in n]
+                if hits: symbol_var.set(hits[0])
+                _redraw()
+            sym_combo.bind("<Return>", lambda e: (_resolve_and_go(), "break"))
+            sym_combo.bind("<FocusOut>", lambda e: _resolve_and_go())
+            sym_combo.bind("<<ComboboxSelected>>", lambda e: _redraw())
+            for var in ind_vars.values(): var.trace_add('write', lambda *a: _redraw())
+            sub_var.trace_add('write', lambda *a: _redraw())
+
+            # ─── Canvas ───
+            canvas = FigureCanvasTkAgg(fig, chart_inner)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+            # NavigationToolbar
+            try:
+                _tb = NavigationToolbar2Tk(canvas, chart_inner, pack_toolbar=False)
+                _tb.update(); _tb.pack(side=tk.TOP, fill=tk.X, before=canvas.get_tk_widget())
+                for _btn in _tb.winfo_children():
+                    if str(_btn.cget('text')) in ('Subplots', 'Customize', 'A'):
+                        _btn.pack_forget()
+            except Exception: pass
+
+            # 初始绘制
+            _redraw()
+
+        except Exception as e:
+            import traceback as _tb3
+            print(f"[💡主力趋势] 崩溃: {_tb3.format_exc()}")
+            messagebox.showerror("错误", f"主力趋势弹窗打开失败:\n{e}", parent=self.root)
 
     # ═══════════════════════════════════════════════════════════════
     # 通用工具: 股票文本解析 + OCR (两个主程序版本都可用)
