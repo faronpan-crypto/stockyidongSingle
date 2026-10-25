@@ -44878,16 +44878,23 @@ class DapanMixin:
                 if code in existing_codes: skipped_exist += 1; continue
                 if not empty_indices: skipped_full += 1; break
                 pos = empty_indices.pop(0)
-                # 如果只有代码没有名称, 尝试用 akshare 查名
+                # 如果只有代码没有名称, 优先查本地缓存, 再兜底网络
                 if not name and code:
+                    # 1) 本地缓存 (已加载 5509 只)
                     try:
-                        import akshare as _akq
-                        info = _akq.stock_individual_info_em(symbol=code)
-                        if info is not None and not info.empty:
-                            for _, row in info.iterrows():
-                                if row.get('item') in ('股票简称', '股票名称'):
-                                    name = row.get('value', ''); break
-                    except Exception: pass
+                        name = get_stock_name_by_code(code) or ""
+                    except Exception:
+                        name = ""
+                    # 2) akshare 兜底 (网络好时)
+                    if not name:
+                        try:
+                            import akshare as _akq
+                            info = _akq.stock_individual_info_em(symbol=code)
+                            if info is not None and not info.empty:
+                                for _, row in info.iterrows():
+                                    if row.get('item') in ('股票简称', '股票名称'):
+                                        name = row.get('value', ''); break
+                        except Exception: pass
                 # 确保名称和代码都有
                 if not code and name:
                     code = get_stock_code_by_name(name) or ""
@@ -59402,5 +59409,69 @@ class DapanMixin:
                     setattr(self.__class__, _name, _obj)
         # 调用真正的实现
         return _fa._show_fed_analysis_dialog(self)
+
+    # ═══════════════════════════════════════════════════════════════
+    # 通用工具: 股票文本解析 + OCR (两个主程序版本都可用)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _parse_stock_text(self, text):
+        """从任意文本里解析出股票代码 + 可能的股票名。
+        支持格式:
+          - 名称(代码)  如 贵州茅台(600519)
+          - 代码 名称   如 002460 多氟多 / 002460,多氟多 / 600519-贵州茅台
+          - 序号+代码+名称 如 23 002460 多氟多 (pattern_b 天然覆盖)
+          - 纯 6 位代码 (首位 0/3/6)
+        返回 list[dict] = [{'code': '600519', 'name': '贵州茅台', 'raw': '贵州茅台(600519)'}]
+        """
+        import re
+        results = []
+        seen_codes = set()
+
+        # 格式A: 名称(代码) 或 名称（代码）
+        pattern_a = r'([\u4e00-\u9fa5A-Za-z·]{2,12})\s*[\(（]\s*([036]\d{5})\s*[\)）]'
+        for m in re.finditer(pattern_a, text):
+            name, code = m.group(1).strip(), m.group(2).strip()
+            if code not in seen_codes:
+                seen_codes.add(code)
+                results.append({'code': code, 'name': name, 'raw': m.group(0)})
+
+        # 格式B: 代码后跟名称 (支持空格/逗号/顿号/短横线分隔)
+        pattern_b = r'([036]\d{5})\s*[,，\s、\-]?\s*([\u4e00-\u9fa5]{2,12})'
+        for m in re.finditer(pattern_b, text):
+            code, name = m.group(1).strip(), m.group(2).strip()
+            if code not in seen_codes:
+                seen_codes.add(code)
+                results.append({'code': code, 'name': name, 'raw': m.group(0)})
+
+        # 格式C: 纯 6 位代码 (排除已被 A/B 覆盖的)
+        for m in re.finditer(r'[036]\d{5}', text):
+            code = m.group()
+            if code in seen_codes:
+                continue
+            already = any(r['code'] == code for r in results)
+            if not already:
+                seen_codes.add(code)
+                results.append({'code': code, 'name': '', 'raw': code})
+
+        # 去重 (按 code)
+        final = []
+        seen = set()
+        for r in results:
+            if r['code'] not in seen:
+                seen.add(r['code'])
+                final.append(r)
+        return final
+
+    def _ocr_image(self, image_path):
+        """用 pytesseract 识别图片里的股票信息。返回纯文本。"""
+        try:
+            from PIL import Image
+            import pytesseract
+            img = Image.open(image_path)
+            text = pytesseract.image_to_string(img, lang='chi_sim+eng')
+            return text
+        except Exception as e:
+            print(f"[OCR] 识别失败: {e}", flush=True)
+            return ""
 
 __all__ = ["DapanMixin"]

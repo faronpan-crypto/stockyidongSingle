@@ -67625,16 +67625,23 @@ class StockKeywordAnalyzerGUI:
                 if code in existing_codes: skipped_exist += 1; continue
                 if not empty_indices: skipped_full += 1; break
                 pos = empty_indices.pop(0)
-                # 如果只有代码没有名称, 尝试用 akshare 查名
+                # 如果只有代码没有名称, 优先查本地缓存, 再兜底网络
                 if not name and code:
+                    # 1) 本地缓存 (已加载 5509 只)
                     try:
-                        import akshare as _akq
-                        info = _akq.stock_individual_info_em(symbol=code)
-                        if info is not None and not info.empty:
-                            for _, row in info.iterrows():
-                                if row.get('item') in ('股票简称', '股票名称'):
-                                    name = row.get('value', ''); break
-                    except Exception: pass
+                        name = get_stock_name_by_code(code) or ""
+                    except Exception:
+                        name = ""
+                    # 2) akshare 兜底 (网络好时)
+                    if not name:
+                        try:
+                            import akshare as _akq
+                            info = _akq.stock_individual_info_em(symbol=code)
+                            if info is not None and not info.empty:
+                                for _, row in info.iterrows():
+                                    if row.get('item') in ('股票简称', '股票名称'):
+                                        name = row.get('value', ''); break
+                        except Exception: pass
                 # 如果只有名称没有代码, 查代码
                 if not code and name:
                     code = get_stock_code_by_name(name) or ""
