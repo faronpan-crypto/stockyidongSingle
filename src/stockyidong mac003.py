@@ -4800,8 +4800,10 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         ttk.Button(tools_row_c, text="🌱成长扫描",
                    command=lambda: crawler_control_notebook.select(growth_tab),
                    width=14).pack(**_tools_pad)
-        # AI用量监控 + 批量股票分析 + 龙虎榜 (从 toolbar_row1 迁入)
+        # AI用量监控 + 批量股票分析 + 龙虎榜 + 通缩通胀 (从 toolbar_row1 迁入)
         tools_row_d = ttk.Frame(tools_frame); tools_row_d.pack(fill=tk.X, pady=2)
+        ttk.Button(tools_row_d, text="📉 通缩通胀",
+                   command=self._show_inflation_dialog, width=14).pack(**_tools_pad)
         ttk.Button(tools_row_d, text="📊 AI用量监控",
                    command=self._show_ai_usage_dialog, width=14).pack(**_tools_pad)
         ttk.Button(tools_row_d, text="📊 批量股票分析",

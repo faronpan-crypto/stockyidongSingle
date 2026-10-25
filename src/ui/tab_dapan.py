@@ -59743,6 +59743,442 @@ class DapanMixin:
         if t.is_alive() or result_q.empty(): return None
         return result_q.get()
 
+    # ═══════════════════════════════════════════════════════════════
+    # 📉 通缩通胀分析弹窗 (付鹏资产负债表框架)
+    # ═══════════════════════════════════════════════════════════════
+
+    _macro_cache = None  # 宏观指标全局缓存
+
+    def _fetch_macro(self, timeout=5):
+        """拉 CPI + PPI 月度同比数据, 返回 dict 或 None。"""
+        import threading, queue, os, datetime as dt
+
+        today = dt.date.today().isoformat()
+        if self._macro_cache and self._macro_cache.get('date') == today:
+            return self._macro_cache['data']
+
+        result_q = queue.Queue(maxsize=1)
+
+        def _worker():
+            try:
+                import tushare as ts
+                token_path = os.path.expanduser('~/.tushare/token')
+                if not os.path.exists(token_path): result_q.put(None); return
+                ts.set_token(open(token_path).read().strip()); pro = ts.pro_api()
+
+                start = '202401'; end = today.replace('-','')
+                cpi_df = pro.cn_cpi(start_date=start, end_date=end)
+                ppi_df = pro.cn_ppi(start_date=start, end_date=end)
+
+                if cpi_df is None or len(cpi_df) == 0:
+                    result_q.put(None); return
+
+                cpi_df = cpi_df.sort_values('month')
+                ppi_df = ppi_df.sort_values('month') if ppi_df is not None else None
+
+                # CPI: nt_yoy (全国同比)
+                cpi_months = [str(m) for m in cpi_df['month'].tolist()]
+                cpi_yoy = cpi_df['nt_yoy'].astype(float).tolist()
+                cpi_mom = cpi_df['nt_mom'].astype(float).tolist()
+
+                # PPI: ppi_yoy
+                ppi_months = []; ppi_yoy = []; ppi_mom = []
+                if ppi_df is not None and len(ppi_df) > 0:
+                    ppi_months = [str(m) for m in ppi_df['month'].tolist()]
+                    ppi_yoy = ppi_df['ppi_yoy'].astype(float).tolist()
+                    ppi_mom = ppi_df['ppi_mom'].astype(float).tolist()
+
+                result_q.put({
+                    'cpi_months': cpi_months, 'cpi_yoy': cpi_yoy, 'cpi_mom': cpi_mom,
+                    'ppi_months': ppi_months, 'ppi_yoy': ppi_yoy, 'ppi_mom': ppi_mom,
+                })
+            except Exception: result_q.put(None)
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start(); t.join(timeout=max(timeout, 3))
+        if t.is_alive() or result_q.empty(): return None
+        data = result_q.get()
+        if data is None: return None
+        self._macro_cache = {'date': today, 'data': data}
+        return data
+
+    def _judge_asset_inflation(self, closes, volumes):
+        """根据量价趋势判断资产属于通胀性还是通缩性。
+        返回 dict: {verdict, label, price_trend, vol_trend, score, detail}
+        verdict: 'inflation' / 'deflation' / 'warning' / 'neutral'
+        """
+        import numpy as np, pandas as pd
+
+        c = np.asarray(closes, dtype=float)
+        v = np.asarray(volumes, dtype=float)
+        n = len(c)
+        if n < 20:
+            return {'verdict': 'neutral', 'label': '数据不足', 'score': 50,
+                    'price_trend': '?', 'vol_trend': '?', 'detail': 'K线少于20根'}
+
+        # 近 20 日涨跌
+        ret_20 = (c[-1] / c[-20] - 1) * 100
+        # 近 5 日 vs 近 20 日均量 (量能变化)
+        vol_5 = np.mean(v[-5:])
+        vol_20 = np.mean(v[-20:])
+        vol_ratio = vol_5 / (vol_20 + 1e-9)
+        # MA20 斜率
+        ma20 = pd.Series(c).rolling(20, min_periods=1).mean().values
+        ma_slope = (ma20[-1] / ma20[-10] - 1) * 100 if len(ma20) >= 10 else 0
+        # 价格在 MA20 上方?
+        above_ma = c[-1] > ma20[-1]
+
+        # 判断逻辑
+        price_up = ret_20 > 3
+        price_down = ret_20 < -3
+        vol_up = vol_ratio > 1.2
+        vol_down = vol_ratio < 0.8
+
+        score = 50
+        detail_parts = []
+
+        if price_up and vol_up:
+            verdict = 'inflation'
+            label = '📈 通胀资产 (量价同增)'
+            score = 75
+            detail_parts.append(f"近20日涨 {ret_20:+.1f}%")
+            detail_parts.append(f"量能放大 {vol_ratio:.1%}")
+            detail_parts.append("资金主动推升")
+        elif price_up and vol_down:
+            verdict = 'warning'
+            label = '⚠️ 警惕 (价涨量缩)'
+            score = 55
+            detail_parts.append(f"近20日涨 {ret_20:+.1f}%")
+            detail_parts.append(f"量能萎缩 {vol_ratio:.1%}")
+            detail_parts.append("上涨动力不足, 虚涨")
+        elif price_down and vol_up:
+            verdict = 'warning'
+            label = '💥 抛压 (价跌量增)'
+            score = 30
+            detail_parts.append(f"近20日跌 {ret_20:+.1f}%")
+            detail_parts.append(f"量能放大 {vol_ratio:.1%}")
+            detail_parts.append("恐慌性抛售, 通缩加速")
+        elif price_down and vol_down:
+            verdict = 'deflation'
+            label = '📉 通缩资产 (量价同缩)'
+            score = 25
+            detail_parts.append(f"近20日跌 {ret_20:+.1f}%")
+            detail_parts.append(f"量能萎缩 {vol_ratio:.1%}")
+            detail_parts.append("无人接盘, 流动性枯竭")
+        elif abs(ret_20) <= 3:
+            verdict = 'neutral'
+            label = '⚖️ 横盘 (量能中性)'
+            score = 50
+            detail_parts.append(f"近20日涨 {ret_20:+.1f}%")
+            detail_parts.append(f"量能比 {vol_ratio:.2f}")
+            detail_parts.append("等待方向选择")
+        else:
+            verdict = 'neutral'
+            label = '⚖️ 中性'
+            score = 50
+
+        # MA20 斜率修正
+        if ma_slope > 1 and verdict == 'inflation':
+            score += 5; detail_parts.append(f"MA20 上倾 {ma_slope:+.1f}%")
+        elif ma_slope < -1 and verdict == 'deflation':
+            score -= 5; detail_parts.append(f"MA20 下倾 {ma_slope:+.1f}%")
+
+        # 在 MA20 上方加分
+        if above_ma and verdict in ('inflation', 'warning'):
+            score += 3
+        elif not above_ma and verdict in ('deflation', 'warning'):
+            score -= 3
+
+        score = max(10, min(95, score))
+
+        return {
+            'verdict': verdict, 'label': label, 'score': score,
+            'price_trend': f"{ret_20:+.1f}% (20日)",
+            'vol_trend': f"量比 {vol_ratio:.2f}",
+            'ma_slope': f"{ma_slope:+.1f}%",
+            'above_ma20': above_ma,
+            'detail': detail_parts,
+        }
+
+    def _show_inflation_dialog(self):
+        """📉 通缩通胀分析弹窗 (付鹏资产负债表框架)"""
+        import tkinter as tk
+        from tkinter import ttk, messagebox
+        import numpy as np, pandas as pd
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+
+        win = self._safe_toplevel(self.root)
+        win.title("📉 通缩通胀分析 · 资产负债表思维")
+        try: win.state("zoomed")
+        except Exception:
+            try: win.attributes("-zoomed", True)
+            except Exception: win.geometry("1280x860")
+
+        # ════════════════════════════════════════
+        # 顶部: 标题 + ❓解释按钮
+        # ════════════════════════════════════════
+        top_frame = ttk.Frame(win, padding=6); top_frame.pack(fill=tk.X)
+        ttk.Label(top_frame, text="📉 通缩通胀分析", font=("Menlo", 14, "bold")).pack(side=tk.LEFT)
+        ttk.Label(top_frame, text="付鹏: 过日子过的是资产负债表",
+                  font=("Menlo", 10), foreground="#666").pack(side=tk.LEFT, padx=12)
+        help_text = (
+            "⚠️ 核心逻辑:\n"
+            "  个人财富 = 资产(房产/股票/现金) − 负债(房贷/车贷)\n"
+            "  通胀中: 资产增值 + 固定利率债务贬值 → 财富被动增长 ✅\n"
+            "  通缩中: 资产缩水 + 债务刚性不变 → 现金流被挤压 💀\n\n"
+            "🎯 付鹏核心观点:\n"
+            "  「通胀的资产 + 通缩的负债」是最佳组合\n"
+            "  · 通胀资产: 核心房产 / 优质股权 (CPI/PPI上行时升值)\n"
+            "  · 通缩负债: 锁定长期固定利率债务 (通胀稀释实际负担)\n\n"
+            "📊 个股量价判断:\n"
+            "  量价同增 📈 → 通胀资产 (资金主动买入, 抗通缩)\n"
+            "  价涨量缩 ⚠️ → 虚涨, 警惕回落\n"
+            "  价跌量增 💥 → 恐慌抛售, 通缩加速\n"
+            "  量价同缩 📉 → 通缩资产 (流动性枯竭, 资产缩水)\n\n"
+            "💰 不同人群的通胀/通缩感受:\n"
+            "  · 富人: 有资产怕通缩 / 喜通胀 (资产增值)\n"
+            "  · 中产/穷人: 无资产怕通缩 (劳动价值贬值) / 不怕通胀 (收入可调)\n"
+            "  · 零负债者: 通缩中最滋润 (现金购买力提升, 无债务压力)\n\n"
+            "🎯 2026 年行动建议 (去杠杆周期):\n"
+            "  1️⃣ 降杠杆: 优先还高息负债 (网贷/信用卡)\n"
+            "  2️⃣ 守现金流: 稳定收入 + 应急储备 (通缩中生命线)\n"
+            "  3️⃣ 慎加风险资产: 等明确信号再出手\n"
+            "  4️⃣ 抓确定性机会: 通缩期现金值钱, 布局错杀优质资产\n\n"
+            "  💡 总结: 周期转向「去杠杆」时, 关键是「降杠杆、守现金、等机会」\n"
+            "          而非盲目追通胀资产。待周期回暖再用「通胀资产+通缩负债」策略。"
+        )
+
+        def _show_help():
+            hwin = self._safe_toplevel(win)
+            hwin.title("📖 付鹏 · 通胀与通缩 · 完整解释")
+            hwin.geometry("680x640")
+            txt = tk.Text(hwin, wrap=tk.WORD, font=("Menlo", 10), padx=12, pady=10)
+            txt.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+            txt.insert("1.0", help_text)
+            txt.config(state=tk.DISABLED)
+            ttk.Button(hwin, text="关闭", command=hwin.destroy).pack(pady=6)
+
+        ttk.Button(top_frame, text="❓ 解释", command=_show_help, width=10).pack(side=tk.RIGHT)
+
+        # ════════════════════════════════════════
+        # 中间: 左=个股分析 / 右=宏观指标
+        # ════════════════════════════════════════
+        mid_paned = ttk.Panedwindow(win, orient=tk.HORIZONTAL)
+        mid_paned.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+
+        # ─── 左侧: 个股通胀/通缩判断 ───
+        left_frame = ttk.LabelFrame(mid_paned, text="🔍 个股/ETF 通胀通缩判断", padding=6)
+        mid_paned.add(left_frame, weight=2)
+
+        input_row = ttk.Frame(left_frame); input_row.pack(fill=tk.X, pady=(0,6))
+        ttk.Label(input_row, text="代码/名称:").pack(side=tk.LEFT)
+        sym_var = tk.StringVar()
+        sym_entry = ttk.Entry(input_row, textvariable=sym_var, width=18)
+        sym_entry.pack(side=tk.LEFT, padx=4)
+        sym_entry.insert(0, "600519")
+
+        # 快速选择
+        QUICK_LIST = [
+            ("600519", "茅台(白酒-通胀资产)"),
+            ("000001", "平安银行(金融)"),
+            ("601318", "中国平安(保险)"),
+            ("000858", "五粮液(白酒)"),
+            ("300750", "宁德时代(新能源)"),
+            ("601899", "紫金矿业(有色-通胀)"),
+            ("510300", "沪深300ETF"),
+        ]
+        for code, tip in QUICK_LIST:
+            ttk.Button(input_row, text=code, width=6,
+                       command=lambda c=code: (sym_var.set(c), _go())).pack(side=tk.LEFT, padx=2)
+
+        result_frame = ttk.Frame(left_frame); result_frame.pack(fill=tk.BOTH, expand=True)
+
+        verdict_var = tk.StringVar(value="等待输入...")
+        verdict_label = ttk.Label(result_frame, textvariable=verdict_var,
+                                   font=("Menlo", 14, "bold"), anchor="w")
+        verdict_label.pack(fill=tk.X, pady=(0,6))
+
+        detail_text = tk.Text(result_frame, height=10, font=("Menlo", 10),
+                              wrap=tk.WORD, padx=8, pady=6)
+        detail_text.pack(fill=tk.BOTH, expand=True)
+
+        mini_fig = Figure(figsize=(6, 3.5), facecolor="#FAFAFA")
+        mini_ax = mini_fig.add_subplot(111)
+        mini_canvas = FigureCanvasTkAgg(mini_fig, master=result_frame)
+        mini_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, pady=(6,0))
+        mini_ax.set_title("量价趋势 (近60日)", fontsize=10)
+
+        # ─── 右侧: 宏观指标 mini chart ───
+        right_frame = ttk.LabelFrame(mid_paned, text="🌐 宏观指标 · CPI / PPI 同比", padding=6)
+        mid_paned.add(right_frame, weight=3)
+
+        macro_fig = Figure(figsize=(7, 6), facecolor="#FAFAFA")
+        gs = macro_fig.add_gridspec(2, 1, hspace=0.35)
+        ax_cpi = macro_fig.add_subplot(gs[0])
+        ax_ppi = macro_fig.add_subplot(gs[1])
+        macro_canvas = FigureCanvasTkAgg(macro_fig, master=right_frame)
+        macro_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        macro_canvas_toolbar = NavigationToolbar2Tk(macro_canvas, right_frame, pack_toolbar=False)
+        macro_canvas_toolbar.update()
+
+        # ════════════════════════════════════════
+        # 底部: 付鹏框架总结 (动态)
+        # ════════════════════════════════════════
+        bottom_frame = ttk.LabelFrame(win, text="📖 付鹏资产负债表 · 当前阶段判断", padding=6)
+        bottom_frame.pack(fill=tk.X, padx=6, pady=(0,6))
+        stage_text = tk.Text(bottom_frame, height=6, font=("Menlo", 10),
+                             wrap=tk.WORD, padx=8, pady=6)
+        stage_text.pack(fill=tk.X)
+
+        # ════════════════════════════════════════
+        # 逻辑
+        # ════════════════════════════════════════
+
+        def _go():
+            code = sym_var.get().strip()
+            if not code: return
+            try:
+                # 拉 K 线
+                if hasattr(self, '_parse_stock_text'):
+                    _parsed = self._parse_stock_text(code)
+                    sym_code = _parsed[0]['code'] if _parsed else code
+                else:
+                    sym_code = code
+                if len(sym_code) == 6 and not sym_code.startswith(('sh','sz','bj')):
+                    market = sym_code[0]
+                    prefix = 'sh' if market in ('5','6','9') else ('sz' if market in ('0','3','2') else 'bj')
+                    sym_code = prefix + sym_code
+
+                # 优先拉指数/ETF (新浪接口), 个股用最近日线
+                df = None
+                if hasattr(self, '_fetch_index_daily'):
+                    df = self._fetch_index_daily(symbol=sym_code, days=120)
+                if not df and hasattr(self, '_fetch_recent_daily_ohlcv'):
+                    pure_code = sym_code[2:] if len(sym_code) == 8 else sym_code
+                    df = self._fetch_recent_daily_ohlcv(stock_code=pure_code, days=120)
+                if not df:
+                    verdict_var.set("❌ 数据拉不到"); return
+
+                closes = [float(d.get('close', d.get('close_price', 0))) for d in df] if isinstance(df, list) else df['close'].astype(float).values.tolist()
+                volumes = [float(d.get('volume', d.get('vol', 0))) for d in df] if isinstance(df, list) else df['volume'].astype(float).values.tolist()
+
+                j = self._judge_asset_inflation(closes, volumes)
+                verdict_var.set(f"{'📉' if '通缩' in j['label'] or '抛压' in j['label'] else '📈' if '通胀' in j['label'] else '⚠️' if '警惕' in j['label'] else '⚖️'}  {j['label']}  ·  评分 {j['score']}/100")
+                verdict_label.config(foreground={
+                    'inflation': '#2e7d32', 'deflation': '#c62828',
+                    'warning': '#e65100', 'neutral': '#616161'
+                }.get(j['verdict'], '#333'))
+
+                detail_text.config(state=tk.NORMAL)
+                detail_text.delete("1.0", tk.END)
+                detail_text.insert("1.0", "\n".join([
+                    f"🎯 {j['label']}  (评分 {j['score']}/100)",
+                    f"",
+                    f"  📊 价格趋势: {j['price_trend']}",
+                    f"  📊 量能趋势: {j['vol_trend']}",
+                    f"  📊 MA20 斜率: {j.get('ma_slope','-')}",
+                    f"  📊 价格 {'在' if j.get('above_ma20') else '低于'} MA20",
+                    f"",
+                    f"  ── 判断依据 ──",
+                ] + [f"  ✅ {d}" for d in j['detail']]))
+                detail_text.config(state=tk.DISABLED)
+
+                # 迷你量价图
+                mini_ax.clear()
+                c60 = np.array(closes[-60:]); v60 = np.array(volumes[-60:])
+                x60 = np.arange(len(c60))
+                ax2 = mini_ax.twinx()
+                mini_ax.plot(x60, c60, color='#1565c0', linewidth=1.2, label='价格')
+                ax2.bar(x60, v60, color='#ff9800', alpha=0.35, label='量')
+                ma20_vals = pd.Series(c60).rolling(20, min_periods=1).mean().values
+                mini_ax.plot(x60, ma20_vals, color='#9c27b0', linewidth=0.8, linestyle='--', label='MA20')
+                mini_ax.axhline(y=c60[0], color='gray', linewidth=0.5, linestyle=':', alpha=0.5)
+                mini_ax.set_title(f"{sym_code} · 近60日量价 ({j['label']})", fontsize=10)
+                mini_ax.set_ylabel("价格", fontsize=8); ax2.set_ylabel("量", fontsize=8)
+                mini_ax.grid(True, alpha=0.2)
+                lines1, labels1 = mini_ax.get_legend_handles_labels()
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                mini_ax.legend(lines1 + lines2, labels1 + labels2, fontsize=7, loc='upper left')
+                mini_fig.tight_layout()
+                mini_canvas.draw()
+
+            except Exception as e:
+                verdict_var.set(f"❌ {e}")
+
+        def _draw_macro():
+            data = self._fetch_macro(timeout=5)
+            ax_cpi.clear(); ax_ppi.clear()
+            if data is None:
+                ax_cpi.text(0.5, 0.5, "宏观数据加载中...\n(需要 Tushare Token)",
+                            transform=ax_cpi.transAxes, ha='center', fontsize=11, color='#888')
+                macro_canvas.draw(); return
+
+            # CPI
+            m = data['cpi_months']; y = data['cpi_yoy']
+            ax_cpi.plot(m, y, 'o-', color='#1565c0', linewidth=1.5, markersize=4, label='CPI同比%')
+            ax_cpi.fill_between(range(len(m)), y, alpha=0.15, color='#1565c0')
+            ax_cpi.axhline(y=0, color='gray', linewidth=0.5)
+            for i, (mi, yi) in enumerate(zip(m, y)):
+                if i % 2 == 0:
+                    ax_cpi.annotate(f"{yi:+.1f}%", (mi, yi), textcoords="offset points",
+                                   xytext=(0, 8), ha='center', fontsize=7, color='#1565c0')
+            ax_cpi.set_title(f"CPI 同比 (最新 {m[-1]}: {y[-1]:+.1f}%)", fontsize=10)
+            ax_cpi.set_ylabel("CPI同比 %", fontsize=9)
+            ax_cpi.tick_params(axis='x', rotation=45, labelsize=7)
+            ax_cpi.grid(True, alpha=0.2)
+
+            # PPI
+            m2 = data['ppi_months']; y2 = data['ppi_yoy']
+            if m2:
+                ax_ppi.plot(m2, y2, 's-', color='#c62828', linewidth=1.5, markersize=4, label='PPI同比%')
+                ax_ppi.fill_between(range(len(m2)), y2, alpha=0.15, color='#c62828')
+                ax_ppi.axhline(y=0, color='gray', linewidth=0.5)
+                for i, (mi, yi) in enumerate(zip(m2, y2)):
+                    if i % 2 == 0:
+                        ax_ppi.annotate(f"{yi:+.1f}%", (mi, yi), textcoords="offset points",
+                                       xytext=(0, 8), ha='center', fontsize=7, color='#c62828')
+                ax_ppi.set_title(f"PPI 同比 (最新 {m2[-1]}: {y2[-1]:+.1f}%)", fontsize=10)
+                ax_ppi.set_ylabel("PPI同比 %", fontsize=9)
+                ax_ppi.tick_params(axis='x', rotation=45, labelsize=7)
+                ax_ppi.grid(True, alpha=0.2)
+
+                # ── 底部阶段判断 (CPI+PPI 组合) ──
+                latest_cpi = y[-1] if y else 0
+                latest_ppi = y2[-1] if y2 else 0
+                if latest_cpi < 1 and latest_ppi < 0:
+                    stage = "📉 **通缩压力期** — CPI<1% 且 PPI<0, 典型通缩环境。资产易缩水, 负债刚性, 现金流为王。"
+                    advice = "   → 降杠杆、守现金、勿追高, 通缩中确定性>弹性。"
+                elif latest_cpi > 2 and latest_ppi > 2:
+                    stage = "📈 **通胀温和期** — CPI和PPI均转正上行。优质资产(核心房产/股权)有抗通胀价值。"
+                    advice = "   → 可逐步布局通胀资产, 锁定长期固定利率负债。"
+                elif latest_ppi > 3 and latest_cpi < 2:
+                    stage = "🏭 **生产端复苏, 消费端滞后** — PPI转正但CPI温和。上游资源/周期股相对受益。"
+                    advice = "   → 关注有色/化工等资源类, 消费端需等待居民收入改善信号。"
+                else:
+                    stage = "⚖️ **结构分化期** — CPI/PPI 一正一负或均接近0。无系统性方向, 板块机会大于指数。"
+                    advice = "   → 均衡配置, 防守端(高股息)+ 进攻端(科技成长)搭配。"
+
+                stage_text.config(state=tk.NORMAL)
+                stage_text.delete("1.0", tk.END)
+                stage_text.insert("1.0", f"📊 【当前宏观】 CPI {latest_cpi:+.1f}% | PPI {latest_ppi:+.1f}%\n\n{stage}\n{advice}\n")
+                stage_text.insert(tk.END, "💡 付鹏金句: 「日子过得好, 是资产端有通胀资产在不断增值, 负债端是固定利率负债在不断贬值, 被动的财富增长。」")
+                stage_text.config(state=tk.DISABLED)
+
+            macro_fig.tight_layout()
+            macro_canvas.draw()
+
+        # 刷新按钮 + Enter 触发
+        go_btn = ttk.Button(input_row, text="🔍 分析", command=_go, width=8)
+        go_btn.pack(side=tk.LEFT, padx=(6,0))
+        sym_entry.bind("<Return>", lambda e: _go())
+
+        # 初始加载宏观
+        win.after(100, _draw_macro)
+
+        # 窗口关闭清理
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
+
     def _show_main_trend_dialog(self):
         """💡 主力趋势: K 线主图 + MA/MACD/KDJ/BOLL/RSI/OBV 叠加 + 副图切换 + hover 评分"""
         import traceback as _tb
