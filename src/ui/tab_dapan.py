@@ -60306,6 +60306,120 @@ class DapanMixin:
             if ichi_chikou_var.get() and len(chikou_y) > 0:
                 ax_i.plot(chikou_x, chikou_y, color='#9c27b0', linewidth=0.8,
                           linestyle='--', label='迟行带(26)')
+
+            # ── 新指标计算 (全部内联, 按需绘制) ──
+            # SuperTrend
+            if ichi_supertrend_var.get():
+                period_st = 10; mult_st = 3
+                tr = np.maximum(highs - lows,
+                      np.maximum(np.abs(highs - np.roll(closes, 1)),
+                                 np.abs(lows - np.roll(closes, 1))))
+                tr[0] = highs[0] - lows[0]
+                atr = np.full(n, np.nan)
+                for _i in range(period_st - 1, n):
+                    atr[_i] = np.mean(tr[_i - period_st + 1:_i + 1])
+                hl2 = (highs + lows) / 2.0
+                upper = hl2 + mult_st * atr; lower = hl2 - mult_st * atr
+                for _i in range(period_st, n):
+                    lower[_i] = lower[_i] if (lower[_i] > lower[_i-1] or closes[_i-1] < lower[_i-1]) else lower[_i-1]
+                    upper[_i] = upper[_i] if (upper[_i] < upper[_i-1] or closes[_i-1] > upper[_i-1]) else upper[_i-1]
+                st_dir = np.ones(n, dtype=int); st_line = np.full(n, np.nan); st_dir[0]=1; st_line[0]=lower[0]
+                for _i in range(1, n):
+                    if st_dir[_i-1] == 1:
+                        if closes[_i] <= lower[_i]: st_dir[_i]=-1; st_line[_i]=upper[_i]
+                        else: st_dir[_i]=1; st_line[_i]=lower[_i]
+                    else:
+                        if closes[_i] >= upper[_i]: st_dir[_i]=1; st_line[_i]=lower[_i]
+                        else: st_dir[_i]=-1; st_line[_i]=upper[_i]
+                st_color = ['#d32f2f' if d == 1 else '#388e3c' for d in st_dir]
+                ax_i.scatter(x, st_line, c=st_color, s=2, alpha=0.5, label='SuperTrend', zorder=3)
+
+            # VWAP+σ带 (用 anchors=60 天)
+            if ichi_vwap_band_var.get():
+                typical = (highs + lows + closes) / 3.0
+                anchor = max(0, n - 60)
+                cum_tv = np.cumsum(typical * vols) - (np.cumsum(typical * vols)[anchor-1] if anchor > 0 else 0)
+                cum_v = np.cumsum(vols) - (np.cumsum(vols)[anchor-1] if anchor > 0 else 0)
+                vwap = np.full(n, np.nan); vwap[anchor:] = cum_tv[anchor:] / np.maximum(cum_v[anchor:], 1e-9)
+                dev_sq = np.zeros(n)
+                for _i in range(anchor, n):
+                    if vols[_i] > 0 and not np.isnan(vwap[_i]):
+                        dev_sq[_i] = vols[_i] * (typical[_i] - vwap[_i])**2
+                cum_dev = np.cumsum(dev_sq) - (np.cumsum(dev_sq)[anchor-1] if anchor > 0 else 0)
+                cum_v2 = np.cumsum(vols) - (np.cumsum(vols)[anchor-1] if anchor > 0 else 0)
+                var_vw = np.full(n, np.nan)
+                for _i in range(anchor, n):
+                    denom = cum_v2[_i]
+                    if denom > 0: var_vw[_i] = cum_dev[_i] / denom
+                sigma = np.sqrt(np.maximum(var_vw, 0))
+                ax_i.plot(x, vwap, color='#ff9800', linewidth=0.9, label='VWAP(60)')
+                ax_i.fill_between(x, vwap - sigma, vwap + sigma, color='#ffb74d', alpha=0.08, label='VWAP±1σ')
+                ax_i.fill_between(x, vwap - 2*sigma, vwap + 2*sigma, color='#ff8a65', alpha=0.05, label='VWAP±2σ')
+
+            # TD Sequential (点号 1-13)
+            if ichi_td_var.get():
+                td_count = np.zeros(n, dtype=int); td_color = []
+                for _i in range(4, n):
+                    if closes[_i] > closes[_i-4]: td_count[_i] = td_count[_i-1] + 1 if td_count[_i-1] >= 0 else 1
+                    elif closes[_i] < closes[_i-4]: td_count[_i] = td_count[_i-1] - 1 if td_count[_i-1] <= 0 else -1
+                    else: td_count[_i] = 0
+                for _i in range(4, n):
+                    if td_count[_i] != 0 and abs(td_count[_i]) >= 1:
+                        color_td = '#d32f2f' if td_count[_i] > 0 else '#388e3c'
+                        ax_i.annotate(str(abs(td_count[_i])), (x[_i], lows[_i]),
+                                      textcoords="offset points", xytext=(0, -8),
+                                      ha='center', fontsize=6, color=color_td)
+
+            # Camarilla (最近 anchor=10 根 K 线 H/L/C 算 6 条压力支撑)
+            if ichi_camarilla_var.get() and n >= 10:
+                ah = np.max(highs[-10:]); al = np.min(lows[-10:]); ac = closes[-1]
+                a_range = ah - al
+                s1h = ac + 1.1/12 * a_range; s1l = ac - 1.1/12 * a_range
+                s2h = ac + 1.27/12 * a_range; s2l = ac - 1.27/12 * a_range
+                s3h = ac + 1.61/12 * a_range; s3l = ac - 1.61/12 * a_range
+                for _lv, (_lb, _col, _ls) in enumerate([
+                    (s1h, '#ef6c00', '--'), (s2h, '#e65100', '--'), (s3h, '#bf360c', '--'),
+                    (s1l, '#2e7d32', '--'), (s2l, '#1b5e20', '--'), (s3l, '#0d3d0d', '--'),
+                ]):
+                    ax_i.axhline(y=_lb, color=_col, linewidth=0.5, linestyle=_ls, alpha=0.6)
+                    ax_i.text(n - 1, _lb, f"C{s1h>_lb and '3' or s2h>_lb and '2' or '1'}",
+                              fontsize=6, color=_col, ha='right', va='bottom')
+                ax_i.axhline(y=ac, color='#2196f3', linewidth=0.6, linestyle='-', alpha=0.7, label=f"Camarilla C={ac:.2f}")
+
+            # MA 均线 (5/10/20/60)
+            if ichi_ma_var.get():
+                for _ma_n, _ma_c in [(5, '#ff9800'), (10, '#2196f3'), (20, '#9c27b0'), (60, '#6d4c41')]:
+                    _ma_vals = pd.Series(closes).rolling(_ma_n, min_periods=1).mean().values
+                    ax_i.plot(x, _ma_vals, color=_ma_c, linewidth=0.8, label=f'MA{_ma_n}', alpha=0.7)
+
+            # BOLL 布林带 (20, 2σ)
+            if ichi_boll_var.get():
+                _boll_mid = pd.Series(closes).rolling(20, min_periods=1).mean().values
+                _boll_std = pd.Series(closes).rolling(20, min_periods=1).std().values
+                ax_i.plot(x, _boll_mid, color='#9800ff', linewidth=0.9, label='BOLL中轨(20)')
+                ax_i.plot(x, _boll_mid + 2*_boll_std, color='#9800ff', linewidth=0.5, alpha=0.5, label='BOLL上轨')
+                ax_i.plot(x, _boll_mid - 2*_boll_std, color='#9800ff', linewidth=0.5, alpha=0.5, label='BOLL下轨')
+                ax_i.fill_between(x, _boll_mid - 2*_boll_std, _boll_mid + 2*_boll_std,
+                                  color='#9800ff', alpha=0.06)
+
+            # BIAS 乖离率 (主图画 MA20+bias fill)
+            if ichi_bias_var.get():
+                _bias_ma = pd.Series(closes).rolling(20, min_periods=1).mean().values
+                _bias_val = (closes - _bias_ma) / _bias_ma * 100
+                ax_i.fill_between(x, closes, _bias_ma,
+                                  where=(closes >= _bias_ma),
+                                  color='#d32f2f', alpha=0.06)
+                ax_i.fill_between(x, closes, _bias_ma,
+                                  where=(closes < _bias_ma),
+                                  color='#388e3c', alpha=0.06)
+                # 乖离率数值标注 (最后一天)
+                if len(_bias_val) > 0:
+                    _latest_bias = _bias_val[-1]
+                    _bias_color = '#d32f2f' if _latest_bias > 0 else '#388e3c'
+                    ax_i.text(0.02, 0.95, f"BIAS(20)={_latest_bias:+.2f}%",
+                              transform=ax_i.transAxes, fontsize=8, color=_bias_color,
+                              va='top', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+
             ax_i.set_title(f"{sym_code} · 一目均衡", fontsize=10, fontweight='bold')
             ax_i.set_ylabel("价格", fontsize=9); ax_i.legend(fontsize=7, loc='upper left')
             ax_i.grid(True, alpha=0.15); ax_i.tick_params(labelbottom=False)
@@ -60371,18 +60485,35 @@ class DapanMixin:
                     # 推断 ts_code
                     ts_code = sym_code
                     if len(sym_code) == 8 and sym_code[:2] in ('sh','sz','bj'):
-                        market = sym_code[:2]
-                        pure = sym_code[2:]
+                        market = sym_code[:2]; pure = sym_code[2:]
                         ts_code = f"{pure}.SH" if market == 'sh' else (f"{pure}.SZ" if market == 'sz' else f"{pure}.BJ")
                     # 指数无财务数据
-                    if sym_code.startswith(('sh000','sz399')) or (len(sym_code)==8 and sym_code[2:5]=='000'):
+                    is_index = sym_code.startswith(('sh000','sz399')) or (len(sym_code)==8 and sym_code[2:5]=='000')
+                    if is_index:
                         result_q.put({'error': f"{sym_code} 是指数, 无个股财务数据"})
                         return
-                    df = pro.fina_indicator(ts_code=ts_code, fields='ts_code,end_date,roe,dt_net_profit_yoy,or_yoy,grossprofit_margin,debt_to_assets')
-                    if df is None or len(df) == 0:
-                        result_q.put({'error': f"{sym_code} 财务数据为空"})
-                        return
-                    result_q.put({'ok': True, 'df': df})
+                    out = {}
+                    # 1) fina_indicator (扩充到 10+ 字段)
+                    fi = pro.fina_indicator(ts_code=ts_code, fields='ts_code,end_date,roe,roe_waa,roa,dt_net_profit_yoy,or_yoy,grossprofit_margin,debt_to_assets,eps,basic_eps,roe_diluted,np_bps,rev_pstr,inv_turn,ar_turn,fcff')
+                    if fi is not None and len(fi) > 0:
+                        out['fi'] = fi
+                    # 2) daily_basic (最新一日市值/PE/PB/PS/股息率/换手率)
+                    try:
+                        db = pro.daily_basic(ts_code=ts_code, fields='ts_code,trade_date,turnover_rate,turnover_rate_f,volume_ratio,pe,pb,ps,dv_ratio,total_mv,circ_mv')
+                        if db is not None and len(db) > 0:
+                            db = db.sort_values('trade_date').iloc[-1:]  # 取最新一天
+                            out['db'] = db.iloc[0].to_dict()
+                    except Exception: pass
+                    # 3) income TTM (最近 4 季度营收和净利)
+                    try:
+                        inc = pro.income(ts_code=ts_code, fields='ts_code,end_date,revenue,n_income,oper_profit')
+                        if inc is not None and len(inc) >= 4:
+                            inc = inc.sort_values('end_date')
+                            last4 = inc.tail(4)
+                            out['revenue_ttm'] = float(last4['revenue'].sum())
+                            out['n_income_ttm'] = float(last4['n_income'].sum())
+                    except Exception: pass
+                    result_q.put(out if len(out) > 0 else {'error': '财务数据为空'})
                 except Exception as e:
                     result_q.put({'error': str(e)})
 
@@ -60398,32 +60529,63 @@ class DapanMixin:
                         fin_text.insert("1.0", f"❌ {r['error']}")
                         fin_text.config(state=tk.DISABLED)
                         fin_canvas.draw(); return
-                    df = r['df']
-                    df = df.sort_values('end_date').reset_index(drop=True)
-                    periods = df['end_date'].astype(str).tolist()
-                    # 表格文本
-                    latest = df.iloc[-1]
-                    lines = [f"📊 {sym_code} 最新季度 {latest.get('end_date','')[:7]} 财务指标:"]
-                    lines.append(f"  ROE(加权): {latest.get('roe', np.nan):.2f}%" if pd.notna(latest.get('roe')) else "  ROE: -")
-                    lines.append(f"  净利润同比: {latest.get('dt_net_profit_yoy', np.nan):+.2f}%" if pd.notna(latest.get('dt_net_profit_yoy')) else "  净利增长: -")
-                    lines.append(f"  营收同比: {latest.get('or_yoy', np.nan):+.2f}%" if pd.notna(latest.get('or_yoy')) else "  营收增长: -")
-                    lines.append(f"  毛利率: {latest.get('grossprofit_margin', np.nan):.2f}%" if pd.notna(latest.get('grossprofit_margin')) else "  毛利率: -")
-                    lines.append(f"  资产负债率: {latest.get('debt_to_assets', np.nan):.2f}%" if pd.notna(latest.get('debt_to_assets')) else "  负债率: -")
+
+                    lines = [f"📊 {sym_code} · 财务指标全景"]
+                    # ── daily_basic (估值类, 1-6) ──
+                    if 'db' in r:
+                        b = r['db']
+                        lines.append("\n── 估值指标 (daily_basic) ──")
+                        lines.append(f"  总市值: {float(b.get('total_mv', np.nan))/1e4:.2f}亿" if pd.notna(b.get('total_mv')) else "  总市值: -")
+                        lines.append(f"  流通市值: {float(b.get('circ_mv', np.nan))/1e4:.2f}亿" if pd.notna(b.get('circ_mv')) else "  流通市值: -")
+                        lines.append(f"  PE(TTM): {float(b.get('pe', np.nan)):.2f}" if pd.notna(b.get('pe')) else "  PE: -")
+                        lines.append(f"  PB: {float(b.get('pb', np.nan)):.2f}" if pd.notna(b.get('pb')) else "  PB: -")
+                        lines.append(f"  PS: {float(b.get('ps', np.nan)):.2f}" if pd.notna(b.get('ps')) else "  PS: -")
+                        lines.append(f"  股息率: {float(b.get('dv_ratio', np.nan)):.2f}%" if pd.notna(b.get('dv_ratio')) else "  股息率: -")
+                        lines.append(f"  换手率: {float(b.get('turnover_rate', np.nan)):.2f}%" if pd.notna(b.get('turnover_rate')) else "  换手率: -")
+                        lines.append(f"  量比: {float(b.get('volume_ratio', np.nan)):.2f}" if pd.notna(b.get('volume_ratio')) else "  量比: -")
+
+                    # ── fina_indicator (盈利能力类, 7-14) ──
+                    if 'fi' in r:
+                        df = r['fi'].sort_values('end_date').reset_index(drop=True)
+                        latest = df.iloc[-1]
+                        lines.append(f"\n── 盈利能力 ({latest.get('end_date','')[:7]}) ──")
+                        lines.append(f"  ROE(加权): {float(latest.get('roe_waa', latest.get('roe', np.nan))):.2f}%" if pd.notna(latest.get('roe')) else "  ROE: -")
+                        lines.append(f"  ROA: {float(latest.get('roa', np.nan)):.2f}%" if pd.notna(latest.get('roa')) else "  ROA: -")
+                        lines.append(f"  EPS(基本): {float(latest.get('basic_eps', latest.get('eps', np.nan))):.2f}" if pd.notna(latest.get('basic_eps')) else "  EPS: -")
+                        lines.append(f"  净利润同比: {float(latest.get('dt_net_profit_yoy', np.nan)):+.2f}%" if pd.notna(latest.get('dt_net_profit_yoy')) else "  净利增长: -")
+                        lines.append(f"  营收同比: {float(latest.get('or_yoy', np.nan)):+.2f}%" if pd.notna(latest.get('or_yoy')) else "  营收增长: -")
+                        lines.append(f"  毛利率: {float(latest.get('grossprofit_margin', np.nan)):.2f}%" if pd.notna(latest.get('grossprofit_margin')) else "  毛利率: -")
+                        lines.append(f"  资产负债率: {float(latest.get('debt_to_assets', np.nan)):.2f}%" if pd.notna(latest.get('debt_to_assets')) else "  负债率: -")
+                        lines.append(f"  存货周转率: {float(latest.get('inv_turn', np.nan)):.2f}" if pd.notna(latest.get('inv_turn')) else "  存货周转: -")
+                        lines.append(f"  应收账款周转: {float(latest.get('ar_turn', np.nan)):.2f}" if pd.notna(latest.get('ar_turn')) else "  应收周转: -")
+                        # TTM 补充
+                        if 'revenue_ttm' in r:
+                            lines.append(f"\n── TTM (最近 4 季度合计) ──")
+                            lines.append(f"  营收TTM: {r['revenue_ttm']/1e8:.2f}亿")
+                        if 'n_income_ttm' in r:
+                            lines.append(f"  净利TTM: {r['n_income_ttm']/1e8:.2f}亿")
+
                     fin_text.insert("1.0", "\n".join(lines))
                     fin_text.config(state=tk.DISABLED)
-                    # 趋势图
-                    y_roe = df['roe'].astype(float).values
-                    y_or = df['or_yoy'].astype(float).values
+
+                    # ── 趋势图 ──
                     ax_fin1.clear(); ax_fin2.clear()
-                    if y_roe[-20:].shape[0] > 0:
-                        ax_fin1.plot(periods[-20:], y_roe[-20:], 'o-', color='#1565c0', linewidth=1.5, label='ROE(%)')
-                        ax_fin1.set_title('ROE 趋势', fontsize=10); ax_fin1.grid(True, alpha=0.15)
-                        ax_fin1.tick_params(axis='x', rotation=45, labelsize=7)
-                    if y_or[-20:].shape[0] > 0:
-                        ax_fin2.bar(periods[-20:], y_or[-20:], color=['#d32f2f' if v >= 0 else '#388e3c' for v in y_or[-20:]])
-                        ax_fin2.axhline(y=0, color='gray', linewidth=0.5)
-                        ax_fin2.set_title('营收同比增长(%)', fontsize=10); ax_fin2.grid(True, alpha=0.15)
-                        ax_fin2.tick_params(axis='x', rotation=45, labelsize=7)
+                    if 'fi' in r:
+                        df = r['fi'].sort_values('end_date').reset_index(drop=True)
+                        periods = df['end_date'].astype(str).tolist()
+                        y_roe = df['roe'].astype(float).values
+                        y_or = df['or_yoy'].astype(float).values
+                        if len(y_roe) > 0:
+                            ax_fin1.plot(periods, y_roe, 'o-', color='#1565c0', linewidth=1.2, label='ROE(%)')
+                            ax_fin1.axhline(y=0, color='gray', linewidth=0.5)
+                            ax_fin1.set_title('ROE 趋势', fontsize=10); ax_fin1.grid(True, alpha=0.15)
+                            ax_fin1.tick_params(axis='x', rotation=45, labelsize=7)
+                        if len(y_or) > 0:
+                            colors_bar = ['#d32f2f' if v >= 0 else '#388e3c' for v in y_or]
+                            ax_fin2.bar(periods, y_or, color=colors_bar)
+                            ax_fin2.axhline(y=0, color='gray', linewidth=0.5)
+                            ax_fin2.set_title('营收同比增长(%)', fontsize=10); ax_fin2.grid(True, alpha=0.15)
+                            ax_fin2.tick_params(axis='x', rotation=45, labelsize=7)
                     fin_fig.tight_layout(); fin_canvas.draw()
                 elif t.is_alive():
                     win.after(300, _poll)
@@ -60472,6 +60634,26 @@ class DapanMixin:
                             ret_5 = (closes[-1] / closes[-6] - 1) * 100 if len(closes) >= 6 else 0
                             out['stock'] = {'vr': vr_today, 'vma5': vma5, 'vma20': vma20,
                                             'ret_5d': ret_5, 'vols': vols[-60:], 'closes': closes[-60:]}
+                    # 4) 资讯 DB (stock_analysis.db news_info 表)
+                    try:
+                        import sqlite3, os as _os
+                        _db = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                                              "..", "data", "stock_analysis.db"))
+                        if _os.path.exists(_db):
+                            conn = sqlite3.connect(_db)
+                            cur = conn.cursor()
+                            # 提取纯 6 位代码
+                            pure_code = sym_code[2:] if len(sym_code) == 8 else sym_code
+                            # 搜 news_info
+                            cur.execute(
+                                "SELECT content, created_at FROM news_info WHERE content LIKE ? ORDER BY created_at DESC LIMIT 50",
+                                (f'%{pure_code}%',))
+                            rows = cur.fetchall()
+                            conn.close()
+                            if rows:
+                                out['news_mentions'] = len(rows)
+                                out['news_top'] = rows[:5]  # 最近 5 条
+                    except Exception: pass
                     result_q.put(out)
                 except Exception as e:
                     result_q.put({'error': str(e)})
@@ -60499,6 +60681,14 @@ class DapanMixin:
                         s = r['stock']
                         lines.append(f"  📊 量比(20日): {s['vr']:.2f}  5日涨幅: {s['ret_5d']:+.1f}%")
                         lines.append(f"    解读: {'放量上涨' if s['vr']>1.2 and s['ret_5d']>0 else '缩量调整' if s['vr']<0.8 and s['ret_5d']<0 else '量能正常'}")
+                    # 资讯 DB (news_info)
+                    if 'news_mentions' in r:
+                        lines.append(f"  📰 资讯提及(DB): {r['news_mentions']} 条")
+                        if 'news_top' in r:
+                            lines.append("  最近资讯:")
+                            for _content, _date in r['news_top'][:3]:
+                                _short = (_content or '')[:60].replace('\n', ' ').strip()
+                                lines.append(f"    [{_date or '-'}] {_short}{'...' if len(_content or '') > 60 else ''}")
                     sent_text.insert("1.0", "\n".join(lines))
                     sent_text.config(state=tk.DISABLED)
                     # ── 画图 ──
@@ -60634,20 +60824,34 @@ class DapanMixin:
 
         # Tab 3: 🌈 一目均衡 (3 行: 主图 + VW-MACD + 成交量) + 指标 toggle 栏
         tab_ichi = ttk.Frame(right_nb); right_nb.add(tab_ichi, text="🌈 一目均衡")
-        # 指标 toggle 栏
+        # 指标 toggle 栏 (13 个)
         ichi_toggle_row = ttk.Frame(tab_ichi); ichi_toggle_row.pack(fill=tk.X, padx=4, pady=(4,0))
         ichi_cloud_var = tk.BooleanVar(value=True)
         ichi_tenkan_var = tk.BooleanVar(value=True)
         ichi_kijun_var = tk.BooleanVar(value=True)
         ichi_chikou_var = tk.BooleanVar(value=True)
+        ichi_supertrend_var = tk.BooleanVar(value=False)
+        ichi_vwap_band_var = tk.BooleanVar(value=False)
+        ichi_td_var = tk.BooleanVar(value=False)
+        ichi_camarilla_var = tk.BooleanVar(value=False)
+        ichi_ma_var = tk.BooleanVar(value=False)
+        ichi_boll_var = tk.BooleanVar(value=False)
+        ichi_bias_var = tk.BooleanVar(value=False)
         ichi_vwmacd_var = tk.BooleanVar(value=True)
         ichi_volma_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(ichi_toggle_row, text="☁️云", variable=ichi_cloud_var).pack(side=tk.LEFT)
-        ttk.Checkbutton(ichi_toggle_row, text="转换线", variable=ichi_tenkan_var).pack(side=tk.LEFT, padx=(6,0))
-        ttk.Checkbutton(ichi_toggle_row, text="基准线", variable=ichi_kijun_var).pack(side=tk.LEFT, padx=(6,0))
-        ttk.Checkbutton(ichi_toggle_row, text="迟行带", variable=ichi_chikou_var).pack(side=tk.LEFT, padx=(6,0))
-        ttk.Checkbutton(ichi_toggle_row, text="VW-MACD", variable=ichi_vwmacd_var).pack(side=tk.LEFT, padx=(12,0))
-        ttk.Checkbutton(ichi_toggle_row, text="量MA5/10", variable=ichi_volma_var).pack(side=tk.LEFT, padx=(6,0))
+        ttk.Checkbutton(ichi_toggle_row, text="转换线", variable=ichi_tenkan_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="基准线", variable=ichi_kijun_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="迟行带", variable=ichi_chikou_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="SuperTrend", variable=ichi_supertrend_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="VWAP带", variable=ichi_vwap_band_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="TD序列", variable=ichi_td_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="Camarilla", variable=ichi_camarilla_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="MA", variable=ichi_ma_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="BOLL", variable=ichi_boll_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="BIAS", variable=ichi_bias_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="VW-MACD", variable=ichi_vwmacd_var).pack(side=tk.LEFT, padx=(10,0))
+        ttk.Checkbutton(ichi_toggle_row, text="量MA", variable=ichi_volma_var).pack(side=tk.LEFT, padx=(4,0))
 
         ichi_fig = Figure(figsize=(7, 7.5), facecolor="#FAFAFA")
         ax_i = ichi_fig.add_subplot(311)
@@ -60665,7 +60869,9 @@ class DapanMixin:
                 try: _draw_ichimoku_tab(_ichi_df_cache['df'], _ichi_df_cache['sym'])
                 except Exception: pass
         for _v in (ichi_cloud_var, ichi_tenkan_var, ichi_kijun_var,
-                   ichi_chikou_var, ichi_vwmacd_var, ichi_volma_var):
+                   ichi_chikou_var, ichi_supertrend_var, ichi_vwap_band_var,
+                   ichi_td_var, ichi_camarilla_var, ichi_ma_var,
+                   ichi_boll_var, ichi_bias_var, ichi_vwmacd_var, ichi_volma_var):
             _v.trace_add('write', _ichi_redraw_on_toggle)
 
         # Tab 4: 📊 财务指标

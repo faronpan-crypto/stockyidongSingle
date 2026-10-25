@@ -692,11 +692,14 @@ def build_fund_holdings_tab(parent, root=None):
     nb = ttk.Notebook(_body_frame_ref[0])
     nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
-    # ── Tab1: 基金卡片 ──
+    # ── Tab1: 基金卡片 (左右 Panedwindow) ──
     card_frame = ttk.Frame(nb); nb.add(card_frame, text="🏦 基金持仓卡片")
-    # 可滚动
-    card_canvas = tk.Canvas(card_frame, bg=_BG_DEEP, highlightthickness=0)
-    card_vsb = ttk.Scrollbar(card_frame, orient="vertical", command=card_canvas.yview)
+    card_split = ttk.Panedwindow(card_frame, orient=tk.HORIZONTAL)
+    card_split.pack(fill=tk.BOTH, expand=True)
+    # 左侧: 滚动卡片
+    card_left = ttk.Frame(card_split); card_split.add(card_left, weight=3)
+    card_canvas = tk.Canvas(card_left, bg=_BG_DEEP, highlightthickness=0)
+    card_vsb = ttk.Scrollbar(card_left, orient="vertical", command=card_canvas.yview)
     card_inner = ttk.Frame(card_canvas, style="Dark.TFrame")
     card_canvas.configure(yscrollcommand=card_vsb.set)
     card_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -704,6 +707,425 @@ def build_fund_holdings_tab(parent, root=None):
     card_canvas.create_window((0, 0), window=card_inner, anchor="nw")
     card_inner.bind("<Configure>", lambda e: card_canvas.configure(scrollregion=card_canvas.bbox("all")))
     card_canvas.bind_all("<MouseWheel>", lambda e: card_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+    # 右侧: 4 Tab 个股深度面板
+    card_right = ttk.Frame(card_split); card_split.add(card_right, weight=2)
+    right_nb = ttk.Notebook(card_right)
+    right_nb.pack(fill=tk.BOTH, expand=True)
+    # 子图占位
+    _stock_cache = {'sina': '', 'name': '', 'df': None}
+    _click_timer = {'id': None}
+
+    def _on_stock_click(sina, name):
+        """单击 → 更新右侧面板 (debounce 250ms 避免干扰双击)."""
+        print(f"[FUND_CLICK] on_stock_click called: sina={sina!r} name={name!r}")
+        if _click_timer['id'] is not None:
+            try: root.after_cancel(_click_timer['id'])
+            except: pass
+        _click_timer['id'] = root.after(250, lambda: _update_right_panel(sina, name))
+
+    # ── 右侧 4 Tab ──
+    try:
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        import numpy as np, pandas as pd
+        import matplotlib.pyplot as _plt; _plt.rcParams['font.sans-serif'] = ['PingFang SC','Heiti TC','Arial Unicode MS','DejaVu Sans']
+        _plt.rcParams['axes.unicode_minus'] = False
+    except Exception: pass
+
+    # Tab A: 📈 日K周期
+    tab_rk = ttk.Frame(right_nb); right_nb.add(tab_rk, text="📈 日K")
+    rk_fig = Figure(figsize=(7, 6), facecolor=_BG_PANEL)
+    rk_ax1 = rk_fig.add_subplot(211); rk_ax2 = rk_fig.add_subplot(212, sharex=rk_ax1)
+    rk_ax1.set_facecolor(_BG_PANEL); rk_ax2.set_facecolor(_BG_PANEL)
+    rk_canvas = FigureCanvasTkAgg(rk_fig, master=tab_rk); rk_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    NavigationToolbar2Tk(rk_canvas, tab_rk, pack_toolbar=False).update()
+
+    # Tab B: 🌈 一目均衡 (3 行 + 13 toggle, 参照通缩通胀弹窗完整版)
+    tab_ri = ttk.Frame(right_nb); right_nb.add(tab_ri, text="🌈 一目均衡")
+    # toggle 栏
+    ri_toggle = ttk.Frame(tab_ri); ri_toggle.pack(fill=tk.X, padx=2, pady=(2,0))
+    rc = '#AAAAAA'  # 暗色 toggle 文字色
+    ri_cloud_var = tk.BooleanVar(value=True); ri_tenkan_var = tk.BooleanVar(value=True)
+    ri_kijun_var = tk.BooleanVar(value=True); ri_chikou_var = tk.BooleanVar(value=True)
+    ri_supertrend_var = tk.BooleanVar(value=False); ri_vwap_band_var = tk.BooleanVar(value=False)
+    ri_td_var = tk.BooleanVar(value=False); ri_camarilla_var = tk.BooleanVar(value=False)
+    ri_ma_var = tk.BooleanVar(value=False); ri_boll_var = tk.BooleanVar(value=False)
+    ri_bias_var = tk.BooleanVar(value=False); ri_vwmacd_var = tk.BooleanVar(value=True)
+    ri_volma_var = tk.BooleanVar(value=True)
+    def _mkcb(parent, txt, var):
+        cb = tk.Checkbutton(parent, text=txt, variable=var, fg=rc, bg=_BG_PANEL,
+                            activebackground=_BG_PANEL, activeforeground=rc,
+                            selectcolor=_BG_DEEP, font=("Menlo", 8))
+        return cb
+    for txt, v in [("☁️云", ri_cloud_var), ("转换", ri_tenkan_var), ("基准", ri_kijun_var),
+                   ("迟行", ri_chikou_var), ("SuperTrend", ri_supertrend_var),
+                   ("VWAP带", ri_vwap_band_var), ("TD", ri_td_var),
+                   ("Camari", ri_camarilla_var), ("MA", ri_ma_var), ("BOLL", ri_boll_var),
+                   ("BIAS", ri_bias_var), ("VW-MACD", ri_vwmacd_var), ("量MA", ri_volma_var)]:
+        _mkcb(ri_toggle, txt, v).pack(side=tk.LEFT, padx=1)
+    # 3 行 subplots: 主图 + VW-MACD + 成交量
+    ri_fig = Figure(figsize=(7, 6), facecolor=_BG_PANEL)
+    ri_ax1 = ri_fig.add_subplot(311); ri_ax2 = ri_fig.add_subplot(312, sharex=ri_ax1)
+    ri_ax3 = ri_fig.add_subplot(313, sharex=ri_ax1)
+    for ax in (ri_ax1, ri_ax2, ri_ax3): ax.set_facecolor(_BG_PANEL)
+    ri_canvas = FigureCanvasTkAgg(ri_fig, master=tab_ri); ri_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    NavigationToolbar2Tk(ri_canvas, tab_ri, pack_toolbar=False).update()
+    # cache + trace toggle 自动重画
+    _ri_cache = {'df': None, 'sym': '', 'name': ''}
+    def _ri_redraw_on_toggle(*_):
+        if _ri_cache['df'] is not None:
+            try: _draw_ri_tab(_ri_cache['sym'], _ri_cache['name'], _ri_cache['df'])
+            except Exception: pass
+    for _v in (ri_cloud_var, ri_tenkan_var, ri_kijun_var, ri_chikou_var,
+               ri_supertrend_var, ri_vwap_band_var, ri_td_var, ri_camarilla_var,
+               ri_ma_var, ri_boll_var, ri_bias_var, ri_vwmacd_var, ri_volma_var):
+        _v.trace_add('write', _ri_redraw_on_toggle)
+
+    # Tab C: 📊 财务
+    tab_rf = ttk.Frame(right_nb); right_nb.add(tab_rf, text="📊 财务")
+    rf_text = tk.Text(tab_rf, height=14, font=("Menlo", 9), wrap=tk.WORD, bg=_BG_PANEL, fg=_FG_TEXT, insertbackground=_FG_TEXT, bd=0)
+    rf_text.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+    # Tab D: 😤 情绪
+    tab_rs = ttk.Frame(right_nb); right_nb.add(tab_rs, text="😤 情绪")
+    rs_text = tk.Text(tab_rs, height=14, font=("Menlo", 9), wrap=tk.WORD, bg=_BG_PANEL, fg=_FG_TEXT, insertbackground=_FG_TEXT, bd=0)
+    rs_text.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+    def _update_right_panel(sina, name):
+        """单击持仓股 → 后台线程拉 K 线, 不阻塞主线程."""
+        _stock_cache['sina'] = sina; _stock_cache['name'] = name
+        if not sina: return
+        # 先画占位 (清空图 + 显示加载中)
+        _draw_rk_tab(sina, name, None)
+        _draw_ri_tab(sina, name, None)
+        _draw_rf_tab(sina, name)   # 启动异步财务
+        _draw_rs_tab(sina, name, None)  # 启动异步情绪
+        # 后台线程拉新浪 K 线
+        def _w():
+            import requests, json as _j
+            try:
+                url = f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={sina}&scale=240&ma=no&datalen=120"
+                headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://finance.sina.com.cn/'}
+                r = requests.get(url, headers=headers, timeout=8)
+                if r.status_code == 200 and r.text.strip():
+                    df = _j.loads(r.text)
+                else: df = None
+            except Exception: df = None
+            _stock_cache['df'] = df
+            def _apply():
+                _draw_rk_tab(sina, name, df)
+                _draw_ri_tab(sina, name, df)
+                _draw_rs_tab(sina, name, df)  # 量比需要 df
+            root.after(0, _apply)
+        threading.Thread(target=_w, daemon=True).start()
+
+    def _draw_rk_tab(sina, name, df):
+        rk_ax1.clear(); rk_ax2.clear()
+        if not df:
+            rk_ax1.text(0.5, 0.5, f"加载中 {sina}...", transform=rk_ax1.transAxes, ha='center', color=_FG_DIM)
+            rk_canvas.draw(); return
+        if isinstance(df, list):
+            opens = np.array([float(d.get('open', 0)) for d in df])
+            highs = np.array([float(d.get('high', 0)) for d in df])
+            lows  = np.array([float(d.get('low', 0)) for d in df])
+            closes = np.array([float(d.get('close', 0)) for d in df])
+            vols  = np.array([float(d.get('volume', d.get('vol', 0))) for d in df])
+        else:
+            opens = df['open'].astype(float).values; highs = df['high'].astype(float).values
+            lows  = df['low'].astype(float).values; closes = df['close'].astype(float).values
+            vols  = df['volume'].astype(float).values
+        n = len(closes); x = np.arange(n)
+        # MA
+        for ma_n, c in [(5, _FG_BLUE), (10, _FG_CYAN), (20, _FG_GOLD), (60, _FG_DIM)]:
+            ma_v = pd.Series(closes).rolling(ma_n, min_periods=1).mean().values
+            rk_ax1.plot(x, ma_v, color=c, linewidth=0.8, alpha=0.8, label=f'MA{ma_n}')
+        # 蜡烛 A股红涨绿跌
+        for i in range(n):
+            rk_ax1.vlines(x[i], lows[i], highs[i],
+                          colors=_FG_RED if closes[i] >= opens[i] else _FG_GREEN, linewidth=0.6)
+            body_lo = min(opens[i], closes[i]); body_hi = max(opens[i], closes[i])
+            rk_ax1.bar(x[i], max(body_hi - body_lo, 0.001), bottom=body_lo, width=0.6,
+                       color=_FG_RED if closes[i] >= opens[i] else _FG_GREEN)
+        rk_ax1.set_title(f"{name}({sina}) · 日K", color=_FG_TEXT, fontsize=10)
+        rk_ax1.tick_params(colors=_FG_DIM); rk_ax1.legend(fontsize=7, loc='upper left', labelcolor=_FG_TEXT)
+        rk_ax1.grid(True, alpha=0.15, color=_FG_DIM)
+        # 成交量
+        cv = [_FG_RED if closes[i] >= opens[i] else _FG_GREEN for i in range(n)]
+        rk_ax2.bar(x, vols, color=cv, width=0.6, alpha=0.7)
+        rk_ax2.tick_params(colors=_FG_DIM); rk_ax2.grid(True, alpha=0.15, color=_FG_DIM)
+        rk_fig.tight_layout(); rk_canvas.draw()
+
+    def _draw_ri_tab(sina, name, df):
+        """🌈 完整版一目均衡: 3 行 (主图 + VW-MACD + 成交量) + 13 toggle."""
+        _ri_cache['df'] = df; _ri_cache['sym'] = sina; _ri_cache['name'] = name
+        ri_ax1.clear(); ri_ax2.clear(); ri_ax3.clear()
+        if not df:
+            ri_ax1.text(0.5, 0.5, "加载中...", transform=ri_ax1.transAxes, ha='center', color=_FG_DIM)
+            ri_canvas.draw(); return
+        if isinstance(df, list):
+            highs = np.array([float(d.get('high', 0)) for d in df])
+            lows  = np.array([float(d.get('low', 0)) for d in df])
+            closes = np.array([float(d.get('close', 0)) for d in df])
+            vols  = np.array([float(d.get('volume', d.get('vol', 0))) for d in df])
+        else:
+            highs = df['high'].astype(float).values; lows = df['low'].astype(float).values
+            closes = df['close'].astype(float).values; vols = df['volume'].astype(float).values
+        n = len(closes); x = np.arange(n)
+        def _philo(h, l, p):
+            oh = np.full(len(h), np.nan); ol = np.full(len(l), np.nan)
+            for i in range(len(h)):
+                s = max(0, i-p+1); oh[i]=np.max(h[s:i+1]); ol[i]=np.min(l[s:i+1])
+            return (oh+ol)/2
+        tenkan = _philo(highs, lows, 9); kijun = _philo(highs, lows, 26)
+        senkou_a = (tenkan + kijun) / 2; senkou_b = _philo(highs, lows, 52)
+
+        # ── 云 ──
+        if ri_cloud_var.get():
+            sa_p = np.concatenate([senkou_a, [senkou_a[-1]]*26])
+            sb_p = np.concatenate([senkou_b, [senkou_b[-1]]*26])
+            ri_ax1.fill_between(x, sa_p[:n], sb_p[:n], where=(sb_p[:n] >= sa_p[:n]), color='#26a69a', alpha=0.2, label='绿云(看跌)')
+            ri_ax1.fill_between(x, sa_p[:n], sb_p[:n], where=(sb_p[:n] < sa_p[:n]), color='#ef5350', alpha=0.2, label='红云(看涨)')
+        if ri_tenkan_var.get(): ri_ax1.plot(x, tenkan, color=_FG_GOLD, linewidth=0.9, label='转换线(9)')
+        if ri_kijun_var.get(): ri_ax1.plot(x, kijun, color=_FG_BLUE, linewidth=1.0, label='基准线(26)')
+        ri_ax1.plot(x, closes, color=_FG_TEXT, linewidth=1.0, label='收盘价', zorder=5)
+        if ri_chikou_var.get() and n > 26:
+            ri_ax1.plot(x[:-26]+26, closes[:-26], color='#ba68c8', linewidth=0.7, linestyle='--', label='迟行带(26)')
+
+        # ── SuperTrend ──
+        if ri_supertrend_var.get():
+            tr = np.maximum(highs-lows, np.maximum(np.abs(highs-np.roll(closes,1)), np.abs(lows-np.roll(closes,1))))
+            tr[0]=highs[0]-lows[0]; atr=np.full(n,np.nan)
+            for _i in range(9,n): atr[_i]=np.mean(tr[_i-9:_i+1])
+            hl2=(highs+lows)/2.; up=hl2+3*atr; lo=hl2-3*atr
+            for _i in range(10,n):
+                lo[_i]=lo[_i] if (lo[_i]>lo[_i-1] or closes[_i-1]<lo[_i-1]) else lo[_i-1]
+                up[_i]=up[_i] if (up[_i]<up[_i-1] or closes[_i-1]>up[_i-1]) else up[_i-1]
+            sd=np.ones(n,dtype=int); sl=np.full(n,np.nan); sd[0]=1; sl[0]=lo[0]
+            for _i in range(1,n):
+                if sd[_i-1]==1:
+                    if closes[_i]<=lo[_i]: sd[_i]=-1; sl[_i]=up[_i]
+                    else: sd[_i]=1; sl[_i]=lo[_i]
+                else:
+                    if closes[_i]>=up[_i]: sd[_i]=1; sl[_i]=lo[_i]
+                    else: sd[_i]=-1; sl[_i]=up[_i]
+            ri_ax1.scatter(x, sl, c=[_FG_RED if d==1 else _FG_GREEN for d in sd], s=2, alpha=0.6, label='SuperTrend', zorder=3)
+
+        # ── VWAP+σ带 ──
+        if ri_vwap_band_var.get():
+            typ=(highs+lows+closes)/3.; anchor=max(0,n-60)
+            ct=np.cumsum(typ*vols)-(np.cumsum(typ*vols)[anchor-1] if anchor>0 else 0)
+            cv_=np.cumsum(vols)-(np.cumsum(vols)[anchor-1] if anchor>0 else 0)
+            vwap=np.full(n,np.nan); vwap[anchor:]=ct[anchor:]/np.maximum(cv_[anchor:],1e-9)
+            ds=np.zeros(n)
+            for _i in range(anchor,n):
+                if vols[_i]>0 and not np.isnan(vwap[_i]): ds[_i]=vols[_i]*(typ[_i]-vwap[_i])**2
+            cd=np.cumsum(ds)-(np.cumsum(ds)[anchor-1] if anchor>0 else 0)
+            cv2=np.cumsum(vols)-(np.cumsum(vols)[anchor-1] if anchor>0 else 0)
+            varv=np.full(n,np.nan)
+            for _i in range(anchor,n):
+                if cv2[_i]>0: varv[_i]=cd[_i]/cv2[_i]
+            sig=np.sqrt(np.maximum(varv,0))
+            ri_ax1.plot(x,vwap,color='#ff9800',linewidth=0.9,label='VWAP(60)')
+            ri_ax1.fill_between(x,vwap-sig,vwap+sig,color='#ffb74d',alpha=0.08,label='VWAP±1σ')
+            ri_ax1.fill_between(x,vwap-2*sig,vwap+2*sig,color='#ff8a65',alpha=0.05,label='VWAP±2σ')
+
+        # ── TD Sequential ──
+        if ri_td_var.get():
+            td=np.zeros(n,dtype=int)
+            for _i in range(4,n):
+                if closes[_i]>closes[_i-4]: td[_i]=td[_i-1]+1 if td[_i-1]>=0 else 1
+                elif closes[_i]<closes[_i-4]: td[_i]=td[_i-1]-1 if td[_i-1]<=0 else -1
+                else: td[_i]=0
+            for _i in range(4,n):
+                if td[_i]!=0 and abs(td[_i])>=1:
+                    ri_ax1.annotate(str(abs(td[_i])),(x[_i],lows[_i]),textcoords="offset points",xytext=(0,-8),ha='center',fontsize=6,color=_FG_RED if td[_i]>0 else _FG_GREEN)
+
+        # ── Camarilla ──
+        if ri_camarilla_var.get() and n>=10:
+            ah=np.max(highs[-10:]); al=np.min(lows[-10:]); ac=closes[-1]; rg=ah-al
+            s1h=ac+1.1/12*rg; s2h=ac+1.27/12*rg; s3h=ac+1.61/12*rg
+            s1l=ac-1.1/12*rg; s2l=ac-1.27/12*rg; s3l=ac-1.61/12*rg
+            for lb,col,ls in [(s1h,'#ef6c00','--'),(s2h,'#e65100','--'),(s3h,'#bf360c','--'),(s1l,'#2e7d32','--'),(s2l,'#1b5e20','--'),(s3l,'#0d3d0d','--')]:
+                ri_ax1.axhline(y=lb,color=col,linewidth=0.5,linestyle=ls,alpha=0.6)
+            ri_ax1.axhline(y=ac,color=_FG_BLUE,linewidth=0.6,alpha=0.7,label=f'Camari C={ac:.2f}')
+
+        # ── MA ──
+        if ri_ma_var.get():
+            for mn,mc in [(5,_FG_BLUE),(10,_FG_CYAN),(20,_FG_GOLD),(60,_FG_DIM)]:
+                ri_ax1.plot(x,pd.Series(closes).rolling(mn,min_periods=1).mean().values,color=mc,linewidth=0.8,alpha=0.7,label=f'MA{mn}')
+
+        # ── BOLL ──
+        if ri_boll_var.get():
+            bm=pd.Series(closes).rolling(20,min_periods=1).mean().values
+            bs=pd.Series(closes).rolling(20,min_periods=1).std().values
+            ri_ax1.plot(x,bm,color='#9800ff',linewidth=0.9,label='BOLL中轨')
+            ri_ax1.plot(x,bm+2*bs,color='#9800ff',linewidth=0.5,alpha=0.5)
+            ri_ax1.plot(x,bm-2*bs,color='#9800ff',linewidth=0.5,alpha=0.5)
+            ri_ax1.fill_between(x,bm-2*bs,bm+2*bs,color='#9800ff',alpha=0.06)
+
+        # ── BIAS ──
+        if ri_bias_var.get():
+            b20=pd.Series(closes).rolling(20,min_periods=1).mean().values
+            ri_ax1.fill_between(x,closes,b20,where=(closes>=b20),color=_FG_RED,alpha=0.06)
+            ri_ax1.fill_between(x,closes,b20,where=(closes<b20),color=_FG_GREEN,alpha=0.06)
+            bv=(closes[-1]-b20[-1])/b20[-1]*100 if len(b20)>0 else 0
+            ri_ax1.text(0.02,0.95,f"BIAS(20)={bv:+.2f}%",transform=ri_ax1.transAxes,fontsize=8,
+                        color=_FG_RED if bv>0 else _FG_GREEN,va='top',
+                        bbox=dict(boxstyle='round,pad=0.3',facecolor=_BG_DEEP,alpha=0.8))
+
+        ri_ax1.set_title(f"{name}({sina}) · 一目均衡",color=_FG_TEXT,fontsize=10)
+        ri_ax1.tick_params(colors=_FG_DIM); ri_ax1.legend(fontsize=6,loc='upper left',labelcolor=_FG_TEXT)
+        ri_ax1.grid(True,alpha=0.15,color=_FG_DIM); ri_ax1.tick_params(labelbottom=False)
+
+        # ── VW-MACD ──
+        if ri_vwmacd_var.get():
+            def _ema(a,p):
+                o=np.zeros_like(a,dtype=float);o[0]=a[0];al=2/(p+1)
+                for i in range(1,len(a)):o[i]=o[i-1]*(1-al)+a[i]*al
+                return o
+            e12=_ema(closes,12);e26=_ema(closes,26);dif=e12-e26;dea=_ema(dif,9)
+            vma20=pd.Series(vols).rolling(20,min_periods=1).mean().values
+            vr=np.clip(np.where(vma20>0,vols/vma20,1.0),0.1,5.0)
+            vw_dif=dif*(0.5+0.5*np.sqrt(vr));vw_dea=_ema(vw_dif,9)
+            vw_h=2*(vw_dif-vw_dea)*np.sqrt(vr)
+            ri_ax2.axhline(y=0,color=_FG_DIM,linewidth=0.5)
+            ri_ax2.bar(x,vw_h,color=[_FG_RED if vw_h[i]>=0 else _FG_GREEN for i in range(n)],width=0.7,alpha=0.7,label='VW-MACD')
+            ri_ax2.plot(x,vw_dif,color=_FG_BLUE,linewidth=0.8,label='VW-DIF')
+            ri_ax2.plot(x,vw_dea,color='#ff6f00',linewidth=0.8,label='VW-DEA')
+            ri_ax2.tick_params(colors=_FG_DIM); ri_ax2.legend(fontsize=6,loc='upper left',labelcolor=_FG_TEXT)
+            ri_ax2.grid(True,alpha=0.15,color=_FG_DIM); ri_ax2.tick_params(labelbottom=False)
+
+        # ── 成交量 + MA ──
+        cv=[_FG_RED if closes[i]>=closes[max(0,i-1)] else _FG_GREEN for i in range(n)]
+        ri_ax3.bar(x,vols,color=cv,width=0.7,alpha=0.6)
+        if ri_volma_var.get():
+            ri_ax3.plot(x,pd.Series(vols).rolling(5,min_periods=1).mean().values,color=_FG_GOLD,linewidth=0.8,label='VOL_MA5')
+            ri_ax3.plot(x,pd.Series(vols).rolling(10,min_periods=1).mean().values,color=_FG_BLUE,linewidth=0.8,label='VOL_MA10')
+        ri_ax3.tick_params(colors=_FG_DIM); ri_ax3.legend(fontsize=6,loc='upper left',labelcolor=_FG_TEXT)
+        ri_ax3.grid(True,alpha=0.15,color=_FG_DIM)
+        step=max(1,n//10); ri_ax3.set_xticks(x[::step])
+
+        ri_fig.tight_layout(); ri_canvas.draw()
+
+    def _draw_rf_tab(sina, name):  # 异步财务数据
+        rf_text.config(state=tk.NORMAL); rf_text.delete("1.0", tk.END)
+        rf_text.insert("1.0", f"⏳ 正在拉取 {name}({sina}) 财务指标 (Tushare)...")
+        rf_text.config(state=tk.DISABLED)
+        def _w():
+            import tushare as ts, queue as _q, os
+            try:
+                tok = os.path.expanduser('~/.tushare/token')
+                if not os.path.exists(tok): return {'err': '缺少 Tushare Token'}
+                ts.set_token(open(tok).read().strip()); pro = ts.pro_api()
+                pure = sina[2:] if len(sina) == 8 else sina
+                mkt = sina[:2].upper() if len(sina) == 8 else ('SH' if pure[:1] in '569' else 'SZ')
+                tc = f"{pure}.{mkt}"
+                fi = pro.fina_indicator(ts_code=tc, fields='end_date,roe,roa,basic_eps,dt_net_profit_yoy,or_yoy,grossprofit_margin,debt_to_assets')
+                db = pro.daily_basic(ts_code=tc, fields='trade_date,total_mv,circ_mv,pe,pb,dv_ratio,turnover_rate,volume_ratio')
+                return {'fi': fi, 'db': db}
+            except Exception as e: return {'err': str(e)}
+        import queue as _qq
+        q = _qq.Queue(maxsize=1)
+        def _wr(): q.put(_w())
+        threading.Thread(target=_wr, daemon=True).start()
+        def _pll():
+            if not q.empty():
+                r = q.get()
+                rf_text.config(state=tk.NORMAL); rf_text.delete("1.0", tk.END)
+                if 'err' in r: rf_text.insert("1.0", f"❌ {r['err']}")
+                else:
+                    lines = [f"📊 {name}({sina}) 财务指标"]
+                    if r.get('db') is not None and len(r['db']) > 0:
+                        b = r['db'].sort_values('trade_date').iloc[-1]
+                        lines.append(f"  总市值: {float(b.get('total_mv', np.nan))/1e4:.2f}亿" if pd.notna(b.get('total_mv')) else "  总市值: -")
+                        lines.append(f"  PE: {float(b.get('pe', np.nan)):.2f}" if pd.notna(b.get('pe')) else "  PE: -")
+                        lines.append(f"  PB: {float(b.get('pb', np.nan)):.2f}" if pd.notna(b.get('pb')) else "  PB: -")
+                        lines.append(f"  股息率: {float(b.get('dv_ratio', np.nan)):.2f}%" if pd.notna(b.get('dv_ratio')) else "  股息率: -")
+                        lines.append(f"  换手率: {float(b.get('turnover_rate', np.nan)):.2f}%" if pd.notna(b.get('turnover_rate')) else "  换手率: -")
+                    if r.get('fi') is not None and len(r['fi']) > 0:
+                        fi = r['fi'].sort_values('end_date').iloc[-1]
+                        lines.append(f"\n  ═ {fi.get('end_date','')[:7]} ═")
+                        lines.append(f"  ROE: {float(fi.get('roe', np.nan)):.2f}%" if pd.notna(fi.get('roe')) else "  ROE: -")
+                        lines.append(f"  ROA: {float(fi.get('roa', np.nan)):.2f}%" if pd.notna(fi.get('roa')) else "  ROA: -")
+                        lines.append(f"  EPS: {float(fi.get('basic_eps', np.nan)):.2f}" if pd.notna(fi.get('basic_eps')) else "  EPS: -")
+                        lines.append(f"  净利同比: {float(fi.get('dt_net_profit_yoy', np.nan)):+.2f}%" if pd.notna(fi.get('dt_net_profit_yoy')) else "  净利增长: -")
+                        lines.append(f"  营收同比: {float(fi.get('or_yoy', np.nan)):+.2f}%" if pd.notna(fi.get('or_yoy')) else "  营收增长: -")
+                        lines.append(f"  毛利率: {float(fi.get('grossprofit_margin', np.nan)):.2f}%" if pd.notna(fi.get('grossprofit_margin')) else "  毛利率: -")
+                        lines.append(f"  负债率: {float(fi.get('debt_to_assets', np.nan)):.2f}%" if pd.notna(fi.get('debt_to_assets')) else "  负债率: -")
+                    rf_text.insert("1.0", "\n".join(lines))
+                rf_text.config(state=tk.DISABLED)
+            else: root.after(300, _pll)
+        root.after(300, _pll)
+
+    def _draw_rs_tab(sina, name, df=None):
+        rs_text.config(state=tk.NORMAL); rs_text.delete("1.0", tk.END)
+        rs_text.insert("1.0", f"⏳ 正在拉取 {name}({sina}) 情绪指标...")
+        rs_text.config(state=tk.DISABLED)
+        def _wr():
+            try:
+                pure = sina[2:] if len(sina) == 8 else sina
+                out = {}
+                # ARMS (静态 import)
+                try:
+                    import sys as _sy
+                    from ui.tab_dapan import DapanMixin
+                    # 临时实例 (不完整, 只调 _calc_arms_index)
+                    class _Lite(DapanMixin): pass
+                    inst = _Lite(); inst.root = root
+                    arms = inst._calc_arms_index(timeout=5)
+                    if arms:
+                        # _calc_arms_index 返回 dict, 取 arms_value
+                        out['arms'] = float(arms.get('arms_value', arms.get('value', arms))) if isinstance(arms, dict) else float(arms)
+                except Exception: pass
+                # 量比
+                if df and isinstance(df, list):
+                    vols = np.array([float(d.get('volume', d.get('vol', 0))) for d in df])
+                    closes = np.array([float(d.get('close', 0)) for d in df])
+                    if len(vols) >= 20:
+                        vma20 = np.mean(vols[-20:])
+                        vr = vols[-1]/vma20 if vma20 > 0 else 1.0
+                        ret5 = (closes[-1]/closes[-6]-1)*100 if len(closes)>=6 else 0
+                        out['vr'] = vr; out['ret5'] = ret5
+                # news_info
+                try:
+                    import sqlite3, os as _os2
+                    dbp = _os2.path.normpath(_os2.path.join(_os2.path.dirname(_os2.path.abspath(__file__)),
+                                                          "..", "..", "data", "stock_analysis.db"))
+                    if _os2.path.exists(dbp):
+                        conn = sqlite3.connect(dbp); cur = conn.cursor()
+                        cur.execute("SELECT content, created_at FROM news_info WHERE content LIKE ? ORDER BY created_at DESC LIMIT 5", (f'%{pure}%',))
+                        rows = cur.fetchall(); conn.close()
+                        if rows: out['news_count'] = len(rows); out['news_top'] = rows
+                except Exception: pass
+                return out
+            except Exception as e: return {'err': str(e)}
+        import queue as _qq2
+        q2 = _qq2.Queue(maxsize=1); threading.Thread(target=lambda: q2.put(_wr()), daemon=True).start()
+        def _pll2():
+            if not q2.empty():
+                r = q2.get(); rs_text.config(state=tk.NORMAL); rs_text.delete("1.0", tk.END)
+                lines = [f"😤 {name}({sina}) 情绪指标"]
+                if 'arms' in r:
+                    a = r['arms']; v = "🧪强势" if a<0.7 else "🔷偏强" if a<0.9 else "⚪均衡" if a<1.1 else "🔴抛压" if a<1.5 else "💣恐慌"
+                    lines.append(f"  🧭 ARMS广度: {a:.2f} {v}")
+                if 'vr' in r:
+                    lines.append(f"  📊 量比(20日): {r['vr']:.2f}  5日涨幅: {r['ret5']:+.1f}%")
+                if 'news_count' in r:
+                    lines.append(f"  📰 资讯DB提及: {r['news_count']} 条")
+                    for _c, _d in r.get('news_top', [])[:2]:
+                        _short = (_c or '')[:50].replace('\n',' ').strip()
+                        lines.append(f"    [{_d or '-'}] {_short}")
+                if len(lines) == 1: lines.append("  (无数据)")
+                rs_text.insert("1.0", "\n".join(lines)); rs_text.config(state=tk.DISABLED)
+            else: root.after(300, _pll2)
+        root.after(300, _pll2)
+
+    # ── 单击/双击绑定辅助 (覆盖原 _on_stock_dblclick 行为) ──
+    def _on_stock_click_wrp(e, sina, name):
+        _on_stock_click(sina, name)
+    def _on_stock_dblclick_new(e, sina, name):
+        """双击 → 仍弹日K."""
+        if sina: _open_kline(root, sina, name)
 
     # ── Tab2: 板块聚合 ──
     agg_frame = ttk.Frame(nb); nb.add(agg_frame, text="📊 板块聚合 Top100")
@@ -876,16 +1298,18 @@ def build_fund_holdings_tab(parent, root=None):
                     hrow.pack(fill=tk.X, padx=4, pady=1)
                     def _mk(_s=sina, _n=nm):
                         return lambda e: _on_stock_dblclick(e, _s, _n)
-                    _h = _mk()
-                    hrow.bind("<Double-Button-1>", _h)
+                    def _mkclick(_s=sina, _n=nm):
+                        return lambda e: _on_stock_click(_s, _n)
+                    _h = _mk(); _c = _mkclick()
+                    hrow.bind("<Double-Button-1>", _h); hrow.bind("<Button-1>", _c)
                     _n_lbl = tk.Label(hrow, text=f"  {hi+1}. {nm}", bg=row_bg, fg=_FG_TEXT,
-                                      font=_font())
+                                      font=_font(), cursor="hand2")
                     _n_lbl.pack(side=tk.LEFT, padx=4, pady=2)
-                    _n_lbl.bind("<Double-Button-1>", _h)
+                    _n_lbl.bind("<Double-Button-1>", _h); _n_lbl.bind("<Button-1>", _c)
                     _c_lbl = tk.Label(hrow, text=f"({code6})", bg=row_bg, fg=_FG_DIM,
-                                      font=_font())
+                                      font=_font(), cursor="hand2")
                     _c_lbl.pack(side=tk.RIGHT, padx=4)
-                    _c_lbl.bind("<Double-Button-1>", _h)
+                    _c_lbl.bind("<Double-Button-1>", _h); _c_lbl.bind("<Button-1>", _c)
 
                 tk.Label(card, text="💡 择时笔记:", bg=_BG_CARD, fg=_FG_GREEN,
                          font=_font(bold=True)).pack(anchor="w", padx=8, pady=(6, 0))
@@ -1198,23 +1622,25 @@ def build_fund_holdings_tab(parent, root=None):
 
                 def _mk_click(_s=sina, _n=h["name"]):
                     return lambda e: _on_stock_dblclick(e, _s, _n)
-                _h = _mk_click()
-                row.bind("<Double-Button-1>", _h)
+                def _mkone(_s=sina, _n=h["name"]):
+                    return lambda e: _on_stock_click(_s, _n)
+                _h = _mk_click(); _c = _mkone()
+                row.bind("<Double-Button-1>", _h); row.bind("<Button-1>", _c)
 
                 _idx_lbl = tk.Label(row, text=f"{hi+1}.", bg=row_bg, fg=_FG_DIM,
                                     font=_font(), width=2)
                 _idx_lbl.pack(side=tk.LEFT)
-                _idx_lbl.bind("<Double-Button-1>", _h)
+                _idx_lbl.bind("<Double-Button-1>", _h); _idx_lbl.bind("<Button-1>", _c)
 
                 _nm_lbl = tk.Label(row, text=h["name"], bg=row_bg, fg=_FG_TEXT,
                                    font=_font())
                 _nm_lbl.pack(side=tk.LEFT, padx=2)
-                _nm_lbl.bind("<Double-Button-1>", _h)
+                _nm_lbl.bind("<Double-Button-1>", _h); _nm_lbl.bind("<Button-1>", _c)
 
                 _pct_lbl = tk.Label(row, text=f"占{h['total_pct']:.1f}%", bg=row_bg,
                                     fg=_FG_GOLD, font=_font())
                 _pct_lbl.pack(side=tk.RIGHT, padx=6)
-                _pct_lbl.bind("<Double-Button-1>", _h)
+                _pct_lbl.bind("<Double-Button-1>", _h); _pct_lbl.bind("<Button-1>", _c)
 
             tk.Frame(card, bg=_BG_CARD, height=4).pack(fill=tk.X)
 
@@ -1250,7 +1676,9 @@ def build_fund_holdings_tab(parent, root=None):
 
                 def _mk(_s=s["sina"], _n=s["name"]):
                     return lambda e: _on_stock_dblclick(e, _s, _n)
-                _h = _mk()
+                def _mkone(_s=s["sina"], _n=s["name"]):
+                    return lambda e: _on_stock_click(_s, _n)
+                _h = _mk(); _c = _mkone()
 
                 _idx = tk.Label(row, text=f"{hi+1}.", bg=row_bg, fg=_FG_DIM,
                                font=_font(bold=True), width=3)
@@ -1271,9 +1699,8 @@ def build_fund_holdings_tab(parent, root=None):
                                 fg=_FG_GOLD, font=_font(), width=6, anchor="e")
                 _pct.pack(side=tk.RIGHT)
 
-                # 给 row + 所有子 Label 都绑双击
                 for w in [row, _idx, _nm, _code, _fc, _mv, _pct]:
-                    w.bind("<Double-Button-1>", _h)
+                    w.bind("<Double-Button-1>", _h); w.bind("<Button-1>", _c)
 
     def _rerender_all():
         """字体调节后重绘所有 Tab"""
