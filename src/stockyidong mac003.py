@@ -4699,8 +4699,8 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("全", 3, self.show_market_situation),
             # ("自选股管理", 8, self.show_stock_management_dialog),  # 迁入工具 Tab
             # ("最新N条分析", 9, self.analyze_latest_n_stocks),    # 迁入工具 Tab
-            ("📊 批量股票分析", 9, self.show_batch_stock_analyzer),
-            ("龙虎榜", 6, self.show_top_list_dialog),
+            # ("📊 批量股票分析", 9, self.show_batch_stock_analyzer),  # 迁入工具 Tab
+            # ("龙虎榜", 6, self.show_top_list_dialog),                # 迁入工具 Tab
             ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
             ("📈价增量涨", 10, self._show_price_volume_dialog),
             ("🏛️美联储分析", 12, self._show_fed_analysis_dialog),
@@ -4734,6 +4734,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("📊分析深度", 8, self._show_stock_analysis_dialog),
             ("📊比价横向", 8, self._show_stock_compare_dialog),
             ("👁️看盘", 7, self._show_speculator_watch),
+            ("📈一目均衡", 8, self._show_ichimoku_kline_dialog),
             ("🎯高抛低吸", 8, self._show_high_low_swing),
             ("🎯机会", 7, self._show_jianlou),
             ("🪙筹码", 7, self._show_chouma),
@@ -4798,12 +4799,14 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         ttk.Button(tools_row_c, text="🌱成长扫描",
                    command=lambda: crawler_control_notebook.select(growth_tab),
                    width=14).pack(**_tools_pad)
-        # AI用量监控 + 一目均衡K线 (顺序交换)
+        # AI用量监控 + 批量股票分析 + 龙虎榜 (从 toolbar_row1 迁入)
         tools_row_d = ttk.Frame(tools_frame); tools_row_d.pack(fill=tk.X, pady=2)
         ttk.Button(tools_row_d, text="📊 AI用量监控",
                    command=self._show_ai_usage_dialog, width=14).pack(**_tools_pad)
-        ttk.Button(tools_row_d, text="📈 一目均衡K线",
-                   command=self._show_ichimoku_kline_dialog, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_d, text="📊 批量股票分析",
+                   command=self.show_batch_stock_analyzer, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_d, text="🐉 龙虎榜",
+                   command=self.show_top_list_dialog, width=14).pack(**_tools_pad)
         # 将咨询分析、投资、系统、赌博、交易体系、交割单分析按钮移到交易标签页
         trading_buttons_frame = ttk.LabelFrame(trading_tab, text="交易功能", padding=3)
         trading_buttons_frame.pack(fill=tk.X, expand=False, pady=2)

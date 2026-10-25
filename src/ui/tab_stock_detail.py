@@ -3227,10 +3227,11 @@ class StockDetailMixin:
                 ax_main.legend(loc='upper left', fontsize=7, ncol=3)
                 ax_main.grid(True, alpha=0.3)
                 ax_main.tick_params(axis="x", labelbottom=False)
-                # 🔒 锁死 x 轴在 K 线范围:
-                # K线画在 x=[0..n-1], 一目均衡 extended_x 到 n+25 (含未来预测)
-                # matplotlib 会自动扩展 xlim 让 K 线被挤在左边 → 必须手动锁死
+                # 初始视图聚焦 K 线区域 (0..n-1), 但允许 pan 到右侧看一目均衡未来预测 (n..n+26)
                 ax_main.set_xlim(-1, n)
+                # 保存 home 视图 (NavigationToolbar 的 🏠 按钮恢复到此范围)
+                ax_main._initial_xlim = (-1, n)
+                ax_main._initial_ylim = ax_main.get_ylim()
                 # 副图 sharex=ax_main 会自动对齐
 
                 # ─── 📊 图表角落加判别分析文本框 ───
@@ -3330,6 +3331,19 @@ class StockDetailMixin:
                 canvas = FigureCanvasTkAgg(fig, chart_inner)
                 canvas.draw()
                 canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                # 🎯 加 matplotlib 自带导航工具条 (平移 ↔ / 缩放 🔍 / 重置 🏠 / 保存 📷)
+                try:
+                    from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
+                    _tb = NavigationToolbar2Tk(canvas, chart_inner, pack_toolbar=False)
+                    _tb.update()
+                    _tb.pack(side=tk.TOP, fill=tk.X, before=canvas.get_tk_widget())
+                    # 隐藏不需要的按钮, 留下 Pan / Zoom / Home / Save
+                    for _btn in _tb.winfo_children():
+                        _txt = str(_btn.cget('text'))
+                        if _txt in ('Subplots', 'Customize', 'A'):
+                            _btn.pack_forget()
+                except Exception as _etb:
+                    pass
                 # 双击图表 → 弹出指标说明 (复用 _show_ichimoku_help)
                 canvas.mpl_connect("button_press_event",
                     lambda e: _show_ichimoku_help() if e.dblclick else None)
