@@ -59411,6 +59411,580 @@ class DapanMixin:
         return _fa._show_fed_analysis_dialog(self)
 
     # ═══════════════════════════════════════════════════════════════
+    # 💡 主力趋势分析: 多指数 + 多指标 + 广度 + 聪明钱
+    # ═══════════════════════════════════════════════════════════════
+
+    def _show_main_trend_dialog(self):
+        """主力趋势弹窗: 四大指数 × 6 指标 + 广度情绪 + 综合判断"""
+        import tkinter as tk
+        from tkinter import ttk, messagebox
+        import numpy as np, pandas as pd
+        from datetime import datetime, timedelta
+
+        win = tk.Toplevel(self.root)
+        win.title("💡 主力趋势分析 (多指数 · 多指标 · 聪明钱)")
+        win.geometry("1200x860")
+        win.configure(bg="#ECEFF1")
+
+        # 顶栏: 目标指数
+        INDICES = [
+            ("sh000001", "上证指数"),
+            ("sz399001", "深证成指"),
+            ("sz399006", "创业板指"),
+            ("sh000300", "沪深300"),
+        ]
+
+        top = ttk.Frame(win); top.pack(fill=tk.X, padx=10, pady=(8, 4))
+        ttk.Label(top, text="📌 分析指数:", font=("Microsoft YaHei", 10, "bold")).pack(side=tk.LEFT)
+        idx_vars = {}
+        for code, name in INDICES:
+            v = tk.BooleanVar(value=True)
+            ttk.Checkbutton(top, text=name, variable=v).pack(side=tk.LEFT, padx=4)
+            idx_vars[code] = (name, v)
+
+        ttk.Button(top, text="🔄 刷新分析", command=lambda: _run_analysis(),
+                   style="Accent.TButton").pack(side=tk.RIGHT)
+        date_lbl = ttk.Label(top, text="", foreground="#555")
+        date_lbl.pack(side=tk.RIGHT, padx=8)
+
+        # 主区: Notebook 每个指数一个 Tab + 广度 + 综合
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        # ═══════════════════════════════════════════════════════════════
+        # 指标计算工具 (闭包里复用)
+        # ═══════════════════════════════════════════════════════════════
+
+        def _ma(series, n):
+            return pd.Series(series).rolling(n, min_periods=1).mean().values
+
+        def _ema(series, n):
+            return pd.Series(series).ewm(span=n, adjust=False).mean().values
+
+        def _calc_macd(closes, fast=12, slow=26, signal=9):
+            c = np.asarray(closes, dtype=float)
+            dif = _ema(c, fast) - _ema(c, slow)
+            dea = _ema(dif, signal)
+            macdh = 2 * (dif - dea)
+            return dif, dea, macdh
+
+        def _calc_kdj(highs, lows, closes, n=9, m1=3, m2=3):
+            h = pd.Series(highs); l = pd.Series(lows); c = pd.Series(closes)
+            low_n = l.rolling(n, min_periods=1).min()
+            high_n = h.rolling(n, min_periods=1).max()
+            rsv = (c - low_n) / (high_n - low_n + 1e-9) * 100
+            k = rsv.ewm(com=m1 - 1, adjust=False).mean()
+            d = k.ewm(com=m2 - 1, adjust=False).mean()
+            j = 3 * k - 2 * d
+            return k.values, d.values, j.values
+
+        def _calc_boll(closes, n=20, k=2):
+            c = pd.Series(closes, dtype=float)
+            mid = c.rolling(n, min_periods=1).mean()
+            std = c.rolling(n, min_periods=1).std()
+            return mid.values, (mid + k * std).values, (mid - k * std).values
+
+        def _calc_rsi(closes, n=14):
+            c = np.asarray(closes, dtype=float)
+            delta = np.diff(c, prepend=c[0])
+            gain = np.where(delta > 0, delta, 0.0)
+            loss = np.where(delta < 0, -delta, 0.0)
+            avg_gain = pd.Series(gain).ewm(alpha=1/n, adjust=False).mean()
+            avg_loss = pd.Series(loss).ewm(alpha=1/n, adjust=False).mean()
+            rs = avg_gain / (avg_loss + 1e-9)
+            return (100 - 100 / (1 + rs)).values
+
+        def _calc_obv(closes, vol):
+            c = np.asarray(closes, dtype=float); v = np.asarray(vol, dtype=float)
+            obv = np.zeros(len(c))
+            for i in range(1, len(c)):
+                obv[i] = obv[i-1] + (v[i] if c[i] > c[i-1] else (-v[i] if c[i] < c[i-1] else 0))
+            return obv
+
+        def _analyze_index(code, name):
+            """拉数据 + 算指标 + 返回分析 dict"""
+            try:
+                # 拉日线
+                days = 200
+                df = self._fetch_index_daily(symbol=code, days=days)
+                if df is None or len(df) < 30:
+                    return {"code": code, "name": name, "error": f"数据不足 ({len(df) if df is not None else 0}根)"}
+
+                df = pd.DataFrame(df)
+                closes = df['close'].astype(float).values
+                highs = df['high'].astype(float).values
+                lows = df['low'].astype(float).values
+                opens = df['open'].astype(float).values
+                vol = df.get('volume', df.get('amount', pd.Series([0]*len(df)))).astype(float).values
+
+                n = len(closes)
+                last_c = closes[-1]
+                last_h = highs[-1]; last_l = lows[-1]
+                prev_c = closes[-2] if n > 1 else last_c
+
+                # ── 趋势类 ──
+                ma5 = _ma(closes, 5)[-1]
+                ma10 = _ma(closes, 10)[-1]
+                ma20 = _ma(closes, 20)[-1]
+                ma60 = _ma(closes, 60)[-1]
+                # MA 多头/空头排列
+                ma_arrangement = ""
+                if ma5 > ma10 > ma20 > ma60:
+                    ma_arrangement = "🟢 多头排列"
+                elif ma5 < ma10 < ma20 < ma60:
+                    ma_arrangement = "🔴 空头排列"
+                else:
+                    ma_arrangement = "🟡 交叉纠缠"
+
+                # MA 金叉死叉 (最近 5 天)
+                ma_cross = ""
+                dif_fast = _ma(closes, 5) - _ma(closes, 10)
+                if dif_fast[-1] > 0 and dif_fast[-2] <= 0:
+                    ma_cross = "🟢 MA5上穿MA10 金叉"
+                elif dif_fast[-1] < 0 and dif_fast[-2] >= 0:
+                    ma_cross = "🔴 MA5下穿MA10 死叉"
+
+                # MACD
+                dif, dea, macdh = _calc_macd(closes)
+                macd_label = ""
+                if dif[-1] > dea[-1] and dif[-2] <= dea[-2]:
+                    macd_label = "🟢 MACD金叉"
+                elif dif[-1] < dea[-1] and dif[-2] >= dea[-2]:
+                    macd_label = "🔴 MACD死叉"
+                elif dif[-1] > dea[-1]:
+                    macd_label = "🟢 DIF>DEA"
+                else:
+                    macd_label = "🔴 DIF<DEA"
+                # MACD 柱背离
+                price_new_high = last_c >= max(closes[-60:-1]) if n > 60 else False
+                macd_new_high = macdh[-1] >= max(macdh[-60:-1]) if n > 60 else False
+                divergence = ""
+                if price_new_high and not macd_new_high:
+                    divergence = "⚠️ 顶背离 (价新高但MACD未新高)"
+                elif not price_new_high and last_c <= min(closes[-60:-1]) and macdh[-1] > max(macdh[-60:-1]):
+                    divergence = "⚠️ 底背离 (价新低但MACD未新低)"
+
+                # ── 震荡类 ──
+                k, d, j = _calc_kdj(highs, lows, closes)
+                kdj_label = ""
+                if k[-1] > 80 and d[-1] > 80:
+                    kdj_label = f"🔴 超买区 K={k[-1]:.1f} D={d[-1]:.1f}"
+                elif k[-1] < 20 and d[-1] < 20:
+                    kdj_label = f"🟢 超卖区 K={k[-1]:.1f} D={d[-1]:.1f}"
+                else:
+                    kdj_label = f"🟡 K={k[-1]:.1f} D={d[-1]:.1f} J={j[-1]:.1f}"
+
+                mid, up, dn = _calc_boll(closes)
+                boll_label = ""
+                boll_w = (up[-1] - dn[-1]) / mid[-1] * 100  # 带宽 %
+                if last_c >= up[-1]:
+                    boll_label = f"🔴 触上轨 (带宽{boll_w:.1f}%)"
+                elif last_c <= dn[-1]:
+                    boll_label = f"🟢 触下轨 (带宽{boll_w:.1f}%)"
+                else:
+                    pos = (last_c - dn[-1]) / (up[-1] - dn[-1]) * 100
+                    boll_label = f"🟡 带内 {pos:.0f}% (带宽{boll_w:.1f}%)"
+
+                rsi = _calc_rsi(closes)
+                rsi_label = ""
+                if rsi[-1] > 70:
+                    rsi_label = f"🔴 RSI={rsi[-1]:.1f} 超买"
+                elif rsi[-1] < 30:
+                    rsi_label = f"🟢 RSI={rsi[-1]:.1f} 超卖"
+                else:
+                    rsi_label = f"🟡 RSI={rsi[-1]:.1f}"
+
+                # ── 成交量类 ──
+                obv = _calc_obv(closes, vol)
+                # OBV 斜率 vs 价格斜率 (最近 10 天)
+                obv_slope = (obv[-1] - obv[-10]) / (abs(obv[-10]) + 1e-9) if n > 10 else 0
+                price_slope = (closes[-1] - closes[-10]) / (closes[-10] + 1e-9) if n > 10 else 0
+                obv_label = ""
+                if price_slope > 0 and obv_slope < 0:
+                    obv_label = "⚠️ 顶背离 (价涨量跌)"
+                elif price_slope < 0 and obv_slope > 0:
+                    obv_label = "⚠️ 底背离 (价跌量涨)"
+                elif price_slope > 0 and obv_slope > 0:
+                    obv_label = "🟢 量价齐升"
+                elif price_slope < 0 and obv_slope < 0:
+                    obv_label = "🔴 量价齐跌"
+                else:
+                    obv_label = "🟡 量价配合平"
+
+                # 量比 (今日量 / 20日均量)
+                vol_ma20 = np.mean(vol[-20:]) if n >= 20 else np.mean(vol)
+                vr = vol[-1] / (vol_ma20 + 1e-9)
+                vol_label = f"量比 {vr:.2f}" + (" 放量" if vr > 1.5 else (" 缩量" if vr < 0.7 else " 正常"))
+
+                # ── 综合趋势评分 ──
+                score = 50  # 基准
+                # MA 排列
+                if ma_arrangement == "🟢 多头排列": score += 15
+                elif ma_arrangement == "🔴 空头排列": score -= 15
+                # MACD
+                if dif[-1] > dea[-1]: score += 8
+                else: score -= 8
+                if macdh[-1] > 0 and macdh[-1] > macdh[-2]: score += 4
+                elif macdh[-1] < 0 and macdh[-1] < macdh[-2]: score -= 4
+                # RSI
+                if 40 <= rsi[-1] <= 60: score += 3  # 健康区
+                elif rsi[-1] > 70: score -= 5  # 超买风险
+                elif rsi[-1] < 30: score += 5  # 超卖机会
+                # 量价
+                if price_slope > 0 and vr > 1.2: score += 6
+                elif price_slope < 0 and vr > 1.2: score -= 6
+                # 背离扣分
+                if "顶背离" in divergence or "顶背离" in obv_label: score -= 10
+                if "底背离" in divergence or "底背离" in obv_label: score += 10
+
+                score = max(0, min(100, score))
+                if score >= 70:
+                    verdict = "🟢 偏多 · 可持有/顺势"
+                elif score >= 45:
+                    verdict = "🟡 中性 · 观望/轻仓"
+                else:
+                    verdict = "🔴 偏空 · 谨慎/减仓"
+
+                return {
+                    "code": code, "name": name, "date": str(df.iloc[-1].get('day', df.index[-1])),
+                    "last_close": last_c, "change_pct": (last_c - prev_c) / prev_c * 100,
+                    "ma_arrangement": ma_arrangement, "ma_cross": ma_cross,
+                    "macd_label": macd_label, "divergence": divergence,
+                    "kdj_label": kdj_label, "boll_label": boll_label,
+                    "rsi_label": rsi_label,
+                    "obv_label": obv_label, "vol_label": vol_label,
+                    "score": score, "verdict": verdict,
+                }
+            except Exception as e:
+                return {"code": code, "name": name, "error": str(e)}
+
+        def _fetch_breadth():
+            """获取市场广度: 涨跌家数比 (先本地缓存, akshare 作为第二级)"""
+            # 1) 先试本地缓存 (秒级)
+            try:
+                import sqlite3, os as _os
+                db_path = _os.path.expanduser("~/.qclaw/workspace-agent-85985980/market_breadth_daily.sqlite")
+                if _os.path.exists(db_path):
+                    conn = sqlite3.connect(db_path)
+                    cur = conn.cursor()
+                    cur.execute("SELECT up_n, down_n, flat_n FROM breadth ORDER BY date DESC LIMIT 1")
+                    row = cur.fetchone(); conn.close()
+                    if row:
+                        up, down, flat = row
+                        return {"up": up, "down": down, "flat": flat, "total": up + down + flat,
+                                "ratio": up / (down + 1), "amount_yi": 0, "cached": True}
+            except Exception:
+                pass
+            # 2) 再试 akshare (可能慢/超时)
+            try:
+                import threading, queue
+                result_q = queue.Queue()
+                def _do_fetch():
+                    try:
+                        import akshare as ak
+                        df = ak.stock_zh_a_spot_em()
+                        if df is not None and len(df) > 1000:
+                            up = int((df['涨跌幅'] > 0).sum())
+                            down = int((df['涨跌幅'] < 0).sum())
+                            flat = int((df['涨跌幅'] == 0).sum())
+                            total = len(df); ratio = up / (down + 1)
+                            amt = float(df['成交额'].sum()) / 1e8 if '成交额' in df.columns else 0
+                            result_q.put({"up": up, "down": down, "flat": flat, "total": total,
+                                          "ratio": ratio, "amount_yi": amt})
+                    except Exception:
+                        pass
+                t = threading.Thread(target=_do_fetch, daemon=True); t.start()
+                try:
+                    return result_q.get(timeout=8)  # 8秒超时
+                except Exception:
+                    return None
+            except Exception:
+                pass
+            return None
+
+        def _color_for_score(s):
+            if s >= 70: return "#2e7d32"  # 红 (A股偏多=红)
+            if s >= 45: return "#f57f17"  # 橙
+            return "#c62828"  # 绿 (偏空=绿)
+
+        def _run_analysis():
+            try:
+                # 清空旧 Tab
+                for tab in nb.tabs():
+                    nb.forget(tab)
+
+                selected = [(c, n) for c, (n, v) in INDICES if v.get()]
+                if not selected:
+                    messagebox.showwarning("提示", "请至少选一个指数", parent=win)
+                    return
+
+                date_lbl.config(text=f"⏳ 正在分析 {len(selected)} 个指数...")
+                win.update_idletasks()
+
+                results = []
+                for code, name in selected:
+                    date_lbl.config(text=f"⏳ 正在分析 {name}..."); win.update_idletasks()
+                    r = _analyze_index(code, name)
+                    results.append(r)
+                    _build_index_tab(r)
+
+                # 广度 Tab
+                date_lbl.config(text=f"⏳ 获取广度数据..."); win.update_idletasks()
+                breadth = _fetch_breadth()
+                _build_breadth_tab(breadth)
+
+                # 综合判断 Tab
+                _build_overall_tab(results, breadth)
+
+                date_lbl.config(text=f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')} | ✅ 已分析 {len(results)} 指数")
+            except Exception as e:
+                import traceback
+                err_win = tk.Toplevel(win); err_win.title("❌ 错误详情"); err_win.geometry("700x500")
+                err_txt = tk.Text(err_win, font=("Menlo", 10), bg="#ffebee", fg="#b71c1c")
+                err_txt.pack(fill=tk.BOTH, expand=True)
+                err_txt.insert(tk.END, traceback.format_exc())
+                err_txt.config(state=tk.DISABLED)
+                date_lbl.config(text=f"❌ 出错: {e}")
+
+        def _build_index_tab(r):
+            code = r["code"]; name = r["name"]
+            frame = ttk.Frame(nb); nb.add(frame, text=f"📊 {name}")
+
+            if "error" in r:
+                ttk.Label(frame, text=f"❌ {r['error']}", foreground="red").pack(pady=20)
+                return
+
+            # 头部卡片: 价格 + 涨跌 + 评分
+            header = tk.Frame(frame, bg="#263238", padx=14, pady=10)
+            header.pack(fill=tk.X, padx=10, pady=(10, 6))
+            tk.Label(header, text=f"{name}  ({code})", bg="#263238", fg="white",
+                     font=("Microsoft YaHei", 12, "bold")).pack(side=tk.LEFT)
+            chg = r['change_pct']
+            chg_color = "#ef5350" if chg >= 0 else "#66bb6a"
+            tk.Label(header, text=f"  {r['last_close']:.2f}  {chg:+.2f}%", bg="#263238", fg=chg_color,
+                     font=("Microsoft YaHei", 13, "bold")).pack(side=tk.LEFT, padx=12)
+            tk.Label(header, text=f"🎯 评分 {r['score']}/100", bg="#263238", fg="#ffd54f",
+                     font=("Microsoft YaHei", 11, "bold")).pack(side=tk.LEFT, padx=12)
+            tk.Label(header, text=r['verdict'], bg="#263238", fg="white",
+                     font=("Microsoft YaHei", 11)).pack(side=tk.LEFT)
+
+            # 指标网格
+            grid = tk.Frame(frame, bg="#ECEFF1"); grid.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
+            for c in range(3): grid.columnconfigure(c, weight=1)
+
+            def _card(parent, row, col, title, items, color="#37474f"):
+                f = tk.Frame(parent, bg=color, padx=10, pady=8, bd=0)
+                f.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
+                tk.Label(f, text=title, bg=color, fg="white",
+                         font=("Microsoft YaHei", 10, "bold")).pack(anchor="w")
+                for txt in items:
+                    tk.Label(f, text=txt, bg=color, fg="#eceff1",
+                             font=("Microsoft YaHei", 10)).pack(anchor="w", pady=1)
+
+            # Row 0: 趋势类
+            _card(grid, 0, 0, "📈 趋势类 (MA + MACD)", [
+                f"MA排列: {r['ma_arrangement']}",
+                f"MA交叉: {r['ma_cross'] or '—'}",
+                f"MACD: {r['macd_label']}",
+                f"背离: {r['divergence'] or '无'}",
+            ], "#1565c0")
+
+            # Row 0: 震荡类
+            _card(grid, 0, 1, "📊 震荡类 (KDJ + BOLL + RSI)", [
+                f"KDJ: {r['kdj_label']}",
+                f"布林: {r['boll_label']}",
+                f"RSI: {r['rsi_label']}",
+            ], "#2e7d32")
+
+            # Row 0: 成交量类
+            _card(grid, 0, 2, "📦 成交量类 (OBV + 量比)", [
+                f"OBV: {r['obv_label']}",
+                f"{r['vol_label']}",
+            ], "#6a1b9a")
+
+            # Row 1: 综合判定
+            color = _color_for_score(r['score'])
+            _card(grid, 1, 0, "🎯 综合判定", [
+                f"趋势评分: {r['score']}/100",
+                f"核心结论: {r['verdict']}",
+            ], color)
+
+            # 操作建议
+            suggestions = []
+            if r['score'] >= 70:
+                suggestions = ["✅ 多头排列 + MACD金叉 → 顺势持有",
+                               "✅ 回调至 MA20 / 云边 → 可加仓",
+                               "⚠️ 若 RSI>70 + 顶背离 → 警惕短期回调"]
+            elif r['score'] >= 45:
+                suggestions = ["➖ 震荡格局 → 高抛低吸为主",
+                               "➖ 关注 MA 交叉方向选择",
+                               "⚠️ 轻仓操作, 等待突破确认"]
+            else:
+                suggestions = ["🔴 空头排列 + MACD死叉 → 谨慎",
+                               "🔴 反弹至 MA10 → 考虑减仓",
+                               "⚠️ 若 RSI<30 + 底背离 → 可能超跌反弹"]
+            _card(grid, 1, 1, "💡 操作建议", suggestions, "#ef6c00")
+
+            # 关键价位
+            try:
+                df_back = self._fetch_index_daily(symbol=code, days=250)
+                if df_back and len(df_back) > 60:
+                    closes_all = pd.DataFrame(df_back)['close'].astype(float).values
+                    highs_all = pd.DataFrame(df_back)['high'].astype(float).values
+                    lows_all = pd.DataFrame(df_back)['low'].astype(float).values
+                    ma20_val = _ma(closes_all, 20)[-1]
+                    ma60_val = _ma(closes_all, 60)[-1]
+                    high_60 = np.max(highs_all[-60:])
+                    low_60 = np.min(lows_all[-60:])
+                    _card(grid, 1, 2, "📍 关键价位", [
+                        f"MA20: {ma20_val:.2f}",
+                        f"MA60: {ma60_val:.2f}",
+                        f"60日高: {high_60:.2f}",
+                        f"60日低: {low_60:.2f}",
+                    ], "#4527a0")
+            except Exception:
+                pass
+
+        def _build_breadth_tab(b):
+            frame = ttk.Frame(nb)
+            nb.add(frame, text="🌐 广度情绪")
+
+            if b is None:
+                ttk.Label(frame, text="⚠️ 广度数据暂不可用 (akshare / 本地缓存均无)",
+                          foreground="#666").pack(pady=40)
+                return
+
+            header = tk.Frame(frame, bg="#37474f", padx=14, pady=10)
+            header.pack(fill=tk.X, padx=10, pady=(10, 6))
+            cached_tag = " (缓存)" if b.get("cached") else ""
+            tk.Label(header, text=f"🌐 市场广度 (涨跌家数) {cached_tag}", bg="#37474f", fg="white",
+                     font=("Microsoft YaHei", 12, "bold")).pack(side=tk.LEFT)
+
+            grid = tk.Frame(frame, bg="#ECEFF1"); grid.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
+            for c in range(4): grid.columnconfigure(c, weight=1)
+
+            total = b['total']; up = b['up']; down = b['down']; flat = b['flat']
+            ratio = b['ratio']
+            pct_up = up / total * 100; pct_down = down / total * 100
+
+            # 广度条
+            bar_frame = tk.Frame(grid, bg="#ECEFF1"); bar_frame.grid(row=0, column=0, columnspan=4, sticky="ew", pady=8)
+            bar_canvas = tk.Canvas(bar_frame, height=36, bg="#ECEFF1", highlightthickness=0)
+            bar_canvas.pack(fill=tk.X)
+            def _draw_bar():
+                bar_canvas.delete("all")
+                w = bar_canvas.winfo_width() or 800
+                up_w = int(w * pct_up / 100); down_w = int(w * pct_down / 100); flat_w = w - up_w - down_w
+                bar_canvas.create_rectangle(0, 4, up_w, 32, fill="#ef5350", outline="")
+                bar_canvas.create_rectangle(up_w, 4, up_w + flat_w, 32, fill="#9e9e9e", outline="")
+                bar_canvas.create_rectangle(up_w + flat_w, 4, w, 32, fill="#66bb6a", outline="")
+                bar_canvas.create_text(w//2, 20, text=f"上涨 {up}({pct_up:.0f}%)  |  平盘 {flat}  |  下跌 {down}({pct_down:.0f}%)",
+                                       font=("Microsoft YaHei", 11, "bold"), fill="white")
+            bar_canvas.after(100, _draw_bar)
+
+            # 广度分析
+            if ratio > 2:
+                breadth_verdict = "🟢 普涨格局, 多头占优"
+            elif ratio > 1.2:
+                breadth_verdict = "🟡 偏多, 但分化"
+            elif ratio > 0.8:
+                breadth_verdict = "➖ 多空均衡"
+            elif ratio > 0.5:
+                breadth_verdict = "🟠 偏空, 谨慎"
+            else:
+                breadth_verdict = "🔴 普跌格局, 空头占优"
+
+            def _card(parent, row, col, colspan, title, items, color):
+                f = tk.Frame(parent, bg=color, padx=10, pady=8)
+                f.grid(row=row, column=col, columnspan=colspan, sticky="nsew", padx=4, pady=4)
+                tk.Label(f, text=title, bg=color, fg="white",
+                         font=("Microsoft YaHei", 10, "bold")).pack(anchor="w")
+                for txt in items:
+                    tk.Label(f, text=txt, bg=color, fg="#eceff1",
+                             font=("Microsoft YaHei", 10)).pack(anchor="w", pady=1)
+
+            _card(grid, 1, 0, 2, "📊 广度数据", [
+                f"上涨家数: {up} ({pct_up:.1f}%)",
+                f"下跌家数: {down} ({pct_down:.1f}%)",
+                f"平盘家数: {flat}",
+                f"涨跌比: {ratio:.2f}",
+            ], "#1565c0")
+
+            _card(grid, 1, 2, 2, "🎯 广度判断", [
+                f"结论: {breadth_verdict}",
+                f"成交额: {b.get('amount_yi', 0):.0f} 亿" if b.get('amount_yi', 0) > 0 else "成交额: —",
+                "⚠️ 广度 = 市场情绪温度计, 领先指数涨跌",
+                "💡 普涨但指数滞涨 → 关注大盘蓝筹是否拖后腿",
+                "💡 普跌但指数抗跌 → 可能是少数权重撑盘",
+            ], "#ef6c00")
+
+        def _build_overall_tab(results, breadth):
+            frame = ttk.Frame(nb); nb.add(frame, text="🏆 综合判断")
+
+            valid = [r for r in results if "error" not in r]
+            if not valid:
+                ttk.Label(frame, text="❌ 所有指数数据获取失败", foreground="red").pack(pady=40)
+                return
+
+            avg_score = np.mean([r['score'] for r in valid])
+
+            header = tk.Frame(frame, bg="#1a237e", padx=16, pady=14)
+            header.pack(fill=tk.X, padx=10, pady=(10, 6))
+            tk.Label(header, text="🏆 主力趋势综合判断", bg="#1a237e", fg="white",
+                     font=("Microsoft YaHei", 14, "bold")).pack(side=tk.LEFT)
+            tk.Label(header, text=f"  平均评分: {avg_score:.0f}/100", bg="#1a237e", fg="#ffd54f",
+                     font=("Microsoft YaHei", 13, "bold")).pack(side=tk.LEFT, padx=14)
+
+            # 各指数评分条
+            body = tk.Frame(frame, bg="#ECEFF1"); body.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
+            for c in range(2): body.columnconfigure(c, weight=1)
+
+            for i, r in enumerate(valid):
+                row, col = divmod(i, 2)
+                f = tk.Frame(body, bg="white", bd=1, relief=tk.GROOVE, padx=10, pady=8)
+                f.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
+                tk.Label(f, text=f"{r['name']} ({r['code']})", bg="white",
+                         font=("Microsoft YaHei", 11, "bold")).pack(anchor="w")
+                # 评分条
+                bar_bg = tk.Canvas(f, height=20, bg="#eee", highlightthickness=0)
+                bar_bg.pack(fill=tk.X, pady=4)
+                sc = r['score']; color = _color_for_score(sc)
+                bar_bg.bind("<Configure>", lambda e, c=bar_bg, s=sc, col=color: (
+                    c.delete("all"),
+                    c.create_rectangle(0, 0, int(e.width * s / 100), 20, fill=col, outline=""),
+                    c.create_text(e.width//2, 10, text=f"{s}", fill="white",
+                                  font=("Microsoft YaHei", 9, "bold"))
+                ))
+                chg = r['change_pct']; chg_c = "#ef5350" if chg >= 0 else "#66bb6a"
+                tk.Label(f, text=f"  {r['last_close']:.2f}  {chg:+.2f}%  |  {r['verdict']}",
+                         bg="white", fg=chg_c, font=("Microsoft YaHei", 10)).pack(anchor="w")
+
+            # 底部综合结论
+            bottom = tk.Frame(frame, bg="#E8EAF6", padx=14, pady=12)
+            bottom.pack(fill=tk.X, padx=10, pady=(0, 10))
+            if avg_score >= 65:
+                overall = "🟢 多头主导 · 顺势操作"
+                detail = "主要指数 MA 多头排列 + MACD 金叉 → 主力资金持续进场, 可逢低布局"
+            elif avg_score >= 45:
+                overall = "🟡 多空交织 · 观望为主"
+                detail = "指数涨跌互现, 无统一方向 → 控制仓位, 等待明确信号"
+            else:
+                overall = "🔴 空头主导 · 谨慎防守"
+                detail = "主要指数 MA 空头排列 + MACD 死叉 → 主力资金撤退, 以防御为主"
+
+            tk.Label(bottom, text=f"🎯 {overall}", bg="#E8EAF6", fg="#1a237e",
+                     font=("Microsoft YaHei", 13, "bold")).pack(anchor="w")
+            tk.Label(bottom, text=detail, bg="#E8EAF6", fg="#333",
+                     font=("Microsoft YaHei", 10), wraplength=1100, justify="left").pack(anchor="w", pady=4)
+
+            # 广度联动
+            if breadth:
+                tk.Label(bottom,
+                         text=f"🌐 广度参考: 涨跌比 {breadth['ratio']:.2f}  {'(普涨)' if breadth['ratio']>1.5 else ('(普跌)' if breadth['ratio']<0.7 else '(均衡)')}",
+                         bg="#E8EAF6", fg="#555", font=("Microsoft YaHei", 10)).pack(anchor="w", pady=2)
+
+        _run_analysis()
+
+    # ═══════════════════════════════════════════════════════════════
     # 通用工具: 股票文本解析 + OCR (两个主程序版本都可用)
     # ═══════════════════════════════════════════════════════════════
 

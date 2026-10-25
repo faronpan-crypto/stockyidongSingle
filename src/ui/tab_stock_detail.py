@@ -2151,6 +2151,89 @@ class StockDetailMixin:
             ax.plot(extended_x, ich['chikou'], color='#9c27b0', linewidth=0.9, alpha=0.6,
                     label='迟行带 (Chikou)', linestyle=':')
 
+        # ═══════════════════════════════════════════════════════════════
+        # 🎯 一目均衡关键信号标记
+        # ═══════════════════════════════════════════════════════════════
+        tenkan = ich['tenkan_sen']
+        kijun = ich['kijun_sen']
+        chikou = ich['chikou']
+
+        # 1) 金叉/死叉: Tenkan 与 Kijun 交叉
+        for i in range(1, n):
+            if np.isnan(tenkan[i]) or np.isnan(tenkan[i-1]) or np.isnan(kijun[i]) or np.isnan(kijun[i-1]):
+                continue
+            prev_diff = tenkan[i-1] - kijun[i-1]
+            curr_diff = tenkan[i] - kijun[i]
+            if prev_diff <= 0 < curr_diff:
+                # 金叉 → 转上穿基
+                ax.scatter([i], [lows[i] * 0.998], marker='^', color='#d32f2f', s=60, zorder=15, edgecolors='none')
+                ax.annotate('金', xy=(i, lows[i]), xytext=(0, -14), textcoords='offset points',
+                            fontsize=7, color='#d32f2f', fontweight='bold', ha='center')
+            elif prev_diff >= 0 > curr_diff:
+                # 死叉 → 转下穿基
+                ax.scatter([i], [highs[i] * 1.002], marker='v', color='#2e7d32', s=60, zorder=15, edgecolors='none')
+                ax.annotate('死', xy=(i, highs[i]), xytext=(0, 6), textcoords='offset points',
+                            fontsize=7, color='#2e7d32', fontweight='bold', ha='center')
+
+        # 2) 出云/入云: Close 与云边界交叉 (cloud 在 extended_x 坐标)
+        # cloud_top/cloud_bottom 长度 n+26, closes 长度 n
+        # closes[i] 对应 cloud_top[i] / cloud_bottom[i]
+        for i in range(1, n):
+            ct, cb = cloud_top[i], cloud_bottom[i]
+            ct_p, cb_p = cloud_top[i-1], cloud_bottom[i-1]
+            if np.isnan(ct) or np.isnan(cb) or np.isnan(ct_p) or np.isnan(cb_p):
+                continue
+            ci, ci_p = closes[i], closes[i-1]
+            # 出云: 上穿云顶
+            if ci_p <= ct_p and ci > ct:
+                ax.scatter([i], [ct], marker='^', color='#ff5722', s=70, zorder=15, edgecolors='white', linewidths=0.8)
+                ax.annotate('出云', xy=(i, ct), xytext=(0, -16), textcoords='offset points',
+                            fontsize=6, color='#ff5722', fontweight='bold', ha='center')
+            # 入云: 下穿云底
+            elif ci_p >= cb_p and ci < cb:
+                ax.scatter([i], [cb], marker='v', color='#009688', s=70, zorder=15, edgecolors='white', linewidths=0.8)
+                ax.annotate('入云', xy=(i, cb), xytext=(0, 8), textcoords='offset points',
+                            fontsize=6, color='#009688', fontweight='bold', ha='center')
+
+        # 3) 云变色: Senkou A 与 Senkou B 交叉 (限制在 K 线范围 0..n-1)
+        for i in range(1, min(n, len(sen_a))):
+            if np.isnan(sen_a[i]) or np.isnan(sen_a[i-1]) or np.isnan(sen_b[i]) or np.isnan(sen_b[i-1]):
+                continue
+            prev_sd = sen_a[i-1] - sen_b[i-1]
+            curr_sd = sen_a[i] - sen_b[i]
+            if prev_sd <= 0 < curr_sd:
+                # 看涨云形成 (A上穿B)
+                mid_y = (cloud_top[i] + cloud_bottom[i]) / 2
+                ax.scatter([i], [mid_y], marker='o', color='#e53935', s=40, zorder=14, alpha=0.85)
+                ax.annotate('云多', xy=(i, mid_y), xytext=(0, -12), textcoords='offset points',
+                            fontsize=6, color='#e53935', fontweight='bold', ha='center')
+            elif prev_sd >= 0 > curr_sd:
+                # 看跌云形成 (A下穿B)
+                mid_y = (cloud_top[i] + cloud_bottom[i]) / 2
+                ax.scatter([i], [mid_y], marker='o', color='#43a047', s=40, zorder=14, alpha=0.85)
+                ax.annotate('云空', xy=(i, mid_y), xytext=(0, 6), textcoords='offset points',
+                            fontsize=6, color='#43a047', fontweight='bold', ha='center')
+
+        # 4) 迟行带穿云信号: 迟行带进入/穿出云边界 (extended_x 坐标)
+        # chikou[t] = closes[t-26], 云边界 cloud_top[t] 对应 t 位置
+        for i in range(27, min(n, len(chikou))):
+            if np.isnan(chikou[i]) or np.isnan(chikou[i-1]):
+                continue
+            ct_i, cb_i = cloud_top[i], cloud_bottom[i]
+            ct_p, cb_p = cloud_top[i-1], cloud_bottom[i-1]
+            if np.isnan(ct_i) or np.isnan(cb_i) or np.isnan(ct_p) or np.isnan(cb_p):
+                continue
+            # 迟行带上穿云顶 (看涨)
+            if chikou[i-1] <= ct_p and chikou[i] > ct_i:
+                ax.scatter([i], [ct_i], marker='^', color='#7c4dff', s=55, zorder=14, alpha=0.85, edgecolors='white', linewidths=0.6)
+                ax.annotate('迟出', xy=(i, ct_i), xytext=(0, -12), textcoords='offset points',
+                            fontsize=6, color='#7c4dff', fontweight='bold', ha='center')
+            # 迟行带下穿云底 (看跌)
+            elif chikou[i-1] >= cb_p and chikou[i] < cb_i:
+                ax.scatter([i], [cb_i], marker='v', color='#ff4081', s=55, zorder=14, alpha=0.85, edgecolors='white', linewidths=0.6)
+                ax.annotate('迟入', xy=(i, cb_i), xytext=(0, 6), textcoords='offset points',
+                            fontsize=6, color='#ff4081', fontweight='bold', ha='center')
+
     # ═══════════════════════════════════════════════════════════════
     # VW-MACD (带成交量权重的 MACD)
     # ═══════════════════════════════════════════════════════════════
@@ -2835,12 +2918,63 @@ class StockDetailMixin:
                     "   → 预测未来 52 根的 S/R\n\n"
                     "5. 🟣 迟行带: 收盘价, 左移 26 根\n"
                     "   → 当前价格相对于 26 期前的位置\n\n", "body")
-                text1.insert(tk.END, "▌云 (Kumo)\n", "subtitle")
+                text1.insert(tk.END, "═══ ⭐ 一目均衡实战应用技巧 ═══\n\n", "title")
+                text1.insert(tk.END, "▌① 用云层定趋势与支撑阻力 (核心)\n", "subtitle")
                 text1.insert(tk.END,
-                    "  先行带 A 和 B 之间的填充区域就是云:\n"
-                    "  🔴 红色云 (A > B): 看涨区域, 价格在云上=强多头\n"
-                    "  🟢 绿色云 (A < B): 看跌区域, 价格在云下=强空头\n"
-                    "  价格突破云的边界 = 重要买卖信号\n\n", "body")
+                    "趋势判断:\n"
+                    "  价在云层上方 → 多头趋势 (云层=动态支撑)\n"
+                    "  价在云层下方 → 空头趋势 (云层=动态阻力)\n"
+                    "  价在云层内部 → 震荡市 (观望为主)\n\n"
+                    "云层厚度:\n"
+                    "  越厚 → 支撑/阻力越强, 突破需更大动能\n"
+                    "  越薄 → 越易被突破 (趋势转弱信号)\n\n"
+                    "云层颜色变换:\n"
+                    "  未来云由红转绿 → 空头预警\n"
+                    "  未来云由绿转红 → 多头预警\n\n", "body")
+                text1.insert(tk.END, "▌② 用转换线+基准线抓短期信号\n", "subtitle")
+                text1.insert(tk.END,
+                    "金叉 (转换线上穿基准线):\n"
+                    "  🟢 价格在云上 → 可靠买入信号 ✅\n"
+                    "  🔴 价格在云内/下 → 假信号风险大 ⚠️\n\n"
+                    "死叉 (转换线下穿基准线):\n"
+                    "  🔴 价格在云下 → 可靠卖出信号 ✅\n"
+                    "  🟢 价格在云内/上 → 假信号风险大 ⚠️\n\n"
+                    "基准线方向:\n"
+                    "  向上 → 短期偏多, 比单一均线更准\n"
+                    "  向下 → 短期偏空\n\n", "body")
+                text1.insert(tk.END, "▌③ 用迟行线确认动能\n", "subtitle")
+                text1.insert(tk.END,
+                    "迟行线在历史K线上方 → 多头动能强\n"
+                    "迟行线在历史K线下方 → 空头动能强\n\n"
+                    "与价格/云层无缠绕 → 趋势延续 (信号有效)\n"
+                    "与价格/云层缠绕 → 震荡市 (信号无效)\n\n", "body")
+                text1.insert(tk.END, "▌④ 实战组合策略 (过滤假信号)\n", "subtitle")
+                text1.insert(tk.END,
+                    "🎯 趋势交易 (高胜率):\n"
+                    "  价在云上 + 基准线向上 + 迟行线在历史K线上方\n"
+                    "  → 回调至转换线/云边买入; 止损云下\n\n"
+                    "⚖️ 震荡交易 (低风险):\n"
+                    "  价在云内 + 转换线与基准线反复交叉\n"
+                    "  → 云边高抛低吸; 止损云层另一侧\n\n"
+                    "🚀 突破交易 (抓拐点):\n"
+                    "  价放量突破云层 + 转换线/基准线同步突破 + 迟行线配合\n"
+                    "  → 顺突破方向入场; 止损突破点反侧\n\n", "body")
+                text1.insert(tk.END, "▌⑤ 关键注意事项\n", "subtitle")
+                text1.insert(tk.END,
+                    "时间周期适配:\n"
+                    "  日线/4小时 → 看趋势\n"
+                    "  1小时 → 找入场 (短周期服从长周期)\n\n"
+                    "结合量价:\n"
+                    "  突破需放量, 缩量突破易回踩\n\n"
+                    "多指标共振:\n"
+                    "  搭配 RSI (超买超卖) / MACD (背离) 提升胜率\n\n"
+                    "规避误区:\n"
+                    "  震荡市信号频繁失效, 需严格止损\n"
+                    "  参数 (9/26/52) 勿随意修改\n\n", "body")
+                text1.insert(tk.END, "▌🎯 核心逻辑 (口诀)\n", "subtitle")
+                text1.insert(tk.END,
+                    "  云层定方向, 线组找点位,\n"
+                    "  迟行线防骗线, 结合周期与量价 → 「一目」决策\n\n", "body")
 
                 text1.insert(tk.END, "═══ VW-MACD (量价 MACD) ═══\n\n", "title")
                 text1.insert(tk.END, "▌什么是 VW-MACD?\n", "subtitle")
@@ -3261,6 +3395,43 @@ class StockDetailMixin:
                     else:
                         price_pos = "价在云中 ➖"
 
+                    # 云层厚度判断
+                    if not (np.isnan(last_sen_a) or np.isnan(last_sen_b)):
+                        cloud_thickness = abs(last_sen_a - last_sen_b)
+                        cloud_pct = cloud_thickness / last_close * 100
+                        if cloud_pct > 4:
+                            thick_label = f"云厚 {cloud_pct:.1f}% (支撑强)"
+                        elif cloud_pct > 2:
+                            thick_label = f"云厚 {cloud_pct:.1f}% (中等)"
+                        else:
+                            thick_label = f"云薄 {cloud_pct:.1f}% (易突破)"
+                    else:
+                        thick_label = "云厚 —"
+
+                    # 迟行线动能判断 (chikou 在 x=n-1 位置对应 closes[n-27])
+                    try:
+                        chikou_now = ich['chikou'][n - 1] if n - 1 < len(ich['chikou']) else np.nan
+                        # 迟行线与历史K线的位置关系: 比较 chikou[t] 与 closes[t] 在时间轴上的缠绕程度
+                        # 简化: 用最近 20 根 chikou 相对于 closes 的位置
+                        lookback = min(30, n)
+                        chikou_tail = ich['chikou'][max(26, n-lookback):n]
+                        closes_tail = closes[max(0, n-lookback-26):n-26]
+                        # 统计 chikou > close 的比例
+                        if len(chikou_tail) > 5 and len(closes_tail) > 5:
+                            min_len = min(len(chikou_tail), len(closes_tail))
+                            chk_above = sum(1 for j in range(min_len) if chikou_tail[j] > closes_tail[j])
+                            chk_ratio = chk_above / min_len
+                            if chk_ratio > 0.7:
+                                chk_label = "迟行强多 🟣↑"
+                            elif chk_ratio < 0.3:
+                                chk_label = "迟行强空 🟣↓"
+                            else:
+                                chk_label = "迟行缠绕 🟣〰"
+                        else:
+                            chk_label = "迟行 —"
+                    except Exception:
+                        chk_label = "迟行 —"
+
                     # 2) VW-MACD 信号
                     vw_dif_val = vw['dif'][-1]
                     vw_dea_val = vw['dea'][-1]
@@ -3288,8 +3459,9 @@ class StockDetailMixin:
                         f"═══ 判别分析 ═══",
                         f"🎯 趋势: {verdict}",
                         f"─── 一目均衡 ───",
-                        f"  云: {cloud_label}",
+                        f"  云: {cloud_label} | {thick_label}",
                         f"  {tk_kijun}  |  {price_pos}",
+                        f"  {chk_label}",
                         f"─── VW-MACD ───",
                         f"  {macd_dir}  |  {vol_flag}(量比{vr:.2f})",
                     ]
