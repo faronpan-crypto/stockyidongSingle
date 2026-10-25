@@ -60352,9 +60352,9 @@ class DapanMixin:
                     denom = cum_v2[_i]
                     if denom > 0: var_vw[_i] = cum_dev[_i] / denom
                 sigma = np.sqrt(np.maximum(var_vw, 0))
-                ax_i.plot(x, vwap, color='#ff9800', linewidth=0.9, label='VWAP(60)')
-                ax_i.fill_between(x, vwap - sigma, vwap + sigma, color='#ffb74d', alpha=0.08, label='VWAP±1σ')
-                ax_i.fill_between(x, vwap - 2*sigma, vwap + 2*sigma, color='#ff8a65', alpha=0.05, label='VWAP±2σ')
+                ax_i.plot(x, vwap, color='#ff9800', linewidth=0.9, label='VWAP')
+                ax_i.fill_between(x, vwap - sigma, vwap + sigma, color='#ffb74d', alpha=0.10, label='VWAP±1σ')
+                ax_i.fill_between(x, vwap - 2*sigma, vwap + 2*sigma, color='#ff8a65', alpha=0.06, label='VWAP±2σ')
 
             # TD Sequential (点号 1-13)
             if ichi_td_var.get():
@@ -60420,8 +60420,11 @@ class DapanMixin:
                               transform=ax_i.transAxes, fontsize=8, color=_bias_color,
                               va='top', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
 
-            ax_i.set_title(f"{sym_code} · 一目均衡", fontsize=10, fontweight='bold')
-            ax_i.set_ylabel("价格", fontsize=9); ax_i.legend(fontsize=7, loc='upper left')
+            ax_i.set_title(f"{sym_code} · 一目均衡", fontsize=10, fontweight='bold', color='#212121')
+            ax_i.set_ylabel("价格", fontsize=9, color='#424242')
+            ax_i.tick_params(colors='#424242')
+            ax_i.legend(fontsize=7, loc='upper left', labelcolor='#212121',
+                        facecolor='#FFFFFF', edgecolor='#CCCCCC')
             ax_i.grid(True, alpha=0.15); ax_i.tick_params(labelbottom=False)
             ax_i.set_xlim(0, n - 1)
 
@@ -60443,7 +60446,10 @@ class DapanMixin:
                 ax_ivw.bar(x, vw_macdh, color=bar_colors, width=0.7, alpha=0.7, label='VW-MACD柱')
                 ax_ivw.plot(x, vw_dif, color='#1565c0', linewidth=0.8, label='VW-DIF')
                 ax_ivw.plot(x, vw_dea, color='#ff6f00', linewidth=0.8, label='VW-DEA')
-                ax_ivw.set_ylabel("VW-MACD", fontsize=9); ax_ivw.legend(fontsize=7, loc='upper left')
+                ax_ivw.set_ylabel("VW-MACD", fontsize=9, color='#424242')
+                ax_ivw.tick_params(colors='#424242')
+                ax_ivw.legend(fontsize=7, loc='upper left', labelcolor='#212121',
+                              facecolor='#FFFFFF', edgecolor='#CCCCCC')
                 ax_ivw.grid(True, alpha=0.15)
             ax_ivw.tick_params(labelbottom=False)
 
@@ -60456,12 +60462,15 @@ class DapanMixin:
                 vol_ma10 = pd.Series(vols).rolling(10, min_periods=1).mean().values
                 ax_iv.plot(x, vol_ma5, color='#ff9800', linewidth=0.8, label='VOL_MA5')
                 ax_iv.plot(x, vol_ma10, color='#2196f3', linewidth=0.8, label='VOL_MA10')
-            ax_iv.set_ylabel("成交量", fontsize=9); ax_iv.legend(fontsize=7, loc='upper left')
+            ax_iv.set_ylabel("成交量", fontsize=9, color='#424242')
+            ax_iv.tick_params(colors='#424242')
+            ax_iv.legend(fontsize=7, loc='upper left', labelcolor='#212121',
+                         facecolor='#FFFFFF', edgecolor='#CCCCCC')
             ax_iv.grid(True, alpha=0.15)
             step = max(1, n // 12)
             ax_iv.set_xticks(x[::step])
             dates_label = [df[i].get('day', '') if isinstance(df, list) else '' for i in range(n)]
-            ax_iv.set_xticklabels(dates_label[::step], rotation=30, fontsize=7)
+            ax_iv.set_xticklabels(dates_label[::step], rotation=30, fontsize=7, color='#424242')
 
             ichi_fig.tight_layout(); ichi_canvas.draw()
 
@@ -60805,8 +60814,8 @@ class DapanMixin:
         tab_macro = ttk.Frame(right_nb); right_nb.add(tab_macro, text="🌐 宏观指标")
         macro_fig = Figure(figsize=(7, 6), facecolor="#FAFAFA")
         gs = macro_fig.add_gridspec(2, 1, hspace=0.35)
-        ax_cpi = macro_fig.add_subplot(gs[0])
-        ax_ppi = macro_fig.add_subplot(gs[1])
+        ax_cpi = macro_fig.add_subplot(gs[0]); ax_cpi.set_facecolor('#FFFFFF')
+        ax_ppi = macro_fig.add_subplot(gs[1]); ax_ppi.set_facecolor('#FFFFFF')
         macro_canvas = FigureCanvasTkAgg(macro_fig, master=tab_macro)
         macro_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         macro_tb = NavigationToolbar2Tk(macro_canvas, tab_macro, pack_toolbar=False)
@@ -60815,8 +60824,8 @@ class DapanMixin:
         # Tab 2: 📈 日K周期
         tab_kline = ttk.Frame(right_nb); right_nb.add(tab_kline, text="📈 日K周期")
         kline_fig = Figure(figsize=(7, 6), facecolor="#FAFAFA")
-        ax_k = kline_fig.add_subplot(211)
-        ax_kv = kline_fig.add_subplot(212, sharex=ax_k)
+        ax_k = kline_fig.add_subplot(211); ax_k.set_facecolor('#FFFFFF')
+        ax_kv = kline_fig.add_subplot(212, sharex=ax_k); ax_kv.set_facecolor('#FFFFFF')
         kline_canvas = FigureCanvasTkAgg(kline_fig, master=tab_kline)
         kline_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         kline_tb = NavigationToolbar2Tk(kline_canvas, tab_kline, pack_toolbar=False)
@@ -60844,7 +60853,7 @@ class DapanMixin:
         ttk.Checkbutton(ichi_toggle_row, text="基准线", variable=ichi_kijun_var).pack(side=tk.LEFT, padx=(4,0))
         ttk.Checkbutton(ichi_toggle_row, text="迟行带", variable=ichi_chikou_var).pack(side=tk.LEFT, padx=(4,0))
         ttk.Checkbutton(ichi_toggle_row, text="SuperTrend", variable=ichi_supertrend_var).pack(side=tk.LEFT, padx=(4,0))
-        ttk.Checkbutton(ichi_toggle_row, text="VWAP带", variable=ichi_vwap_band_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="VWAP+σ带", variable=ichi_vwap_band_var).pack(side=tk.LEFT, padx=(4,0))
         ttk.Checkbutton(ichi_toggle_row, text="TD序列", variable=ichi_td_var).pack(side=tk.LEFT, padx=(4,0))
         ttk.Checkbutton(ichi_toggle_row, text="Camarilla", variable=ichi_camarilla_var).pack(side=tk.LEFT, padx=(4,0))
         ttk.Checkbutton(ichi_toggle_row, text="MA", variable=ichi_ma_var).pack(side=tk.LEFT, padx=(4,0))
@@ -60854,9 +60863,9 @@ class DapanMixin:
         ttk.Checkbutton(ichi_toggle_row, text="量MA", variable=ichi_volma_var).pack(side=tk.LEFT, padx=(4,0))
 
         ichi_fig = Figure(figsize=(7, 7.5), facecolor="#FAFAFA")
-        ax_i = ichi_fig.add_subplot(311)
-        ax_ivw = ichi_fig.add_subplot(312, sharex=ax_i)
-        ax_iv = ichi_fig.add_subplot(313, sharex=ax_i)
+        ax_i = ichi_fig.add_subplot(311); ax_i.set_facecolor('#FFFFFF')
+        ax_ivw = ichi_fig.add_subplot(312, sharex=ax_i); ax_ivw.set_facecolor('#FFFFFF')
+        ax_iv = ichi_fig.add_subplot(313, sharex=ax_i); ax_iv.set_facecolor('#FFFFFF')
         ichi_canvas = FigureCanvasTkAgg(ichi_fig, master=tab_ichi)
         ichi_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         ichi_tb = NavigationToolbar2Tk(ichi_canvas, tab_ichi, pack_toolbar=False)
@@ -60877,26 +60886,30 @@ class DapanMixin:
         # Tab 4: 📊 财务指标
         tab_fin = ttk.Frame(right_nb); right_nb.add(tab_fin, text="📊 财务指标")
         fin_fig = Figure(figsize=(7, 6), facecolor="#FAFAFA")
-        ax_fin1 = fin_fig.add_subplot(211)
-        ax_fin2 = fin_fig.add_subplot(212)
+        ax_fin1 = fin_fig.add_subplot(211); ax_fin1.set_facecolor('#FFFFFF')
+        ax_fin2 = fin_fig.add_subplot(212); ax_fin2.set_facecolor('#FFFFFF')
         fin_canvas = FigureCanvasTkAgg(fin_fig, master=tab_fin)
         fin_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         fin_tb = NavigationToolbar2Tk(fin_canvas, tab_fin, pack_toolbar=False)
         fin_tb.update()
-        # 财务指标文本框 (指标表格)
-        fin_text = tk.Text(tab_fin, height=5, font=("Menlo", 9), wrap=tk.WORD)
+        # 财务指标文本框 (指标表格) — 显式 bg/fg 避免 macOS 深色模式看不清
+        fin_text = tk.Text(tab_fin, height=5, font=("Menlo", 9), wrap=tk.WORD,
+                           bg="#FFFFFF", fg="#212121", insertbackground="#212121",
+                           selectbackground="#BBDEFB", selectforeground="#212121")
         fin_text.pack(fill=tk.X, padx=4, pady=(2,4))
 
         # Tab 5: 😤 情绪指标
         tab_sent = ttk.Frame(right_nb); right_nb.add(tab_sent, text="😤 情绪指标")
         sent_fig = Figure(figsize=(7, 6), facecolor="#FAFAFA")
-        ax_sent1 = sent_fig.add_subplot(211)
-        ax_sent2 = sent_fig.add_subplot(212)
+        ax_sent1 = sent_fig.add_subplot(211); ax_sent1.set_facecolor('#FFFFFF')
+        ax_sent2 = sent_fig.add_subplot(212); ax_sent2.set_facecolor('#FFFFFF')
         sent_canvas = FigureCanvasTkAgg(sent_fig, master=tab_sent)
         sent_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         sent_tb = NavigationToolbar2Tk(sent_canvas, tab_sent, pack_toolbar=False)
         sent_tb.update()
-        sent_text = tk.Text(tab_sent, height=5, font=("Menlo", 9), wrap=tk.WORD)
+        sent_text = tk.Text(tab_sent, height=5, font=("Menlo", 9), wrap=tk.WORD,
+                            bg="#FFFFFF", fg="#212121", insertbackground="#212121",
+                            selectbackground="#BBDEFB", selectforeground="#212121")
         sent_text.pack(fill=tk.X, padx=4, pady=(2,4))
 
         # ════════════════════════════════════════

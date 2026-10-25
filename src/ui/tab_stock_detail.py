@@ -3217,9 +3217,9 @@ class StockDetailMixin:
                 # 构建图表 (主图: K线+叠加; 副图1: VW-MACD; 副图2: 成交量)
                 fig = Figure(figsize=(14, 11), dpi=100, facecolor='#FAFAFA')
                 gs = gridspec.GridSpec(3, 1, figure=fig, height_ratios=[4, 1, 1], hspace=0.06)
-                ax_main = fig.add_subplot(gs[0, 0])
-                ax_sub1 = fig.add_subplot(gs[1, 0], sharex=ax_main)
-                ax_sub2 = fig.add_subplot(gs[2, 0], sharex=ax_main)
+                ax_main = fig.add_subplot(gs[0, 0]); ax_main.set_facecolor('#FFFFFF')
+                ax_sub1 = fig.add_subplot(gs[1, 0], sharex=ax_main); ax_sub1.set_facecolor('#FFFFFF')
+                ax_sub2 = fig.add_subplot(gs[2, 0], sharex=ax_main); ax_sub2.set_facecolor('#FFFFFF')
 
                 # ─── 主图: K 线 ───
                 for i in range(n):
@@ -3384,8 +3384,10 @@ class StockDetailMixin:
                 if ind_vars["td_seq"].get(): active_inds.append("TD序列")
                 if ind_vars["camarilla"].get(): active_inds.append("Camarilla")
                 ax_main.set_title(f"📈 {sym_name} — {period_label} | " + " · ".join(active_inds) + " + VW-MACD",
-                                  fontsize=13, fontweight='bold', pad=10)
-                ax_main.legend(loc='upper left', fontsize=7, ncol=3)
+                                  fontsize=13, fontweight='bold', pad=10, color='#212121')
+                ax_main.legend(loc='upper left', fontsize=7, ncol=3,
+                               labelcolor='#212121', facecolor='#FFFFFF', edgecolor='#CCCCCC')
+                ax_main.tick_params(colors='#424242')
                 ax_main.grid(True, alpha=0.3)
                 ax_main.tick_params(axis="x", labelbottom=False)
                 # 初始视图聚焦 K 线区域 (0..n-1), 但允许 pan 到右侧看一目均衡未来预测 (n..n+26)
@@ -3518,8 +3520,12 @@ class StockDetailMixin:
                 ax_sub1b.set_ylabel('量比', fontsize=8, color='#ff9800')
                 ax_sub1b.tick_params(axis='y', labelcolor='#ff9800', labelsize=8)
                 ax_sub1b.set_ylim(0, max(3.0, np.nanmax(vol_ratio) * 1.1))
-                ax_sub1.set_ylabel('VW-MACD', fontsize=9)
-                ax_sub1.legend(loc='upper left', fontsize=7); ax_sub1b.legend(loc='upper right', fontsize=7)
+                ax_sub1.set_ylabel('VW-MACD', fontsize=9, color='#424242')
+                ax_sub1.tick_params(colors='#424242')
+                ax_sub1.legend(loc='upper left', fontsize=7,
+                               labelcolor='#212121', facecolor='#FFFFFF', edgecolor='#CCCCCC')
+                ax_sub1b.legend(loc='upper right', fontsize=7,
+                                labelcolor='#212121', facecolor='#FFFFFF', edgecolor='#CCCCCC')
                 ax_sub1.grid(True, alpha=0.3)
 
                 # ─── 副图2: 成交量 (固定) ───
@@ -3528,7 +3534,10 @@ class StockDetailMixin:
                 vol_ma5 = _ma_series(vol, 5)
                 ax_sub2.bar(x, vol, color=vol_colors, width=0.55, alpha=0.7)
                 ax_sub2.plot(x, vol_ma5, color='#ff9800', linewidth=0.8, label='VOL_MA5')
-                ax_sub2.set_ylabel('量', fontsize=9); ax_sub2.legend(loc='upper left', fontsize=7)
+                ax_sub2.set_ylabel('量', fontsize=9, color='#424242')
+                ax_sub2.tick_params(colors='#424242')
+                ax_sub2.legend(loc='upper left', fontsize=7,
+                               labelcolor='#212121', facecolor='#FFFFFF', edgecolor='#CCCCCC')
                 ax_sub2.grid(True, alpha=0.3)
 
                 # 日期轴 (副图2 显示)
