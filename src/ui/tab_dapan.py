@@ -60863,9 +60863,10 @@ class DapanMixin:
         ttk.Checkbutton(ichi_toggle_row, text="量MA", variable=ichi_volma_var).pack(side=tk.LEFT, padx=(4,0))
 
         ichi_fig = Figure(figsize=(7, 7.5), facecolor="#FAFAFA")
-        ax_i = ichi_fig.add_subplot(311); ax_i.set_facecolor('#FFFFFF')
-        ax_ivw = ichi_fig.add_subplot(312, sharex=ax_i); ax_ivw.set_facecolor('#FFFFFF')
-        ax_iv = ichi_fig.add_subplot(313, sharex=ax_i); ax_iv.set_facecolor('#FFFFFF')
+        _ichi_gs = ichi_fig.add_gridspec(3, 1, height_ratios=[5, 3, 2], hspace=0.06)
+        ax_i = ichi_fig.add_subplot(_ichi_gs[0]); ax_i.set_facecolor('#FFFFFF')
+        ax_ivw = ichi_fig.add_subplot(_ichi_gs[1], sharex=ax_i); ax_ivw.set_facecolor('#FFFFFF')
+        ax_iv = ichi_fig.add_subplot(_ichi_gs[2], sharex=ax_i); ax_iv.set_facecolor('#FFFFFF')
         ichi_canvas = FigureCanvasTkAgg(ichi_fig, master=tab_ichi)
         ichi_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         ichi_tb = NavigationToolbar2Tk(ichi_canvas, tab_ichi, pack_toolbar=False)

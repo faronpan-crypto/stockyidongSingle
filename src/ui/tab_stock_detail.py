@@ -3216,7 +3216,7 @@ class StockDetailMixin:
 
                 # 构建图表 (主图: K线+叠加; 副图1: VW-MACD; 副图2: 成交量)
                 fig = Figure(figsize=(14, 11), dpi=100, facecolor='#FAFAFA')
-                gs = gridspec.GridSpec(3, 1, figure=fig, height_ratios=[4, 1, 1], hspace=0.06)
+                gs = gridspec.GridSpec(3, 1, figure=fig, height_ratios=[5, 3, 2], hspace=0.06)
                 ax_main = fig.add_subplot(gs[0, 0]); ax_main.set_facecolor('#FFFFFF')
                 ax_sub1 = fig.add_subplot(gs[1, 0], sharex=ax_main); ax_sub1.set_facecolor('#FFFFFF')
                 ax_sub2 = fig.add_subplot(gs[2, 0], sharex=ax_main); ax_sub2.set_facecolor('#FFFFFF')

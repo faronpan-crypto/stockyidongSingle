@@ -764,9 +764,10 @@ def build_fund_holdings_tab(parent, root=None):
                    ("Camari", ri_camarilla_var), ("MA", ri_ma_var), ("BOLL", ri_boll_var),
                    ("BIAS", ri_bias_var), ("VW-MACD", ri_vwmacd_var), ("量MA", ri_volma_var)]:
         _mkcb(ri_toggle, txt, v).pack(side=tk.LEFT, padx=1)
-    ri_fig = Figure(figsize=(7, 6), facecolor=_BG_PANEL)
-    ri_ax1 = ri_fig.add_subplot(311); ri_ax2 = ri_fig.add_subplot(312, sharex=ri_ax1)
-    ri_ax3 = ri_fig.add_subplot(313, sharex=ri_ax1)
+    ri_fig = Figure(figsize=(7, 7), facecolor=_BG_PANEL)
+    _ri_gs = ri_fig.add_gridspec(3, 1, height_ratios=[5, 3, 2], hspace=0.06)
+    ri_ax1 = ri_fig.add_subplot(_ri_gs[0]); ri_ax2 = ri_fig.add_subplot(_ri_gs[1], sharex=ri_ax1)
+    ri_ax3 = ri_fig.add_subplot(_ri_gs[2], sharex=ri_ax1)
     for ax in (ri_ax1, ri_ax2, ri_ax3): ax.set_facecolor(_BG_PANEL)
     ri_canvas = FigureCanvasTkAgg(ri_fig, master=tab_ri); ri_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     NavigationToolbar2Tk(ri_canvas, tab_ri, pack_toolbar=False).update()
