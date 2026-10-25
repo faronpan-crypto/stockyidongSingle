@@ -4798,6 +4798,12 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         ttk.Button(tools_row_c, text="🌱成长扫描",
                    command=lambda: crawler_control_notebook.select(growth_tab),
                    width=14).pack(**_tools_pad)
+        # 一目均衡 + VW-MACD K线
+        tools_row_d = ttk.Frame(tools_frame); tools_row_d.pack(fill=tk.X, pady=2)
+        ttk.Button(tools_row_d, text="📈 一目均衡K线",
+                   command=self._show_ichimoku_kline_dialog, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_d, text="📊 AI用量监控",
+                   command=self._show_ai_usage_dialog, width=14).pack(**_tools_pad)
         # 将咨询分析、投资、系统、赌博、交易体系、交割单分析按钮移到交易标签页
         trading_buttons_frame = ttk.LabelFrame(trading_tab, text="交易功能", padding=3)
         trading_buttons_frame.pack(fill=tk.X, expand=False, pady=2)

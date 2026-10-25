@@ -647,6 +647,170 @@ def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None
         elif score >= 0: return "reduce"
         else: return "sell"
 
+    # ─── 本地规则引擎 (AI 不可用时兜底) ───
+    def _local_rule_advice(results: List[Dict], board_name: str, err_note: str = "") -> str:
+        """不用 AI, 纯规则引擎生成同板块综合建议"""
+        header = "🤖 AI 暂时不可用 → 本地规则分析\n"
+        if err_note:
+            header += f"  (原因: {err_note[:80]})\n"
+        header += "━" * 40 + "\n\n"
+
+        if not results:
+            return header + "❌ 无板块数据, 请先刷新\n"
+
+        # --- 1) 板块整体判断 ---
+        up_count = sum(1 for r in results if (r.get("tech") or {}).get("above_ma20"))
+        total = len(results)
+        up_pct = up_count / total if total > 0 else 0
+
+        # 估值中位数
+        pes = [(r.get("fund") or {}).get("pe") for r in results
+               if isinstance((r.get("fund") or {}).get("pe"), (int, float)) and 0 < (r.get("fund") or {}).get("pe") < 200]
+        pe_med = sorted(pes)[len(pes)//2] if pes else None
+
+        roes = [(r.get("fund") or {}).get("roe") for r in results
+                if isinstance((r.get("fund") or {}).get("roe"), (int, float))]
+        roe_med = sorted(roes)[len(roes)//2] if roes else None
+
+        # 20 日涨跌中位数
+        chg20s = [(r.get("tech") or {}).get("chg_20d") for r in results
+                  if isinstance((r.get("tech") or {}).get("chg_20d"), (int, float))]
+        chg20_med = sorted(chg20s)[len(chg20s)//2] if chg20s else None
+
+        lines = [header, f"【板块整体判断】"]
+        # 热度
+        if up_pct >= 0.7:
+            hot = "🔥 热度高 (70%+ 站上 MA20), 板块处于上升趋势"
+        elif up_pct >= 0.4:
+            hot = "🌤️ 热度中等 (40-70% 站上 MA20), 分化明显"
+        else:
+            hot = "❄️ 热度低 (<40% 站上 MA20), 板块整体偏弱"
+        lines.append(f"  • {hot}")
+
+        # 估值
+        if pe_med is not None:
+            if pe_med < 15: val = f"低估 (PE中位数 {pe_med:.1f}, 价值区)"
+            elif pe_med < 30: val = f"合理 (PE中位数 {pe_med:.1f})"
+            else: val = f"偏高 (PE中位数 {pe_med:.1f})"
+            lines.append(f"  • 估值: {val}")
+
+        # 趋势
+        if chg20_med is not None:
+            if chg20_med > 10: trend = f"近20日涨 {chg20_med:.1f}%, 强势"
+            elif chg20_med > 0: trend = f"近20日涨 {chg20_med:.1f}%, 小幅正收益"
+            else: trend = f"近20日跌 {chg20_med:.1f}%, 弱势调整"
+            lines.append(f"  • 技术面: {trend}")
+
+        lines.append("")
+
+        # --- 2) 每只股票打分排序 ---
+        def _score_one(r):
+            fund = r.get("fund") or {}
+            tech = r.get("tech") or {}
+            s = 0
+            # 基本面分
+            pe = fund.get("pe")
+            if pe is not None and 5 < pe < 20: s += 3
+            elif pe is not None and pe > 60: s -= 2
+            roe = fund.get("roe")
+            if roe is not None and roe > 15: s += 2
+            elif roe is not None and roe < 5: s -= 1
+            rev = fund.get("revenue_yoy")
+            if rev is not None and rev > 20: s += 2
+            elif rev is not None and rev < -10: s -= 1
+            # 技术面分
+            if tech.get("above_ma20"): s += 2
+            else: s -= 1
+            macd_t = tech.get("macd_trend", "")
+            if macd_t in ("金叉", "多头"): s += 2
+            elif macd_t in ("死叉", "空头"): s -= 2
+            rsi = tech.get("rsi")
+            if rsi is not None and 40 <= rsi <= 60: s += 1
+            elif rsi is not None and rsi > 75: s -= 1
+            chg5 = tech.get("chg_5d")
+            if chg5 is not None and chg5 < -10: s -= 1
+            return s
+
+        ranked = [(r, _score_one(r)) for r in results]
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        # 去重同代码
+        seen = set()
+        ranked_unique = []
+        for r, s in ranked:
+            tsc = r.get("ts_code", "")
+            code6 = tsc.split(".")[0] if tsc else ""
+            if code6 and code6 in seen:
+                continue
+            seen.add(code6)
+            ranked_unique.append((r, s))
+
+        lines.append("【最值得买 Top2】")
+        for r, s in ranked_unique[:2]:
+            tsc = r.get("ts_code", "?")
+            code6 = tsc.split(".")[0]
+            fund = r.get("fund") or {}; tech = r.get("tech") or {}
+            reasons = []
+            pe = fund.get("pe")
+            if pe is not None and pe < 20: reasons.append(f"PE低({pe:.1f})")
+            roe = fund.get("roe")
+            if roe is not None and roe > 15: reasons.append(f"ROE高({roe:.1f}%)")
+            rev = fund.get("revenue_yoy")
+            if rev is not None and rev > 10: reasons.append(f"营收+{rev:.1f}%")
+            if tech.get("above_ma20"): reasons.append("站上MA20")
+            if tech.get("macd_trend") in ("金叉", "多头"): reasons.append(f"MACD{tech.get('macd_trend')}")
+            if not reasons: reasons.append("综合得分最高")
+            lines.append(f"  ✅ {code6} 理由: {'/'.join(reasons)} (规则分 {s})")
+        lines.append("")
+
+        lines.append("【最该避开 Top2】")
+        for r, s in ranked_unique[-2:]:
+            tsc = r.get("ts_code", "?")
+            code6 = tsc.split(".")[0]
+            fund = r.get("fund") or {}; tech = r.get("tech") or {}
+            reasons = []
+            pe = fund.get("pe")
+            if pe is not None and pe > 60: reasons.append(f"PE高({pe:.1f})")
+            if not tech.get("above_ma20"): reasons.append("跌破MA20")
+            if tech.get("macd_trend") in ("死叉", "空头"): reasons.append(f"MACD{tech.get('macd_trend')}")
+            rsi = tech.get("rsi")
+            if rsi is not None and rsi > 75: reasons.append(f"RSI超买({rsi:.0f})")
+            if not reasons: reasons.append("综合得分最低")
+            lines.append(f"  ❌ {code6} 理由: {'/'.join(reasons)} (规则分 {s})")
+        lines.append("")
+
+        # --- 机构操作建议 (简化版) ---
+        lines.append("【操作建议】")
+        if up_pct >= 0.6 and pe_med and pe_med < 30:
+            lines.append("  • 板块热度+估值双优 → 可集中持有 Top2 标的")
+            lines.append("  • 已有仓位: 持有为主, 跌破 MA20 再减仓")
+        elif up_pct >= 0.4:
+            lines.append("  • 板块分化 → 精选高 ROE + 站上 MA20 的标的")
+            lines.append("  • 已有仓位: 持有 Top2, 避开 Bottom2")
+        else:
+            lines.append("  • 板块偏弱 → 控制仓位, 等待企稳 MA20 再介入")
+            lines.append("  • 已有仓位: 考虑减仓或换强势板块")
+        lines.append("")
+
+        # --- 风险提示 ---
+        risks = []
+        if chg20_med is not None and chg20_med > 15:
+            risks.append("短期涨幅较大, 追高风险")
+        if pe_med and pe_med > 40:
+            risks.append("估值偏高, 业绩不及预期风险")
+        if up_pct < 0.3:
+            risks.append("板块整体弱势, 系统性风险")
+        if len(risks) < 2:
+            risks.append("大盘波动可能加剧板块分化")
+            risks.append("注意个股基本面变化")
+        lines.append("【风险提示】")
+        for i, r in enumerate(risks[:3], 1):
+            lines.append(f"  {i}. {r}")
+        lines.append("")
+        lines.append("━" * 40)
+        lines.append("📌 以上为本地规则引擎生成, 仅作参考, 非投资建议")
+
+        return "\n".join(lines)
+
     def _do_compare():
         board_name = board_name_var.get().strip()
         if not board_name or not hasattr(board_combo, "_boards"):
@@ -867,12 +1031,16 @@ def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None
                       f"📌 代码直接给 6 位数字, 方便用户快速查。")
             try:
                 res = call_ai_fn(prompt, system_prompt=system_p, max_tokens=800)
-                if isinstance(res, str) and len(res) > 10:
+                if isinstance(res, str) and len(res) > 10 and not res.startswith("⚠️") and "余额不足" not in res:
                     win.after(0, lambda: _show_ai(res))
                 else:
-                    win.after(0, lambda: _show_ai(f"⚠️ AI 返回异常: {str(res)[:200]}"))
+                    # AI 失败 → 用本地规则引擎兜底
+                    local = _local_rule_advice(results, board_name,
+                                               err_note=(res or "")[:100] if isinstance(res, str) else "")
+                    win.after(0, lambda: _show_ai(local))
             except Exception as e:
-                win.after(0, lambda: _show_ai(f"⚠️ AI 调用失败: {e}"))
+                local = _local_rule_advice(results, board_name, err_note=str(e)[:100])
+                win.after(0, lambda: _show_ai(local))
         threading.Thread(target=_bg, daemon=True).start()
 
     def _show_ai(text: str):

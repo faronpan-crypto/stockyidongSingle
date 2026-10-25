@@ -1059,6 +1059,20 @@ class StockDetailMixin:
                         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
                         status_var.set("当前显示:只显示主图 | 买卖点开" if show_bs_var.get() else "当前显示:只显示主图")
                         _bind_hover(canvas, fig)
+                        # 🎯 叠加综合评分 hover (不影响原买卖点 hover)
+                        try:
+                            _df0 = kline_data["data"]
+                            _d0 = _df0["日期"].tolist() if "日期" in _df0.columns else []
+                            self._install_score_hover(
+                                canvas, fig.axes[0],
+                                _df0["开盘"].values.astype(float),
+                                _df0["最高"].values.astype(float),
+                                _df0["最低"].values.astype(float),
+                                _df0["收盘"].values.astype(float),
+                                _df0["成交量"].values.astype(float) if "成交量" in _df0.columns else None,
+                                trade_dates=_d0)
+                        except Exception:
+                            pass
                     except Exception as ex:
                         messagebox.showerror("错误", f"绘制失败: {ex}", parent=win)
                 else:
@@ -1082,6 +1096,20 @@ class StockDetailMixin:
                         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
                         status_var.set(f"副图:{' + '.join(sel)} | 买卖点开" if show_bs_var.get() else f"副图:{' + '.join(sel)}")
                         _bind_hover(canvas, fig)
+                        # 🎯 叠加综合评分 hover
+                        try:
+                            _df0 = kline_data["data"]
+                            _d0 = _df0["日期"].tolist() if "日期" in _df0.columns else []
+                            self._install_score_hover(
+                                canvas, fig.axes[0],
+                                _df0["开盘"].values.astype(float),
+                                _df0["最高"].values.astype(float),
+                                _df0["最低"].values.astype(float),
+                                _df0["收盘"].values.astype(float),
+                                _df0["成交量"].values.astype(float) if "成交量" in _df0.columns else None,
+                                trade_dates=_d0)
+                        except Exception:
+                            pass
                     except Exception as ex:
                         if hasattr(self, '_apply_daily_kline_ax'): self._apply_daily_kline_ax = original_apply
                         messagebox.showerror("错误", f"绘制失败: {ex}", parent=win)
@@ -1444,6 +1472,20 @@ class StockDetailMixin:
                             canvas = FigureCanvasTkAgg(fig, chart_inner)
                             canvas.draw()
                             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                            # 🎯 叠加综合评分 hover (redraw 分支)
+                            try:
+                                _df0 = kline_data["data"]
+                                _d0 = _df0["日期"].tolist() if "日期" in _df0.columns else []
+                                self._install_score_hover(
+                                    canvas, fig.axes[0],
+                                    _df0["开盘"].values.astype(float),
+                                    _df0["最高"].values.astype(float),
+                                    _df0["最低"].values.astype(float),
+                                    _df0["收盘"].values.astype(float),
+                                    _df0["成交量"].values.astype(float) if "成交量" in _df0.columns else None,
+                                    trade_dates=_d0)
+                            except Exception:
+                                pass
                             if main_only_var.get():
                                 status_var.set("当前显示:只显示主图")
                             else:
@@ -1514,6 +1556,20 @@ class StockDetailMixin:
                     canvas = FigureCanvasTkAgg(fig, chart_inner)
                     canvas.draw()
                     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                    # 🎯 叠加综合评分 hover (query 分支)
+                    try:
+                        _df0 = kline_data["data"]
+                        _d0 = _df0["日期"].tolist() if "日期" in _df0.columns else []
+                        self._install_score_hover(
+                            canvas, fig.axes[0],
+                            _df0["开盘"].values.astype(float),
+                            _df0["最高"].values.astype(float),
+                            _df0["最低"].values.astype(float),
+                            _df0["收盘"].values.astype(float),
+                            _df0["成交量"].values.astype(float) if "成交量" in _df0.columns else None,
+                            trade_dates=_d0)
+                    except Exception:
+                        pass
                     if main_only_var.get():
                         status_var.set("当前显示:只显示主图")
                     else:
@@ -1596,6 +1652,20 @@ class StockDetailMixin:
             canvas.draw()
             w = canvas.get_tk_widget()
             w.pack(fill=tk.BOTH, expand=True)
+            # 🎯 叠加综合评分 hover (嵌入版日K)
+            try:
+                _df0 = kline_data["data"]
+                _d0 = _df0["日期"].tolist() if "日期" in _df0.columns else []
+                self._install_score_hover(
+                    canvas, fig.axes[0],
+                    _df0["开盘"].values.astype(float),
+                    _df0["最高"].values.astype(float),
+                    _df0["最低"].values.astype(float),
+                    _df0["收盘"].values.astype(float),
+                    _df0["成交量"].values.astype(float) if "成交量" in _df0.columns else None,
+                    trade_dates=_d0)
+            except Exception:
+                pass
             if embed_zoom_handler:
                 w.bind("<Double-Button-1>", lambda e: self._show_daily_kline_zoom(kline_data, stock_name))
         except Exception as e:
@@ -1689,6 +1759,16 @@ class StockDetailMixin:
             canvas = FigureCanvasTkAgg(fig, parent)
             canvas.draw()
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            # 🎯 叠加综合评分 hover (15min K 线, 无成交量数据则传 None)
+            try:
+                _vols15 = data['成交量'].values.astype(float) if '成交量' in data.columns else None
+                self._install_score_hover(
+                    canvas, ax,
+                    opens.astype(float), highs.astype(float),
+                    lows.astype(float), closes.astype(float),
+                    _vols15, trade_dates=[str(d) for d in dates])
+            except Exception:
+                pass
         except Exception as e:
             print(f"绘制K线图失败: {e}")
             import traceback
@@ -1718,6 +1798,1554 @@ class StockDetailMixin:
         finally:
             # 恢复原始方法
             self._get_holding_group_data = original_get_holding_group_data
+
+    # ═══════════════════════════════════════════════════════════════
+    # 通用: 复合指标综合评分 + 颜色渐变 + hover tooltip 安装
+    # 任何 K 线 matplotlib 弹窗都能装这个
+    # ═══════════════════════════════════════════════════════════════
+
+    def _score_to_color(self, score):
+        """0-100 → A股渐变: 低=绿 → 中=灰 → 高=红。返回 (浅色背景, 边框, 文字色, 原始色)."""
+        score = max(0, min(100, score))
+        if score <= 50:
+            t = score / 50.0
+            r = int(0x2e + (0x75 - 0x2e) * t)
+            g = int(0x7d + (0x75 - 0x7d) * t)
+            b = int(0x32 + (0x75 - 0x32) * t)
+            edge = '#558B2F'; text_c = '#1B5E20'
+        else:
+            t = (score - 50) / 50.0
+            r = int(0x75 + (0xc6 - 0x75) * t)
+            g = int(0x75 + (0x28 - 0x75) * t)
+            b = int(0x75 + (0x28 - 0x75) * t)
+            edge = '#C62828'; text_c = '#B71C1C'
+        face = f'#{r:02x}{g:02x}{b:02x}'
+        face_light = f'#{(r+255)//2:02x}{(g+255)//2:02x}{(b+255)//2:02x}'
+        return face_light, edge, text_c, face
+
+    def _generic_indicator_scores(self, idx, closes, highs=None, lows=None,
+                                   opens=None, vol=None):
+        """通用评分: 只用基础 OHLCV (任何 K 线数据都有)。
+        返回 (scores_list, total_0_100)。"""
+        scores = []
+        close = closes[idx]
+
+        # 1) VW-MACD (总是算, 因为 VW-MACD 函数稳定)
+        if vol is not None and len(closes) >= 26 + 9:
+            try:
+                vw = self._calc_vwmacd(closes, vol)
+                dif_v = vw['dif'][idx]; dea_v = vw['dea'][idx]
+                vr = vw['vol_ratio'][idx]
+                if not (np.isnan(dif_v) or np.isnan(dea_v)):
+                    vwmacd_score = 60 if dif_v > dea_v else -60
+                    if vr > 1.3: vwmacd_score = int(vwmacd_score * 1.2)
+                    elif vr < 0.7: vwmacd_score = int(vwmacd_score * 0.6)
+                    desc = f"DIF{'>' if dif_v > dea_v else '<'}DEA"
+                    if vr > 1.3: desc += "·放量"
+                    elif vr < 0.7: desc += "·缩量"
+                    scores.append(("VW-MACD", vwmacd_score, 1.0, desc))
+            except Exception:
+                pass
+
+        # 2) 20 日均线方向 (最简单的趋势分)
+        if len(closes) >= 20:
+            ma20 = np.mean(closes[max(0, idx - 19):idx + 1])
+            # 价在 MA20 上 + 20 日前也在 → 趋势向上
+            if idx >= 20:
+                ma20_prev = np.mean(closes[max(0, idx - 39):idx - 19])
+                ma20_slope = ma20 - ma20_prev
+            else:
+                ma20_slope = 0
+            pos_rel = (close - ma20) / close * 100  # 偏离 %
+            # 在 MA20 上 + MA20 向上 → 多头 +60
+            ma_score = 0
+            if close > ma20: ma_score += 30
+            if ma20_slope > 0: ma_score += 30
+            elif ma20_slope < 0 and close < ma20: ma_score = -40
+            if ma_score == 0 and close < ma20: ma_score = -20
+            ma_desc = f"MA20={ma20:.2f} {'↑' if ma20_slope > 0 else ('↓' if ma20_slope < 0 else '—')}"
+            scores.append(("MA20趋势", ma_score, 0.8, ma_desc))
+
+        # 3) 量价配合 (今日 vs 前 5 日均量, 收盘 vs 开盘)
+        if vol is not None and opens is not None and idx >= 5:
+            avg_vol5 = np.mean(vol[max(0, idx - 4):idx + 1])
+            vr_today = vol[idx] / avg_vol5 if avg_vol5 > 0 else 1
+            pct_today = (close - opens[idx]) / opens[idx] * 100 if opens[idx] != 0 else 0
+            vol_price_score = 0
+            if pct_today > 0 and vr_today > 1.2:
+                vol_price_score = 50  # 放量上涨
+                vp_desc = "放量上涨"
+            elif pct_today < 0 and vr_today > 1.2:
+                vol_price_score = -50  # 放量下跌
+                vp_desc = "放量下跌"
+            elif pct_today > 0 and vr_today < 0.7:
+                vol_price_score = 15  # 缩量上涨 (弱)
+                vp_desc = "缩量上涨"
+            elif pct_today < 0 and vr_today < 0.7:
+                vol_price_score = -15
+                vp_desc = "缩量下跌"
+            else:
+                vp_desc = "量平"
+            scores.append(("量价配合", vol_price_score, 0.5,
+                           f"{vp_desc}(量比={vr_today:.2f})"))
+
+        # 4) 简单支撑压力 (用近 20 根高低)
+        if highs is not None and lows is not None and idx >= 20:
+            recent_h = np.max(highs[max(0, idx - 19):idx + 1])
+            recent_l = np.min(lows[max(0, idx - 19):idx + 1])
+            range_h = recent_h - recent_l
+            pos_in_range = (close - recent_l) / range_h if range_h > 0 else 0.5
+            # pos_in_range > 0.7 → 接近高位压力区, score 偏低
+            sr_score = int((0.5 - pos_in_range) * 120)  # -60 到 +60
+            sr_desc = f"位置{pos_in_range:.0%}(近20根)"
+            scores.append(("简单S/R", sr_score, 0.5, sr_desc))
+
+        # 加权平均 → 0-100
+        total_w = sum(w for _, _, w, _ in scores)
+        if total_w == 0:
+            avg_raw = 0
+        else:
+            avg_raw = sum(s * w for _, s, w, _ in scores) / total_w
+        total = int((avg_raw + 100) / 2)
+        return scores, total
+
+    def _install_score_hover(self, canvas, ax_main, opens, highs, lows, closes, vol,
+                             trade_dates=None, extra_info_fn=None):
+        """给 matplotlib canvas 的主图装一个综合评分 hover tooltip。
+        - opens/highs/lows/closes/vol: numpy arrays
+        - trade_dates: list of date strings (可选)
+        - extra_info_fn: callable(idx) -> (scores_list, total)，让调用方可以传额外指标分
+        返回 (hover_text, bbox_base) 供调用方自定义。
+        """
+        opens = np.asarray(opens, dtype=float)
+        highs = np.asarray(highs, dtype=float) if highs is not None else None
+        lows = np.asarray(lows, dtype=float) if lows is not None else None
+        closes = np.asarray(closes, dtype=float)
+        vol = np.asarray(vol, dtype=float) if vol is not None else None
+        n = len(closes)
+        # trade_dates 可能是 pandas Series → 强制转 list 避免 bool 判断报错
+        if trade_dates is not None:
+            try: trade_dates = list(trade_dates)
+            except Exception: trade_dates = None
+
+        bbox_base = dict(boxstyle='round,pad=0.5', alpha=0.95, linewidth=1.2)
+        hover_text = ax_main.text(0.01, 0.99, "", transform=ax_main.transAxes,
+                                  fontsize=8.5, va='top', ha='left',
+                                  bbox=dict(bbox_base, facecolor='#F5F5F5', edgecolor='#888888'),
+                                  linespacing=1.4, visible=False)
+
+        def _on_hover(event):
+            try:
+                print(f"[hover] event! inaxes={event.inaxes is not None} "
+                      f"xdata={event.xdata!r} ax_main={ax_main}", flush=True)
+                if event.inaxes != ax_main:
+                    hover_text.set_visible(False); canvas.draw_idle(); return
+                if event.xdata is None or np.isnan(event.xdata):
+                    hover_text.set_visible(False); canvas.draw_idle(); return
+                idx = int(round(event.xdata))
+                if idx < 0 or idx >= n:
+                    hover_text.set_visible(False); canvas.draw_idle(); return
+
+                print(f"[hover] idx={idx}/{n} calculating...", flush=True)
+                # 先算通用分
+                scores, total = self._generic_indicator_scores(
+                    idx, closes, highs, lows, opens, vol)
+                print(f"[hover] basic scores={len(scores)} total={total}", flush=True)
+
+                # 调用方额外分 (例如一目均衡的复合指标)
+                if extra_info_fn is not None:
+                    try:
+                        extra_scores, extra_total = extra_info_fn(idx)
+                        if extra_scores:
+                            scores.extend(extra_scores)
+                        if extra_total is not None and len(scores) >= 4:
+                            total = extra_total
+                    except Exception as e2:
+                        print(f"[hover] extra_info_fn error: {e2!s}", flush=True)
+                        import traceback; traceback.print_exc()
+
+                # 组装 tooltip
+                close_val = float(closes[idx])
+                op_val = float(opens[idx])
+                hi = float(highs[idx]) if highs is not None else close_val
+                lo = float(lows[idx]) if lows is not None else close_val
+                pct_chg = (close_val - op_val) / op_val * 100 if op_val != 0 else 0
+
+                # 日期标签: 兼容 Timestamp / string / int
+                date_label = f"K{idx+1}"
+                if trade_dates is not None and len(trade_dates) > 0 and idx < len(trade_dates):
+                    try:
+                        d0 = trade_dates[idx]
+                        # Timestamp 对象只取日期部分
+                        import pandas as _pd
+                        if isinstance(d0, _pd.Timestamp):
+                            date_label = d0.strftime("%Y-%m-%d")
+                        else:
+                            date_label = str(d0)[:10]
+                    except Exception:
+                        date_label = f"K{idx+1}"
+
+                lines = [f"📅 {date_label}  K#{idx+1}"]
+                lines.append(f"  O{op_val:.2f}  H{hi:.2f}  L{lo:.2f}  C{close_val:.2f} ({pct_chg:+.2f}%)")
+                if scores:
+                    lines.append("─" * 22)
+                    for name, sc, _w, desc in scores:
+                        sc_color = "🟢" if sc > 20 else ("🔴" if sc < -20 else "⚪")
+                        lines.append(f"  {name:10s} {sc_color} {sc:+.0f}  {desc}")
+                lines.append("─" * 22)
+                if total >= 70: verdict = "🟢 偏多"
+                elif total >= 55: verdict = "🟡 略偏多"
+                elif total >= 45: verdict = "⚪ 中性"
+                elif total >= 30: verdict = "🟠 略偏空"
+                else: verdict = "🔴 偏空"
+                lines.append(f"  🎯 综合: {total}/100  {verdict}")
+
+                hover_text.set_text("\n".join(lines))
+                face_light, edge, text_c, _ = self._score_to_color(total)
+                hover_text.set_bbox(dict(boxstyle='round,pad=0.5',
+                                         facecolor=face_light, edgecolor=edge,
+                                         alpha=0.95, linewidth=1.2))
+                hover_text.set_color(text_c)
+                hover_text.set_visible(True)
+                print(f"[hover] SHOWING tooltip total={total}", flush=True)
+                if idx > n * 0.6:
+                    hover_text.set_ha('right'); hover_text.set_x(0.99)
+                else:
+                    hover_text.set_ha('left'); hover_text.set_x(0.01)
+                canvas.draw_idle()
+            except Exception as e:
+                print(f"[hover] 出错: {e!s}", flush=True)
+                import traceback; traceback.print_exc()
+                hover_text.set_visible(False)
+                try: canvas.draw_idle()
+                except Exception: pass
+
+        canvas.mpl_connect("motion_notify_event", _on_hover)
+        canvas.mpl_connect("axes_leave_event",
+            lambda e: (hover_text.set_visible(False), canvas.draw_idle()))
+        return hover_text
+
+    # ═══════════════════════════════════════════════════════════════
+    # 一目均衡表 (Ichimoku Kinko Hyo) 核心函数
+    # ═══════════════════════════════════════════════════════════════
+
+    def _calc_ichimoku(self, highs, lows, closes):
+        """计算一目均衡表 (Ichimoku) 的 5 条线。
+        参数都是 numpy 数组, 返回 dict 包含:
+          - tenkan_sen (转换线/短期趋势线)
+          - kijun_sen (基准线/中期趋势线)
+          - senkou_span_a (先行带A/快线)
+          - senkou_span_b (先行带B/慢线)
+          - chikou_span (迟行带/落后线)
+          - cloud_top, cloud_bottom (云的上下边界, 用于绘制填充)
+        注意: 先行带 A/B 要向前偏移 26 根 K 线 (预测未来)
+        """
+        h = np.asarray(highs, dtype=float)
+        l = np.asarray(lows, dtype=float)
+        c = np.asarray(closes, dtype=float)
+        n = len(c)
+
+        def _period_high(arr, period):
+            out = np.full(len(arr), np.nan)
+            for i in range(period - 1, len(arr)):
+                out[i] = np.max(arr[i - period + 1:i + 1])
+            return out
+
+        def _period_low(arr, period):
+            out = np.full(len(arr), np.nan)
+            for i in range(period - 1, len(arr)):
+                out[i] = np.min(arr[i - period + 1:i + 1])
+            return out
+
+        # 1. 转换线 (Tenkan-sen): 短期 (9 期) 最高价和最低价的中点
+        # 注意: 一目均衡的转换线是 (9 日最高 + 9 日最低) / 2, 然后再做一次 6 期平均
+        # 简化版: 直接用 (9日最高+9日最低)/2
+        tenkan_sen = (_period_high(h, 9) + _period_low(l, 9)) / 2.0
+
+        # 2. 基准线 (Kijun-sen): 中期 (26 期) 最高价和最低价的中点
+        kijun_sen = (_period_high(h, 26) + _period_low(l, 26)) / 2.0
+
+        # 3. 先行带 A (Senkou Span A): (转换线 + 基准线) / 2, 向前偏移 26
+        senkou_a = (tenkan_sen + kijun_sen) / 2.0
+        senkou_a_shifted = np.full(n + 26, np.nan)
+        senkou_a_shifted[26:26 + n] = senkou_a  # 右移 26 位
+
+        # 4. 先行带 B (Senkou Span B): (52 期最高 + 52 期最低) / 2, 向前偏移 26
+        senkou_b = (_period_high(h, 52) + _period_low(l, 52)) / 2.0
+        senkou_b_shifted = np.full(n + 26, np.nan)
+        senkou_b_shifted[26:26 + n] = senkou_b
+
+        # 5. 迟行带 (Chikou Span): 当前收盘价左移 26 根 (画在过去 26 根的位置上)
+        # 也就是: 位置 0 显示的是 c[26] 的值 (今天价格对应 26 天前的位置)
+        chikou = np.full(n, np.nan)
+        shift = 26
+        if n > shift:
+            chikou[:n - shift] = c[shift:]
+        # 为了和先行带统一在同一个 extended 坐标系里展示, 扩展到 n+26
+        chikou_extended = np.full(n + 26, np.nan)
+        chikou_extended[:n] = chikou
+
+        return {
+            'tenkan_sen': tenkan_sen,
+            'kijun_sen': kijun_sen,
+            'senkou_a': senkou_a_shifted,
+            'senkou_b': senkou_b_shifted,
+            'chikou': chikou_extended,
+        }
+
+    def _plot_ichimoku_ax(self, ax, x, highs, lows, closes, show_explanation=True):
+        """在主图上叠加一目均衡表 (Ichimoku Kinko Hyo)。
+        x: 索引数组 (长度 n)
+        ichimoku 的先行带 A/B 长度是 n+26 (右移了 26), 所以 x 也需要扩展
+        """
+        ich = self._calc_ichimoku(highs, lows, closes)
+        n = len(closes)
+        extended_x = list(range(n + 26))
+        x_arr = np.asarray(x)
+
+        # 云 (Kumo): 先行带 A 和 B 之间的填充区域
+        sen_a = ich['senkou_a']
+        sen_b = ich['senkou_b']
+
+        # 云的上边界和下边界
+        cloud_top = np.nanmax([sen_a, sen_b], axis=0)
+        cloud_bottom = np.nanmin([sen_a, sen_b], axis=0)
+
+        # 云的颜色: A > B = 看涨云 → 红色 (A股红涨绿跌习惯)
+        # A < B = 看跌云 → 绿色
+        ax.fill_between(extended_x, cloud_bottom, cloud_top,
+                        where=sen_a >= sen_b, color='#c62828', alpha=0.20, label='看涨云(Kumo Bull)')
+        ax.fill_between(extended_x, cloud_bottom, cloud_top,
+                        where=sen_a < sen_b, color='#2e7d32', alpha=0.20, label='看跌云(Kumo Bear)')
+
+        # 先行带 A 和 B 线 (预测未来 26 根)
+        ax.plot(extended_x, sen_a, color='#2196f3', linewidth=1.0, alpha=0.7, label='先行带A (Senkou A)', linestyle='--')
+        ax.plot(extended_x, sen_b, color='#ff9800', linewidth=1.0, alpha=0.7, label='先行带B (Senkou B)', linestyle='--')
+
+        # 转换线 (Tenkan-sen): 红色
+        if not np.all(np.isnan(ich['tenkan_sen'])):
+            ax.plot(x_arr, ich['tenkan_sen'], color='#e91e63', linewidth=1.2, label='转换线 (Tenkan)')
+
+        # 基准线 (Kijun-sen): 蓝色
+        if not np.all(np.isnan(ich['kijun_sen'])):
+            ax.plot(x_arr, ich['kijun_sen'], color='#1565c0', linewidth=1.2, label='基准线 (Kijun)')
+
+        # 迟行带 (Chikou): 收盘价后移 26 根 — 画在后面
+        if not np.all(np.isnan(ich['chikou'])):
+            ax.plot(extended_x, ich['chikou'], color='#9c27b0', linewidth=0.9, alpha=0.6,
+                    label='迟行带 (Chikou)', linestyle=':')
+
+    # ═══════════════════════════════════════════════════════════════
+    # VW-MACD (带成交量权重的 MACD)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _calc_vwmacd(self, closes, vol, fast=12, slow=26, signal=9):
+        """VW-MACD: 用成交量加权的 MACD。
+        公式:
+          1. typical_price = close
+          2. 用成交量作为权重计算 VW-EMA (成交量加权指数平滑均线)
+          3. DIF = VW-EMA(fast) - VW-EMA(slow)
+          4. DEA = VW-EMA(DIF, signal)
+          5. MACD 柱 = 2 * (DIF - DEA)
+        简化版: 用成交量的 EMA 对 MACD 的 DIF 和 DEA 进行量能修正
+        更通用的 VW-MACD 公式 (网上):
+          VOL_MA = SMA(VOL, period)
+          MACD_VOL = MACD * (VOL / VOL_MA)   ← 对 MACD 柱进行量能修正
+        返回: {dif, dea, macdh, vol_ratio, vol_ma}
+        """
+        c = np.asarray(closes, dtype=float)
+        v = np.asarray(vol, dtype=float)
+        n = len(c)
+
+        # 标准 MACD
+        ema_fast = self._ema_np(c, fast) if hasattr(self, '_ema_np') else self._simple_ema(c, fast)
+        ema_slow = self._ema_np(c, slow) if hasattr(self, '_ema_np') else self._simple_ema(c, slow)
+        dif = ema_fast - ema_slow
+        dea = self._ema_np(dif, signal) if hasattr(self, '_ema_np') else self._simple_ema(dif, signal)
+        macdh = 2.0 * (dif - dea)
+
+        # 成交量均线
+        v_ma20 = pd.Series(v).rolling(20, min_periods=1).mean().values
+        # 成交量比率 (当前量 / 20日均量)
+        vol_ratio = np.where(v_ma20 > 0, v / v_ma20, 1.0)
+        vol_ratio = np.clip(vol_ratio, 0.1, 5.0)  # 限制在合理范围
+
+        # VW-MACD: 对 MACD 柱进行量能加权
+        # 当成交量大时, MACD 柱放大 (信号更可信); 缩量时缩小
+        vw_macdh = macdh * np.sqrt(vol_ratio)  # 用根号防止放大太夸张
+
+        # 对 DIF/DEA 也做量能修正 (更高级版本)
+        vw_dif = dif * (0.5 + 0.5 * np.sqrt(vol_ratio))
+        vw_dea = self._ema_np(vw_dif, signal) if hasattr(self, '_ema_np') else self._simple_ema(vw_dif, signal)
+
+        return {
+            'dif': vw_dif,
+            'dea': vw_dea,
+            'macdh': vw_macdh,
+            'vol_ratio': vol_ratio,
+            'vol_ma': v_ma20,
+            'vol': v,
+        }
+
+    def _simple_ema(self, data, period):
+        """简单 EMA 计算 (fallback, 如果 _ema_np 不存在)"""
+        arr = np.asarray(data, dtype=float)
+        alpha = 2.0 / (period + 1)
+        out = np.zeros(len(arr))
+        out[0] = arr[0]
+        for i in range(1, len(arr)):
+            out[i] = alpha * arr[i] + (1 - alpha) * out[i - 1]
+        return out
+
+    # ═══════════════════════════════════════════════════════════════
+    # 复合指标: SuperTrend (ATR 趋势带 + 动态 S/R)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _calc_supertrend(self, highs, lows, closes, period=10, multiplier=3):
+        """SuperTrend: 基于 ATR 的趋势跟踪复合指标。
+        自带动态压力支撑: 上涨趋势中 SuperTrend 线 = 动态支撑, 下跌趋势中 = 动态压力。
+        返回 dict: trend_dir (+1 上 / -1 下), supertrend_line, upper, lower
+        """
+        h = np.asarray(highs, dtype=float)
+        l = np.asarray(lows, dtype=float)
+        c = np.asarray(closes, dtype=float)
+        n = len(c)
+
+        tr = np.maximum(h - l, np.maximum(np.abs(h - np.roll(c, 1)), np.abs(l - np.roll(c, 1))))
+        tr[0] = h[0] - l[0]
+        atr = np.full(n, np.nan)
+        for i in range(period - 1, n):
+            atr[i] = np.mean(tr[i - period + 1:i + 1])
+
+        hl2 = (h + l) / 2.0
+        upper = hl2 + multiplier * atr
+        lower = hl2 - multiplier * atr
+
+        # 递归修正
+        for i in range(period, n):
+            if lower[i] > lower[i - 1] or c[i - 1] < lower[i - 1]:
+                lower[i] = lower[i]
+            else:
+                lower[i] = lower[i - 1]
+            if upper[i] < upper[i - 1] or c[i - 1] > upper[i - 1]:
+                upper[i] = upper[i]
+            else:
+                upper[i] = upper[i - 1]
+
+        trend_dir = np.ones(n, dtype=int)
+        supertrend = np.full(n, np.nan)
+        trend_dir[0] = 1
+        supertrend[0] = lower[0]
+        for i in range(1, n):
+            if trend_dir[i - 1] == 1:
+                if c[i] <= lower[i]:
+                    trend_dir[i] = -1
+                    supertrend[i] = upper[i]
+                else:
+                    trend_dir[i] = 1
+                    supertrend[i] = lower[i]
+            else:
+                if c[i] >= upper[i]:
+                    trend_dir[i] = 1
+                    supertrend[i] = lower[i]
+                else:
+                    trend_dir[i] = -1
+                    supertrend[i] = upper[i]
+
+        return {'trend_dir': trend_dir, 'supertrend': supertrend, 'upper': upper, 'lower': lower}
+
+    # ═══════════════════════════════════════════════════════════════
+    # 复合指标: VWAP + σ 带 (机构公允价值 + 动态压力支撑)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _calc_vwap(self, opens, highs, lows, closes, vol, anchor_days=120):
+        """VWAP 带: 成交量加权均价 + ±1σ ±2σ 动态通道。
+        anchor_days: 回看多少天累积 VWAP (0 = 从第一天开始)
+        返回 dict: vwap, upper1, lower1 (±1σ), upper2, lower2 (±2σ)
+        """
+        o = np.asarray(opens, dtype=float)
+        h = np.asarray(highs, dtype=float)
+        l = np.asarray(lows, dtype=float)
+        c = np.asarray(closes, dtype=float)
+        v = np.asarray(vol, dtype=float)
+        n = len(c)
+
+        typical = (h + l + c) / 3.0
+
+        anchor = max(0, n - anchor_days) if anchor_days > 0 else 0
+        cum_tv = np.cumsum(typical * v)
+        cum_v = np.cumsum(v)
+        # 锚定后: 减去锚定点之前的值
+        cum_tv2 = cum_tv - (cum_tv[anchor - 1] if anchor > 0 else 0)
+        cum_v2 = cum_v - (cum_v[anchor - 1] if anchor > 0 else 0)
+
+        vwap = np.full(n, np.nan)
+        vwap[anchor:] = cum_tv2[anchor:] / np.maximum(cum_v2[anchor:], 1e-9)
+
+        # σ 带: 每根 K 线 typical 与 vwap 的偏差, 累积加权 std
+        # 注意: 只计算 anchor 之后的偏差 (anchor 之前 vwap 是 nan)
+        dev_sq = np.zeros(n)
+        for i in range(anchor, n):
+            if v[i] > 0 and not np.isnan(vwap[i]):
+                dev_sq[i] = v[i] * (typical[i] - vwap[i]) ** 2
+        cum_dev = np.cumsum(dev_sq)
+        var = np.full(n, np.nan)
+        # var[i] = (cum_dev[i] - cum_dev[anchor-1]) / (cum_v2[i] - cum_v2[anchor-1])
+        for i in range(anchor, n):
+            denom = cum_v2[i] - (cum_v2[anchor - 1] if anchor > 0 else 0)
+            if denom > 0:
+                num = cum_dev[i] - (cum_dev[anchor - 1] if anchor > 0 else 0)
+                var[i] = num / denom
+        sigma = np.sqrt(np.maximum(var, 0))
+
+        upper1 = np.full(n, np.nan); lower1 = np.full(n, np.nan)
+        upper2 = np.full(n, np.nan); lower2 = np.full(n, np.nan)
+        upper1[anchor:] = vwap[anchor:] + sigma[anchor:]
+        lower1[anchor:] = vwap[anchor:] - sigma[anchor:]
+        upper2[anchor:] = vwap[anchor:] + 2 * sigma[anchor:]
+        lower2[anchor:] = vwap[anchor:] - 2 * sigma[anchor:]
+
+        return {'vwap': vwap, 'upper1': upper1, 'lower1': lower1,
+                'upper2': upper2, 'lower2': lower2}
+
+    # ═══════════════════════════════════════════════════════════════
+    # 复合指标: TD Sequential (迪马克序列 — 衰竭反转捕捉)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _calc_td_sequential(self, closes, opens=None):
+        """TD Sequential: 迪马克序列, 捕捉趋势衰竭反转。
+        核心: 当前收盘 vs 4 天前收盘, 连续上涨或下跌计数。
+        Setup Countdown (1-9): 9 是衰竭信号。
+        返回 dict: td_count (1-9), td_sell_setup, td_buy_setup
+        """
+        c = np.asarray(closes, dtype=float)
+        n = len(c)
+        td_count = np.zeros(n, dtype=int)
+        # 1=上涨 setup (当前 > 4 天前), -1=下跌 setup, 0=不确定
+        td_sell_setup = np.full(n, np.nan)  # 9 时标记衰竭
+        td_buy_setup = np.full(n, np.nan)
+
+        direction = 0  # 当前 setup 方向
+        count = 0
+        for i in range(4, n):
+            if c[i] > c[i - 4]:
+                if direction == 1:
+                    count += 1
+                else:
+                    direction = 1
+                    count = 1
+                td_count[i] = count
+                if count == 9:
+                    td_sell_setup[i] = c[i]  # 衰竭信号, 可能反转下跌
+                    count = 0  # 重置
+            elif c[i] < c[i - 4]:
+                if direction == -1:
+                    count += 1
+                else:
+                    direction = -1
+                    count = 1
+                td_count[i] = -count
+                if count == 9:
+                    td_buy_setup[i] = c[i]  # 衰竭信号, 可能反转上涨
+                    count = 0
+            else:
+                td_count[i] = 0
+                count = 0
+
+        return {'td_count': td_count, 'td_sell': td_sell_setup, 'td_buy': td_buy_setup}
+
+    # ═══════════════════════════════════════════════════════════════
+    # 复合指标: Camarilla Pivot (精细日内 S/R — 支持多周期)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _calc_camarilla_pivot(self, highs, lows, closes, anchor=10):
+        """Camarilla Pivot: 比传统 Pivot 更精细的压力支撑位。
+        用前 anchor 根 K 线的 H/L/C 计算一组 Pivot 线。
+        返回 dict: pivot, r1-r4, s1-s4 (单组 S/R 线, 画成水平线)
+        """
+        h = np.asarray(highs, dtype=float)
+        l = np.asarray(lows, dtype=float)
+        c = np.asarray(closes, dtype=float)
+        n = len(c)
+        if n < anchor + 1:
+            anchor = max(3, n // 2)
+
+        # 最近 anchor 根 K 线
+        hh = np.max(h[-anchor:])
+        ll = np.min(l[-anchor:])
+        cc = c[-1]
+        pivot = (hh + ll + cc) / 3.0
+        range_hl = hh - ll
+
+        r1 = cc + 1.1 * range_hl / 12
+        r2 = cc + 1.1 * range_hl / 6
+        r3 = cc + 1.1 * range_hl / 4
+        r4 = cc + 1.1 * range_hl / 2
+        s1 = cc - 1.1 * range_hl / 12
+        s2 = cc - 1.1 * range_hl / 6
+        s3 = cc - 1.1 * range_hl / 4
+        s4 = cc - 1.1 * range_hl / 2
+
+        return {
+            'pivot': pivot,
+            'resistances': [r1, r2, r3, r4],
+            'supports': [s1, s2, s3, s4],
+            'high_anchor': hh,
+            'low_anchor': ll,
+        }
+
+    # ═══════════════════════════════════════════════════════════════
+    # 多周期数据获取 (60min / 日 / 周 / 月)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _fetch_ichimoku_kline_data(self, symbol, period="daily", is_index=False):
+        """获取一目均衡表所需的多周期 K 线数据 (120+ 根, 用于 Ichimoku 计算)。
+        核心策略: 先拉日 K (成熟 fallback 链), 再用 resample 聚合成周/月 K。
+        symbol: 股票代码/指数代码, 支持 "600519" / "sh000001" / "sz399001" / "510300"(ETF)
+        period: "60min" / "daily" / "weekly" / "monthly"
+        is_index: 是否为指数
+        返回: DataFrame [日期, 开盘, 最高, 最低, 收盘, 成交量] 或 None
+        """
+        from datetime import datetime, timedelta
+
+        # ─── 关键修复: 保留原始 symbol, 不重新推断 market_prefix ───
+        # INDEX_LIST 里给的就是 "sh000001" / "sz399001" (正确的指数前缀)
+        # ETF_LIST 里给的就是纯 6 位 "510300" (个股/ETF 用 fetch_daily_kline)
+        # stock_options 里也是纯 6 位
+        # 只有 akshare 接口需要纯 6 位时才 strip 前缀
+
+        # sina_symbol: 给 fetch_index_daily 用 (需要 sh/sz 前缀)
+        if len(symbol) == 8 and symbol[:2].lower() in ("sh", "sz", "bj"):
+            sina_symbol = symbol  # 已经带正确前缀, 直接用
+        else:
+            # 纯 6 位 code — 根据首数字推断市场 (只用于个股/ETF)
+            code6 = str(symbol).zfill(6)
+            prefix = "sh" if code6.startswith(("6", "5", "9")) else "sz"
+            sina_symbol = f"{prefix}{code6}"
+
+        # code6: 给 akshare 等接口用 (纯 6 位)
+        code6 = symbol[2:] if len(symbol) == 8 and symbol[:2].lower() in ("sh", "sz", "bj") else symbol
+        code6 = str(code6).zfill(6)
+
+        # 需要至少 ~150 根日 K (一目均衡 52+26=78 有效 + 尾部 resample 缓冲)
+        DAILY_DAYS = 200
+
+        # ─── 方案 1: 先拿日 K (项目里的成熟 fallback 链) ───
+        daily_df = None
+
+        try:
+            from ui._akshare_fetcher import fetch_daily_kline, fetch_index_daily
+            if is_index:
+                # 指数 — fetch_index_daily 内部会正确拆分 prefix+code
+                daily_df = fetch_index_daily(sina_symbol, days=DAILY_DAYS)
+                _price_hint = ""
+                if daily_df is not None and len(daily_df) > 0:
+                    _price_hint = f", close≈{float(daily_df['close'].iloc[-1]):.1f}"
+                print(f"[一目均衡] 指数 → {sina_symbol} → {len(daily_df) if daily_df is not None else 'None'} 根{_price_hint}")
+            else:
+                # 个股/ETF — fetch_daily_kline 支持 Tushare + 新浪 + 腾讯
+                daily_df = fetch_daily_kline(code6, days=DAILY_DAYS)
+                _price_hint = ""
+                if daily_df is not None and len(daily_df) > 0:
+                    _price_hint = f", close≈{float(daily_df['close'].iloc[-1]):.2f}"
+                print(f"[一目均衡] 个股/ETF → {code6} → {len(daily_df) if daily_df is not None else 'None'} 根{_price_hint}")
+        except Exception as e:
+            print(f"[一目均衡] fetch_*_daily 异常: {e}")
+            import traceback; traceback.print_exc()
+
+        # ─── 方案 2: 如果 fallback 链也挂了, 直接用 akshare 尝试 ───
+        if daily_df is None or len(daily_df) < 60:
+            print(f"[一目均衡] fallback 链不足, 尝试直接 akshare...")
+            try:
+                import akshare as ak
+                end_date = datetime.now().strftime('%Y%m%d')
+                start_date = (datetime.now() - timedelta(days=DAILY_DAYS + 30)).strftime('%Y%m%d')
+                if is_index:
+                    daily_df = ak.index_zh_a_hist(symbol=code6, period="daily")
+                else:
+                    daily_df = ak.stock_zh_a_hist(symbol=code6, period="daily", adjust="qfq",
+                                                  start_date=start_date, end_date=end_date)
+                if daily_df is not None and not daily_df.empty:
+                    # 列名标准化 (akshare 中文列)
+                    col_map = {}
+                    for cn, en in [("日期", "date"), ("开盘", "open"), ("最高", "high"),
+                                   ("最低", "low"), ("收盘", "close"), ("成交量", "volume")]:
+                        if cn in daily_df.columns:
+                            col_map[cn] = en
+                    daily_df = daily_df.rename(columns=col_map)
+                    print(f"[一目均衡] akshare 日K 兜底成功: {len(daily_df)} 根")
+                else:
+                    daily_df = None
+            except Exception as e:
+                print(f"[一目均衡] akshare 兜底也挂: {e}")
+                daily_df = None
+
+        if daily_df is None or len(daily_df) < 60:
+            print(f"[一目均衡] ❌ 所有日K源都挂了, 无法获取 {symbol}")
+            return None
+
+        # ─── 日K列名标准化 → [日期, 开盘, 最高, 最低, 收盘, 成交量] ───
+        df = daily_df.copy()
+        # 确保 date 列存在 (可能是 datetime 或 str)
+        if 'date' not in df.columns and '日期' in df.columns:
+            df = df.rename(columns={'日期': 'date'})
+        for cn, en in [("开盘", "open"), ("最高", "high"), ("最低", "low"),
+                       ("收盘", "close"), ("成交量", "volume")]:
+            if cn in df.columns and en not in df.columns:
+                df = df.rename(columns={cn: en})
+
+        required = ["date", "open", "high", "low", "close"]
+        for col in required:
+            if col not in df.columns:
+                print(f"[一目均衡] ❌ 日K缺少列 {col}, 实际={list(df.columns)}")
+                return None
+        if "volume" not in df.columns:
+            df["volume"] = 0
+
+        # 统一 date → string "YYYY-MM-DD" 格式
+        df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+        df = df.sort_values('date').reset_index(drop=True)
+
+        # ─── 方案 A: daily 直接返回 ───
+        if period == "daily":
+            result = pd.DataFrame({
+                '日期': df['date'],
+                '开盘': df['open'].astype(float),
+                '最高': df['high'].astype(float),
+                '最低': df['low'].astype(float),
+                '收盘': df['close'].astype(float),
+                '成交量': df['volume'].astype(float),
+            }).tail(150).reset_index(drop=True)
+            print(f"[一目均衡] ✅ {symbol} 日K: {len(result)} 根, 日期 {result['日期'].iloc[0]} ~ {result['日期'].iloc[-1]}")
+            return result
+
+        # ─── 方案 B: weekly / monthly → pandas resample 聚合 ───
+        if period in ("weekly", "monthly"):
+            freq = "W" if period == "weekly" else "ME"
+            df_dt = df.copy()
+            df_dt['date'] = pd.to_datetime(df_dt['date'])
+            df_dt = df_dt.set_index('date')
+            resampled = df_dt.resample(freq).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum',
+            }).dropna(subset=['close'])
+            resampled = resampled.reset_index()
+            resampled['date'] = resampled['date'].dt.strftime('%Y-%m-%d')
+            result = pd.DataFrame({
+                '日期': resampled['date'],
+                '开盘': resampled['open'].astype(float),
+                '最高': resampled['high'].astype(float),
+                '最低': resampled['low'].astype(float),
+                '收盘': resampled['close'].astype(float),
+                '成交量': resampled['volume'].astype(float),
+            }).tail(80).reset_index(drop=True)  # 周/月 K 只要 80 根就够了
+            print(f"[一目均衡] ✅ {symbol} {period}K (resample): {len(result)} 根")
+            return result
+
+        # ─── 方案 C: 60min K ───
+        if period == "60min":
+            try:
+                import akshare as ak
+                if is_index:
+                    # 指数分钟线 — 某些 akshare 版本没有, 跳过
+                    try:
+                        mdf = ak.index_zh_a_hist_min_em(symbol=code6, period="60", adjust="")
+                    except AttributeError:
+                        print(f"[一目均衡] ⚠️ akshare 没有 index_zh_a_hist_min_em, 60min 指数不可用")
+                        return None
+                    except Exception:
+                        mdf = None
+                else:
+                    mdf = ak.stock_zh_a_hist_min_em(symbol=code6, period="60", adjust="qfq")
+                if mdf is None or mdf.empty:
+                    print(f"[一目均衡] ❌ 60min K 线返回空")
+                    return None
+                # 列名标准化
+                col_map = {}
+                for cn, en in [("时间", "date"), ("开盘", "open"), ("最高", "high"),
+                               ("最低", "low"), ("收盘", "close"), ("成交量", "volume")]:
+                    if cn in mdf.columns:
+                        col_map[cn] = en
+                mdf = mdf.rename(columns=col_map)
+                mdf['date'] = pd.to_datetime(mdf['date']).dt.strftime('%Y-%m-%d %H:%M')
+                result = pd.DataFrame({
+                    '日期': mdf['date'],
+                    '开盘': mdf['open'].astype(float),
+                    '最高': mdf['high'].astype(float),
+                    '最低': mdf['low'].astype(float),
+                    '收盘': mdf['close'].astype(float),
+                    '成交量': mdf['volume'].astype(float),
+                }).tail(180).reset_index(drop=True)
+                print(f"[一目均衡] ✅ {symbol} 60min K: {len(result)} 根")
+                return result
+            except Exception as e:
+                print(f"[一目均衡] ❌ 60min K 失败: {e}")
+                return None
+
+        print(f"[一目均衡] ❌ 未知 period={period}")
+        return None
+
+    # ═══════════════════════════════════════════════════════════════
+    # 一目均衡 K 线弹窗 (主入口)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _show_ichimoku_kline_dialog(self):
+        """📈 一目均衡 + VW-MACD K 线弹窗 — 支持多标的 + 多周期"""
+        import traceback as _tb
+        print("[📈一目均衡] 按钮被点击!", flush=True)
+        try:
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            from matplotlib import gridspec
+            from matplotlib.figure import Figure
+
+            win = self._safe_toplevel(self.root)
+            win.title("📈 一目均衡表 + VW-MACD K线分析")
+            try:
+                win.state("zoomed")
+            except Exception:
+                try:
+                    win.attributes("-zoomed", True)
+                except Exception:
+                    win.geometry("1300x900")
+
+            # ─── 标的下拉框 ───
+            top_frame = ttk.Frame(win, padding=4)
+            top_frame.pack(fill=tk.X)
+
+            # 指数列表
+            INDEX_LIST = [
+                ("sh000001", "上证指数", True),
+                ("sz399001", "深证成指", True),
+                ("sz399006", "创业板指", True),
+                ("sh000300", "沪深300", True),
+                ("sh000905", "中证500", True),
+                ("sh000016", "上证50", True),
+                ("sz399300", "沪深300(深)", True),
+            ]
+
+            # ETF 列表
+            ETF_LIST = [
+                ("510300", "沪深300ETF", False),
+                ("510500", "中证500ETF", False),
+                ("510050", "上证50ETF", False),
+                ("159915", "创业板ETF", False),
+                ("512100", "中证1000ETF", False),
+                ("512880", "证券ETF", False),
+                ("515050", "5GETF", False),
+                ("515790", "光伏ETF", False),
+            ]
+
+            # 持仓股 + 龙头股 + 资讯股
+            stock_options = []
+            seen = set()
+            try:
+                all_holdings = self._get_all_holding_stocks() if hasattr(self, '_get_all_holding_stocks') else []
+                for sname, scode, gidx, _pos in all_holdings:
+                    if scode not in seen:
+                        seen.add(scode)
+                        tag = "持仓" if gidx == 1 else ("龙头" if gidx == 2 else "其他")
+                        stock_options.append((scode, f"{sname}({scode})[{tag}]", False))
+            except Exception:
+                pass
+            try:
+                from logic.stock_names import get_news_stocks_merged_recent_days
+                hot = get_news_stocks_merged_recent_days(ndays=3)
+                for sname, scode in hot[:30]:
+                    if scode not in seen:
+                        seen.add(scode)
+                        stock_options.append((scode, f"{sname}({scode})[热门]", False))
+            except Exception:
+                pass
+
+            # 合并所有选项
+            all_options = []
+            for sym, name, is_idx in INDEX_LIST:
+                all_options.append((sym, name, is_idx))
+            for sym, name, is_idx in ETF_LIST:
+                all_options.append((sym, name, is_idx))
+            for sym, name, is_idx in stock_options:
+                all_options.append((sym, name, is_idx))
+
+            display_names = [name for _, name, _ in all_options]
+            sym_map = {name: (sym, is_idx) for sym, name, is_idx in all_options}
+
+            # 控件
+            ttk.Label(top_frame, text="📌 标的:").pack(side=tk.LEFT, padx=(0, 4))
+            symbol_var = tk.StringVar(value="上证指数")
+            sym_combo = ttk.Combobox(top_frame, values=display_names, width=22, state="readonly",
+                                     textvariable=symbol_var)
+            sym_combo.pack(side=tk.LEFT, padx=2)
+
+            ttk.Label(top_frame, text="  ⏱ 周期:").pack(side=tk.LEFT, padx=(10, 4))
+            period_var = tk.StringVar(value="daily")
+            PERIOD_LABELS = {"60min": "60分钟", "daily": "日K", "weekly": "周K", "monthly": "月K"}
+            PERIOD_KEYS = ["60min", "daily", "weekly", "monthly"]
+            period_combo = ttk.Combobox(top_frame, values=[PERIOD_LABELS[p] for p in PERIOD_KEYS],
+                                        width=10, state="readonly")
+            period_combo.set("日K")
+            period_combo.pack(side=tk.LEFT, padx=2)
+
+            ttk.Button(top_frame, text="🔄 刷新", command=lambda: redraw()).pack(side=tk.LEFT, padx=(15, 4))
+
+            # ❓ 解释按钮
+            def _show_ichimoku_help(_event=None):
+                help_win = tk.Toplevel(win)
+                help_win.title("📖 一目均衡表 + 复合指标说明 (3列)")
+                help_win.geometry("1280x780")
+                help_win.configure(bg="#ECEFF1")
+
+                # 顶栏: 字体控件 (3 列同步)
+                ctrl = ttk.Frame(help_win); ctrl.pack(fill=tk.X, padx=10, pady=(8, 4))
+                ttk.Label(ctrl, text="🔤 字体:").pack(side=tk.LEFT)
+                font_size_var = tk.IntVar(value=13)
+
+                _texts = []  # 收集 3 个 text widget
+
+                def _apply_font(size):
+                    for t in _texts:
+                        try:
+                            t.configure(font=("Microsoft YaHei", size))
+                            t.tag_configure("title", font=("Microsoft YaHei", size + 3, "bold"))
+                            t.tag_configure("subtitle", font=("Microsoft YaHei", size + 1, "bold"))
+                            t.tag_configure("body", font=("Microsoft YaHei", size))
+                        except Exception:
+                            pass
+
+                ttk.Button(ctrl, text="A-", width=3,
+                           command=lambda: (font_size_var.set(max(8, font_size_var.get() - 1)),
+                                            _apply_font(font_size_var.get()))).pack(side=tk.LEFT, padx=(4, 0))
+                ttk.Button(ctrl, text="A+", width=3,
+                           command=lambda: (font_size_var.set(min(22, font_size_var.get() + 1)),
+                                            _apply_font(font_size_var.get()))).pack(side=tk.LEFT)
+                ttk.Label(ctrl, text=f"  {font_size_var.get()}pt").pack(side=tk.LEFT)
+                def _on_scale(v):
+                    try:
+                        font_size_var.set(int(float(v)))
+                        _apply_font(font_size_var.get())
+                    except Exception:
+                        pass
+                scale = ttk.Scale(ctrl, from_=9, to=20, orient=tk.HORIZONTAL,
+                                  command=_on_scale, length=180)
+                scale.set(font_size_var.get())
+                scale.pack(side=tk.LEFT, padx=(12, 0))
+                ttk.Button(ctrl, text="重置", width=4,
+                           command=lambda: (font_size_var.set(10), _apply_font(10), scale.set(10))
+                           ).pack(side=tk.LEFT, padx=(6, 0))
+
+                # 3 列 grid 容器
+                cols_frame = tk.Frame(help_win, bg="#ECEFF1")
+                cols_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+                for c in range(3):
+                    cols_frame.columnconfigure(c, weight=1, uniform="col")
+                cols_frame.rowconfigure(0, weight=1)
+
+                # ─── 左列: 一目均衡 + VW-MACD ───
+                left_frame = tk.Frame(cols_frame, bg="#FFF3E0", bd=1, relief=tk.SOLID)
+                left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+                ttk.Label(left_frame, text="📈 主图指标",
+                          font=("Microsoft YaHei", 13, "bold"),
+                          background="#FF9800", foreground="white", anchor="center"
+                          ).pack(fill=tk.X)
+                sb1 = ttk.Scrollbar(left_frame); sb1.pack(side=tk.RIGHT, fill=tk.Y)
+                text1 = tk.Text(left_frame, wrap=tk.WORD, font=("Microsoft YaHei", font_size_var.get()),
+                                bg="#FFF8E1", fg="#3E2723", padx=10, pady=8,
+                                yscrollcommand=sb1.set, height=30)
+                text1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                sb1.config(command=text1.yview)
+                _texts.append(text1)
+
+                text1.tag_configure("title", foreground="#E65100")
+                text1.tag_configure("subtitle", foreground="#BF360C")
+                text1.tag_configure("body", foreground="#3E2723")
+
+                text1.insert(tk.END, "═══ 一目均衡表 (Ichimoku) ═══\n\n", "title")
+                text1.insert(tk.END, "▌五条线含义\n", "subtitle")
+                text1.insert(tk.END,
+                    "1. 🔴 转换线 (Tenkan-sen): 9期最高+最低的中点\n"
+                    "   → 短期趋势线, 类似快均线\n\n"
+                    "2. 🔵 基准线 (Kijun-sen): 26期最高+最低的中点\n"
+                    "   → 中期趋势线, 类似慢均线\n"
+                    "   → 转换线上穿基准线=金叉 (买入信号)\n"
+                    "   → 转换线下穿基准线=死叉 (卖出信号)\n\n"
+                    "3. 🔵 先行带 A: (转换+基准)/2, 右移 26 根\n"
+                    "   → 预测未来 26 根的 S/R\n\n"
+                    "4. 🟠 先行带 B: (52期高+低)/2, 右移 26 根\n"
+                    "   → 预测未来 52 根的 S/R\n\n"
+                    "5. 🟣 迟行带: 收盘价, 左移 26 根\n"
+                    "   → 当前价格相对于 26 期前的位置\n\n", "body")
+                text1.insert(tk.END, "▌云 (Kumo)\n", "subtitle")
+                text1.insert(tk.END,
+                    "  先行带 A 和 B 之间的填充区域就是云:\n"
+                    "  🔴 红色云 (A > B): 看涨区域, 价格在云上=强多头\n"
+                    "  🟢 绿色云 (A < B): 看跌区域, 价格在云下=强空头\n"
+                    "  价格突破云的边界 = 重要买卖信号\n\n", "body")
+
+                text1.insert(tk.END, "═══ VW-MACD (量价 MACD) ═══\n\n", "title")
+                text1.insert(tk.END, "▌什么是 VW-MACD?\n", "subtitle")
+                text1.insert(tk.END,
+                    "VW-MACD = Volume-Weighted MACD\n"
+                    "标准 MACD 只看价格, VW-MACD 把成交量作为权重:\n"
+                    "量价齐升的信号更可靠, 缩量上涨的信号被弱化。\n\n", "body")
+                text1.insert(tk.END, "▌公式原理\n", "subtitle")
+                text1.insert(tk.END,
+                    "1. 先算标准 MACD 的 DIF / DEA\n"
+                    "2. VR = 当前量 / 20日均量\n"
+                    "3. VW_MACD = MACD × √VR (放量放大, 缩量缩小)\n\n", "body")
+                text1.insert(tk.END, "▌怎么看?\n", "subtitle")
+                text1.insert(tk.END,
+                    "• DIF 金叉 + 放量 = 强买入信号\n"
+                    "• DIF 金叉但缩量 = 假突破可能\n"
+                    "• DIF 死叉 + 放量 = 强卖出信号\n"
+                    "• VW-MACD 柱放大 = 量价配合好, 趋势可靠\n\n", "body")
+                text1.insert(tk.END, "▌与标准 MACD 的区别\n", "subtitle")
+                text1.insert(tk.END,
+                    "• 标准 MACD: 只看价格, 可能出现指标背离\n"
+                    "• VW-MACD: 结合量价, 更早发现虚假突破\n"
+                    "• 用法: 先看 VW-MACD 确认量能, 再用一目均衡判断趋势方向\n", "body")
+                text1.config(state=tk.DISABLED)
+
+                # ─── 中列: SuperTrend + VWAP ───
+                mid_frame = tk.Frame(cols_frame, bg="#E8F5E9", bd=1, relief=tk.SOLID)
+                mid_frame.grid(row=0, column=1, sticky="nsew", padx=4)
+                ttk.Label(mid_frame, text="📊 通道类指标",
+                          font=("Microsoft YaHei", 13, "bold"),
+                          background="#43A047", foreground="white", anchor="center"
+                          ).pack(fill=tk.X)
+                sb2 = ttk.Scrollbar(mid_frame); sb2.pack(side=tk.RIGHT, fill=tk.Y)
+                text2 = tk.Text(mid_frame, wrap=tk.WORD, font=("Microsoft YaHei", font_size_var.get()),
+                                bg="#F1F8E9", fg="#1B5E20", padx=10, pady=8,
+                                yscrollcommand=sb2.set, height=30)
+                text2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                sb2.config(command=text2.yview)
+                _texts.append(text2)
+
+                text2.tag_configure("title", foreground="#1B5E20")
+                text2.tag_configure("subtitle", foreground="#2E7D32")
+                text2.tag_configure("body", foreground="#33691E")
+
+                text2.insert(tk.END, "═══ SuperTrend ═══\n\n", "title")
+                text2.insert(tk.END, "▌什么是 SuperTrend?\n", "subtitle")
+                text2.insert(tk.END,
+                    "基于 ATR (平均真实波幅) 的趋势跟踪复合指标,\n"
+                    "波动大时通道宽, 波动小时通道窄。\n"
+                    "核心: 线的颜色就是动态支撑/压力位本身。\n\n", "body")
+                text2.insert(tk.END, "▌公式 (3 步)\n", "subtitle")
+                text2.insert(tk.END,
+                    "1. HL2 = (H + L) / 2\n"
+                    "2. 通道 = HL2 ± (10期 ATR × 3)\n"
+                    "3. 递归修正: 上涨通道下沿不降, 下跌上沿不升\n\n", "body")
+                text2.insert(tk.END, "▌怎么看?\n", "subtitle")
+                text2.insert(tk.END,
+                    "• 🟢 绿色线 (↑): 动态支撑, 价踩线=买点\n"
+                    "• 🔴 红色线 (↓): 动态压力, 价碰线=卖点\n"
+                    "• 线变色 = 趋势反转信号\n"
+                    "• 和云配合: 云方向 + SuperTrend = 双重确认\n\n", "body")
+
+                text2.insert(tk.END, "═══ VWAP + σ 带 ═══\n\n", "title")
+                text2.insert(tk.END, "▌什么是 VWAP?\n", "subtitle")
+                text2.insert(tk.END,
+                    "VWAP = 成交量加权平均价, 机构大户的交易基准。\n"
+                    "价在 VWAP 以下 → 机构平均在亏损;\n"
+                    "价在 VWAP 以上 → 机构平均在盈利。\n\n", "body")
+                text2.insert(tk.END, "▌公式\n", "subtitle")
+                text2.insert(tk.END,
+                    "1. Typical = (H + L + C) / 3\n"
+                    "2. VWAP = Σ(Typical × Vol) / Σ(Vol)\n"
+                    "3. σ = √Σ(Vol × (Typical-VWAP)²) / Σ(Vol)\n"
+                    "4. VWAP ± 1σ / ± 2σ = 动态波动通道\n\n", "body")
+                text2.insert(tk.END, "▌怎么看?\n", "subtitle")
+                text2.insert(tk.END,
+                    "• 🟠 VWAP 线: 多空分水岭\n"
+                    "• 价 < VWAP-2σ: 超跌区 (远低于机构成本)\n"
+                    "• 价 > VWAP+2σ: 超买区 (远高于机构成本)\n"
+                    "• ±1σ 带内: 正常波动区\n"
+                    "• 突破 2σ + VW-MACD 配合 = 强反转信号\n\n", "body")
+                text2.config(state=tk.DISABLED)
+
+                # ─── 右列: TD Sequential + Camarilla + 组合建议 ───
+                right_frame = tk.Frame(cols_frame, bg="#E3F2FD", bd=1, relief=tk.SOLID)
+                right_frame.grid(row=0, column=2, sticky="nsew", padx=(4, 0))
+                ttk.Label(right_frame, text="🎯 反转与 S/R",
+                          font=("Microsoft YaHei", 13, "bold"),
+                          background="#1976D2", foreground="white", anchor="center"
+                          ).pack(fill=tk.X)
+                sb3 = ttk.Scrollbar(right_frame); sb3.pack(side=tk.RIGHT, fill=tk.Y)
+                text3 = tk.Text(right_frame, wrap=tk.WORD, font=("Microsoft YaHei", font_size_var.get()),
+                                bg="#E8EAF6", fg="#0D47A1", padx=10, pady=8,
+                                yscrollcommand=sb3.set, height=30)
+                text3.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                sb3.config(command=text3.yview)
+                _texts.append(text3)
+
+                text3.tag_configure("title", foreground="#0D47A1")
+                text3.tag_configure("subtitle", foreground="#1565C0")
+                text3.tag_configure("body", foreground="#283593")
+
+                text3.insert(tk.END, "═══ TD Sequential ═══\n\n", "title")
+                text3.insert(tk.END, "▌什么是 TD 序列?\n", "subtitle")
+                text3.insert(tk.END,
+                    "Tom DeMark 发明的趋势衰竭捕捉指标。\n"
+                    "连续 9 根 K 线收盘高于 (或低于) 4 天前收盘\n"
+                    "→ 趋势能量耗尽, 即将反转。\n"
+                    "9 不是买卖信号, 是「警惕信号」。\n\n", "body")
+                text3.insert(tk.END, "▌公式\n", "subtitle")
+                text3.insert(tk.END,
+                    "• Setup: Close[i] > Close[i-4] 连满足 → +1, 否则重置\n"
+                    "• 上涨 1-9 红色 (K线上方), 下跌 1-9 蓝色 (K线下方)\n"
+                    "• 断档或方向改变 → 从 1 重新开始\n"
+                    "• 图上只显示 6 以上的数字\n\n", "body")
+                text3.insert(tk.END, "▌怎么看?\n", "subtitle")
+                text3.insert(tk.END,
+                    "• 🔴 上涨 9: 趋势衰竭, 警惕转跌\n"
+                    "• 🔵 下跌 9: 抛压衰竭, 警惕反弹\n"
+                    "• 需后续确认 (1-2 根 K 线反转)\n"
+                    "• 周K/月K 9 信号 > 日K/60min (级别越高越可靠)\n\n", "body")
+
+                text3.insert(tk.END, "═══ Camarilla Pivot ═══\n\n", "title")
+                text3.insert(tk.END, "▌什么是 Camarilla?\n", "subtitle")
+                text3.insert(tk.END,
+                    "经典日内 S/R 方法, 比传统 Pivot 更精细。\n"
+                    "4 组 R1-R4 / S1-S4, 密集覆盖价格区间。\n"
+                    "价格在某个线反弹 = 重要介入/止盈位。\n\n", "body")
+                text3.insert(tk.END, "▌公式 (近 10 根)\n", "subtitle")
+                text3.insert(tk.END,
+                    "H = 高, L = 低, C = 收, Range = H - L\n"
+                    "Pivot = (H + L + C) / 3\n"
+                    "R1 = C + 1.1×Range/12   S1 = C - 1.1×Range/12\n"
+                    "R2 = C + 1.1×Range/6    S2 = C - 1.1×Range/6\n"
+                    "R3 = C + 1.1×Range/4    S3 = C - 1.1×Range/4\n"
+                    "R4 = C + 1.1×Range/2    S4 = C - 1.1×Range/2\n\n", "body")
+                text3.insert(tk.END, "▌怎么看?\n", "subtitle")
+                text3.insert(tk.END,
+                    "• 🟠 Pivot: 多空焦点, 站上=偏多\n"
+                    "• 🔴 R1-R4: 递增压力 (R4=强阻力)\n"
+                    "• 🟢 S1-S4: 递减支撑 (S4=强支撑)\n"
+                    "• 配合 SuperTrend: 绿线 + S2 = 双重底部\n"
+                    "• 配合 VWAP: 突破 VWAP + R1 = 趋势启动\n\n", "body")
+
+                text3.insert(tk.END, "═══ 🎯 指标组合建议 ═══\n\n", "title")
+                text3.insert(tk.END, "【稳健波段】\n", "subtitle")
+                text3.insert(tk.END,
+                    "一目均衡 + SuperTrend + Camarilla\n"
+                    "大方向 → 动态 S/R → 入场位\n\n", "body")
+                text3.insert(tk.END, "【量价过滤】\n", "subtitle")
+                text3.insert(tk.END,
+                    "VWAP+σ + VW-MACD + TD 序列\n"
+                    "机构成本 → 量能确认 → 衰竭反转\n\n", "body")
+                text3.insert(tk.END, "【趋势捕捉】\n", "subtitle")
+                text3.insert(tk.END,
+                    "SuperTrend + TD 序列 + Camarilla\n"
+                    "趋势启动 → 趋势衰竭 → 中途波段\n\n", "body")
+                text3.insert(tk.END, "【高胜率抄底】\n", "subtitle")
+                text3.insert(tk.END,
+                    "TD 下跌9 + VWAP-2σ + Camarilla S3\n"
+                    "三条件同时满足 = 价低 + 抛尽 + 支撑强\n"
+                    "✨ 实战中命中率非常高\n", "body")
+                text3.config(state=tk.DISABLED)
+
+                _apply_font(font_size_var.get())
+
+            help_btn = ttk.Button(top_frame, text="❓ 指标说明", command=_show_ichimoku_help)
+            help_btn.pack(side=tk.LEFT, padx=(10, 0))
+
+            # ─── 叠加指标 toggle 行 ───
+            ind_row = ttk.LabelFrame(win, text="🛠️ 叠加指标 (可多选, 可随时开关重绘)", padding=4)
+            ind_row.pack(fill=tk.X, padx=4, pady=(2, 2))
+
+            # 预定义指标列表 (key, 显示名, 默认勾选, 说明)
+            INDICATOR_LIST = [
+                ("ichimoku", "一目均衡", True, "主图"),
+                ("supertrend", "SuperTrend", True, "主图·ATR趋势带"),
+                ("vwap_band", "VWAP+σ带", False, "主图·量价通道"),
+                ("td_seq", "TD序列", False, "主图·衰竭反转计数"),
+                ("camarilla", "Camarilla", False, "主图·动态S/R水平线"),
+            ]
+            ind_vars = {}
+            for key, label, default, tip in INDICATOR_LIST:
+                v = tk.BooleanVar(value=default)
+                ind_vars[key] = v
+                cb = ttk.Checkbutton(ind_row, text=f"📊 {label}", variable=v,
+                                     command=lambda: redraw())
+                cb.pack(side=tk.LEFT, padx=6)
+
+            # 图表容器
+            chart_inner = ttk.Frame(win)
+            chart_inner.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+            status_var = tk.StringVar(value="⏳ 等待加载...")
+            ttk.Label(win, textvariable=status_var, anchor=tk.W).pack(fill=tk.X, padx=4)
+
+            # 当前数据缓存
+            current_df = None
+            current_info = None  # (symbol, name, is_index, period)
+
+            def redraw():
+                nonlocal current_df, current_info
+                for w in chart_inner.winfo_children():
+                    w.destroy()
+                sym_name = symbol_var.get()
+                period_label = period_combo.get()
+                period_key = [k for k, v in PERIOD_LABELS.items() if v == period_label][0]
+                if sym_name not in sym_map:
+                    messagebox.showwarning("提示", f"无效标的: {sym_name}", parent=win)
+                    return
+                sym_code, is_index = sym_map[sym_name]
+                status_var.set(f"⏳ 加载 {sym_name} {period_label} 数据...")
+                win.update()
+
+                df = self._fetch_ichimoku_kline_data(sym_code, period_key, is_index=is_index)
+                if df is None or df.empty:
+                    status_var.set(f"❌ 无法获取 {sym_name} {period_label} 数据")
+                    return
+                current_df = df
+                current_info = (sym_code, sym_name, is_index, period_key)
+
+                # 提取数组
+                opens = df['开盘'].astype(float).values
+                closes = df['收盘'].astype(float).values
+                highs = df['最高'].astype(float).values
+                lows = df['最低'].astype(float).values
+                if '成交量' in df.columns:
+                    vol = df['成交量'].astype(float).values
+                else:
+                    vol = np.zeros(len(closes))
+                n = len(closes)
+                dates = list(range(n))
+                trade_dates = df.get('日期', [''] * n)
+
+                # 构建图表 (主图: 一目均衡 + K线; 副图: VW-MACD)
+                fig = Figure(figsize=(14, 10), dpi=100, facecolor='#FAFAFA')
+                gs = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[3, 1], hspace=0.08)
+                ax_main = fig.add_subplot(gs[0, 0])
+                ax_sub = fig.add_subplot(gs[1, 0], sharex=ax_main)
+
+                # ─── 主图: K 线 ───
+                for i in range(n):
+                    color = '#D32F2F' if closes[i] >= opens[i] else '#388E3C'
+                    body_bottom = min(opens[i], closes[i])
+                    body_top = max(opens[i], closes[i])
+                    ax_main.bar(i, body_top - body_bottom, bottom=body_bottom,
+                               color=color, alpha=0.8, width=0.6)
+                    ax_main.plot([i, i], [lows[i], body_bottom], color=color, linewidth=1)
+                    ax_main.plot([i, i], [body_top, highs[i]], color=color, linewidth=1)
+
+                # ─── 主图叠加: 复合指标 (全部条件绘制) ───
+                x_arr = np.asarray(dates)
+
+                # 📦 闭包 dict: 存所有已计算的指标数据 (hover 时用来算分)
+                ind_data = {}
+
+                # 1) 一目均衡 (Ichimoku) — 默认勾选
+                if ind_vars["ichimoku"].get():
+                    ich = self._calc_ichimoku(highs, lows, closes)
+                    ind_data['ich'] = ich
+                    self._plot_ichimoku_ax(ax_main, dates, highs, lows, closes)
+
+                # 2) SuperTrend (ATR 趋势带 + 动态 S/R)
+                st = None
+                if ind_vars["supertrend"].get():
+                    st = self._calc_supertrend(highs, lows, closes)
+                    ind_data['st'] = st
+                    # 上涨 (trend=+1) 画绿色动态支撑线, 下跌 (trend=-1) 画红色压力线
+                    mask_up = st['trend_dir'] == 1
+                    mask_dn = st['trend_dir'] == -1
+                    ax_main.plot(x_arr[mask_up], st['supertrend'][mask_up],
+                                 color='#26a69a', linewidth=1.8, label='SuperTrend↑(支撑)', alpha=0.85)
+                    ax_main.plot(x_arr[mask_dn], st['supertrend'][mask_dn],
+                                 color='#ef5350', linewidth=1.8, label='SuperTrend↓(压力)', alpha=0.85)
+
+                # 3) VWAP + σ 带
+                vwap_band = None
+                if ind_vars["vwap_band"].get():
+                    vwap_band = self._calc_vwap(opens, highs, lows, closes, vol)
+                    ind_data['vwap_band'] = vwap_band
+                    ax_main.plot(x_arr, vwap_band['vwap'], color='#ff9800', linewidth=1.4,
+                                 label='VWAP', alpha=0.9)
+                    ax_main.fill_between(x_arr, vwap_band['lower1'], vwap_band['upper1'],
+                                        color='#ffb74d', alpha=0.10, label='VWAP±1σ')
+                    ax_main.fill_between(x_arr, vwap_band['lower2'], vwap_band['upper2'],
+                                        color='#ff8a65', alpha=0.06, label='VWAP±2σ')
+
+                # 4) TD Sequential (衰竭反转计数 — 数字标在 K 线上)
+                td = None
+                if ind_vars["td_seq"].get():
+                    td = self._calc_td_sequential(closes)
+                    ind_data['td'] = td
+                    for i in range(n):
+                        cnt = td['td_count'][i]
+                        if cnt == 0:
+                            continue
+                        if cnt == 9:
+                            # 衰竭信号 — 特别标红/标绿 + 更大字号
+                            ax_main.annotate("9", xy=(i, closes[i]), xytext=(i, closes[i] * 1.012),
+                                             fontsize=9, fontweight='bold',
+                                             ha='center', color='#e53935' if cnt > 0 else '#1e88e5',
+                                             arrowprops=dict(arrowstyle='->', lw=0.6,
+                                                             color='#e53935' if cnt > 0 else '#1e88e5'))
+                        elif abs(cnt) >= 6:
+                            # 6-8 计数 — 中等字号
+                            ax_main.annotate(str(abs(cnt)), xy=(i, closes[i]),
+                                             xytext=(0, 6), textcoords='offset points',
+                                             fontsize=7, ha='center',
+                                             color='#c62828' if cnt > 0 else '#0d47a1', alpha=0.85)
+
+                # 5) Camarilla Pivot (动态 S/R 水平线)
+                cam = None
+                if ind_vars["camarilla"].get():
+                    cam = self._calc_camarilla_pivot(highs, lows, closes)
+                    ind_data['cam'] = cam
+                    all_lines = []
+                    labels = []
+                    # 压力 (上方)
+                    for j, r in enumerate(cam['resistances']):
+                        all_lines.append(r); labels.append(f"R{j+1}={r:.2f}")
+                    # 焦点 pivot
+                    all_lines.append(cam['pivot']); labels.append(f"P={cam['pivot']:.2f}")
+                    # 支撑 (下方)
+                    for j, s in enumerate(cam['supports']):
+                        all_lines.append(s); labels.append(f"S{j+1}={s:.2f}")
+                    # 只画最靠近价格的 4 条 (减少视觉噪音)
+                    last_c = closes[-1]
+                    all_lines.sort()
+                    # 找 last_c 附近的 4 条
+                    idx_near = 0
+                    for j, lv in enumerate(all_lines):
+                        if lv < last_c:
+                            idx_near = j
+                        else:
+                            break
+                    chosen = all_lines[max(0, idx_near - 1):idx_near + 3]
+                    for level in chosen:
+                        if level > last_c:
+                            color, ls, lbl = '#f44336', '--', f'压力 {level:.2f}'
+                        elif level < last_c:
+                            color, ls, lbl = '#4caf50', '--', f'支撑 {level:.2f}'
+                        else:
+                            color, ls, lbl = '#ff9800', '-.', f'Pivot {level:.2f}'
+                        ax_main.axhline(y=level, color=color, linestyle=ls,
+                                        linewidth=1.0, alpha=0.7, label=lbl)
+
+                # 主图装饰 (动态标题: 根据勾选的指标名)
+                active_inds = []
+                if ind_vars["ichimoku"].get(): active_inds.append("一目均衡")
+                if ind_vars["supertrend"].get(): active_inds.append("SuperTrend")
+                if ind_vars["vwap_band"].get(): active_inds.append("VWAP+σ")
+                if ind_vars["td_seq"].get(): active_inds.append("TD序列")
+                if ind_vars["camarilla"].get(): active_inds.append("Camarilla")
+                ax_main.set_title(f"📈 {sym_name} — {period_label} | " + " · ".join(active_inds) + " + VW-MACD",
+                                  fontsize=13, fontweight='bold', pad=10)
+                ax_main.legend(loc='upper left', fontsize=7, ncol=3)
+                ax_main.grid(True, alpha=0.3)
+                ax_main.tick_params(axis="x", labelbottom=False)
+                # 🔒 锁死 x 轴在 K 线范围:
+                # K线画在 x=[0..n-1], 一目均衡 extended_x 到 n+25 (含未来预测)
+                # matplotlib 会自动扩展 xlim 让 K 线被挤在左边 → 必须手动锁死
+                ax_main.set_xlim(-1, n)
+                # 副图 sharex=ax_main 会自动对齐
+
+                # ─── 📊 图表角落加判别分析文本框 ───
+                # 先把 VW-MACD 算出来 (后面要用)
+                vw = self._calc_vwmacd(closes, vol)
+                try:
+                    ich = self._calc_ichimoku(highs, lows, closes)
+                    last_tenkan = ich['tenkan_sen'][-1] if not np.isnan(ich['tenkan_sen'][-1]) else closes[-1]
+                    last_kijun = ich['kijun_sen'][-1] if not np.isnan(ich['kijun_sen'][-1]) else closes[-1]
+                    last_close = closes[-1]
+                    cloud_idx = n - 1 + 26
+                    if cloud_idx < len(ich['senkou_a']):
+                        last_sen_a = ich['senkou_a'][cloud_idx]
+                        last_sen_b = ich['senkou_b'][cloud_idx]
+                        bull_cloud = bool(last_sen_a >= last_sen_b)
+                    else:
+                        bull_cloud = True
+                        last_sen_a = last_sen_b = np.nan
+
+                    # 1) 一目均衡信号
+                    tk_kijun = "转>基" if last_tenkan > last_kijun else "转<基"
+                    cloud_label = "红看涨云" if bull_cloud else "绿看跌云"
+                    if bull_cloud and last_close > max(last_sen_a, last_sen_b):
+                        price_pos = "价在云上 ✅"
+                    elif not bull_cloud and last_close < min(last_sen_a, last_sen_b):
+                        price_pos = "价在云下 ❌"
+                    else:
+                        price_pos = "价在云中 ➖"
+
+                    # 2) VW-MACD 信号
+                    vw_dif_val = vw['dif'][-1]
+                    vw_dea_val = vw['dea'][-1]
+                    vw_h_val = vw['macdh'][-1]
+                    vr = vw['vol_ratio'][-1]
+                    macd_dir = "DIF>DEA" if vw_dif_val > vw_dea_val else "DIF<DEA"
+                    vol_flag = "放量" if vr > 1.3 else ("缩量" if vr < 0.7 else "量平")
+
+                    # 3) 综合判断 (4 维打分)
+                    score = 0
+                    score += 1 if (bull_cloud and last_close > max(last_sen_a, last_sen_b)) else 0
+                    score += 1 if (last_tenkan > last_kijun) else 0
+                    score += 1 if vw_dif_val > vw_dea_val else 0
+                    score += 1 if (vw_dif_val > vw_dea_val and vr > 1.2) else 0  # 量价配合加分
+
+                    if score >= 3:
+                        verdict = "🟢 偏多, 可持有"
+                    elif score >= 2:
+                        verdict = "🟡 中性, 观望"
+                    else:
+                        verdict = "🔴 偏空, 谨慎"
+
+                    # 组装分析文本 (放进 bbox)
+                    analysis_lines = [
+                        f"═══ 判别分析 ═══",
+                        f"🎯 趋势: {verdict}",
+                        f"─── 一目均衡 ───",
+                        f"  云: {cloud_label}",
+                        f"  {tk_kijun}  |  {price_pos}",
+                        f"─── VW-MACD ───",
+                        f"  {macd_dir}  |  {vol_flag}(量比{vr:.2f})",
+                    ]
+                    analysis_text = "\n".join(analysis_lines)
+                    ax_main.text(0.02, 0.98, analysis_text,
+                                transform=ax_main.transAxes,
+                                fontsize=8.5, va='top', ha='left',
+                                bbox=dict(boxstyle='round,pad=0.4', facecolor='#E3F2FD',
+                                          edgecolor='#1565c0', alpha=0.92, linewidth=0.8),
+                                linespacing=1.4)
+                except Exception:
+                    pass
+
+                # ─── 副图: VW-MACD ───
+                x = np.asarray(dates)
+                ax_sub.plot(x, vw['dif'], label='VW-DIF', linewidth=1.0, color='#1565c0')
+                ax_sub.plot(x, vw['dea'], label='VW-DEA', linewidth=1.0, color='#c62828')
+                bar_colors = ['#d32f2f' if v >= 0 else '#388e3c' for v in vw['macdh']]
+                ax_sub.bar(x, vw['macdh'], color=bar_colors, alpha=0.45, width=0.55)
+                ax_sub.axhline(0, color="gray", linewidth=0.6)
+
+                # 成交量比率提示线 (量能信号)
+                vol_ratio = vw['vol_ratio']
+                ax_sub2 = ax_sub.twinx()
+                ax_sub2.plot(x, vol_ratio, color='#ff9800', linewidth=0.7,
+                             alpha=0.5, linestyle=':', label='量比')
+                ax_sub2.axhline(1.5, color='#ff9800', linestyle='--', linewidth=0.5, alpha=0.5)
+                ax_sub2.axhline(0.7, color='#ff9800', linestyle='--', linewidth=0.5, alpha=0.5)
+                ax_sub2.set_ylabel('量比', fontsize=8, color='#ff9800')
+                ax_sub2.tick_params(axis='y', labelcolor='#ff9800', labelsize=8)
+                ax_sub2.set_ylim(0, max(3.0, np.nanmax(vol_ratio) * 1.1))
+
+                ax_sub.set_ylabel('VW-MACD', fontsize=9)
+                ax_sub.legend(loc='upper left', fontsize=7)
+                ax_sub2.legend(loc='upper right', fontsize=7)
+                ax_sub.grid(True, alpha=0.3)
+
+                fig.tight_layout()
+                canvas = FigureCanvasTkAgg(fig, chart_inner)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                # 双击图表 → 弹出指标说明 (复用 _show_ichimoku_help)
+                canvas.mpl_connect("button_press_event",
+                    lambda e: _show_ichimoku_help() if e.dblclick else None)
+
+                # ─── 🖱️ 鼠标 hover → 综合评分 tooltip (用 mixin 通用方法, 加一目均衡复合指标分) ───
+                def _ichimoku_extra_scores(idx):
+                    """extra_info_fn: 附加一目均衡复合指标评分 (ind_data/ind_vars 已在闭包中)。"""
+                    extra = []
+                    if ind_vars["ichimoku"].get() and 'ich' in ind_data:
+                        ich = ind_data['ich']
+                        cloud_idx = min(idx + 26, len(ich['senkou_a']) - 1)
+                        s_a = ich['senkou_a'][cloud_idx]
+                        s_b = ich['senkou_b'][cloud_idx]
+                        tenkan = ich['tenkan_sen'][idx]
+                        kijun = ich['kijun_sen'][idx]
+                        close = closes[idx]
+                        cloud_score = 0
+                        if not (np.isnan(s_a) or np.isnan(s_b)):
+                            top_cloud = max(s_a, s_b); bot_cloud = min(s_a, s_b)
+                            if close > top_cloud: cloud_score = 100
+                            elif close < bot_cloud: cloud_score = -100
+                        tk_score = 50 if (not np.isnan(tenkan) and not np.isnan(kijun) and tenkan > kijun) else -50
+                        extra.append(("一目均衡", cloud_score * 0.6 + tk_score * 0.4, 2.0,
+                                     f"价在{'云上✅' if cloud_score>50 else ('云下❌' if cloud_score<-50 else '云中')}"))
+                    if ind_vars["supertrend"].get() and 'st' in ind_data:
+                        st = ind_data['st']; td = st['trend_dir'][idx]
+                        extra.append(("SuperTrend", 100 if td == 1 else -100, 1.5,
+                                     "↑支撑" if td == 1 else "↓压力"))
+                    if ind_vars["vwap_band"].get() and 'vwap_band' in ind_data:
+                        vb = ind_data['vwap_band']
+                        v = vb['vwap'][idx]; u2 = vb['upper2'][idx]; l2 = vb['lower2'][idx]
+                        if not np.isnan(v):
+                            if closes[idx] > u2: vs, vd = 80, "超买"
+                            elif closes[idx] < l2: vs, vd = -80, "超跌"
+                            elif closes[idx] > v: vs, vd = 40, "VWAP上"
+                            else: vs, vd = -40, "VWAP下"
+                        else: vs, vd = 0, "未成型"
+                        extra.append(("VWAP+σ", vs, 1.0, vd))
+                    if ind_vars["td_seq"].get() and 'td' in ind_data:
+                        tdc = ind_data['td']['td_count'][idx]
+                        extra.append(("TD序列", tdc * 8 if abs(tdc) < 9 else -tdc * 5, 0.5,
+                                     f"setup {tdc:+d}"))
+                    if ind_vars["camarilla"].get() and 'cam' in ind_data:
+                        cam_data = ind_data['cam']
+                        all_levs = cam_data['resistances'] + [cam_data['pivot']] + cam_data['supports']
+                        nearest = min(all_levs, key=lambda lv: abs(lv - closes[idx]))
+                        cam_s = 60 - abs(closes[idx] - nearest) / closes[idx] * 500
+                        extra.append(("Camarilla", cam_s, 0.5, f"近位{nearest:.2f}"))
+                    # 用 extra 自己算加权总分
+                    total_w = sum(w for _, _, w, _ in extra)
+                    if total_w > 0:
+                        avg_raw = sum(s * w for _, s, w, _ in extra) / total_w
+                        extra_total = int((avg_raw + 100) / 2)
+                        return extra, extra_total
+                    return extra, None
+
+                self._install_score_hover(
+                    canvas, ax_main, opens, highs, lows, closes, vol,
+                    trade_dates=trade_dates, extra_info_fn=_ichimoku_extra_scores)
+
+                # 状态: 当前信号简要
+                try:
+                    ich = self._calc_ichimoku(highs, lows, closes)
+                    last_tenkan = ich['tenkan_sen'][-1] if not np.isnan(ich['tenkan_sen'][-1]) else closes[-1]
+                    last_kijun = ich['kijun_sen'][-1] if not np.isnan(ich['kijun_sen'][-1]) else closes[-1]
+                    last_close = closes[-1]
+                    # 云的最后边界 (先取偏移 26 位的位置)
+                    cloud_idx = n - 1 + 26  # 偏移后的索引
+                    if cloud_idx < len(ich['senkou_a']):
+                        last_sen_a = ich['senkou_a'][cloud_idx]
+                        last_sen_b = ich['senkou_b'][cloud_idx]
+                        cloud_type = "🟢看涨云" if last_sen_a >= last_sen_b else "🔴看跌云"
+                    else:
+                        cloud_type = "云数据不足"
+
+                    # 转换线 vs 基准线
+                    tk_kj_cross = "转>基 (金叉区)" if last_tenkan > last_kijun else "转<基 (死叉区)"
+                    price_pos = "价在云上 ✅" if (not np.isnan(last_sen_a) and not np.isnan(last_sen_b)
+                            and last_close > max(last_sen_a, last_sen_b)) else \
+                               ("价在云下 ❌" if (not np.isnan(last_sen_a) and not np.isnan(last_sen_b)
+                            and last_close < min(last_sen_a, last_sen_b)) else "价在云中")
+
+                    # VW-MACD 最新
+                    vw_dif_val = vw['dif'][-1]
+                    vw_dea_val = vw['dea'][-1]
+                    vw_signal = "DIF>DEA ✅" if vw_dif_val > vw_dea_val else "DIF<DEA ❌"
+                    vr = vw['vol_ratio'][-1]
+                    vol_desc = f"量比{vr:.2f}"
+
+                    status_var.set(
+                        f"📊 {sym_name} | 云: {cloud_type} | {tk_kj_cross} | {price_pos} | "
+                        f"VW-MACD: {vw_signal} | {vol_desc}")
+                except Exception as _e:
+                    status_var.set(f"📊 {sym_name} (信号计算跳过: {_e})")
+
+            # 事件绑定
+            period_combo.bind("<<ComboboxSelected>>", lambda e: redraw())
+            sym_combo.bind("<<ComboboxSelected>>", lambda e: redraw())
+            win.after(100, redraw)
+
+        except Exception as e:
+            print(f"[📈一目均衡❌] {e}", flush=True)
+            _tb.print_exc()
+            messagebox.showerror("错误", f"打开一目均衡K线图失败: {e}", parent=getattr(self, 'root', None))
 
 
 __all__ = ["StockDetailMixin"]

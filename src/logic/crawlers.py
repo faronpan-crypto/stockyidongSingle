@@ -414,16 +414,57 @@ class AIConfigManager:
         if token is not None:
             self.config["tushare"]["token"] = token
         self.save_config()
-    def call_ai(self, prompt, provider=None):
-        """调用AI接口"""
+    def call_ai(self, prompt, provider=None, tag=None):
+        """调用AI接口, 带用量记录埋点。
+        tag: 调用方模块标识 (如 "同板块对比"/"AI写手"), 用于统计哪个功能最耗 API。
+        """
+        import time as _time
+        import os as _os
+        import inspect as _inspect
+        import json as _json
         if provider is None:
             provider = self.config.get("active_provider", "deepseek")
         provider_config = self.config.get("providers", {}).get(provider, {})
         if not provider_config:
             return None
+
+        # ── 自动推断调用方模块 (如果没传 tag) ──
+        if not tag:
+            try:
+                stack = _inspect.stack()
+                # 跳过当前 call_ai frame, 找第一个非 crawlers.py 的
+                for f in stack[1:]:
+                    fn = f.filename
+                    if not fn.endswith("crawlers.py"):
+                        # 取文件名去掉扩展名
+                        tag = _os.path.splitext(_os.path.basename(fn))[0]
+                        # 再去掉 .py → 干净名字; 也可以加行号
+                        tag = f"{tag}:{f.lineno}"
+                        break
+                if not tag:
+                    tag = "unknown"
+            except Exception:
+                tag = "unknown"
+
+        entry = {
+            "ts": _time.strftime("%Y-%m-%d %H:%M:%S"),
+            "provider": provider,
+            "model": provider_config.get("model", ""),
+            "tag": tag,
+            "prompt_chars": len(prompt) if prompt else 0,
+            "status": None,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "latency_ms": 0,
+            "error": None,
+        }
+
+        _t0 = _time.time()
         try:
             api_key = provider_config.get("api_key", "")
             if not api_key:
+                entry["error"] = "no_api_key"
                 return "错误: 未配置API密钥"
             base_url = provider_config.get("base_url", "")
             model = provider_config.get("model", "")
@@ -443,13 +484,45 @@ class AIConfigManager:
             }
             response = requests.post(url, json=data, headers=headers,
                                   timeout=provider_config.get("timeout", 60))
+            entry["latency_ms"] = int((_time.time() - _t0) * 1000)
+            entry["status"] = response.status_code
             if response.status_code == 200:
                 result = response.json()
+                # 解析 usage
+                usage = result.get("usage", {})
+                entry["prompt_tokens"] = usage.get("prompt_tokens", 0)
+                entry["completion_tokens"] = usage.get("completion_tokens", 0)
+                entry["total_tokens"] = usage.get("total_tokens", 0)
                 return result.get("choices", [{}])[0].get("message", {}).get("content", "")
             else:
+                err_text = response.text[:200]
+                entry["error"] = f"{response.status_code}: {err_text}"
                 return f"API调用失败: {response.status_code} - {response.text}"
         except Exception as e:
+            entry["latency_ms"] = int((_time.time() - _t0) * 1000)
+            entry["error"] = str(e)[:200]
             return f"AI调用错误: {e!s}"
+        finally:
+            # ── 写入用量日志 ──
+            try:
+                log_dir = _os.path.dirname(getattr(self, 'config_file', '') or _APP_CONFIG_DIR)
+                if not log_dir:
+                    from utils.config import _APP_CONFIG_DIR as _acd
+                    log_dir = _acd
+                log_path = _os.path.join(log_dir, "ai_usage_log.jsonl")
+                # 限制文件大小: 超过 5MB 截断前半
+                if _os.path.exists(log_path) and _os.path.getsize(log_path) > 5 * 1024 * 1024:
+                    try:
+                        with open(log_path, 'r', encoding='utf-8') as _f:
+                            _lines = _f.readlines()
+                        with open(log_path, 'w', encoding='utf-8') as _f:
+                            _f.writelines(_lines[-3000:])  # 留最后 3000 条
+                    except Exception:
+                        pass
+                with open(log_path, 'a', encoding='utf-8') as _f:
+                    _f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
     def _copy_tree_selection(self, tree_widget, columns):
         """复制Treeview选中行到剪贴板"""
         selections = tree_widget.selection()

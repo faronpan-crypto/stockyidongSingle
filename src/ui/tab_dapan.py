@@ -44803,12 +44803,209 @@ class DapanMixin:
         # 持仓输入标签页(默认标签页)
         input_tab = ttk.Frame(notebook)
         notebook.add(input_tab, text="持仓输入")
-        # 输入说明
-        ttk.Label(input_tab, text="请输入股票名称或代码(每行一个):",
-                 font=("TkDefaultFont", 11)).pack(anchor=tk.W, padx=5, pady=(5, 2))
-        # 输入框
-        input_text = scrolledtext.ScrolledText(input_tab, height=15, wrap=tk.WORD)
-        input_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # ────────────────────────────────────────────────────────────
+        # 📥 内嵌一键导入区 (文本粘贴 + 图片粘贴/OCR) — 直接填充空位
+        # ────────────────────────────────────────────────────────────
+        paste_import_wrap = ttk.LabelFrame(input_tab,
+                                           text="📥 一键导入 (粘贴文本 / Ctrl+V 粘贴图片 → OCR → 去重填空位)",
+                                           padding=4)
+        paste_import_wrap.pack(fill=tk.X, padx=5, pady=(5, 3))
+
+        paste_body = ttk.Frame(paste_import_wrap); paste_body.pack(fill=tk.X)
+
+        # 左侧: 粘贴文本区
+        paste_left = ttk.Frame(paste_body); paste_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        paste_txt = tk.Text(paste_left, height=4, font=("Menlo", 10), wrap=tk.WORD,
+                             bg="#F5F9FF", fg="#0D47A1", insertbackground="#1976D2",
+                             relief=tk.SOLID, bd=1)
+        paste_txt.pack(fill=tk.X, padx=(0, 4))
+        paste_txt.insert(tk.END, "例: 贵州茅台(600519)  或  600519  或  招商银行 600036\nCtrl+V 粘贴图片或文本")
+
+        # 右侧: 按钮列
+        paste_right = ttk.Frame(paste_body); paste_right.pack(side=tk.RIGHT, fill=tk.Y)
+        paste_status_var = tk.StringVar(value="")
+        paste_status_label = ttk.Label(paste_right, textvariable=paste_status_var,
+                                       foreground="#757575", font=("Microsoft YaHei", 8))
+        paste_status_label.pack(side=tk.BOTTOM, pady=(2, 0))
+
+        def _paste_fill_and_import():
+            """解析粘贴区 → 去重 → 填入空位 → 刷新"""
+            import re
+            raw = paste_txt.get("1.0", tk.END)
+            parsed = []
+            # 优先用 self._parse_stock_text (mac.py 里已有的正则解析)
+            if hasattr(self, '_parse_stock_text'):
+                parsed = self._parse_stock_text(raw)
+            if not parsed:
+                # fallback: 基础按行解析
+                for line in raw.split('\n'):
+                    line = line.strip()
+                    if not line: continue
+                    if line.isdigit() and len(line) == 6 and line[0] in '036':
+                        parsed.append({'code': line, 'name': ''})
+                    elif '(' in line and ')' in line:
+                        nm = line.split('(')[0].strip()
+                        cd = line.split('(')[1].rstrip(')').strip()
+                        if cd.isdigit() and len(cd) == 6:
+                            parsed.append({'code': cd, 'name': nm})
+            if not parsed:
+                paste_status_var.set("⚠️ 未识别到有效股票"); paste_status_label.config(foreground="#D32F2F")
+                return
+            # 获取当前已有的代码
+            hs, _, _, _ = self._get_holding_group_data(group_index)
+            existing_codes = set()
+            for i in range(max_count):
+                v = hs[i] if i < len(hs) else None
+                if v and v not in (None, "", (None, None), ("", "")):
+                    try:
+                        _, cd = v if isinstance(v, (tuple, list)) else (str(v), "")
+                        if cd: existing_codes.add(cd)
+                    except Exception: pass
+            # 找出空位
+            empty_indices = []
+            for i in range(max_count):
+                v = hs[i] if i < len(hs) else None
+                if v in (None, "", (None, None), ("", "")):
+                    empty_indices.append(i)
+            imported = 0; skipped_exist = 0; skipped_full = 0
+            seen_codes_now = set()  # 本次粘贴里的去重
+            for item in parsed:
+                code = item['code']
+                name = item.get('name', '')
+                if code in seen_codes_now: continue  # 本次重复跳过
+                seen_codes_now.add(code)
+                if code in existing_codes: skipped_exist += 1; continue
+                if not empty_indices: skipped_full += 1; break
+                pos = empty_indices.pop(0)
+                # 如果只有代码没有名称, 尝试用 akshare 查名
+                if not name and code:
+                    try:
+                        import akshare as _akq
+                        info = _akq.stock_individual_info_em(symbol=code)
+                        if info is not None and not info.empty:
+                            for _, row in info.iterrows():
+                                if row.get('item') in ('股票简称', '股票名称'):
+                                    name = row.get('value', ''); break
+                    except Exception: pass
+                # 确保名称和代码都有
+                if not code and name:
+                    code = get_stock_code_by_name(name) or ""
+                hs[pos] = (name or '', code or '') if (name or code) else None
+                existing_codes.add(code); imported += 1
+            # 刷新显示
+            for j in range(max_count):
+                self._update_holding_label(j, check_conditions=False, group_index=group_index)
+            self._safe_update_idletasks()
+            self._save_holdings_to_config(group_index)
+            # 刷新底部槽位 Treeview (如果已定义)
+            try: refresh_slots()
+            except Exception: pass
+            # 清空粘贴区
+            paste_txt.delete("1.0", "end-1c")
+            msg = f"✅ 填入 {imported} 只"
+            if skipped_exist: msg += f", 跳过已存在 {skipped_exist}"
+            if skipped_full: msg += f", 空行不足 {skipped_full}"
+            paste_status_var.set(msg); paste_status_label.config(foreground="#2E7D32" if imported else "#D32F2F")
+            if imported > 0:
+                import_window.after(100, lambda: self._check_holdings(group_index, max_count=max_count))
+
+        def _paste_image_from_clipboard(event=None):
+            """从剪贴板取图片 → OCR → 追加到粘贴区"""
+            try:
+                from PIL import ImageGrab
+                img = ImageGrab.grabclipboard()
+                if img is None:
+                    paste_status_var.set("剪贴板无图片, 用 Ctrl+V 粘贴文本"); paste_status_label.config(foreground="#757575")
+                    return "break"
+                import tempfile, os
+                tmp = tempfile.mktemp(suffix=".png")
+                if hasattr(img, 'save'):
+                    img.save(tmp)
+                else:
+                    paste_status_var.set("剪贴板内容不是图片"); paste_status_label.config(foreground="#D32F2F"); return "break"
+                paste_status_var.set("🔄 OCR 识别中..."); paste_status_label.config(foreground="#F57C00")
+                paste_txt.update_idletasks()
+                text = ""
+                if hasattr(self, '_ocr_image'):
+                    text = self._ocr_image(tmp)
+                else:
+                    # fallback: 直接调用 pytesseract
+                    try:
+                        from PIL import Image
+                        import pytesseract
+                        _img = Image.open(tmp)
+                        text = pytesseract.image_to_string(_img, lang='chi_sim+eng')
+                    except Exception as _e:
+                        text = ""
+                try: os.unlink(tmp)
+                except Exception: pass
+                if text and text.strip():
+                    paste_txt.delete("1.0", "end-1c")
+                    paste_txt.insert(tk.END, text.strip())
+                    paste_status_var.set("✅ OCR完成, 点 ⚡一键填充"); paste_status_label.config(foreground="#2E7D32")
+                else:
+                    paste_status_var.set("⚠️ 图片中未识别到文字"); paste_status_label.config(foreground="#D32F2F")
+                return "break"
+            except Exception as e:
+                paste_status_var.set(f"OCR失败: {e!s}"); paste_status_label.config(foreground="#D32F2F")
+                return "break"
+
+        def _pick_image_file():
+            """选图片文件 → OCR → 追加到粘贴区"""
+            import tkinter.filedialog as filedialog
+            import threading
+            p = filedialog.askopenfilename(
+                parent=import_window, title="选择股票列表图片",
+                filetypes=[("图片", "*.png *.jpg *.jpeg *.bmp"), ("所有文件", "*.*")])
+            if not p: return
+            paste_status_var.set("🔄 OCR 识别中..."); paste_status_label.config(foreground="#F57C00")
+            paste_txt.update_idletasks()
+            def _do():
+                text = ""
+                if hasattr(self, '_ocr_image'):
+                    text = self._ocr_image(p)
+                else:
+                    try:
+                        from PIL import Image
+                        import pytesseract
+                        _img = Image.open(p)
+                        text = pytesseract.image_to_string(_img, lang='chi_sim+eng')
+                    except Exception: pass
+                import_window.after(0, lambda: (
+                    paste_txt.delete("1.0", "end-1c"),
+                    paste_txt.insert(tk.END, text.strip() if text and text.strip() else "(未能识别)"),
+                    paste_status_var.set("✅ OCR完成, 点 ⚡一键填充") if text and text.strip() else paste_status_var.set("⚠️ 未能识别"),
+                    paste_status_label.config(foreground="#2E7D32" if text and text.strip() else "#D32F2F")))
+            threading.Thread(target=_do, daemon=True).start()
+
+        ttk.Button(paste_right, text="⚡ 一键填充", command=_paste_fill_and_import,
+                   width=11).pack(side=tk.TOP, pady=1)
+        ttk.Button(paste_right, text="🖼️ 选图片", command=_pick_image_file,
+                   width=11).pack(side=tk.TOP, pady=1)
+
+        # Ctrl+V 在粘贴区: 优先图片, 退回文本
+        def _on_ctrl_v(event):
+            try:
+                from PIL import ImageGrab
+                img = ImageGrab.grabclipboard()
+                if img is not None and hasattr(img, 'save'):
+                    return _paste_image_from_clipboard()
+            except Exception: pass
+            paste_txt.event_generate("<<Paste>>")
+            return "break"
+        paste_txt.bind("<Control-v>", _on_ctrl_v)
+        paste_txt.bind("<Control-V>", _on_ctrl_v)
+        paste_txt.bind("<Button-3>", lambda e: _paste_image_from_clipboard() or "break")
+        paste_txt.bind("<Control-Return>", lambda e: (_paste_fill_and_import(), "break"))
+
+        # ────────────────────────────────────────────────────────────
+        # 备用: 原来的逐行文本输入 (调小高度)
+        # ────────────────────────────────────────────────────────────
+        ttk.Label(input_tab, text="（备用）请输入股票名称或代码(每行一个):",
+                 font=("TkDefaultFont", 10), foreground="gray").pack(anchor=tk.W, padx=5, pady=(3, 1))
+        input_text = scrolledtext.ScrolledText(input_tab, height=8, wrap=tk.WORD)
+        input_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=3)
         # 历史持仓股标签页
         history_tab = ttk.Frame(notebook)
         notebook.add(history_tab, text="历史持仓股")
