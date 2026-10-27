@@ -4707,6 +4707,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("🌏纳指日经套利", 10, self._show_etf_holiday_dialog),
             ("📱日报", 7, self._show_wechat_dialog),
             ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
+            ("🤖量化", 7, self._show_quant_dialog),
         ]):
             if "📸" in txt or "📱" in txt or "🦅" in txt:
                 import traceback as _tb_toolbar

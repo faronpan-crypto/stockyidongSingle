@@ -752,7 +752,7 @@ def build_fund_holdings_tab(parent, root=None):
     ri_td_var = tk.BooleanVar(value=False); ri_camarilla_var = tk.BooleanVar(value=False)
     ri_ma_var = tk.BooleanVar(value=False); ri_boll_var = tk.BooleanVar(value=False)
     ri_bias_var = tk.BooleanVar(value=False); ri_vwmacd_var = tk.BooleanVar(value=True)
-    ri_volma_var = tk.BooleanVar(value=True)
+    ri_volma_var = tk.BooleanVar(value=True); ri_cci_var = tk.BooleanVar(value=False)
     def _mkcb(parent, txt, var):
         cb = tk.Checkbutton(parent, text=txt, variable=var, fg=rc, bg=_BG_PANEL,
                             activebackground=_BG_PANEL, activeforeground=rc,
@@ -762,7 +762,8 @@ def build_fund_holdings_tab(parent, root=None):
                    ("迟行", ri_chikou_var), ("SuperTrend", ri_supertrend_var),
                    ("VWAP+σ带", ri_vwap_band_var), ("TD", ri_td_var),
                    ("Camari", ri_camarilla_var), ("MA", ri_ma_var), ("BOLL", ri_boll_var),
-                   ("BIAS", ri_bias_var), ("VW-MACD", ri_vwmacd_var), ("量MA", ri_volma_var)]:
+                   ("BIAS", ri_bias_var), ("VW-MACD", ri_vwmacd_var), ("量MA", ri_volma_var),
+                   ("🎵五线谱", ri_cci_var)]:
         _mkcb(ri_toggle, txt, v).pack(side=tk.LEFT, padx=1)
     ri_fig = Figure(figsize=(7, 7), facecolor=_BG_PANEL)
     _ri_gs = ri_fig.add_gridspec(3, 1, height_ratios=[5, 3, 2], hspace=0.06)
@@ -775,10 +776,12 @@ def build_fund_holdings_tab(parent, root=None):
     def _ri_redraw_on_toggle(*_):
         if _ri_cache['df'] is not None:
             try: _draw_ri_tab(_ri_cache['sym'], _ri_cache['name'], _ri_cache['df'])
-            except Exception: pass
+            except Exception as _e:
+                import traceback; traceback.print_exc(); print(f"❌ _ri_redraw toggle err: {_e}")
     for _v in (ri_cloud_var, ri_tenkan_var, ri_kijun_var, ri_chikou_var,
                ri_supertrend_var, ri_vwap_band_var, ri_td_var, ri_camarilla_var,
-               ri_ma_var, ri_boll_var, ri_bias_var, ri_vwmacd_var, ri_volma_var):
+               ri_ma_var, ri_boll_var, ri_bias_var, ri_vwmacd_var, ri_volma_var,
+               ri_cci_var):
         _v.trace_add('write', _ri_redraw_on_toggle)
 
     # Tab C: 📊 财务 (3行 subplots: 利润率 + 增长率 + 比率)
@@ -857,7 +860,12 @@ def build_fund_holdings_tab(parent, root=None):
 
     def _draw_ri_tab(sina, name, df):
         """🌈 完整版一目均衡: 3 行 + 13 toggle."""
+        print(f"📊 [ri_tab] draw called! sina={sina} name={name} df={'list:'+str(len(df)) if isinstance(df,list) else ('dict:'+str(list(df.keys()) if df is not None else 'None'))} cci_var={ri_cci_var.get()}")
         _ri_cache['df'] = df; _ri_cache['sym'] = sina; _ri_cache['name'] = name
+        # 重绘前先清掉所有残留的 twin axes (否则累积后遮挡/冲突)
+        for _child in list(ri_ax3.get_shared_x_axes().get_siblings(ri_ax3)):
+            if _child is not ri_ax3 and _child in ri_fig.axes:
+                ri_fig.delaxes(_child)
         ri_ax1.clear(); ri_ax2.clear(); ri_ax3.clear()
         if not df:
             ri_ax1.text(0.5, 0.5, "加载中...", transform=ri_ax1.transAxes, ha='center', color=_FG_DIM)
@@ -988,11 +996,42 @@ def build_fund_holdings_tab(parent, root=None):
                                                               facecolor=_BG_PANEL, edgecolor=_FG_DIM)
             ri_ax2.grid(True,alpha=0.15,color=_FG_DIM); ri_ax2.tick_params(labelbottom=False)
 
-        cv=[_FG_RED if closes[i]>=closes[max(0,i-1)] else _FG_GREEN for i in range(n)]
-        ri_ax3.bar(x,vols,color=cv,width=0.7,alpha=0.6)
-        if ri_volma_var.get():
-            ri_ax3.plot(x,pd.Series(vols).rolling(5,min_periods=1).mean().values,color=_FG_GOLD,linewidth=0.8,label='VOL_MA5')
-            ri_ax3.plot(x,pd.Series(vols).rolling(10,min_periods=1).mean().values,color=_FG_BLUE,linewidth=0.8,label='VOL_MA10')
+        # ── ax3: 成交量 (默认) 或 🎵情绪五线谱 CCI ──
+        if ri_cci_var.get():
+            # 🎵 情绪五线谱 CCI(14) + 5 条水平参考线
+            tp = (highs + lows + closes) / 3
+            sma_tp = pd.Series(tp).rolling(14, min_periods=1).mean().values
+            md = np.zeros(n)
+            for _i in range(n):
+                _s = max(0, _i-13); md[_i] = np.mean(np.abs(tp[_s:_i+1] - sma_tp[_i]))
+            cci = (tp - sma_tp) / (0.015 * np.maximum(md, 1e-8))
+            cci = np.nan_to_num(cci, nan=0.0)
+            ri_ax3.plot(x, cci, color='#ab47bc', linewidth=0.9, label='CCI(14)')
+            # 5 条水平参考线 — 情绪区间
+            _bands = [(-200, '#26a69a', '冰点'), (-100, '#66bb6a', '超卖'),
+                      (0,    '#888888', '中性'),
+                      (100,  '#ff7043', '超买'), (200, '#d32f2f', '高潮')]
+            for _lv, _c, _lb in _bands:
+                ri_ax3.axhline(y=_lv, color=_c, linewidth=0.6, linestyle='--', alpha=0.8)
+                ri_ax3.text(n-1, _lv, f'  {_lv}({_lb})', va='center', fontsize=6, color=_c)
+            ri_ax3.set_ylabel('CCI', color='#ab47bc', fontsize=8)
+            ri_ax3.tick_params(axis='y', colors='#ab47bc')
+            _cci_lo = min(-250, float(np.min(cci)) - 30)
+            _cci_hi = max(250,  float(np.max(cci)) + 30)
+            ri_ax3.set_ylim(_cci_lo, _cci_hi)
+            # 如果量MA也开了,成交量半透明叠加右轴
+            if ri_volma_var.get():
+                cv2=[_FG_RED if closes[i]>=closes[max(0,i-1)] else _FG_GREEN for i in range(n)]
+                ax3r = ri_ax3.twinx()
+                ax3r.bar(x, vols, color=cv2, width=0.7, alpha=0.25)
+                ax3r.tick_params(axis='y', colors=_FG_DIM, labelsize=7)
+                ax3r.set_ylabel('VOL', color=_FG_DIM, fontsize=7)
+        else:
+            cv=[_FG_RED if closes[i]>=closes[max(0,i-1)] else _FG_GREEN for i in range(n)]
+            ri_ax3.bar(x,vols,color=cv,width=0.7,alpha=0.6)
+            if ri_volma_var.get():
+                ri_ax3.plot(x,pd.Series(vols).rolling(5,min_periods=1).mean().values,color=_FG_GOLD,linewidth=0.8,label='VOL_MA5')
+                ri_ax3.plot(x,pd.Series(vols).rolling(10,min_periods=1).mean().values,color=_FG_BLUE,linewidth=0.8,label='VOL_MA10')
         ri_ax3.tick_params(colors=_FG_DIM); ri_ax3.legend(fontsize=6,loc='upper left',
                                                           facecolor=_BG_PANEL, edgecolor=_FG_DIM)
         ri_ax3.grid(True,alpha=0.15,color=_FG_DIM)

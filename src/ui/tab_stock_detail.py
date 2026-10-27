@@ -3161,6 +3161,7 @@ class StockDetailMixin:
                 ("camarilla", "Camarilla", False, "主图·动态S/R水平线"),
                 ("ma", "MA均线", False, "主图·MA5/10/20/60"),
                 ("boll", "BOLL布林", False, "主图·中轨±2σ"),
+                ("cci", "🎵五线谱", False, "副图·CCI情绪区间-200~+200"),
             ]
             ind_vars = {}
             for key, label, default, tip in INDICATOR_LIST:
@@ -3528,14 +3529,42 @@ class StockDetailMixin:
                                 facecolor='#FFFFFF', edgecolor='#CCCCCC')
                 ax_sub1.grid(True, alpha=0.3)
 
-                # ─── 副图2: 成交量 (固定) ───
-                def _ma_series(s, n): return pd.Series(s).rolling(n, min_periods=1).mean().values
-                vol_colors = ['#d32f2f' if closes[i] >= opens[i] else '#2e7d32' for i in range(n)]
-                vol_ma5 = _ma_series(vol, 5)
-                ax_sub2.bar(x, vol, color=vol_colors, width=0.55, alpha=0.7)
-                ax_sub2.plot(x, vol_ma5, color='#ff9800', linewidth=0.8, label='VOL_MA5')
-                ax_sub2.set_ylabel('量', fontsize=9, color='#424242')
-                ax_sub2.tick_params(colors='#424242')
+                # ─── 副图2: 成交量 (默认) 或 🎵情绪五线谱 CCI ───
+                if ind_vars['cci'].get():
+                    # 🎵 情绪五线谱 CCI(14) + 5 条水平参考线
+                    tp = (highs + lows + closes) / 3
+                    sma_tp = pd.Series(tp).rolling(14, min_periods=1).mean().values
+                    md_vals = np.zeros(n)
+                    for _i in range(n):
+                        _s = max(0, _i-13); md_vals[_i] = np.mean(np.abs(tp[_s:_i+1] - sma_tp[_i]))
+                    cci = (tp - sma_tp) / (0.015 * np.maximum(md_vals, 1e-8))
+                    cci = np.nan_to_num(cci, nan=0.0)
+                    ax_sub2.plot(x, cci, color='#7b1fa2', linewidth=0.9, label='CCI(14)')
+                    _bands = [(-200, '#00796b', '冰点'), (-100, '#388e3c', '超卖'),
+                              (0,    '#999999', '中性'),
+                              (100,  '#f4511e', '超买'), (200, '#c62828', '高潮')]
+                    for _lv, _c, _lb in _bands:
+                        ax_sub2.axhline(y=_lv, color=_c, linewidth=0.6, linestyle='--', alpha=0.8)
+                        ax_sub2.text(n-1, _lv, f'  {_lv}({_lb})', va='center', fontsize=6, color=_c)
+                    ax_sub2.set_ylabel('CCI', color='#7b1fa2', fontsize=9)
+                    ax_sub2.tick_params(axis='y', colors='#7b1fa2')
+                    _cci_lo = min(-250, float(np.min(cci)) - 30)
+                    _cci_hi = max(250,  float(np.max(cci)) + 30)
+                    ax_sub2.set_ylim(_cci_lo, _cci_hi)
+                    # 成交量半透明叠加右轴
+                    vol_colors2 = ['#d32f2f' if closes[i] >= opens[i] else '#2e7d32' for i in range(n)]
+                    ax_sub2_r = ax_sub2.twinx()
+                    ax_sub2_r.bar(x, vol, color=vol_colors2, width=0.55, alpha=0.2)
+                    ax_sub2_r.tick_params(axis='y', colors='#424242', labelsize=7)
+                    ax_sub2_r.set_ylabel('VOL', color='#424242', fontsize=8)
+                else:
+                    def _ma_series(s, n): return pd.Series(s).rolling(n, min_periods=1).mean().values
+                    vol_colors = ['#d32f2f' if closes[i] >= opens[i] else '#2e7d32' for i in range(n)]
+                    vol_ma5 = _ma_series(vol, 5)
+                    ax_sub2.bar(x, vol, color=vol_colors, width=0.55, alpha=0.7)
+                    ax_sub2.plot(x, vol_ma5, color='#ff9800', linewidth=0.8, label='VOL_MA5')
+                    ax_sub2.set_ylabel('量', fontsize=9, color='#424242')
+                    ax_sub2.tick_params(colors='#424242')
                 ax_sub2.legend(loc='upper left', fontsize=7,
                                facecolor='#FFFFFF', edgecolor='#CCCCCC')
                 ax_sub2.grid(True, alpha=0.3)

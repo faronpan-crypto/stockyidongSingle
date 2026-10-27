@@ -3968,6 +3968,45 @@ class DapanMixin:
                     for h in raw: hist_dict[h.get("date", "")] = h
             except: hist_dict = {}
 
+        # ── 关键补: 从 sentiment_history DB 补最新日期 ──
+        # JSON 经常滞后 (如 10-22), DB 盘中实时写 (10-27 已有)
+        try:
+            import sqlite3 as _sql_e
+            try:
+                from utils.config import DB_PATH as _DBP_E
+            except Exception:
+                _DBP_E = os.path.join(
+                    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                    "data", "stock_analysis.db")
+            if _DBP_E and _os.path.exists(_DBP_E):
+                _ce = _sql_e.connect(_DBP_E)
+                _cue = _ce.cursor()
+                _cue.execute(
+                    "SELECT snapshot_date, m2_up, m2_down, m2_total, m3_count, "
+                    "m1_today, m5_hs300, m5_zz500, m5_kc30, m5_avg "
+                    "FROM sentiment_history ORDER BY snapshot_date DESC")
+                for _row in _cue.fetchall():
+                    _d = str(_row[0]).replace("-", "")
+                    if len(_d) == 8 and _d not in hist_dict:
+                        # 统一成 JSON 风格 "20261027" (8 字符, 跟 hist_dict 原 key 一致)
+                        hist_dict[_d] = {
+                            "date": _d,
+                            "m2_up": _row[1] or 0, "m2_down": _row[2] or 0,
+                            "m2_total": _row[3] or 0, "m3_count": _row[4],
+                            "m1_today": _row[5], "m5_hs300": _row[6],
+                            "m5_zz500": _row[7], "m5_kc30": _row[8],
+                            "m5_avg": _row[9], "source": "db",
+                        }
+                _ce.close()
+                # 自动回写 JSON
+                try:
+                    with open(EMO_HIST, "w") as _fw:
+                        _j.dump(hist_dict, _fw, ensure_ascii=False, indent=2)
+                except Exception: pass
+                print(f"[情绪周期] ✅ DB 补最新 {len(hist_dict)}天", flush=True)
+        except Exception as _e:
+            print(f"[情绪周期] DB 补最新失败: {_e}", flush=True)
+
         def _reload_hist():
             """从磁盘重新加载 + 后台异步 Gist pull (不阻塞 UI)"""
             nonlocal hist_dict
@@ -22389,20 +22428,37 @@ class DapanMixin:
         try:
             import tushare as _ts
             _pro_td = _ts.pro_api()
-            _cal = _pro_td.trade_cal(exchange="SSE", start_date=(_dt.date.today() - _dt.timedelta(days=10)).strftime("%Y%m%d"),
+            _cal = _pro_td.trade_cal(exchange="SSE", start_date=(_dt.date.today() - _dt.timedelta(days=14)).strftime("%Y%m%d"),
                                       end_date=_dt.date.today().strftime("%Y%m%d"), is_open="1")
             if _cal is not None and len(_cal) > 0:
-                recent_td = str(_cal["cal_date"].iloc[0])  # tushare trade_cal 默认降序, iloc[0]=最新!
-                result["data_date"] = recent_td
-                print(f"[盘中警告] 最近交易日: {recent_td}", flush=True)
+                # trade_cal 默认降序, iloc[0]=最新. 但盘中今天 daily 还没出数据 → 必须回退
+                for _cand in _cal["cal_date"].tolist():
+                    _td_str = str(_cand)
+                    # 快速验证: daily 接口对这天有没有数据
+                    try:
+                        _tmp_d = _pro_td.daily(trade_date=_td_str, limit=1)
+                        if _tmp_d is not None and len(_tmp_d) > 0:
+                            recent_td = _td_str; break
+                    except Exception:
+                        continue
+                if recent_td:
+                    result["data_date"] = recent_td
+                    print(f"[盘中警告] 最近交易日(有daily数据): {recent_td}", flush=True)
+                else:
+                    # 全部没数据 → 手动兜底
+                    for _bd in range(1, 8):
+                        _d = _dt.date.today() - _dt.timedelta(days=_bd)
+                        if _d.weekday() < 5:
+                            recent_td = _d.strftime("%Y%m%d"); break
+                    result["data_date"] = recent_td or ""
+                    print(f"[盘中警告] trade_cal 全空, 手动兜底: {recent_td}")
         except Exception as e:
             print(f"[盘中警告] trade_cal fail: {e}")
             # 手动兜底: 往前退
             for _bd in range(1, 8):
                 _d = _dt.date.today() - _dt.timedelta(days=_bd)
                 if _d.weekday() < 5:
-                    recent_td = _d.strftime("%Y%m%d")
-                    break
+                    recent_td = _d.strftime("%Y%m%d"); break
             result["data_date"] = recent_td or ""
 
         use_tushare_fallback = not result["is_trading"]  # 非交易时段直接用 tushare
@@ -26011,6 +26067,45 @@ class DapanMixin:
                     for h in raw: hist_dict[h.get("date", "")] = h
             except: hist_dict = {}
 
+        # ── 关键补: 从 sentiment_history DB 补最新日期 ──
+        # JSON 经常滞后 (如 10-22), DB 盘中实时写 (10-27 已有)
+        try:
+            import sqlite3 as _sql_e
+            try:
+                from utils.config import DB_PATH as _DBP_E
+            except Exception:
+                _DBP_E = os.path.join(
+                    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                    "data", "stock_analysis.db")
+            if _DBP_E and _os.path.exists(_DBP_E):
+                _ce = _sql_e.connect(_DBP_E)
+                _cue = _ce.cursor()
+                _cue.execute(
+                    "SELECT snapshot_date, m2_up, m2_down, m2_total, m3_count, "
+                    "m1_today, m5_hs300, m5_zz500, m5_kc30, m5_avg "
+                    "FROM sentiment_history ORDER BY snapshot_date DESC")
+                for _row in _cue.fetchall():
+                    _d = str(_row[0]).replace("-", "")
+                    if len(_d) == 8 and _d not in hist_dict:
+                        # 统一成 JSON 风格 "20261027" (8 字符, 跟 hist_dict 原 key 一致)
+                        hist_dict[_d] = {
+                            "date": _d,
+                            "m2_up": _row[1] or 0, "m2_down": _row[2] or 0,
+                            "m2_total": _row[3] or 0, "m3_count": _row[4],
+                            "m1_today": _row[5], "m5_hs300": _row[6],
+                            "m5_zz500": _row[7], "m5_kc30": _row[8],
+                            "m5_avg": _row[9], "source": "db",
+                        }
+                _ce.close()
+                # 自动回写 JSON
+                try:
+                    with open(EMO_HIST, "w") as _fw:
+                        _j.dump(hist_dict, _fw, ensure_ascii=False, indent=2)
+                except Exception: pass
+                print(f"[情绪周期] ✅ DB 补最新 {len(hist_dict)}天", flush=True)
+        except Exception as _e:
+            print(f"[情绪周期] DB 补最新失败: {_e}", flush=True)
+
         def _reload_hist():
             """从磁盘重新加载 + 后台异步 Gist pull (不阻塞 UI)"""
             nonlocal hist_dict
@@ -26060,8 +26155,18 @@ class DapanMixin:
 
         # ---- 状态变量 ----
         # 默认月份: 优先定位到 hist_dict 中最新有数据的月份, 否则当前月
-        dates_with_data = [_dt2.strptime(d, "%Y-%m-%d") for d in hist_dict.keys()
-                           if isinstance(d, str) and len(d) == 10]
+        # 支持两种 key 格式: "20261027"(8) 或 "2026-10-27"(10)
+        def _norm_date_str(s):
+            if not isinstance(s, str): return None
+            if len(s) == 8:
+                try: return _dt2.strptime(s, "%Y%m%d")
+                except Exception: return None
+            if len(s) == 10:
+                try: return _dt2.strptime(s, "%Y-%m-%d")
+                except Exception: return None
+            return None
+        dates_with_data = [_norm_date_str(d) for d in hist_dict.keys()]
+        dates_with_data = [d for d in dates_with_data if d is not None]
         latest_hist_date = max(dates_with_data) if dates_with_data else None
         if latest_hist_date:
             # 定位到有数据的最新月份 (如果是过去月份就定位过去, 没数据才用当前月)
@@ -60256,6 +60361,10 @@ class DapanMixin:
 
         def _draw_ichimoku_tab(df, sym_code):
             """🌈 一目均衡 Tab — 3 行: 一目均衡云 + VW-MACD + 成交量MA5/MA10."""
+            # 重绘前清掉 ax_iv 上残留的所有 twin axes
+            for _child in list(ax_iv.get_shared_x_axes().get_siblings(ax_iv)):
+                if _child is not ax_iv and _child in ichi_fig.axes:
+                    ichi_fig.delaxes(_child)
             ax_i.clear(); ax_ivw.clear(); ax_iv.clear()
             if not df:
                 ax_i.text(0.5, 0.5, "请先在左侧选择标的\n点 🔍 分析",
@@ -60453,17 +60562,45 @@ class DapanMixin:
                 ax_ivw.grid(True, alpha=0.15)
             ax_ivw.tick_params(labelbottom=False)
 
-            # ── 成交量 + MA5/MA10 (toggle) ──
-            vol_colors = ['#d32f2f' if closes[i] >= closes[max(0,i-1)] else '#388e3c'
-                          for i in range(n)]
-            ax_iv.bar(x, vols, color=vol_colors, width=0.7, alpha=0.6)
-            if ichi_volma_var.get():
-                vol_ma5 = pd.Series(vols).rolling(5, min_periods=1).mean().values
-                vol_ma10 = pd.Series(vols).rolling(10, min_periods=1).mean().values
-                ax_iv.plot(x, vol_ma5, color='#ff9800', linewidth=0.8, label='VOL_MA5')
-                ax_iv.plot(x, vol_ma10, color='#2196f3', linewidth=0.8, label='VOL_MA10')
-            ax_iv.set_ylabel("成交量", fontsize=9, color='#424242')
-            ax_iv.tick_params(colors='#424242')
+            # ── ax3: 成交量 (默认) 或 🎵情绪五线谱 CCI ──
+            if ichi_cci_var.get():
+                # 🎵 情绪五线谱 CCI(14) + 5 条水平参考线
+                tp = (highs + lows + closes) / 3
+                sma_tp = pd.Series(tp).rolling(14, min_periods=1).mean().values
+                md_vals = np.zeros(n)
+                for _i in range(n):
+                    _s = max(0, _i-13); md_vals[_i] = np.mean(np.abs(tp[_s:_i+1] - sma_tp[_i]))
+                cci = (tp - sma_tp) / (0.015 * np.maximum(md_vals, 1e-8))
+                cci = np.nan_to_num(cci, nan=0.0)
+                ax_iv.plot(x, cci, color='#7b1fa2', linewidth=0.9, label='CCI(14)')
+                _bands = [(-200, '#00796b', '冰点'), (-100, '#388e3c', '超卖'),
+                          (0,    '#999999', '中性'),
+                          (100,  '#f4511e', '超买'), (200, '#c62828', '高潮')]
+                for _lv, _c, _lb in _bands:
+                    ax_iv.axhline(y=_lv, color=_c, linewidth=0.6, linestyle='--', alpha=0.8)
+                    ax_iv.text(n-1, _lv, f'  {_lv}({_lb})', va='center', fontsize=6, color=_c)
+                ax_iv.set_ylabel('CCI', color='#7b1fa2', fontsize=9)
+                ax_iv.tick_params(axis='y', colors='#7b1fa2')
+                _cci_lo = min(-250, float(np.min(cci)) - 30)
+                _cci_hi = max(250,  float(np.max(cci)) + 30)
+                ax_iv.set_ylim(_cci_lo, _cci_hi)
+                if ichi_volma_var.get():
+                    cv3=['#d32f2f' if closes[i]>=closes[max(0,i-1)] else '#388e3c' for i in range(n)]
+                    ax_iv_r = ax_iv.twinx()
+                    ax_iv_r.bar(x, vols, color=cv3, width=0.7, alpha=0.2)
+                    ax_iv_r.tick_params(axis='y', colors='#424242', labelsize=7)
+                    ax_iv_r.set_ylabel('VOL', color='#424242', fontsize=8)
+            else:
+                vol_colors = ['#d32f2f' if closes[i] >= closes[max(0,i-1)] else '#388e3c'
+                              for i in range(n)]
+                ax_iv.bar(x, vols, color=vol_colors, width=0.7, alpha=0.6)
+                if ichi_volma_var.get():
+                    vol_ma5 = pd.Series(vols).rolling(5, min_periods=1).mean().values
+                    vol_ma10 = pd.Series(vols).rolling(10, min_periods=1).mean().values
+                    ax_iv.plot(x, vol_ma5, color='#ff9800', linewidth=0.8, label='VOL_MA5')
+                    ax_iv.plot(x, vol_ma10, color='#2196f3', linewidth=0.8, label='VOL_MA10')
+                ax_iv.set_ylabel("成交量", fontsize=9, color='#424242')
+                ax_iv.tick_params(colors='#424242')
             ax_iv.legend(fontsize=7, loc='upper left',
                          facecolor='#FFFFFF', edgecolor='#CCCCCC')
             ax_iv.grid(True, alpha=0.15)
@@ -60848,6 +60985,7 @@ class DapanMixin:
         ichi_bias_var = tk.BooleanVar(value=False)
         ichi_vwmacd_var = tk.BooleanVar(value=True)
         ichi_volma_var = tk.BooleanVar(value=True)
+        ichi_cci_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(ichi_toggle_row, text="☁️云", variable=ichi_cloud_var).pack(side=tk.LEFT)
         ttk.Checkbutton(ichi_toggle_row, text="转换线", variable=ichi_tenkan_var).pack(side=tk.LEFT, padx=(4,0))
         ttk.Checkbutton(ichi_toggle_row, text="基准线", variable=ichi_kijun_var).pack(side=tk.LEFT, padx=(4,0))
@@ -60861,6 +60999,7 @@ class DapanMixin:
         ttk.Checkbutton(ichi_toggle_row, text="BIAS", variable=ichi_bias_var).pack(side=tk.LEFT, padx=(4,0))
         ttk.Checkbutton(ichi_toggle_row, text="VW-MACD", variable=ichi_vwmacd_var).pack(side=tk.LEFT, padx=(10,0))
         ttk.Checkbutton(ichi_toggle_row, text="量MA", variable=ichi_volma_var).pack(side=tk.LEFT, padx=(4,0))
+        ttk.Checkbutton(ichi_toggle_row, text="🎵五线谱", variable=ichi_cci_var).pack(side=tk.LEFT, padx=(10,0))
 
         ichi_fig = Figure(figsize=(7, 7.5), facecolor="#FAFAFA")
         _ichi_gs = ichi_fig.add_gridspec(3, 1, height_ratios=[5, 3, 2], hspace=0.06)
@@ -60877,11 +61016,13 @@ class DapanMixin:
         def _ichi_redraw_on_toggle(*_):
             if _ichi_df_cache['df'] is not None:
                 try: _draw_ichimoku_tab(_ichi_df_cache['df'], _ichi_df_cache['sym'])
-                except Exception: pass
+                except Exception as _e:
+                    import traceback; traceback.print_exc(); print(f"❌ _ichi_redraw err: {_e}")
         for _v in (ichi_cloud_var, ichi_tenkan_var, ichi_kijun_var,
                    ichi_chikou_var, ichi_supertrend_var, ichi_vwap_band_var,
                    ichi_td_var, ichi_camarilla_var, ichi_ma_var,
-                   ichi_boll_var, ichi_bias_var, ichi_vwmacd_var, ichi_volma_var):
+                   ichi_boll_var, ichi_bias_var, ichi_vwmacd_var, ichi_volma_var,
+                   ichi_cci_var):
             _v.trace_add('write', _ichi_redraw_on_toggle)
 
         # Tab 4: 📊 财务指标
@@ -61501,5 +61642,291 @@ class DapanMixin:
         except Exception as e:
             print(f"[OCR] 识别失败: {e}", flush=True)
             return ""
+
+    def _show_quant_dialog(self):
+        """🤖 量化总览面板 — 7层闭环 + 已有 skill 入口。"""
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+        except Exception:
+            return
+        root = getattr(self, 'root', None) or getattr(self, '_root', None)
+        if root is None:
+            try: root = self.master
+            except Exception: return
+
+        win = tk.Toplevel(root)
+        win.title("🤖 量化系统总览")
+        win.geometry("960x720")
+        try: win.attributes("-topmost", True)
+        except Exception: pass
+        try: win.state("zoomed")
+        except Exception: pass
+
+        # 顶部标题
+        top = ttk.Frame(win); top.pack(fill=tk.X, padx=8, pady=(8, 4))
+        ttk.Label(top, text="🤖 量化系统总览", font=("Menlo", 14, "bold")).pack(side=tk.LEFT)
+        ttk.Label(top, text="   数据→因子→信号→组合→风控→执行→复盘",
+                  font=("Menlo", 9), foreground="#888").pack(side=tk.LEFT, padx=6)
+
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+
+        # ── Tab 1: 🏗️ 架构导图 ──
+        tab_arch = ttk.Frame(nb); nb.add(tab_arch, text="🏗️ 架构导图")
+        arch_text = tk.Text(tab_arch, font=("Menlo", 10), wrap=tk.WORD,
+                            bg="#121212", fg="#E0E0E0", bd=0, padx=10, pady=10)
+        arch_text.pack(fill=tk.BOTH, expand=True)
+        arch_content = """
+╔═══════════════════════════════════════════════════════════════════╗
+║                  🤖 STOCKYIDONG 量化系统架构                       ║
+║                    个人/A股/短线实战版                              ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+  📊 数据层 ── 行情/财务/舆情, 统一接口+缓存+限流
+  │
+  🧬 因子层 ── 10类因子(价值/成长/动量/反转/规模/波动率/情绪…)
+  │             截面 z-score + 行业中性化
+  │
+  🎯 信号层 ── 封装现有 Skill:
+  │              · 多因子打分 (quant-factors)
+  │              · 主升浪 (main-wave-scanner)
+  │              · 情绪择时 (market-sentiment-guard)
+  │              · ETF/可转债套利 (etf-arbitrage)
+  │              · 事件驱动
+  │
+  📦 组合层 ── TopN 打分融合 + 等权/风险平价/凯利 + 约束
+  │             (单票≤10% / 行业中性 / 黑名单)
+  │
+  🛡️ 风控层 ── 贯穿全链路
+  │              · 仓位档位 (涨跌家数<800空仓 / 800-1500半仓 / >3000加仓)
+  │              · 单票 -5~-8% 硬止损
+  │              · 回撤阈值
+  │
+  🚀 执行层 ── 个人不直连券商 → 买卖清单 + 推送 wechat
+  │
+  📖 复盘层 ── 交易记录 + 归因 + 回测 (china-stock-quant) + 再训练
+
+  ⚠️ 回测四大坑: 未来函数 / 幸存者偏差 / 过拟合 / 成本低估
+
+  🏦 主力代表: 文艺复兴(统计套利+高频) / 桥水(风险平价)
+               AQR(因子投资) / Two Sigma(另类数据因子)
+
+  📋 你已有的核心构件 (整合而非重写):
+    · quant_runner.py          新浪源+本地回测
+    · lunchuan_strategy.py     巴芒段基本面+热点
+    · trend_factor_scan.py     双均线+段基+芒格
+    · auto_screener.py         自动选股
+    · china-stock-quant skill  指标+回测
+    · 已装 Skill: quant-factors / main-wave-scanner /
+                  market-sentiment-guard / etf-arbitrage
+"""
+        arch_text.insert("1.0", arch_content)
+        arch_text.config(state=tk.DISABLED)
+
+        # ── Tab 2: 🎯 因子体系 ──
+        tab_factor = ttk.Frame(nb); nb.add(tab_factor, text="🧬 因子体系")
+        factor_text = tk.Text(tab_factor, font=("Menlo", 9), wrap=tk.WORD,
+                              bg="#121212", fg="#E0E0E0", bd=0, padx=10, pady=10)
+        factor_text.pack(fill=tk.BOTH, expand=True)
+        factor_text.insert("1.0", """
+  🧬 10 大类因子 (截面 z-score → 加权打分)
+
+  ┌──────────┬──────────────────────────┬───────────┐
+  │ 类别     │ 代表指标                 │ 数据来源  │
+  ├──────────┼──────────────────────────┼───────────┤
+  │ 💰价值   │ PE/PB/PS/股息率/自由现金流 │ Tushare   │
+  │ 📈成长   │ ROE增速/营收增速/净利增速  │ Tushare   │
+  │ 💎质量   │ 毛利率/资产负债率/周转率  │ Tushare   │
+  │ 🚀动量   │ 过去5/10/20/60日涨跌幅   │ 新浪日线   │
+  │ 🔄反转   │ 超跌反弹(RSI<20)/连续下跌 │ 新浪日线   │
+  │ 📏规模   │ 总市值/流通市值           │ Tushare   │
+  │ 🎢波动率 │ 20日波动率/ATR           │ 新浪日线   │
+  │ 💧流动性 │ 换手率/成交额/量比        │ 新浪日线   │
+  │ 😤情绪   │ 涨跌家数/连板高度/封板率   │ 盘中实时   │
+  │ 🔧技术   │ MA多头/MACD金叉/CCI超卖  │ 新浪日线   │
+  └──────────┴──────────────────────────┴───────────┘
+
+  📐 因子工程:
+    · 截面 z-score 标准化 (去极值 ±3σ)
+    · 行业中性化 (申万31行业)
+    · 缺失值处理 (行业中位数填充)
+    · IC/IR 因子有效性检验
+
+  📊 组合构建:
+    · 多因子打分 → Top 20
+    · 等权 / 风险平价 / 凯利公式
+    · 约束: 单票≤10%, 行业暴露≤20%, 市值偏离≤20%
+    · 定期调仓: 周频 (周五收盘后生成清单)
+""")
+        factor_text.config(state=tk.DISABLED)
+
+        # ── Tab 3: 🛡️ 风控仪表盘 ──
+        tab_risk = ttk.Frame(nb); nb.add(tab_risk, text="🛡️ 风控仪表盘")
+        risk_frame = ttk.Frame(tab_risk); risk_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        # 风控规则说明
+        risk_text = tk.Text(risk_frame, font=("Menlo", 10), wrap=tk.WORD,
+                            bg="#121212", fg="#E0E0E0", bd=0, height=12)
+        risk_text.pack(fill=tk.X, pady=(0, 6))
+        risk_text.insert("1.0", """
+  🛡️ 三层风控体系
+
+  📍 第一层: 大盘择时 (决定仓位档位)
+     · 涨跌家数 < 800  → 空仓 (0%)
+     · 涨跌家数 800-1500 → 半仓 (30%)
+     · 涨跌家数 1500-3000 → 标准仓 (60%)
+     · 涨跌家数 > 3000 → 加仓 (80%)
+     · 同花顺情绪指数 1日线向下 → 强制减仓 20%
+
+  📍 第二层: 个股止损 (硬纪律)
+     · 单票 -5% → 预警
+     · 单票 -8% → 强制清仓
+     · 跌破 MA60 → 减仓 50%
+     · 放量跌破关键位 → 立即清
+
+  📍 第三层: 组合约束
+     · 单票最大仓位 ≤ 10%
+     · 单一行业 ≤ 20%
+     · 总回撤 > 15% → 全仓清出
+     · 黑名单池 (st/退市/连续跌停)
+
+  ⚠️ 核心纪律: 个人量化不是选股是执行
+     系统必须输出 "留/减/清" + 止损位
+     不能只给信号 — 这是你 8 月反复踩的坑
+""")
+        risk_text.config(state=tk.DISABLED)
+
+        # 快捷按钮行
+        btn_row = ttk.Frame(tab_risk); btn_row.pack(fill=tk.X, padx=8, pady=4)
+        _btn_cfg = [
+            ("🚦大盘风险仪表盘", "_show_market_risk_dashboard"),
+            ("🏦华尔街红绿灯", "_show_wall_street_traffic_light"),
+            ("🇨🇳A股红绿灯", "_show_a_share_traffic_light"),
+            ("📊持股仪表盘", "_show_portfolio_dashboard"),
+            ("⚠️盘中警告", "_show_intraday_alert_dialog"),
+        ]
+        for _t, _m in _btn_cfg:
+            _fn = getattr(self, _m, None)
+            if _fn:
+                ttk.Button(btn_row, text=_t, command=_fn).pack(side=tk.LEFT, padx=3)
+
+        # ── Tab 4: 🔧 已装 Skill 入口 ──
+        tab_skill = ttk.Frame(nb); nb.add(tab_skill, text="🔧 Skill工具箱")
+        skill_text = tk.Text(tab_skill, font=("Menlo", 9), wrap=tk.WORD,
+                             bg="#121212", fg="#E0E0E0", bd=0, padx=10, pady=10)
+        skill_text.pack(fill=tk.BOTH, expand=True)
+        skill_text.insert("1.0", """
+  🔧 已安装量化 Skill (直接点主界面 Skill 按钮调用)
+
+  ┌──────────────────────┬──────────────────────────────────┐
+  │ Skill                │ 功能                               │
+  ├──────────────────────┼──────────────────────────────────┤
+  │ quant-factors        │ 多因子打分框架                     │
+  │ main-wave-scanner    │ 主升浪波段扫描                     │
+  │ trend-phase-scanner  │ 趋势三阶段 (初期/中期/末期)         │
+  │ price-volume-scanner │ 价增量涨选股                       │
+  │ market-sentiment-guard │ 情绪周期 + 风控                  │
+  │ etf-holiday-arbitrage│ 跨境 ETF 节假日套利                 │
+  │ fed-analysis         │ 美联储利率分析 + FOMC 周期          │
+  │ should-hold          │ 持仓决策 (该卖/该拿)                │
+  │ china-stock-quant    │ A股量化回测 + 因子 IC 检验           │
+  └──────────────────────┴──────────────────────────────────┘
+
+  📁 项目已有量化脚本:
+    · src/quant_runner.py          新浪源回测引擎
+    · src/lunchuan_strategy.py     巴芒段+热点选股
+    · src/trend_factor_scan.py     双均线+段基+芒格
+    · src/auto_screener.py         全市场自动选股
+
+  ▶ 下一步: 把这些脚本收口进 "信号层" → 组合层
+
+  ─────────────────────────────────────
+  🎯 点击 "🛠️ Skill浏览器" 或主界面 "Skill" 按钮
+     进入完整 Skill 列表
+  ─────────────────────────────────────
+""")
+        skill_text.config(state=tk.DISABLED)
+        # 底部快捷按钮
+        skill_btn_row = ttk.Frame(tab_skill); skill_btn_row.pack(fill=tk.X, padx=8, pady=4)
+        for _t, _m in [("🎯 Skill浏览器", "_show_qclaw_skills_browser"),
+                       ("📊 量化因子体系", "_show_factor_catalog_dialog"),
+                       ("🔄 回测/回撤分析", "show_backtest_dialog"),
+                       ("🏛️ 机构公私募", "_show_institution_dialog")]:
+            _fn = getattr(self, _m, None)
+            if _fn:
+                ttk.Button(skill_btn_row, text=_t, command=_fn).pack(side=tk.LEFT, padx=3)
+
+        # ── Tab 5: 📖 回测避坑指南 ──
+        tab_pitfall = ttk.Frame(nb); nb.add(tab_pitfall, text="⚠️ 回测避坑")
+        pitfall_text = tk.Text(tab_pitfall, font=("Menlo", 10), wrap=tk.WORD,
+                                bg="#121212", fg="#E0E0E0", bd=0, padx=10, pady=10)
+        pitfall_text.pack(fill=tk.BOTH, expand=True)
+        pitfall_text.insert("1.0", """
+  ⚠️ 回测四大坑 (个人量化 90% 死在这里)
+
+  1️⃣ 未来函数
+     · 用了当天收盘后才知道的数据做当天决策
+     · 例如: 用 PE_TTM (年报数据) 选年报发布前的股票
+     · 检查: 所有因子都要用 shift(1) 或者只用当日及之前数据
+     · 反例: 用"明天才公告的业绩"做今天的选股
+
+  2️⃣ 幸存者偏差
+     · 回测只看现在还活着的股票, 退市/ST 股被忽略
+     · 结果: 收益率虚高, 实盘买的都是垃圾股
+     · 解决: 用 Tushare stock_basic + list_date + delist_date
+             构建历史股票池
+
+  3️⃣ 过拟合
+     · 参数调太多, 回测完美实盘拉胯
+     · 症状: 样本内 Sharpe>3, 样本外<0.5
+     · 解决: 参数不超过 3 个, walk-forward 验证,
+             跨年份/跨市场检验, 避免在噪声大的因子上挖太深
+
+  4️⃣ 成本低估
+     · 只算佣金, 不算印花税 (千分之一) + 滑点 + 冲击成本
+     · A股实际单边成本 ≈ 0.3% (佣金0.025% + 印花税0.1% + 滑点0.15%)
+     · 高频策略 (日频调仓) 成本吃掉 30-50% 收益
+     · 回测务必计入: 每次换仓金额 × 0.003
+
+  🎯 你踩过的坑 (要写进系统):
+    · 东财限流 → 改腾讯/K线加 sleep
+    · 腾讯K线限流 → 分批请求 + 缓存
+    · call_ai 判错 → 加降级逻辑
+    · 中文乱码 → 指定 Matplotlib 字体 PingFang SC
+    · 满仓+票多+不止损 → 系统强制仓位/止损
+
+  📋 验收标准 (M1 数据层):
+    □ 数据源统一接口 (Tushare/新浪/AKShare 可切换)
+    □ 行情缓存 + TTL 过期
+    □ 限流保护 + 自动重试
+    □ 因子计算无未来函数 (shift(1) 检查)
+    □ 选股记录落 SQLite (可回溯)
+    □ 买卖清单 wechat 推送
+""")
+        pitfall_text.config(state=tk.DISABLED)
+
+        # 底部按钮行
+        bottom = ttk.Frame(win); bottom.pack(fill=tk.X, padx=8, pady=6)
+        ttk.Button(bottom, text="📋 量化架构文档",
+                   command=lambda: self._open_quant_spec_file()).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bottom, text="🔍 浏览 Skill 库",
+                   command=lambda: getattr(self, '_show_qclaw_skills_browser',
+                                           lambda: None)()).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bottom, text="❌ 关闭", command=win.destroy).pack(side=tk.RIGHT)
+
+    def _open_quant_spec_file(self):
+        """打开量化架构 spec markdown 文件。"""
+        import os, subprocess
+        _cands = [
+            os.path.expanduser("~/.qclaw/workspace-agent-8e17987b/quant_system_arch_spec_20261027.md"),
+            os.path.expanduser("~/quant_system_arch_spec_20261027.md"),
+        ]
+        for _p in _cands:
+            if os.path.exists(_p):
+                try: subprocess.Popen(["open", _p]); return
+                except Exception: pass
+        try:
+            import tkinter.messagebox as _mb
+            _mb.showinfo("提示", "量化架构 spec 文件未找到\n可在 ~/.qclaw/ 目录下搜索 *.md")
+        except Exception: pass
 
 __all__ = ["DapanMixin"]

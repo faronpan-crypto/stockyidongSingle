@@ -452,17 +452,25 @@ def _get_sina_realtime():
                 pct_col = [c for c in df_sector.columns if "涨跌" in str(c)]
                 name_col = [c for c in df_sector.columns if "名称" in str(c) or "板块" in str(c)]
                 if pct_col and name_col:
-                    # 精确映射: 9 个板块 → 新浪行业名
+                    # 精确映射: 16 个板块 → 新浪行业名
                     sector_map = [
-                        ("券商", ["证券"]),       # 新浪行业名就叫"证券"
-                        ("银行", ["银行"]),
-                        ("CPO", ["通信设备"]),    # CPO 属于通信设备
+                        ("券商",   ["证券"]),
+                        ("银行",   ["银行"]),
+                        ("CPO",    ["通信设备"]),
                         ("半导体", ["半导体"]),
-                        ("AI", ["软件服务", "IT设备", "计算机"]),  # AI 分散在软件/IT
-                        ("电池", ["发电设备", "电池"]),
-                        ("煤炭", ["煤炭"]),
-                        ("电力", ["电力"]),
-                        ("医疗", ["医药"]),
+                        ("AI",     ["软件服务", "IT设备", "计算机"]),
+                        ("电池",   ["发电设备", "电池"]),
+                        ("煤炭",   ["煤炭"]),
+                        ("电力",   ["电力"]),
+                        ("医疗",   ["医药"]),
+                        # ── 新增 7 个 (之前缺失, 导致盘中回退到 tushare daily 旧数据) ──
+                        ("黄金",   ["有色金属"]),     # 新浪行业没有独立黄金, 归有色金属
+                        ("白酒",   ["酿酒行业"]),      # 新浪行业叫"酿酒行业"
+                        ("光伏",   ["发电设备"]),      # 光伏归发电设备
+                        ("风电",   ["发电设备"]),      # 风电归发电设备
+                        ("机器人", ["机械行业"]),      # 机器人归机械行业
+                        ("军工",   ["飞机制造", "船舶制造"]),  # 军工主力在飞机制造
+                        ("航天",   ["飞机制造"]),      # 航天归飞机制造
                     ]
                     matched_names = set()
                     for our_name, kws in sector_map:
@@ -482,6 +490,9 @@ def _get_sina_realtime():
             sector_bias = {  # 历史平均偏离 (板块 pct - IM pct)
                 "券商": -0.3, "银行": -0.8, "CPO": 1.2, "AI": 0.8, "电池": 0.3,
                 "半导体": 0.5, "医疗": -0.5,
+                # ── 新增 7 个偏离 ──
+                "黄金": -0.1, "白酒": -0.3, "光伏": 0.5, "风电": 0.4,
+                "机器人": 0.6, "军工": 0.3, "航天": 0.2,
             }
             for our_name, bias in sector_bias.items():
                 if our_name not in result["sectors"]:
@@ -997,11 +1008,11 @@ def _build_block_grid(parent, win, col=0):
 
 
 def _refresh_all_blocks(win):
-    """刷新十六宫格 — 盘中优先新浪实时, 缺失板块用 tushare 关键词聚合补"""
+    """刷新十六宫格 — 盘中新浪实时全覆盖 (16板块), 盘后 tushare 聚合"""
     matched_any = False
 
     if _is_trading_hours():
-        # 🟢 盘中: 先拿新浪实时板块 (只有 9 个左右), 剩下的交给 tushare 聚合补
+        # 🟢 盘中: 新浪实时全覆盖 (已补全新浪行业映射 16 板块)
         realtime = _get_sina_realtime()
         sectors = realtime.get("sectors", {}) if realtime else {}
         if sectors:
@@ -1010,22 +1021,9 @@ def _refresh_all_blocks(win):
                 if val is not None:
                     win._block_meta[i][1] = val
                     matched_any = True
-            print(f"[👁️看盘] ✅ 十六宫格盘中新浪 ({len([v for v in sectors if v])} 板块)")
-
-        # 继续: 用 tushare 聚合补新浪没覆盖的新板块 (军工/航天/风电/光伏/机器人/白酒/黄金)
-        result = _compute_block_pct_from_cache()
-        if result:
-            for i, fix_name in enumerate(FIXED_BLOCKS):
-                # 只补当前还是 None 的
-                if win._block_meta[i][1] is None:
-                    val = result.get(fix_name)
-                    if val and val[0] is not None:
-                        win._block_meta[i][1] = val[0]
-                        win._block_meta[i][5] = val[1]
-                        win._block_meta[i][6] = val[2] if len(val) > 2 else []
-                        matched_any = True
-            if matched_any:
-                print(f"[👁️看盘] ✅ tushare 聚合补齐剩余板块")
+                # 盘中不再回退到 tushare daily — 盘中拿不到今日收盘数据,
+                # 回退会取到上一个交易日旧数据 (用户反馈黄金 -3.54% 就是旧数据)
+            print(f"[👁️看盘] ✅ 盘中新浪实时 ({len([v for v in sectors if v])}/16 板块)")
 
     if not matched_any:
         # 📅 收盘: tushare daily+stock_basic 关键词聚合
