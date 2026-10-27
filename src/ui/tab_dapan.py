@@ -61810,183 +61810,6 @@ class DapanMixin:
 
         _th.Thread(target=_bg_run, daemon=True).start()
 
-    # ═══════════════════════════════════════════════════════════
-    # 🛠️ QClaw Skill 浏览器 — 筹码风格卡片 + 4 类主题色 + 选股结果
-    #   主界面 "🛠️ Skill浏览器" 按钮 + 量化弹窗 Tab4 都走这里
-    # ═══════════════════════════════════════════════════════════
-    _SKILL_BROWSER_THEME = {
-        "screener": {"bg": "#FFFDE7", "fg": "#F57F17", "accent": "#FFA000"},
-        "analyze":  {"bg": "#E3F2FD", "fg": "#0D47A1", "accent": "#1976D2"},
-        "etf":      {"bg": "#F3E5F5", "fg": "#6A1B9A", "accent": "#8E24AA"},
-        "macro":    {"bg": "#FFEBEE", "fg": "#B71C1C", "accent": "#D32F2F"},
-    }
-    _SKILL_BROWSER_LIST = [
-        {"key": "trend-phase-scanner",  "cat": "screener", "icon": "📈", "name": "趋势三阶段",
-         "desc": "初期起爆/中期主升浪/末期衰竭"},
-        {"key": "price-volume-scanner", "cat": "screener", "icon": "💰", "name": "价增量涨扫描",
-         "desc": "量价齐升 + 板块活跃度"},
-        {"key": "lifecycle-chip",       "cat": "screener", "icon": "🧬", "name": "筹码转折点",
-         "desc": "生命周期起爆点 (机构/主力/游资)"},
-        {"key": "auto-screener",        "cat": "screener", "icon": "🎯", "name": "自动选股",
-         "desc": "全市场自动多因子筛选"},
-        {"key": "stock-analysis",       "cat": "analyze",  "icon": "📊", "name": "股票分析",
-         "desc": "基本面 + 技术面 + 估值"},
-        {"key": "technical-analysis",   "cat": "analyze",  "icon": "📉", "name": "K线技术分析",
-         "desc": "MA/MACD/RSI/CCI 指标判读"},
-        {"key": "should-hold",          "cat": "analyze",  "icon": "🤔", "name": "该拿还是该卖",
-         "desc": "持仓决策树 (止损/止盈)"},
-        {"key": "etf-holiday-arbitrage","cat": "etf",      "icon": "💱", "name": "跨境ETF套利",
-         "desc": "纳指/日经/恒生 节假日溢价"},
-        {"key": "fed-analysis",         "cat": "macro",    "icon": "🏛️", "name": "美联储传导",
-         "desc": "EFFR + DXY + 利差 → A股"},
-        {"key": "market-sentiment",     "cat": "macro",    "icon": "😤", "name": "情绪周期",
-         "desc": "涨跌家数 + 广度 + 仓位档位"},
-        {"key": "intraday-alert",       "cat": "macro",    "icon": "⚠️", "name": "盘中警告",
-         "desc": "实时盘面 5 维度量化诊断"},
-    ]
-
-    def _show_qclaw_skills_browser(self):
-        """🛠️ QClaw Skill 浏览器 — 筹码风格卡片网格 + 右侧选股结果
-        双击选股结果行 → 打开 K线+一目均衡弹窗"""
-        import tkinter as tk
-        from tkinter import ttk
-
-        # 如果已经有一个打开了, 就提上来
-        for _w in self.root.winfo_children():
-            if isinstance(_w, tk.Toplevel) and ("Skill 浏览器" in _w.title() or "QClaw Skill" in _w.title()):
-                try:
-                    _w.deiconify(); _w.lift(); _w.focus_force()
-                    return
-                except Exception: pass
-
-        win = tk.Toplevel(self.root)
-        win.title("🛠️ QClaw Skill 浏览器 — 股票量化精选")
-        try: win.state("zoomed")
-        except Exception: win.geometry("1200x800")
-
-        # 顶部标题栏
-        top = ttk.Frame(win); top.pack(fill=tk.X, padx=10, pady=(10, 4))
-        ttk.Label(top, text="🛠️ QClaw Skill 浏览器", font=("", 16, "bold")).pack(side=tk.LEFT)
-        ttk.Label(top,
-                  text="   精选股票量化 Skill  ·  非股票相关已过滤  ·  不同类型不同颜色",
-                  foreground="#666").pack(side=tk.LEFT, padx=6)
-        # 颜色图例
-        legend = ttk.Frame(top); legend.pack(side=tk.RIGHT)
-        for _cat, _lbl in [("screener", "🎯选股(亮色)"), ("analyze", "📊分析"),
-                           ("etf", "💹ETF/套利"), ("macro", "🌐宏观/风控")]:
-            _theme = self._SKILL_BROWSER_THEME[_cat]
-            _sw = tk.Frame(legend, bg=_theme["bg"], width=14, height=14,
-                           highlightbackground=_theme["accent"], highlightthickness=1)
-            _sw.pack(side=tk.LEFT, padx=(6, 2)); tk.Label(legend, text=_lbl,
-                bg=win.cget("bg"), fg=_theme["fg"]).pack(side=tk.LEFT)
-
-        # Panedwindow 左: Skill 卡片 | 右: 选股结果
-        pw = ttk.Panedwindow(win, orient=tk.HORIZONTAL)
-        pw.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
-
-        # ============ 左侧: Skill 卡片网格 (Canvas 筹码风格) ============
-        left = ttk.Frame(pw); pw.add(left, weight=3)
-        canvas = tk.Canvas(left, bg="#FAFAFA", highlightthickness=0)
-        sb = ttk.Scrollbar(left, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=sb.set)
-        canvas.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
-        sb.pack(side="right", fill="y", pady=4)
-        grid = tk.Frame(canvas, bg="#FAFAFA")
-        cv_win = canvas.create_window((0, 0), window=grid, anchor="nw")
-        canvas.bind("<Configure>",
-                    lambda e: (canvas.itemconfig(cv_win, width=e.width),
-                               canvas.configure(scrollregion=canvas.bbox("all"))))
-        canvas.bind_all("<MouseWheel>",
-                        lambda e: canvas.yview_scroll(int(-e.delta/120), "units"))
-
-        # 状态栏 + Treeview (放到闭包里让卡片回调能访问)
-        status_var = tk.StringVar(value="⚡ 点击左侧 Skill 卡片执行 →")
-        right_tree_ref = {"tree": None}
-
-        # 渲染卡片网格 (2 列)
-        COLS = 2
-        for i, sk in enumerate(self._SKILL_BROWSER_LIST):
-            r, c = divmod(i, COLS)
-            theme = self._SKILL_BROWSER_THEME[sk["cat"]]
-            card = tk.Frame(grid, bg=theme["bg"], bd=0,
-                            highlightbackground=theme["accent"], highlightthickness=2,
-                            cursor="hand2")
-            card.grid(row=r, column=c, padx=8, pady=8, sticky="nsew", ipadx=6, ipady=4)
-            tk.Label(card, text=f"{sk['icon']} {sk['name']}", bg=theme["bg"], fg=theme["fg"],
-                     font=("", 13, "bold"), anchor="w").pack(fill="x", padx=6, pady=(4, 0))
-            tk.Label(card, text=sk["desc"], bg=theme["bg"], fg=theme["accent"],
-                     font=("", 10), anchor="w").pack(fill="x", padx=6, pady=(0, 2))
-            _badge = {"screener": "🎯选股", "analyze": "📊分析",
-                      "etf": "💹ETF", "macro": "🌐宏观"}.get(sk["cat"], "Skill")
-            tk.Label(card, text=f"▶ 执行  [{_badge}]", bg=theme["bg"], fg=theme["fg"],
-                     font=("", 9)).pack(anchor="e", padx=6, pady=(2, 4))
-
-            # 卡片点击 → 执行
-            def _bind(w, sk=dict(sk)):
-                def _on(_e=None):
-                    if right_tree_ref["tree"] is not None:
-                        self._run_skill_from_dialog(sk, right_tree_ref["tree"], status_var)
-                    else:
-                        # Treeview 还没创建 → 延迟到 100ms 后再试
-                        self.root.after(100, lambda: self._run_skill_from_dialog(
-                            sk, right_tree_ref["tree"], status_var))
-                    return "break"
-                w.bind("<Button-1>", _on)
-                for ch in w.winfo_children():
-                    ch.bind("<Button-1>", _on)
-                    for sub in ch.winfo_children():
-                        sub.bind("<Button-1>", _on)
-            _bind(card)
-
-        # ============ 右侧: 选股结果 Treeview + 双击一目均衡 ============
-        right = ttk.Frame(pw); pw.add(right, weight=2)
-        rhead = ttk.Frame(right); rhead.pack(fill=tk.X, padx=8, pady=(8, 2))
-        ttk.Label(rhead, text="🏆 选股结果", font=("", 12, "bold")).pack(side=tk.LEFT)
-        ttk.Label(rhead, textvariable=status_var, foreground="#777").pack(side=tk.RIGHT)
-
-        tf = ttk.Frame(right); tf.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
-        cols = ("code", "name", "pct", "score", "reason")
-        tree = ttk.Treeview(tf, columns=cols, show="headings", height=18)
-        for c, w, t in [("code", 80, "代码"), ("name", 90, "名称"),
-                        ("pct", 75, "涨跌%"), ("score", 70, "得分"),
-                        ("reason", 220, "入选原因")]:
-            tree.heading(c, text=t)
-            tree.column(c, width=w, anchor="center" if c != "reason" else "w")
-        sb2 = ttk.Scrollbar(tf, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb2.set)
-        tree.pack(side="left", fill="both", expand=True); sb2.pack(side="right", fill="y")
-        tree.tag_configure("up", foreground="#EF5350")
-        tree.tag_configure("down", foreground="#66BB6A")
-        tree.tag_configure("hi", foreground="#FFA000", font=("", 10, "bold"))
-        right_tree_ref["tree"] = tree  # 暴露给卡片回调
-
-        def _on_dbl(_e):
-            sel = tree.selection()
-            if not sel: return
-            item = tree.item(sel[0])
-            code6 = str(item["values"][0]); name = str(item["values"][1])
-            if code6 and code6 != "None":
-                try:
-                    self._show_stock_analysis_dialog(code6, name)
-                except Exception as _ed:
-                    import traceback; traceback.print_exc()
-        tree.bind("<Double-1>", _on_dbl)
-        ttk.Label(right, text="💡 双击任意行 → 打开该股票 K线+一目均衡弹窗",
-                  foreground="#888", font=("", 9)).pack(anchor="w", padx=8, pady=(0, 8))
-
-        # 底部按钮行
-        btm = ttk.Frame(win); btm.pack(fill=tk.X, padx=10, pady=(0, 10))
-        for t, m in [("📊因子体系", "_show_factor_catalog_dialog"),
-                     ("🏛️机构公私募", "_show_institution_dialog"),
-                     ("⚠️盘中警告", "_show_intraday_alert_dialog"),
-                     ("📖回测避坑", None)]:
-            if m:
-                fn = getattr(self, m, None)
-                if fn: ttk.Button(btm, text=t, command=fn).pack(side=tk.LEFT, padx=3)
-            else:
-                ttk.Label(btm, text="  💡 选股类卡片亮色 (黄) → 优先看",
-                          foreground="#888").pack(side=tk.RIGHT)
-
     def _show_quant_dialog(self):
         """🤖 量化总览面板 — 7层闭环 + 已有 skill 入口。"""
         try:
@@ -62153,31 +61976,145 @@ class DapanMixin:
             if _fn:
                 ttk.Button(btn_row, text=_t, command=_fn).pack(side=tk.LEFT, padx=3)
 
-        # ── Tab 4: 🔧 Skill工具箱 (引导页 → 独立弹窗) ──
+        # ── Tab 4: 🔧 Skill工具箱 (筹码风格 Canvas + 卡片网格) ──
         tab_skill = ttk.Frame(nb); nb.add(tab_skill, text="🔧 Skill工具箱")
-        tk.Label(tab_skill,
-                 text="🛠️ Skill 浏览器已升级为独立弹窗\n\n"
-                      "筹码风格卡片网格 + 4 类主题色 + 选股结果 Treeview + 双击一目均衡",
-                 font=("", 14), fg="#555", bg="#FAFAFA", justify=tk.CENTER
-                 ).pack(fill=tk.X, padx=40, pady=(40, 20))
-        _open_btn = tk.Button(tab_skill, text="🚀 打开 QClaw Skill 浏览器 (独立窗口)",
-                              font=("", 14, "bold"), fg="#FFF", bg="#F57F17",
-                              activebackground="#FFA000", cursor="hand2",
-                              padx=20, pady=10, bd=0,
-                              command=self._show_qclaw_skills_browser)
-        _open_btn.pack(pady=20)
-        ttk.Label(tab_skill,
-                  text="💡 主界面工具栏也有『🛠️ Skill浏览器』按钮, 两个入口同一个界面\n"
-                       "🎯 选股类卡片 = 亮色 (黄) → 优先执行\n"
-                       "🖱️ 双击右侧选股结果行 → 打开 K线+一目均衡弹窗",
-                  foreground="#888", font=("", 10)).pack(pady=10)
-        # 快捷按钮
-        skill_btn_row = ttk.Frame(tab_skill); skill_btn_row.pack(pady=20)
+        # 左: Skill 卡片网格 | 右: 选股结果面板
+        skill_split = ttk.Panedwindow(tab_skill, orient=tk.HORIZONTAL)
+        skill_split.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        # ═══════════════════════════════════════════════════════════
+        # 左侧: Skill 卡片网格 (筹码 Canvas + 4 类主题色)
+        # ═══════════════════════════════════════════════════════════
+        skill_left = ttk.Frame(skill_split)
+        skill_split.add(skill_left, weight=3)
+
+        _SKILL_THEME = {
+            "screener": {"bg": "#FFFDE7", "fg": "#F57F17", "accent": "#FFA000", "label": "🎯 选股 (亮色)"},
+            "analyze":  {"bg": "#E3F2FD", "fg": "#0D47A1", "accent": "#1976D2", "label": "📊 分析"},
+            "etf":      {"bg": "#F3E5F5", "fg": "#6A1B9A", "accent": "#8E24AA", "label": "💹 ETF/套利"},
+            "macro":    {"bg": "#FFEBEE", "fg": "#B71C1C", "accent": "#D32F2F", "label": "🌐 宏观/风控"},
+        }
+        # Skill 清单 (已过滤非股票相关)
+        _SKILLS = [
+            # 选股类 (亮色, 能输出股票清单)
+            {"key": "trend-phase-scanner",  "cat": "screener", "icon": "📈", "name": "趋势三阶段",
+             "desc": "初期起爆/中期主升浪/末期衰竭"},
+            {"key": "price-volume-scanner", "cat": "screener", "icon": "💰", "name": "价增量涨扫描",
+             "desc": "量价齐升 + 板块活跃度 + αβ"},
+            # 分析诊断类
+            {"key": "stock-analysis",       "cat": "analyze",  "icon": "📊", "name": "股票分析",
+             "desc": "基本面 + 技术面 + 估值"},
+            {"key": "stock-market-pro",     "cat": "analyze",  "icon": "📰", "name": "实时行情Pro",
+             "desc": "实时报价 + PE/EPS + 涨停日历"},
+            {"key": "technical-analysis",   "cat": "analyze",  "icon": "📉", "name": "K线技术分析",
+             "desc": "MA/MACD/RSI 指标"},
+            {"key": "should-hold",          "cat": "analyze",  "icon": "🤔", "name": "该拿还是该卖",
+             "desc": "持仓决策树"},
+            # ETF/套利类
+            {"key": "etf-holiday-arbitrage","cat": "etf",      "icon": "💱", "name": "跨境ETF套利",
+             "desc": "纳指/日经/恒生/标普 7只"},
+            # 宏观/风控类
+            {"key": "fed-analysis",         "cat": "macro",    "icon": "🏛️", "name": "美联储传导",
+             "desc": "EFFR + DXY + 10Y-2Y 利差 → A股"},
+            {"key": "a-stock-daily-report", "cat": "macro",   "icon": "📰", "name": "A股每日简报",
+             "desc": "大盘 + 热门板块 + 资金动向"},
+        ]
+
+        skill_canvas = tk.Canvas(skill_left, bg="#FAFAFA", highlightthickness=0)
+        skill_sb = ttk.Scrollbar(skill_left, orient="vertical", command=skill_canvas.yview)
+        skill_canvas.configure(yscrollcommand=skill_sb.set)
+        skill_canvas.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
+        skill_sb.pack(side="right", fill="y", pady=4)
+        skill_grid = tk.Frame(skill_canvas, bg="#FAFAFA")
+        _sk_cv_win = skill_canvas.create_window((0, 0), window=skill_grid, anchor="nw")
+        skill_canvas.bind("<Configure>", lambda e: (skill_canvas.itemconfig(_sk_cv_win, width=e.width),
+                                                    skill_canvas.configure(scrollregion=skill_canvas.bbox("all"))))
+        skill_canvas.bind_all("<MouseWheel>", lambda e: skill_canvas.yview_scroll(int(-e.delta/120), "units"))
+
+        # 渲染 Skill 卡片网格 (2 列)
+        _SKILL_CARD_W = 260; _SKILL_CARD_H = 100; _SKILL_COLS = 2
+        for _i, _sk in enumerate(_SKILLS):
+            _r, _c = divmod(_i, _SKILL_COLS)
+            _theme = _SKILL_THEME[_sk["cat"]]
+            _card = tk.Frame(skill_grid, bg=_theme["bg"], bd=0,
+                             highlightbackground=_theme["accent"], highlightthickness=2,
+                             cursor="hand2")
+            _card.grid(row=_r, column=_c, padx=8, pady=8, sticky="nsew",
+                       ipadx=6, ipady=4)
+            tk.Label(_card, text=f"{_sk['icon']} {_sk['name']}",
+                     bg=_theme["bg"], fg=_theme["fg"],
+                     font=("", 13, "bold"), anchor="w").pack(fill="x", padx=6, pady=(4, 0))
+            tk.Label(_card, text=_sk["desc"], bg=_theme["bg"], fg=_theme["accent"],
+                     font=("", 10), anchor="w").pack(fill="x", padx=6, pady=(0, 2))
+            _badge = "🎯选股" if _sk["cat"] == "screener" else (
+                "📊分析" if _sk["cat"] == "analyze" else (
+                "💹ETF" if _sk["cat"] == "etf" else "🌐宏观"))
+            tk.Label(_card, text=f"▶ 执行  [{_badge}]", bg=_theme["bg"], fg=_theme["fg"],
+                     font=("", 9)).pack(anchor="e", padx=6, pady=(2, 4))
+
+            # 卡片点击 → 执行 Skill (return "break" 防事件冒泡重复触发)
+            def _bind_card(_w, _sk=dict(_sk)):
+                def _on_click(_e=None):
+                    self._run_skill_from_dialog(_sk, skill_result_tree, skill_status_var)
+                    return "break"
+                _w.bind("<Button-1>", _on_click)
+                for _child in _w.winfo_children():
+                    _child.bind("<Button-1>", _on_click)
+                    for _sub in _child.winfo_children():
+                        _sub.bind("<Button-1>", _on_click)
+
+        # 快捷按钮行
+        skill_btn_row = ttk.Frame(skill_left)
+        skill_btn_row.pack(fill=tk.X, padx=8, pady=(4, 8))
         for _t, _m in [("📊因子体系", "_show_factor_catalog_dialog"),
-                       ("🏛️机构公私募", "_show_institution_dialog"),
-                       ("⚠️盘中警告", "_show_intraday_alert_dialog")]:
+                       ("🏛️机构公私募", "_show_institution_dialog")]:
             _fn = getattr(self, _m, None)
-            if _fn: ttk.Button(skill_btn_row, text=_t, command=_fn).pack(side=tk.LEFT, padx=5)
+            if _fn: ttk.Button(skill_btn_row, text=_t, command=_fn).pack(side=tk.LEFT, padx=3)
+
+        # ═══════════════════════════════════════════════════════════
+        # 右侧: 选股结果面板 (Treeview + 双击 → 一目均衡)
+        # ═══════════════════════════════════════════════════════════
+        skill_right = ttk.Frame(skill_split)
+        skill_split.add(skill_right, weight=2)
+        # 顶栏
+        right_head = ttk.Frame(skill_right)
+        right_head.pack(fill=tk.X, padx=8, pady=(8, 2))
+        ttk.Label(right_head, text="🏆 选股结果", font=("", 12, "bold")).pack(side=tk.LEFT)
+        skill_status_var = tk.StringVar(value="⚡ 点击左侧 Skill 卡片执行 →")
+        ttk.Label(right_head, textvariable=skill_status_var, foreground="#777").pack(side=tk.RIGHT)
+
+        # Treeview 选股结果
+        tree_frame = ttk.Frame(skill_right)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+        _cols = ("code", "name", "pct", "score", "reason")
+        skill_result_tree = ttk.Treeview(tree_frame, columns=_cols, show="headings", height=15)
+        for _c, _w, _t in [("code", 80, "代码"), ("name", 90, "名称"),
+                            ("pct", 70, "涨跌幅%"), ("score", 70, "得分"),
+                            ("reason", 200, "入选原因")]:
+            skill_result_tree.heading(_c, text=_t)
+            skill_result_tree.column(_c, width=_w, anchor="center" if _c != "reason" else "w")
+        _sb2 = ttk.Scrollbar(tree_frame, orient="vertical", command=skill_result_tree.yview)
+        skill_result_tree.configure(yscrollcommand=_sb2.set)
+        skill_result_tree.pack(side="left", fill="both", expand=True)
+        _sb2.pack(side="right", fill="y")
+        skill_result_tree.tag_configure("up", foreground="#EF5350")
+        skill_result_tree.tag_configure("down", foreground="#66BB6A")
+        skill_result_tree.tag_configure("hi", foreground="#FFA000", font=("", 10, "bold"))
+
+        # 双击 → 打开股票分析弹窗 (内含一目均衡 tab)
+        def _on_result_dbl(_e):
+            sel = skill_result_tree.selection()
+            if not sel: return
+            item = skill_result_tree.item(sel[0])
+            code6 = str(item["values"][0]); name = str(item["values"][1])
+            if code6 and code6 != "None":
+                try:
+                    self._show_stock_analysis_dialog(code6, name)
+                except Exception as _ed:
+                    import traceback; traceback.print_exc()
+        skill_result_tree.bind("<Double-1>", _on_result_dbl)
+        ttk.Label(skill_right, text="💡 双击任意行 → 打开该股票 K线+一目均衡弹窗",
+                  foreground="#888", font=("", 9)).pack(anchor="w", padx=8, pady=(0, 6))
 
         # ── Tab 5: 📖 回测避坑指南 ──
         tab_pitfall = ttk.Frame(nb); nb.add(tab_pitfall, text="⚠️ 回测避坑")
