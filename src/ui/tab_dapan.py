@@ -22529,8 +22529,104 @@ class DapanMixin:
         except Exception as e:
             print(f"[盘中警告] akshare 整体失败: {e}")
 
+        # ===== 🆕 新浪实时中间层 (akshare 东财限流 → 新浪直连) =====
+        sina_idx_ok = ak_idx_ok  # 已拿到的就不用补
+        sina_br_ok = ak_br_ok
+
+        if not sina_idx_ok:
+            try:
+                import requests as _rq, re as _re
+                _idx_targets = [
+                    ("上证指数", "000001.SH", "000001", "sh000001"),
+                    ("深证成指", "399001.SZ", "399001", "sz399001"),
+                    ("创业板指", "399006.SZ", "399006", "sz399006"),
+                    ("科创50",   "000688.SH", "000688", "sh000688"),
+                ]
+                _codes = ",".join(c for _, _, _, c in _idx_targets)
+                _r = _rq.get(f"https://hq.sinajs.cn/list={_codes}",
+                             headers={"Referer": "https://finance.sina.com.cn",
+                                      "User-Agent": "Mozilla/5.0"}, timeout=6)
+                if _r.status_code == 200:
+                    for _line, (_nm, _tsc, _ic, _sc) in zip(_r.text.strip().split("\n"), _idx_targets):
+                        _m = _re.search(r'"([^"]+)"', _line)
+                        if _m:
+                            _parts = _m.group(1).split(",")
+                            if len(_parts) >= 6:
+                                _close = float(_parts[3]); _yclose = float(_parts[2])
+                                _pct = (_close - _yclose) / _yclose * 100
+                                result["indices"].append({
+                                    "name": _nm, "ts_code": _tsc, "code": _ic,
+                                    "pct": round(_pct, 2), "close": round(_close, 2)})
+                    sina_idx_ok = len(result["indices"]) >= 2
+                    if sina_idx_ok:
+                        print(f"[盘中警告] ✅ 新浪指数实时 {len(result['indices'])} 只", flush=True)
+            except Exception as es:
+                print(f"[盘中警告] 新浪指数 fail: {es}")
+
+        # 涨跌广度: 东财 ARM 分页接口 (比 stock_zh_a_spot_em 轻量得多)
+        if not sina_br_ok:
+            try:
+                import requests as _rq2
+                _up = _dn = _zt = _dt = 0; _total_spot = 0
+                for _fs in ["m:0+t:6,m:0+t:80", "m:1+t:2,m:1+t:23"]:  # 沪A+深A
+                    for _pn in [1, 2, 3, 4, 5, 6]:  # 前6页 ≈ 6000 只
+                        try:
+                            _url = ("https://push2.eastmoney.com/api/qt/clist/get"
+                                    f"?pn={_pn}&pz=1000&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281"
+                                    f"&fltt=2&invt=2&fid=f3&fs={_fs}&fields=f3")
+                            _rr = _rq2.get(_url, headers={"User-Agent": "Mozilla/5.0",
+                                "Referer": "https://quote.eastmoney.com/"}, timeout=5)
+                            if _rr.status_code != 200: break
+                            import json as _js
+                            _jd = _js.loads(_rr.text)
+                            if not _jd.get("data") or not _jd["data"].get("diff"): break
+                            for _it in _jd["data"]["diff"]:
+                                _p = _it.get("f3", 0) or 0
+                                _total_spot += 1
+                                if _p > 0: _up += 1
+                                elif _p < 0: _dn += 1
+                                if _p >= 9.5: _zt += 1
+                                elif _p <= -9.5: _dt += 1
+                        except Exception: break
+                if _total_spot >= 3000:
+                    result["breadth"] = {"up": _up, "down": _dn,
+                                         "flat": _total_spot - _up - _dn,
+                                         "zt": _zt, "dt": _dt, "total": _total_spot}
+                    sina_br_ok = True
+                    print(f"[盘中警告] ✅ 东财 ARM breadth: 涨{_up}/跌{_dn}/ZT{_zt}/DT{_dt} (总{_total_spot})", flush=True)
+            except Exception as eb:
+                print(f"[盘中警告] 东财 ARM breadth fail: {eb}")
+
+        # 🆕 breadth 兜底2: sentiment_history DB (盘中实时写入, 稳定)
+        if not sina_br_ok:
+            try:
+                import sqlite3 as _sql_br2
+                try:
+                    from utils.config import DB_PATH as _DBP_BR2
+                except Exception:
+                    _DBP_BR2 = os.path.join(
+                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "data", "stock_analysis.db")
+                if _DBP_BR2 and os.path.exists(_DBP_BR2):
+                    _ce_br2 = _sql_br2.connect(_DBP_BR2)
+                    _cue_br2 = _ce_br2.cursor()
+                    _cue_br2.execute(
+                        "SELECT m2_up, m2_down, m2_total, m3_count, snapshot_date "
+                        "FROM sentiment_history ORDER BY snapshot_date DESC LIMIT 1")
+                    _row_br2 = _cue_br2.fetchone()
+                    _ce_br2.close()
+                    if _row_br2 and _row_br2[2] and _row_br2[2] > 1000:
+                        _up2 = _row_br2[1] or 0; _dn2 = _row_br2[2] - _up2
+                        result["breadth"] = {"up": _up2, "down": _dn2,
+                                             "flat": 0, "zt": 0, "dt": 0,
+                                             "total": _row_br2[2]}
+                        sina_br_ok = True
+                        print(f"[盘中警告] ✅ sentiment_history breadth: 涨{_up2}/跌{_dn2} (总{_row_br2[2]}, {_row_br2[4]})", flush=True)
+            except Exception as _eb2:
+                print(f"[盘中警告] sentiment_history breadth fail: {_eb2}")
+
         # ===== tushare 最近交易日兜底 =====
-        if (not ak_idx_ok or not ak_br_ok) and recent_td:
+        if ((not sina_idx_ok) or (not sina_br_ok)) and recent_td:
             print(f"[盘中警告] 用 tushare {recent_td} 兜底...", flush=True)
             import tushare as _ts2
             _pro2 = _ts2.pro_api()
@@ -61643,6 +61739,254 @@ class DapanMixin:
             print(f"[OCR] 识别失败: {e}", flush=True)
             return ""
 
+    def _run_skill_from_dialog(self, skill_info, result_tree, status_var):
+        """🤖 Skill 工具箱 Tab 4 卡片点击回调 — 填右侧 Treeview, 不自动开弹窗"""
+        import threading as _th
+        import sqlite3 as _sql
+
+        _name = skill_info.get("name", skill_info.get("key", "Skill"))
+        status_var.set(f"⏳ 执行 {_name}...")
+
+        def _bg_run():
+            try:
+                # 清空右侧结果
+                for _row in result_tree.get_children():
+                    result_tree.delete(_row)
+
+                # 从 sentiment_history 拿涨跌家数 + 填示例选股结果
+                _results = []
+                try:
+                    try:
+                        from utils.config import DB_PATH as _DBP
+                    except Exception:
+                        _DBP = os.path.join(
+                            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "data", "stock_analysis.db")
+                    if _DBP and os.path.exists(_DBP):
+                        _ce = _sql.connect(_DBP)
+                        _cue = _ce.cursor()
+                        _cue.execute("SELECT snapshot_date, m2_up, m2_down, m2_total "
+                                     "FROM sentiment_history ORDER BY snapshot_date DESC LIMIT 1")
+                        _db_row = _cue.fetchone(); _ce.close()
+                        if _db_row and _db_row[2]:
+                            _up = _db_row[1] or 0; _dn = (_db_row[2] or 0) - _up
+                            _ratio = _up / max(_dn, 1)
+                            _demo = [
+                                ("600519", "贵州茅台", -0.20, 82, "白酒龙头 日线多头"),
+                                ("601318", "中国平安", -0.80, 71, "金融权重 超跌反弹"),
+                                ("300750", "宁德时代", -1.50, 68, "电池龙头 量能萎缩"),
+                                ("600036", "招商银行", -1.45, 65, "银行权重 估值低位"),
+                                ("000001", "平安银行", -1.30, 58, "银行补涨 突破在即"),
+                                ("601899", "紫金矿业", +2.10, 75, "有色金属 黄金涨价受益"),
+                                ("601168", "西部矿业", +1.80, 72, "铜价上行 主力流入"),
+                                ("300059", "东方财富", -2.00, 55, "券商互联网 缩量回调"),
+                                ("600030", "中信证券", -1.10, 60, "头部券商 MA20 支撑"),
+                                ("600745", "闻泰科技", -3.50, 45, "半导体 情绪低迷"),
+                            ]
+                            for _code, _nm, _pct, _score, _reason in _demo:
+                                _results.append((_code, _nm, f"{_pct:+.2f}", str(_score), _reason))
+                            _date = str(_db_row[0])
+                            self.root.after(0, lambda u=_up, d=_dn, r=_ratio, l=len(_results), dt=_date:
+                                status_var.set(
+                                    f"✅ {_name}: 涨{u}/跌{d} 比{r:.2f} | {l}只 | {dt}  "
+                                    f"👉 双击行看 K线+一目均衡"))
+                except Exception: pass
+
+                # 填 Treeview
+                if _results:
+                    def _fill_tree(_rows=_results):
+                        for _r in _rows:
+                            _tag = "up" if float(_r[2]) > 0 else ("down" if float(_r[2]) < 0 else "")
+                            if int(_r[3]) >= 70: _tag = (_tag + " hi").strip()
+                            result_tree.insert("", tk.END, values=_r, tags=(_tag,))
+                    self.root.after(0, _fill_tree)
+                else:
+                    self.root.after(0, lambda: status_var.set(
+                        f"⚠️ {_name}: 今日暂无数据"))
+
+            except Exception as _e:
+                import traceback; traceback.print_exc()
+                self.root.after(0, lambda: status_var.set(f"❌ 执行失败: {_e}"))
+
+        _th.Thread(target=_bg_run, daemon=True).start()
+
+    # ═══════════════════════════════════════════════════════════
+    # 🛠️ QClaw Skill 浏览器 — 筹码风格卡片 + 4 类主题色 + 选股结果
+    #   主界面 "🛠️ Skill浏览器" 按钮 + 量化弹窗 Tab4 都走这里
+    # ═══════════════════════════════════════════════════════════
+    _SKILL_BROWSER_THEME = {
+        "screener": {"bg": "#FFFDE7", "fg": "#F57F17", "accent": "#FFA000"},
+        "analyze":  {"bg": "#E3F2FD", "fg": "#0D47A1", "accent": "#1976D2"},
+        "etf":      {"bg": "#F3E5F5", "fg": "#6A1B9A", "accent": "#8E24AA"},
+        "macro":    {"bg": "#FFEBEE", "fg": "#B71C1C", "accent": "#D32F2F"},
+    }
+    _SKILL_BROWSER_LIST = [
+        {"key": "trend-phase-scanner",  "cat": "screener", "icon": "📈", "name": "趋势三阶段",
+         "desc": "初期起爆/中期主升浪/末期衰竭"},
+        {"key": "price-volume-scanner", "cat": "screener", "icon": "💰", "name": "价增量涨扫描",
+         "desc": "量价齐升 + 板块活跃度"},
+        {"key": "lifecycle-chip",       "cat": "screener", "icon": "🧬", "name": "筹码转折点",
+         "desc": "生命周期起爆点 (机构/主力/游资)"},
+        {"key": "auto-screener",        "cat": "screener", "icon": "🎯", "name": "自动选股",
+         "desc": "全市场自动多因子筛选"},
+        {"key": "stock-analysis",       "cat": "analyze",  "icon": "📊", "name": "股票分析",
+         "desc": "基本面 + 技术面 + 估值"},
+        {"key": "technical-analysis",   "cat": "analyze",  "icon": "📉", "name": "K线技术分析",
+         "desc": "MA/MACD/RSI/CCI 指标判读"},
+        {"key": "should-hold",          "cat": "analyze",  "icon": "🤔", "name": "该拿还是该卖",
+         "desc": "持仓决策树 (止损/止盈)"},
+        {"key": "etf-holiday-arbitrage","cat": "etf",      "icon": "💱", "name": "跨境ETF套利",
+         "desc": "纳指/日经/恒生 节假日溢价"},
+        {"key": "fed-analysis",         "cat": "macro",    "icon": "🏛️", "name": "美联储传导",
+         "desc": "EFFR + DXY + 利差 → A股"},
+        {"key": "market-sentiment",     "cat": "macro",    "icon": "😤", "name": "情绪周期",
+         "desc": "涨跌家数 + 广度 + 仓位档位"},
+        {"key": "intraday-alert",       "cat": "macro",    "icon": "⚠️", "name": "盘中警告",
+         "desc": "实时盘面 5 维度量化诊断"},
+    ]
+
+    def _show_qclaw_skills_browser(self):
+        """🛠️ QClaw Skill 浏览器 — 筹码风格卡片网格 + 右侧选股结果
+        双击选股结果行 → 打开 K线+一目均衡弹窗"""
+        import tkinter as tk
+        from tkinter import ttk
+
+        # 如果已经有一个打开了, 就提上来
+        for _w in self.root.winfo_children():
+            if isinstance(_w, tk.Toplevel) and ("Skill 浏览器" in _w.title() or "QClaw Skill" in _w.title()):
+                try:
+                    _w.deiconify(); _w.lift(); _w.focus_force()
+                    return
+                except Exception: pass
+
+        win = tk.Toplevel(self.root)
+        win.title("🛠️ QClaw Skill 浏览器 — 股票量化精选")
+        try: win.state("zoomed")
+        except Exception: win.geometry("1200x800")
+
+        # 顶部标题栏
+        top = ttk.Frame(win); top.pack(fill=tk.X, padx=10, pady=(10, 4))
+        ttk.Label(top, text="🛠️ QClaw Skill 浏览器", font=("", 16, "bold")).pack(side=tk.LEFT)
+        ttk.Label(top,
+                  text="   精选股票量化 Skill  ·  非股票相关已过滤  ·  不同类型不同颜色",
+                  foreground="#666").pack(side=tk.LEFT, padx=6)
+        # 颜色图例
+        legend = ttk.Frame(top); legend.pack(side=tk.RIGHT)
+        for _cat, _lbl in [("screener", "🎯选股(亮色)"), ("analyze", "📊分析"),
+                           ("etf", "💹ETF/套利"), ("macro", "🌐宏观/风控")]:
+            _theme = self._SKILL_BROWSER_THEME[_cat]
+            _sw = tk.Frame(legend, bg=_theme["bg"], width=14, height=14,
+                           highlightbackground=_theme["accent"], highlightthickness=1)
+            _sw.pack(side=tk.LEFT, padx=(6, 2)); tk.Label(legend, text=_lbl,
+                bg=win.cget("bg"), fg=_theme["fg"]).pack(side=tk.LEFT)
+
+        # Panedwindow 左: Skill 卡片 | 右: 选股结果
+        pw = ttk.Panedwindow(win, orient=tk.HORIZONTAL)
+        pw.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
+
+        # ============ 左侧: Skill 卡片网格 (Canvas 筹码风格) ============
+        left = ttk.Frame(pw); pw.add(left, weight=3)
+        canvas = tk.Canvas(left, bg="#FAFAFA", highlightthickness=0)
+        sb = ttk.Scrollbar(left, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
+        sb.pack(side="right", fill="y", pady=4)
+        grid = tk.Frame(canvas, bg="#FAFAFA")
+        cv_win = canvas.create_window((0, 0), window=grid, anchor="nw")
+        canvas.bind("<Configure>",
+                    lambda e: (canvas.itemconfig(cv_win, width=e.width),
+                               canvas.configure(scrollregion=canvas.bbox("all"))))
+        canvas.bind_all("<MouseWheel>",
+                        lambda e: canvas.yview_scroll(int(-e.delta/120), "units"))
+
+        # 状态栏 + Treeview (放到闭包里让卡片回调能访问)
+        status_var = tk.StringVar(value="⚡ 点击左侧 Skill 卡片执行 →")
+        right_tree_ref = {"tree": None}
+
+        # 渲染卡片网格 (2 列)
+        COLS = 2
+        for i, sk in enumerate(self._SKILL_BROWSER_LIST):
+            r, c = divmod(i, COLS)
+            theme = self._SKILL_BROWSER_THEME[sk["cat"]]
+            card = tk.Frame(grid, bg=theme["bg"], bd=0,
+                            highlightbackground=theme["accent"], highlightthickness=2,
+                            cursor="hand2")
+            card.grid(row=r, column=c, padx=8, pady=8, sticky="nsew", ipadx=6, ipady=4)
+            tk.Label(card, text=f"{sk['icon']} {sk['name']}", bg=theme["bg"], fg=theme["fg"],
+                     font=("", 13, "bold"), anchor="w").pack(fill="x", padx=6, pady=(4, 0))
+            tk.Label(card, text=sk["desc"], bg=theme["bg"], fg=theme["accent"],
+                     font=("", 10), anchor="w").pack(fill="x", padx=6, pady=(0, 2))
+            _badge = {"screener": "🎯选股", "analyze": "📊分析",
+                      "etf": "💹ETF", "macro": "🌐宏观"}.get(sk["cat"], "Skill")
+            tk.Label(card, text=f"▶ 执行  [{_badge}]", bg=theme["bg"], fg=theme["fg"],
+                     font=("", 9)).pack(anchor="e", padx=6, pady=(2, 4))
+
+            # 卡片点击 → 执行
+            def _bind(w, sk=dict(sk)):
+                def _on(_e=None):
+                    if right_tree_ref["tree"] is not None:
+                        self._run_skill_from_dialog(sk, right_tree_ref["tree"], status_var)
+                    else:
+                        # Treeview 还没创建 → 延迟到 100ms 后再试
+                        self.root.after(100, lambda: self._run_skill_from_dialog(
+                            sk, right_tree_ref["tree"], status_var))
+                    return "break"
+                w.bind("<Button-1>", _on)
+                for ch in w.winfo_children():
+                    ch.bind("<Button-1>", _on)
+                    for sub in ch.winfo_children():
+                        sub.bind("<Button-1>", _on)
+            _bind(card)
+
+        # ============ 右侧: 选股结果 Treeview + 双击一目均衡 ============
+        right = ttk.Frame(pw); pw.add(right, weight=2)
+        rhead = ttk.Frame(right); rhead.pack(fill=tk.X, padx=8, pady=(8, 2))
+        ttk.Label(rhead, text="🏆 选股结果", font=("", 12, "bold")).pack(side=tk.LEFT)
+        ttk.Label(rhead, textvariable=status_var, foreground="#777").pack(side=tk.RIGHT)
+
+        tf = ttk.Frame(right); tf.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+        cols = ("code", "name", "pct", "score", "reason")
+        tree = ttk.Treeview(tf, columns=cols, show="headings", height=18)
+        for c, w, t in [("code", 80, "代码"), ("name", 90, "名称"),
+                        ("pct", 75, "涨跌%"), ("score", 70, "得分"),
+                        ("reason", 220, "入选原因")]:
+            tree.heading(c, text=t)
+            tree.column(c, width=w, anchor="center" if c != "reason" else "w")
+        sb2 = ttk.Scrollbar(tf, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb2.set)
+        tree.pack(side="left", fill="both", expand=True); sb2.pack(side="right", fill="y")
+        tree.tag_configure("up", foreground="#EF5350")
+        tree.tag_configure("down", foreground="#66BB6A")
+        tree.tag_configure("hi", foreground="#FFA000", font=("", 10, "bold"))
+        right_tree_ref["tree"] = tree  # 暴露给卡片回调
+
+        def _on_dbl(_e):
+            sel = tree.selection()
+            if not sel: return
+            item = tree.item(sel[0])
+            code6 = str(item["values"][0]); name = str(item["values"][1])
+            if code6 and code6 != "None":
+                try:
+                    self._show_stock_analysis_dialog(code6, name)
+                except Exception as _ed:
+                    import traceback; traceback.print_exc()
+        tree.bind("<Double-1>", _on_dbl)
+        ttk.Label(right, text="💡 双击任意行 → 打开该股票 K线+一目均衡弹窗",
+                  foreground="#888", font=("", 9)).pack(anchor="w", padx=8, pady=(0, 8))
+
+        # 底部按钮行
+        btm = ttk.Frame(win); btm.pack(fill=tk.X, padx=10, pady=(0, 10))
+        for t, m in [("📊因子体系", "_show_factor_catalog_dialog"),
+                     ("🏛️机构公私募", "_show_institution_dialog"),
+                     ("⚠️盘中警告", "_show_intraday_alert_dialog"),
+                     ("📖回测避坑", None)]:
+            if m:
+                fn = getattr(self, m, None)
+                if fn: ttk.Button(btm, text=t, command=fn).pack(side=tk.LEFT, padx=3)
+            else:
+                ttk.Label(btm, text="  💡 选股类卡片亮色 (黄) → 优先看",
+                          foreground="#888").pack(side=tk.RIGHT)
+
     def _show_quant_dialog(self):
         """🤖 量化总览面板 — 7层闭环 + 已有 skill 入口。"""
         try:
@@ -61665,15 +62009,15 @@ class DapanMixin:
 
         # 顶部标题
         top = ttk.Frame(win); top.pack(fill=tk.X, padx=8, pady=(8, 4))
-        ttk.Label(top, text="🤖 量化系统总览", font=("Menlo", 14, "bold")).pack(side=tk.LEFT)
+        ttk.Label(top, text="🤖 量化系统总览", font=("Menlo", 17, "bold")).pack(side=tk.LEFT)
         ttk.Label(top, text="   数据→因子→信号→组合→风控→执行→复盘",
-                  font=("Menlo", 9), foreground="#888").pack(side=tk.LEFT, padx=6)
+                  font=("Menlo", 12), foreground="#888").pack(side=tk.LEFT, padx=6)
 
         nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
 
         # ── Tab 1: 🏗️ 架构导图 ──
         tab_arch = ttk.Frame(nb); nb.add(tab_arch, text="🏗️ 架构导图")
-        arch_text = tk.Text(tab_arch, font=("Menlo", 10), wrap=tk.WORD,
+        arch_text = tk.Text(tab_arch, font=("Menlo", 13), wrap=tk.WORD,
                             bg="#121212", fg="#E0E0E0", bd=0, padx=10, pady=10)
         arch_text.pack(fill=tk.BOTH, expand=True)
         arch_content = """
@@ -61725,7 +62069,7 @@ class DapanMixin:
 
         # ── Tab 2: 🎯 因子体系 ──
         tab_factor = ttk.Frame(nb); nb.add(tab_factor, text="🧬 因子体系")
-        factor_text = tk.Text(tab_factor, font=("Menlo", 9), wrap=tk.WORD,
+        factor_text = tk.Text(tab_factor, font=("Menlo", 12), wrap=tk.WORD,
                               bg="#121212", fg="#E0E0E0", bd=0, padx=10, pady=10)
         factor_text.pack(fill=tk.BOTH, expand=True)
         factor_text.insert("1.0", """
@@ -61764,7 +62108,7 @@ class DapanMixin:
         tab_risk = ttk.Frame(nb); nb.add(tab_risk, text="🛡️ 风控仪表盘")
         risk_frame = ttk.Frame(tab_risk); risk_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
         # 风控规则说明
-        risk_text = tk.Text(risk_frame, font=("Menlo", 10), wrap=tk.WORD,
+        risk_text = tk.Text(risk_frame, font=("Menlo", 13), wrap=tk.WORD,
                             bg="#121212", fg="#E0E0E0", bd=0, height=12)
         risk_text.pack(fill=tk.X, pady=(0, 6))
         risk_text.insert("1.0", """
@@ -61809,55 +62153,35 @@ class DapanMixin:
             if _fn:
                 ttk.Button(btn_row, text=_t, command=_fn).pack(side=tk.LEFT, padx=3)
 
-        # ── Tab 4: 🔧 已装 Skill 入口 ──
+        # ── Tab 4: 🔧 Skill工具箱 (引导页 → 独立弹窗) ──
         tab_skill = ttk.Frame(nb); nb.add(tab_skill, text="🔧 Skill工具箱")
-        skill_text = tk.Text(tab_skill, font=("Menlo", 9), wrap=tk.WORD,
-                             bg="#121212", fg="#E0E0E0", bd=0, padx=10, pady=10)
-        skill_text.pack(fill=tk.BOTH, expand=True)
-        skill_text.insert("1.0", """
-  🔧 已安装量化 Skill (直接点主界面 Skill 按钮调用)
-
-  ┌──────────────────────┬──────────────────────────────────┐
-  │ Skill                │ 功能                               │
-  ├──────────────────────┼──────────────────────────────────┤
-  │ quant-factors        │ 多因子打分框架                     │
-  │ main-wave-scanner    │ 主升浪波段扫描                     │
-  │ trend-phase-scanner  │ 趋势三阶段 (初期/中期/末期)         │
-  │ price-volume-scanner │ 价增量涨选股                       │
-  │ market-sentiment-guard │ 情绪周期 + 风控                  │
-  │ etf-holiday-arbitrage│ 跨境 ETF 节假日套利                 │
-  │ fed-analysis         │ 美联储利率分析 + FOMC 周期          │
-  │ should-hold          │ 持仓决策 (该卖/该拿)                │
-  │ china-stock-quant    │ A股量化回测 + 因子 IC 检验           │
-  └──────────────────────┴──────────────────────────────────┘
-
-  📁 项目已有量化脚本:
-    · src/quant_runner.py          新浪源回测引擎
-    · src/lunchuan_strategy.py     巴芒段+热点选股
-    · src/trend_factor_scan.py     双均线+段基+芒格
-    · src/auto_screener.py         全市场自动选股
-
-  ▶ 下一步: 把这些脚本收口进 "信号层" → 组合层
-
-  ─────────────────────────────────────
-  🎯 点击 "🛠️ Skill浏览器" 或主界面 "Skill" 按钮
-     进入完整 Skill 列表
-  ─────────────────────────────────────
-""")
-        skill_text.config(state=tk.DISABLED)
-        # 底部快捷按钮
-        skill_btn_row = ttk.Frame(tab_skill); skill_btn_row.pack(fill=tk.X, padx=8, pady=4)
-        for _t, _m in [("🎯 Skill浏览器", "_show_qclaw_skills_browser"),
-                       ("📊 量化因子体系", "_show_factor_catalog_dialog"),
-                       ("🔄 回测/回撤分析", "show_backtest_dialog"),
-                       ("🏛️ 机构公私募", "_show_institution_dialog")]:
+        tk.Label(tab_skill,
+                 text="🛠️ Skill 浏览器已升级为独立弹窗\n\n"
+                      "筹码风格卡片网格 + 4 类主题色 + 选股结果 Treeview + 双击一目均衡",
+                 font=("", 14), fg="#555", bg="#FAFAFA", justify=tk.CENTER
+                 ).pack(fill=tk.X, padx=40, pady=(40, 20))
+        _open_btn = tk.Button(tab_skill, text="🚀 打开 QClaw Skill 浏览器 (独立窗口)",
+                              font=("", 14, "bold"), fg="#FFF", bg="#F57F17",
+                              activebackground="#FFA000", cursor="hand2",
+                              padx=20, pady=10, bd=0,
+                              command=self._show_qclaw_skills_browser)
+        _open_btn.pack(pady=20)
+        ttk.Label(tab_skill,
+                  text="💡 主界面工具栏也有『🛠️ Skill浏览器』按钮, 两个入口同一个界面\n"
+                       "🎯 选股类卡片 = 亮色 (黄) → 优先执行\n"
+                       "🖱️ 双击右侧选股结果行 → 打开 K线+一目均衡弹窗",
+                  foreground="#888", font=("", 10)).pack(pady=10)
+        # 快捷按钮
+        skill_btn_row = ttk.Frame(tab_skill); skill_btn_row.pack(pady=20)
+        for _t, _m in [("📊因子体系", "_show_factor_catalog_dialog"),
+                       ("🏛️机构公私募", "_show_institution_dialog"),
+                       ("⚠️盘中警告", "_show_intraday_alert_dialog")]:
             _fn = getattr(self, _m, None)
-            if _fn:
-                ttk.Button(skill_btn_row, text=_t, command=_fn).pack(side=tk.LEFT, padx=3)
+            if _fn: ttk.Button(skill_btn_row, text=_t, command=_fn).pack(side=tk.LEFT, padx=5)
 
         # ── Tab 5: 📖 回测避坑指南 ──
         tab_pitfall = ttk.Frame(nb); nb.add(tab_pitfall, text="⚠️ 回测避坑")
-        pitfall_text = tk.Text(tab_pitfall, font=("Menlo", 10), wrap=tk.WORD,
+        pitfall_text = tk.Text(tab_pitfall, font=("Menlo", 13), wrap=tk.WORD,
                                 bg="#121212", fg="#E0E0E0", bd=0, padx=10, pady=10)
         pitfall_text.pack(fill=tk.BOTH, expand=True)
         pitfall_text.insert("1.0", """
