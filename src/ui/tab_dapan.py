@@ -5,6 +5,16 @@
 涵盖: 大盘 Tab 刷新/快照/趋势, 情绪周期三维度, 涨跌停广度, 同花顺情绪, 生命周期扫描
 """
 import os, sys, re, json, time, sqlite3, threading, traceback, base64, io, hashlib
+
+# ── 🔧 sys.path 自动修正 (让本文件从任何目录运行都能 import utils/data/logic) ──
+# 典型场景: IDE 直接 Run tab_dapan.py 时, 当前工作目录是 src/ui/,
+#          但 utils.config / data.db / logic.* 都在 src/ 下, 需要把 src/ 加进 path.
+_HERE = os.path.dirname(os.path.abspath(__file__))          # .../src/ui
+_SRC  = os.path.dirname(_HERE)                               # .../src
+if _SRC not in sys.path: sys.path.insert(0, _SRC)
+_PROJ = os.path.dirname(_SRC)                                # 项目根
+if _PROJ not in sys.path: sys.path.insert(0, _PROJ)
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog, scrolledtext
 from datetime import datetime, timedelta
@@ -44,6 +54,34 @@ from data.snapshot import *
 from logic.crawlers import *
 from logic.spot import *  # _should_skip_akshare
 from logic.dapan_fetcher import *
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 📈 情绪复盘 · 指数+ETF K线Tab 配置 (新浪 CN_MarketData 接口)
+# 维护说明: 每行 (显示名, 新浪symbol), 前面加 # 即停用, 删 # 即启用
+#          指数: sh000001/sz399001/sz399006 ...  ETF: sh512xxx/sz159xxx
+# 新增代码参考: 新浪 finance.sina.com.cn -> ETF/指数代码
+# ══════════════════════════════════════════════════════════════════════
+ETF_IDX_LIST = [
+    # ── 三大指数 (核心) ──
+    ("上证指数",    "sh000001"),
+    ("深证成指",    "sz399001"),
+    ("创业板指",    "sz399006"),
+    # ── 宽基ETF ──
+    ("沪深300ETF",  "sh510300"),
+    ("中证500ETF",  "sh510500"),
+    ("中证1000ETF", "sh512100"),
+    ("科创50ETF",   "sh588000"),
+    ("创业板ETF",   "sz159915"),
+    # ── 行业/主题ETF ──
+    ("半导体ETF",   "sh512480"),
+    ("证券ETF",     "sh512880"),
+    ("银行ETF",     "sh512800"),
+    ("红利ETF",     "sh510880"),
+    # (加新ETF:    ("名称",   "symbol"), )
+    # (停用某行:   行首加 #             )
+]
+
 
 class DapanMixin:
     """大盘分析 + 情绪周期相关方法"""
@@ -8250,6 +8288,9 @@ class DapanMixin:
                 _rev_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
                 _rev_canvas.configure(yscrollcommand=_rev_scroll.set)
                 _rev_inner = ttk.Frame(_rev_canvas)
+                # ⚠️ _render_month_review 用 grid(row=6, column=0, columnspan=7) 放内容,
+                # 所以 _rev_inner 必须用 grid 布局, 新加的组件也必须 grid, 不能混用 pack!
+                for _ci in range(7): _rev_inner.columnconfigure(_ci, weight=1)
                 _rev_win = _rev_canvas.create_window((0, 0), window=_rev_inner, anchor="nw")
                 def _rev_on_config(e):
                     _rev_canvas.itemconfigure(_rev_win, width=e.width)
@@ -8269,10 +8310,7 @@ class DapanMixin:
                 import matplotlib as _mpl_idx
                 _mpl_idx.use("TkAgg"); import matplotlib.pyplot as _plt_idx
 
-                _IDX_LIST = [("上证指数", "sh000001"),
-                             ("深证成指", "sz399001"),
-                             ("创业板指", "sz399006")]
-
+                # 数据源列表 → 模块顶部 ETF_IDX_LIST 统一维护 (增删注释即可)
                 def _period_to_scale_idx(pn):
                     return {"1分钟":1,"5分钟":5,"15分钟":15,"30分钟":30,"60分钟":60,"日线":240}.get(pn, 60)
 
@@ -8314,9 +8352,9 @@ class DapanMixin:
                     macd_bar=2*(dif-dea)
                     return dif,dea,macd_bar
 
-                # 周期工具栏 (共享)
+                # 周期工具栏 (共享) — 用 grid (与 _render_month_review 的 row=6 衔接)
                 _idx_tool = tk.Frame(_rev_inner, bg="#1E1E2E")
-                _idx_tool.pack(fill=tk.X, padx=6, pady=(14,4))
+                _idx_tool.grid(row=7, column=0, columnspan=7, sticky="ew", padx=6, pady=(14,4))
                 tk.Label(_idx_tool, text="📈 三大指数 · K线+MACD+量能",
                          bg="#1E1E2E", fg="#FFD54F",
                          font=("", 11, "bold")).pack(side=tk.LEFT, padx=4)
@@ -8328,15 +8366,17 @@ class DapanMixin:
                 _idx_status = tk.Label(_idx_tool, text="⏳", bg="#1E1E2E", fg="#888")
                 _idx_status.pack(side=tk.RIGHT, padx=4)
 
-                # Notebook: 上证/深成/创业板
+                # Notebook: 上证/深成/创业板 (固定高度, 因为在 Canvas 里 expand 无效)
                 _idx_nb = ttk.Notebook(_rev_inner)
-                _idx_nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+                _idx_nb.grid(row=8, column=0, columnspan=7, sticky="ew", padx=6, pady=4)
+                _idx_nb.pack_propagate(False)  # 锁定高度, 防止子组件 collapse
+                _idx_nb.configure(height=420)
 
                 _idx_figs = []; _idx_canvases = []; _idx_frames = []
 
-                for _iname, _scode in _IDX_LIST:
+                for _iname, _scode in ETF_IDX_LIST:
                     _iframe = ttk.Frame(_idx_nb)
-                    _idx_nb.add(_iframe, text=f"📊 {_iname}")
+                    _idx_nb.add(_iframe, text=_iname)
                     _idx_frames.append((_iframe, _scode, _iname))
 
                 def _draw_one(iframe, scode, iname, period):
@@ -61449,46 +61489,139 @@ class DapanMixin:
                 for i in range(1,len(c)): obv[i]=obv[i-1]+(v[i] if c[i]>c[i-1] else (-v[i] if c[i]<c[i-1] else 0))
                 return obv
 
-            def _calc_butterfly_up(highs, lows, closes):
-                """🦋 蝴蝶UP指标 — 缠论笔中枢识别简化版
-                三笔重叠区 = 中枢, 当价格突破中枢上沿且 MACD 辅助确认 = UP 信号"""
-                h = np.asarray(highs, dtype=float)
-                l = np.asarray(lows, dtype=float)
-                c = np.asarray(closes, dtype=float)
-                n = len(c)
-                # 1. 识别笔 (顶底分型)
-                top_fractals = []; bot_fractals = []
-                for i in range(2, n - 2):
-                    if h[i] > h[i-1] and h[i] > h[i-2] and h[i] > h[i+1] and h[i] > h[i+2]:
-                        top_fractals.append((i, h[i]))
-                    if l[i] < l[i-1] and l[i] < l[i-2] and l[i] < l[i+1] and l[i] < l[i+2]:
-                        bot_fractals.append((i, l[i]))
-                # 2. 合并 + 排序
-                fractals = [(i, p, 'T') for i, p in top_fractals] + \
-                           [(i, p, 'B') for i, p in bot_fractals]
-                fractals.sort(key=lambda x: x[0])
-                # 3. 构造连续笔, 取三笔重叠区作为中枢
-                up_signals = np.zeros(n)   # 中枢上沿突破信号 (1=突破)
-                pivot_high = np.full(n, np.nan)   # 中枢上沿
-                pivot_low = np.full(n, np.nan)    # 中枢下沿
-                for k in range(len(fractals) - 3):
-                    seg = fractals[k:k+4]  # 4 个分型 = 3 笔
-                    # 三笔: B-T-B-T 或 T-B-T-B 交替
-                    highs_in = [s[1] for s in seg if s[2] == 'T']
-                    lows_in = [s[1] for s in seg if s[2] == 'B']
-                    if len(highs_in) >= 2 and len(lows_in) >= 2:
-                        # 中枢 = 前三笔重叠
-                        zh_high = min(highs_in[:2])   # 中枢上沿 = 向下两笔的低高点
-                        zh_low  = max(lows_in[:2])    # 中枢下沿 = 向上两笔的高低点
-                        if zh_high > zh_low:  # 有效中枢
-                            seg_start = seg[0][0]; seg_end = seg[-1][0]
-                            pivot_high[seg_start:seg_end+1] = zh_high
-                            pivot_low[seg_start:seg_end+1]  = zh_low
-                            # 突破信号: 当前收 > 中枢上沿
-                            for j in range(seg_end, min(seg_end + 5, n)):
-                                if j < n and c[j] > zh_high:
-                                    up_signals[j] = 1.0
-                return up_signals, pivot_high, pivot_low
+            def _calc_ths_butterfly(closes, highs, lows):
+                """🦋 同花顺手机版金蝴蝶UP — 波段双雄 RSV体系 (KDJ变体)
+                源码开头: RSV:=(CLOSE-LLV(LOW,7))/(HHV(HIGH,7)-LLV(LOW,7))*100
+                         K:=SMA(RSV,3,1); D:=SMA(K,3,1); J:=3*K-2*D"""
+                c = np.asarray(closes, dtype=float); n = len(c)
+                h = np.asarray(highs, dtype=float) if highs is not None else c
+                l = np.asarray(lows, dtype=float) if lows is not None else c
+
+                # LLV / HHV rolling (7 日窗口)
+                def _llv(arr, win):
+                    out = np.full(len(arr), np.nan)
+                    for i in range(win-1, len(arr)): out[i] = np.min(arr[i-win+1:i+1])
+                    return out
+                def _hhv(arr, win):
+                    out = np.full(len(arr), np.nan)
+                    for i in range(win-1, len(arr)): out[i] = np.max(arr[i-win+1:i+1])
+                    return out
+
+                llv7 = _llv(l, 7); hhv7 = _hhv(h, 7)
+                denom = hhv7 - llv7
+                denom[denom == 0] = 1e-8
+                rsv = (c - llv7) / denom * 100
+                rsv = np.nan_to_num(rsv, nan=50.0)
+
+                # SMA (同花顺版 = 通达信 SMA(X,N,1))
+                def _sma(src, n, m=1):
+                    out = np.full(len(src), np.nan)
+                    out[n-1] = np.mean(src[:n])
+                    for i in range(n, len(src)):
+                        out[i] = (m * src[i] + (n - m) * out[i-1]) / n
+                    return out
+
+                k = _sma(rsv, 3, 1)
+                d = _sma(k, 3, 1)
+                j = 3 * k - 2 * d
+
+                # 波段双雄买卖信号 (类 KDJ 金叉死叉 + J 值极值)
+                buy = np.zeros(n); sell = np.zeros(n)
+                for i in range(1, n):
+                    if not np.isnan(k[i]) and not np.isnan(d[i]) \
+                       and not np.isnan(k[i-1]) and not np.isnan(d[i-1]):
+                        # 金叉 + J<0 (超卖区) = 强买入
+                        if k[i-1] < d[i-1] and k[i] >= d[i] and j[i] < 20:
+                            buy[i] = 2.0
+                        elif k[i-1] < d[i-1] and k[i] >= d[i]:
+                            buy[i] = 1.0
+                        # 死叉 + J>100 (超买区) = 强卖出
+                        if k[i-1] > d[i-1] and k[i] <= d[i] and j[i] > 80:
+                            sell[i] = 2.0
+                        elif k[i-1] > d[i-1] and k[i] <= d[i]:
+                            sell[i] = 1.0
+
+                # 金蝴蝶🦋调整到位 (同花顺版推断: KDJ 底背离)
+                butterfly = np.zeros(n)
+                # 找最近两个低点 (低点 = J < 0 且局部极小)
+                # 注意 j[1:-1] 长度 = n-2, 所以 j<0 也要切片 [1:-1] 对齐
+                _j_inner = j[1:-1]
+                j_min = np.argwhere((_j_inner < 0) & (_j_inner <= j[:-2]) & (_j_inner <= j[2:])).flatten() + 1
+                if len(j_min) >= 2:
+                    for k_idx in range(1, len(j_min)):
+                        i1, i2 = j_min[k_idx-1], j_min[k_idx]
+                        # 底背离: 价格创新低但 J 值抬高
+                        if i2 < n and l[i2] < l[i1] and j[i2] > j[i1]:
+                            # 在第二个低点后 3 天内找金叉
+                            for j_idx in range(i2, min(i2+4, n)):
+                                if buy[j_idx] > 0:
+                                    butterfly[j_idx] = 1.0
+
+                return {"rsv": rsv, "k": k, "d": d, "j": j,
+                        "buy": buy, "sell": sell, "butterfly": butterfly}
+
+            def _calc_gold_butterfly(closes, highs, lows):
+                """🦋 金蝴蝶UP安全投资卫士 — 波段双雄 + 调整到位信号
+                主图信号: ABC2(EXPMA10)上穿ABC3(EXPMA20) + ABC1(EXPMA5)>ABC2 + ABC1拐头向上
+                副图BU/SEL: 买线EMA(C,2) 上穿/下穿 卖线EMA(SLOPE(C,21)*20+C,42)"""
+                c = np.asarray(closes, dtype=float); n = len(c)
+                h = np.asarray(highs, dtype=float) if highs is not None else c
+                l = np.asarray(lows, dtype=float) if lows is not None else c
+                # ── EXPMA ──
+                def _expma(data, p):
+                    if len(data)<p: return np.full(len(data), np.nan)
+                    r = np.full(len(data), np.nan); r[p-1] = np.mean(data[:p])
+                    k=2/(p+1)
+                    for i in range(p,len(data)): r[i] = data[i]*k + r[i-1]*(1-k)
+                    return r
+                abc1 = _expma(c,5); abc2 = _expma(c,10); abc3 = _expma(c,20)
+
+                # ── 金蝴蝶调整到位信号 ──
+                # 条件1: CROSS(abc2, abc3) — abc2 刚刚上穿 abc3
+                cross23 = np.zeros(n)
+                for i in range(1, n):
+                    if not np.isnan(abc2[i]) and not np.isnan(abc3[i]) \
+                       and not np.isnan(abc2[i-1]) and not np.isnan(abc3[i-1]):
+                        if abc2[i-1] < abc3[i-1] and abc2[i] >= abc3[i]:
+                            cross23[i] = 1.0
+                # 条件2: abc1 > abc2
+                cond2 = (abc1 > abc2).astype(float)
+                # 条件3: abc1[i] > abc1[i-1] — abc1 拐头向上
+                cond3 = np.zeros(n)
+                for i in range(1,n):
+                    if not np.isnan(abc1[i]) and not np.isnan(abc1[i-1]):
+                        cond3[i] = 1.0 if abc1[i] > abc1[i-1] else 0.0
+                # 合并金蝴蝶信号 = cross23 当天及随后 3 天内 cond2+cond3 满足
+                gold_butterfly = np.zeros(n)
+                for i in range(n):
+                    if cross23[i] > 0:
+                        for j in range(max(0,i-2), min(n,i+4)):
+                            if cond2[j]>0 and cond3[j]>0:
+                                gold_butterfly[j] = 1.0
+
+                # ── 精准波段底 BU/SEL ──
+                # 卖线 = EMA(SLOPE(C,21)*20 + C, 42)
+                # SLOPE = (C - REF(C,21)) / 21
+                buy_line = _expma(c, 2)
+                slope = np.zeros(n)
+                for i in range(21, n):
+                    slope[i] = (c[i] - c[i-21]) / 21.0
+                sell_line = _expma(slope * 20 + c, 42)
+                bu = np.zeros(n); sel = np.zeros(n)
+                for i in range(1, n):
+                    if not np.isnan(buy_line[i]) and not np.isnan(sell_line[i]) \
+                       and not np.isnan(buy_line[i-1]) and not np.isnan(sell_line[i-1]):
+                        if buy_line[i-1] < sell_line[i-1] and buy_line[i] >= sell_line[i]:
+                            bu[i] = 1.0
+                        if buy_line[i-1] > sell_line[i-1] and buy_line[i] <= sell_line[i]:
+                            sel[i] = 1.0
+
+                return {
+                    "abc1": abc1, "abc2": abc2, "abc3": abc3,
+                    "gold_butterfly": gold_butterfly,
+                    "buy_line": buy_line, "sell_line": sell_line,
+                    "bu": bu, "sel": sel,
+                }
 
             # ─── 新浪多周期 K 线拉取 ───
             def _fetch_sina_multi(sina_code, scale, datalen=240):
@@ -61554,7 +61687,63 @@ class DapanMixin:
             # 副图选择
             ttk.Label(ind_frame, text="副图:").pack(side=tk.LEFT, padx=(10,2))
             sub_var = tk.StringVar(value="MACD")
-            ttk.Combobox(ind_frame, values=["MACD", "🦋蝴蝶UP", "RSI", "KDJ", "OBV", "🧭ARMS", "💰资金面"], width=12, state="readonly", textvariable=sub_var).pack(side=tk.LEFT)
+            sub_combo = ttk.Combobox(ind_frame, values=["MACD", "🦋金蝴蝶-同花顺", "🦋金蝴蝶-通达信", "RSI", "KDJ", "OBV", "🧭ARMS", "💰资金面"], width=18, state="readonly", textvariable=sub_var)
+            sub_combo.pack(side=tk.LEFT)
+
+            # ❓ 帮助按钮 (蝴蝶UP 专用)
+            def _show_butterfly_help():
+                help_text = """🦋 金蝴蝶UP安全投资卫士 · 使用手册
+═══════════════════════════════════════════════
+
+【📌 两个版本的区别】
+
+  ┌─ 🦋金蝴蝶-同花顺版（手机UP原版）────────────────────┐
+  │  核心: RSV(7) → K(3) → D(3) → J(3K-2D)            │
+  │  体系: KDJ 随机指标变体                              │
+  │  适用: 手机同花顺自带，敏感、快反、噪音也多          │
+  │  买点: K金叉D + J<20(超卖)                          │
+  │  卖点: K死叉D + J>80(超买)                          │
+  │  金蝴蝶🦋信号: 价格创新低但J值抬高(底背离)+金叉     │
+  └────────────────────────────────────────────────────┘
+
+  ┌─ 🦋金蝴蝶-通达信版（网上流传版）────────────────────┐
+  │  核心: EXPMA5/10/20 均线系统                         │
+  │  体系: 趋势均线 + 精准波段底                          │
+  │  适用: 通达信 DIY，稳、慢、噪音少                    │
+  │  买点: 买线EMA2 金叉 卖线EMA42(趋势线)              │
+  │  卖点: 买线EMA2 死叉 卖线EMA42                       │
+  │  金蝴蝶🦋信号: EXPMA10上穿EXPMA20 + EXPMA5拐头       │
+  └────────────────────────────────────────────────────┘
+
+【🎯 实战使用建议】
+
+  1. 周期: 60分钟/日线效果最佳 (分钟级太敏感噪音多)
+  2. 蝴蝶🦋信号 = 调整到位即将启动 (不是买点! 只是提醒关注)
+  3. 真正买点 = 蝴蝶信号 + 波段双雄BU信号 + 放量突破
+  4. 止损: 蝴蝶信号低点下方 2-3%
+  5. 信号消失就走 (金蝴蝶"蝴蝶效应": 信号出现→启动→信号消失)
+
+【⚠️ 风险提示】
+
+  · 两个版本都是历史统计胜率 ~55-60%，没有神奇信号
+  · 超卖区(J<0)的金叉胜率更高 (~65%)
+  · 配合大盘环境: 大盘上升期效果好, 熊市反弹别贪
+  · 个人版简化实现, 与原版可能有细微偏差"""
+                try:
+                    import tkinter as _tk, tkinter.scrolledtext as _st
+                    hd = _tk.Toplevel(self.root)
+                    hd.title("🦋 金蝴蝶UP · 使用手册")
+                    hd.geometry("620x560")
+                    hd.configure(bg="#1E1E2E")
+                    _st.ScrolledText(hd, wrap=_tk.WORD, font=("Menlo", 10),
+                                     bg="#1E1E2E", fg="#E0E0E0",
+                                     insertbackground="#E0E0E0").pack(fill=_tk.BOTH, expand=True, padx=8, pady=8).insert("1.0", help_text)
+                except Exception: pass
+            help_btn = tk.Button(ind_frame, text="❓", command=_show_butterfly_help,
+                                 bg="#1E1E2E", fg="#FFD54F", activebackground="#333",
+                                 font=("", 11, "bold"), relief="flat", cursor="hand2",
+                                 width=2, height=1)
+            help_btn.pack(side=tk.LEFT, padx=2)
 
             # 主图上方广度实时条 (ARMS 当天值)
             breadth_frame = ttk.Frame(win); breadth_frame.pack(fill=tk.X, padx=4)
@@ -61704,28 +61893,70 @@ class DapanMixin:
 
                     # ═══ 副图 (根据选择切换) ═══
                     sub_choice = sub_var.get()
-                    if sub_choice == "🦋蝴蝶UP":
-                        up_sig, ph, pl = _calc_butterfly_up(highs, lows, closes)
-                        # 中枢上沿/下沿填充
-                        _has_pivot = ~np.isnan(ph)
-                        if np.any(_has_pivot):
-                            ax_sub1.plot(x, ph, color='#9c27b0', linewidth=0.8, linestyle='--', label='中枢上沿', alpha=0.8)
-                            ax_sub1.plot(x, pl, color='#2196f3', linewidth=0.8, linestyle='--', label='中枢下沿', alpha=0.8)
-                            # 中枢填充区
-                            _between = ~np.isnan(ph) & ~np.isnan(pl)
-                            if np.any(_between):
-                                ax_sub1.fill_between(x, pl, ph, where=_between,
-                                                     color='#ff9800', alpha=0.15)
-                        # UP 信号柱
-                        _sig_colors = ['#d32f2f' if s > 0 else '#eeeeee00' for s in up_sig]
-                        ax_sub1.bar(x, up_sig * 100, color=_sig_colors, width=0.6, alpha=0.85)
-                        # 信号星标
-                        _up_idx = np.where(up_sig > 0)[0]
-                        for _ui in _up_idx:
-                            ax_sub1.scatter([x[_ui]], [105], marker='*', color='#d32f2f', s=120, zorder=10)
-                        ax_sub1.set_ylim(-5, 115); ax_sub1.set_ylabel("🦋蝴蝶", fontsize=8)
-                        ax_sub1.legend(loc='upper left', fontsize=7)
-                        ax_sub1.axhline(y=0, color='gray', linewidth=0.5, alpha=0.5)
+                    if sub_choice in ("🦋金蝴蝶-同花顺", "🦋金蝴蝶-通达信"):
+                        if sub_choice == "🦋金蝴蝶-同花顺":
+                            # ── 同花顺版: RSV/K/D/J + 底背离金蝴蝶 ──
+                            thb = _calc_ths_butterfly(closes, highs, lows)
+                            # 金蝴蝶🦋标记 (主图 K 线下方)
+                            _bf_idx = np.where(thb["butterfly"] > 0)[0]
+                            for _bi in _bf_idx:
+                                ax_main.scatter([x[_bi]], [lows[_bi]*0.995], marker=r"$🦋$",
+                                                color='#FFD54F', s=180, zorder=10)
+                            if len(_bf_idx) > 0:
+                                ax_main.set_title(f"{sym_name}  🦋同花顺×{len(_bf_idx)}",
+                                                  color='#FFD54F', fontsize=10, pad=6)
+                            # 副图: RSV/K/D/J + 买卖点
+                            ax_sub1.plot(x, thb["k"], color='#EF5350', linewidth=0.9, label='K')
+                            ax_sub1.plot(x, thb["d"], color='#42A5F5', linewidth=0.9, label='D')
+                            ax_sub1.plot(x, thb["j"], color='#AB47BC', linewidth=0.7, linestyle='--', label='J')
+                            ax_sub1.plot(x, thb["rsv"], color='#888', linewidth=0.5, alpha=0.5, label='RSV')
+                            ax_sub1.axhline(80, color='#EF5350', linewidth=0.5, linestyle=':', alpha=0.5)
+                            ax_sub1.axhline(20, color='#26A69A', linewidth=0.5, linestyle=':', alpha=0.5)
+                            ax_sub1.axhline(50, color='#555', linewidth=0.4, linestyle=':', alpha=0.3)
+                            # 买卖信号柱
+                            _buy_bars = np.where(thb["buy"]>0, thb["buy"]*100, 0)
+                            _sel_bars = np.where(thb["sell"]>0, -thb["sell"]*100, 0)
+                            ax_sub1.bar(x, _buy_bars, color='#EF5350', width=0.6, alpha=0.6, label='BUY')
+                            ax_sub1.bar(x, _sel_bars, color='#26A69A', width=0.6, alpha=0.6, label='SELL')
+                            ax_sub1.set_ylim(-110, 130)
+                            ax_sub1.set_ylabel("🦋同花顺", fontsize=8)
+                            ax_sub1.legend(loc='upper left', fontsize=7, ncol=4)
+                        else:
+                            # ── 通达信版: EXPMA + 精准波段底 ──
+                            gbf = _calc_gold_butterfly(closes, highs, lows)
+                            ax_main.plot(x, gbf["abc1"], color='#FFE66D', linewidth=0.9, label='EXPMA5')
+                            ax_main.plot(x, gbf["abc2"], color='#FF9800', linewidth=0.9, label='EXPMA10')
+                            ax_main.plot(x, gbf["abc3"], color='#9C27B0', linewidth=0.9, label='EXPMA20')
+                            _gb_idx = np.where(gbf["gold_butterfly"] > 0)[0]
+                            for _gi in _gb_idx:
+                                ax_main.scatter([x[_gi]], [lows[_gi]*0.995], marker=r"$🦋$",
+                                                color='#FFD54F', s=180, zorder=10)
+                            if len(_gb_idx) > 0:
+                                ax_main.set_title(f"{sym_name}  🦋通达信×{len(_gb_idx)}",
+                                                  color='#FFD54F', fontsize=10, pad=6)
+                            # 副图
+                            ax_sub1.plot(x, gbf["buy_line"], color='#EF5350', linewidth=0.8, label='买线EMA2')
+                            ax_sub1.plot(x, gbf["sell_line"], color='#42A5F5', linewidth=0.8, label='卖线EMA42')
+                            _diff = (gbf["buy_line"] - gbf["sell_line"])
+                            _diff_colors = ['#EF5350' if v>=0 else '#66BB6A' for v in _diff]
+                            ax_sub1.bar(x, _diff, color=_diff_colors, width=0.6, alpha=0.6)
+                            _bu_idx = np.where(gbf["bu"] > 0)[0]
+                            _sel_idx = np.where(gbf["sel"] > 0)[0]
+                            for _bi in _bu_idx:
+                                ax_sub1.annotate('BU', xy=(x[_bi], gbf["sell_line"][_bi]),
+                                                 xytext=(x[_bi], gbf["sell_line"][_bi]*0.92),
+                                                 color='#EF5350', fontsize=7, fontweight='bold',
+                                                 ha='center', va='top',
+                                                 arrowprops=dict(arrowstyle='->', color='#EF5350', lw=0.8))
+                            for _si in _sel_idx:
+                                ax_sub1.annotate('SEL', xy=(x[_si], gbf["sell_line"][_si]),
+                                                 xytext=(x[_si], gbf["sell_line"][_si]*1.08),
+                                                 color='#26A69A', fontsize=7, fontweight='bold',
+                                                 ha='center', va='bottom',
+                                                 arrowprops=dict(arrowstyle='->', color='#26A69A', lw=0.8))
+                            ax_sub1.axhline(0, color='#555', linewidth=0.5)
+                            ax_sub1.set_ylabel("🦋通达信", fontsize=8)
+                            ax_sub1.legend(loc='upper left', fontsize=7, ncol=3)
                     elif sub_choice == "MACD":
                         if ind_vars["macd"].get():
                             dif, dea, macdh = _calc_macd(closes)
