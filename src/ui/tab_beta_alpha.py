@@ -170,20 +170,36 @@ class BetaAlphaMixin:
         dlg.transient(self.root)
 
         # 顶栏
-        top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=38)
+        top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=56)
         top.pack(fill=tk.X); top.pack_propagate(False)
         tk.Label(top, text="📐 β-α 透视", bg=_BG_TOOLBAR, fg=_FG_GOLD,
                  font=("Menlo", 13, "bold")).pack(side=tk.LEFT, padx=12)
         tk.Label(top, text="  「指数涨60%你亏？根因：选股错配 + 行为偏差」",
-                 bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT)
+                 bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT, pady=(6, 0))
+
+        # 进度条
+        pbar = ttk.Progressbar(top, length=200, mode="determinate", maximum=100)
+        pbar.pack(side=tk.RIGHT, padx=(4, 2), pady=10)
+
+        cancel_flag = {"stop": False}
+
+        def _do_cancel():
+            cancel_flag["stop"] = True
+            status.config(text="🛑 已请求停止...", fg="#FF9800")
+            stop_btn.config(state=tk.DISABLED)
+
+        stop_btn = tk.Button(top, text="🛑停止", bg="#FF9800", fg="white",
+                             font=("", 9, "bold"), relief="flat", padx=8, pady=2,
+                             state=tk.DISABLED, command=_do_cancel)
+        stop_btn.pack(side=tk.RIGHT, padx=2, pady=10)
 
         scan_btn = tk.Button(top, text="🔄一键诊断", bg="#2E7D32", fg="white",
                              font=("", 10, "bold"), relief="flat", padx=14, pady=4)
-        scan_btn.pack(side=tk.RIGHT, padx=10)
+        scan_btn.pack(side=tk.RIGHT, padx=6, pady=10)
 
         status = tk.Label(top, text="⏳ 准备就绪, 点「一键诊断」开始分析...",
                           bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9))
-        status.pack(side=tk.RIGHT, padx=10)
+        status.pack(side=tk.RIGHT, padx=(6, 0), pady=10)
 
         # 主体 — ttk Notebook 分 4 个 Tab
         style = ttk.Style(); style.theme_use("clam")
@@ -856,34 +872,61 @@ class BetaAlphaMixin:
         # ── 一键诊断流程 ──
         def _run_diag():
             scan_btn.config(state=tk.DISABLED, text="⏳诊断中...")
-            status.config(text="⏳ 拉指数YTD + 扫持仓...", fg=_FG_DIM)
+            stop_btn.config(state=tk.NORMAL)
+            cancel_flag["stop"] = False
+            status.config(text="⏳ 准备...", fg=_FG_DIM)
+            pbar["value"] = 0
 
             def _bg():
-                # 1. 指数YTD
-                idx_res = []
-                for sina, _n in _INDICES:
-                    idx_res.append(_fetch_index_ytd(sina))
+                import time as _t
+                def _prog(v, msg):
+                    def _upd():
+                        pbar["value"] = v
+                        status.config(text=msg, fg=_FG_BLUE)
+                    dlg.after(0, _upd)
 
-                # 2. 拉自选股 (持仓+龙头+资讯)
+                # 1. 指数YTD (5 个指数)
+                _prog(5, f"⏳ 拉 {len(_INDICES)} 个指数YTD...")
+                idx_res = []
+                for _i, (sina, _n) in enumerate(_INDICES):
+                    if cancel_flag["stop"]: break
+                    idx_res.append(_fetch_index_ytd(sina))
+                    _prog(5 + int(25 * (_i + 1) / len(_INDICES)),
+                          f"⏳ 指数 {_i+1}/{len(_INDICES)} ...")
+
+                if cancel_flag["stop"]:
+                    dlg.after(0, lambda: scan_btn.config(state=tk.NORMAL, text="🔄一键诊断"))
+                    dlg.after(0, lambda: stop_btn.config(state=tk.DISABLED))
+                    dlg.after(0, lambda: status.config(text="🛑 已停止", fg="#FF9800"))
+                    dlg.after(0, lambda: pbar.configure(value=0))
+                    return
+
+                # 2. 拉自选股
+                _prog(35, "⏳ 拉自选股...")
                 watchlist = _load_watchlist()
                 sina_codes = [s for _, s, _ in watchlist]
+                _prog(45, f"⏳ {len(sina_codes)} 只股的实时行情...")
+
+                if cancel_flag["stop"]:
+                    dlg.after(0, lambda: scan_btn.config(state=tk.NORMAL, text="🔄一键诊断"))
+                    dlg.after(0, lambda: stop_btn.config(state=tk.DISABLED))
+                    dlg.after(0, lambda: status.config(text="🛑 已停止", fg="#FF9800"))
+                    return
+
                 # 3. 实时行情
                 hq_map = _fetch_hq_batch(sina_codes)
+                _prog(55, f"⏳ 算 {len(watchlist)} 只的YTD...")
 
-                # 4. 算每只YTD + 近似市值 (用现价*流通股估算太复杂, 用市值字段)
-                # 新浪 hq 字段里有 mktcap? —— 没有, 但我们可以用 hq_map + 日线YTD
+                # 4. 算每只 YTD
                 holdings = []
-                for name, sina, tag in watchlist:
+                for _i, (name, sina, tag) in enumerate(watchlist):
+                    if cancel_flag["stop"]: break
                     hq = hq_map.get(sina, {})
                     cur = float(hq.get("price", hq.get("cur", 0)))
                     vol = float(hq.get("volume", 0))
-                    # YTD (用日线)
                     k_ret = _fetch_closes_ytd(sina, "2026-01-01", 240, 300)
                     ret_ytd = k_ret[2] if k_ret else None
-                    # 近似市值估算 (简化): 成交额/换手率 ≈ 市值, 但我们没换手率
-                    # 用 tag + 名字里的关键词粗分:
-                    # 龙头/主力 → 蓝筹候选; 资讯 → 题材候选; 持仓看名字
-                    mktcap = 50  # 默认中间
+                    mktcap = 50
                     if tag == "龙头": mktcap = 200
                     elif tag == "持仓": mktcap = 100
                     elif tag == "资讯": mktcap = 50
@@ -893,24 +936,30 @@ class BetaAlphaMixin:
                     "cur": cur, "volume": vol,
                     "ret_ytd": ret_ytd, "mktcap": mktcap,
                 })
+                    if _i % 5 == 0:
+                        _prog(55 + int(35 * (_i + 1) / max(len(watchlist), 1)),
+                              f"⏳ YTD {_i+1}/{len(watchlist)} ...")
 
-                # 5. 中位数 (过滤 None)
+                if cancel_flag["stop"]:
+                    dlg.after(0, lambda: scan_btn.config(state=tk.NORMAL, text="🔄一键诊断"))
+                    dlg.after(0, lambda: stop_btn.config(state=tk.DISABLED))
+                    dlg.after(0, lambda: status.config(text="🛑 已停止", fg="#FF9800"))
+                    return
+
+                # 5. 中位数
                 rets_valid = [h["ret_ytd"] for h in holdings if h.get("ret_ytd") is not None]
                 median_ret = float(np.median(rets_valid)) if rets_valid else 0
                 up_cnt = sum(1 for r in rets_valid if r > 0)
                 down_cnt = sum(1 for r in rets_valid if r <= 0)
-
-                # 🆕 统一兜底: ret_ytd 为 None 的全部设为 0 —— 防止 NoneType 比较
                 for h in holdings:
                     if h.get("ret_ytd") is None:
                         h["ret_ytd"] = 0.0
-
-                # 6. K型分化 = 最大指数涨幅 - 个股中位数
                 valid_idx = [d for d in idx_res if d]
                 max_idx_ret = max(d["ret"] for d in valid_idx) if valid_idx else 0
                 k_gap = max_idx_ret - median_ret
 
-                # 切回主线程渲染
+                _prog(95, "⏳ 渲染 5 个 Tab...")
+
                 def _ui():
                     try:
                         _render_temp(tab_temp, idx_res, median_ret, up_cnt, down_cnt)
@@ -920,6 +969,7 @@ class BetaAlphaMixin:
                         _render_etf(tab_etf, hs300_ret, holdings)
                         _render_diag(tab_diag, idx_res, median_ret, holdings, k_gap)
                         _render_lobster(tab_lob)
+                        pbar["value"] = 100
                         status.config(
                             text=f"✅ 诊断完成  中位数{median_ret:+.1f}%  K型{k_gap:.1f}pct  "
                                  f"题材票{sum(1 for h in holdings if h['mktcap']<=70)}/{len(holdings)}",
@@ -928,16 +978,13 @@ class BetaAlphaMixin:
                         import traceback
                         tb = traceback.format_exc()
                         print(f"[β-α] 渲染异常:\n{tb}", flush=True)
-                        # 状态栏显示前100字符
-                        short = str(_e)[:80]
-                        status.config(text=f"❌ 渲染异常: {short}", fg=_FG_RED)
-                        # 主窗口也显示
+                        status.config(text=f"❌ 渲染异常: {str(_e)[:80]}", fg=_FG_RED)
                         tk.Label(tab_diag,
                                  text=f"❌ 渲染异常\n\n{tb}",
                                  bg=_BG_DEEP, fg=_FG_RED,
                                  font=("Menlo", 9), justify="left").pack(anchor="w", padx=12, pady=12)
-
                     scan_btn.config(state=tk.NORMAL, text="🔄一键诊断")
+                    stop_btn.config(state=tk.DISABLED)
 
                 dlg.after(0, _ui)
 

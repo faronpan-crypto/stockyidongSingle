@@ -4687,64 +4687,76 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         # 交易标签页(在仓位/交易标签页控件框中,调整padding使其更紧凑)
         trading_tab = ttk.Frame(self.position_trading_notebook, padding=2)
         self.position_trading_notebook.add(trading_tab, text="交易")
-        # 左侧工具条:固定两行(全~新闻搜索)
+        # 左侧工具条:3 行 (按工作流排序: 大盘 → 选股 → 个股)
         toolbar_frame = ttk.Frame(left_frame)
         toolbar_frame.pack(fill=tk.X, pady=(0, 1))
         toolbar_row1 = ttk.Frame(toolbar_frame)
         toolbar_row1.pack(fill=tk.X, pady=(0, 1))
         toolbar_row2 = ttk.Frame(toolbar_frame)
-        toolbar_row2.pack(fill=tk.X)
+        toolbar_row2.pack(fill=tk.X, pady=(0, 1))
+        toolbar_row3 = ttk.Frame(toolbar_frame)
+        toolbar_row3.pack(fill=tk.X)
         tp = 2
-        for idx_btn, (txt, w, cmd) in enumerate([
+
+        # ── Row 1: 🌏 大盘 / 宏观 / 周期 (big picture first) ──
+        _ROW1 = [
             ("全", 3, self.show_market_situation),
-            # ("自选股管理", 8, self.show_stock_management_dialog),  # 迁入工具 Tab
-            # ("最新N条分析", 9, self.analyze_latest_n_stocks),    # 迁入工具 Tab
-            # ("📊 批量股票分析", 9, self.show_batch_stock_analyzer),  # 迁入工具 Tab
-            # ("龙虎榜", 6, self.show_top_list_dialog),                # 迁入工具 Tab
+            ("👁️看盘", 7, self._show_speculator_watch),
+            ("🏛️美联储", 9, self._show_fed_analysis_dialog),
+            ("🌏纳指套利", 10, self._show_etf_holiday_dialog),
             ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
-            ("📈价增量涨", 10, self._show_price_volume_dialog),
-            ("🏛️美联储分析", 12, self._show_fed_analysis_dialog),
-            ("🌏纳指日经套利", 10, self._show_etf_holiday_dialog),
             ("📱日报", 7, self._show_wechat_dialog),
-            ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
-            ("🤖量化", 7, self._show_quant_dialog),
-        ]):
-            if "📸" in txt or "📱" in txt or "🦅" in txt:
-                import traceback as _tb_toolbar
+        ]
+        for _idx, (txt, w, cmd) in enumerate(_ROW1):
+            _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
+            if "📱" in txt or "🦅" in txt:
+                import traceback as _tb_r1
                 def _wrap(_c=cmd, _t=txt):
                     print(f"[🎯工具栏] 点击 '{_t}'", flush=True)
                     try: _c()
                     except Exception as _e:
-                        print(f"[🎯工具栏❌] '{_t}': {_e}", flush=True)
-                        _tb_toolbar.print_exc()
-                ttk.Button(toolbar_row1, text=txt, width=w, command=_wrap).pack(
-                    side=tk.LEFT, padx=(0 if idx_btn == 0 else tp, 0))
+                        print(f"[🎯工具栏❌] '{_t}': {_e}", flush=True); _tb_r1.print_exc()
+                ttk.Button(toolbar_row1, text=txt, width=w, command=_wrap).pack(**_pad)
             else:
-                ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(
-                    side=tk.LEFT, padx=(0 if idx_btn == 0 else tp, 0))
+                ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(**_pad)
+
+        # ── Row 2: 🎯 选股 / 量化 / 机会 (actionable) ──
+        _ROW2 = [
+            ("📈价增量涨", 10, self._show_price_volume_dialog),
+            ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
+            ("🤖量化", 7, self._show_quant_dialog),
+            ("🪙筹码", 7, self._show_chouma),
+            ("🎯机会", 7, self._show_jianlou),
+            ("🎯高抛低吸", 8, self._show_high_low_swing),
+            ("💡主力趋势", 8, self._show_main_trend_dialog),
+            ("⭐五星跟随", 9, self.show_five_star_follow_dialog),
+        ]
+        for _idx, (txt, w, cmd) in enumerate(_ROW2):
+            _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
+            ttk.Button(toolbar_row2, text=txt, width=w, command=cmd).pack(**_pad)
+
+        # ── Row 3: 📈 K线 / 个股分析 (per-stock deep dive) ──
+        _ROW3 = [
+            ("📊K线图", 7, self.show_kline_dialog),
+            ("📈一目均衡", 8, self._show_ichimoku_kline_dialog),
+            ("📈1minK", 7, self._show_1min_kline_dialog),
+            ("📊分析深度", 8, self._show_stock_analysis_dialog),
+            ("📊比价横向", 8, self._show_stock_compare_dialog),
+            ("🔍多股对比", 8, self._show_multi_compare_dialog),
+            ("📐β-α", 7, self._show_beta_alpha),
+        ]
+        for _idx, (txt, w, cmd) in enumerate(_ROW3):
+            _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
+            ttk.Button(toolbar_row3, text=txt, width=w, command=cmd).pack(**_pad)
+
+        # 黄色批量爬取按钮 (单独 pack 到 Row3 末尾, 保持醒目)
         batch_crawl_news_btn = tk.Button(
-            toolbar_row2, text="批量爬取资讯", width=10,
+            toolbar_row3, text="批量爬取资讯", width=10,
             command=self.batch_crawl_news, bg="yellow", fg="black",
             font=("TkDefaultFont", 10)
         )
-        batch_crawl_news_btn.pack(side=tk.LEFT, padx=(0, tp))
+        batch_crawl_news_btn.pack(side=tk.LEFT, padx=(tp, 0))
         self.batch_crawl_news_btn = batch_crawl_news_btn
-        for txt, w, cmd in [
-            ("五星跟随", 7, self.show_five_star_follow_dialog),
-            ("K线图", 6, self.show_kline_dialog),
-            ("📊分析深度", 8, self._show_stock_analysis_dialog),
-            ("📊比价横向", 8, self._show_stock_compare_dialog),
-            ("👁️看盘", 7, self._show_speculator_watch),
-            ("📈一目均衡", 8, self._show_ichimoku_kline_dialog),
-            ("💡主力趋势", 8, self._show_main_trend_dialog),
-            ("🎯高抛低吸", 8, self._show_high_low_swing),
-            ("🎯机会", 7, self._show_jianlou),
-            ("🪙筹码", 7, self._show_chouma),
-            ("📐β-α", 7, self._show_beta_alpha),
-            ("📈1minK", 7, self._show_1min_kline_dialog),
-            ("🔍多股对比", 8, self._show_multi_compare_dialog),
-        ]:
-            ttk.Button(toolbar_row2, text=txt, width=w, command=cmd).pack(side=tk.LEFT, padx=(0, tp))
         # 快速爬取/文本控制标签页控件框(共用一块区域,可以切换)
         crawler_control_notebook = ttk.Notebook(left_frame)
         crawler_control_notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 0))

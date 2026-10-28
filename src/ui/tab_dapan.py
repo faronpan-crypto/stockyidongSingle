@@ -8262,7 +8262,212 @@ class DapanMixin:
                 _ym = _dt2.now()
                 _pf, _cf = self._fetch_month_index_pct(_ym)
                 self._render_month_review(_rev_inner, _ym, _pf, _cf)
-                _rev_canvas.after(300, lambda: _rev_canvas.configure(scrollregion=_rev_canvas.bbox("all")))
+
+                # ── 🆕 下方空白处加: 上证/深成/创业板 3Tab K线 + MACD/量副图 + 周期切换 ──
+                import numpy as _np_idx, pandas as _pd_idx
+                from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+                import matplotlib as _mpl_idx
+                _mpl_idx.use("TkAgg"); import matplotlib.pyplot as _plt_idx
+
+                _IDX_LIST = [("上证指数", "sh000001"),
+                             ("深证成指", "sz399001"),
+                             ("创业板指", "sz399006")]
+
+                def _period_to_scale_idx(pn):
+                    return {"1分钟":1,"5分钟":5,"15分钟":15,"30分钟":30,"60分钟":60,"日线":240}.get(pn, 60)
+
+                def _sina_fetch_idx(sina_code, scale, datalen=240):
+                    import json as _j2, urllib.request, ssl as _ssl2
+                    ctx2 = _ssl2._create_unverified_context()
+                    url = (f"https://quotes.sina.cn/cn/api/jsonp.php/_/"
+                           f"CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}"
+                           f"&ma=no&datalen={datalen}")
+                    try:
+                        req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0",
+                                                                     "Referer":"https://finance.sina.com.cn"})
+                        with urllib.request.urlopen(req, timeout=6, context=ctx2) as _r:
+                            raw = _r.read().decode("utf-8","ignore")
+                        body = raw.split("(",1)[1].rsplit(")",1)[0]
+                        data = _j2.loads(body)
+                        if not data: return None
+                        df = _pd_idx.DataFrame(data)
+                        for _c in ['open','high','low','close']:
+                            if _c in df.columns: df[_c]=df[_c].astype(float)
+                        if 'volume' in df.columns: df['volume']=df['volume'].astype(float)
+                        return df
+                    except Exception as _e2:
+                        print(f"[情绪复盘K线] {sina_code} scale={scale} 失败: {_e2}", flush=True)
+                        return None
+
+                def _ema_idx(data, period):
+                    if len(data)<period: return _np_idx.full(len(data), _np_idx.nan)
+                    arr=_np_idx.array(data, dtype=float); res=_np_idx.full(len(data), _np_idx.nan)
+                    res[period-1] = _np_idx.mean(arr[:period])
+                    k=2/(period+1)
+                    for i in range(period, len(arr)): res[i] = arr[i]*k + res[i-1]*(1-k)
+                    return res
+
+                def _compute_macd_idx(closes):
+                    arr=_np_idx.asarray(closes, dtype=float); n=len(arr)
+                    ema12=_ema_idx(arr,12); ema26=_ema_idx(arr,26)
+                    dif=ema12-ema26; dea=_ema_idx(_np_idx.nan_to_num(dif,0),9)
+                    macd_bar=2*(dif-dea)
+                    return dif,dea,macd_bar
+
+                # 周期工具栏 (共享)
+                _idx_tool = tk.Frame(_rev_inner, bg="#1E1E2E")
+                _idx_tool.pack(fill=tk.X, padx=6, pady=(14,4))
+                tk.Label(_idx_tool, text="📈 三大指数 · K线+MACD+量能",
+                         bg="#1E1E2E", fg="#FFD54F",
+                         font=("", 11, "bold")).pack(side=tk.LEFT, padx=4)
+                tk.Label(_idx_tool, text="  周期:",
+                         bg="#1E1E2E", fg="#aaa").pack(side=tk.LEFT)
+                _idx_period_var = tk.StringVar(value="60分钟")
+                ttk.Combobox(_idx_tool, values=["1分钟","5分钟","15分钟","30分钟","60分钟","日线","周K","月K"],
+                             width=8, state="readonly", textvariable=_idx_period_var).pack(side=tk.LEFT, padx=2)
+                _idx_status = tk.Label(_idx_tool, text="⏳", bg="#1E1E2E", fg="#888")
+                _idx_status.pack(side=tk.RIGHT, padx=4)
+
+                # Notebook: 上证/深成/创业板
+                _idx_nb = ttk.Notebook(_rev_inner)
+                _idx_nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+
+                _idx_figs = []; _idx_canvases = []; _idx_frames = []
+
+                for _iname, _scode in _IDX_LIST:
+                    _iframe = ttk.Frame(_idx_nb)
+                    _idx_nb.add(_iframe, text=f"📊 {_iname}")
+                    _idx_frames.append((_iframe, _scode, _iname))
+
+                def _draw_one(iframe, scode, iname, period):
+                    # 清空
+                    for _w in iframe.winfo_children(): _w.destroy()
+                    scale = _period_to_scale_idx(period)
+                    df = None
+                    if period == "周K":
+                        df_d = _sina_fetch_idx(scode, 240, 300)
+                        if df_d is not None and len(df_d)>10:
+                            df_d['day']=_pd_idx.to_datetime(df_d['day'])
+                            df = df_d.set_index('day').resample('W').agg(
+                                {'open':'first','high':'max','low':'min','close':'last','volume':'sum'}
+                            ).dropna().reset_index()
+                            df['day']=df['day'].dt.strftime('%Y-%m-%d')
+                    elif period == "月K":
+                        df_d = _sina_fetch_idx(scode, 240, 500)
+                        if df_d is not None and len(df_d)>10:
+                            df_d['day']=_pd_idx.to_datetime(df_d['day'])
+                            df = df_d.set_index('day').resample('ME').agg(
+                                {'open':'first','high':'max','low':'min','close':'last','volume':'sum'}
+                            ).dropna().reset_index()
+                            df['day']=df['day'].dt.strftime('%Y-%m-%d')
+                    else:
+                        df = _sina_fetch_idx(scode, scale, 240)
+
+                    # 画图 (高度比 5:2:2 — 主K:MACD:量)
+                    fig = _plt_idx.Figure(figsize=(7.2, 7), dpi=95, facecolor="#1E1E2E")
+                    gs = fig.add_gridspec(3,1,height_ratios=[5,2,2], hspace=0.08)
+                    ax_k = fig.add_subplot(gs[0]); ax_m = fig.add_subplot(gs[1], sharex=ax_k)
+                    ax_v = fig.add_subplot(gs[2], sharex=ax_k)
+                    for _ax in (ax_k,ax_m,ax_v):
+                        _ax.set_facecolor("#121212")
+                        _ax.tick_params(colors="#888", labelsize=7)
+                        _ax.spines['bottom'].set_color("#333"); _ax.spines['top'].set_visible(False)
+                        _ax.spines['right'].set_visible(False); _ax.spines['left'].set_color("#333")
+
+                    if df is None or len(df) < 10:
+                        ax_k.text(0.5,0.5,"❌ 数据不足 / 新浪限流",color="#EF5350",
+                                  ha='center',va='center',transform=ax_k.transAxes,fontsize=10)
+                        ax_k.set_title(f"{iname}  [{period}]", color="#FFD54F", fontsize=10, pad=6)
+                    else:
+                        opens=df['open'].values; highs=df['high'].values; lows=df['low'].values
+                        closes=df['close'].values; volumes=df['volume'].values
+                        n=len(closes); x=_np_idx.arange(n)
+                        # 蜡烛 (A股红涨绿跌)
+                        _up = closes >= opens
+                        for _i in range(n):
+                            _c = "#EF5350" if _up[_i] else "#66BB6A"
+                            ax_k.plot([x[_i],x[_i]], [lows[_i],highs[_i]], color=_c, linewidth=0.7)
+                            ax_k.bar(x[_i], abs(closes[_i]-opens[_i]) or 0.001,
+                                     bottom=min(closes[_i],opens[_i]), color=_c, width=0.6)
+                        # MA5/10/20
+                        _ma5=_ema_idx(closes,5); _ma10=_ema_idx(closes,10); _ma20=_ema_idx(closes,20)
+                        ax_k.plot(x, _ma5, color="#4ECDC4", linewidth=0.8, label="MA5")
+                        ax_k.plot(x, _ma10, color="#FFE66D", linewidth=0.8, label="MA10")
+                        ax_k.plot(x, _ma20, color="#C7CEEA", linewidth=0.8, label="MA20")
+                        # 标题 + 图例
+                        _last_pct = (closes[-1]/closes[-2]-1)*100 if n>=2 else 0
+                        _pct_c = "#EF5350" if _last_pct>=0 else "#66BB6A"
+                        ax_k.set_title(f"{iname} [{period}]  {closes[-1]:.2f} ({_last_pct:+.2f}%)",
+                                       color="#FFD54F", fontsize=10, pad=6)
+                        ax_k.legend(loc='upper left', fontsize=6, facecolor="#1E1E2E",
+                                    edgecolor="#333", labelcolor="#ccc")
+                        ax_k.grid(True, alpha=0.15, color="#555")
+                        ax_k.label_outer()
+
+                        # MACD 副图
+                        dif,dea,mb = _compute_macd_idx(closes)
+                        _mb_colors = ["#EF5350" if v>=0 else "#66BB6A" for v in mb]
+                        ax_m.bar(x, mb, color=_mb_colors, width=0.6, alpha=0.85)
+                        ax_m.plot(x, dif, color="#42A5F5", linewidth=0.7, label="DIF")
+                        ax_m.plot(x, dea, color="#FFA726", linewidth=0.7, label="DEA")
+                        ax_m.axhline(0, color="#555", linewidth=0.5)
+                        ax_m.set_ylabel("MACD", color="#888", fontsize=8)
+                        ax_m.legend(loc='upper left', fontsize=6, facecolor="#1E1E2E",
+                                    edgecolor="#333", labelcolor="#ccc")
+                        ax_m.grid(True, alpha=0.1, color="#555")
+                        ax_m.label_outer()
+
+                        # 成交量副图
+                        _v_colors = ["#EF5350" if closes[_i]>=opens[_i] else "#66BB6A" for _i in range(n)]
+                        ax_v.bar(x, volumes, color=_v_colors, width=0.6, alpha=0.85)
+                        _vma5=_ema_idx(volumes,5); _vma10=_ema_idx(volumes,10)
+                        ax_v.plot(x, _vma5, color="#4ECDC4", linewidth=0.7, label="VOL_MA5")
+                        ax_v.plot(x, _vma10, color="#FFE66D", linewidth=0.7, label="VOL_MA10")
+                        ax_v.set_ylabel("量", color="#888", fontsize=8)
+                        ax_v.legend(loc='upper left', fontsize=6, facecolor="#1E1E2E",
+                                    edgecolor="#333", labelcolor="#ccc")
+                        ax_v.grid(True, alpha=0.1, color="#555")
+                        # X 轴刻度 (只在最下副图)
+                        _pf2 = period
+                        if _pf2 in ("1分钟","5分钟","15分钟","30分钟","60分钟"):
+                            def _tf(t): return t[:10]+"\n"+t[11:16] if len(t)>16 else t[:10]
+                        elif _pf2 == "周K":
+                            def _tf(t): return t[:7]
+                        else:
+                            def _tf(t): return t[5:10] if len(t)>=10 else str(t)
+                        _n_tick = min(6, max(3, n//40))
+                        _ts = max(1, n//(_n_tick+1))
+                        _idxs = list(range(_ts-1, n, _ts)); _idxs.append(n-1)
+                        _day_vals = df['day'].values
+                        ax_v.set_xticks([x[i] for i in _idxs])
+                        ax_v.set_xticklabels([_tf(_day_vals[i]) for i in _idxs],
+                                             color="#aaa", fontsize=7, rotation=15)
+
+                    # 嵌入
+                    cv = FigureCanvasTkAgg(fig, master=iframe)
+                    cv.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+                    cv.draw_idle()
+                    return fig, cv
+
+                def _redraw_all():
+                    period = _idx_period_var.get()
+                    _idx_status.config(text=f"⏳ 拉 {period} ...")
+                    _idx_nb.update_idletasks()
+                    for iframe, scode, iname in _idx_frames:
+                        try:
+                            _draw_one(iframe, scode, iname, period)
+                        except Exception as _ed:
+                            import traceback; traceback.print_exc()
+                            print(f"[情绪复盘K线] {iname} 重绘失败: {_ed}", flush=True)
+                    _idx_status.config(text=f"✅ {period} 三大指数已更新  {_dt2.now().strftime('%H:%M:%S')}")
+
+                # 周期切换 = 自动重绘
+                _idx_period_var.trace_add('write', lambda *a: _redraw_all())
+                # 异步首绘 (防卡)
+                def _first_draw():
+                    _redraw_all()
+                    _rev_canvas.configure(scrollregion=_rev_canvas.bbox("all"))
+                _rev_inner.after(400, _first_draw)
             except Exception as _e_emo_tab:
                 import traceback; traceback.print_exc()
                 print(f"[情绪复盘] tab创建失败: {_e_emo_tab}", flush=True)
@@ -61244,6 +61449,77 @@ class DapanMixin:
                 for i in range(1,len(c)): obv[i]=obv[i-1]+(v[i] if c[i]>c[i-1] else (-v[i] if c[i]<c[i-1] else 0))
                 return obv
 
+            def _calc_butterfly_up(highs, lows, closes):
+                """🦋 蝴蝶UP指标 — 缠论笔中枢识别简化版
+                三笔重叠区 = 中枢, 当价格突破中枢上沿且 MACD 辅助确认 = UP 信号"""
+                h = np.asarray(highs, dtype=float)
+                l = np.asarray(lows, dtype=float)
+                c = np.asarray(closes, dtype=float)
+                n = len(c)
+                # 1. 识别笔 (顶底分型)
+                top_fractals = []; bot_fractals = []
+                for i in range(2, n - 2):
+                    if h[i] > h[i-1] and h[i] > h[i-2] and h[i] > h[i+1] and h[i] > h[i+2]:
+                        top_fractals.append((i, h[i]))
+                    if l[i] < l[i-1] and l[i] < l[i-2] and l[i] < l[i+1] and l[i] < l[i+2]:
+                        bot_fractals.append((i, l[i]))
+                # 2. 合并 + 排序
+                fractals = [(i, p, 'T') for i, p in top_fractals] + \
+                           [(i, p, 'B') for i, p in bot_fractals]
+                fractals.sort(key=lambda x: x[0])
+                # 3. 构造连续笔, 取三笔重叠区作为中枢
+                up_signals = np.zeros(n)   # 中枢上沿突破信号 (1=突破)
+                pivot_high = np.full(n, np.nan)   # 中枢上沿
+                pivot_low = np.full(n, np.nan)    # 中枢下沿
+                for k in range(len(fractals) - 3):
+                    seg = fractals[k:k+4]  # 4 个分型 = 3 笔
+                    # 三笔: B-T-B-T 或 T-B-T-B 交替
+                    highs_in = [s[1] for s in seg if s[2] == 'T']
+                    lows_in = [s[1] for s in seg if s[2] == 'B']
+                    if len(highs_in) >= 2 and len(lows_in) >= 2:
+                        # 中枢 = 前三笔重叠
+                        zh_high = min(highs_in[:2])   # 中枢上沿 = 向下两笔的低高点
+                        zh_low  = max(lows_in[:2])    # 中枢下沿 = 向上两笔的高低点
+                        if zh_high > zh_low:  # 有效中枢
+                            seg_start = seg[0][0]; seg_end = seg[-1][0]
+                            pivot_high[seg_start:seg_end+1] = zh_high
+                            pivot_low[seg_start:seg_end+1]  = zh_low
+                            # 突破信号: 当前收 > 中枢上沿
+                            for j in range(seg_end, min(seg_end + 5, n)):
+                                if j < n and c[j] > zh_high:
+                                    up_signals[j] = 1.0
+                return up_signals, pivot_high, pivot_low
+
+            # ─── 新浪多周期 K 线拉取 ───
+            def _fetch_sina_multi(sina_code, scale, datalen=240):
+                import ssl, urllib.request, json as _json, pandas as _pd
+                ctx = ssl._create_unverified_context()
+                url = (f"https://quotes.sina.cn/cn/api/jsonp.php/_/"
+                       f"CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}"
+                       f"&ma=no&datalen={datalen}")
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0",
+                                                                "Referer": "https://finance.sina.com.cn"})
+                    with urllib.request.urlopen(req, timeout=6, context=ctx) as _r:
+                        raw = _r.read().decode("utf-8", errors="ignore")
+                    body = raw.split("(", 1)[1].rsplit(")", 1)[0]
+                    data = _json.loads(body)
+                    if not data: return None
+                    df = _pd.DataFrame(data)
+                    for _col in ['open','high','low','close']:
+                        if _col in df.columns: df[_col] = df[_col].astype(float)
+                    if 'volume' in df.columns: df['volume'] = df['volume'].astype(float)
+                    return df
+                except Exception as _e:
+                    print(f"[主力趋势] 新浪拉取 {sina_code} scale={scale} 失败: {_e}", flush=True)
+                    return None
+
+            def _period_to_scale(period_name):
+                return {
+                    "1分钟": 1, "5分钟": 5, "15分钟": 15, "30分钟": 30,
+                    "60分钟": 60, "日线": 240,
+                }.get(period_name, 240)
+
             # ─── UI: 顶部控件 ───
             top_frame = ttk.Frame(win, padding=4); top_frame.pack(fill=tk.X)
 
@@ -61252,10 +61528,15 @@ class DapanMixin:
             sym_combo = ttk.Combobox(top_frame, values=display_names, width=20, state="normal", textvariable=symbol_var)
             sym_combo.pack(side=tk.LEFT, padx=2)
 
-            # 周期
+            # 周期 + 刷新按钮
             ttk.Label(top_frame, text="周期:").pack(side=tk.LEFT, padx=(12, 2))
             period_var = tk.StringVar(value="日线")
-            ttk.Combobox(top_frame, values=["日线", "60分钟", "30分钟", "15分钟"], width=8, state="readonly", textvariable=period_var).pack(side=tk.LEFT)
+            ttk.Combobox(top_frame, values=["1分钟", "5分钟", "15分钟", "30分钟", "60分钟", "日线", "周K", "月K"],
+                         width=8, state="readonly", textvariable=period_var).pack(side=tk.LEFT)
+
+            refresh_btn = tk.Button(top_frame, text="🔄 执行", bg="#1976D2", fg="white",
+                                    font=("", 10, "bold"), relief="flat", padx=12, pady=2, cursor="hand2")
+            refresh_btn.pack(side=tk.RIGHT, padx=6)
 
             # 指标 toggle
             ind_frame = ttk.Frame(win); ind_frame.pack(fill=tk.X, padx=4, pady=(2,4))
@@ -61273,7 +61554,7 @@ class DapanMixin:
             # 副图选择
             ttk.Label(ind_frame, text="副图:").pack(side=tk.LEFT, padx=(10,2))
             sub_var = tk.StringVar(value="MACD")
-            ttk.Combobox(ind_frame, values=["MACD", "RSI", "KDJ", "OBV", "🧭ARMS", "💰资金面"], width=10, state="readonly", textvariable=sub_var).pack(side=tk.LEFT)
+            ttk.Combobox(ind_frame, values=["MACD", "🦋蝴蝶UP", "RSI", "KDJ", "OBV", "🧭ARMS", "💰资金面"], width=12, state="readonly", textvariable=sub_var).pack(side=tk.LEFT)
 
             # 主图上方广度实时条 (ARMS 当天值)
             breadth_frame = ttk.Frame(win); breadth_frame.pack(fill=tk.X, padx=4)
@@ -61319,18 +61600,51 @@ class DapanMixin:
                         else: status_var.set(f"❌ 找不到 {sym_name}"); return
 
                     sym_code = sym_map[sym_name]
-                    status_var.set(f"⏳ 拉取 {sym_name} ({sym_code})..."); win.update_idletasks()
+                    status_var.set(f"⏳ 拉取 {sym_name} ({sym_code}) [{period_var.get()}]..."); win.update_idletasks()
 
-                    # 拉数据
+                    # ─── 多周期数据拉取 ───
+                    period_name = period_var.get()
+                    scale = _period_to_scale(period_name)
+                    sina_code = sym_code if sym_code.startswith(("sh","sz","bj")) else \
+                        ("sh" + sym_code) if sym_code.startswith(("5","6","9")) else \
+                        ("sz" + sym_code)
+                    df = None
                     try:
-                        df = self._fetch_index_daily(symbol=sym_code, days=200)
-                    except Exception: df = None
-                    if not df:
-                        try:
-                            df = self._fetch_daily_kline(symbol=sym_code, days=200)
+                        # 周K/月K: 新浪不支持, 拉日线本地聚合
+                        if period_name == "周K":
+                            df_daily = _fetch_sina_multi(sina_code, 240, 300)
+                            if df_daily is not None and len(df_daily) > 0:
+                                import pandas as _pd
+                                df_daily['day'] = _pd.to_datetime(df_daily['day'])
+                                df = df_daily.set_index('day').resample('W').agg({
+                                    'open':'first','high':'max','low':'min','close':'last',
+                                    'volume':'sum'}).dropna().reset_index()
+                                df['day'] = df['day'].dt.strftime('%Y-%m-%d')
+                        elif period_name == "月K":
+                            df_daily = _fetch_sina_multi(sina_code, 240, 500)
+                            if df_daily is not None and len(df_daily) > 0:
+                                import pandas as _pd
+                                df_daily['day'] = _pd.to_datetime(df_daily['day'])
+                                df = df_daily.set_index('day').resample('ME').agg({
+                                    'open':'first','high':'max','low':'min','close':'last',
+                                    'volume':'sum'}).dropna().reset_index()
+                                df['day'] = df['day'].dt.strftime('%Y-%m-%d')
+                        else:
+                            # 正常分钟/日线: 直接新浪
+                            df = _fetch_sina_multi(sina_code, scale, 240)
+                    except Exception as _ef:
+                        print(f"[主力趋势] 多周期拉取失败: {_ef}", flush=True)
+                        df = None
+
+                    if df is None or len(df) < 10:
+                        # fallback: 旧的日线接口
+                        try: df = self._fetch_index_daily(symbol=sym_code, days=200)
                         except Exception: df = None
-                    if not df or len(df) < 30:
-                        status_var.set("❌ 数据不足"); return
+                        if df is None:
+                            try: df = self._fetch_daily_kline(symbol=sym_code, days=200)
+                            except Exception: df = None
+                        if df is None or len(df) < 30:
+                            status_var.set("❌ 数据不足"); return
 
                     df = pd.DataFrame(df)
                     opens = df['open'].astype(float).values
@@ -61390,7 +61704,29 @@ class DapanMixin:
 
                     # ═══ 副图 (根据选择切换) ═══
                     sub_choice = sub_var.get()
-                    if sub_choice == "MACD":
+                    if sub_choice == "🦋蝴蝶UP":
+                        up_sig, ph, pl = _calc_butterfly_up(highs, lows, closes)
+                        # 中枢上沿/下沿填充
+                        _has_pivot = ~np.isnan(ph)
+                        if np.any(_has_pivot):
+                            ax_sub1.plot(x, ph, color='#9c27b0', linewidth=0.8, linestyle='--', label='中枢上沿', alpha=0.8)
+                            ax_sub1.plot(x, pl, color='#2196f3', linewidth=0.8, linestyle='--', label='中枢下沿', alpha=0.8)
+                            # 中枢填充区
+                            _between = ~np.isnan(ph) & ~np.isnan(pl)
+                            if np.any(_between):
+                                ax_sub1.fill_between(x, pl, ph, where=_between,
+                                                     color='#ff9800', alpha=0.15)
+                        # UP 信号柱
+                        _sig_colors = ['#d32f2f' if s > 0 else '#eeeeee00' for s in up_sig]
+                        ax_sub1.bar(x, up_sig * 100, color=_sig_colors, width=0.6, alpha=0.85)
+                        # 信号星标
+                        _up_idx = np.where(up_sig > 0)[0]
+                        for _ui in _up_idx:
+                            ax_sub1.scatter([x[_ui]], [105], marker='*', color='#d32f2f', s=120, zorder=10)
+                        ax_sub1.set_ylim(-5, 115); ax_sub1.set_ylabel("🦋蝴蝶", fontsize=8)
+                        ax_sub1.legend(loc='upper left', fontsize=7)
+                        ax_sub1.axhline(y=0, color='gray', linewidth=0.5, alpha=0.5)
+                    elif sub_choice == "MACD":
                         if ind_vars["macd"].get():
                             dif, dea, macdh = _calc_macd(closes)
                             colors = ['#d32f2f' if v >= 0 else '#2e7d32' for v in macdh]
@@ -61652,6 +61988,8 @@ class DapanMixin:
             sym_combo.bind("<<ComboboxSelected>>", lambda e: _redraw())
             for var in ind_vars.values(): var.trace_add('write', lambda *a: _redraw())
             sub_var.trace_add('write', lambda *a: _redraw())
+            period_var.trace_add('write', lambda *a: _redraw())
+            refresh_btn.config(command=_redraw)
 
             # ─── Canvas ───
             canvas = FigureCanvasTkAgg(fig, chart_inner)

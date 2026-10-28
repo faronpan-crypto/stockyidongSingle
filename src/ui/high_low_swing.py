@@ -2937,7 +2937,7 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
 # ═══════════════════════════════════════════════
 
 def _show_multi_kline_comparison(parent_root, app=None):
-    """多标的并排对比 mini K 线图。ETF=日线, 个股=1min"""
+    """多标的并排对比 K 线图 — 支持多周期 + MACD 副图"""
     import requests, json as _json, threading
     import numpy as np
     from datetime import datetime
@@ -2957,10 +2957,21 @@ def _show_multi_kline_comparison(parent_root, app=None):
         return
 
     dlg = tk.Toplevel(parent_root)
-    dlg.title("🔍 多股并排对比 (MA5/10/20/60)")
+    dlg.title("🔍 多股并排对比 (MA+VW-MACD, 多周期)")
     dlg.geometry("1440x940")
     dlg.configure(bg=_BG_DEEP)
     dlg.minsize(1000, 700)
+
+    # ── 周期配置 (scale → 新浪参数, 周K=240日线本地聚合) ──
+    _PERIODS = [
+        ("1min",   1,   240),
+        ("5min",   5,   240),
+        ("15min",  15,  240),
+        ("60min",  60,  240),
+        ("日K",    240, 240),
+        ("周K",    900, 120),   # 伪 scale=900 (新浪不支持, 本地聚合日线)
+    ]
+    period_var = tk.StringVar(value="1min")
 
     # ── 下拉候选池 ──
     _POOL = [
@@ -3000,6 +3011,11 @@ def _show_multi_kline_comparison(parent_root, app=None):
     top.pack_propagate(False)
     tk.Label(top, text="🔍 多股并排对比", bg=_BG_TOOLBAR, fg=_FG_GOLD,
              font=("", 11, "bold")).pack(side=tk.LEFT, padx=(10, 8), pady=10)
+
+    # 周期选择 (Radio 按钮组)
+    tk.Label(top, text="周期:", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT, padx=(4, 2))
+    for _pname, _, _ in _PERIODS:
+        ttk.Radiobutton(top, text=_pname, value=_pname, variable=period_var).pack(side=tk.LEFT, padx=1)
 
     # 列数
     tk.Label(top, text="列数:", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9)).pack(side=tk.LEFT, padx=(4, 2))
@@ -3063,10 +3079,10 @@ def _show_multi_kline_comparison(parent_root, app=None):
     def _update_combo():
         selected_lbl.config(text=f"已选: {len(selected_codes)} 个 — {', '.join(sorted(selected_codes))}")
 
-    # 🔍 开始
+    # 🔍 开始 (放到 preset 和 combo 之间, 方便操作)
     tk.Button(top, text="🔍 开始对比", bg="#00695C", fg="white",
               font=("", 10, "bold"), padx=12, pady=2, cursor="hand2",
-              command=lambda: _render_grid()).pack(side=tk.RIGHT, padx=10, pady=10)
+              command=lambda: _render_grid()).pack(side=tk.LEFT, padx=(10, 4), pady=10)
 
     # ── Canvas 区 ──
     canvas_frame = tk.Frame(dlg, bg=_BG_DEEP)
@@ -3077,25 +3093,66 @@ def _show_multi_kline_comparison(parent_root, app=None):
     fig = None
     canvas = None
 
-    def _fetch_one(sina_code, n=240):
-        """拉一个标的 K 线 (优先 1min, 失败 fallback 日线)"""
-        def _try(scale, datalen):
+    def _fetch_one(sina_code, period_name="日K"):
+        """拉一个标的 K 线 — 支持多周期, 周K本地聚合"""
+        # 找 period
+        scale = 240; datalen = 240
+        for _pn, _sc, _dl in _PERIODS:
+            if _pn == period_name:
+                scale = _sc; datalen = _dl; break
+        is_weekly = (scale == 900)
+
+        def _try(s, dl):
             url = (f"https://quotes.sina.cn/cn/api/jsonp.php/var%20{sina_code}=/"
-                   f"CN_MarketData.getKLineData?symbol={sina_code}&scale={scale}&ma=no&datalen={datalen}")
+                   f"CN_MarketData.getKLineData?symbol={sina_code}&scale={s}&ma=no&datalen={dl}")
             r = requests.get(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"},
                              timeout=8)
             txt = r.text
-            if "([{}])" in txt or len(txt) < 200:
-                return None
+            if "([{}])" in txt or len(txt) < 200: return None
             start = txt.index("(") + 1; end = txt.rindex(");")
             try: return _json.loads(txt[start:end])
             except: return None
+
+        def _aggregate_weekly(daily_data):
+            """日线聚合成周K"""
+            if not daily_data: return daily_data
+            weeks = {}
+            for d in daily_data:
+                date_str = d["day"]
+                try:
+                    dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S" if ":" in date_str else "%Y-%m-%d")
+                except: continue
+                # ISO week 编号
+                iso_year, iso_week, _ = dt.isocalendar()
+                key = f"{iso_year}-W{iso_week:02d}"
+                if key not in weeks:
+                    weeks[key] = {"open": float(d["open"]), "high": float(d["high"]),
+                                  "low": float(d["low"]), "close": float(d["close"]),
+                                  "volume": float(d.get("volume", 0)),
+                                  "amount": float(d.get("amount", 0)), "day": date_str[:10]}
+                else:
+                    w = weeks[key]
+                    w["high"] = max(w["high"], float(d["high"]))
+                    w["low"] = min(w["low"], float(d["low"]))
+                    w["close"] = float(d["close"])
+                    w["volume"] += float(d.get("volume", 0))
+                    w["amount"] += float(d.get("amount", 0))
+            # 按日期排序
+            return sorted(weeks.values(), key=lambda x: x["day"])
+
         try:
-            # 先试 1min
-            data = _try(1, min(n, 240))
+            # 周K需要先拉日线再聚合
+            if is_weekly:
+                data = _try(240, max(datalen * 5, 300))
+                if data:
+                    data = _aggregate_weekly(data)
+                if data: return data, True, None
+                return None, False, "周K: 日线聚合失败"
+            # 正常多周期
+            data = _try(scale, datalen)
             if data: return data, False, None
-            # fallback: 日线 (ETF/指数都支持)
-            data = _try(240, min(n, 240))
+            # fallback: 日线
+            data = _try(240, datalen)
             if data: return data, True, None
             return None, False, "sina返回空"
         except Exception as e:
@@ -3148,16 +3205,17 @@ def _show_multi_kline_comparison(parent_root, app=None):
         codes = sorted(selected_codes)[:9]  # 最多 9 个
         cols = cols_var.get()
         rows = (len(codes) + cols - 1) // cols
+        period_name = period_var.get()
 
-        status_lbl.config(text=f"⏳ 拉取 {len(codes)} 个标的...", fg=_FG_BLUE)
+        status_lbl.config(text=f"⏳ 拉取 {len(codes)} 个 [{period_name}]...", fg=_FG_BLUE)
         dlg.update()
 
-        # 并行拉取
+        # 并行拉取 (传 period)
         results = [None] * len(codes)
         lock = threading.Lock()
 
         def _worker(idx, code):
-            data, is_etf, err = _fetch_one(code)
+            data, is_etf, err = _fetch_one(code, period_name)
             with lock:
                 results[idx] = (data, is_etf, err, code)
 
@@ -3172,15 +3230,31 @@ def _show_multi_kline_comparison(parent_root, app=None):
             try: canvas.toolbar.destroy()
             except Exception: pass
 
-        fig = Figure(figsize=(cols * 4.5, rows * 3.5 + 0.5), dpi=96, facecolor=_BG_PANEL)
+        # gridspec: 每个 cell = 主图 K线(3) + MACD副图(1)
+        from matplotlib.gridspec import GridSpec
+        # 整体 figure: rows*2 个子图 (K线+MACD)
+        _cell_h = 4.2  # 每个 cell (K线+MACD) 高度
+        fig = Figure(figsize=(cols * 4.5, rows * _cell_h + 0.5), dpi=96, facecolor=_BG_PANEL)
+
+        # 存 ax 映射 (主图)
+        _main_axes = []
+        _macd_axes = []
 
         for i, (data, is_etf, err, code) in enumerate(results):
-            ax = fig.add_subplot(rows, cols, i + 1, facecolor=_BG_PANEL)
+            r, c = divmod(i, cols)
+            _gs = GridSpec(rows * 2, cols, figure=fig, height_ratios=[3, 1] * rows,
+                           hspace=0.45, wspace=0.25,
+                           left=0.05 + c * 0.005, right=0.95 - (cols - 1 - c) * 0.005)
+            ax_main = fig.add_subplot(_gs[r * 2, c])
+            ax_macd = fig.add_subplot(_gs[r * 2 + 1, c], sharex=ax_main)
+            _main_axes.append(ax_main); _macd_axes.append(ax_macd)
+
             label = _find_label(code)
             if err or not data:
-                ax.text(0.5, 0.5, f"❌ {label}\n{err or '空'}", ha="center", va="center",
-                        color="#EF5350", fontsize=10, transform=ax.transAxes)
-                ax.set_axis_off()
+                for _a in (ax_main, ax_macd):
+                    _a.text(0.5, 0.5, f"❌ {label}\n{err or '空'}", ha="center", va="center",
+                            color="#EF5350", fontsize=10, transform=_a.transAxes)
+                    _a.set_axis_off()
                 continue
 
             # 解析
@@ -3190,63 +3264,119 @@ def _show_multi_kline_comparison(parent_root, app=None):
             h = np.array([float(d["high"]) for d in data])
             lo = np.array([float(d["low"]) for d in data])
             c = np.array([float(d["close"]) for d in data])
+            try: v = np.array([float(d.get("volume", 0)) for d in data])
+            except Exception: v = np.zeros(len(c))
 
             x = np.arange(len(times))
-            # 蜡烛
+
+            # ════════════════ 主图: 蜡烛 + MA ════════════════
             for j in range(len(times)):
                 up = c[j] >= o[j]
                 col = "#EF5350" if up else "#66BB6A"
-                ax.plot([x[j], x[j]], [lo[j], h[j]], color=col, lw=0.6)
+                ax_main.plot([x[j], x[j]], [lo[j], h[j]], color=col, lw=0.6)
                 bl = min(o[j], c[j]); bh = max(o[j], c[j])
-                ax.add_patch(FancyBboxPatch((x[j] - 0.35, bl), 0.7, max(bh - bl, 0.001),
-                                            boxstyle="square,pad=0", facecolor=col, edgecolor=col, lw=0.4))
+                ax_main.add_patch(FancyBboxPatch((x[j] - 0.35, bl), 0.7, max(bh - bl, 0.001),
+                                                boxstyle="square,pad=0", facecolor=col, edgecolor=col, lw=0.4))
             # MA 线
             ma5 = _ma(c, 5); ma10 = _ma(c, 10); ma20 = _ma(c, 20); ma60 = _ma(c, 60)
-            ax.plot(x, ma5, color="#FFD54F", lw=0.9, label="MA5")
-            ax.plot(x, ma10, color="#42A5F5", lw=0.9, label="MA10")
-            ax.plot(x, ma20, color="#AB47BC", lw=0.9, label="MA20")
-            ax.plot(x, ma60, color="#EF9A9A", lw=1.2, label="MA60")
+            ax_main.plot(x, ma5, color="#FFD54F", lw=0.9, label="MA5")
+            ax_main.plot(x, ma10, color="#42A5F5", lw=0.9, label="MA10")
+            ax_main.plot(x, ma20, color="#AB47BC", lw=0.9, label="MA20")
+            ax_main.plot(x, ma60, color="#EF9A9A", lw=1.2, label="MA60")
 
-            # 🎯 mini K 线也加 MA60 上穿🟢买/下穿🔴卖
-            for i in range(61, len(c)):
-                if np.isnan(ma60[i]) or np.isnan(ma60[i-1]): continue
-                if c[i-1] < ma60[i-1] and c[i] >= ma60[i]:
-                    ax.scatter([x[i]], [c[i] * 0.998], marker="^", s=40,
-                               color="#66BB6A", zorder=10)
-                elif c[i-1] > ma60[i-1] and c[i] <= ma60[i]:
-                    ax.scatter([x[i]], [c[i] * 1.002], marker="v", s=40,
-                               color="#EF5350", zorder=10)
+            # MA60 上穿🟢买/下穿🔴卖 (长周期才给 MA60 信号)
+            if len(c) > 60:
+                for j in range(61, len(c)):
+                    if np.isnan(ma60[j]) or np.isnan(ma60[j-1]): continue
+                    if c[j-1] < ma60[j-1] and c[j] >= ma60[j]:
+                        ax_main.scatter([x[j]], [c[j] * 0.998], marker="^", s=40, color="#66BB6A", zorder=10)
+                    elif c[j-1] > ma60[j-1] and c[j] <= ma60[j]:
+                        ax_main.scatter([x[j]], [c[j] * 1.002], marker="v", s=40, color="#EF5350", zorder=10)
 
-            # 🆕 mini PAN 买点/卖点 (BIAS + 局部极值, 只看最近 80 根)
-            _start_p = max(61, len(c) - 80)
-            for i in range(_start_p, len(c)):
-                if np.isnan(ma60[i]) or ma60[i] <= 0: continue
-                bias = (c[i] - ma60[i]) / ma60[i] * 100.0
-                _lo2 = max(0, i - 5); _hi2 = min(len(c), i + 6)
-                is_lo = c[i] == np.min(c[_lo2:_hi2])
-                is_hi = c[i] == np.max(c[_lo2:_hi2])
+            # 🎯 PAN 买点/卖点 (BIAS + 局部极值)
+            _start_p = max(21, len(c) - 80)
+            for j in range(_start_p, len(c)):
+                _ref_ma = ma20 if len(c) < 60 else ma60
+                if np.isnan(_ref_ma[j]) or _ref_ma[j] <= 0: continue
+                bias = (c[j] - _ref_ma[j]) / _ref_ma[j] * 100.0
+                _lo2 = max(0, j - 5); _hi2 = min(len(c), j + 6)
+                is_lo = c[j] == np.min(c[_lo2:_hi2])
+                is_hi = c[j] == np.max(c[_lo2:_hi2])
                 if bias <= -2.0 and is_lo:
-                    ax.scatter([x[i]], [c[i] * 0.995], marker="^", s=60,
-                               color="#FFC107", zorder=11, edgecolors="white", linewidths=0.8)
+                    ax_main.scatter([x[j]], [c[j] * 0.995], marker="^", s=60,
+                                   color="#FFC107", zorder=11, edgecolors="white", linewidths=0.8)
                 elif bias >= 2.0 and is_hi:
-                    ax.scatter([x[i]], [c[i] * 1.005], marker="v", s=60,
-                               color="#29B6F6", zorder=11, edgecolors="white", linewidths=0.8)
+                    ax_main.scatter([x[j]], [c[j] * 1.005], marker="v", s=60,
+                                   color="#29B6F6", zorder=11, edgecolors="white", linewidths=0.8)
 
-            # 标题 (周期 + 最新 MA)
-            title_txt = f"{label} (1min)"
-            ax.set_title(title_txt, color="#E0E0E0", fontsize=9, fontweight="bold", pad=4)
-            ax.set_facecolor(_BG_PANEL)
-            ax.tick_params(colors=_FG_DIM, labelsize=7)
-            for s in ax.spines.values(): s.set_color(_FG_DIM)
-            ax.grid(True, alpha=0.12, color=_FG_DIM)
-
-            # 最新 MA60 标记
+            # 标题 + 最新 MA
+            title_txt = f"{label} [{period_name}]"
             if not np.isnan(ma60[-1]):
-                pos = "📈" if c[-1] > ma60[-1] else "📉"
-                ax.text(0.98, 0.95, f"MA60={ma60[-1]:.2f} {pos}", transform=ax.transAxes,
-                        color="#EF9A9A", fontsize=7, ha="right", va="top")
+                title_txt += f"  MA60={ma60[-1]:.2f}"
+            ax_main.set_title(title_txt, color="#E0E0E0", fontsize=9, fontweight="bold", pad=4)
+            ax_main.set_facecolor(_BG_PANEL)
+            ax_main.tick_params(colors=_FG_DIM, labelsize=7, labelbottom=False)
+            for s in ax_main.spines.values(): s.set_color(_FG_DIM)
+            ax_main.grid(True, alpha=0.12, color=_FG_DIM)
 
-        fig.subplots_adjust(top=0.95, bottom=0.05, left=0.05, right=0.95, hspace=0.35, wspace=0.2)
+            # ════════════════ MACD 副图 (VW-MACD 量能加权) ════════════════
+            def _ema(a, n):
+                _out = np.empty_like(a); _out[0] = a[0]
+                _k = 2.0 / (n + 1)
+                for _ii in range(1, len(a)): _out[_ii] = a[_ii] * _k + _out[_ii-1] * (1 - _k)
+                return _out
+            if len(c) > 35:
+                ema12 = _ema(c, 12); ema26 = _ema(c, 26)
+                dif = ema12 - ema26
+                dea = _ema(dif, 9)
+                macdh = 2.0 * (dif - dea)
+                # VW 量能加权
+                v_ma20 = np.full_like(v, np.nan)
+                if len(v) >= 20:
+                    v_ma20[19:] = _ma(v, 20)[19:]
+                vol_ratio = np.where(v_ma20 > 0, v / np.maximum(v_ma20, 1), 1.0)
+                vol_ratio = np.clip(vol_ratio, 0.1, 5.0)
+                vw_macdh = macdh * np.sqrt(vol_ratio)
+                # 柱色: 正红负绿 (A股)
+                _bar_colors = ["#EF5350" if _m >= 0 else "#66BB6A" for _m in vw_macdh]
+                ax_macd.bar(x, vw_macdh, color=_bar_colors, width=0.7, alpha=0.85)
+                ax_macd.plot(x, dif, color="#FFD54F", lw=0.8, label="DIF")
+                ax_macd.plot(x, dea, color="#42A5F5", lw=0.8, label="DEA")
+                ax_macd.axhline(0, color="#555", lw=0.5)
+            else:
+                ax_macd.text(0.5, 0.5, "数据不足", ha="center", va="center",
+                             color=_FG_DIM, fontsize=9, transform=ax_macd.transAxes)
+
+            ax_macd.set_facecolor(_BG_PANEL)
+            ax_macd.tick_params(colors=_FG_DIM, labelsize=7)
+            for s in ax_macd.spines.values(): s.set_color(_FG_DIM)
+            ax_macd.grid(True, alpha=0.08, color=_FG_DIM)
+            ax_macd.set_ylabel("MACD", color=_FG_DIM, fontsize=7)
+
+            # X 轴时间刻度 (按周期选显示密度)
+            _n = len(times)
+            # 根据总根数选 tick 密度: 6~8 个刻度
+            _target_ticks = min(8, max(4, _n // 30))
+            _step = max(1, _n // (_target_ticks + 1))
+            _tick_idx = list(range(_step - 1, _n, _step))
+            if _tick_idx and _tick_idx[-1] != _n - 1:
+                _tick_idx.append(_n - 1)
+            # 时间格式化
+            _pf = period_name
+            if _pf in ("1min", "5min", "15min", "60min"):
+                def _tfmt(t):
+                    return t.strftime("%m-%d %H:%M")
+            elif _pf == "日K":
+                def _tfmt(t):
+                    return t.strftime("%m-%d")
+            else:  # 周K
+                def _tfmt(t):
+                    return t.strftime("%Y-W%W")
+            ax_macd.set_xticks([x[i] for i in _tick_idx])
+            ax_macd.set_xticklabels([_tfmt(times[i]) for i in _tick_idx],
+                                     color=_FG_DIM, fontsize=7, rotation=20)
+
+        fig.subplots_adjust(top=0.95, bottom=0.05, left=0.04, right=0.97, hspace=0.4, wspace=0.2)
 
         canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
         canvas.draw()
@@ -3257,26 +3387,30 @@ def _show_multi_kline_comparison(parent_root, app=None):
         tb.update()
         tb.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # 🆕 多股 canvas 双击 → 弹对应子图标的日K
-        # 把 ax 和 sina code 建立映射 (用 _ax_code_map)
+        # canvas 双击 → 弹对应子图标的 K线
         _ax_code_map = {}
         for i, (data, is_etf, err, code) in enumerate(results):
-            ax_i = fig.axes[i]
+            ax_i = _main_axes[i]
             _ax_code_map[id(ax_i)] = code
         def _mg_press(e):
             if e.dblclick and e.inaxes is not None:
-                _code = _ax_code_map.get(id(e.inaxes))
-                if _code:
-                    _label = _find_label(_code)
-                    print(f"[🔍多股双击] {_label}({_code}) → 弹日K", flush=True)
-                    _quick_open_daily_kline(dlg, _code, _label)
-        try:
-            canvas.mpl_connect("button_press_event", _mg_press)
+                # 找到主图 (因为 sharex, 可能点到 macd 子图)
+                _ax_code = _ax_code_map.get(id(e.inaxes))
+                if not _ax_code:
+                    # 从 macd 反查 main
+                    for j, _ma in enumerate(_macd_axes):
+                        if id(_ma) == id(e.inaxes):
+                            _ax_code = _ax_code_map.get(id(_main_axes[j])); break
+                if _ax_code:
+                    _label = _find_label(_ax_code)
+                    print(f"[🔍多股双击] {_label}({_ax_code}) → 弹K线", flush=True)
+                    _quick_open_daily_kline(dlg, _ax_code, _label)
+        try: canvas.mpl_connect("button_press_event", _mg_press)
         except Exception: pass
 
-        status_lbl.config(text=f"✅ {len(codes)} 个标的, {rows}×{cols} 网格", fg="#66BB6A")
-        print(f"[🔍多股] ✅ 渲染完成 {len(codes)} 个", flush=True)
-        _mg_start()  # 🆕 首次渲染成功后启动盘中自动刷新
+        status_lbl.config(text=f"✅ {len(codes)} 个 [{period_name}], {rows}×{cols} 网格 + MACD", fg="#66BB6A")
+        print(f"[🔍多股] ✅ 渲染完成 {len(codes)} 个 [{period_name}]", flush=True)
+        _mg_start()
 
     dlg.after(300, lambda: (None))  # 延迟显示
 
