@@ -62309,75 +62309,392 @@ class DapanMixin:
             return ""
 
     def _run_skill_from_dialog(self, skill_info, result_tree, status_var):
-        """🤖 Skill 工具箱 Tab 4 卡片点击回调 — 填右侧 Treeview, 不自动开弹窗"""
+        """🤖 Skill 工具箱 Tab 4 — 按 skill key 分发到真实脚本"""
         import threading as _th
-        import sqlite3 as _sql
+        import sqlite3 as _sql, urllib.request as _ur, ssl as _ssl, json as _jrt, os as _os, sys as _sys
 
-        _name = skill_info.get("name", skill_info.get("key", "Skill"))
+        _key = skill_info.get("key", "")
+        _name = skill_info.get("name", _key)
         status_var.set(f"⏳ 执行 {_name}...")
+
+
+        try:
+            from utils.config import DB_PATH as _DBP
+        except Exception:
+            _DBP = _os.path.join(
+                _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                "data", "stock_analysis.db")
+
+        # ── 新浪实时行情工具 ──
+        def _sina_realtime(codes):
+            ctx = _ssl._create_unverified_context()
+            _cm = {c: ("sh" if c.startswith("6") else "sz") + c for c in codes}
+            url = "https://hq.sinajs.cn/list=" + ",".join(_cm.values())
+            try:
+                req = _ur.Request(url, headers={"Referer": "https://finance.sina.com.cn"})
+                with _ur.urlopen(req, timeout=6, context=ctx) as _r:
+                    text = _r.read().decode("gbk", "ignore")
+            except Exception as _e:
+                print(f"[Skill] 新浪实时失败: {_e}", flush=True); return {}
+            out = {}
+            for _6c, _sc in _cm.items():
+                for _ln in text.strip().split("\n"):
+                    if f"hq_str_{_sc}=" not in _ln: continue
+                    d = _ln.split("=")[1].strip().strip(";").strip('"')
+                    if not d: break
+                    f = d.split(",")
+                    if len(f) < 4: break
+                    try:
+                        _nm = f[0]; _pv = float(f[2]); _cv = float(f[3])
+                        _pct = (_cv - _pv) / _pv * 100 if _pv else 0
+                        out[_6c] = {"name": _nm, "cur": _cv, "pct": _pct}
+                    except Exception: pass
+                    break
+            return out
+
+
+        # ── 统一股票池 (跟趋势三阶段一致: 持仓 + 资讯 + 实时 + 龙头, 多表合并去重) ──
+        def _get_unified_pool(_dbp):
+            """从多表拉全量股票池, 返回 [(code, name), ...]"""
+            _stocks = {}
+            try:
+                _c = _sql.connect(_dbp); _cue = _c.cursor()
+                # 1) batch_analysis_results (资讯股, 主力池)
+                _cue.execute("SELECT stock_code, stock_name FROM batch_analysis_results WHERE current_price > 0 AND stock_code IS NOT NULL")
+                for code, name in _cue.fetchall():
+                    if code and len(code) == 6: _stocks[code] = name
+                # 2) positions (持仓)
+                try:
+                    _cue.execute("SELECT code, name FROM positions WHERE code IS NOT NULL AND code != ''")
+                    for code, name in _cue.fetchall():
+                        if code and len(code) == 6 and code not in _stocks:
+                            _stocks[code] = name or code
+                except Exception: pass
+                # 3) ths_realtime_data (同花顺实时行情池)
+                try:
+                    _cue.execute("SELECT stock_code, stock_name FROM ths_realtime_data WHERE stock_code IS NOT NULL AND save_date = date('now','localtime')")
+                    for code, name in _cue.fetchall():
+                        if code and len(code) == 6 and code not in _stocks:
+                            _stocks[code] = name or code
+                except Exception: pass
+                # 4) lhb_records (龙虎榜)
+                try:
+                    _cue.execute("SELECT ts_code, name FROM lhb_records WHERE ts_code IS NOT NULL AND ts_code != '' LIMIT 200")
+                    for code, name in _cue.fetchall():
+                        code = code.split(".")[0] if "." in str(code) else str(code)
+                        if code and len(code) == 6 and code not in _stocks:
+                            _stocks[code] = name or code
+                except Exception: pass
+                _c.close()
+            except Exception as _e:
+                print(f"[统一股票池] DB 拉取异常: {_e}", flush=True)
+            # 去掉 ST/*ST (可选, 保留让 skill 自己判断)
+            return [(c, n) for c, n in _stocks.items()]
+
+        # ── 批量拉新浪实时 (分批 50 只, 避免接口限流) ──
+        def _sina_batch(codes, _batch=50):
+            _all = {}
+            for _i in range(0, len(codes), _batch):
+                _batch_codes = codes[_i:_i+_batch]
+                _all.update(_sina_realtime(_batch_codes))
+            return _all
+
+        # ── Runner 1: trend-phase-scanner → import 真实 skill 模块 ──
+        def _run_trend_phase():
+            _skill_dir = _os.path.expanduser("~/.qclaw/skills/trend-phase-scanner/scripts")
+            if _skill_dir not in _sys.path: _sys.path.insert(0, _skill_dir)
+            import trend_phase_scanner as _tps
+
+            _c = _sql.connect(_DBP); _cue = _c.cursor()
+            _cue.execute("SELECT DISTINCT stock_code, stock_name FROM batch_analysis_results WHERE current_price IS NOT NULL AND current_price > 0")
+            _raw = _cue.fetchall(); _c.close()
+            _stocks = [(c, _tps.clean_name(n)) for c, n in _raw]
+            print(f"[趋势三阶段] 股票池 {len(_stocks)} 只, 开始扫描...", flush=True)
+            _results = []
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            with ThreadPoolExecutor(max_workers=20) as _ex:
+                _futures = {_ex.submit(_tps.process, s): s for s in _stocks}
+                for _f in as_completed(_futures):
+                    try:
+                        _r = _f.result(timeout=15)
+                        if _r: _results.append(_r)
+                    except Exception: pass
+            _seen = {}
+            for _r in _results:
+                _c = _r["code"]
+                if _c not in _seen or _r["score"] > _seen[_c]["score"]:
+                    _seen[_c] = _r
+            _results = list(_seen.values())
+            _early = sorted([r for r in _results if "初期" in r["phase"]], key=lambda x: -x["score"])
+            _mid   = sorted([r for r in _results if "中期" in r["phase"]], key=lambda x: -x["score"])
+            _out = []
+            for _r in _early[:15]:
+                _out.append((_r["code"], _r["name"], _r.get("close", 0), _r["score"], f"🚀初期 {_r['reason']}"))
+            for _r in _mid[:10]:
+                _out.append((_r["code"], _r["name"], _r.get("close", 0), _r["score"], f"📈中期 {_r['reason']}"))
+            print(f"[趋势三阶段] 完成: {len(_results)}有效, 初期{len(_early)} 中期{len(_mid)}", flush=True)
+            return _out, len(_stocks), len(_results)
+
+        # ── Runner 2: price-volume-scanner → 统一股票池实时行情按量价排序 ──
+        def _run_price_volume():
+            _pool = _get_unified_pool(_DBP)
+            print(f"[价增量涨] 统一股票池 {len(_pool)} 只, 分批拉实时...", flush=True)
+            _rt = _sina_batch([c for c,_ in _pool])
+            print(f"[价增量涨] 实时拉取完成: {len(_rt)} 只有效", flush=True)
+            _out = []
+            for _c, _nm_full in _pool:
+                if _c not in _rt: continue
+                _q = _rt[_c]
+                _nm = _q["name"]; _pct = _q["pct"]; _cur = _q["cur"]
+                _score = min(100, int(max(0, 40 + _pct * 20 + (10 if _cur < 100 else 0))))
+                _out.append((_c, _nm, _pct, _score, f"{_pct:+.2f}%"))
+            _out.sort(key=lambda r: -r[3])
+            return _out[:10], len(_pool), len(_rt)
+
+        # ── Runner 兜底: 统一股票池实时行情按涨跌幅排序 ──
+        def _run_realtime(_skill_key):
+            _pool = _get_unified_pool(_DBP)
+            print(f"[{_skill_key}] 统一股票池 {len(_pool)} 只, 分批拉实时...", flush=True)
+            _rt = _sina_batch([c for c,_ in _pool])
+            print(f"[{_skill_key}] 实时拉取完成: {len(_rt)} 只有效", flush=True)
+            _out = []
+            for _c, _nm_full in _pool:
+                if _c not in _rt: continue
+                _q = _rt[_c]; _nm = _q["name"]; _pct = _q["pct"]; _cur = _q["cur"]
+                _score = min(100, int(max(0, 50 + _pct * 15 + (10 if _cur < 50 else 0))))
+                _out.append((_c, _nm, _pct, _score, _skill_key.replace("-","_")[:20]))
+            _out.sort(key=lambda r: -r[2])
+            return _out[:10], len(_pool), len(_rt)
+
+        # 从 skill_info 拿 cat, 写入实例
+        _cat = skill_info.get("cat", "screener")
+        self._last_skill_cat = _cat
+        self._last_skill_info = skill_info  # 存一份给"再分析一次"按钮用
+
+        _RUNNERS = {
+            "trend-phase-scanner":   _run_trend_phase,
+            "price-volume-scanner":  _run_price_volume,
+        }
 
         def _bg_run():
             try:
-                # 清空右侧结果
                 for _row in result_tree.get_children():
                     result_tree.delete(_row)
 
-                # 从 sentiment_history 拿涨跌家数 + 填示例选股结果
-                _results = []
-                try:
+                # ── ETF/宏观类 → 自动跑 AI 分析 (Tab2) ──
+                if _cat in ("etf", "macro"):
+                    # 同时在 Treeview 列简要结果 + AI 分析到 Tab2
+                    _results, _total, _valid = _run_realtime(_key)
+                    def _fill_tree(_rows):
+                        for _c, _nm, _p, _s, _r in _rows:
+                            _tag = "up" if _p > 0 else ("down" if _p < 0 else "")
+                            if _s >= 80: _tag = (_tag + " hi").strip()
+                            result_tree.insert("", tk.END, values=(
+                                _c, _nm, f"{_p:+.2f}", str(_s), _r), tags=(_tag,))
+                    self.root.after(0, _fill_tree, _results)
+                    # 触发 AI 宏观分析 → Tab2
                     try:
-                        from utils.config import DB_PATH as _DBP
-                    except Exception:
-                        _DBP = os.path.join(
-                            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "data", "stock_analysis.db")
-                    if _DBP and os.path.exists(_DBP):
-                        _ce = _sql.connect(_DBP)
-                        _cue = _ce.cursor()
-                        _cue.execute("SELECT snapshot_date, m2_up, m2_down, m2_total "
-                                     "FROM sentiment_history ORDER BY snapshot_date DESC LIMIT 1")
-                        _db_row = _cue.fetchone(); _ce.close()
-                        if _db_row and _db_row[2]:
-                            _up = _db_row[1] or 0; _dn = (_db_row[2] or 0) - _up
-                            _ratio = _up / max(_dn, 1)
-                            _demo = [
-                                ("600519", "贵州茅台", -0.20, 82, "白酒龙头 日线多头"),
-                                ("601318", "中国平安", -0.80, 71, "金融权重 超跌反弹"),
-                                ("300750", "宁德时代", -1.50, 68, "电池龙头 量能萎缩"),
-                                ("600036", "招商银行", -1.45, 65, "银行权重 估值低位"),
-                                ("000001", "平安银行", -1.30, 58, "银行补涨 突破在即"),
-                                ("601899", "紫金矿业", +2.10, 75, "有色金属 黄金涨价受益"),
-                                ("601168", "西部矿业", +1.80, 72, "铜价上行 主力流入"),
-                                ("300059", "东方财富", -2.00, 55, "券商互联网 缩量回调"),
-                                ("600030", "中信证券", -1.10, 60, "头部券商 MA20 支撑"),
-                                ("600745", "闻泰科技", -3.50, 45, "半导体 情绪低迷"),
-                            ]
-                            for _code, _nm, _pct, _score, _reason in _demo:
-                                _results.append((_code, _nm, f"{_pct:+.2f}", str(_score), _reason))
-                            _date = str(_db_row[0])
-                            self.root.after(0, lambda u=_up, d=_dn, r=_ratio, l=len(_results), dt=_date:
-                                status_var.set(
-                                    f"✅ {_name}: 涨{u}/跌{d} 比{r:.2f} | {l}只 | {dt}  "
-                                    f"👉 双击行看 K线+一目均衡"))
-                except Exception: pass
+                        self._run_macro_skill(skill_info, self._skill_nb, self._skill_ai_text, status_var)
+                    except Exception as _me:
+                        print(f"[宏观 Skill] 调用异常: {_me}", flush=True)
+                    return
 
-                # 填 Treeview
-                if _results:
-                    def _fill_tree(_rows=_results):
-                        for _r in _rows:
-                            _tag = "up" if float(_r[2]) > 0 else ("down" if float(_r[2]) < 0 else "")
-                            if int(_r[3]) >= 70: _tag = (_tag + " hi").strip()
-                            result_tree.insert("", tk.END, values=_r, tags=(_tag,))
-                    self.root.after(0, _fill_tree)
+                # ── 选股/分析类 → 跑扫描, 填 Treeview (Tab1) ──
+                _runner = _RUNNERS.get(_key)
+                if _runner:
+                    _results, _total, _valid = _runner()
                 else:
-                    self.root.after(0, lambda: status_var.set(
-                        f"⚠️ {_name}: 今日暂无数据"))
-
+                    _results, _total, _valid = _run_realtime(_key)
+                def _fill_tree(_rows):
+                    for _c, _nm, _p, _s, _r in _rows:
+                        _tag = "up" if _p > 0 else ("down" if _p < 0 else "")
+                        if _s >= 80: _tag = (_tag + " hi").strip()
+                        result_tree.insert("", tk.END, values=(
+                            _c, _nm, f"{_p:+.2f}", str(_s), _r), tags=(_tag,))
+                self.root.after(0, _fill_tree, _results)
+                self.root.after(0, lambda: status_var.set(
+                    f"✅ {_name}: {_valid}只有效 / {_total}只池 | "
+                    f"结果{len(_results)}只  👉 双击行看 K线+一目均衡"))
             except Exception as _e:
                 import traceback; traceback.print_exc()
                 self.root.after(0, lambda: status_var.set(f"❌ 执行失败: {_e}"))
-
         _th.Thread(target=_bg_run, daemon=True).start()
+
+    # ═══════════════════════════════════════════════
+    # 🤖 AI 分析辅助方法 (供 Skill 工具箱右侧 Tab2 使用)
+    # ═══════════════════════════════════════════════
+
+    def _ai_analyze_result_row(self, name, reason, nb_widget, text_widget):
+        """双击宏观/ETF类结果行 → 触发 AI 逻辑分析, 输出到 Tab2"""
+        import threading as _th
+        _cat = getattr(self, "_last_skill_cat", "macro")
+        _prompt = f"## {name}\n\n分析需求: {_cat} 类 Skill 执行结果\n详情: {reason}\n\n请从以下角度分析:\n1) 逻辑合理性\n2) 风险点\n3) 操作建议"
+
+        def _bg():
+            _res = self._call_ai_safe(_prompt, system="你是一位专业的 A股量化分析师, 擅长宏观研判、ETF套利、板块分析。输出结构化 Markdown, 300字以内, 要点清晰。")
+            self.root.after(0, lambda: self._show_ai_result(text_widget, _res, nb_widget))
+        _th.Thread(target=_bg, daemon=True).start()
+        nb_widget.select(1)  # 自动切到 Tab2
+
+    def _ai_reattach(self, tree, text_widget, status_var):
+        """Tab2 '再分析一次' 按钮 → 取 Treeview 第一行重新 AI 分析"""
+        sel = tree.selection()
+        if not sel:
+            all_rows = tree.get_children()
+            if not all_rows:
+                status_var.set("⚠️ 结果列表为空, 请先点击 Skill 卡片"); return
+            sel = [all_rows[0]]
+        item = tree.item(sel[0])
+        vals = item["values"]
+        name = str(vals[1]) if len(vals) > 1 else "未命名"
+        reason = str(vals[4]) if len(vals) > 4 else str(vals[3]) if len(vals) > 3 else ""
+        self._ai_analyze_result_row(name, reason, self._skill_nb, text_widget)
+
+    def _run_macro_skill(self, skill_info, nb_widget, text_widget, status_var):
+        """🔍 宏观类 Skill (Fed/日报/ETF) — 直接跑 AI 分析 + 拉数据"""
+        import threading as _th
+        import urllib.request as _ur, ssl as _ssl, json as _j, os as _os, time
+
+        _key = skill_info.get("key", "")
+        _name = skill_info.get("name", _key)
+        status_var.set(f"⏳ 宏观类 Skill: {_name} — 拉数据 + AI 分析中...")
+
+        def _collect_macro_data():
+            """收集实时宏观数据 (指数+ETF涨跌+板块热度)"""
+            ctx = _ssl._create_unverified_context()
+            _lines = []
+            _lines.append(f"## 📊 {_name} — 实时数据快照\n")
+            # 三大指数
+            _idx_map = [("sh000001","上证指数"),("sz399001","深证成指"),("sz399006","创业板指"),
+                        ("sh000300","沪深300"),("sh000016","上证50")]
+            try:
+                _cm = [c for c,_ in _idx_map]
+                url = "https://hq.sinajs.cn/list=" + ",".join(_cm)
+                req = _ur.Request(url, headers={"Referer":"https://finance.sina.com.cn"})
+                with _ur.urlopen(req, timeout=6, context=ctx) as r:
+                    text = r.read().decode("gbk","ignore")
+                _lines.append("### 大盘指数\n| 指数 | 当前 | 昨收 | 涨跌幅 |\n|------|------|------|--------|")
+                for code, nm in _idx_map:
+                    for _ln in text.strip().split("\n"):
+                        if f"hq_str_{code}=" not in _ln: continue
+                        d = _ln.split("=")[1].strip().strip(";").strip('"')
+                        if not d: break
+                        f = d.split(",")
+                        if len(f) >= 4:
+                            pv = float(f[2]); cv = float(f[3])
+                            pct = (cv-pv)/pv*100 if pv else 0
+                            _lines.append(f"| {nm} | {cv:.2f} | {pv:.2f} | {pct:+.2f}% |")
+                        break
+            except Exception as e:
+                _lines.append(f"⚠️ 指数拉取失败: {e}")
+
+            # ETF 涨跌幅 (10 只主题 ETF)
+            _etf_map = [("sh512660","军工ETF"),("sh512800","银行ETF"),("sh512000","券商ETF"),
+                        ("sh512480","半导体ETF"),("sh515790","光伏ETF"),("sh515050","5GETF"),
+                        ("sh512100","中证1000ETF"),("sh513100","纳指ETF"),("sh513520","日经ETF"),
+                        ("sh512980","传媒ETF")]
+            try:
+                _cm = [c for c,_ in _etf_map]
+                url2 = "https://hq.sinajs.cn/list=" + ",".join(_cm)
+                req2 = _ur.Request(url2, headers={"Referer":"https://finance.sina.com.cn"})
+                with _ur.urlopen(req2, timeout=6, context=ctx) as r:
+                    text2 = r.read().decode("gbk","ignore")
+                _lines.append("\n### 主题 ETF\n| ETF | 涨跌幅 |\n|-----|--------|")
+                for code, nm in _etf_map:
+                    for _ln in text2.strip().split("\n"):
+                        if f"hq_str_{code}=" not in _ln: continue
+                        d = _ln.split("=")[1].strip().strip(";").strip('"')
+                        if not d: break
+                        f = d.split(",")
+                        if len(f) >= 4:
+                            pv = float(f[2]); cv = float(f[3])
+                            pct = (cv-pv)/pv*100 if pv else 0
+                            _tag = "🟢" if pct >= 0 else "🔴"
+                            _lines.append(f"| {_tag} {nm} | {pct:+.2f}% |")
+                        break
+            except Exception as e:
+                _lines.append(f"⚠️ ETF拉取失败: {e}")
+
+            # 美元指数 DXY (Fed 传导关键变量)
+            if "fed" in _key.lower() or "宏观" in _name:
+                try:
+                    url3 = "https://hq.sinajs.cn/list=hf_DINIW"
+                    req3 = _ur.Request(url3, headers={"Referer":"https://finance.sina.com.cn"})
+                    with _ur.urlopen(req3, timeout=6, context=ctx) as r:
+                        text3 = r.read().decode("gbk","ignore")
+                    for _ln in text3.strip().split("\n"):
+                        if "DINIW" not in _ln: continue
+                        d = _ln.split("=")[1].strip().strip(";").strip('"')
+                        if d and "," in d:
+                            f = d.split(",")
+                            _lines.append(f"\n### 美元指数 DXY\n当前: {f[0]}  涨跌: {f[1] if len(f)>1 else 'N/A'}")
+                        break
+                except Exception: pass
+
+            _lines.append(f"\n⏱️ 更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            return "\n".join(_lines)
+
+        def _bg():
+            try:
+                _data = _collect_macro_data()
+                _prompt = f"{_data}\n\n请基于以上实时数据, 给出 {_name} 的深度分析 (300字 Markdown)。"
+                _res = self._call_ai_safe(_prompt, system="你是资深 A股宏观策略分析师, 擅长指数研判、ETF择时、美联储传导机制。输出结构化 Markdown, 结论先行, 数据支撑, 300字以内。")
+                self.root.after(0, lambda: self._show_ai_result(text_widget, _res, nb_widget, pre_data=_data))
+                self.root.after(0, lambda: status_var.set(f"✅ {_name}: 宏观数据 + AI 分析完成"))
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                self.root.after(0, lambda: status_var.set(f"❌ 宏观 Skill 执行失败: {e}"))
+
+        _th.Thread(target=_bg, daemon=True).start()
+        nb_widget.select(1)
+
+    def _call_ai_safe(self, prompt, system=None):
+        """安全调用 AI — 优先 call_ai_model, 回退 HTTP, 都不行则返回规则化文本"""
+        import requests as _req, json as _j
+        import datetime as _dt
+        _time_tag = _dt.datetime.now().strftime("%H:%M")
+        try:
+            # 1) 优先走 main_window.call_ai_model
+            _mw = getattr(self, "call_ai_model", None)
+            if _mw and callable(_mw):
+                return _mw(prompt, system_prompt=system) or "(AI 无回复)"
+            # 2) 手动 HTTP 调用
+            _ai_cfg = getattr(self, "ai_config_manager", None)
+            if _ai_cfg:
+                _pc = _ai_cfg.get_active_provider_config() or {}
+                _ak = _pc.get("api_key", "")
+                _bu = _pc.get("base_url", "")
+                _md = _pc.get("model", "")
+                if _ak and _bu and _md:
+                    _url = f"{_bu.rstrip('/')}/chat/completions"
+                    _hdrs = {"Authorization": f"Bearer {_ak}", "Content-Type": "application/json"}
+                    _msgs = []
+                    if system: _msgs.append({"role": "system", "content": system})
+                    _msgs.append({"role": "user", "content": prompt})
+                    _pl = {"model": _md, "messages": _msgs, "temperature": 0.3, "max_tokens": 500}
+                    _resp = _req.post(_url, json=_pl, headers=_hdrs, timeout=45)
+                    if _resp.status_code == 200:
+                        return _resp.json().get("choices", [{}])[0].get("message", {}).get("content", "(AI返回空)")
+        except Exception as _e:
+            print(f"[_call_ai_safe] AI 调用异常: {_e}", flush=True)
+        # 3) 都不行 → 规则化文本
+        return f"""## AI 分析暂不可用 ⚠️\n\nAPI 未配置或请求超时。\n\n(本地规则化占位回复 - {_time_tag})\n\n👉 请在「AI 配置」里填写 API Key 后重试。"""
+
+    def _show_ai_result(self, text_widget, result, nb_widget, pre_data=None):
+        """把 AI 结果塞进 Tab2 Text"""
+        text_widget.config(state=tk.NORMAL)
+        text_widget.delete("1.0", tk.END)
+        text_widget.insert("1.0", "🤖 AI 逻辑分析\n", "title")
+        text_widget.insert(tk.END, "═" * 48 + "\n\n")
+        if pre_data:
+            text_widget.insert(tk.END, pre_data + "\n\n")
+            text_widget.insert(tk.END, "─" * 48 + "\n\n")
+        text_widget.insert(tk.END, result)
+        text_widget.config(state=tk.DISABLED)
+        try:
+            nb_widget.select(1)
+        except Exception: pass
+
 
     def _show_quant_dialog(self):
         """🤖 量化总览面板 — 7层闭环 + 已有 skill 入口。"""
@@ -62625,6 +62942,18 @@ class DapanMixin:
             # ⚠️ 必须调用 _bind_card, 否则卡片无任何事件响应!
             def _bind_card(_w, _sk=dict(_sk)):
                 def _on_click(_e=None):
+                    # 记录当前 cat, 决定双击行为 + 默认 Tab
+                    self._last_skill_cat = _sk.get("cat", "screener")
+                    _cat = self._last_skill_cat
+                    # 切换右侧默认 Tab
+                    try:
+                        if _cat in ("screener", "analyze"):
+                            skill_nb.select(0)  # Tab1 选股结果
+                            self._skill_hint_var.set("💡 双击任意行 → 打开该股票 K线+一目均衡")
+                        elif _cat in ("etf", "macro"):
+                            skill_nb.select(1)  # Tab2 AI 分析
+                            self._skill_hint_var.set("💡 ETF/宏观类 → 自动显示 AI 分析结果")
+                    except Exception: pass
                     self._run_skill_from_dialog(_sk, skill_result_tree, skill_status_var)
                     return "break"
                 for _evt in ("<Button-1>", "<Double-1>"):
@@ -62651,42 +62980,78 @@ class DapanMixin:
         # 顶栏
         right_head = ttk.Frame(skill_right)
         right_head.pack(fill=tk.X, padx=8, pady=(8, 2))
-        ttk.Label(right_head, text="🏆 选股结果", font=("", 12, "bold")).pack(side=tk.LEFT)
         skill_status_var = tk.StringVar(value="⚡ 点击左侧 Skill 卡片执行 →")
-        ttk.Label(right_head, textvariable=skill_status_var, foreground="#777").pack(side=tk.RIGHT)
+        ttk.Label(right_head, textvariable=skill_status_var, foreground="#777").pack(side=tk.LEFT)
 
-        # Treeview 选股结果
-        tree_frame = ttk.Frame(skill_right)
-        tree_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+        # ════════════════════════════════════════════
+        # 右侧 Notebook: Tab1=选股结果(Treeview) + Tab2=AI分析(Text)
+        # ════════════════════════════════════════════
+        skill_nb = ttk.Notebook(skill_right)
+        skill_nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+
+        # ── Tab1: 选股/ETF 结果 Treeview ──
+        tab_tree = ttk.Frame(skill_nb); skill_nb.add(tab_tree, text="🏆 结果列表")
         _cols = ("code", "name", "pct", "score", "reason")
-        skill_result_tree = ttk.Treeview(tree_frame, columns=_cols, show="headings", height=15)
+        skill_result_tree = ttk.Treeview(tab_tree, columns=_cols, show="headings", height=15)
         for _c, _w, _t in [("code", 80, "代码"), ("name", 90, "名称"),
                             ("pct", 70, "涨跌幅%"), ("score", 70, "得分"),
                             ("reason", 200, "入选原因")]:
             skill_result_tree.heading(_c, text=_t)
             skill_result_tree.column(_c, width=_w, anchor="center" if _c != "reason" else "w")
-        _sb2 = ttk.Scrollbar(tree_frame, orient="vertical", command=skill_result_tree.yview)
+        _sb2 = ttk.Scrollbar(tab_tree, orient="vertical", command=skill_result_tree.yview)
         skill_result_tree.configure(yscrollcommand=_sb2.set)
-        skill_result_tree.pack(side="left", fill="both", expand=True)
+        skill_result_tree.pack(side="left", fill="both", expand=True, pady=4)
         _sb2.pack(side="right", fill="y")
         skill_result_tree.tag_configure("up", foreground="#EF5350")
         skill_result_tree.tag_configure("down", foreground="#66BB6A")
         skill_result_tree.tag_configure("hi", foreground="#FFA000", font=("", 10, "bold"))
 
-        # 双击 → 打开股票分析弹窗 (内含一目均衡 tab)
+        # 双击 → 区分 cat: 选股/ETF → K线弹窗; 宏观 → AI 分析
         def _on_result_dbl(_e):
             sel = skill_result_tree.selection()
             if not sel: return
             item = skill_result_tree.item(sel[0])
+            _cat = getattr(self, "_last_skill_cat", "screener")
             code6 = str(item["values"][0]); name = str(item["values"][1])
-            if code6 and code6 != "None":
+            reason = str(item["values"][4]) if len(item["values"]) > 4 else ""
+            if _cat in ("macro", "etf") or (_cat == "analyze" and not code6.isdigit()):
+                # 宏观/ETF类: 双击触发 AI 逻辑分析, 显示到 Tab2
+                self._ai_analyze_result_row(name, reason, skill_nb, skill_ai_text)
+            elif code6 and code6 != "None" and len(code6) == 6:
+                # 选股/分析类: 打开 K线+一目均衡
                 try:
                     self._show_stock_analysis_dialog(code6, name)
                 except Exception as _ed:
                     import traceback; traceback.print_exc()
+                    skill_status_var.set(f"❌ K线弹窗失败: {_ed}")
+            else:
+                skill_status_var.set(f"ℹ️ 这是分析行, 不是股票 — 看 Tab2 AI 分析")
         skill_result_tree.bind("<Double-1>", _on_result_dbl)
-        ttk.Label(skill_right, text="💡 双击任意行 → 打开该股票 K线+一目均衡弹窗",
-                  foreground="#888", font=("", 9)).pack(anchor="w", padx=8, pady=(0, 6))
+
+        # ── Tab2: AI 分析 Text (股票诊断/宏观研判/ETF套利) ──
+        tab_ai = ttk.Frame(skill_nb); skill_nb.add(tab_ai, text="🤖 AI 分析")
+        _ai_head = ttk.Frame(tab_ai); _ai_head.pack(fill=tk.X, pady=4)
+        ttk.Label(_ai_head, text="AI 逻辑分析结果", font=("", 11, "bold")).pack(side=tk.LEFT, padx=8)
+        ttk.Button(_ai_head, text="🧠 再分析一次", command=lambda: self._ai_reattach(skill_result_tree, skill_ai_text, skill_status_var), width=12).pack(side=tk.RIGHT, padx=8)
+
+        import tkinter.scrolledtext as _st
+        skill_ai_text = _st.ScrolledText(tab_ai, font=("Menlo", 11), wrap=tk.WORD,
+                                          bg="#0F1923", fg="#E0E0E0", bd=0, padx=10, pady=10)
+        skill_ai_text.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
+        skill_ai_text.tag_configure("title", foreground="#FFD54F", font=("Menlo", 13, "bold"))
+        skill_ai_text.tag_configure("up", foreground="#EF5350", font=("Menlo", 11, "bold"))
+        skill_ai_text.tag_configure("down", foreground="#66BB6A", font=("Menlo", 11, "bold"))
+        skill_ai_text.tag_configure("hint", foreground="#78909C")
+        skill_ai_text.insert("1.0", "💡 选一行股票, 双击 → 自动 K线+一目均衡\n\n宏观/ETF/逻辑类 Skill → 默认显示 AI 分析 Tab\n选股/分析类 Skill → 默认显示 结果列表 Tab")
+        skill_ai_text.config(state=tk.DISABLED)
+
+        # 底部提示 (动态)
+        skill_hint_var = tk.StringVar(value="💡 双击行打开股票 K线; 宏观/ETF 类看 Tab2 AI 分析")
+        ttk.Label(skill_right, textvariable=skill_hint_var, foreground="#888", font=("", 9)).pack(anchor="w", padx=8, pady=(0, 6))
+        self._skill_hint_var = skill_hint_var
+        self._skill_nb = skill_nb
+        self._skill_ai_text = skill_ai_text
+        self._last_skill_cat = "screener"
 
         # ── Tab 5: 📖 回测避坑指南 ──
         tab_pitfall = ttk.Frame(nb); nb.add(tab_pitfall, text="⚠️ 回测避坑")
