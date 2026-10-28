@@ -62621,16 +62621,19 @@ class DapanMixin:
             tk.Label(_card, text=f"▶ 执行  [{_badge}]", bg=_theme["bg"], fg=_theme["fg"],
                      font=("", 9)).pack(anchor="e", padx=6, pady=(2, 4))
 
-            # 卡片点击 → 执行 Skill (return "break" 防事件冒泡重复触发)
+            # 卡片点击/双击 → 执行 Skill (return "break" 防事件冒泡重复触发)
+            # ⚠️ 必须调用 _bind_card, 否则卡片无任何事件响应!
             def _bind_card(_w, _sk=dict(_sk)):
                 def _on_click(_e=None):
                     self._run_skill_from_dialog(_sk, skill_result_tree, skill_status_var)
                     return "break"
-                _w.bind("<Button-1>", _on_click)
-                for _child in _w.winfo_children():
-                    _child.bind("<Button-1>", _on_click)
-                    for _sub in _child.winfo_children():
-                        _sub.bind("<Button-1>", _on_click)
+                for _evt in ("<Button-1>", "<Double-1>"):
+                    _w.bind(_evt, _on_click)
+                    for _child in _w.winfo_children():
+                        _child.bind(_evt, _on_click)
+                        for _sub in _child.winfo_children():
+                            _sub.bind(_evt, _on_click)
+            _bind_card(_card, _sk)   # ← 之前漏了这行! 事件根本没绑上
 
         # 快捷按钮行
         skill_btn_row = ttk.Frame(skill_left)
