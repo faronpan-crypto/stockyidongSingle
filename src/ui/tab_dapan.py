@@ -3439,23 +3439,11 @@ class DapanMixin:
                 hist = _js.load(f)
             if not isinstance(hist, dict) or not hist:
                 return
-            # 统一 key 格式: 8 位 (20261024) → 10 位 (2026-10-24), 过滤 emo_score=50 & pct=0 的垃圾数据
-            _norm = {}
-            for _k, _v in hist.items():
-                if len(_k) == 8:
-                    _nk = _k[:4] + "-" + _k[4:6] + "-" + _k[6:8]
-                else:
-                    _nk = _k
-                # 跳过 emo_score=50 且 pct=0 的写入失败数据
-                _e = float(_v.get("emo_score", 50) or 50)
-                _p = float(_v.get("pct", 0) or 0)
-                if _e == 50.0 and _p == 0.0:
-                    continue
-                _norm[_nk] = _v
-            sorted_dates = sorted(_norm.keys())[-20:]
+            # 取全部天数 (按日期排序)
+            sorted_dates = sorted(hist.keys())
             trend10 = []
             for d in sorted_dates:
-                v = _norm[d]
+                v = hist[d]
                 trend10.append({
                     "full_date": d,
                     "date": d[5:10],
@@ -4377,123 +4365,113 @@ class DapanMixin:
             _bad = sum(1 for v in hist_dict.values() if v.get("stage") in ("冰点","退潮"))
             stat_lbl.config(text=f"📅 {len(hist_dict)}天  |  💰{_up}  📉{_dn}  |  ⚠️冰点/退潮{_bad}  |  🔥连亏{cl}天")
 
-        # ---- 渲染日历 ----
+        # ---- 渲染: 近 20 日上证涨跌 + 情绪分趋势 (matplotlib 紧凑图) ----
         def _render_month():
             _reload_hist()
             is_rebuilding[0] = True
             for w in grid_f.winfo_children(): w.destroy()
-            ym = view_month[0]
-            month_lbl.config(text=f"{ym.year} 年 {ym.month} 月")
-            first = ym.replace(day=1)
-            first_wd = first.weekday()
-            if ym.month == 12:
-                nx = ym.replace(year=ym.year+1, month=1, day=1)
-            else:
-                nx = ym.replace(month=ym.month+1, day=1)
-            dim = (nx - _td(days=1)).day
-            today_str = _dt2.now().strftime("%Y-%m-%d")
 
-            row = 0; col = first_wd
-            for d in range(1, dim + 1):
-                ds = f"{ym.year:04d}-{ym.month:02d}-{d:02d}"
-                is_today = (ds == today_str)
-                rec = hist_dict.get(ds)
+            # 取最近 20 个交易日 (有记录优先)
+            _today = _dt2.now().date()
+            _cand = []
+            for _i in range(60):
+                _d = (_today - _td(days=_i)).strftime("%Y-%m-%d")
+                if _d in hist_dict: _cand.append(_d)
+                if len(_cand) >= 20: break
+            # 若 hist_dict 不够 20, 用自然日补齐 (显示为空白柱)
+            if len(_cand) < 20:
+                for _i in range(60):
+                    _d = (_today - _td(days=_i)).strftime("%Y-%m-%d")
+                    if _d not in _cand: _cand.append(_d)
+                    if len(_cand) >= 20: break
+            recent_20 = sorted(_cand)  # 从旧到新
 
-                # 背景色 (A股)
-                if rec:
-                    pnl = rec.get("pnl","")
-                    ths = rec.get("ths","")
-                    pct_v = rec.get("pct")
-                    if pnl == "赚钱": bg = "#B71C1C"
-                    elif pnl == "亏钱": bg = "#1B5E20"
-                    elif pct_v is not None:
-                        bg = "#B71C1C" if pct_v > 0 else ("#1B5E20" if pct_v < 0 else "#455A64")
-                    else: bg = "#455A64"
-                    bd = "#E65100" if ths == "向下" else None
-                else:
-                    bg = "#37474F"; bd = None
+            month_lbl.config(text=f"📈 近 {len(recent_20)} 日 · 上证涨跌 + 情绪分趋势")
 
-                cell = tk.Frame(grid_f, bg=bg, width=95, height=65,
-                                highlightbackground=bd or "#1A1A2E",
-                                highlightthickness=3 if bd else 1, cursor="hand2")
-                cell.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
-                cell.grid_propagate(False)
+            # 提取数据
+            _dates = []; _pcts = []; _emos = []
+            for _ds in recent_20:
+                _dates.append(_ds[5:])  # MM-DD
+                _r = hist_dict.get(_ds, {})
+                _p = _r.get("pct")
+                _e = _r.get("emo_score")
+                _pcts.append(float(_p) if _p is not None else None)
+                _emos.append(float(_e) if _e is not None else None)
 
-                ths_v = rec.get("ths","") if rec else ""
-                ths_icon = "📈" if ths_v=="向上" else ("📉" if ths_v=="向下" else "·")
-                ths_fg = "#81D4FA" if ths_v else "#78909C"
-                pnl_v = rec.get("pnl","") if rec else ""
-                pnl_sym = "💰" if pnl_v=="赚钱" else ("💸" if pnl_v=="亏钱" else "·")
-                stage_v = rec.get("stage","") if rec else ""
-                stage_v = re.sub(r'[^\u4e00-\u9fa5A-Za-z0-9 ]+', '', str(stage_v or '')).strip()
-                stage_fg = "#FFD54F" if stage_v in ("冰点","退潮") else "#FFFFFF"
-                emo_s = rec.get("emo_score") if rec else None
-                pct_v2 = rec.get("pct") if rec else None
-                up_v = rec.get("up") if rec else None
-                dn_v = rec.get("dn") if rec else None
-                zt_v = rec.get("zt") if rec else None
-                dt_v = rec.get("dt") if rec else None
-
-                wl = []
-                # 行1: 日期(左) + 同花顺(右)
-                l1 = tk.Frame(cell, bg=bg); l1.pack(fill="x", pady=(2,0)); wl.append(l1)
-                fg = "#FFD54F" if is_today else "white"
-                n = tk.Label(l1, text=str(d), bg=bg, fg=fg,
-                            font=("", 11, "bold" if is_today else "normal")); n.pack(side="left", padx=3); wl.append(n)
-                t = tk.Label(l1, text=f"{ths_icon}", bg=bg, fg=ths_fg, font=("", 10)); t.pack(side="right", padx=3); wl.append(t)
-                # 行2: 盈亏emoji (居中大号)
-                p = tk.Label(cell, text=pnl_sym, bg=bg, fg="white", font=("", 14, "bold")); p.pack(pady=0); wl.append(p)
-                # 行3: stage阶段文字 (居中)
-                s = tk.Label(cell, text=stage_v or "·", bg=bg, fg=stage_fg, font=("", 10, "bold")); s.pack(pady=0); wl.append(s)
-                # 行4: 优先显示涨跌广度, fallback emo+涨跌幅
-                info_txt = ""; info_fg = "#B0BEC5"
-                if up_v is not None and dn_v is not None:
-                    # 有涨跌数据 → 显示广度
-                    info_txt = f"↑{up_v} ↓{dn_v}"
-                    if zt_v: info_txt += f" 🔥{zt_v}"
-                    if dt_v: info_txt += f" ⚠️{dt_v}"
-                    # 颜色: 涨多红/跌多绿/持平金
-                    info_fg = "#FFCDD2" if up_v > dn_v else ("#C8E6C9" if up_v < dn_v else "#FFECB3")
-                else:
-                    # 无广度数据 → fallback emo分+涨跌幅
-                    if emo_s is not None: info_txt += f"emo{emo_s:.0f}"
-                    if pct_v2 is not None: info_txt += f" {pct_v2:+.1f}%"
-                    if not info_txt: info_txt = "·"
-                inf = tk.Label(cell, text=info_txt.strip(), bg=bg, fg=info_fg,
-                               font=("", 9)); inf.pack(pady=0); wl.append(inf)
-                wl.append(cell)
-
-                def _bind_all(wlist, _ds=ds):
-                    def _click(e):
-                        print(f"[情绪日历] 👆 点击格子 ds={_ds}  hist_dict有={_ds in hist_dict}", flush=True)
-                        if not is_rebuilding[0]: _open_day_editor(_ds)
-                    def _ent(e):
-                        _r = hist_dict.get(_ds, {})
-                        _t = (f"📅 {_ds}  ①{_r.get('stage','未填') or '未填'}  "
-                              f"②同花顺:{_r.get('ths','未填')}  ③盈亏:{_r.get('pnl','未填')}  "
-                              f"📊emo={_r.get('emo_score','--')}  📈上证={_r.get('pct','--')}")
-                        detail_lbl.config(text=_t, fg="#FFD54F")
-                    def _lv(e):
-                        detail_lbl.config(text="点击格子补录/修改, 鼠标悬停看三维度详情", fg="#90A4AE")
-                    for w in wlist:
-                        try:
-                            w.bind("<Button-1>", _click)
-                            w.bind("<Enter>", _ent)
-                            w.bind("<Leave>", _lv)
-                        except: pass
-                _bind_all(wl)
-
-                col += 1
-                if col > 6: col = 0; row += 1
-
-            for ci in range(7): grid_f.grid_columnconfigure(ci, weight=1)
-
-            # 📊 复盘面板 (嵌在月历下方)
+            # 画 2 行紧凑图 (情绪分折线 + 上证涨跌柱)
             try:
-                pct_map_r, close_map_r = self._fetch_month_index_pct(ym)
-                self._render_month_review(grid_f, ym, pct_map_r, close_map_r)
-            except Exception as _rv_e:
-                print(f"[情绪周期] 复盘面板 warn: {_rv_e}", flush=True)
+                import matplotlib as _mpl_c
+                _mpl_c.use("TkAgg")
+                from matplotlib.figure import Figure
+                from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+                import matplotlib.pyplot as _plt_c
+
+                _fig = Figure(figsize=(10, 3.2), dpi=90, facecolor="#1A1A2E")
+                _ax1 = _fig.add_subplot(211)   # 情绪分
+                _ax2 = _fig.add_subplot(212, sharex=_ax1)  # 上证涨跌
+
+                for _ax in (_ax1, _ax2):
+                    _ax.set_facecolor("#1A1A2E")
+                    _ax.tick_params(colors="#90A4AE", labelsize=8)
+                    for _sp in _ax.spines.values(): _sp.set_color("#37474F")
+                    _ax.grid(True, alpha=0.25, color="#546E7A", linestyle="--")
+
+                # ── 上图: 情绪分折线 ──
+                _x_idx = list(range(len(recent_20)))
+                _emo_valid = [(i, v) for i, v in enumerate(_emos) if v is not None]
+                if _emo_valid:
+                    _xe, _ye = zip(*_emo_valid)
+                    _ax1.plot(_xe, _ye, color="#FFB74D", linewidth=1.8, marker="o",
+                              markersize=3, markerfacecolor="#FFB74D", zorder=5)
+                    _ax1.fill_between(_xe, _ye, alpha=0.12, color="#FFB74D")
+                    # 冰点线 (emo 分 30)
+                    _ax1.axhline(30, color="#EF5350", linewidth=0.8, linestyle="--", alpha=0.6)
+                    _ax1.text(len(recent_20)-0.5, 30, "冰点", color="#EF5350", fontsize=7, va="bottom")
+                _ax1.set_ylabel("情绪分", color="#FFB74D", fontsize=9, fontweight="bold")
+                _ax1.set_ylim(0, 100)
+                _ax1.set_yticks([0, 25, 50, 75, 100])
+                _ax1.tick_params(labelbottom=False)
+
+                # ── 下图: 上证涨跌柱 ──
+                _bar_colors = ["#C62828" if (v is not None and v >= 0)
+                               else ("#2E7D32" if v is not None else "#37474F") for v in _pcts]
+                _bar_vals = [(v if v is not None else 0) for v in _pcts]
+                _ax2.bar(_x_idx, _bar_vals, color=_bar_colors, width=0.75, edgecolor="#1A1A2E", linewidth=0.5)
+                # 柱顶标值
+                for i, v in enumerate(_pcts):
+                    if v is not None:
+                        _c = "#FFCDD2" if v >= 0 else "#C8E6C9"
+                        _ax2.text(i, v + (0.15 if v >= 0 else -0.25), f"{v:+.1f}%",
+                                  ha="center", va="bottom" if v >= 0 else "top",
+                                  fontsize=7, color=_c, fontweight="bold")
+                _ax2.axhline(0, color="#546E7A", linewidth=0.6)
+                _ax2.set_ylabel("上证%", color="#81D4FA", fontsize=9, fontweight="bold")
+                _ax2.set_xticks(_x_idx)
+                _ax2.set_xticklabels(_dates, fontsize=7, rotation=45, ha="right")
+
+                _fig.subplots_adjust(left=0.06, right=0.98, top=0.92, bottom=0.18, hspace=0.15)
+
+                # 标题
+                _fig.suptitle(f"近 {len(recent_20)} 日 · 上证涨跌 + 情绪分趋势",
+                             color="#FFD54F", fontsize=10, fontweight="bold", y=0.98)
+
+                _canvas = FigureCanvasTkAgg(_fig, master=grid_f)
+                _canvas.draw()
+                _tk_w = _canvas.get_tk_widget()
+                _tk_w.configure(bg="#1A1A2E", highlightthickness=0)
+                _tk_w.pack(fill=tk.BOTH, expand=True)
+
+                # 点击柱子 → 打开该日编辑
+                def _on_fig_click(_evt):
+                    if _evt.xdata is None: return
+                    _xi = int(round(_evt.xdata))
+                    if 0 <= _xi < len(recent_20):
+                        _open_day_editor(recent_20[_xi])
+                _fig.canvas.mpl_connect("button_press_event", _on_fig_click)
+
+            except Exception as _me:
+                import traceback; traceback.print_exc()
+                ttk.Label(grid_f, text=f"图表渲染失败: {_me}", foreground="red").pack(expand=True)
 
             is_rebuilding[0] = False
             _refresh_stats()
@@ -8300,7 +8278,7 @@ class DapanMixin:
                 _rev_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
                 _rev_canvas.configure(yscrollcommand=_rev_scroll.set)
                 _rev_inner = ttk.Frame(_rev_canvas)
-                # ⚠️ _render_month_review 用 grid(row=6, column=0, columnspan=7) 放内容,
+                # ⚠️ _render_month_review 用 grid(row=start_row, columnspan=n_cols) 放内容,
                 # 所以 _rev_inner 必须用 grid 布局, 新加的组件也必须 grid, 不能混用 pack!
                 for _ci in range(7): _rev_inner.columnconfigure(_ci, weight=1)
                 _rev_win = _rev_canvas.create_window((0, 0), window=_rev_inner, anchor="nw")
@@ -8314,9 +8292,9 @@ class DapanMixin:
                 from datetime import datetime as _dt2
                 _ym = _dt2.now()
                 _pf, _cf = self._fetch_month_index_pct(_ym)
-                self._render_month_review(_rev_inner, _ym, _pf, _cf)
+                self._render_month_review(_rev_inner, _ym, _pf, _cf, start_row=0, n_cols=7)
 
-                # ── 🆕 下方空白处加: 上证/深成/创业板 3Tab K线 + MACD/量副图 + 周期切换 ──
+                # ── 🆕 下方加: 上证/深成/创业板 12Tab K线 + MACD/量副图 + 周期切换 (grid row=1) ──
                 import numpy as _np_idx, pandas as _pd_idx
                 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
                 import matplotlib as _mpl_idx
@@ -8366,7 +8344,7 @@ class DapanMixin:
 
                 # 周期工具栏 (共享) — 用 grid (与 _render_month_review 的 row=6 衔接)
                 _idx_tool = tk.Frame(_rev_inner, bg="#1E1E2E")
-                _idx_tool.grid(row=7, column=0, columnspan=7, sticky="ew", padx=6, pady=(14,4))
+                _idx_tool.grid(row=1, column=0, columnspan=7, sticky="ew", padx=6, pady=(14,4))
                 tk.Label(_idx_tool, text="📈 三大指数 · K线+MACD+量能",
                          bg="#1E1E2E", fg="#FFD54F",
                          font=("", 11, "bold")).pack(side=tk.LEFT, padx=4)
@@ -8380,7 +8358,7 @@ class DapanMixin:
 
                 # Notebook: 上证/深成/创业板 (固定高度, 因为在 Canvas 里 expand 无效)
                 _idx_nb = ttk.Notebook(_rev_inner)
-                _idx_nb.grid(row=8, column=0, columnspan=7, sticky="ew", padx=6, pady=4)
+                _idx_nb.grid(row=2, column=0, columnspan=7, sticky="ew", padx=6, pady=4)
                 _idx_nb.pack_propagate(False)  # 锁定高度, 防止子组件 collapse
                 _idx_nb.configure(height=420)
 
@@ -12241,7 +12219,7 @@ class DapanMixin:
     # ════════════════════════════════════════════════════════════════════════
 
 
-    def _render_month_review(self, grid_f, ym, pct_map, close_map):
+    def _render_month_review(self, grid_f, ym, pct_map, close_map, start_row=6, n_cols=7):
 
         """在月历下方追加一个复盘 Text 面板"""
 
@@ -12259,11 +12237,7 @@ class DapanMixin:
 
                 child.destroy()
 
-        row_idx = max(6, (len(pct_map) > 0 and 6 or 6))
-
-        # 根据已渲染的格子数算 row_idx
-
-        row_idx = 6  # 6 行日历后追加
+        row_idx = start_row  # 由调用方传入 (最近20天=2行,整月=6行)
 
 
 
@@ -12271,7 +12245,7 @@ class DapanMixin:
 
         rev_frame._is_month_review = True
 
-        rev_frame.grid(row=row_idx, column=0, columnspan=7, sticky="nsew",
+        rev_frame.grid(row=row_idx, column=0, columnspan=n_cols, sticky="nsew",
 
                        padx=1, pady=(8, 4))
 
@@ -24807,23 +24781,11 @@ class DapanMixin:
                 hist = _js.load(f)
             if not isinstance(hist, dict) or not hist:
                 return
-            # 统一 key 格式: 8 位 (20261024) → 10 位 (2026-10-24), 过滤 emo_score=50 & pct=0 的垃圾数据
-            _norm = {}
-            for _k, _v in hist.items():
-                if len(_k) == 8:
-                    _nk = _k[:4] + "-" + _k[4:6] + "-" + _k[6:8]
-                else:
-                    _nk = _k
-                # 跳过 emo_score=50 且 pct=0 的写入失败数据
-                _e = float(_v.get("emo_score", 50) or 50)
-                _p = float(_v.get("pct", 0) or 0)
-                if _e == 50.0 and _p == 0.0:
-                    continue
-                _norm[_nk] = _v
-            sorted_dates = sorted(_norm.keys())[-20:]
+            # 取全部天数 (按日期排序)
+            sorted_dates = sorted(hist.keys())
             trend10 = []
             for d in sorted_dates:
-                v = _norm[d]
+                v = hist[d]
                 trend10.append({
                     "full_date": d,
                     "date": d[5:10],
@@ -25944,7 +25906,10 @@ class DapanMixin:
                     if prev and prev > 0:
                         pct_map[ds] = round((c - prev) / prev * 100, 2)
                     prev = c
-                # 保留最近 150 个交易日 (≈半年), 月复盘更有参考性
+                # 只保留当月
+                ym_str = f"{ym.year:04d}-{ym.month:02d}"
+                pct_map = {k: v for k, v in pct_map.items() if k.startswith(ym_str)}
+                close_map = {k: v for k, v in close_map.items() if k.startswith(ym_str)}
                 print(f"[日历] 📈 新浪源拉到 {len(pct_map)} 天上证日线", flush=True)
         except Exception as _e:
             print(f"[日历] 新浪源失败, 尝试 AKShare: {_e}", flush=True)
@@ -25972,7 +25937,7 @@ class DapanMixin:
                 print(f"[日历] AKShare 也失败: {_e2}", flush=True)
         return pct_map, close_map
 
-    def _render_month_review(self, grid_f, ym, pct_map, close_map):
+    def _render_month_review(self, grid_f, ym, pct_map, close_map, start_row=6, n_cols=7):
         """在月历下方追加一个复盘 Text 面板"""
         import sqlite3, os as _os, json as _j_rv
         from datetime import datetime as _dt3
@@ -25981,13 +25946,11 @@ class DapanMixin:
         for child in grid_f.winfo_children():
             if getattr(child, "_is_month_review", False):
                 child.destroy()
-        row_idx = max(6, (len(pct_map) > 0 and 6 or 6))
-        # 根据已渲染的格子数算 row_idx
-        row_idx = 6  # 6 行日历后追加
+        row_idx = start_row  # 由调用方传入
 
         rev_frame = tk.Frame(grid_f, bg="#0D1B2A")
         rev_frame._is_month_review = True
-        rev_frame.grid(row=row_idx, column=0, columnspan=7, sticky="nsew",
+        rev_frame.grid(row=row_idx, column=0, columnspan=n_cols, sticky="nsew",
                        padx=1, pady=(8, 4))
         rev_frame.grid_propagate(False)  # 允许控制高度
 
