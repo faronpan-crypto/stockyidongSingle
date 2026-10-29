@@ -3439,11 +3439,23 @@ class DapanMixin:
                 hist = _js.load(f)
             if not isinstance(hist, dict) or not hist:
                 return
-            # 取全部天数 (按日期排序)
-            sorted_dates = sorted(hist.keys())
+            # 统一 key 格式: 8 位 (20261024) → 10 位 (2026-10-24), 过滤 emo_score=50 & pct=0 的垃圾数据
+            _norm = {}
+            for _k, _v in hist.items():
+                if len(_k) == 8:
+                    _nk = _k[:4] + "-" + _k[4:6] + "-" + _k[6:8]
+                else:
+                    _nk = _k
+                # 跳过 emo_score=50 且 pct=0 的写入失败数据
+                _e = float(_v.get("emo_score", 50) or 50)
+                _p = float(_v.get("pct", 0) or 0)
+                if _e == 50.0 and _p == 0.0:
+                    continue
+                _norm[_nk] = _v
+            sorted_dates = sorted(_norm.keys())[-20:]
             trend10 = []
             for d in sorted_dates:
-                v = hist[d]
+                v = _norm[d]
                 trend10.append({
                     "full_date": d,
                     "date": d[5:10],
@@ -12965,14 +12977,7 @@ class DapanMixin:
 
                     prev = c
 
-                # 只保留当月
-
-                ym_str = f"{ym.year:04d}-{ym.month:02d}"
-
-                pct_map = {k: v for k, v in pct_map.items() if k.startswith(ym_str)}
-
-                close_map = {k: v for k, v in close_map.items() if k.startswith(ym_str)}
-
+                # 保留最近 150 个交易日 (≈半年), 月复盘更有参考性
                 print(f"[日历] 📈 新浪源拉到 {len(pct_map)} 天上证日线", flush=True)
 
         except Exception as _e:
@@ -24802,11 +24807,23 @@ class DapanMixin:
                 hist = _js.load(f)
             if not isinstance(hist, dict) or not hist:
                 return
-            # 取全部天数 (按日期排序)
-            sorted_dates = sorted(hist.keys())
+            # 统一 key 格式: 8 位 (20261024) → 10 位 (2026-10-24), 过滤 emo_score=50 & pct=0 的垃圾数据
+            _norm = {}
+            for _k, _v in hist.items():
+                if len(_k) == 8:
+                    _nk = _k[:4] + "-" + _k[4:6] + "-" + _k[6:8]
+                else:
+                    _nk = _k
+                # 跳过 emo_score=50 且 pct=0 的写入失败数据
+                _e = float(_v.get("emo_score", 50) or 50)
+                _p = float(_v.get("pct", 0) or 0)
+                if _e == 50.0 and _p == 0.0:
+                    continue
+                _norm[_nk] = _v
+            sorted_dates = sorted(_norm.keys())[-20:]
             trend10 = []
             for d in sorted_dates:
-                v = hist[d]
+                v = _norm[d]
                 trend10.append({
                     "full_date": d,
                     "date": d[5:10],
@@ -25927,10 +25944,7 @@ class DapanMixin:
                     if prev and prev > 0:
                         pct_map[ds] = round((c - prev) / prev * 100, 2)
                     prev = c
-                # 只保留当月
-                ym_str = f"{ym.year:04d}-{ym.month:02d}"
-                pct_map = {k: v for k, v in pct_map.items() if k.startswith(ym_str)}
-                close_map = {k: v for k, v in close_map.items() if k.startswith(ym_str)}
+                # 保留最近 150 个交易日 (≈半年), 月复盘更有参考性
                 print(f"[日历] 📈 新浪源拉到 {len(pct_map)} 天上证日线", flush=True)
         except Exception as _e:
             print(f"[日历] 新浪源失败, 尝试 AKShare: {_e}", flush=True)
