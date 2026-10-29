@@ -46,7 +46,7 @@ class RenderMixin:
         except Exception as e:
             messagebox.showerror("错误", f"复制失败: {e}")
 
-    def _enable_text_copy_menu(text_widget, readonly=True):
+    def _enable_text_copy_menu(self, text_widget, readonly=True):
         """
         给任意 Text / ScrolledText 组件加上:
           1. 右键菜单(复制 / 全选 / 粘贴 / 剪切 / 清空)
@@ -126,7 +126,7 @@ class RenderMixin:
             w.bind("<Control-x>", lambda e: (_cut(), "break"))
         return w
 
-    def _render_text_to_long_image(text, title="", bg_color="#FFFFFF",
+    def _render_text_to_long_image(self, text, title="", bg_color="#FFFFFF",
                                     text_color="#212121", title_color="#333333",
                                     width_px=1080, font_size=16, line_height_factor=1.7):
         """把任意长文本渲染成长图 PNG（用 matplotlib，返回文件路径）。

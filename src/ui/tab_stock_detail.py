@@ -857,48 +857,177 @@ class StockDetailMixin:
             ax1.tick_params(axis="x", labelbottom=False)
             ax1.set_xlabel("")
 
-    def _build_daily_kline_figure(self, kline_data, stock_name, figsize=(12, 6), show_zoom_hint=True, show_support_resistance=False):
-        """单图日K线 Figure(嵌入持仓详情等)。"""
+    def _compute_ichimoku(self, highs, lows, closes):
+        """计算一目均衡图五大分量: Tenkan, Kijun, Senkou A, Senkou B, Chikou"""
+        import numpy as _np
+        h = _np.asarray(highs, dtype=float)
+        l = _np.asarray(lows, dtype=float)
+        c = _np.asarray(closes, dtype=float)
+        n = len(c)
+
+        def _period_hilo(_h, _l, period):
+            out_h = _np.full(n, _np.nan); out_l = _np.full(n, _np.nan)
+            for i in range(n):
+                s = max(0, i - period + 1)
+                out_h[i] = _np.max(_h[s:i+1]); out_l[i] = _np.min(_l[s:i+1])
+            return (out_h + out_l) / 2.0
+
+        tenkan = _period_hilo(h, l, 9)
+        kijun  = _period_hilo(h, l, 26)
+        senkou_a = (tenkan + kijun) / 2.0
+        senkou_b = _period_hilo(h, l, 52)
+        return tenkan, kijun, senkou_a, senkou_b
+
+    def _build_daily_kline_figure(self, kline_data, stock_name, figsize=(12, 9),
+                                  show_zoom_hint=True, show_support_resistance=False,
+                                  chart_type="kline"):
+        """多子图日K线 Figure: K线/一目均衡 + MACD + KDJ + BIAS + 量。
+        chart_type: 'kline'(默认) 或 'ichimoku'(一目均衡图)。"""
         from matplotlib.figure import Figure
+        from matplotlib import gridspec
+        import numpy as _np, pandas as _pd
+
+        data = kline_data['data']
+        n = len(data)
+        opens   = data['开盘'].values
+        closes  = data['收盘'].values
+        highs   = data['最高'].values
+        lows    = data['最低'].values
+        if "成交量" in data.columns:
+            vol = data["成交量"].values.astype(float)
+        else:
+            vol = _np.zeros(n, dtype=float)
+
+        # 高度比: 主图(K线/一目均衡) : MACD : KDJ : BIAS : 量
+        ratios = [4.2, 1.3, 1.3, 1.3, 1.3]
+        fig_h = 7.0 + 1.5 * 5  # 大致总高
         fig = Figure(figsize=figsize, dpi=100)
-        # 根据情绪周期设置背景颜色
         emotion_cycle = getattr(self, 'emotion_cycle_var', None)
         if emotion_cycle:
             cycle = emotion_cycle.get()
             if cycle == "上行":
-                fig.patch.set_facecolor('#E8F5E9')
-                fig.patch.set_alpha(0.6)
+                fig.patch.set_facecolor('#E8F5E9'); fig.patch.set_alpha(0.6)
             elif cycle == "震荡":
-                fig.patch.set_facecolor('#FFF9C4')
-                fig.patch.set_alpha(0.6)
+                fig.patch.set_facecolor('#FFF9C4'); fig.patch.set_alpha(0.6)
             elif cycle == "下行":
-                fig.patch.set_facecolor('#FFEBEE')
-                fig.patch.set_alpha(0.6)
-        ax1 = fig.add_subplot(111)
-        # 设置axes背景颜色
+                fig.patch.set_facecolor('#FFEBEE'); fig.patch.set_alpha(0.6)
+
+        gs = gridspec.GridSpec(len(ratios), 1, figure=fig, height_ratios=ratios, hspace=0.08)
+        ax_main = fig.add_subplot(gs[0])
+        ax_macd = fig.add_subplot(gs[1], sharex=ax_main)
+        ax_kdj  = fig.add_subplot(gs[2], sharex=ax_main)
+        ax_bias = fig.add_subplot(gs[3], sharex=ax_main)
+        ax_vol  = fig.add_subplot(gs[4], sharex=ax_main)
+        _axes = [ax_main, ax_macd, ax_kdj, ax_bias, ax_vol]
         if emotion_cycle:
             cycle = emotion_cycle.get()
-            if cycle == "上行":
-                ax1.set_facecolor('#E8F5E9')
-                ax1.patch.set_alpha(0.4)
-            elif cycle == "震荡":
-                ax1.set_facecolor('#FFF9C4')
-                ax1.patch.set_alpha(0.4)
-            elif cycle == "下行":
-                ax1.set_facecolor('#FFEBEE')
-                ax1.patch.set_alpha(0.4)
-        self._apply_daily_kline_ax(ax1, kline_data, stock_name, show_zoom_hint, hide_x_labels=False, show_support_resistance=show_support_resistance)
+            for _ax in _axes:
+                if cycle == "上行":
+                    _ax.set_facecolor('#E8F5E9'); _ax.patch.set_alpha(0.4)
+                elif cycle == "震荡":
+                    _ax.set_facecolor('#FFF9C4'); _ax.patch.set_alpha(0.4)
+                elif cycle == "下行":
+                    _ax.set_facecolor('#FFEBEE'); _ax.patch.set_alpha(0.4)
+
+        x = list(range(n))
+
+        # ── 主图 ──
+        if chart_type == "ichimoku":
+            # 一目均衡图
+            tenkan, kijun, senkou_a, senkou_b = self._compute_ichimoku(highs, lows, closes)
+            # 先行带 (前移 26 日)
+            senkou_a_plot = _np.concatenate([senkou_a[26:], [senkou_a[-1]] * 26]) if n > 26 else senkou_a
+            senkou_b_plot = _np.concatenate([senkou_b[26:], [senkou_b[-1]] * 26]) if n > 26 else senkou_b
+            use_n = min(n, len(senkou_a_plot))
+            ax_main.fill_between(x[:use_n], senkou_a_plot[:use_n], senkou_b_plot[:use_n],
+                                 where=(senkou_b_plot[:use_n] >= senkou_a_plot[:use_n]),
+                                 color='#26a69a', alpha=0.25, label='绿云(看跌)')
+            ax_main.fill_between(x[:use_n], senkou_a_plot[:use_n], senkou_b_plot[:use_n],
+                                 where=(senkou_b_plot[:use_n] < senkou_a_plot[:use_n]),
+                                 color='#ef5350', alpha=0.25, label='红云(看涨)')
+            ax_main.plot(x, tenkan, color='#ff9800', linewidth=0.9, label='转换线(9)')
+            ax_main.plot(x, kijun,  color='#2196f3', linewidth=1.0, label='基准线(26)')
+            ax_main.plot(x, closes,  color='#333',     linewidth=1.2, label='收盘价', zorder=5)
+            # 迟行带 (后移 26 日)
+            if n > 26:
+                chi_x = list(range(26, n))
+                chi_y = closes[:n-26]
+                ax_main.plot(chi_x, chi_y, color='#9c27b0', linewidth=0.8, linestyle='--', label='迟行带(26)')
+            # K线蜡烛 叠加在云之上
+            for i in range(n):
+                _c = '#d32f2f' if closes[i] >= opens[i] else '#388e3c'
+                ax_main.plot([x[i], x[i]], [lows[i], highs[i]], color=_c, linewidth=0.5, zorder=3)
+                ax_main.bar(x[i], abs(closes[i] - opens[i]) or 0.001,
+                            bottom=min(closes[i], opens[i]), color=_c, width=0.5, alpha=0.6, zorder=4)
+            _hint = " 双击放大" if show_zoom_hint else ""
+            ax_main.set_title(f"{stock_name} — 🌈 一目均衡图{_hint}", fontsize=12, fontweight='bold')
+            ax_main.legend(loc='upper left', fontsize=7, ncol=3)
+        else:
+            # 普通 K 线 (委托 _apply_daily_kline_ax)
+            self._apply_daily_kline_ax(
+                ax_main, kline_data, stock_name,
+                show_zoom_hint=show_zoom_hint, hide_x_labels=True,
+                show_support_resistance=show_support_resistance
+            )
+
+        ax_main.label_outer(); ax_main.grid(True, alpha=0.3)
+
+        # ── MACD 副图 ──
+        ema12 = self._ema_np(closes, 12); ema26 = self._ema_np(closes, 26)
+        dif = ema12 - ema26; dea = self._ema_np(dif, 9)
+        macdh = 2.0 * (dif - dea)
+        bar_colors = ["#d32f2f" if v >= 0 else "#388e3c" for v in macdh]
+        ax_macd.bar(x, macdh, color=bar_colors, alpha=0.45, width=0.55)
+        ax_macd.plot(x, dif, label="DIF", linewidth=0.9, color="#1565c0")
+        ax_macd.plot(x, dea, label="DEA", linewidth=0.9, color="#c62828")
+        ax_macd.axhline(0, color="gray", linewidth=0.5)
+        ax_macd.set_ylabel("MACD", fontsize=9)
+        ax_macd.legend(loc="upper left", fontsize=7); ax_macd.label_outer(); ax_macd.grid(True, alpha=0.3)
+
+        # ── KDJ 副图 ──
+        kv, dv, jv = self._kdj_series(highs, lows, closes, 9)
+        ax_kdj.plot(x, kv, label="K", linewidth=0.9, color="#c62828")
+        ax_kdj.plot(x, dv, label="D", linewidth=0.9, color="#1565c0")
+        ax_kdj.plot(x, jv, label="J", linewidth=0.8, color="#6a1b9a", alpha=0.9)
+        ax_kdj.axhline(80, color="gray", linestyle=":", linewidth=0.5)
+        ax_kdj.axhline(20, color="gray", linestyle=":", linewidth=0.5)
+        ax_kdj.set_ylabel("KDJ", fontsize=9)
+        ax_kdj.legend(loc="upper left", fontsize=7); ax_kdj.label_outer(); ax_kdj.grid(True, alpha=0.3)
+
+        # ── BIAS 副图 ──
+        for p, col, lbl in [(6, "#00897b", "BIAS6"), (12, "#d84315", "BIAS12"), (24, "#4527a0", "BIAS24")]:
+            ma_p = _pd.Series(closes).rolling(p, min_periods=1).mean().values
+            bias_p = (closes - ma_p) / ma_p * 100
+            ax_bias.plot(x, bias_p, label=lbl, linewidth=0.9, color=col, alpha=0.9)
+        ax_bias.axhline(0, color="gray", linewidth=0.5)
+        ax_bias.set_ylabel("BIAS(%)", fontsize=9)
+        ax_bias.legend(loc="upper left", fontsize=7); ax_bias.label_outer(); ax_bias.grid(True, alpha=0.3)
+
+        # ── 成交量 副图 ──
+        colors_v = ["#d32f2f" if closes[i] >= opens[i] else "#388e3c" for i in range(n)]
+        ax_vol.bar(x, vol, color=colors_v, alpha=0.7, width=0.65)
+        if n >= 5:
+            vma5  = _pd.Series(vol).rolling(5,  min_periods=1).mean().values
+            vma10 = _pd.Series(vol).rolling(10, min_periods=1).mean().values
+            ax_vol.plot(x, vma5,  color="#f57c00", linewidth=0.9, label="VOL MA5")
+            ax_vol.plot(x, vma10, color="#2196f3", linewidth=0.9, label="VOL MA10")
+        ax_vol.set_ylabel("量", fontsize=9)
+        ax_vol.legend(loc="upper left", fontsize=7); ax_vol.grid(True, alpha=0.3)
+
         fig.tight_layout()
         return fig
 
-    def _build_daily_kline_zoom_figure(self, kline_data, stock_name, indicator_keys):
-        """放大窗口:主图 K 线 + 2~4 个副图指标(VOL/MACD/WR2/KDJ/BOLL)。"""
+    def _build_daily_kline_zoom_figure(self, kline_data, stock_name, indicator_keys,
+                                       chart_type="kline", show_support_resistance=True):
+        """放大窗口:主图 K线/一目均衡 + 2~5 个副图指标(VOL/MACD/WR2/KDJ/BOLL/BIAS)。
+        chart_type: 'kline'(默认) 或 'ichimoku'。"""
         from matplotlib import gridspec
         from matplotlib.figure import Figure
-        allowed = {"VOL", "MACD", "WR2", "KDJ", "BOLL"}
+        import numpy as _np
+        allowed = {"VOL", "MACD", "WR2", "KDJ", "BOLL", "BIAS"}
         keys = [k for k in (indicator_keys or []) if k in allowed]
-        if len(keys) < 2 or len(keys) > 4:
-            raise ValueError("副图指标须选 2~4 个")
+        if len(keys) < 2 or len(keys) > 5:
+            raise ValueError("副图指标须选 2~5 个")
         ni = len(keys)
         data = kline_data["data"]
         n = len(data)
@@ -911,37 +1040,61 @@ class StockDetailMixin:
             vol = data["成交量"].values.astype(float)
         else:
             vol = np.zeros(n, dtype=float)
-        fig_h = 7.0 + 2.15 * ni
+        fig_h = 7.0 + 1.5 * (ni + 1)
         fig = Figure(figsize=(14, fig_h), dpi=100)
-        # 根据情绪周期设置背景颜色
         emotion_cycle = getattr(self, 'emotion_cycle_var', None)
         if emotion_cycle:
             cycle = emotion_cycle.get()
             if cycle == "上行":
-                fig.patch.set_facecolor('#E8F5E9')
-                fig.patch.set_alpha(0.6)
+                fig.patch.set_facecolor('#E8F5E9'); fig.patch.set_alpha(0.6)
             elif cycle == "震荡":
-                fig.patch.set_facecolor('#FFF9C4')
-                fig.patch.set_alpha(0.6)
+                fig.patch.set_facecolor('#FFF9C4'); fig.patch.set_alpha(0.6)
             elif cycle == "下行":
-                fig.patch.set_facecolor('#FFEBEE')
-                fig.patch.set_alpha(0.6)
+                fig.patch.set_facecolor('#FFEBEE'); fig.patch.set_alpha(0.6)
         ratios = [3.2] + [1.0] * ni
         gs = gridspec.GridSpec(1 + ni, 1, figure=fig, height_ratios=ratios, hspace=0.14)
         ax_main = fig.add_subplot(gs[0, 0])
-        # 设置主图背景颜色
         if emotion_cycle:
             cycle = emotion_cycle.get()
             if cycle == "上行":
-                ax_main.set_facecolor('#E8F5E9')
-                ax_main.patch.set_alpha(0.4)
+                ax_main.set_facecolor('#E8F5E9'); ax_main.patch.set_alpha(0.4)
             elif cycle == "震荡":
-                ax_main.set_facecolor('#FFF9C4')
-                ax_main.patch.set_alpha(0.4)
+                ax_main.set_facecolor('#FFF9C4'); ax_main.patch.set_alpha(0.4)
             elif cycle == "下行":
-                ax_main.set_facecolor('#FFEBEE')
-                ax_main.patch.set_alpha(0.4)
-        self._apply_daily_kline_ax(ax_main, kline_data, stock_name, show_zoom_hint=False, hide_x_labels=True, show_support_resistance=True)
+                ax_main.set_facecolor('#FFEBEE'); ax_main.patch.set_alpha(0.4)
+        # ── 主图: K 线 / 一目均衡 切换 ──
+        x = list(range(n))
+        if chart_type == "ichimoku":
+            tenkan, kijun, senkou_a, senkou_b = self._compute_ichimoku(highs, lows, closes)
+            if n > 26:
+                senkou_a_plot = _np.concatenate([senkou_a[26:], [senkou_a[-1]] * 26])
+                senkou_b_plot = _np.concatenate([senkou_b[26:], [senkou_b[-1]] * 26])
+            else:
+                senkou_a_plot = senkou_a; senkou_b_plot = senkou_b
+            ax_main.fill_between(x, senkou_a_plot, senkou_b_plot,
+                                 where=(senkou_b_plot >= senkou_a_plot),
+                                 color='#26a69a', alpha=0.22, label='绿云(看跌)')
+            ax_main.fill_between(x, senkou_a_plot, senkou_b_plot,
+                                 where=(senkou_b_plot < senkou_a_plot),
+                                 color='#ef5350', alpha=0.22, label='红云(看涨)')
+            ax_main.plot(x, tenkan, color='#ff9800', linewidth=0.9, label='转换线(9)')
+            ax_main.plot(x, kijun,  color='#2196f3', linewidth=1.0, label='基准线(26)')
+            ax_main.plot(x, closes,  color='#333',     linewidth=1.2, label='收盘价', zorder=5)
+            if n > 26:
+                chi_x = list(range(26, n)); chi_y = closes[:n-26]
+                ax_main.plot(chi_x, chi_y, color='#9c27b0', linewidth=0.8, linestyle='--', label='迟行带(26)')
+            for i in range(n):
+                _c = '#d32f2f' if closes[i] >= opens[i] else '#388e3c'
+                ax_main.plot([x[i], x[i]], [lows[i], highs[i]], color=_c, linewidth=0.5, zorder=3)
+                ax_main.bar(x[i], abs(closes[i] - opens[i]) or 0.001,
+                            bottom=min(closes[i], opens[i]), color=_c, width=0.5, alpha=0.6, zorder=4)
+            ax_main.set_title(f"{stock_name} — 🌈 一目均衡图", fontsize=12, fontweight='bold')
+            ax_main.legend(loc='upper left', fontsize=7, ncol=3)
+            ax_main.grid(True, alpha=0.3)
+        else:
+            self._apply_daily_kline_ax(ax_main, kline_data, stock_name,
+                                        show_zoom_hint=False, hide_x_labels=True,
+                                        show_support_resistance=show_support_resistance)
         for row, key in enumerate(keys, start=1):
             ax_sub = fig.add_subplot(gs[row, 0], sharex=ax_main)
             # 设置副图背景颜色
@@ -962,8 +1115,8 @@ class StockDetailMixin:
         fig.tight_layout()
         return fig
 
-    def _show_daily_kline_zoom(self, kline_data, stock_name):
-        """双击日K线:最大化窗口 + 可选 2~4 个副图指标。"""
+    def _show_daily_kline_zoom(self, kline_data, stock_name, default_chart_type="kline"):
+        """双击日K线:最大化窗口 + 可选 2~5 个副图指标 + 主图 K线/一目均衡切换。"""
         try:
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
             win = self._safe_toplevel(self.root)
@@ -977,21 +1130,27 @@ class StockDetailMixin:
                     win.geometry("1200x900")
             top = ttk.Frame(win, padding=4)
             top.pack(fill=tk.X)
+            # 主图切换: K线 / 一目均衡图
+            ttk.Label(top, text="主图:", font=("Microsoft YaHei", 10)).pack(side=tk.LEFT, padx=(0, 2))
+            main_chart_type = tk.StringVar(value=default_chart_type)
+            ttk.Radiobutton(top, text="🕯️K线", variable=main_chart_type, value="kline").pack(side=tk.LEFT)
+            ttk.Radiobutton(top, text="🌈一目均衡", variable=main_chart_type, value="ichimoku").pack(side=tk.LEFT, padx=(0, 10))
             # 添加只显示主图的选项
             main_only_var = tk.BooleanVar(value=False)
             ttk.Checkbutton(top, text="只显示主图", variable=main_only_var).pack(side=tk.LEFT, padx=(0, 10))
-            # 添加显示支撑/压力线的选项
+            # 添加显示支撑/压力线的选项(只对 K线主图生效)
             show_support_resistance_var = tk.BooleanVar(value=True)
-            ttk.Checkbutton(top, text="显示支撑/压力线", variable=show_support_resistance_var).pack(side=tk.LEFT, padx=(0, 10))
+            ttk.Checkbutton(top, text="支撑/压力线", variable=show_support_resistance_var).pack(side=tk.LEFT, padx=(0, 10))
             ttk.Label(top, text="副图指标(选 2~4 项后点「应用」):", font=("Microsoft YaHei", 10)).pack(
                 side=tk.LEFT, padx=(0, 6)
             )
             opt_specs = [
-                ("VOL", "VOL"),
+                ("VOL",  "VOL"),
                 ("MACD", "MACD"),
-                ("WR2", "WR(2)"),
-                ("KDJ", "KDJ"),
+                ("WR2",  "WR(2)"),
+                ("KDJ",  "KDJ"),
                 ("BOLL", "BOLL"),
+                ("BIAS", "BIAS"),
             ]
             ivars = {}
             for code, _lbl in opt_specs:
@@ -1052,12 +1211,15 @@ class StockDetailMixin:
                                                    show_support_resistance=show_support_resistance_var.get(),
                                                    show_bs_signals=show_bs_var.get())
                         self._apply_daily_kline_ax = temp_apply2
-                        fig = self._build_daily_kline_figure(kline_data, stock_name, figsize=(14, 9), show_support_resistance=show_support_resistance_var.get())
+                        fig = self._build_daily_kline_figure(kline_data, stock_name, figsize=(14, 9),
+                                                             show_support_resistance=show_support_resistance_var.get(),
+                                                             chart_type=main_chart_type.get())
                         self._apply_daily_kline_ax = original_apply2
                         canvas = FigureCanvasTkAgg(fig, chart_inner)
                         canvas.draw()
                         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-                        status_var.set("当前显示:只显示主图 | 买卖点开" if show_bs_var.get() else "当前显示:只显示主图")
+                        _ct_label = "🌈一目均衡" if main_chart_type.get() == "ichimoku" else "🕯️K线"
+                        status_var.set(f"当前显示:{_ct_label}主图 | 买卖点开" if show_bs_var.get() else f"当前显示:{_ct_label}主图")
                         _bind_hover(canvas, fig)
                         # 🎯 叠加综合评分 hover (不影响原买卖点 hover)
                         try:
@@ -1078,8 +1240,8 @@ class StockDetailMixin:
                 else:
                     # 显示主图+副图
                     sel = _collect_keys()
-                    if len(sel) < 2 or len(sel) > 4:
-                        messagebox.showwarning("提示", "请勾选 2~4 个副图指标。", parent=win); return
+                    if len(sel) < 2 or len(sel) > 5:
+                        messagebox.showwarning("提示", "请勾选 2~5 个副图指标。", parent=win); return
                     for w in chart_inner.winfo_children():
                         w.destroy()
                     try:
@@ -1089,12 +1251,16 @@ class StockDetailMixin:
                                                   show_support_resistance=show_support_resistance_var.get(),
                                                   show_bs_signals=show_bs_var.get())
                         self._apply_daily_kline_ax = temp_apply
-                        fig = self._build_daily_kline_zoom_figure(kline_data, stock_name, sel)
+                        fig = self._build_daily_kline_zoom_figure(kline_data, stock_name, sel,
+                                                                  chart_type=main_chart_type.get(),
+                                                                  show_support_resistance=show_support_resistance_var.get())
                         self._apply_daily_kline_ax = original_apply
                         canvas = FigureCanvasTkAgg(fig, chart_inner)
                         canvas.draw()
                         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-                        status_var.set(f"副图:{' + '.join(sel)} | 买卖点开" if show_bs_var.get() else f"副图:{' + '.join(sel)}")
+                        _ct_label = "🌈一目均衡" if main_chart_type.get() == "ichimoku" else "🕯️K线"
+                        status_var.set(f"{_ct_label} | 副图:{' + '.join(sel)} | 买卖点开" if show_bs_var.get()
+                                       else f"{_ct_label} | 副图:{' + '.join(sel)}")
                         _bind_hover(canvas, fig)
                         # 🎯 叠加综合评分 hover
                         try:
@@ -1458,15 +1624,21 @@ class StockDetailMixin:
                             for w in chart_inner.winfo_children():
                                 w.destroy()
                             if main_only_var.get():
-                                fig = self._build_daily_kline_figure(kline_data, stock_name, figsize=(14, 9), show_support_resistance=show_support_resistance_var.get())
+                                fig = self._build_daily_kline_figure(kline_data, stock_name, figsize=(14, 9),
+                                                                     show_support_resistance=show_support_resistance_var.get(),
+                                                                     chart_type=main_chart_type.get())
                             else:
                                 sel = _collect_keys()
+                                if len(sel) < 2 or len(sel) > 5:
+                                    messagebox.showwarning("提示", "请勾选 2~5 个副图指标。", parent=win); return
                                 # 临时修改_apply_daily_kline_ax的调用,添加show_support_resistance参数
                                 original_apply = self._apply_daily_kline_ax
                                 def temp_apply(ax1, kline_data, stock_name, show_zoom_hint=True, hide_x_labels=False, show_support_resistance=True):
                                     return original_apply(ax1, kline_data, stock_name, show_zoom_hint, hide_x_labels, show_support_resistance=show_support_resistance_var.get())
                                 self._apply_daily_kline_ax = temp_apply
-                                fig = self._build_daily_kline_zoom_figure(kline_data, stock_name, sel)
+                                fig = self._build_daily_kline_zoom_figure(kline_data, stock_name, sel,
+                                                                          chart_type=main_chart_type.get(),
+                                                                          show_support_resistance=show_support_resistance_var.get())
                                 # 恢复原始函数
                                 self._apply_daily_kline_ax = original_apply
                             canvas = FigureCanvasTkAgg(fig, chart_inner)
@@ -1542,15 +1714,21 @@ class StockDetailMixin:
                     for w in chart_inner.winfo_children():
                         w.destroy()
                     if main_only_var.get():
-                        fig = self._build_daily_kline_figure(kline_data, stock_name, figsize=(14, 9), show_support_resistance=show_support_resistance_var.get())
+                        fig = self._build_daily_kline_figure(kline_data, stock_name, figsize=(14, 9),
+                                                             show_support_resistance=show_support_resistance_var.get(),
+                                                             chart_type=main_chart_type.get())
                     else:
                         sel = _collect_keys()
+                        if len(sel) < 2 or len(sel) > 5:
+                            messagebox.showwarning("提示", "请勾选 2~5 个副图指标。", parent=win); return
                         # 临时修改_apply_daily_kline_ax的调用,添加show_support_resistance参数
                         original_apply = self._apply_daily_kline_ax
                         def temp_apply(ax1, kline_data, stock_name, show_zoom_hint=True, hide_x_labels=False, show_support_resistance=True):
                             return original_apply(ax1, kline_data, stock_name, show_zoom_hint, hide_x_labels, show_support_resistance=show_support_resistance_var.get())
                         self._apply_daily_kline_ax = temp_apply
-                        fig = self._build_daily_kline_zoom_figure(kline_data, stock_name, sel)
+                        fig = self._build_daily_kline_zoom_figure(kline_data, stock_name, sel,
+                                                                  chart_type=main_chart_type.get(),
+                                                                  show_support_resistance=show_support_resistance_var.get())
                         # 恢复原始函数
                         self._apply_daily_kline_ax = original_apply
                     canvas = FigureCanvasTkAgg(fig, chart_inner)
@@ -1643,11 +1821,15 @@ class StockDetailMixin:
         except Exception as e:
             messagebox.showerror("错误", f"打开放大K线失败: {e}", parent=self.root)
 
-    def _draw_daily_kline_chart(self, parent, kline_data, stock_name, embed_zoom_handler=True):
-        """绘制日K线图(Tushare),含均线与支撑/压力线;双击可弹出最大化查看。"""
+    def _draw_daily_kline_chart(self, parent, kline_data, stock_name, embed_zoom_handler=True,
+                                chart_type="kline"):
+        """绘制日K线图(Tushare),含 MACD/KDJ/BIAS/量 4 个副图 + 支撑/压力线;
+        主图支持 'kline'(K线蜡烛) 或 'ichimoku'(一目均衡图) 切换;
+        双击可弹出放大查看。"""
         try:
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-            fig = self._build_daily_kline_figure(kline_data, stock_name, figsize=(12, 6))
+            fig = self._build_daily_kline_figure(kline_data, stock_name,
+                                                 figsize=(12, 9), chart_type=chart_type)
             canvas = FigureCanvasTkAgg(fig, parent)
             canvas.draw()
             w = canvas.get_tk_widget()
@@ -1667,7 +1849,7 @@ class StockDetailMixin:
             except Exception:
                 pass
             if embed_zoom_handler:
-                w.bind("<Double-Button-1>", lambda e: self._show_daily_kline_zoom(kline_data, stock_name))
+                w.bind("<Double-Button-1>", lambda e: self._show_daily_kline_zoom(kline_data, stock_name, default_chart_type=chart_type))
         except Exception as e:
             print(f"绘制日K线图失败: {e}")
             import traceback
