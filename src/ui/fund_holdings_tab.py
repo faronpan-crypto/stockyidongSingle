@@ -604,6 +604,10 @@ def build_fund_holdings_tab(parent, root=None):
     btn_refresh = ttk.Button(top, text="🔄 刷新", width=10,
                               command=lambda: _load_data(force=True))
     btn_refresh.pack(side=tk.RIGHT)
+    # 🆕 实时行情刷新按钮 (批量拉持仓股票现价+涨跌幅)
+    btn_quote = ttk.Button(top, text="💹 刷新行情", width=12,
+                            command=lambda: _fetch_quotes(force=True))
+    btn_quote.pack(side=tk.RIGHT, padx=(0, 4))
     # 字体调节
     tk.Label(top, text=" 字体:", bg=_BG_PANEL, fg=_FG_DIM, font=("", 9)).pack(side=tk.RIGHT)
     def _do_font_plus():
@@ -1454,6 +1458,9 @@ def build_fund_holdings_tab(parent, root=None):
     # 全局数据 (后台线程写入, 主线程渲染)
     _data = {"funds": [], "agg": []}
     _running = False
+    # 🆕 实时行情缓存 (持仓股票现价+涨跌幅)
+    _quote_cache = {}  # {sina_code: {"now": float, "close": float, "pct": float, "ts": int}}
+    _quote_running = False
 
     def _load_data(force=False):
         """联网抓取 or 读缓存"""
@@ -1472,6 +1479,8 @@ def build_fund_holdings_tab(parent, root=None):
                     _render_all()
                     status.configure(text=f"📂 读缓存 {len(_data['funds'])} 只基金 ({_today})", foreground=_FG_GREEN)
                     print(f"[基金持仓] 读缓存 OK ({len(_data['funds'])} 只)", flush=True)
+                    # 🆕 自动拉一次行情
+                    root.after(200, lambda: _fetch_quotes(force=False))
                     return
             except Exception as _ce:
                 print(f"[基金持仓] 缓存读失败: {_ce}", flush=True)
@@ -1611,7 +1620,8 @@ def build_fund_holdings_tab(parent, root=None):
                 _data["funds"] = fund_rows
                 _data["agg"] = [{"block": b, "stocks": s} for b, s in agg_list]
                 root.after(0, lambda: (_render_all(),
-                    status.configure(text=f"✅ {len(fund_rows)} 只基金, Top {len(all_hold)} 重仓股", foreground=_FG_GREEN)))
+                    status.configure(text=f"✅ {len(fund_rows)} 只基金, Top {len(all_hold)} 重仓股", foreground=_FG_GREEN),
+                    _fetch_quotes(force=False)))
             except Exception as e:
                 import traceback; traceback.print_exc()
                 root.after(0, lambda: status.configure(
@@ -1620,6 +1630,111 @@ def build_fund_holdings_tab(parent, root=None):
                 _running = False
 
         threading.Thread(target=_bg, daemon=True).start()
+
+    def _fetch_quotes(force=False):
+        """💹 腾讯 qt.gtimg.cn 批量拉持仓股票实时行情 → 渲染时直接读缓存"""
+        nonlocal _quote_running, _quote_cache
+        if _quote_running and not force:
+            return
+        # 收集所有需要拉的 sina 代码
+        all_codes = []
+        for f in _data.get("funds", []):
+            for h in f.get("holdings", []):
+                sina, _ = _lookup_sina(h["name"], h["code6"])
+                if sina and sina not in all_codes:
+                    all_codes.append(sina)
+        for blk in _data.get("agg", []):
+            for s in blk.get("stocks", []):
+                if s.get("sina") and s["sina"] not in all_codes:
+                    all_codes.append(s["sina"])
+        if not all_codes:
+            # 还没数据, 先加载持仓再拉行情
+            if _data.get("funds"):
+                pass  # 有数据就跳过
+            else:
+                _load_data(force=False)
+            return
+
+        _quote_running = True
+        _start_ts = time.time()
+        status.configure(text=f"⏳ 拉行情 {len(all_codes)} 只...", foreground="#FFA726")
+
+        def _bg_quote():
+            import requests as _req
+            import time as _t
+            new_cache = {}
+            batch_size = 40
+            try:
+                for bi in range(0, len(all_codes), batch_size):
+                    batch = all_codes[bi:bi + batch_size]
+                    try:
+                        r = _req.get(
+                            f"https://qt.gtimg.cn/q={','.join(batch)}",
+                            timeout=10,
+                            headers={"User-Agent": "Mozilla/5.0",
+                                     "Referer": "https://gu.qq.com/"})
+                        for seg in r.text.strip().split(";"):
+                            if "=" not in seg or '"' not in seg:
+                                continue
+                            var_part, val_part = seg.split("=", 1)
+                            code = var_part.split("_")[-1]  # v_sh600519 → sh600519
+                            fields = val_part.strip('"').split("~")
+                            if len(fields) < 5:
+                                continue
+                            try:
+                                now = float(fields[3]) if fields[3] else 0.0
+                                close = float(fields[4]) if fields[4] else 0.0
+                                pct = round((now - close) / close * 100, 2) if close > 0 else 0.0
+                            except Exception:
+                                now = 0.0; close = 0.0; pct = 0.0
+                            new_cache[code] = {
+                                "now": round(now, 2), "close": round(close, 2),
+                                "pct": pct, "ts": int(_t.time()),
+                            }
+                    except Exception as _be:
+                        print(f"[基金行情] batch {bi} 失败: {_be}", flush=True)
+                _quote_cache = new_cache
+                print(f"[基金行情] 拉取 OK: {len(new_cache)}/{len(all_codes)} 只, "
+                      f"耗时 {_t.time() - _start_ts:.1f}s", flush=True)
+            except Exception as _e:
+                import traceback; traceback.print_exc()
+                print(f"[基金行情] 全量失败: {_e}", flush=True)
+            finally:
+                _quote_running = False
+                root.after(0, lambda: (
+                    _rerender_all(),
+                    status.configure(
+                        text=f"✅ 行情 {len(new_cache)} 只 · {_t.strftime('%H:%M:%S')}",
+                        foreground="#81C784",
+                    ),
+                ))
+
+        threading.Thread(target=_bg_quote, daemon=True).start()
+
+    def _quote(sina_code):
+        """🆕 查单只股票实时行情 (供渲染时调用)"""
+        q = _quote_cache.get(sina_code)
+        if q:
+            return q
+        # 尝试补拉 (单只)
+        try:
+            import requests as _req2
+            r = _req2.get(f"https://qt.gtimg.cn/q={sina_code}", timeout=6,
+                          headers={"User-Agent": "Mozilla/5.0"})
+            for seg in r.text.strip().split(";"):
+                if "=" not in seg or '"' not in seg: continue
+                _, val = seg.split("=", 1)
+                f = val.strip('"').split("~")
+                if len(f) >= 5:
+                    now = float(f[3]) if f[3] else 0.0
+                    close = float(f[4]) if f[4] else 0.0
+                    pct = round((now - close) / close * 100, 2) if close > 0 else 0.0
+                    q = {"now": round(now, 2), "close": round(close, 2),
+                         "pct": pct, "ts": int(time.time())}
+                    _quote_cache[sina_code] = q
+        except Exception:
+            pass
+        return q  # 可能是 None
 
     def _bind_click_deep(widget, handler):
         try:
@@ -1712,6 +1827,16 @@ def build_fund_holdings_tab(parent, root=None):
                 _nm_lbl.pack(side=tk.LEFT, padx=2)
                 _nm_lbl.bind("<Double-Button-1>", _h); _nm_lbl.bind("<Button-1>", _c)
 
+                # 🆕 实时行情 (现价 + 涨跌幅)
+                _q = _quote_cache.get(sina) if sina else None
+                if _q and _q.get("now", 0) > 0:
+                    _pct = _q.get("pct", 0)
+                    _pct_col = _FG_RED if _pct >= 0 else _FG_GREEN
+                    _quote_lbl = tk.Label(row, text=f"{_q['now']:.2f}  {_pct:+.2f}%",
+                                          bg=row_bg, fg=_pct_col, font=_font(bold=True))
+                    _quote_lbl.pack(side=tk.RIGHT, padx=4)
+                    _quote_lbl.bind("<Double-Button-1>", _h); _quote_lbl.bind("<Button-1>", _c)
+
                 _pct_lbl = tk.Label(row, text=f"占{h['total_pct']:.1f}%", bg=row_bg,
                                     fg=_FG_GOLD, font=_font())
                 _pct_lbl.pack(side=tk.RIGHT, padx=6)
@@ -1773,6 +1898,14 @@ def build_fund_holdings_tab(parent, root=None):
                 _pct = tk.Label(row, text=f"{s['total_pct']:.1f}%", bg=row_bg,
                                 fg=_FG_GOLD, font=_font(), width=6, anchor="e")
                 _pct.pack(side=tk.RIGHT)
+                # 🆕 实时行情
+                _sq = _quote_cache.get(s["sina"]) if s.get("sina") else None
+                if _sq and _sq.get("now", 0) > 0:
+                    _sp = _sq.get("pct", 0)
+                    _sp_col = _FG_RED if _sp >= 0 else _FG_GREEN
+                    _sq_lbl = tk.Label(row, text=f"{_sq['now']:.2f}  {_sp:+.2f}%",
+                                       bg=row_bg, fg=_sp_col, font=_font(bold=True))
+                    _sq_lbl.pack(side=tk.RIGHT, padx=6)
 
                 for w in [row, _idx, _nm, _code, _fc, _mv, _pct]:
                     w.bind("<Double-Button-1>", _h); w.bind("<Button-1>", _c)
