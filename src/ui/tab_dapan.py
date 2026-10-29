@@ -73,11 +73,36 @@ ETF_IDX_LIST = [
     ("中证1000ETF", "sh512100"),
     ("科创50ETF",   "sh588000"),
     ("创业板ETF",   "sz159915"),
-    # ── 行业/主题ETF ──
+    ("上证50ETF",   "sh510050"),
+    ("中证2000ETF", "sh159533"),
+    # ── 科技/成长 ──
     ("半导体ETF",   "sh512480"),
+    ("科创芯片ETF", "sh588200"),
+    ("AI算力ETF",   "sh515070"),
+    ("信创ETF",     "sz159811"),
+    # ── 消费/医药 ──
+    ("消费ETF",     "sz159928"),
+    ("酒ETF",       "sh512690"),
+    ("医药ETF",     "sh512010"),
+    ("医疗ETF",     "sh512170"),
+    # ── 新能源/周期 ──
+    ("新能源ETF",   "sh516160"),
+    ("光伏ETF",     "sh515790"),
+    ("新能源车ETF", "sh515030"),
+    ("有色金属ETF", "sh512400"),
+    # ── 军工/金融 ──
+    ("军工ETF",     "sh512660"),
     ("证券ETF",     "sh512880"),
     ("银行ETF",     "sh512800"),
+    ("保险ETF",     "sh512070"),
+    # ── 红利/防御 ──
     ("红利ETF",     "sh510880"),
+    ("央企红利ETF", "sh515180"),
+    ("黄金ETF",     "sh518880"),
+    # ── 跨境/海外 ──
+    ("纳指ETF",     "sh513100"),
+    ("恒生科技ETF", "sh513130"),
+    ("日经ETF",     "sh513520"),
     # (加新ETF:    ("名称",   "symbol"), )
     # (停用某行:   行首加 #             )
 ]
@@ -8388,7 +8413,6 @@ class DapanMixin:
                 _mpl_idx.use("TkAgg"); import matplotlib.pyplot as _plt_idx
 
                 # 数据源列表 → 模块顶部 ETF_IDX_LIST 统一维护 (增删注释即可)
-                # ── 工具函数 ────────────────────────────────────────────────
                 def _period_to_scale_idx(pn):
                     return {"1分钟":1,"5分钟":5,"15分钟":15,"30分钟":30,"60分钟":60,"日线":240}.get(pn, 60)
 
@@ -8416,8 +8440,9 @@ class DapanMixin:
                         return None
 
                 def _ema_idx(data, period):
-                    if len(data)<period: return _np_idx.full(len(data), _np_idx.nan)
-                    arr=_np_idx.array(data, dtype=float); res=_np_idx.full(len(data), _np_idx.nan)
+                    arr=_np_idx.asarray(data, dtype=float); arr=_np_idx.nan_to_num(arr, nan=0.0)
+                    if len(arr)<period: return _np_idx.full(len(data), _np_idx.nan)
+                    res=_np_idx.full(len(data), _np_idx.nan)
                     res[period-1] = _np_idx.mean(arr[:period])
                     k=2/(period+1)
                     for i in range(period, len(arr)): res[i] = arr[i]*k + res[i-1]*(1-k)
@@ -8430,43 +8455,25 @@ class DapanMixin:
                     macd_bar=2*(dif-dea)
                     return dif,dea,macd_bar
 
-                def _compute_kdj_idx(highs, lows, closes, n=9, m1=3, m2=3):
-                    """KDJ: K,D,J. RSV = (C - LLN)/(HHN - LLN)*100  """
-                    arr_h=_np_idx.asarray(highs, dtype=float)
-                    arr_l=_np_idx.asarray(lows,  dtype=float)
-                    arr_c=_np_idx.asarray(closes,dtype=float)
-                    lh = pd.Series(arr_h).rolling(n, min_periods=1).max().values
-                    ll = pd.Series(arr_l).rolling(n, min_periods=1).min().values
-                    rsv = _np_idx.where(lh-ll>0, (arr_c-ll)/(lh-ll)*100, 50.0)
-                    k = _np_idx.full(len(arr_c), 50.0)
-                    d = _np_idx.full(len(arr_c), 50.0)
-                    for i in range(len(arr_c)):
-                        if i==0:
-                            k[i] = 50.0 + m1*(rsv[i]-50.0)
-                            d[i] = 50.0 + m2*(k[i]-50.0)
-                        else:
-                            k[i] = k[i-1]*(m1-1)/m1 + rsv[i]/m1
-                            d[i] = d[i-1]*(m2-1)/m2 + k[i]/m2
-                    j = 3*k - 2*d
+                def _compute_kdj_idx(highs, lows, closes, n=9):
+                    hh = _np_idx.array([max(highs[max(0,i-n+1):i+1]) for i in range(len(highs))])
+                    ll = _np_idx.array([min(lows[max(0,i-n+1):i+1]) for i in range(len(lows))])
+                    rsv = _np_idx.where(hh > ll, (closes - ll)/(hh - ll)*100, 50.0)
+                    k = _ema_idx(rsv, 3); d = _ema_idx(k, 3); j = 3*k - 2*d
                     return k, d, j
 
-                def _compute_bias_idx(closes, periods=(6,12,24)):
-                    """BIAS = (C - MA)/MA * 100"""
+                def _compute_bias_idx(closes, n=20):
                     arr = _np_idx.asarray(closes, dtype=float)
-                    result = {}
-                    for p in periods:
-                        ma = pd.Series(arr).rolling(p, min_periods=1).mean().values
-                        result[p] = (arr - ma) / ma * 100
-                    return result
+                    n2 = len(arr); ma = _np_idx.full(n2, _np_idx.nan)
+                    if n2 >= n:
+                        cs = _np_idx.nancumsum(arr)
+                        ma[n-1:] = (cs[n-1:] - _np_idx.concatenate([[0], cs[:-n]])) / n
+                    return _np_idx.where(~_np_idx.isnan(ma), (arr - ma)/ma*100, 0.0)
 
-                # ── 拆分成主流指数列表 + ETF 列表 ─────────────────────────
-                _MAIN_INDEXES = [x for x in ETF_IDX_LIST if x[1].startswith("sh000") or x[1].startswith("sz399")]
-                _ETF_LIST     = [x for x in ETF_IDX_LIST if x not in _MAIN_INDEXES]
-
-                # ── 周期工具栏 ────────────────────────────────────────────
+                # 周期工具栏 (共享) — 用 grid (与 _render_month_review 的 row=6 衔接)
                 _idx_tool = tk.Frame(_rev_inner, bg="#1E1E2E")
                 _idx_tool.grid(row=1, column=0, columnspan=7, sticky="ew", padx=6, pady=(14,4))
-                tk.Label(_idx_tool, text="📈 指数·ETF K线  K线+MACD+KDJ+BIAS+量",
+                tk.Label(_idx_tool, text="📈 三大指数 · K线+MACD+量能",
                          bg="#1E1E2E", fg="#FFD54F",
                          font=("", 11, "bold")).pack(side=tk.LEFT, padx=4)
                 tk.Label(_idx_tool, text="  周期:",
@@ -8477,130 +8484,69 @@ class DapanMixin:
                 _idx_status = tk.Label(_idx_tool, text="⏳", bg="#1E1E2E", fg="#888")
                 _idx_status.pack(side=tk.RIGHT, padx=4)
 
-                # ── 三列 Grid: 主流指数 | ETF | K线图 ─────────────────────
-                _triple = tk.Frame(_rev_inner, bg="#1E1E2E")
-                _triple.grid(row=2, column=0, columnspan=7, sticky="nsew", padx=6, pady=4)
-                _triple.grid_columnconfigure(0, weight=0)
-                _triple.grid_columnconfigure(1, weight=0)
-                _triple.grid_columnconfigure(2, weight=1)
-                _triple.grid_rowconfigure(0, weight=1)
+                # 指标切换按钮栏 (共享) — MACD / KDJ / BIAS
+                tk.Label(_idx_tool, text="  副图:", bg="#1E1E2E", fg="#aaa").pack(side=tk.LEFT, padx=(10,2))
+                _idx_ind_var = tk.StringVar(value="MACD")
+                _idx_ind_btns = {}
+                for _ind_name, _ind_color in [("MACD","#42A5F5"),("KDJ","#FF7043"),("BIAS","#26C6DA")]:
+                    _b = tk.Button(_idx_tool, text=_ind_name, width=5,
+                                   bg="#333", fg="#aaa", activebackground="#555",
+                                   relief=tk.FLAT, cursor="hand2",
+                                   font=("", 9, "bold"))
+                    _b.pack(side=tk.LEFT, padx=1)
+                    _idx_ind_btns[_ind_name] = _b
+                def _switch_ind(name):
+                    _idx_ind_var.set(name)
+                    for k, b in _idx_ind_btns.items():
+                        if k == name: b.config(bg="#FFD54F", fg="#1E1E2E", relief=tk.RAISED)
+                        else: b.config(bg="#333", fg="#aaa", relief=tk.FLAT)
+                for _n in _idx_ind_btns:
+                    _idx_ind_btns[_n].config(command=lambda _n=_n: (_switch_ind(_n), _redraw_all()))
+                _switch_ind("MACD")  # 默认选中
 
-                # 每列高度锁定(避免子组件 collapse)
-                _LEFT_H = 430
-                _MID_H  = 430
-                _RIGHT_H= 540
+                # Notebook: 上证/深成/创业板 (固定高度, 因为在 Canvas 里 expand 无效)
+                _idx_nb = ttk.Notebook(_rev_inner)
+                _idx_nb.grid(row=2, column=0, columnspan=7, sticky="ew", padx=6, pady=4)
+                _idx_nb.pack_propagate(False)  # 锁定高度, 防止子组件 collapse
+                _idx_nb.configure(height=420)
 
-                # ── 左列: 主流指数 ────────────────────────────────────────
-                _left_frame = tk.Frame(_triple, bg="#1E1E2E", width=120, height=_LEFT_H)
-                _left_frame.grid(row=0, column=0, sticky="nsew", padx=(0,6), pady=0)
-                _left_frame.grid_propagate(False)
-                tk.Label(_left_frame, text="📊 主流指数", bg="#1E1E2E", fg="#FFD54F",
-                         font=("", 10, "bold")).pack(anchor="w", pady=(2,4), padx=4)
-                _left_inner = tk.Frame(_left_frame, bg="#1E1E2E")
-                _left_inner.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+                _idx_figs = []; _idx_canvases = []; _idx_frames = []
 
-                # ── 中列: ETF ─────────────────────────────────────────────
-                _mid_frame = tk.Frame(_triple, bg="#1E1E2E", width=140, height=_MID_H)
-                _mid_frame.grid(row=0, column=1, sticky="nsew", padx=(0,6), pady=0)
-                _mid_frame.grid_propagate(False)
-                tk.Label(_mid_frame, text="💹 ETF", bg="#1E1E2E", fg="#4ECDC4",
-                         font=("", 10, "bold")).pack(anchor="w", pady=(2,4), padx=4)
-                _mid_inner = tk.Frame(_mid_frame, bg="#1E1E2E")
-                _mid_inner.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+                for _iname, _scode in ETF_IDX_LIST:
+                    _iframe = ttk.Frame(_idx_nb)
+                    _idx_nb.add(_iframe, text=_iname)
+                    _idx_frames.append((_iframe, _scode, _iname))
 
-                # ── 右列: K线图画布 ───────────────────────────────────────
-                _right_frame = tk.Frame(_triple, bg="#1E1E2E", height=_RIGHT_H)
-                _right_frame.grid(row=0, column=2, sticky="nsew", padx=0, pady=0)
-                _right_frame.grid_propagate(False)
-                _chart_frame = tk.Frame(_right_frame, bg="#121212")
-                _chart_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-
-                # 当前选中标的状态
-                _current_symbol = {"scode": _MAIN_INDEXES[0][1], "iname": _MAIN_INDEXES[0][0]}
-
-                def _build_ticker_list(parent, items, kind_label):
-                    """在 parent 里放一列按钮, 点击即切换 K线"""
-                    for idx, (name, scode) in enumerate(items):
-                        # 取个短名
-                        short = name
-                        b = tk.Button(
-                            parent, text=short, anchor="w",
-                            bg="#2A2A3A", fg="#E0E0E0",
-                            activebackground="#3A3A4A", activeforeground="#FFD54F",
-                            bd=0, highlightthickness=1, highlightbackground="#3A3A4A",
-                            font=("", 9), padx=6, pady=4, cursor="hand2",
-                            command=lambda s=scode, n=name, bn=None: _select_ticker(s, n),
-                        )
-                        b.pack(fill=tk.X, pady=1)
-                        # 存引用以便高亮切换
-                        b._tk_tag = (scode, name)
-                        b._orig_bg = "#2A2A3A"
-                        b._orig_fg = "#E0E0E0"
-                        if idx == 0 and kind_label == "idx":
-                            b.configure(bg="#FFD54F", fg="#1E1E2E", font=("", 9, "bold"),
-                                        highlightbackground="#FFD54F")
-                        parent._btns = getattr(parent, "_btns", [])
-                        parent._btns.append(b)
-
-                def _select_ticker(scode, iname):
-                    """高亮切换 + 重绘 K线"""
-                    _current_symbol["scode"] = scode
-                    _current_symbol["iname"] = iname
-                    for col in (_left_inner, _mid_inner):
-                        for b in getattr(col, "_btns", []):
-                            if b._tk_tag[0] == scode:
-                                b.configure(bg="#FFD54F", fg="#1E1E2E", font=("", 9, "bold"),
-                                            highlightbackground="#FFD54F")
-                            else:
-                                b.configure(bg=b._orig_bg, fg=b._orig_fg,
-                                            font=("", 9), highlightbackground="#3A3A4A")
-                    _redraw_chart()
-
-                _build_ticker_list(_left_inner, _MAIN_INDEXES, "idx")
-                _build_ticker_list(_mid_inner,  _ETF_LIST,     "etf")
-
-                # ── K线图绘制 (K线+MACD+KDJ+BIAS+量) ──────────────────────
-                def _fetch_kline_df(scode, period):
+                def _draw_one(iframe, scode, iname, period):
+                    # 清空
+                    for _w in iframe.winfo_children(): _w.destroy()
                     scale = _period_to_scale_idx(period)
                     df = None
                     if period == "周K":
                         df_d = _sina_fetch_idx(scode, 240, 300)
-                        if df_d is not None and len(df_d) > 10:
-                            df_d['day'] = _pd_idx.to_datetime(df_d['day'])
+                        if df_d is not None and len(df_d)>10:
+                            df_d['day']=_pd_idx.to_datetime(df_d['day'])
                             df = df_d.set_index('day').resample('W').agg(
-                                {'open':'first','high':'max','low':'min',
-                                 'close':'last','volume':'sum'}
+                                {'open':'first','high':'max','low':'min','close':'last','volume':'sum'}
                             ).dropna().reset_index()
-                            df['day'] = df['day'].dt.strftime('%Y-%m-%d')
+                            df['day']=df['day'].dt.strftime('%Y-%m-%d')
                     elif period == "月K":
                         df_d = _sina_fetch_idx(scode, 240, 500)
-                        if df_d is not None and len(df_d) > 10:
-                            df_d['day'] = _pd_idx.to_datetime(df_d['day'])
+                        if df_d is not None and len(df_d)>10:
+                            df_d['day']=_pd_idx.to_datetime(df_d['day'])
                             df = df_d.set_index('day').resample('ME').agg(
-                                {'open':'first','high':'max','low':'min',
-                                 'close':'last','volume':'sum'}
+                                {'open':'first','high':'max','low':'min','close':'last','volume':'sum'}
                             ).dropna().reset_index()
-                            df['day'] = df['day'].dt.strftime('%Y-%m-%d')
+                            df['day']=df['day'].dt.strftime('%Y-%m-%d')
                     else:
                         df = _sina_fetch_idx(scode, scale, 240)
-                    return df
 
-                def _draw_chart(iframe, scode, iname, period):
-                    for _w in iframe.winfo_children(): _w.destroy()
-                    df = _fetch_kline_df(scode, period)
-
-                    # 高度比 5:1.5:1.5:1.5:1.5 — K:MACD:KDJ:BIAS:量
-                    fig = _plt_idx.Figure(figsize=(11, 9.5), dpi=95, facecolor="#1E1E2E")
-                    gs = fig.add_gridspec(5, 1,
-                                          height_ratios=[5, 1.5, 1.5, 1.5, 1.5],
-                                          hspace=0.08)
-                    ax_k  = fig.add_subplot(gs[0])
-                    ax_m  = fig.add_subplot(gs[1], sharex=ax_k)
-                    ax_kd = fig.add_subplot(gs[2], sharex=ax_k)
-                    ax_b  = fig.add_subplot(gs[3], sharex=ax_k)
-                    ax_v  = fig.add_subplot(gs[4], sharex=ax_k)
-
-                    for _ax in (ax_k, ax_m, ax_kd, ax_b, ax_v):
+                    # 画图 (高度比 5:2:2 — 主K:MACD:量)
+                    fig = _plt_idx.Figure(figsize=(7.2, 7), dpi=95, facecolor="#1E1E2E")
+                    gs = fig.add_gridspec(3,1,height_ratios=[5,2,2], hspace=0.08)
+                    ax_k = fig.add_subplot(gs[0]); ax_m = fig.add_subplot(gs[1], sharex=ax_k)
+                    ax_v = fig.add_subplot(gs[2], sharex=ax_k)
+                    for _ax in (ax_k,ax_m,ax_v):
                         _ax.set_facecolor("#121212")
                         _ax.tick_params(colors="#888", labelsize=7)
                         _ax.spines['bottom'].set_color("#333"); _ax.spines['top'].set_visible(False)
@@ -8608,101 +8554,86 @@ class DapanMixin:
 
                     if df is None or len(df) < 10:
                         ax_k.text(0.5,0.5,"❌ 数据不足 / 新浪限流",color="#EF5350",
-                                  ha='center',va='center',transform=ax_k.transAxes,fontsize=11)
-                        ax_k.set_title(f"{iname}  [{period}]", color="#FFD54F", fontsize=11, pad=6)
+                                  ha='center',va='center',transform=ax_k.transAxes,fontsize=10)
+                        ax_k.set_title(f"{iname}  [{period}]", color="#FFD54F", fontsize=10, pad=6)
                     else:
-                        opens   = df['open'].values
-                        highs   = df['high'].values
-                        lows    = df['low'].values
-                        closes  = df['close'].values
-                        volumes = df['volume'].values
-                        n = len(closes); x = _np_idx.arange(n)
+                        opens=df['open'].values; highs=df['high'].values; lows=df['low'].values
+                        closes=df['close'].values; volumes=df['volume'].values
+                        n=len(closes); x=_np_idx.arange(n)
+                        # 蜡烛 (A股红涨绿跌)
                         _up = closes >= opens
-
-                        # ── K线蜡烛 (A股红涨绿跌) ──────────────────────
                         for _i in range(n):
                             _c = "#EF5350" if _up[_i] else "#66BB6A"
                             ax_k.plot([x[_i],x[_i]], [lows[_i],highs[_i]], color=_c, linewidth=0.7)
                             ax_k.bar(x[_i], abs(closes[_i]-opens[_i]) or 0.001,
                                      bottom=min(closes[_i],opens[_i]), color=_c, width=0.6)
-                        _ma5  = _ema_idx(closes, 5)
-                        _ma10 = _ema_idx(closes, 10)
-                        _ma20 = _ema_idx(closes, 20)
-                        ax_k.plot(x, _ma5,  color="#4ECDC4", linewidth=0.8, label="MA5")
+                        # MA5/10/20
+                        _ma5=_ema_idx(closes,5); _ma10=_ema_idx(closes,10); _ma20=_ema_idx(closes,20)
+                        ax_k.plot(x, _ma5, color="#4ECDC4", linewidth=0.8, label="MA5")
                         ax_k.plot(x, _ma10, color="#FFE66D", linewidth=0.8, label="MA10")
                         ax_k.plot(x, _ma20, color="#C7CEEA", linewidth=0.8, label="MA20")
-                        # 标题
+                        # 标题 + 图例
                         _last_pct = (closes[-1]/closes[-2]-1)*100 if n>=2 else 0
                         _pct_c = "#EF5350" if _last_pct>=0 else "#66BB6A"
                         ax_k.set_title(f"{iname} [{period}]  {closes[-1]:.2f} ({_last_pct:+.2f}%)",
-                                       color="#FFD54F", fontsize=11, pad=6)
-                        ax_k.legend(loc='upper left', fontsize=7, facecolor="#1E1E2E",
-                                    edgecolor="#333", labelcolor="#ccc", ncol=3)
+                                       color="#FFD54F", fontsize=10, pad=6)
+                        ax_k.legend(loc='upper left', fontsize=6, facecolor="#1E1E2E",
+                                    edgecolor="#333", labelcolor="#ccc")
                         ax_k.grid(True, alpha=0.15, color="#555")
                         ax_k.label_outer()
 
-                        # ── MACD ──────────────────────────────────────
-                        dif, dea, mb = _compute_macd_idx(closes)
-                        _mb_colors = ["#EF5350" if v>=0 else "#66BB6A" for v in mb]
-                        ax_m.bar(x, mb, color=_mb_colors, width=0.6, alpha=0.85)
-                        ax_m.plot(x, dif, color="#42A5F5", linewidth=0.7, label="DIF")
-                        ax_m.plot(x, dea, color="#FFA726", linewidth=0.7, label="DEA")
-                        ax_m.axhline(0, color="#555", linewidth=0.5)
-                        ax_m.set_ylabel("MACD", color="#888", fontsize=8)
+                        # 副图: MACD / KDJ / BIAS (可切换)
+                        _ind_choice = _idx_ind_var.get()
+                        if _ind_choice == "KDJ":
+                            kv,dv,jv = _compute_kdj_idx(highs, lows, closes)
+                            ax_m.plot(x, kv, color="#FF7043", linewidth=0.8, label="K")
+                            ax_m.plot(x, dv, color="#42A5F5", linewidth=0.8, label="D")
+                            ax_m.plot(x, jv, color="#AB47BC", linewidth=0.7, linestyle=":", label="J")
+                            ax_m.axhline(80, color="#EF5350", linewidth=0.5, linestyle="--", alpha=0.5)
+                            ax_m.axhline(20, color="#66BB6A", linewidth=0.5, linestyle="--", alpha=0.5)
+                            ax_m.set_ylim(-10, 110)
+                            ax_m.set_ylabel("KDJ", color="#888", fontsize=8)
+                        elif _ind_choice == "BIAS":
+                            bias_val = _compute_bias_idx(closes, 20)
+                            ax_m.plot(x, bias_val, color="#26C6DA", linewidth=0.9, label="BIAS(20)")
+                            ax_m.axhline(0, color="#555", linewidth=0.5)
+                            ax_m.fill_between(x, 0, bias_val,
+                                              where=bias_val>0, color="#EF5350", alpha=0.18)
+                            ax_m.fill_between(x, 0, bias_val,
+                                              where=bias_val<0, color="#66BB6A", alpha=0.18)
+                            ax_m.set_ylabel("BIAS", color="#888", fontsize=8)
+                        else:  # MACD (默认)
+                            dif,dea,mb = _compute_macd_idx(closes)
+                            _mb_colors = ["#EF5350" if v>=0 else "#66BB6A" for v in mb]
+                            ax_m.bar(x, mb, color=_mb_colors, width=0.6, alpha=0.85)
+                            ax_m.plot(x, dif, color="#42A5F5", linewidth=0.7, label="DIF")
+                            ax_m.plot(x, dea, color="#FFA726", linewidth=0.7, label="DEA")
+                            ax_m.axhline(0, color="#555", linewidth=0.5)
+                            ax_m.set_ylabel("MACD", color="#888", fontsize=8)
                         ax_m.legend(loc='upper left', fontsize=6, facecolor="#1E1E2E",
-                                    edgecolor="#333", labelcolor="#ccc", ncol=3)
+                                    edgecolor="#333", labelcolor="#ccc")
                         ax_m.grid(True, alpha=0.1, color="#555")
                         ax_m.label_outer()
 
-                        # ── KDJ ────────────────────────────────────────
-                        k_v, d_v, j_v = _compute_kdj_idx(highs, lows, closes)
-                        ax_kd.plot(x, k_v, color="#4ECDC4", linewidth=0.7, label="K")
-                        ax_kd.plot(x, d_v, color="#FFA726", linewidth=0.7, label="D")
-                        ax_kd.plot(x, j_v, color="#BA68C8", linewidth=0.6, label="J", linestyle="--")
-                        ax_kd.axhline(80, color="#EF5350", linewidth=0.4, alpha=0.5, linestyle=":")
-                        ax_kd.axhline(20, color="#66BB6A", linewidth=0.4, alpha=0.5, linestyle=":")
-                        ax_kd.axhline(50, color="#555",    linewidth=0.3, alpha=0.5)
-                        ax_kd.set_ylabel("KDJ", color="#888", fontsize=8)
-                        ax_kd.set_ylim(-10, 110)
-                        ax_kd.legend(loc='upper left', fontsize=6, facecolor="#1E1E2E",
-                                     edgecolor="#333", labelcolor="#ccc", ncol=3)
-                        ax_kd.grid(True, alpha=0.1, color="#555")
-                        ax_kd.label_outer()
-
-                        # ── BIAS ────────────────────────────────────────
-                        bias_map = _compute_bias_idx(closes, (6, 12, 24))
-                        ax_b.plot(x, bias_map[6],  color="#4ECDC4", linewidth=0.7, label="BIAS6")
-                        ax_b.plot(x, bias_map[12], color="#FFA726", linewidth=0.7, label="BIAS12")
-                        ax_b.plot(x, bias_map[24], color="#BA68C8", linewidth=0.7, label="BIAS24")
-                        ax_b.axhline(0, color="#555", linewidth=0.5)
-                        ax_b.set_ylabel("BIAS", color="#888", fontsize=8)
-                        ax_b.legend(loc='upper left', fontsize=6, facecolor="#1E1E2E",
-                                    edgecolor="#333", labelcolor="#ccc", ncol=3)
-                        ax_b.grid(True, alpha=0.1, color="#555")
-                        ax_b.label_outer()
-
-                        # ── 成交量 ───────────────────────────────────────
-                        _v_colors = ["#EF5350" if closes[_i]>=opens[_i] else "#66BB6A"
-                                     for _i in range(n)]
+                        # 成交量副图
+                        _v_colors = ["#EF5350" if closes[_i]>=opens[_i] else "#66BB6A" for _i in range(n)]
                         ax_v.bar(x, volumes, color=_v_colors, width=0.6, alpha=0.85)
-                        _vma5  = _ema_idx(volumes, 5)
-                        _vma10 = _ema_idx(volumes, 10)
-                        ax_v.plot(x, _vma5,  color="#4ECDC4", linewidth=0.7, label="VOL_MA5")
+                        _vma5=_ema_idx(volumes,5); _vma10=_ema_idx(volumes,10)
+                        ax_v.plot(x, _vma5, color="#4ECDC4", linewidth=0.7, label="VOL_MA5")
                         ax_v.plot(x, _vma10, color="#FFE66D", linewidth=0.7, label="VOL_MA10")
                         ax_v.set_ylabel("量", color="#888", fontsize=8)
                         ax_v.legend(loc='upper left', fontsize=6, facecolor="#1E1E2E",
-                                    edgecolor="#333", labelcolor="#ccc", ncol=2)
+                                    edgecolor="#333", labelcolor="#ccc")
                         ax_v.grid(True, alpha=0.1, color="#555")
-
                         # X 轴刻度 (只在最下副图)
                         _pf2 = period
                         if _pf2 in ("1分钟","5分钟","15分钟","30分钟","60分钟"):
-                            def _tf(t): return (t[:10]+"\n"+t[11:16]) if len(t)>16 else t[:10]
+                            def _tf(t): return t[:10]+"\n"+t[11:16] if len(t)>16 else t[:10]
                         elif _pf2 == "周K":
                             def _tf(t): return t[:7]
                         else:
                             def _tf(t): return t[5:10] if len(t)>=10 else str(t)
-                        _n_tick = min(6, max(3, n//50))
+                        _n_tick = min(6, max(3, n//40))
                         _ts = max(1, n//(_n_tick+1))
                         _idxs = list(range(_ts-1, n, _ts)); _idxs.append(n-1)
                         _day_vals = df['day'].values
@@ -8716,24 +8647,23 @@ class DapanMixin:
                     cv.draw_idle()
                     return fig, cv
 
-                def _redraw_chart():
+                def _redraw_all():
                     period = _idx_period_var.get()
-                    scode  = _current_symbol["scode"]
-                    iname  = _current_symbol["iname"]
-                    _idx_status.config(text=f"⏳ 拉 {iname} {period} ...")
-                    try:
-                        _draw_chart(_chart_frame, scode, iname, period)
-                        _idx_status.config(text=f"✅ {iname} {period} 已更新  {_dt2.now().strftime('%H:%M:%S')}")
-                    except Exception as _ed:
-                        import traceback; traceback.print_exc()
-                        _idx_status.config(text=f"❌ {iname} 重绘失败: {_ed}")
-                        print(f"[情绪复盘K线] {iname} 重绘失败: {_ed}", flush=True)
+                    _idx_status.config(text=f"⏳ 拉 {period} ...")
+                    _idx_nb.update_idletasks()
+                    for iframe, scode, iname in _idx_frames:
+                        try:
+                            _draw_one(iframe, scode, iname, period)
+                        except Exception as _ed:
+                            import traceback; traceback.print_exc()
+                            print(f"[情绪复盘K线] {iname} 重绘失败: {_ed}", flush=True)
+                    _idx_status.config(text=f"✅ {period} 三大指数已更新  {_dt2.now().strftime('%H:%M:%S')}")
 
-                # 周期切换 → 自动重绘
-                _idx_period_var.trace_add('write', lambda *a: _redraw_chart())
+                # 周期切换 = 自动重绘
+                _idx_period_var.trace_add('write', lambda *a: _redraw_all())
                 # 异步首绘 (防卡)
                 def _first_draw():
-                    _redraw_chart()
+                    _redraw_all()
                     _rev_canvas.configure(scrollregion=_rev_canvas.bbox("all"))
                 _rev_inner.after(400, _first_draw)
             except Exception as _e_emo_tab:
@@ -27649,13 +27579,14 @@ class DapanMixin:
         ind_row = ttk.Frame(win, padding=(6, 0)); ind_row.pack(fill=tk.X)
         ttk.Label(ind_row, text="📊 指标:").pack(side=tk.LEFT, padx=(0, 6))
         ind_vars = {
+            'ichimoku': tk.BooleanVar(value=True),
             'macd': tk.BooleanVar(value=True),
             'kdj':  tk.BooleanVar(value=True),
             'wr':   tk.BooleanVar(value=False),
             'bias': tk.BooleanVar(value=False),
             'chip': tk.BooleanVar(value=True),
         }
-        ind_labels = [('macd', 'MACD'), ('kdj', 'KDJ'), ('wr', 'WR威廉'), ('bias', 'BIAS乖离'), ('chip', '筹码')]
+        ind_labels = [('ichimoku', '🌈一目均衡'), ('macd', 'MACD'), ('kdj', 'KDJ'), ('wr', 'WR威廉'), ('bias', 'BIAS乖离'), ('chip', '筹码')]
         for k, label in ind_labels:
             ttk.Checkbutton(ind_row, text=label, variable=ind_vars[k]).pack(side=tk.LEFT, padx=3)
 
@@ -27759,6 +27690,27 @@ class DapanMixin:
                     ('⭐⭐⭐ 百度百科', 'https://baike.baidu.com/item/筹码分布'),
                     ('⭐⭐⭐ 雪球筹码峰选股法', 'https://xueqiu.com/9383148762/345678901'),
                     ('⭐⭐ 同花顺筹码集中度判断', 'https://www.10jqka.com.cn/20200618/c610293847518843.shtml'),
+                ],
+            },
+            'ichimoku': {
+                'title': '🌈 一目均衡表 (Ichimoku Kinko Hyo)',
+                'stars': '⭐⭐⭐⭐⭐', 'star_text': '趋势 + 支撑压力 + 动量 三位一体',
+                'formula': '转换线 = 9日 (最高+最低)/2\n基准线 = 26日 (最高+最低)/2\n先行带A = (转换线+基准线)/2, 右移26期\n先行带B = 52日 (最高+最低)/2, 右移26期\n迟行带 = 收盘价, 右移26期',
+                'core_signals': [
+                    '📈 价格在红色云(先行A≥B)上方 → 多头趋势, 可持有',
+                    '📉 价格在绿色云(先行A<B)下方 → 空头趋势, 避风险',
+                    '🔺 转换线上穿基准线 → 短期买信号 (类似金叉)',
+                    '🔻 转换线下穿基准线 → 短期卖信号 (类似死叉)',
+                    '📊 价格穿越云边界 → 支撑/压力突破信号',
+                    '🎯 迟行带向上交叉历史价格 → 动量确认',
+                    '🔮 云向右延伸26期 → 未来支撑压力预测',
+                ],
+                'when_to_use': ['中长期趋势判断', '寻找关键支撑压力', '配合MACD/KDJ确认入场'],
+                'pitfalls': ['震荡市里云频繁穿越=无效信号', '云在远期是预测, 非真实数据', '参数(9,26,52)是日线标准, 其他周期需调整'],
+                'links': [
+                    ('⭐⭐⭐ 百度百科 - 一目均衡表', 'https://baike.baidu.com/item/一目均衡表'),
+                    ('⭐⭐⭐ 雪球Ichimoku实战', 'https://xueqiu.com/2247615274/27612345'),
+                    ('⭐⭐ TradingView Ichimoku教程', 'https://www.tradingview.com/scripts/ichimoku-kinko-hyo/'),
                 ],
             },
         }
@@ -27927,6 +27879,26 @@ class DapanMixin:
             rh = max(highs[-look:]); rl = min(lows[-look:])
             pp = (rh + rl + closes[-1])/3
             return {'R1':2*pp-rl, 'R2':pp+(rh-rl), 'S1':2*pp-rh, 'S2':pp-(rh-rl), 'PP':pp, 'max':rh, 'min':rl}
+        def _ichimoku(highs, lows, closes):
+            """计算一目均衡表 (Ichimoku Kinko Hyo) 5 条成分线 + 云填充."""
+            n = len(closes)
+            def _ph(h, l, p):
+                out_h = np.full(n, np.nan); out_l = np.full(n, np.nan)
+                for i in range(n):
+                    s = max(0, i - p + 1)
+                    out_h[i] = np.max(h[s:i+1]); out_l[i] = np.min(l[s:i+1])
+                return (out_h + out_l) / 2
+            tenkan  = _ph(highs, lows, 9)    # 转换线
+            kijun   = _ph(highs, lows, 26)   # 基准线
+            senkou_a = (tenkan + kijun) / 2  # 先行带 A
+            senkou_b = _ph(highs, lows, 52)  # 先行带 B
+            # 先行带向右预延 26 期 — 填充最后一个已知值
+            senkou_a_plot = np.concatenate([senkou_a, [senkou_a[-1]] * 26])
+            senkou_b_plot = np.concatenate([senkou_b, [senkou_b[-1]] * 26])
+            # 迟行带: 收盘价向后 26 期 (画在 x+26 位置)
+            chikou_x = np.arange(n - 26) + 26 if n > 26 else np.arange(n)
+            chikou_y = closes[:-26] if n > 26 else closes
+            return tenkan, kijun, senkou_a_plot, senkou_b_plot, chikou_x, chikou_y
 
         # === 拉取 + 渲染 ===
         def _redraw():
@@ -27973,6 +27945,7 @@ class DapanMixin:
             bias = _bias(closes)
             chip, cp_lo, cp_hi, cp_bin = _chip(data)
             sr = _sr(highs, lows, closes)
+            ich_tenkan, ich_kijun, ich_senkou_a, ich_senkou_b, ich_chikou_x, ich_chikou_y = _ichimoku(highs, lows, closes)
 
             v_chips = [k for k in ['macd','kdj','wr','bias'] if ind_vars[k].get()]
             show_chip = ind_vars['chip'].get()
@@ -28012,6 +27985,26 @@ class DapanMixin:
             for k, v in sr.items():
                 ax.axhline(v, color=sr_colors.get(k,'#666'), linewidth=0.7, linestyle='--', alpha=0.6, zorder=1)
                 ax.text(len(closes)-1, v, f' {k}={v:.2f}', color=sr_colors.get(k,'#666'), fontsize=7, va='bottom')
+
+            # --- 🌈 一目均衡表 (Ichimoku) 主图叠加 ---
+            if ind_vars['ichimoku'].get():
+                # 先行云 (向右预延 26 期, 截取可视范围内)
+                _na = len(ich_senkou_a)
+                _xb = np.arange(_na)
+                ax.fill_between(_xb, ich_senkou_a, ich_senkou_b,
+                                where=(ich_senkou_b >= ich_senkou_a),
+                                color='#26a69a', alpha=0.18, zorder=1, label='🔵看涨云')
+                ax.fill_between(_xb, ich_senkou_a, ich_senkou_b,
+                                where=(ich_senkou_b < ich_senkou_a),
+                                color='#ef5350', alpha=0.18, zorder=1, label='🔴看跌云')
+                # 转换线 (9)
+                ax.plot(x, ich_tenkan, color='#ff9800', linewidth=0.9, label='转换线(9)', zorder=4)
+                # 基准线 (26)
+                ax.plot(x, ich_kijun, color='#2196f3', linewidth=1.0, label='基准线(26)', zorder=4)
+                # 迟行带 (收盘价右移 26 期, 紫色虚线)
+                if len(ich_chikou_y) > 0:
+                    ax.plot(ich_chikou_x, ich_chikou_y, color='#9c27b0', linewidth=0.8,
+                            linestyle=':', label='迟行带(26)', zorder=4)
             pmax = float(np.max(highs)); pmin = float(np.min(lows))
             ppad = (pmax - pmin) * 0.08
             ax.set_ylim(pmin - ppad, pmax + ppad)
@@ -57797,7 +57790,7 @@ class DapanMixin:
         lower = mid - float(num_std) * std
         return upper.values, mid.values, lower.values
     def _plot_kline_zoom_subpanel(self, ax, key, dates, opens, closes, highs, lows, vol):
-        """放大窗副图:VOL / MACD / WR2 / KDJ / BOLL / BIAS。"""
+        """放大窗副图:VOL / MACD / WR2 / KDJ / BOLL。"""
         x = dates
         n = len(closes)
         o = np.asarray(opens, dtype=float)
@@ -57807,8 +57800,7 @@ class DapanMixin:
             "MACD": "MACD:指数平滑异同移动平均线,DIF上穿DEA为金叉,下穿为死叉",
             "WR2": "WR:威廉指标,超买超卖指标,低于-80为超卖,高于-20为超买",
             "KDJ": "KDJ:随机指标,K上穿D为金叉买入信号,80以上超买,20以下超卖",
-            "BOLL": "BOLL:布林带,价格突破上轨超买,跌破下轨超卖,中轨为趋势线",
-            "BIAS": "BIAS乖离率:(收盘-MA)/MA×100,乖离过大易超买/超卖,6/12/24日三条线"
+            "BOLL": "BOLL:布林带,价格突破上轨超买,跌破下轨超卖,中轨为趋势线"
         }
         if key == "VOL":
             v = np.asarray(vol, dtype=float) if vol is not None else np.zeros(n)
@@ -57862,16 +57854,6 @@ class DapanMixin:
             ax.plot(x, up, label="UP", color="#d32f2f", linewidth=0.95, alpha=0.9)
             ax.plot(x, lo, label="LOW", color="#2e7d32", linewidth=0.95, alpha=0.9)
             ax.set_ylabel("BOLL")
-            ax.legend(loc="upper left", fontsize=7)
-            ax.set_title(indicator_descriptions[key], fontsize=7, loc="left", color="#666666", pad=2)
-        elif key == "BIAS":
-            for p, col, lbl in [(6, "#00897b", "BIAS6"), (12, "#d84315", "BIAS12"), (24, "#4527a0", "BIAS24")]:
-                if n >= p:
-                    ma_p = pd.Series(c).rolling(p, min_periods=1).mean().values
-                    bias_p = (c - ma_p) / ma_p * 100
-                    ax.plot(x, bias_p, label=lbl, linewidth=1.0, color=col, alpha=0.9)
-            ax.axhline(0, color="gray", linewidth=0.6)
-            ax.set_ylabel("BIAS(%)")
             ax.legend(loc="upper left", fontsize=7)
             ax.set_title(indicator_descriptions[key], fontsize=7, loc="left", color="#666666", pad=2)
         ax.grid(True, alpha=0.3)
@@ -58117,149 +58099,47 @@ class DapanMixin:
         if hide_x_labels:
             ax1.tick_params(axis="x", labelbottom=False)
             ax1.set_xlabel("")
-    def _build_daily_kline_figure(self, kline_data, stock_name, figsize=(12, 9),
-                                  show_zoom_hint=True, show_support_resistance=False,
-                                  chart_type="kline"):
-        """多子图日K线 Figure: K线/一目均衡 + MACD + KDJ + BIAS + 量。
-        chart_type: 'kline'(默认) 或 'ichimoku'(一目均衡图)。"""
+    def _build_daily_kline_figure(self, kline_data, stock_name, figsize=(12, 6), show_zoom_hint=True, show_support_resistance=False):
+        """单图日K线 Figure(嵌入持仓详情等)。"""
         from matplotlib.figure import Figure
-        from matplotlib import gridspec
-        import numpy as _np, pandas as _pd
-
-        data = kline_data['data']
-        n = len(data)
-        opens   = data['开盘'].values
-        closes  = data['收盘'].values
-        highs   = data['最高'].values
-        lows    = data['最低'].values
-        if "成交量" in data.columns:
-            vol = data["成交量"].values.astype(float)
-        else:
-            vol = _np.zeros(n, dtype=float)
-
-        ratios = [4.2, 1.3, 1.3, 1.3, 1.3]
         fig = Figure(figsize=figsize, dpi=100)
+        # 根据情绪周期设置背景颜色
         emotion_cycle = getattr(self, 'emotion_cycle_var', None)
         if emotion_cycle:
             cycle = emotion_cycle.get()
             if cycle == "上行":
-                fig.patch.set_facecolor('#E8F5E9'); fig.patch.set_alpha(0.6)
+                fig.patch.set_facecolor('#E8F5E9')
+                fig.patch.set_alpha(0.6)
             elif cycle == "震荡":
-                fig.patch.set_facecolor('#FFF9C4'); fig.patch.set_alpha(0.6)
+                fig.patch.set_facecolor('#FFF9C4')
+                fig.patch.set_alpha(0.6)
             elif cycle == "下行":
-                fig.patch.set_facecolor('#FFEBEE'); fig.patch.set_alpha(0.6)
-
-        gs = gridspec.GridSpec(len(ratios), 1, figure=fig, height_ratios=ratios, hspace=0.08)
-        ax_main = fig.add_subplot(gs[0])
-        ax_macd = fig.add_subplot(gs[1], sharex=ax_main)
-        ax_kdj  = fig.add_subplot(gs[2], sharex=ax_main)
-        ax_bias = fig.add_subplot(gs[3], sharex=ax_main)
-        ax_vol  = fig.add_subplot(gs[4], sharex=ax_main)
-        _axes = [ax_main, ax_macd, ax_kdj, ax_bias, ax_vol]
+                fig.patch.set_facecolor('#FFEBEE')
+                fig.patch.set_alpha(0.6)
+        ax1 = fig.add_subplot(111)
+        # 设置axes背景颜色
         if emotion_cycle:
             cycle = emotion_cycle.get()
-            for _ax in _axes:
-                if cycle == "上行":
-                    _ax.set_facecolor('#E8F5E9'); _ax.patch.set_alpha(0.4)
-                elif cycle == "震荡":
-                    _ax.set_facecolor('#FFF9C4'); _ax.patch.set_alpha(0.4)
-                elif cycle == "下行":
-                    _ax.set_facecolor('#FFEBEE'); _ax.patch.set_alpha(0.4)
-
-        x = list(range(n))
-
-        # ── 主图 ──
-        if chart_type == "ichimoku":
-            tenkan, kijun, senkou_a, senkou_b = self._compute_ichimoku(highs, lows, closes)
-            if n > 26:
-                senkou_a_plot = _np.concatenate([senkou_a[26:], [senkou_a[-1]] * 26])
-                senkou_b_plot = _np.concatenate([senkou_b[26:], [senkou_b[-1]] * 26])
-            else:
-                senkou_a_plot = senkou_a; senkou_b_plot = senkou_b
-            ax_main.fill_between(x, senkou_a_plot, senkou_b_plot,
-                                 where=(senkou_b_plot >= senkou_a_plot),
-                                 color='#26a69a', alpha=0.25, label='绿云(看跌)')
-            ax_main.fill_between(x, senkou_a_plot, senkou_b_plot,
-                                 where=(senkou_b_plot < senkou_a_plot),
-                                 color='#ef5350', alpha=0.25, label='红云(看涨)')
-            ax_main.plot(x, tenkan, color='#ff9800', linewidth=0.9, label='转换线(9)')
-            ax_main.plot(x, kijun,  color='#2196f3', linewidth=1.0, label='基准线(26)')
-            ax_main.plot(x, closes,  color='#333',     linewidth=1.2, label='收盘价', zorder=5)
-            if n > 26:
-                chi_x = list(range(26, n)); chi_y = closes[:n-26]
-                ax_main.plot(chi_x, chi_y, color='#9c27b0', linewidth=0.8, linestyle='--', label='迟行带(26)')
-            for i in range(n):
-                _c = '#d32f2f' if closes[i] >= opens[i] else '#388e3c'
-                ax_main.plot([x[i], x[i]], [lows[i], highs[i]], color=_c, linewidth=0.5, zorder=3)
-                ax_main.bar(x[i], abs(closes[i] - opens[i]) or 0.001,
-                            bottom=min(closes[i], opens[i]), color=_c, width=0.5, alpha=0.6, zorder=4)
-            _hint = " 双击放大" if show_zoom_hint else ""
-            ax_main.set_title(f"{stock_name} — 🌈 一目均衡图{_hint}", fontsize=12, fontweight='bold')
-            ax_main.legend(loc='upper left', fontsize=7, ncol=3)
-        else:
-            self._apply_daily_kline_ax(
-                ax_main, kline_data, stock_name,
-                show_zoom_hint=show_zoom_hint, hide_x_labels=True,
-                show_support_resistance=show_support_resistance
-            )
-
-        ax_main.label_outer(); ax_main.grid(True, alpha=0.3)
-
-        # ── MACD 副图 ──
-        ema12 = self._ema_np(closes, 12); ema26 = self._ema_np(closes, 26)
-        dif = ema12 - ema26; dea = self._ema_np(dif, 9)
-        macdh = 2.0 * (dif - dea)
-        bar_colors = ["#d32f2f" if v >= 0 else "#388e3c" for v in macdh]
-        ax_macd.bar(x, macdh, color=bar_colors, alpha=0.45, width=0.55)
-        ax_macd.plot(x, dif, label="DIF", linewidth=0.9, color="#1565c0")
-        ax_macd.plot(x, dea, label="DEA", linewidth=0.9, color="#c62828")
-        ax_macd.axhline(0, color="gray", linewidth=0.5)
-        ax_macd.set_ylabel("MACD", fontsize=9)
-        ax_macd.legend(loc="upper left", fontsize=7); ax_macd.label_outer(); ax_macd.grid(True, alpha=0.3)
-
-        # ── KDJ 副图 ──
-        kv, dv, jv = self._kdj_series(highs, lows, closes, 9)
-        ax_kdj.plot(x, kv, label="K", linewidth=0.9, color="#c62828")
-        ax_kdj.plot(x, dv, label="D", linewidth=0.9, color="#1565c0")
-        ax_kdj.plot(x, jv, label="J", linewidth=0.8, color="#6a1b9a", alpha=0.9)
-        ax_kdj.axhline(80, color="gray", linestyle=":", linewidth=0.5)
-        ax_kdj.axhline(20, color="gray", linestyle=":", linewidth=0.5)
-        ax_kdj.set_ylabel("KDJ", fontsize=9)
-        ax_kdj.legend(loc="upper left", fontsize=7); ax_kdj.label_outer(); ax_kdj.grid(True, alpha=0.3)
-
-        # ── BIAS 副图 ──
-        for p, col, lbl in [(6, "#00897b", "BIAS6"), (12, "#d84315", "BIAS12"), (24, "#4527a0", "BIAS24")]:
-            ma_p = _pd.Series(closes).rolling(p, min_periods=1).mean().values
-            bias_p = (closes - ma_p) / ma_p * 100
-            ax_bias.plot(x, bias_p, label=lbl, linewidth=0.9, color=col, alpha=0.9)
-        ax_bias.axhline(0, color="gray", linewidth=0.5)
-        ax_bias.set_ylabel("BIAS(%)", fontsize=9)
-        ax_bias.legend(loc="upper left", fontsize=7); ax_bias.label_outer(); ax_bias.grid(True, alpha=0.3)
-
-        # ── 成交量 副图 ──
-        colors_v = ["#d32f2f" if closes[i] >= opens[i] else "#388e3c" for i in range(n)]
-        ax_vol.bar(x, vol, color=colors_v, alpha=0.7, width=0.65)
-        if n >= 5:
-            vma5  = _pd.Series(vol).rolling(5,  min_periods=1).mean().values
-            vma10 = _pd.Series(vol).rolling(10, min_periods=1).mean().values
-            ax_vol.plot(x, vma5,  color="#f57c00", linewidth=0.9, label="VOL MA5")
-            ax_vol.plot(x, vma10, color="#2196f3", linewidth=0.9, label="VOL MA10")
-        ax_vol.set_ylabel("量", fontsize=9)
-        ax_vol.legend(loc="upper left", fontsize=7); ax_vol.grid(True, alpha=0.3)
-
+            if cycle == "上行":
+                ax1.set_facecolor('#E8F5E9')
+                ax1.patch.set_alpha(0.4)
+            elif cycle == "震荡":
+                ax1.set_facecolor('#FFF9C4')
+                ax1.patch.set_alpha(0.4)
+            elif cycle == "下行":
+                ax1.set_facecolor('#FFEBEE')
+                ax1.patch.set_alpha(0.4)
+        self._apply_daily_kline_ax(ax1, kline_data, stock_name, show_zoom_hint, hide_x_labels=False, show_support_resistance=show_support_resistance)
         fig.tight_layout()
         return fig
-    def _build_daily_kline_zoom_figure(self, kline_data, stock_name, indicator_keys,
-                                       chart_type="kline", show_support_resistance=True):
-        """放大窗口:主图 K线/一目均衡 + 2~5 个副图指标(VOL/MACD/WR2/KDJ/BOLL/BIAS)。
-        chart_type: 'kline'(默认) 或 'ichimoku'。"""
+    def _build_daily_kline_zoom_figure(self, kline_data, stock_name, indicator_keys):
+        """放大窗口:主图 K 线 + 2~4 个副图指标(VOL/MACD/WR2/KDJ/BOLL)。"""
         from matplotlib import gridspec
         from matplotlib.figure import Figure
-        import numpy as _np
-        allowed = {"VOL", "MACD", "WR2", "KDJ", "BOLL", "BIAS"}
+        allowed = {"VOL", "MACD", "WR2", "KDJ", "BOLL"}
         keys = [k for k in (indicator_keys or []) if k in allowed]
-        if len(keys) < 2 or len(keys) > 5:
-            raise ValueError("副图指标须选 2~5 个")
+        if len(keys) < 2 or len(keys) > 4:
+            raise ValueError("副图指标须选 2~4 个")
         ni = len(keys)
         data = kline_data["data"]
         n = len(data)
@@ -58272,60 +58152,37 @@ class DapanMixin:
             vol = data["成交量"].values.astype(float)
         else:
             vol = np.zeros(n, dtype=float)
-        fig_h = 7.0 + 1.5 * (ni + 1)
+        fig_h = 7.0 + 2.15 * ni
         fig = Figure(figsize=(14, fig_h), dpi=100)
+        # 根据情绪周期设置背景颜色
         emotion_cycle = getattr(self, 'emotion_cycle_var', None)
         if emotion_cycle:
             cycle = emotion_cycle.get()
             if cycle == "上行":
-                fig.patch.set_facecolor('#E8F5E9'); fig.patch.set_alpha(0.6)
+                fig.patch.set_facecolor('#E8F5E9')
+                fig.patch.set_alpha(0.6)
             elif cycle == "震荡":
-                fig.patch.set_facecolor('#FFF9C4'); fig.patch.set_alpha(0.6)
+                fig.patch.set_facecolor('#FFF9C4')
+                fig.patch.set_alpha(0.6)
             elif cycle == "下行":
-                fig.patch.set_facecolor('#FFEBEE'); fig.patch.set_alpha(0.6)
+                fig.patch.set_facecolor('#FFEBEE')
+                fig.patch.set_alpha(0.6)
         ratios = [3.2] + [1.0] * ni
         gs = gridspec.GridSpec(1 + ni, 1, figure=fig, height_ratios=ratios, hspace=0.14)
         ax_main = fig.add_subplot(gs[0, 0])
+        # 设置主图背景颜色
         if emotion_cycle:
             cycle = emotion_cycle.get()
             if cycle == "上行":
-                ax_main.set_facecolor('#E8F5E9'); ax_main.patch.set_alpha(0.4)
+                ax_main.set_facecolor('#E8F5E9')
+                ax_main.patch.set_alpha(0.4)
             elif cycle == "震荡":
-                ax_main.set_facecolor('#FFF9C4'); ax_main.patch.set_alpha(0.4)
+                ax_main.set_facecolor('#FFF9C4')
+                ax_main.patch.set_alpha(0.4)
             elif cycle == "下行":
-                ax_main.set_facecolor('#FFEBEE'); ax_main.patch.set_alpha(0.4)
-        # ── 主图: K 线 / 一目均衡 切换 ──
-        x = list(range(n))
-        if chart_type == "ichimoku":
-            tenkan, kijun, senkou_a, senkou_b = self._compute_ichimoku(highs, lows, closes)
-            if n > 26:
-                senkou_a_plot = _np.concatenate([senkou_a[26:], [senkou_a[-1]] * 26])
-                senkou_b_plot = _np.concatenate([senkou_b[26:], [senkou_b[-1]] * 26])
-            else:
-                senkou_a_plot = senkou_a; senkou_b_plot = senkou_b
-            ax_main.fill_between(x, senkou_a_plot, senkou_b_plot,
-                                 where=(senkou_b_plot >= senkou_a_plot),
-                                 color='#26a69a', alpha=0.22, label='绿云(看跌)')
-            ax_main.fill_between(x, senkou_a_plot, senkou_b_plot,
-                                 where=(senkou_b_plot < senkou_a_plot),
-                                 color='#ef5350', alpha=0.22, label='红云(看涨)')
-            ax_main.plot(x, tenkan, color='#ff9800', linewidth=0.9, label='转换线(9)')
-            ax_main.plot(x, kijun,  color='#2196f3', linewidth=1.0, label='基准线(26)')
-            ax_main.plot(x, closes,  color='#333',     linewidth=1.2, label='收盘价', zorder=5)
-            if n > 26:
-                chi_x = list(range(26, n)); chi_y = closes[:n-26]
-                ax_main.plot(chi_x, chi_y, color='#9c27b0', linewidth=0.8, linestyle='--', label='迟行带(26)')
-            for i in range(n):
-                _c = '#d32f2f' if closes[i] >= opens[i] else '#388e3c'
-                ax_main.plot([x[i], x[i]], [lows[i], highs[i]], color=_c, linewidth=0.5, zorder=3)
-                ax_main.bar(x[i], abs(closes[i] - opens[i]) or 0.001,
-                            bottom=min(closes[i], opens[i]), color=_c, width=0.5, alpha=0.6, zorder=4)
-            ax_main.set_title(f"{stock_name} — 🌈 一目均衡图", fontsize=12, fontweight='bold')
-            ax_main.legend(loc='upper left', fontsize=7, ncol=3)
-            ax_main.grid(True, alpha=0.3)
-        else:
-            self._apply_daily_kline_ax(ax_main, kline_data, stock_name, show_zoom_hint=False, hide_x_labels=True,
-                                        show_support_resistance=show_support_resistance)
+                ax_main.set_facecolor('#FFEBEE')
+                ax_main.patch.set_alpha(0.4)
+        self._apply_daily_kline_ax(ax_main, kline_data, stock_name, show_zoom_hint=False, hide_x_labels=True, show_support_resistance=True)
         for row, key in enumerate(keys, start=1):
             ax_sub = fig.add_subplot(gs[row, 0], sharex=ax_main)
             # 设置副图背景颜色

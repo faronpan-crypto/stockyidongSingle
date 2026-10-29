@@ -3541,9 +3541,10 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                    activebackground=_BG_TOOLBAR, activeforeground="#80CBC4",
                    command=lambda: _on_analyze()).pack(side=tk.LEFT, padx=6)
 
-    # 🆕 支撑线 / 买卖点
+    # 🆕 支撑线 / 买卖点 / 一目均衡
     sup_var = tk.BooleanVar(value=True)
     bsp_var = tk.BooleanVar(value=True)
+    ich_var = tk.BooleanVar(value=False)
     tk.Checkbutton(top, text="📏 支撑线", variable=sup_var,
                    bg=_BG_TOOLBAR, fg="#81D4FA", selectcolor=_BG_DEEP,
                    activebackground=_BG_TOOLBAR, activeforeground="#81D4FA",
@@ -3552,16 +3553,30 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                    bg=_BG_TOOLBAR, fg="#FFD54F", selectcolor=_BG_DEEP,
                    activebackground=_BG_TOOLBAR, activeforeground="#FFD54F",
                    command=lambda: _reload()).pack(side=tk.LEFT, padx=6)
+    tk.Checkbutton(top, text="🌥️ 一目均衡", variable=ich_var,
+                   bg=_BG_TOOLBAR, fg="#26C6DA", selectcolor=_BG_DEEP,
+                   activebackground=_BG_TOOLBAR, activeforeground="#26C6DA",
+                   command=lambda: _reload()).pack(side=tk.LEFT, padx=6)
 
-    # 🆕 副图指标下拉
-    tk.Label(top, text="副图:", bg=_BG_TOOLBAR, fg=_FG_DIM,
-             font=("", 9)).pack(side=tk.LEFT, padx=(20, 2))
-    sub_indic = tk.StringVar(value="MACD")
-    _sub_opts = ["MACD", "RSI", "KDJ", "BOLL", "OBV"]
-    sub_menu = ttk.Combobox(top, textvariable=sub_indic, values=_sub_opts,
-                            width=6, state="readonly")
-    sub_menu.pack(side=tk.LEFT)
-    sub_menu.bind("<<ComboboxSelected>>", lambda e: _reload())
+    # 🆕 副图指标多选 (右侧可勾选, 勾选几个画几个)
+    tk.Label(top, text="副图指标:", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 9)).pack(side=tk.LEFT, padx=(18, 2))
+    _sub_defs = [
+        ("MACD",   True,  "#4FC3F7"),
+        ("KDJ",    False, "#CE93D8"),
+        ("RSI",    False, "#AB47BC"),
+        ("BIAS",   False, "#FFB74D"),
+        ("BOLL",   False, "#80CBC4"),
+        ("OBV",    False, "#78909C"),
+    ]
+    _sub_vars = {}
+    for _name, _default, _color in _sub_defs:
+        _v = tk.BooleanVar(value=_default)
+        _sub_vars[_name] = _v
+        tk.Checkbutton(top, text=_name, variable=_v,
+                       bg=_BG_TOOLBAR, fg=_color, selectcolor=_BG_DEEP,
+                       activebackground=_BG_TOOLBAR, activeforeground=_color,
+                       command=lambda: _reload()).pack(side=tk.LEFT, padx=2)
 
     status = tk.Label(top, text="⏳ 加载中...", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9))
     status.pack(side=tk.RIGHT, padx=10)
@@ -4207,8 +4222,18 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 return
 
             # ── K 线图 (60分/日/周/月) ──
-            # 布局: 主图 0.34~0.88, VOL 0.20~0.32, 副图 0.04~0.18
-            ax1 = fig.add_axes([0.08, 0.34, 0.88, 0.52], facecolor=_BG_PANEL)
+            # 🆕 动态布局: 根据勾选的副图指标数量分配空间 (最多 4 个)
+            _selected_subs = [_n for _n, _v in _sub_vars.items() if _v.get()]
+            if not _selected_subs:
+                _selected_subs = ["MACD"]  # 默认至少一个
+            n_sub = min(len(_selected_subs), 4)
+            _sub_h = 0.085; _sub_gap = 0.010; _vol_h = 0.10; _b_margin = 0.02; _t_margin = 0.90
+            _sub_area_h = n_sub * _sub_h + max(0, n_sub - 1) * _sub_gap
+            _sub_top = _b_margin + _sub_area_h
+            _vol_b = _sub_top + _sub_gap; _vol_t = _vol_b + _vol_h
+            _main_b = _vol_t + _sub_gap; _main_h = _t_margin - _main_b
+            # 主图 (K线)
+            ax1 = fig.add_axes([0.08, _main_b, 0.88, _main_h], facecolor=_BG_PANEL)
             ma5 = _ma(closes, 5); ma10 = _ma(closes, 10)
             ma20 = _ma(closes, 20); ma60 = _ma(closes, 60)
 
@@ -4259,6 +4284,50 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             ax1.legend(loc="upper left", fontsize=7, facecolor=_BG_PANEL, edgecolor=_FG_DIM,
                        labelcolor=["#FF8A65","#42A5F5","#AB47BC","#EF5350"][:4 if _is_intra_p else 3],
                        framealpha=0.85, ncol=4 if _is_intra_p else 3)
+
+            # 🆕 一目均衡表 (Ichimoku Kinko Hyo) — 勾选时叠加在主图
+            if ich_var.get() and n >= 60:
+                def _ph(h, l, p):
+                    _oh = np.full(n, np.nan); _ol = np.full(n, np.nan)
+                    for _i in range(n):
+                        _s = max(0, _i - p + 1)
+                        _oh[_i] = np.max(h[_s:_i+1]); _ol[_i] = np.min(l[_s:_i+1])
+                    return (_oh + _ol) / 2
+                ich_tenkan = _ph(highs, lows, 9)    # 转换线
+                ich_kijun  = _ph(highs, lows, 26)   # 基准线
+                ich_sen_a  = (ich_tenkan + ich_kijun) / 2  # 先行带 A
+                ich_sen_b  = _ph(highs, lows, 52)   # 先行带 B
+                # 先行带向右预延 26 期 (填充最后值, 截取到可视范围)
+                ich_sen_a_plot = np.concatenate([ich_sen_a, [ich_sen_a[-1]] * 26])[:n + 26]
+                ich_sen_b_plot = np.concatenate([ich_sen_b, [ich_sen_b[-1]] * 26])[:n + 26]
+                ich_x_ext = np.arange(len(ich_sen_a_plot))
+                # 迟行带: 收盘价向右移 26 期
+                if n > 26:
+                    ich_ch_x = np.arange(n - 26) + 26
+                    ich_ch_y = closes[:-26]
+                else:
+                    ich_ch_x = np.arange(n); ich_ch_y = closes
+
+                # 🔵 先行云 (看涨/看跌填充)
+                ax1.fill_between(ich_x_ext, ich_sen_a_plot, ich_sen_b_plot,
+                                 where=(ich_sen_b_plot >= ich_sen_a_plot),
+                                 color="#26A69A", alpha=0.15, zorder=1)
+                ax1.fill_between(ich_x_ext, ich_sen_a_plot, ich_sen_b_plot,
+                                 where=(ich_sen_b_plot < ich_sen_a_plot),
+                                 color="#EF5350", alpha=0.15, zorder=1)
+                # 转换线 (9) — 橙色
+                ax1.plot(x, ich_tenkan, color="#FF9800", lw=0.8, zorder=4, label="转换线")
+                # 基准线 (26) — 蓝色
+                ax1.plot(x, ich_kijun, color="#2196F3", lw=0.9, zorder=4, label="基准线")
+                # 迟行带 — 紫色虚线
+                ax1.plot(ich_ch_x, ich_ch_y, color="#9C27B0", lw=0.7,
+                         ls=":", zorder=4, label="迟行带")
+                # 云图例 (右侧单独加小面板)
+                ax1.text(0.99, 0.12, "🔵看涨云  🔴看跌云",
+                         transform=ax1.transAxes, fontsize=6.5, ha="right", va="bottom",
+                         color=_FG_DIM, bbox=dict(boxstyle="round,pad=0.2",
+                         fc=_BG_PANEL, ec=_FG_DIM, alpha=0.7))
+
             ax1.set_facecolor(_BG_PANEL)
             for spine in ax1.spines.values(): spine.set_color(_FG_DIM)
             ax1.tick_params(colors=_FG_DIM, labelsize=8)
@@ -4312,6 +4381,100 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                 if _near_r is not None:
                     ax1.text(0.99, _near_r, f"R {_near_r:.2f}", transform=ax1.get_yaxis_transform(),
                              fontsize=7, va="center", ha="right", color="#FF8A80")
+
+            # ═══════════════════════════════════════════════════════════════════════════
+            # 🔧 均线形态检测 (多头/空头发散 · 鱼头鱼尾 · 粘合变盘 · 金叉死叉标注)
+            # ═══════════════════════════════════════════════════════════════════════════
+            _ma_verdict_lines = []  # 收集形态结论, 给右边文字和分析面板
+            if n >= 60:
+                # ── 1. 排列判断 ──
+                _has_ma60 = not np.isnan(ma60[-1])
+                _m5, _m10, _m20, _m60 = ma5[-1], ma10[-1], ma20[-1], ma60[-1]
+                if _has_ma60 and _m5 > _m10 > _m20 > _m60:
+                    _ma_verdict_lines.append(("🟢 多头排列", "#66BB6A"))
+                elif _has_ma60 and _m5 < _m10 < _m20 < _m60:
+                    _ma_verdict_lines.append(("🔴 空头排列", "#EF5350"))
+                else:
+                    # 日线没走完60或排列不完整
+                    if _m5 > _m20 and not np.isnan(ma20[-1]):
+                        _ma_verdict_lines.append(("🟡 MA5>MA20 偏多", "#FFD54F"))
+                    elif _m5 < _m20 and not np.isnan(ma20[-1]):
+                        _ma_verdict_lines.append(("🟠 MA5<MA20 偏空", "#FF8A65"))
+
+                # ── 2. 发散检测 (均线间距扩大) ──
+                # 用最近 10 天的 (ma5-ma20) 差值的变化率判断发散
+                _div_window = min(15, n - 20)
+                if _div_window >= 5 and not np.isnan(ma20[-1]) and not np.isnan(ma20[-_div_window - 1]):
+                    _gap_now = ma5[-1] - ma20[-1]
+                    _gap_prev = ma5[-_div_window - 1] - ma20[-_div_window - 1]
+                    # 间距相对扩大 > 30% 且方向一致
+                    if _gap_now > 0 and _gap_now > _gap_prev * 1.3:
+                        _ma_verdict_lines.append(("📈 多头发散", "#66BB6A"))
+                        # 在主图右半区加半透明绿色背景条
+                        _fade_start = n - _div_window - 5
+                        ax1.axvspan(_fade_start, n - 1, alpha=0.08, color="#66BB6A", zorder=0)
+                    elif _gap_now < 0 and _gap_now < _gap_prev * 1.3:
+                        _ma_verdict_lines.append(("📉 空头发散", "#EF5350"))
+                        _fade_start = n - _div_window - 5
+                        ax1.axvspan(_fade_start, n - 1, alpha=0.08, color="#EF5350", zorder=0)
+
+                # ── 3. 粘合检测 (均线间距收窄 → 变盘预警) ──
+                if not np.isnan(ma60[-1]):
+                    _ma_spread = (max(_m5, _m10, _m20, _m60) - min(_m5, _m10, _m20, _m60)) / _m20
+                    if _ma_spread < 0.015:  # 所有均线间距 < 1.5%
+                        _ma_verdict_lines.append(("⚠️ 均线粘合 · 变盘在即", "#FFD54F"))
+                elif not np.isnan(ma20[-1]):
+                    _ma_spread20 = (max(_m5, _m10, _m20) - min(_m5, _m10, _m20)) / _m20
+                    if _ma_spread20 < 0.012:
+                        _ma_verdict_lines.append(("⚠️ 短中均线粘合", "#FFD54F"))
+
+                # ── 4. 鱼头鱼尾检测 (排列成立 + 均线斜率趋缓) ──
+                if _has_ma60:
+                    # 用 ma5 的斜率 (近5天 vs 近20天) 判断是否趋缓
+                    _slope_short = (ma5[-1] - ma5[-5]) / 5 if not np.isnan(ma5[-5]) else 0
+                    _slope_long = (ma5[-1] - ma5[-20]) / 20 if not np.isnan(ma5[-20]) else 0
+                    if _m5 > _m10 > _m20 > _m60:
+                        # 多头排列 + 短期斜率 < 长期斜率 → 鱼头 (上涨开始乏力)
+                        if abs(_slope_short) < abs(_slope_long) * 0.5 and _slope_long > 0:
+                            _ma_verdict_lines.append(("🔻 鱼头 · 上涨乏力", "#FFD54F"))
+                    elif _m5 < _m10 < _m20 < _m60:
+                        # 空头排列 + 短期斜率 > 长期斜率 → 鱼尾 (下跌开始乏力)
+                        if abs(_slope_short) < abs(_slope_long) * 0.5 and _slope_long < 0:
+                            _ma_verdict_lines.append(("🔺 鱼尾 · 下跌乏力", "#FFD54F"))
+
+                # ── 5. MA5/MA10 / MA5/MA20 金叉死叉标注 (最近 40 根) ──
+                _cross_search_start = max(5, n - 40)
+                for _i in range(_cross_search_start, n):
+                    _ma_fast_arr = ma5
+                    for _slow_arr, _slow_label in [(ma10, "MA10"), (ma20, "MA20")]:
+                        if np.isnan(_ma_fast_arr[_i]) or np.isnan(_slow_arr[_i]): continue
+                        if np.isnan(_ma_fast_arr[_i-1]) or np.isnan(_slow_arr[_i-1]): continue
+                        # 金叉
+                        if _ma_fast_arr[_i-1] < _slow_arr[_i-1] and _ma_fast_arr[_i] >= _slow_arr[_i]:
+                            ax1.annotate(f"🟢金叉{_slow_label}",
+                                         xy=(x[_i], _slow_arr[_i]),
+                                         xytext=(x[_i], _slow_arr[_i] * 0.985),
+                                         fontsize=6, color="#66BB6A", ha="center",
+                                         arrowprops=dict(arrowstyle="->", color="#66BB6A", lw=0.8),
+                                         bbox=dict(boxstyle="round,pad=0.15", fc="#1B3A1B", ec="#66BB6A", alpha=0.8))
+                        # 死叉
+                        elif _ma_fast_arr[_i-1] > _slow_arr[_i-1] and _ma_fast_arr[_i] <= _slow_arr[_i]:
+                            ax1.annotate(f"🔴死叉{_slow_label}",
+                                         xy=(x[_i], _slow_arr[_i]),
+                                         xytext=(x[_i], _slow_arr[_i] * 1.015),
+                                         fontsize=6, color="#EF5350", ha="center",
+                                         arrowprops=dict(arrowstyle="->", color="#EF5350", lw=0.8),
+                                         bbox=dict(boxstyle="round,pad=0.15", fc="#3A1B1B", ec="#EF5350", alpha=0.8))
+
+                # ── 6. 右侧均线形态结论面板 ──
+                if _ma_verdict_lines:
+                    _ma_text = "均线形态\n" + "\n".join(f" {t}" for t, _ in _ma_verdict_lines)
+                    _ma_colors = [c for _, c in _ma_verdict_lines]
+                    # 在 ax1 右侧 (y 轴右边) 画形态摘要
+                    ax1.text(0.01, 0.40, _ma_text, transform=ax1.transAxes,
+                             fontsize=7.5, color=_ma_colors[0], ha="left", va="center",
+                             bbox=dict(boxstyle="round,pad=0.4", fc="#1A1A2E", ec="#78909C", alpha=0.9),
+                             linespacing=1.4)
 
             # 🆕 买卖点标记 (增强版: MA金叉/死叉 + MACD金叉/死叉 + BOLL穿越 + RSI超买超卖 + 蜡烛形态)
             if bsp_var.get() and n >= 30:
@@ -4440,12 +4603,11 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             except Exception as _e:
                 print(f"[综合判断] err={_e}", flush=True)
 
-            # 副图 1: 成交量 + MA5/MA10 (不画 legend, VMA 颜色够区分)
-            ax2 = fig.add_axes([0.08, 0.20, 0.88, 0.12], facecolor=_BG_PANEL, sharex=ax1)
-            colors = ["#EF5350" if closes[i] >= opens[i] else "#66BB6A" for i in range(n)]
-            ax2.bar(x, vols, color=colors, width=w)
-            vol_ma5 = _ma(vols, 5)
-            vol_ma10 = _ma(vols, 10)
+            # 副图 1: 成交量 + MA5/MA10 (位置根据动态布局)
+            ax2 = fig.add_axes([0.08, _vol_b, 0.88, _vol_h], facecolor=_BG_PANEL, sharex=ax1)
+            colors_v = ["#EF5350" if closes[i] >= opens[i] else "#66BB6A" for i in range(n)]
+            ax2.bar(x, vols, color=colors_v, width=w)
+            vol_ma5 = _ma(vols, 5); vol_ma10 = _ma(vols, 10)
             ax2.plot(x, vol_ma5, color="#FF8A65", lw=0.7)
             ax2.plot(x, vol_ma10, color="#42A5F5", lw=0.7)
             ax2.set_facecolor(_BG_PANEL)
@@ -4453,86 +4615,109 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             ax2.tick_params(colors=_FG_DIM, labelsize=7)
             ax2.set_ylabel("VOL", color=_FG_DIM, fontsize=8)
 
-            # 副图 2: 可切换指标 (复用上面提前算好的 MACD/RSI/BOLL)
-            sub_name = sub_indic.get()
-            ax3 = fig.add_axes([0.08, 0.04, 0.88, 0.14], facecolor=_BG_PANEL, sharex=ax1)
-            if sub_name == "MACD":
-                h_colors = ["#EF5350" if h >= 0 else "#66BB6A" for h in hist]
-                ax3.bar(x, hist, color=h_colors, width=w)
-                ax3.plot(x, dif, color="#42A5F5", lw=0.8)
-                ax3.plot(x, dea, color="#FFB74D", lw=0.8)
-                ax3.axhline(y=0, color=_FG_DIM, lw=0.6)
-                ax3.set_ylabel("MACD", color=_FG_DIM, fontsize=8)
-            elif sub_name == "RSI":
-                ax3.plot(x, rsi, color="#CE93D8", lw=1.0)
-                ax3.axhline(y=70, color="#EF5350", lw=0.5, ls="--")
-                ax3.axhline(y=30, color="#66BB6A", lw=0.5, ls="--")
-                ax3.axhline(y=50, color=_FG_DIM, lw=0.4, ls=":")
-                ax3.set_ylim(0, 100)
-                ax3.set_ylabel("RSI", color=_FG_DIM, fontsize=8)
-            elif sub_name == "KDJ":
-                kdj_n = 9
-                kd_low = np.full(n, np.nan)
-                kd_high = np.full(n, np.nan)
-                for i in range(kdj_n - 1, n):
-                    kd_low[i] = np.min(lows[i - kdj_n + 1:i + 1])
-                    kd_high[i] = np.max(highs[i - kdj_n + 1:i + 1])
-                rsv = np.full(n, 50.0)
-                for i in range(n):
-                    if kd_high[i] - kd_low[i] > 0:
-                        rsv[i] = (closes[i] - kd_low[i]) / (kd_high[i] - kd_low[i]) * 100
-                k = np.full(n, 50.0); d = np.full(n, 50.0); j = np.full(n, 50.0)
-                for i in range(1, n):
-                    k[i] = k[i-1] * 2/3 + rsv[i] * 1/3
-                    d[i] = d[i-1] * 2/3 + k[i] * 1/3
-                    j[i] = 3 * k[i] - 2 * d[i]
-                ax3.plot(x, k, color="#42A5F5", lw=0.9)
-                ax3.plot(x, d, color="#FFB74D", lw=0.9)
-                ax3.plot(x, j, color="#CE93D8", lw=0.8)
-                ax3.axhline(y=80, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
-                ax3.axhline(y=20, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
-                ax3.set_ylabel("KDJ", color=_FG_DIM, fontsize=8)
-            elif sub_name == "BOLL":
-                boll_mid = _ma(closes, 20)
-                boll_std = np.full(n, np.nan)
-                for i in range(19, n):
-                    boll_std[i] = np.std(closes[i-19:i+1])
-                boll_up = boll_mid + 2 * boll_std
-                boll_lo = boll_mid - 2 * boll_std
-                pct_b = (closes - boll_lo) / np.maximum(boll_up - boll_lo, 0.001)
-                ax3.plot(x, pct_b, color="#80CBC4", lw=0.9)
-                ax3.axhline(y=1.0, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
-                ax3.axhline(y=0.5, color=_FG_DIM, lw=0.5, ls=":")
-                ax3.axhline(y=0.0, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
-                ax3.set_ylim(-0.1, 1.1)
-                ax3.set_ylabel("BOLL%B", color=_FG_DIM, fontsize=8)
-            elif sub_name == "OBV":
-                obv = np.zeros(n)
-                for i in range(1, n):
-                    if closes[i] > closes[i-1]: obv[i] = obv[i-1] + vols[i]
-                    elif closes[i] < closes[i-1]: obv[i] = obv[i-1] - vols[i]
-                    else: obv[i] = obv[i-1]
-                obv_ma5 = _ma(obv, 5)
-                ax3.plot(x, obv, color="#42A5F5", lw=0.9)
-                ax3.plot(x, obv_ma5, color="#FFB74D", lw=0.8)
-                ax3.set_ylabel("OBV", color=_FG_DIM, fontsize=8)
-            ax3.set_facecolor(_BG_PANEL)
-            for spine in ax3.spines.values(): spine.set_color(_FG_DIM)
-            ax3.tick_params(colors=_FG_DIM, labelsize=7)
+            # 🆕 副图指标: 根据勾选的列表从下往上堆叠 (支持 1~4 个同时显示)
+            _sub_ax_list = []
+            _sub_biases = {}  # 缓存计算结果, 避免重复算
+            for _si, _sname in enumerate(reversed(_selected_subs[:4])):
+                # 从下往上排: reversed 让第一个选中的在最上面
+                _ax_bottom = _b_margin + _si * (_sub_h + _sub_gap)
+                _ax = fig.add_axes([0.08, _ax_bottom, 0.88, _sub_h],
+                                   facecolor=_BG_PANEL, sharex=ax1)
+                _ax.set_facecolor(_BG_PANEL)
+                for spine in _ax.spines.values(): spine.set_color(_FG_DIM)
+                _ax.tick_params(colors=_FG_DIM, labelsize=7)
+                # 只给最上面的副图标 x 轴 (避免重叠)
+                if _si != n_sub - 1:
+                    _ax.set_xticklabels([])
+
+                # ── MACD ──
+                if _sname == "MACD":
+                    h_colors = ["#EF5350" if h >= 0 else "#66BB6A" for h in hist]
+                    _ax.bar(x, hist, color=h_colors, width=w)
+                    _ax.plot(x, dif, color="#42A5F5", lw=0.8)
+                    _ax.plot(x, dea, color="#FFB74D", lw=0.8)
+                    _ax.axhline(y=0, color=_FG_DIM, lw=0.6)
+                    _ax.set_ylabel("MACD", color=_FG_DIM, fontsize=8)
+
+                # ── RSI(14) ──
+                elif _sname == "RSI":
+                    _ax.plot(x, rsi, color="#AB47BC", lw=1.0)
+                    _ax.axhline(y=70, color="#EF5350", lw=0.5, ls="--")
+                    _ax.axhline(y=30, color="#66BB6A", lw=0.5, ls="--")
+                    _ax.axhline(y=50, color=_FG_DIM, lw=0.4, ls=":")
+                    _ax.set_ylim(0, 100)
+                    _ax.set_ylabel("RSI", color=_FG_DIM, fontsize=8)
+
+                # ── KDJ(9,3,3) ──
+                elif _sname == "KDJ":
+                    kd_n = 9
+                    kd_low = np.full(n, np.nan); kd_high = np.full(n, np.nan)
+                    for i in range(kd_n - 1, n):
+                        kd_low[i] = np.min(lows[i - kd_n + 1:i + 1])
+                        kd_high[i] = np.max(highs[i - kd_n + 1:i + 1])
+                    rsv = np.full(n, 50.0)
+                    for i in range(n):
+                        if kd_high[i] - kd_low[i] > 0:
+                            rsv[i] = (closes[i] - kd_low[i]) / (kd_high[i] - kd_low[i]) * 100
+                    _k = np.full(n, 50.0); _d = np.full(n, 50.0); _j = np.full(n, 50.0)
+                    for i in range(1, n):
+                        _k[i] = _k[i-1] * 2/3 + rsv[i] * 1/3
+                        _d[i] = _d[i-1] * 2/3 + _k[i] * 1/3
+                        _j[i] = 3 * _k[i] - 2 * _d[i]
+                    _ax.plot(x, _k, color="#42A5F5", lw=0.9, label="K")
+                    _ax.plot(x, _d, color="#FFB74D", lw=0.9, label="D")
+                    _ax.plot(x, _j, color="#CE93D8", lw=0.8, label="J")
+                    _ax.axhline(y=80, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
+                    _ax.axhline(y=20, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
+                    _ax.set_ylabel("KDJ", color=_FG_DIM, fontsize=8)
+
+                # ── BIAS(6,12,24) ──
+                elif _sname == "BIAS":
+                    _bias6_arr = (closes - _ma(closes, 6)) / _ma(closes, 6) * 100
+                    _bias12_arr = (closes - _ma(closes, 12)) / _ma(closes, 12) * 100
+                    _bias24_arr = (closes - _ma(closes, 24)) / _ma(closes, 24) * 100
+                    _ax.plot(x, _bias6_arr, color="#42A5F5", lw=0.9, label="BIAS6")
+                    _ax.plot(x, _bias12_arr, color="#FFB74D", lw=0.9, label="BIAS12")
+                    _ax.plot(x, _bias24_arr, color="#CE93D8", lw=0.8, label="BIAS24")
+                    _ax.axhline(y=0, color=_FG_DIM, lw=0.5)
+                    _ax.axhline(y=12, color="#EF5350", lw=0.4, ls="--", alpha=0.5)
+                    _ax.axhline(y=-12, color="#66BB6A", lw=0.4, ls="--", alpha=0.5)
+                    _ax.set_ylabel("BIAS", color=_FG_DIM, fontsize=8)
+
+                # ── BOLL%B ──
+                elif _sname == "BOLL":
+                    _boll_mid20 = _ma(closes, 20)
+                    _boll_std20 = np.full(n, np.nan)
+                    for i in range(19, n): _boll_std20[i] = np.std(closes[i-19:i+1])
+                    _boll_up20 = _boll_mid20 + 2 * _boll_std20
+                    _boll_lo20 = _boll_mid20 - 2 * _boll_std20
+                    _pct_b = (closes - _boll_lo20) / np.maximum(_boll_up20 - _boll_lo20, 0.001)
+                    _ax.plot(x, _pct_b, color="#80CBC4", lw=0.9)
+                    _ax.axhline(y=1.0, color="#EF5350", lw=0.5, ls="--", alpha=0.6)
+                    _ax.axhline(y=0.5, color=_FG_DIM, lw=0.5, ls=":")
+                    _ax.axhline(y=0.0, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
+                    _ax.set_ylim(-0.1, 1.1)
+                    _ax.set_ylabel("BOLL%B", color=_FG_DIM, fontsize=8)
+
+                # ── OBV ──
+                elif _sname == "OBV":
+                    obv = np.zeros(n)
+                    for i in range(1, n):
+                        if closes[i] > closes[i-1]: obv[i] = obv[i-1] + vols[i]
+                        elif closes[i] < closes[i-1]: obv[i] = obv[i-1] - vols[i]
+                        else: obv[i] = obv[i-1]
+                    _ax.plot(x, obv, color="#42A5F5", lw=0.9)
+                    _ax.plot(x, _ma(obv, 5), color="#FFB74D", lw=0.8)
+                    _ax.set_ylabel("OBV", color=_FG_DIM, fontsize=8)
+
+                _sub_ax_list.append(_ax)
 
             # 标题简化 (短名称 + 周期)
             last_p = closes[-1] if n else 0
             chg = (closes[-1] / closes[-2] - 1) * 100 if n > 1 else 0
             _chg_col = "#EF5350" if chg >= 0 else "#66BB6A"
             ax1.set_title(f"{name} ({code6})  {period}K", color=_FG_GOLD, fontsize=11, pad=8)
-            # 右下角浮窗: 最新价 + 涨跌% (替代 legend, 省空间)
-            _sub_lbl = {"MACD": "MACD", "RSI": "RSI(14)", "KDJ": "KDJ(9,3,3)", "BOLL": "BOLL%B", "OBV": "OBV"}.get(sub_name, sub_name)
-            _ma_lbls = []
-            _ma_colors = [("#FF8A65", "MA5"), ("#42A5F5", "MA10"), ("#AB47BC", "MA20"), ("#EF5350", "MA60")]
-            for _c, _n in _ma_colors:
-                if _is_intra_p or _n != "MA10":  # 日线跳过 MA10
-                    _ma_lbls.append(f"{_n}={_c}")
-            # 简洁单行: 最新 + 涨跌
+            # 简洁单行: 最新 + 涨跌 (右上角浮窗)
             _rt = f"  {last_p:.2f}  {chg:+.2f}%"
             ax1.text(1.0, 1.0, _rt, transform=ax1.transAxes,
                      fontsize=10, va="top", ha="right", color=_chg_col, fontweight="bold")
@@ -4554,8 +4739,11 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
             if candle_var.get():
                 _mark_candle_patterns(opens, highs, lows, closes)
         except Exception as e:
-            import traceback; traceback.print_exc()
-            status.config(text=f"❌ 渲染失败: {e}", fg="#EF5350")
+            import traceback
+            _tb = traceback.format_exc()
+            print(f"[draw ❌ 渲染失败] {_tb}", flush=True)
+            try: status.config(text=f"❌ 渲染失败: {e}", fg="#EF5350")
+            except: pass
 
     # ── hover tooltip: 鼠标移到蜡烛上弹 Tk Toplevel 浮窗 ──
     def _hover_tip(event, closes, opens, highs, lows, vols, dates):
