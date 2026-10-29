@@ -2914,6 +2914,8 @@ class DapanMixin:
                             print(f"[大盘] 📌 emo_history 补了 {_added_fb} 天, trend10 最新={trend10[-1]['full_date']}")
                 except Exception as _e_emo_fb:
                     print(f"[大盘] emo_history 补全失败: {_e_emo_fb}")
+                # ✂️ 截断: 只保留最近 20 日 (不管合了多少天)
+                trend10 = trend10[-20:] if len(trend10) > 20 else trend10
                 dapan_data["trend10"] = trend10
 
                 # 5.6 把 breadth 实时数据 (up/dn/zt/dt) 合并进 trend10 最新一天
@@ -3026,6 +3028,9 @@ class DapanMixin:
 
     def _dapan_update_ui(self, data):
         """主线程UI更新: 把后台线程拉到的数据渲染到控件上"""
+        # ✂️ 全局保险: trend10 永远只留最近 20 天 (防止 snapshot/merge 合出 96 天)
+        if data and data.get("trend10") and len(data["trend10"]) > 20:
+            data["trend10"] = data["trend10"][-20:]
         # 缓存完整数据, Canvas <Configure> 事件触发重绘时用
         self._dapan_full_data = data
         try:
@@ -3429,7 +3434,7 @@ class DapanMixin:
 
 
     def _render_trend_from_emo_history(self):
-        """从 emo_history.json 渲染全部天数趋势图"""
+        """从 emo_history.json + 新浪/akshare 真实上证日线 → 渲染 20 日趋势"""
         import json as _js, os as _os
         path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
         if not _os.path.exists(path):
@@ -3439,23 +3444,54 @@ class DapanMixin:
                 hist = _js.load(f)
             if not isinstance(hist, dict) or not hist:
                 return
-            # 取全部天数 (按日期排序)
+
+            # ✅ 第一步: 拉真实上证日线 (akshare/新浪, 覆盖 emo_history 里的假 pct)
+            _real_map = {}
+            try:
+                from ui._akshare_fetcher import fetch_index_daily as _fi_trend
+                _df_real = _fi_trend(symbol="sh000001", days=25)
+                if _df_real is not None and len(_df_real) > 0:
+                    for _r in _df_real.itertuples(index=False):
+                        _p = float(getattr(_r, "pct_chg", 0) or 0)
+                        _c = float(getattr(_r, "close", 0) or 0)
+                        if hasattr(_r.date, "strftime"):
+                            _k8 = _r.date.strftime("%Y%m%d")   # 统一成 emo_history 的 8 字符格式
+                        else:
+                            _k8 = str(_r.date).replace("-", "")[:8]
+                        _real_map[_k8] = {"pct": _p, "close": _c}
+                    print(f"[大盘] 📈 akshare 真实日线: {len(_real_map)}天, 最新={max(_real_map.keys())}")
+            except Exception as _e_real:
+                print(f"[大盘] akshare 拉真实日线失败: {_e_real}")
+
+            # 第二步: 合并 — real_map 的 pct 覆盖 hist 里的 0.0 假值
             sorted_dates = sorted(hist.keys())
             trend10 = []
             for d in sorted_dates:
                 v = hist[d]
+                # 优先用真实 pct (8 字符 key 匹配), 没有才 fallback hist 里的值
+                if d in _real_map:
+                    _pct = _real_map[d]["pct"]
+                    _close = _real_map[d]["close"]
+                else:
+                    _pct = float(v.get("pct", 0) or 0)
+                    _close = v.get("close", 0)
+                # 显示用 full_date 统一成 YYYY-MM-DD (和 Canvas 渲染对齐)
+                _full_ymd = d[:4] + "-" + d[4:6] + "-" + d[6:8]
                 trend10.append({
-                    "full_date": d,
-                    "date": d[5:10],
-                    "pct": float(v.get("pct", 0) or 0),
+                    "full_date": _full_ymd,
+                    "date": d[4:6] + "/" + d[6:8],
+                    "pct": _pct,
                     "emo": float(v.get("emo_score", 50) or 50),
                     "zt": int(v.get("zt", 0) or 0),
-                    "close": v.get("close", 0),
+                    "close": _close,
                 })
+
+            # ✂️ 截断 20 天
+            trend10 = trend10[-20:] if len(trend10) > 20 else trend10
+
             if trend10:
                 last = trend10[-1]
                 _es = float(last.get("emo", 50))
-                # 优先从 JSON 里直接读 stage (人工校准过更准), 没有再从 emo_score 推导
                 _raw = hist.get(last["full_date"], {})
                 _stage_from_json = _raw.get("stage", "")
                 if _stage_from_json and _stage_from_json not in ("-", ""):
@@ -3473,8 +3509,9 @@ class DapanMixin:
                     "sectors": {"hot": [], "cold": []}
                 }
                 self._dapan_update_ui(data)
-                print(f"[大盘] 📂 从 emo_history 渲染全部 {len(trend10)} 天趋势 (stage={_stage}, emo={_score})", flush=True)
+                print(f"[大盘] 📂 emo_history+akshare 真实数据 {len(trend10)} 天 → 最新 pct={trend10[-1]['pct']:+.2f}%", flush=True)
         except Exception as e:
+            import traceback; traceback.print_exc()
             print(f"[大盘] emo_history 渲染失败: {e}", flush=True)
 
 
@@ -4388,12 +4425,32 @@ class DapanMixin:
 
             month_lbl.config(text=f"📈 近 {len(recent_20)} 日 · 上证涨跌 + 情绪分趋势")
 
-            # 提取数据
+            # 提取数据 —— 先拉 akshare 真实日线覆盖 hist_dict 里的假 pct=0.0
+            _real_pct_map = {}
+            try:
+                from ui._akshare_fetcher import fetch_index_daily as _fi_emo
+                _df_emo = _fi_emo(symbol="sh000001", days=25)
+                if _df_emo is not None and len(_df_emo) > 0:
+                    for _r in _df_emo.itertuples(index=False):
+                        _p = float(getattr(_r, "pct_chg", 0) or 0)
+                        if hasattr(_r.date, "strftime"):
+                            _k = _r.date.strftime("%Y-%m-%d")
+                        else:
+                            _k = str(_r.date)[:10]
+                        _real_pct_map[_k] = _p
+                    print(f"[情绪周期] 📈 akshare 真实日线 {len(_real_pct_map)}天", flush=True)
+            except Exception as _e_real2:
+                print(f"[情绪周期] akshare 拉真实日线失败: {_e_real2}", flush=True)
+
             _dates = []; _pcts = []; _emos = []
             for _ds in recent_20:
                 _dates.append(_ds[5:])  # MM-DD
                 _r = hist_dict.get(_ds, {})
-                _p = _r.get("pct")
+                # 优先用 akshare 真实 pct, 没有才 fallback hist 里的值
+                if _ds in _real_pct_map and _real_pct_map[_ds] != 0.0:
+                    _p = _real_pct_map[_ds]
+                else:
+                    _p = _r.get("pct")
                 _e = _r.get("emo_score")
                 _pcts.append(float(_p) if _p is not None else None)
                 _emos.append(float(_e) if _e is not None else None)
@@ -4406,15 +4463,17 @@ class DapanMixin:
                 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
                 import matplotlib.pyplot as _plt_c
 
-                _fig = Figure(figsize=(10, 3.2), dpi=90, facecolor="#1A1A2E")
+                _fig = Figure(figsize=(16, 4.2), dpi=85, facecolor="#1A1A2E")
                 _ax1 = _fig.add_subplot(211)   # 情绪分
                 _ax2 = _fig.add_subplot(212, sharex=_ax1)  # 上证涨跌
 
                 for _ax in (_ax1, _ax2):
                     _ax.set_facecolor("#1A1A2E")
-                    _ax.tick_params(colors="#90A4AE", labelsize=8)
+                    _ax.tick_params(colors="#90A4AE", labelsize=8, pad=2)
                     for _sp in _ax.spines.values(): _sp.set_color("#37474F")
-                    _ax.grid(True, alpha=0.25, color="#546E7A", linestyle="--")
+                    _ax.grid(True, alpha=0.25, color="#546E7A", linestyle="--", linewidth=0.5)
+                    _ax.yaxis.labelpad = 4
+                    _ax.set_xlim(-0.6, len(recent_20) - 0.4)  # 左右留半格边距
 
                 # ── 上图: 情绪分折线 ──
                 _x_idx = list(range(len(recent_20)))
@@ -4422,38 +4481,38 @@ class DapanMixin:
                 if _emo_valid:
                     _xe, _ye = zip(*_emo_valid)
                     _ax1.plot(_xe, _ye, color="#FFB74D", linewidth=1.8, marker="o",
-                              markersize=3, markerfacecolor="#FFB74D", zorder=5)
-                    _ax1.fill_between(_xe, _ye, alpha=0.12, color="#FFB74D")
-                    # 冰点线 (emo 分 30)
-                    _ax1.axhline(30, color="#EF5350", linewidth=0.8, linestyle="--", alpha=0.6)
-                    _ax1.text(len(recent_20)-0.5, 30, "冰点", color="#EF5350", fontsize=7, va="bottom")
-                _ax1.set_ylabel("情绪分", color="#FFB74D", fontsize=9, fontweight="bold")
+                              markersize=4, markerfacecolor="#FFB74D", markeredgecolor="#1A1A2E",
+                              markeredgewidth=0.8, zorder=5)
+                    _ax1.fill_between(_xe, _ye, alpha=0.18, color="#FFB74D")
+                    _ax1.axhline(30, color="#EF5350", linewidth=0.8, linestyle="--", alpha=0.7)
+                    _ax1.text(len(recent_20)-0.3, 30, "冰点30", color="#EF5350", fontsize=8, va="bottom")
+                _ax1.set_ylabel("情绪分 0-100", color="#FFB74D", fontsize=9, fontweight="bold")
                 _ax1.set_ylim(0, 100)
                 _ax1.set_yticks([0, 25, 50, 75, 100])
                 _ax1.tick_params(labelbottom=False)
 
-                # ── 下图: 上证涨跌柱 ──
+                # ── 下图: 上证涨跌柱 (20 根柱子完全展开) ──
                 _bar_colors = ["#C62828" if (v is not None and v >= 0)
                                else ("#2E7D32" if v is not None else "#37474F") for v in _pcts]
                 _bar_vals = [(v if v is not None else 0) for v in _pcts]
-                _ax2.bar(_x_idx, _bar_vals, color=_bar_colors, width=0.75, edgecolor="#1A1A2E", linewidth=0.5)
-                # 柱顶标值
+                _ax2.bar(_x_idx, _bar_vals, color=_bar_colors, width=0.72,
+                         edgecolor="#1A1A2E", linewidth=0.8)
                 for i, v in enumerate(_pcts):
                     if v is not None:
                         _c = "#FFCDD2" if v >= 0 else "#C8E6C9"
-                        _ax2.text(i, v + (0.15 if v >= 0 else -0.25), f"{v:+.1f}%",
+                        _ax2.text(i, v + (0.18 if v >= 0 else -0.3), f"{v:+.2f}%",
                                   ha="center", va="bottom" if v >= 0 else "top",
-                                  fontsize=7, color=_c, fontweight="bold")
-                _ax2.axhline(0, color="#546E7A", linewidth=0.6)
+                                  fontsize=8, color=_c, fontweight="bold")
+                _ax2.axhline(0, color="#90A4AE", linewidth=0.8)
                 _ax2.set_ylabel("上证%", color="#81D4FA", fontsize=9, fontweight="bold")
                 _ax2.set_xticks(_x_idx)
-                _ax2.set_xticklabels(_dates, fontsize=7, rotation=45, ha="right")
+                # X 轴: 左边第 1 个 = 第一天, 右边最后 1 个 = 第 20 天
+                _x_labels = [f"D{i+1}\n{d}" for i, d in enumerate(_dates)]
+                _ax2.set_xticklabels(_x_labels, fontsize=7.5, rotation=0, ha="center")
 
-                _fig.subplots_adjust(left=0.06, right=0.98, top=0.92, bottom=0.18, hspace=0.15)
-
-                # 标题
-                _fig.suptitle(f"近 {len(recent_20)} 日 · 上证涨跌 + 情绪分趋势",
-                             color="#FFD54F", fontsize=10, fontweight="bold", y=0.98)
+                _fig.subplots_adjust(left=0.07, right=0.99, top=0.88, bottom=0.22, hspace=0.06)
+                _fig.suptitle(f"近 {len(recent_20)} 日 · 上证涨跌(柱) + 情绪分(折线)   ← D1 第一天   D{len(recent_20)} 最后一天 →",
+                             color="#FFD54F", fontsize=10, fontweight="bold", y=0.96)
 
                 _canvas = FigureCanvasTkAgg(_fig, master=grid_f)
                 _canvas.draw()
@@ -4813,6 +4872,24 @@ class DapanMixin:
                 for w in grid_f.winfo_children(): w.destroy()
                 cells_ref.clear()
 
+                # 📈 拉真实上证日线 (覆盖 hist_dict 里的假 pct=0.0)
+                _real_pct = {}
+                try:
+                    from ui._akshare_fetcher import fetch_index_daily as _fi_cal
+                    import datetime as _dt_cal
+                    _df_cal = _fi_cal(symbol="sh000001", days=60)
+                    if _df_cal is not None and len(_df_cal) > 0:
+                        for _rr in _df_cal.itertuples(index=False):
+                            _pp = float(getattr(_rr, "pct_chg", 0) or 0)
+                            if hasattr(_rr.date, "strftime"):
+                                _k2 = _rr.date.strftime("%Y-%m-%d")
+                            else:
+                                _k2 = str(_rr.date)[:10]
+                            _real_pct[_k2] = _pp
+                        print(f"[情绪周期月历] 📈 akshare 真实日线 {len(_real_pct)}天", flush=True)
+                except Exception as _ee_cal:
+                    print(f"[情绪周期月历] akshare 拉真实日线失败: {_ee_cal}", flush=True)
+
                 try:
                     ym = view_month[0]
                     month_lbl.config(text=f"{ym.year} 年 {ym.month} 月")
@@ -4831,11 +4908,14 @@ class DapanMixin:
                         date_str = f"{ym.year:04d}-{ym.month:02d}-{d:02d}"
                         is_today = (date_str == today_str)
                         rec = hist_dict.get(date_str)
+                        # ✅ 真实 pct 优先
+                        _real_p = _real_pct.get(date_str)
 
                         if rec:
                             pnl = rec.get("pnl", "")
                             ths = rec.get("ths", "")
-                            pct_v = rec.get("pct")
+                            # 优先真实 pct, 没有才用 rec 里的值
+                            pct_v = _real_p if _real_p is not None else rec.get("pct")
                             if pnl == "赚钱": bg = "#B71C1C"
                             elif pnl == "亏钱": bg = "#66BB6A"
                             elif pct_v is not None:
@@ -4845,7 +4925,14 @@ class DapanMixin:
                             else: bg = "#455A64"
                             border_color = "#E65100" if ths == "向下" else None
                         else:
-                            bg = "#37474F"; border_color = None
+                            # 🟢 未补录 → 用真实大盘 pct 上色
+                            if _real_p is not None:
+                                if _real_p > 0.5: bg = "#B71C1C"
+                                elif _real_p < -0.5: bg = "#66BB6A"
+                                else: bg = "#455A64"
+                            else:
+                                bg = "#37474F"
+                            border_color = None
 
                         cell = tk.Frame(grid_f, bg=bg, width=95, height=65,
                                         highlightbackground=border_color or "#1A1A2E",
@@ -8519,6 +8606,14 @@ class DapanMixin:
             except Exception as _e_idx:
                 import traceback; traceback.print_exc()
                 print(f"[指数趋势] tab创建失败: {_e_idx}", flush=True)
+            # ---- Tab 4: 🔌 API 接口清单 ----
+            try:
+                _api_tab = ttk.Frame(notebook)
+                notebook.add(_api_tab, text="🔌 API 接口")
+                self._build_api_inventory_tab(_api_tab)
+            except Exception as _e_api:
+                import traceback; traceback.print_exc()
+                print(f"[API清单] tab创建失败: {_e_api}", flush=True)
             self._refresh_sentiment_zone_tabs_async()
         except Exception as e:
             ttk.Label(parent, text=f"情绪区间标签页创建失败: {e}", foreground="red").pack(expand=True)
@@ -24263,6 +24358,8 @@ class DapanMixin:
                             print(f"[大盘] 📌 emo_history 补了 {_added_fb} 天, trend10 最新={trend10[-1]['full_date']}")
                 except Exception as _e_emo_fb:
                     print(f"[大盘] emo_history 补全失败: {_e_emo_fb}")
+                # ✂️ 截断: 只保留最近 20 日 (不管合了多少天)
+                trend10 = trend10[-20:] if len(trend10) > 20 else trend10
                 dapan_data["trend10"] = trend10
 
                 # 5.6 把 breadth 实时数据 (up/dn/zt/dt) 合并进 trend10 最新一天
@@ -24374,6 +24471,9 @@ class DapanMixin:
 
     def _dapan_update_ui(self, data):
         """主线程UI更新: 把后台线程拉到的数据渲染到控件上"""
+        # ✂️ 全局保险: trend10 永远只留最近 20 天 (防止 snapshot/merge 合出 96 天)
+        if data and data.get("trend10") and len(data["trend10"]) > 20:
+            data["trend10"] = data["trend10"][-20:]
         # 缓存完整数据, Canvas <Configure> 事件触发重绘时用
         self._dapan_full_data = data
         try:
@@ -24771,7 +24871,7 @@ class DapanMixin:
             self._dapan_redrawing = False
 
     def _render_trend_from_emo_history(self):
-        """从 emo_history.json 渲染全部天数趋势图"""
+        """从 emo_history.json + 新浪/akshare 真实上证日线 → 渲染 20 日趋势"""
         import json as _js, os as _os
         path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
         if not _os.path.exists(path):
@@ -24781,23 +24881,54 @@ class DapanMixin:
                 hist = _js.load(f)
             if not isinstance(hist, dict) or not hist:
                 return
-            # 取全部天数 (按日期排序)
+
+            # ✅ 第一步: 拉真实上证日线 (akshare/新浪, 覆盖 emo_history 里的假 pct)
+            _real_map = {}
+            try:
+                from ui._akshare_fetcher import fetch_index_daily as _fi_trend
+                _df_real = _fi_trend(symbol="sh000001", days=25)
+                if _df_real is not None and len(_df_real) > 0:
+                    for _r in _df_real.itertuples(index=False):
+                        _p = float(getattr(_r, "pct_chg", 0) or 0)
+                        _c = float(getattr(_r, "close", 0) or 0)
+                        if hasattr(_r.date, "strftime"):
+                            _k8 = _r.date.strftime("%Y%m%d")   # 统一成 emo_history 的 8 字符格式
+                        else:
+                            _k8 = str(_r.date).replace("-", "")[:8]
+                        _real_map[_k8] = {"pct": _p, "close": _c}
+                    print(f"[大盘] 📈 akshare 真实日线: {len(_real_map)}天, 最新={max(_real_map.keys())}")
+            except Exception as _e_real:
+                print(f"[大盘] akshare 拉真实日线失败: {_e_real}")
+
+            # 第二步: 合并 — real_map 的 pct 覆盖 hist 里的 0.0 假值
             sorted_dates = sorted(hist.keys())
             trend10 = []
             for d in sorted_dates:
                 v = hist[d]
+                # 优先用真实 pct (8 字符 key 匹配), 没有才 fallback hist 里的值
+                if d in _real_map:
+                    _pct = _real_map[d]["pct"]
+                    _close = _real_map[d]["close"]
+                else:
+                    _pct = float(v.get("pct", 0) or 0)
+                    _close = v.get("close", 0)
+                # 显示用 full_date 统一成 YYYY-MM-DD (和 Canvas 渲染对齐)
+                _full_ymd = d[:4] + "-" + d[4:6] + "-" + d[6:8]
                 trend10.append({
-                    "full_date": d,
-                    "date": d[5:10],
-                    "pct": float(v.get("pct", 0) or 0),
+                    "full_date": _full_ymd,
+                    "date": d[4:6] + "/" + d[6:8],
+                    "pct": _pct,
                     "emo": float(v.get("emo_score", 50) or 50),
                     "zt": int(v.get("zt", 0) or 0),
-                    "close": v.get("close", 0),
+                    "close": _close,
                 })
+
+            # ✂️ 截断 20 天
+            trend10 = trend10[-20:] if len(trend10) > 20 else trend10
+
             if trend10:
                 last = trend10[-1]
                 _es = float(last.get("emo", 50))
-                # 优先从 JSON 里直接读 stage (人工校准过更准), 没有再从 emo_score 推导
                 _raw = hist.get(last["full_date"], {})
                 _stage_from_json = _raw.get("stage", "")
                 if _stage_from_json and _stage_from_json not in ("-", ""):
@@ -24815,8 +24946,9 @@ class DapanMixin:
                     "sectors": {"hot": [], "cold": []}
                 }
                 self._dapan_update_ui(data)
-                print(f"[大盘] 📂 从 emo_history 渲染全部 {len(trend10)} 天趋势 (stage={_stage}, emo={_score})", flush=True)
+                print(f"[大盘] 📂 emo_history+akshare 真实数据 {len(trend10)} 天 → 最新 pct={trend10[-1]['pct']:+.2f}%", flush=True)
         except Exception as e:
+            import traceback; traceback.print_exc()
             print(f"[大盘] emo_history 渲染失败: {e}", flush=True)
 
     def _fetch_sector_cons(self, sector_name):
@@ -26797,11 +26929,12 @@ class DapanMixin:
                     rec = hist_dict.get(ds)
                     auto_pct = pct_map.get(ds)
 
-                    # 背景色 (A股 + 大盘日线兜底)
+                    # 背景色 (A股 + 大盘日线兜底 — 真实 pct 优先)
                     if rec:
                         pnl = rec.get("pnl","")
                         ths = rec.get("ths","")
-                        pct_v = rec.get("pct")
+                        # ✅ 优先真实大盘 pct, 没有才用 hist_dict 里的值
+                        pct_v = auto_pct if auto_pct is not None else rec.get("pct")
                         if pnl == "赚钱": bg = "#B71C1C"
                         elif pnl == "亏钱": bg = "#1B5E20"
                         elif pct_v is not None:
@@ -26986,6 +27119,157 @@ class DapanMixin:
             vwap_values.append(cum_pv / cum_v if cum_v > 0 else None)
         ma_values["vwap"] = vwap_values
         return {"data": df, "ma_values": ma_values, "trade_dates": trade_dates}
+
+    def _build_api_inventory_tab(self, parent):
+        """🔌 API 接口清单: 列出程序所有网络接口"""
+        # 顶部说明
+        _top = ttk.Frame(parent)
+        _top.pack(fill=tk.X, padx=6, pady=(4, 2))
+        ttk.Label(_top, text="🔌 程序 API 接口清单", font=("TkDefaultFont", 11, "bold"),
+                  foreground="#FFD54F").pack(side=tk.LEFT)
+        ttk.Label(_top, text="  (共 11 类, 含实时行情/K线/选股/宏观/同步)",
+                  foreground="#90A4AE").pack(side=tk.LEFT)
+
+        # 分组 Treeview
+        _frame = ttk.Frame(parent)
+        _frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+
+        cols = ("category", "name", "source", "endpoint", "usage")
+        _tv = ttk.Treeview(_frame, columns=cols, show="headings", height=14)
+        _tv.heading("category", text="分类")
+        _tv.heading("name", text="接口名称")
+        _tv.heading("source", text="数据源")
+        _tv.heading("endpoint", text="端点 / URL")
+        _tv.heading("usage", text="用途 / 调用位置")
+        _tv.column("category", width=80, anchor="center")
+        _tv.column("name", width=180, anchor="w")
+        _tv.column("source", width=100, anchor="center")
+        _tv.column("endpoint", width=360, anchor="w")
+        _tv.column("usage", width=280, anchor="w")
+
+        _sb = ttk.Scrollbar(_frame, orient="vertical", command=_tv.yview)
+        _sb.pack(side=tk.RIGHT, fill=tk.Y)
+        _tv.configure(yscrollcommand=_sb.set)
+        _tv.pack(fill=tk.BOTH, expand=True)
+
+        _apis = [
+            # ── ① 实时行情 ──
+            ("①实时行情", "A股批量实时行情", "新浪",
+             "hq.sinajs.cn/list=sh600000,sh600519,...",
+             "Skill工具箱/大盘刷新; 50只/批, 1HTTP搞定"),
+            ("①实时行情", "指数实时行情", "新浪",
+             "hq.sinajs.cn/list=s_sh000001,s_sz399001,s_sz399006",
+             "上证/深成/创业板 实时点位"),
+            ("①实时行情", "全部A股实时快照", "东方财富 akshare",
+             "push2.eastmoney.com/api/qt/clist/get",
+             "主界面邮票格子/自选列表/行情批量刷新"),
+            # ── ② K线数据 ──
+            ("②K线数据", "K线历史 (1分-日线)", "新浪",
+             "quotes.sina.cn/cn/api/jsonp.php/CN_MarketData.getKLineData",
+             "情绪复盘ETF 12Tab; 主力趋势; 多股对比; 一目均衡"),
+            ("②K线数据", "指数日线 (25天)", "akshare→腾讯",
+             "push2his.eastmoney.com / 腾讯 stock_zh_a_daily",
+             "大盘Canvas趋势图; 情绪补真pct"),
+            ("②K线数据", "股票日线", "tushare / akshare",
+             "pro.daily / stock_zh_a_hist",
+             "DB批量分析; 主力趋势周/月K; 回测"),
+            # ── ③ 选股类 ──
+            ("③选股", "同花顺问财选股", "同花顺 iwencai",
+             "iwencai.com/unifiedwap/result?w=...",
+             "主力仓位Tab; pywencai→HTTP→tushare兜底三路降级"),
+            ("③选股", "tushare本地兜底", "tushare pro",
+             "pro.daily + pro.daily_basic",
+             "问财全空时PE+换手率+成交额筛选"),
+            ("③选股", "情绪周期流", "本地skill脚本",
+             "~/.qclaw/skills/情绪周期流/scripts/情绪周期流_engine.py",
+             "情绪周期三维度计算 + 起爆点检测"),
+            # ── ④ 宏观/海外 ──
+            ("④宏观海外", "纳指/标普/DXY", "雅虎财经",
+             "query1.finance.yahoo.com/v8/finance/chart/QQQ,SPY,UUP",
+             "跨境ETF套利; 美联储传导"),
+            ("④宏观海外", "美债收益率", "FRED",
+             "fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10,DGS2",
+             "10Y-2Y利差; 美联储降息周期判断"),
+            ("④宏观海外", "Polymarket 预测", "Polymarket",
+             "gamma-api.polymarket.com/markets",
+             "美联储降息次数 / 大选结果预测"),
+            # ── ⑤ 资金面 ──
+            ("⑤资金面", "北向资金", "东方财富",
+             "push2.eastmoney.com/api/qt/clist/get?fid=f62",
+             "大盘资金面维度; 沪深港通持仓"),
+            ("⑤资金面", "龙虎榜", "东方财富",
+             "datacenter-web.eastmoney.com/api/data/v1/get",
+             "龙虎榜机构净买入; 聪明钱席位"),
+            ("⑤资金面", "基金持仓", "东方财富 / 巨潮",
+             "fund.eastmoney.com / cninfo.com.cn",
+             "基金重仓股; 机构进出动向"),
+            # ── ⑥ 同步/AI ──
+            ("⑥同步AI", "情绪周期云端同步", "GitHub Gist",
+             "api.github.com/gists/{gist_id}",
+             "跨设备情绪日期三维度数据push/pull"),
+            ("⑥同步AI", "AI 大模型分析", "DeepSeek/本地",
+             "api.deepseek.com/v1/chat/completions",
+             "Skill工具箱AI分析Tab; 深度研报摘要"),
+            ("⑥同步AI", "Tushare Pro", "tushare.pro",
+             "api.tushare.pro (本地token)",
+             "交易日历; 财报; 每日涨跌停统计"),
+        ]
+
+        # 按分类分组插入 (DeepSeek / AI 接口行 → 黄色背景+前景高亮)
+        _cur_cat = None
+        for _r in _apis:
+            _cat, _name, _src, _ep, _usg = _r
+            if _cat != _cur_cat:
+                _tv.insert("", tk.END, values=(
+                    f"── {_cat} ──", "", "", "", ""
+                ), tags=("cat",))
+                _cur_cat = _cat
+            # ✅ DeepSeek / AI 相关 → 黄色高亮
+            _is_ai = ("deepseek" in (_src + _ep + _name).lower()
+                      or "api.deepseek" in _ep.lower()
+                      or "大模型" in _name or "AI" in _name)
+            _tv.insert("", tk.END, values=_r,
+                       tags=("ai",) if _is_ai else ("row",))
+
+        # 颜色
+        _tv.tag_configure("cat", foreground="#FFD54F",
+                          font=("TkDefaultFont", 10, "bold"))
+        _tv.tag_configure("row", foreground="#E0E0E0")
+        # ✅ DeepSeek / AI 接口 → 黄色前景 + 浅黄背景 + 粗体
+        _tv.tag_configure("ai", foreground="#FFD54F",
+                          background="#3E2723",
+                          font=("TkDefaultFont", 9, "bold"))
+        # 选中时不覆盖 ai 背景
+        _tv.tag_configure("ai_selected", foreground="#FFF59D",
+                          background="#BF360C")
+        _tv.configure(style="Treeview")
+
+        # 双击打开端点 URL
+        import webbrowser as _wb
+        def _on_dbl(e):
+            _sel = _tv.selection()
+            if not _sel: return
+            _vals = _tv.item(_sel[0], "values")
+            _ep = _vals[3] if len(_vals) > 3 else ""
+            if _ep.startswith("http"):
+                _wb.open(_ep)
+            elif "sinajs" in _ep or "eastmoney" in _ep or "sina" in _ep:
+                _wb.open("https://finance.sina.com.cn")
+            else:
+                messagebox.showinfo("API 说明",
+                    f"{_vals[1]}\n\n数据源: {_vals[2]}\n\n端点: {_ep}\n\n{_vals[4]}")
+        _tv.bind("<Double-1>", _on_dbl)
+
+        # 底部统计
+        _btm = ttk.Frame(parent)
+        _btm.pack(fill=tk.X, padx=6, pady=(2, 4))
+        _srcs = set(r[2] for r in _apis)
+        _cats = set(r[0] for r in _apis)
+        ttk.Label(_btm, text=f"📊 合计 {len(_apis)} 个接口 · {len(_srcs)} 个数据源 · {len(_cats)} 大分类",
+                  foreground="#90A4AE").pack(side=tk.LEFT)
+        ttk.Label(_btm, text="💡 双击行可打开端点或查看详细说明",
+                  foreground="#546E7A").pack(side=tk.RIGHT)
+
     def _build_index_trend_tab(self, parent):
         """📈 指数趋势 Tab: 上证/深成指/创业板 日K线 + MA1/5/10/20/60 + 双击放大"""
         import matplotlib
@@ -28181,8 +28465,8 @@ class DapanMixin:
                         if rec:
                             pnl = rec.get("pnl", "")
                             ths = rec.get("ths", "")
-                            pct_v = rec.get("pct")
-                            if pct_v is None: pct_v = auto_pct  # 兜底
+                            # ✅ 优先真实大盘 pct, 没有才用 hist_dict 里的值
+                            pct_v = auto_pct if auto_pct is not None else rec.get("pct")
                             if pnl == "赚钱": bg = "#B71C1C"
                             elif pnl == "亏钱": bg = "#66BB6A"
                             elif pct_v is not None:
