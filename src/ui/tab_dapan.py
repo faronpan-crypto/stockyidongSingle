@@ -14790,12 +14790,13 @@ class DapanMixin:
 
         def _worker():
             import re, time as _time, requests as _req
-            from collections import Counter
+            from collections import Counter, defaultdict
             from bs4 import BeautifulSoup as _BS
 
             # ── Step 0: 爬淘韭文本, 提代码 + 股票名匹配 ──
             freq_counter = Counter()  # code → 提及次数
             source_map = {}           # code → 来源标签 ("淘韭爬取"/"预设"/"换手率"/"成交额")
+            article_hits = defaultdict(list)  # 🆕 code → [文章标题, ...]
             text_count = 0
 
             def _prefix(c):
@@ -14899,11 +14900,15 @@ class DapanMixin:
                             if p:
                                 freq_counter[p] += 1
                                 source_map[p] = f"{scr}详情"
+                                if art['title'] and art['title'] not in article_hits[p]:
+                                    article_hits[p].append(art['title'][:60])
                         # 股票名匹配
                         for name, code in sorted(_NAME2CODE.items(), key=lambda x: -len(x[0])):
                             if name in full_text:
                                 freq_counter[code] += 1
                                 source_map[code] = f"{scr}详情"
+                                if art['title'] and art['title'] not in article_hits[code]:
+                                    article_hits[code].append(art['title'][:60])
                         text_count += 1
                         _time.sleep(0.15)
                     except: pass
@@ -15025,6 +15030,7 @@ class DapanMixin:
                     "code": code, "name": info["name"],
                     "pct": info["pct"], "freq": freq,
                     "origin": origin,  # 来源标签 "韭研SSR"/"淘股吧详情"/"换手率"/"预设"
+                    "articles": list(article_hits.get(code, []))[:3],  # 🆕 匹配的文章标题 Top3
                 })
 
             # 爬取代码置顶 (按提及次数排), 热股池按 score 排
@@ -15273,14 +15279,28 @@ class DapanMixin:
                              font=("", 9, "bold"), padx=3, pady=0).pack(side=tk.LEFT, padx=2)
                 else:
                     tk.Label(row, text="  ", bg=row_bg, width=5).pack(side=tk.LEFT, padx=2)
-                # 第5列: 板块逻辑 (首行显示)
-                if i == 0:
+                # 第5列: 板块逻辑 + 匹配的文章标题 (每只股票都显示)
+                _stock_arts = item.get("articles", [])
+                if _stock_arts:
+                    # 有淘韭爬取的文章 → 显示文章标题 + 板块逻辑
+                    _first = _stock_arts[0][:28]
+                    _blk_logic = BLOCK_LOGIC.get(blk_name, "")[:28]
+                    _show = f"📰 {_first}  |  {_blk_logic}"
+                    tk.Label(row, text=_show, bg=row_bg, fg="#A5D6A7",
+                             font=("", 9), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
+                elif i == 0:
+                    # 板块首行兜底 (无爬取文章)
                     logic_text = BLOCK_LOGIC.get(blk_name, "")[:55]
                     arts = _arts(BLOCK_KWS.get(blk_name, []), 1)
                     if arts and arts[0][0]:
                         logic_text = f"{logic_text}  |  📰 {arts[0][0][:22]}"
                     tk.Label(row, text=logic_text, bg=row_bg, fg="#A5D6A7",
                              font=("", 9), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
+                else:
+                    # 非首行无文章 → 显示板块逻辑简写
+                    _short_logic = BLOCK_LOGIC.get(blk_name, "")[:40]
+                    tk.Label(row, text=_short_logic, bg=row_bg, fg="#78909C",
+                             font=("", 8), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
                 cur_row += 1
                 row._stamp = item
                 row._last_click = {"time": 0}  # 🆕 必须初始化, 否则第一次点击就 AttributeError
@@ -15344,6 +15364,17 @@ class DapanMixin:
             # 🔄 直接复用高抛低吸的秒开日K — 新浪接口不挂
             try:
                 from ui.high_low_swing import _quick_open_daily_kline
+                # 🆕 把淘股吧匹配到的文章标题传给 K 线弹窗
+                try:
+                    from ui import high_low_swing as _hl
+                    import time as _t2
+                    _hl._TAOGUBA_ARTICLES[code] = {
+                        "articles": list(item.get("articles", []))[:5],
+                        "source": item.get("origin", ""),
+                        "freq": item.get("freq", 0),
+                        "ts": int(_t2.time()),
+                    }
+                except Exception: pass
                 _quick_open_daily_kline(self.root, code, name)
             except Exception as e:
                 print(f"[邮票双击-K线] 快速路径失败: {e}")

@@ -11,6 +11,9 @@ matplotlib.rcParams["font.sans-serif"] = [
 matplotlib.rcParams["axes.unicode_minus"] = False
 import math
 
+# 🆕 共享缓存: 淘股吧/韭研匹配到的文章标题 (tab_dapan.py 的邮票格子写入, K线弹窗读取)
+_TAOGUBA_ARTICLES = {}  # {sina_code: [title1, title2, ...]}
+
 # ── 全局字号 (可变: A- / A+ 按钮修改后 refresh config) ──
 _FONT_BASE = [15]           # 正文字号 (用户反馈调大, 默认 15pt)
 _FONT_TITLE = [20]          # 大标题
@@ -4475,6 +4478,25 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                              fontsize=7.5, color=_ma_colors[0], ha="left", va="center",
                              bbox=dict(boxstyle="round,pad=0.4", fc="#1A1A2E", ec="#78909C", alpha=0.9),
                              linespacing=1.4)
+
+            # 🆕 淘股吧/韭研 讨论热点面板 (从 tab_dapan 邮票格子传过来的)
+            _tao = _TAOGUBA_ARTICLES.get(sina_code)
+            if _tao and _tao.get("articles"):
+                _arts = _tao["articles"][:3]
+                _src = _tao.get("source", "")
+                _freq = _tao.get("freq", 0)
+                _lines = [f"🔥 淘韭讨论 ({_src})"]
+                if _freq >= 3:
+                    _lines.append(f"  词频 {_freq} 次 → 热度高" if _freq >= 10 else
+                                  f"  词频 {_freq} 次 → 关注")
+                for _ai, _at in enumerate(_arts):
+                    _lines.append(f"  {_ai+1}. {_at[:35]}")
+                _tao_text = "\n".join(_lines)
+                ax1.text(0.01, 0.22, _tao_text, transform=ax1.transAxes,
+                         fontsize=7, color="#FFAB40", ha="left", va="center",
+                         bbox=dict(boxstyle="round,pad=0.35", fc="#2A1A0A",
+                                   ec="#FF6F00", alpha=0.92),
+                         linespacing=1.35)
 
             # 🆕 买卖点标记 (增强版: MA金叉/死叉 + MACD金叉/死叉 + BOLL穿越 + RSI超买超卖 + 蜡烛形态)
             if bsp_var.get() and n >= 30:
