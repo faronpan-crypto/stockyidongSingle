@@ -3571,6 +3571,7 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
         ("BIAS",   False, "#FFB74D"),
         ("BOLL",   False, "#80CBC4"),
         ("OBV",    False, "#78909C"),
+        ("ENE",    False, "#EF9A9A"),  # 🆕 ENE 轨道线
     ]
     _sub_vars = {}
     for _name, _default, _color in _sub_defs:
@@ -3580,6 +3581,97 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                        bg=_BG_TOOLBAR, fg=_color, selectcolor=_BG_DEEP,
                        activebackground=_BG_TOOLBAR, activeforeground=_color,
                        command=lambda: _reload()).pack(side=tk.LEFT, padx=2)
+    # 🆕 ❓按钮 — 双击查看所有副图指标解释
+    _btn_help = tk.Label(top, text="❓", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+                         font=("", 10, "bold"), cursor="hand2")
+    _btn_help.pack(side=tk.LEFT, padx=(4, 2))
+    _ENE_HELP = """📚 副图指标详解 (双击❓随时查看)
+
+━ MACD (指数平滑异同移动平均线) ━
+  DIF = EMA12 - EMA26 (快慢线差值)
+  DEA = DIF 的 EMA9 (信号线)
+  HIST = 2 × (DIF - DEA) (柱状图)
+  
+  🟢 DIF 上穿 DEA = 金叉 = 买入信号
+  🔴 DIF 下穿 DEA = 死叉 = 卖出信号
+  📈 DIF 向上拐头 = 动能转强
+  📉 DIF 向下拐头 = 动能转弱
+  ⚠ DIF 新高但价格未新高 = 顶背离 (卖出)
+  ⚠ DIF 新低但价格未新低 = 底背离 (买入)
+
+━ KDJ (随机指标 9-3-3) ━
+  RSV = (收盘 - 9日最低) / (9日最高 - 9日最低) × 100
+  K = 2/3 × K + 1/3 × RSV
+  D = 2/3 × D + 1/3 × K
+  J = 3K - 2D
+  
+  🟢 K 上穿 D = 金叉 = 买入信号
+  🔴 K 下穿 D = 死叉 = 卖出信号
+  ⬆ J > 100 = 超买 (谨慎追高)
+  ⬇ J < 0 = 超卖 (关注反弹机会)
+
+━ RSI (相对强弱指标 14) ━
+  RSI = 100 - 100 / (1 + 平均涨幅 / 平均跌幅)
+  
+  ⬆ RSI > 70 = 超买 (涨太多了, 警惕回调)
+  ⬇ RSI < 30 = 超卖 (跌太多了, 关注反转)
+  RSI 在 50 附近 = 中性震荡区
+
+━ BIAS (乖离率 6/12/24) ━
+  BIAS = (当前价 - N日均线) / N日均线 × 100%
+  
+  ⬆ BIAS > 12% = 短期严重超买 (追高风险大)
+  ⬇ BIAS < -12% = 短期严重超卖 (超跌反弹机会)
+  三条 BIAS 线同时向上发散 = 多头强势
+
+━ BOLL%B (布林带相对位置) ━
+  中轨 = MA20
+  上/下轨 = 中轨 ± 2×标准差
+  %B = (价格 - 下轨) / (上轨 - 下轨)
+  
+  %B > 1.0 = 突破上轨 (极端强势或超买)
+  %B < 0.0 = 跌破下轨 (极端弱势或超卖)
+  %B 在 0.5 附近 = 中轨附近震荡
+
+━ OBV (能量潮) ━
+  上涨日 +成交量, 下跌日 -成交量
+  
+  OBV 向上 = 资金持续流入
+  OBV 向下 = 资金持续流出
+  OBV 与价格背离 = 趋势可能反转
+
+━ ENE (轨道线 ✨ 重点推荐) ━
+  中轨 = MA10 (10日均线)
+  上轨 = MA10 × 1.10 (+10%)
+  下轨 = MA10 × 0.90 (-10%)
+  ENE% = (价格 - 下轨) / (上轨 - 下轨)
+  
+  🟢 ENE% 从下轨向上穿越中轨 = 启动信号 (买入)
+  🔴 ENE% 从上轨向下穿越中轨 = 见顶信号 (卖出)
+  ⬆ ENE% > 1.0 = 触上轨 (超买, 谨慎追高)
+  ⬇ ENE% < 0.0 = 触下轨 (超卖, 关注反弹)
+  ✨ 最适合识别短线启动和见顶!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 实战建议:
+  • MACD + KDJ 组合 = 中短期买卖信号双确认
+  • ENE + BIAS 组合 = 短线超买超卖精准捕捉
+  • RSI + BOLL%B 组合 = 反转概率最高的超卖识别"""
+    def _show_sub_help():
+        """弹出副图指标帮助窗口"""
+        top2 = tk.Toplevel(dlg)
+        top2.title("📚 副图指标详解")
+        top2.configure(bg=_BG_DEEP); top2.geometry("560x620")
+        top2.transient(dlg); top2.grab_set()
+        import tkinter.scrolledtext as _st2
+        txt = _st2.ScrolledText(top2, bg=_BG_PANEL, fg="#ECEFF1", font=("", 10),
+                                wrap=tk.WORD, padx=10, pady=10, relief=tk.FLAT)
+        txt.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        txt.insert("1.0", _ENE_HELP)
+        txt.configure(state="disabled")
+        tk.Button(top2, text="关闭", command=top2.destroy,
+                  bg=_BG_TOOLBAR, fg="white", font=("", 10), padx=20).pack(pady=8)
+    _btn_help.bind("<Button-1>", lambda e: _show_sub_help())  # 单击也能打开
 
     status = tk.Label(top, text="⏳ 加载中...", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9))
     status.pack(side=tk.RIGHT, padx=10)
@@ -4720,6 +4812,24 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                     _ax.axhline(y=0.0, color="#66BB6A", lw=0.5, ls="--", alpha=0.6)
                     _ax.set_ylim(-0.1, 1.1)
                     _ax.set_ylabel("BOLL%B", color=_FG_DIM, fontsize=8)
+
+                # ── ENE 轨道线 ──
+                elif _sname == "ENE":
+                    # ENE = 10日均线 ± 10%
+                    _ene_mid = _ma(closes, 10)
+                    _ene_up = _ene_mid * 1.10   # 上轨 +10%
+                    _ene_lo = _ene_mid * 0.90   # 下轨 -10%
+                    _ene_pct = (closes - _ene_lo) / np.maximum(_ene_up - _ene_lo, 0.001)
+                    _ax.plot(x, _ene_pct, color="#EF9A9A", lw=1.0)
+                    _ax.axhline(y=1.0, color="#EF5350", lw=0.6, ls="--", alpha=0.6, label="上轨+10%")
+                    _ax.axhline(y=0.5, color=_FG_DIM, lw=0.5, ls=":", label="中轨MA10")
+                    _ax.axhline(y=0.0, color="#66BB6A", lw=0.6, ls="--", alpha=0.6, label="下轨-10%")
+                    _ax.fill_between(x, 0, _ene_pct, where=_ene_pct > 1.0,
+                                     color="#EF5350", alpha=0.2)  # 超买区
+                    _ax.fill_between(x, 0, _ene_pct, where=_ene_pct < 0.0,
+                                     color="#66BB6A", alpha=0.2)  # 超卖区
+                    _ax.set_ylim(-0.15, 1.15)
+                    _ax.set_ylabel("ENE", color=_FG_DIM, fontsize=8)
 
                 # ── OBV ──
                 elif _sname == "OBV":

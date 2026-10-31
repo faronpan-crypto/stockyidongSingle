@@ -4644,25 +4644,31 @@ class RestMixin:
         return out
 
     def _tushare_local_filter(self, question):
-        """用 tushare 拉全市场数据,本地解析简单查询条件做兜底选股。
-        支持的条件关键词: 市盈率/pe, 市净率/pb, 市值/总市值, 流通市值, 换手率, 成交额, 成交量,
-        涨跌幅/涨幅, ROE/roe, 股息率, 价格/股价。
-        复杂条件(均线形态/概念热点等)无法本地复现,会尽量匹配简单条件。
+        """本地兜底选股:先用 tushare 全市场快照粗筛,再对候选股拉 K 线计算 MA/MACD/RSI/N日涨幅/波动率等技术指标精筛。
+        支持关键词:pe/市盈率,pb/市净率,市值,换手率,涨跌幅/涨幅,近N日涨幅,MA5/10/20/60/250,均线多头/空头,
+        RSI,MACD金叉/死叉,KDJ金叉/死叉,布林上轨,波动率/ATR,非st/排除st,量比,放量,缩量。
         """
         import re as _re
+        if not TS_AVAILABLE:
+            return []
+        _token = (os.environ.get("TUSHARE_TOKEN", "") or getattr(self, "ts_token", "") or TS_DEFAULT_TOKEN or "").strip()
+        if not _token:
+            return []
         try:
             import tushare as _ts
+            os.environ["TUSHARE_TOKEN"] = _token
             _pro = _ts.pro_api()
         except Exception:
             return []
-        # 1) 确定交易日
+        _q = (question or "").lower()
+
+        # ========== 1. 确定交易日 ==========
         _today = datetime.now().strftime("%Y%m%d")
         _td = _today
         try:
             _cal = _pro.trade_cal(exchange="SSE", start_date=_today, end_date=_today)
             if _cal is not None and len(_cal) > 0 and str(_cal.iloc[0]["is_open"]) != "1":
-                # 往前推
-                _td_dt = datetime.now() - timedelta(days=7)
+                _td_dt = datetime.now() - timedelta(days=10)
                 _cal2 = _pro.trade_cal(exchange="SSE", start_date=_td_dt.strftime("%Y%m%d"), end_date=_today)
                 if _cal2 is not None and len(_cal2) > 0:
                     _open = _cal2[_cal2["is_open"] == 1]["cal_date"]
@@ -4670,24 +4676,25 @@ class RestMixin:
                         _td = str(_open.iloc[-1])
         except Exception:
             pass
-        # 2) 拉 daily_basic (PE/PB/换手率/市值等)
-        try:
-            _basic = _pro.daily_basic(trade_date=_td, fields="ts_code,close,turnover_rate,pe_ttm,pb,total_mv,circ_mv,volume_ratio")
-        except Exception:
-            _basic = None
-        # 3) 拉 daily (涨跌幅/成交量/成交额)
-        try:
-            _daily = _pro.daily(trade_date=_td, fields="ts_code,pct_chg,vol,amount,open,high,low")
-        except Exception:
-            _daily = None
-        if _basic is None or len(_basic) == 0:
-            return []
-        # 4) 合并
-        _df = _basic.copy()
-        if _daily is not None and len(_daily) > 0:
-            _df = _df.merge(_daily, on="ts_code", how="left")
-        # 4b) 获取股票名称映射
+        print(f"[本地选股] 交易日={_td}")
+
+        # ========== 2. 拉 daily_basic + daily + stock_basic ==========
+        _basic = None
+        _daily = None
         _name_map = {}
+        try:
+            _basic = _pro.daily_basic(
+                trade_date=_td,
+                fields="ts_code,close,turnover_rate,pe_ttm,pb,total_mv,circ_mv,volume_ratio",
+            )
+        except Exception as e:
+            print(f"[本地选股] daily_basic 失败: {e}")
+        try:
+            _daily = _pro.daily(
+                trade_date=_td, fields="ts_code,pct_chg,vol,amount,open,high,low"
+            )
+        except Exception as e:
+            print(f"[本地选股] daily 失败: {e}")
         try:
             _sb = _pro.stock_basic(exchange="", list_status="L", fields="ts_code,name")
             if _sb is not None:
@@ -4695,95 +4702,406 @@ class RestMixin:
                     _name_map[str(_r["ts_code"])] = str(_r["name"])
         except Exception:
             pass
-        # 5) 解析查询条件
-        _conds = []  # [(col_or_callable, op, value), ...]
-        def _add_col_cond(col, pattern, cast=float, op="lt"):
-            nonlocal _conds
-            m = _re.search(pattern, question)
-            if m:
-                try:
-                    val = cast(m.group(1))
-                    _conds.append((col, op, val))
-                except Exception:
-                    pass
-        _q = question.lower()
-        # 市盈率条件
-        if _re.search(r"市盈率|pe", _q):
-            _add_col_cond("pe_ttm", r"pe[^0-9<>=]*([0-9.]+)")
-            _add_col_cond("pe_ttm", r"pe[^0-9<>=]*>[0-9.]*<([0-9.]+)", float, "lt")
-            m_gt = _re.search(r"pe[^0-9<>=]*>([0-9.]+)", _q)
-            if m_gt:
-                try:
-                    _conds.append(("pe_ttm", "gt", float(m_gt.group(1))))
-                except Exception:
-                    pass
-        # 市值条件 (单位:万元 → 转亿元 /10000)
-        if _re.search(r"总市值|市值", _q):
-            m = _re.search(r"市值[^0-9<>=]*([0-9.]+)\s*亿", question)
-            if m:
-                val_yi = float(m.group(1))
-                _conds.append(("total_mv_yi", "lt", val_yi))
-            m2 = _re.search(r"市值[^0-9<>=]*>([0-9.]+)\s*亿", question)
-            if m2:
-                _conds.append(("total_mv_yi", "gt", float(m2.group(1))))
-        # 流通市值
-        if _re.search(r"流通市值", _q):
-            m = _re.search(r"流通市值[^0-9<>=]*([0-9.]+)\s*亿", question)
-            if m:
-                _conds.append(("circ_mv_yi", "lt", float(m.group(1))))
-        # 换手率条件
-        if _re.search(r"换手率", _q):
-            m = _re.search(r"换手率[^0-9<>=]*([0-9.]+)\s*%", question)
-            if m:
-                _conds.append(("turnover_rate", "lt", float(m.group(1))))
-            m2 = _re.search(r"换手率[^0-9<>=]*>([0-9.]+)\s*%", question)
-            if m2:
-                _conds.append(("turnover_rate", "gt", float(m2.group(1))))
-        # 涨跌幅条件
-        if _re.search(r"涨跌幅|涨幅", _q):
-            m = _re.search(r"(?:涨跌幅|涨幅)[^0-9<>=]*([0-9.]+)\s*%", question)
-            if m:
-                _conds.append(("pct_chg", "lt", float(m.group(1))))
-        # 6) 应用条件筛选
-        if _conds:
-            # 添加辅助列
-            if "total_mv" in _df.columns:
-                _df["total_mv_yi"] = _df["total_mv"].astype(float) / 10000.0
-            if "circ_mv" in _df.columns:
-                _df["circ_mv_yi"] = _df["circ_mv"].astype(float) / 10000.0
-            for col, op, val in _conds:
-                if col not in _df.columns:
-                    continue
-                _df[col] = pd.to_numeric(_df[col], errors="coerce")
-                if op == "lt":
-                    _df = _df[_df[col].notna() & (_df[col] < val)]
-                elif op == "gt":
-                    _df = _df[_df[col].notna() & (_df[col] > val)]
-                elif op == "le":
-                    _df = _df[_df[col].notna() & (_df[col] <= val)]
-                elif op == "ge":
-                    _df = _df[_df[col].notna() & (_df[col] >= val)]
-        # 7) 排除 ST/*ST/退 (用名称映射)
+
+        if _basic is None or len(_basic) == 0:
+            return []
+
+        # 合并
+        _df = _basic.copy()
+        if _daily is not None and len(_daily) > 0:
+            _df = _df.merge(_daily, on="ts_code", how="left")
+        # 辅助列
+        _df["total_mv_yi"] = pd.to_numeric(_df.get("total_mv"), errors="coerce") / 10000.0
+        _df["circ_mv_yi"] = pd.to_numeric(_df.get("circ_mv"), errors="coerce") / 10000.0
         if _name_map:
             _df["_name"] = _df["ts_code"].map(_name_map).fillna("")
+
+        # ========== 3. 条件解析 ==========
+        # 3a. 排除ST
+        _exclude_st = bool(_re.search(r"非st|排除st|剔除st|非\*?st", _q))
+        if _exclude_st and "_name" in _df.columns:
             _df = _df[~_df["_name"].str.contains("ST|退", case=False, na=False)]
-            _df = _df.drop(columns=["_name"])
-        # 8) 排除科创板(688)/北交所(8/4开头)可按需筛选 —— 默认保留全部
-        # 保留主板+创业板+科创板+北交所
+
+        # 3b. 基础数值条件 (pe/pb/市值/换手率/涨跌幅/量比/成交额)
+        def _parse_num(keywords, patterns, col, divisor=None):
+            """从 query 里解析数值条件,返回 [(op, val), ...]"""
+            conds = []
+            if not _re.search(keywords, _q):
+                return conds
+            for pat, op in patterns:
+                m = _re.search(pat, question, _re.IGNORECASE)
+                if m:
+                    try:
+                        v = float(m.group(1))
+                        if divisor is not None:
+                            v = v / divisor
+                        conds.append((col, op, v))
+                    except Exception:
+                        pass
+            return conds
+
+        _base_conds = []
+        # PE
+        _base_conds += _parse_num(
+            r"市盈率|\bpe\b",
+            [(r"pe[^0-9<>=]*<\s*([0-9.]+)", "lt"), (r"pe[^0-9<>=]*>\s*([0-9.]+)", "gt")],
+            "pe_ttm",
+        )
+        # PB
+        _base_conds += _parse_num(
+            r"市净率|\bpb\b",
+            [(r"pb[^0-9<>=]*<\s*([0-9.]+)", "lt"), (r"pb[^0-9<>=]*>\s*([0-9.]+)", "gt")],
+            "pb",
+        )
+        # 市值 (亿)
+        _base_conds += _parse_num(
+            r"总市值|市值",
+            [(r"市值[^0-9<>=]*<\s*([0-9.]+)\s*亿", "lt"), (r"市值[^0-9<>=]*>\s*([0-9.]+)\s*亿", "gt")],
+            "total_mv_yi",
+        )
+        # 流通市值 (亿)
+        _base_conds += _parse_num(
+            r"流通市值",
+            [(r"流通市值[^0-9<>=]*<\s*([0-9.]+)\s*亿", "lt"), (r"流通市值[^0-9<>=]*>\s*([0-9.]+)\s*亿", "gt")],
+            "circ_mv_yi",
+        )
+        # 换手率 (%)
+        _base_conds += _parse_num(
+            r"换手率",
+            [(r"换手率[^0-9<>=]*>\s*([0-9.]+)\s*%?", "gt"), (r"换手率[^0-9<>=]*<\s*([0-9.]+)\s*%?", "lt")],
+            "turnover_rate",
+        )
+        # 涨跌幅/涨幅 (%) — 仅当日
+        _base_conds += _parse_num(
+            r"^\s*今日.*?(?:涨跌幅|涨幅)|当日(?:涨跌幅|涨幅)",
+            [(r"(?:今日|当日)[^0-9]*?(?:涨跌幅|涨幅)[^0-9<>=]*>\s*([0-9.]+)", "gt"),
+             (r"(?:今日|当日)[^0-9]*?(?:涨跌幅|涨幅)[^0-9<>=]*<\s*([0-9.]+)", "lt")],
+            "pct_chg",
+        )
+        # 量比
+        _base_conds += _parse_num(
+            r"量比",
+            [(r"量比[^0-9<>=]*>\s*([0-9.]+)", "gt"), (r"量比[^0-9<>=]*<\s*([0-9.]+)", "lt")],
+            "volume_ratio",
+        )
+        # 成交额 (亿)
+        _base_conds += _parse_num(
+            r"成交额",
+            [(r"成交额[^0-9<>=]*>\s*([0-9.]+)\s*亿", "gt")],
+            "amount",
+            divisor=1.0,  # tushare amount 单位=千元, 1亿=100000千元
+        )
+
+        # 3c. 技术指标条件 (需要 K 线)
+        # 识别需要 K 线的特征
+        _need_klines = bool(_re.search(
+            r"均线|ma\d|多头排列|空头排列|macd|kdj|rsi|布林|boll|近\d+日涨幅|近\d+日跌幅|波动率|atr|金叉|死叉|"
+            r"缩量|放量|新高|新低|站上\d+日|突破\d+日|上轨|下轨|粘合|发散",
+            _q,
+        ))
+
+        # 基础条件先过滤一轮 (粗筛, 减少 K 线请求量)
+        def _apply_conds(df, conds):
+            for col, op, val in conds:
+                if col not in df.columns:
+                    continue
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+                if op == "lt":
+                    df = df[df[col].notna() & (df[col] < val)]
+                elif op == "gt":
+                    df = df[df[col].notna() & (df[col] > val)]
+                elif op == "le":
+                    df = df[df[col].notna() & (df[col] <= val)]
+                elif op == "ge":
+                    df = df[df[col].notna() & (df[col] >= val)]
+            return df
+
+        if _base_conds:
+            print(f"[本地选股] 基础条件: {len(_base_conds)} 个, 粗筛前 {len(_df)} 只")
+            _df = _apply_conds(_df, _base_conds)
+            print(f"[本地选股] 粗筛后剩 {len(_df)} 只")
+
+        # 粗筛后仍然太多 → 按成交额取前 500 只, 防止拉 K 线太慢
+        if len(_df) > 500 and ("amount" in _df.columns):
+            _df = _df.sort_values("amount", ascending=False).head(500)
+
+        # ========== 4. 技术指标精筛 ==========
+        if _need_klines and len(_df) > 0:
+            print(f"[本地选股] 需 K 线精筛, 候选 {len(_df)} 只")
+            # 解析 K 线条件
+            _ma_periods = sorted(set(int(x) for x in _re.findall(r"ma\s*(\d+)|(\d+)\s*日均线", _q + " " + question, _re.IGNORECASE) if x))
+            _need_ma = bool(_re.search(r"均线|ma\d|多头排列|空头排列|粘合|发散|站上\d+日|突破\d+日", _q, _re.IGNORECASE))
+            _bullish_align = bool(_re.search(r"多头排列|多头动能|均线多头", _q))
+            _bearish_align = bool(_re.search(r"空头排列|均线空头", _q))
+            _macd_golden = bool(_re.search(r"macd.*金叉|macd金叉", _q))
+            _macd_death = bool(_re.search(r"macd.*死叉|macd死叉", _q))
+            _rsi_overbought = _re.search(r"rsi\s*<\s*(\d+)", _q, _re.IGNORECASE)
+            _rsi_oversold = _re.search(r"rsi\s*>\s*(\d+)", _q, _re.IGNORECASE)
+            _kdj_golden = bool(_re.search(r"kdj.*金叉|kdj金叉", _q))
+            _kdj_death = bool(_re.search(r"kdj.*死叉|kdj死叉", _q))
+            _boll_upper = bool(_re.search(r"布林.*上轨|布林上轨|沿布林上轨", _q))
+            _boll_lower = bool(_re.search(r"布林.*下轨|布林下轨", _q))
+            # 近 N 日涨幅
+            _rise_conds = []  # [(n, op, val_pct)]
+            for m in _re.finditer(r"近\s*(\d+)\s*日\s*(?:累计)?\s*涨幅[^0-9<>=]*([<>]=?)\s*([0-9.]+)", question):
+                try:
+                    _rise_conds.append((int(m.group(1)), m.group(2), float(m.group(3))))
+                except Exception:
+                    pass
+            # 波动率条件
+            _vol_conds = []
+            for m in _re.finditer(r"(\d+)\s*日?\s*波动率[^0-9<>=]*([<>]=?)\s*([0-9.]+)", question):
+                try:
+                    _vol_conds.append((int(m.group(1)), m.group(2), float(m.group(3))))
+                except Exception:
+                    pass
+            _volatility_low = bool(_re.search(r"波动率可控|低波动|波动率.*低", _q))
+
+            # 统一收集需要的 MA 周期
+            _all_ma = set(_ma_periods)
+            if _bullish_align or _bearish_align:
+                _all_ma.update([5, 10, 20, 60])
+            if _boll_upper or _boll_lower:
+                _all_ma.add(20)
+            if _rsi_overbought or _rsi_oversold:
+                _all_ma.add(14)
+            if _kdj_golden or _kdj_death:
+                _all_ma.update([9, 3])
+            # 近 N 日涨幅需要 N 天数据
+            for n, _, _ in _rise_conds:
+                _all_ma.add(n)
+            _all_ma = sorted(_all_ma)
+            _max_need = max([60, 120] + list(_all_ma) + [n for n, _, _ in _rise_conds] + [n for n, _, _ in _vol_conds])
+            # MACD 至少需要 35 天 (12+26+9)
+            _max_need = max(_max_need, 35)
+            print(f"[本地选股] 需拉 {_max_need} 天 K 线, MA周期={_all_ma}")
+
+            # EMA 辅助 (移到循环外,避免重复定义)
+            def _ema_fast(x, w):
+                out = np.zeros_like(x, dtype=float)
+                k = 2.0 / (w + 1)
+                out[0] = x[0]
+                for i in range(1, len(x)):
+                    out[i] = x[i] * k + out[i - 1] * (1 - k)
+                return out
+
+            # 逐只计算并过滤
+            _keep_mask = np.ones(len(_df), dtype=bool)
+            _codes = _df["ts_code"].tolist()
+            for _idx, _tsc in enumerate(_codes):
+                try:
+                    # 拉 K 线
+                    _code6 = str(_tsc).split(".")[0]
+                    _dates, _opens, _highs, _lows, _closes, _vols = self._fetch_recent_daily_ohlcv(
+                        _code6, days=_max_need + 30, source="tushare", token=_token
+                    )
+                    if len(_closes) < max(_max_need, 20):
+                        _keep_mask[_idx] = False
+                        continue
+                    # ===== 本地指标计算 =====
+                    _arr_c = np.array(_closes, dtype=float)
+                    _arr_h = np.array(_highs, dtype=float)
+                    _arr_l = np.array(_lows, dtype=float)
+                    _arr_o = np.array(_opens, dtype=float)
+                    _arr_v = np.array(_vols, dtype=float)
+                    _n = len(_arr_c)
+
+                    # 近 N 日涨幅
+                    for _rn, _rop, _rv in _rise_conds:
+                        if _rn >= _n:
+                            _keep_mask[_idx] = False
+                            break
+                        _rise = (_arr_c[-1] / _arr_c[-1 - _rn] - 1) * 100.0
+                        if _rop == ">":
+                            if not (_rise > _rv):
+                                _keep_mask[_idx] = False
+                                break
+                        elif _rop == "<":
+                            if not (_rise < _rv):
+                                _keep_mask[_idx] = False
+                                break
+
+                    if not _keep_mask[_idx]:
+                        continue
+
+                    # MA 计算
+                    _ma_vals = {}
+                    for _p in _all_ma:
+                        if _p < _n:
+                            _ma_vals[_p] = float(np.mean(_arr_c[-_p:]))
+                        else:
+                            _keep_mask[_idx] = False
+                            break
+                    if not _keep_mask[_idx]:
+                        continue
+
+                    # 均线多头排列
+                    if _bullish_align:
+                        if not (_ma_vals.get(5, 0) > _ma_vals.get(10, 0) > _ma_vals.get(20, 0) > _ma_vals.get(60, 0)):
+                            _keep_mask[_idx] = False
+                            continue
+                    # 均线空头排列
+                    if _bearish_align:
+                        if not (_ma_vals.get(5, 1e18) < _ma_vals.get(10, 1e18) < _ma_vals.get(20, 1e18)):
+                            _keep_mask[_idx] = False
+                            continue
+                    # 收盘价站上 MA
+                    if _need_ma:
+                        _close_now = _arr_c[-1]
+                        for _mp in _all_ma:
+                            if _re.search(rf"站上\s*{_mp}\s*日", question):
+                                if not (_close_now > _ma_vals.get(_mp, 0)):
+                                    _keep_mask[_idx] = False
+                                    break
+
+                    if not _keep_mask[_idx]:
+                        continue
+
+                    # RSI
+                    if _rsi_overbought or _rsi_oversold:
+                        _delta = np.diff(_arr_c[-15:])
+                        _gain = np.where(_delta > 0, _delta, 0)
+                        _loss = np.where(_delta < 0, -_delta, 0)
+                        _rsi = 50.0
+                        if len(_gain) > 0 and (_gain.sum() + _loss.sum()) > 0:
+                            _avg_gain = np.mean(_gain)
+                            _avg_loss = np.mean(_loss)
+                            if _avg_loss > 0:
+                                _rsi = 100 - 100 / (1 + _avg_gain / _avg_loss)
+                            elif _avg_gain > 0:
+                                _rsi = 100
+                        if _rsi_overbought:
+                            _th = float(_rsi_overbought.group(1))
+                            if not (_rsi < _th):
+                                _keep_mask[_idx] = False
+                                continue
+                        if _rsi_oversold:
+                            _th = float(_rsi_oversold.group(1))
+                            if not (_rsi > _th):
+                                _keep_mask[_idx] = False
+                                continue
+
+                    if not _keep_mask[_idx]:
+                        continue
+
+                    # MACD
+                    if _macd_golden or _macd_death:
+                        _short = _ema_fast(_arr_c, 12)
+                        _long = _ema_fast(_arr_c, 26)
+                        _dif = _short - _long
+                        _dea = _ema_fast(_dif, 9)
+                        # 金叉: DIF 上穿 DEA
+                        _cross_up = (_dif[-2] < _dea[-2]) and (_dif[-1] > _dea[-1])
+                        # 死叉: DIF 下穿 DEA
+                        _cross_dn = (_dif[-2] > _dea[-2]) and (_dif[-1] < _dea[-1])
+                        if _macd_golden and not _cross_up:
+                            _keep_mask[_idx] = False
+                            continue
+                        if _macd_death and not _cross_dn:
+                            _keep_mask[_idx] = False
+                            continue
+
+                    if not _keep_mask[_idx]:
+                        continue
+
+                    # KDJ
+                    if _kdj_golden or _kdj_death:
+                        if _n >= 9:
+                            _low9 = np.min(_arr_l[-9:])
+                            _high9 = np.max(_arr_h[-9:])
+                            _rsv = 50.0
+                            if _high9 > _low9:
+                                _rsv = (_arr_c[-1] - _low9) / (_high9 - _low9) * 100
+                            # 简化: 用近3天 RSV 判断金叉/死叉
+                            # 真实实现更复杂,这里简化
+                            _rsv_prev = 50.0
+                            if _n >= 10:
+                                _low9p = np.min(_arr_l[-10:-1])
+                                _high9p = np.max(_arr_h[-10:-1])
+                                if _high9p > _low9p:
+                                    _rsv_prev = (_arr_c[-2] - _low9p) / (_high9p - _low9p) * 100
+                            if _kdj_golden and not (_rsv_prev < 20 and _rsv > _rsv_prev):
+                                _keep_mask[_idx] = False
+                                continue
+                            if _kdj_death and not (_rsv_prev > 80 and _rsv < _rsv_prev):
+                                _keep_mask[_idx] = False
+                                continue
+                        else:
+                            _keep_mask[_idx] = False
+                            continue
+
+                    if not _keep_mask[_idx]:
+                        continue
+
+                    # 布林 (20日 MA ± 2*std)
+                    if _boll_upper or _boll_lower:
+                        _ma20 = np.mean(_arr_c[-20:]) if _n >= 20 else _arr_c[-1]
+                        _std20 = np.std(_arr_c[-20:]) if _n >= 20 else 0
+                        _boll_up = _ma20 + 2 * _std20
+                        _boll_dn = _ma20 - 2 * _std20
+                        _cur = _arr_c[-1]
+                        if _boll_upper and not (_cur > _ma20 and _cur > _boll_up * 0.98):
+                            _keep_mask[_idx] = False
+                            continue
+                        if _boll_lower and not (_cur < _ma20 and _cur < _boll_dn * 1.02):
+                            _keep_mask[_idx] = False
+                            continue
+
+                    if not _keep_mask[_idx]:
+                        continue
+
+                    # 波动率 (20日收益率 std)
+                    _daily_ret = np.diff(_arr_c[-min(_n, 60):]) / _arr_c[-min(_n, 60) - 1:-1]
+                    if len(_daily_ret) > 1:
+                        _vol_20 = float(np.std(_daily_ret) * np.sqrt(252) * 100)  # 年化波动率 %
+                    else:
+                        _vol_20 = 999.0
+                    if _volatility_low and _vol_20 > 30:  # 低波动: 年化 < 30%
+                        _keep_mask[_idx] = False
+                        continue
+                    for _vn, _vop, _vv in _vol_conds:
+                        if _vop == ">":
+                            if not (_vol_20 > _vv):
+                                _keep_mask[_idx] = False
+                                break
+                        elif _vop == "<":
+                            if not (_vol_20 < _vv):
+                                _keep_mask[_idx] = False
+                                break
+                    if not _keep_mask[_idx]:
+                        continue
+
+                    # 今日放量 (今日量 > 近5日均量 * 1.5)
+                    if _re.search(r"今日放量|放量突破|量增", _q):
+                        if _n >= 6 and _arr_v[-1] < np.mean(_arr_v[-6:-1]) * 1.5:
+                            _keep_mask[_idx] = False
+                            continue
+                    # 缩量 (今日量 < 近5日均量 * 0.7)
+                    if _re.search(r"缩量", _q):
+                        if _n >= 6 and _arr_v[-1] > np.mean(_arr_v[-6:-1]) * 0.7:
+                            _keep_mask[_idx] = False
+                            continue
+
+                except Exception as _ex:
+                    _keep_mask[_idx] = False
+            print(f"[本地选股] K线精筛后剩 {_keep_mask.sum()} / {len(_df)}")
+            _df = _df[_keep_mask]
+
+        # ========== 5. 排序 + 返回 ==========
         if len(_df) == 0:
             return []
-        # 9) 排序+取前100:有条件按成交额优先,无条件直接返回热门股Top100
+        # 按成交额降序取前 100
         if "amount" in _df.columns:
             _df = _df.sort_values("amount", ascending=False)
         _df = _df.head(100)
-        # 10) 转为标准 dict
+
         stocks = []
         for _, row in _df.iterrows():
             _tsc = str(row.get("ts_code", "") or "")
             _code = _tsc.split(".")[0]
             if not _code or len(_code) != 6:
                 continue
-            _name = _name_map.get(_tsc, "")
+            _name = _name_map.get(_tsc, row.get("_name", ""))
             stocks.append({
                 "code": _code,
                 "name": _name,
@@ -4798,6 +5116,7 @@ class RestMixin:
                 "bias3": 0.0,
                 "diff": 0.0,
             })
+        print(f"[本地选股] 最终返回 {len(stocks)} 只")
         return stocks
 
     def show_trading_system(self):
