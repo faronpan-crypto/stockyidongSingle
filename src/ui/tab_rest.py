@@ -4673,7 +4673,7 @@ class RestMixin:
                 if _cal2 is not None and len(_cal2) > 0:
                     _open = _cal2[_cal2["is_open"] == 1]["cal_date"]
                     if len(_open) > 0:
-                        _td = str(_open.iloc[-1])
+                        _td = str(_open.sort_values().iloc[-1])
         except Exception:
             pass
         print(f"[本地选股] 交易日={_td}")

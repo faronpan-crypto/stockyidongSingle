@@ -7381,7 +7381,7 @@ except Exception as e:
             if _cal is not None and len(_cal) > 0:
                 _open = _cal[_cal["is_open"] == 1]["cal_date"]
                 if len(_open) > 0:
-                    _td = str(_open.iloc[-1])
+                    _td = str(_open.sort_values().iloc[-1])
         except Exception:
             pass
 
@@ -7617,338 +7617,265 @@ except Exception as e:
         return result
 
     def _show_mainline_capital_dialog(self):
-        """🔥 主线·资金迁移 —— 6 功能块展示当前市场资金流向、板块状态、主线识别"""
-        import datetime as _dt
+        """🔥 主线·资金迁移 —— 资金流向全景 (pack-only 布局 + 进度条 + 分步渲染)"""
         import threading
 
         win = self._safe_toplevel(self.root)
         win.title("🔥 主线·资金迁移 · 主力资金流向全景")
-        win.geometry("1550x900")
+        win.geometry("1400x820")
         win.transient(self.root)
-        try:
-            win.tk.call("tk", "scaling", 1.2)
-        except Exception:
-            pass
 
-        # 颜色方案 (红涨绿跌 A股)
-        C_UP = "#EF5350"
-        C_DN = "#66BB6A"
-        C_ACC = "#42A5F5"     # 吸筹 蓝
-        C_BRK = "#66BB6A"     # 启动 绿
-        C_DST = "#EF5350"     # 拉高出货 红
-        C_DEC = "#90A4AE"     # 下跌 灰
-        C_BG = "#1E1E2E"
-        C_PANEL = "#121212"
-        C_GOLD = "#FFD54F"
+        C_UP = "#EF5350"; C_DN = "#66BB6A"
 
         # ============ 顶部 Banner ============
-        banner = tk.Frame(win, bg="#B71C1C", height=70)
+        banner = tk.Frame(win, bg="#B71C1C", height=52)
         banner.pack(fill=tk.X)
         banner.pack_propagate(False)
-        bi = tk.Frame(banner, bg="#B71C1C")
-        bi.pack(fill=tk.BOTH, expand=True, padx=16, pady=6)
-        tk.Label(bi, text="🔥 主线·资金迁移 · 主力资金全景",
-                 font=("Microsoft YaHei", 15, "bold"),
-                 bg="#B71C1C", fg="#FFEBEE").pack(anchor="w")
-        status_var = tk.StringVar(value="⏳ 点击「🔄 扫描」加载全市场资金流向...")
-        tk.Label(bi, textvariable=status_var, font=("Microsoft YaHei", 10),
-                 bg="#B71C1C", fg="#FFCCBC").pack(anchor="w")
+        tk.Label(banner, text="🔥 主线·资金迁移 · 主力资金全景",
+                 font=("Microsoft YaHei", 13, "bold"),
+                 bg="#B71C1C", fg="#FFEBEE").pack(side=tk.LEFT, padx=14, pady=10)
+        status_var = tk.StringVar(value="⏳ 点击 🔄 开始扫描...")
+        tk.Label(banner, textvariable=status_var, font=("Microsoft YaHei", 10),
+                 bg="#B71C1C", fg="#FFCCBC").pack(side=tk.LEFT, pady=14)
 
-        # ============ 控制栏 ============
+        # ============ 控制栏 + 进度条 ============
         ctrl = ttk.Frame(win)
-        ctrl.pack(fill=tk.X, padx=8, pady=4)
+        ctrl.pack(fill=tk.X, padx=8, pady=(6, 2))
         scan_btn = ttk.Button(ctrl, text="🔄 扫描全市场", width=14)
         scan_btn.pack(side=tk.LEFT)
-        refresh_btn = ttk.Button(ctrl, text="⏱ 定时30min", width=12)
-        refresh_btn.pack(side=tk.LEFT, padx=4)
-        summary_label = tk.Label(ctrl, text="", font=("Microsoft YaHei", 11, "bold"),
-                                 fg=C_GOLD)
-        summary_label.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
+        pct_var = tk.DoubleVar(value=0)
+        prog = ttk.Progressbar(ctrl, variable=pct_var, maximum=100, length=280)
+        prog.pack(side=tk.LEFT, padx=8)
+        prog_txt = tk.Label(ctrl, text="", font=("Microsoft YaHei", 10), fg="#555")
+        prog_txt.pack(side=tk.LEFT)
 
-        # ============ 主体 Grid: 2行×3列 ============
-        main = ttk.Frame(win)
-        main.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
-        for r in range(2):
-            main.rowconfigure(r, weight=1)
-        for c in range(3):
-            main.columnconfigure(c, weight=1)
+        # ============ 主体: 两行 三列 pack (用 side=LEFT) ============
+        body = tk.Frame(win)
+        body.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
-        # ---- 块1: 💰 资金总览 ----
-        f_overview = ttk.LabelFrame(main, text="💰 资金总览", padding=6)
-        main.grid(f_overview, row=0, column=0, sticky="nsew", padx=4, pady=4)
-        # 数字卡片布局
-        ov_frame = ttk.Frame(f_overview)
-        ov_frame.pack(fill=tk.BOTH, expand=True)
-        def _num_card(parent, title, value, hint, fg="#333"):
-            cf = tk.Frame(parent, bg="#fafafa", highlightbackground="#ddd", highlightthickness=1)
-            cf.pack(fill=tk.X, pady=2)
-            tk.Label(cf, text=title, font=("Microsoft YaHei", 9), bg="#fafafa", fg="#666").pack(anchor="w", padx=6, pady=(4, 0))
-            tk.Label(cf, text=str(value), font=("Microsoft YaHei", 16, "bold"), bg="#fafafa", fg=fg).pack(anchor="w", padx=6)
-            tk.Label(cf, text=hint, font=("Microsoft YaHei", 8), bg="#fafafa", fg="#999").pack(anchor="w", padx=6, pady=(0, 4))
-            return cf
-        ov_total = _num_card(ov_frame, "全市场总成交额", "--", "申万31行业合计", "#333")
-        ov_in = _num_card(ov_frame, "主力净流入 TOP1 行业", "--", "按上涨家数代理", C_UP)
-        ov_out = _num_card(ov_frame, "主力净流出 TOP1 行业", "--", "按下跌家数代理", C_DN)
-        ov_mainline = _num_card(ov_frame, "当前最强主线", "--", "综合评分第一", C_GOLD)
+        # --- 上排 ---
+        top_row = tk.Frame(body)
+        top_row.pack(fill=tk.BOTH, expand=True)
 
-        # ---- 块2: 🔥 主线看板 ----
-        f_mainline = ttk.LabelFrame(main, text="🔥 主线看板 · 龙头标杆", padding=6)
-        main.grid(f_mainline, row=0, column=1, sticky="nsew", padx=4, pady=4)
-        ml_text = scrolledtext.ScrolledText(f_mainline, wrap=tk.WORD, height=14,
-                                             font=("Microsoft YaHei", 10),
-                                             bg="#FFF3E0", fg="#BF360C")
-        ml_text.pack(fill=tk.BOTH, expand=True)
-        ml_text.tag_config("title", font=("Microsoft YaHei", 12, "bold"), foreground="#E65100")
-        ml_text.tag_config("tag", foreground="#1565C0", font=("Microsoft YaHei", 10, "bold"))
-        ml_text.tag_config("leader", foreground="#C62828")
+        # 块1: 资金总览 (最小宽度, 占 1/4)
+        f_ov = tk.LabelFrame(top_row, text="💰 资金总览", font=("", 10, "bold"))
+        f_ov.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 6))
+        ov_vars = {}
+        for _t, _h, _fg in [
+            ("全市场总成交额", "申万31行业合计", "#333"),
+            ("主力净流入TOP", "资金正向板块", C_UP),
+            ("主力净流出TOP", "资金负向板块", C_DN),
+            ("当前最强主线", "综合评分第一", "#B8860B"),
+        ]:
+            cf = tk.Frame(f_ov, bg="#f5f5f5")
+            cf.pack(fill=tk.X, pady=3, padx=4)
+            tk.Label(cf, text=_t, font=("", 9), bg="#f5f5f5", fg="#666").pack(anchor="w", padx=6)
+            _v = tk.Label(cf, text="--", font=("", 14, "bold"), bg="#f5f5f5", fg=_fg)
+            _v.pack(anchor="w", padx=6)
+            tk.Label(cf, text=_h, font=("", 8), bg="#f5f5f5", fg="#aaa").pack(anchor="w", padx=6)
+            ov_vars[_t] = _v
 
-        # ---- 块3: 📊 板块状态矩阵 (四象限) ----
-        f_matrix = ttk.LabelFrame(main, text="📊 板块状态矩阵 · 四象限", padding=4)
-        main.grid(f_matrix, row=0, column=2, sticky="nsew", padx=4, pady=4)
-        cols_m = ("industry", "stage", "score", "pct", "turnover")
-        tree_m = ttk.Treeview(f_matrix, columns=cols_m, show="headings", height=10)
-        tree_m.heading("industry", text="板块")
-        tree_m.heading("stage", text="阶段")
-        tree_m.heading("score", text="评分")
-        tree_m.heading("pct", text="涨跌%")
-        tree_m.heading("turnover", text="换手%")
-        tree_m.column("industry", width=80, anchor="w")
-        tree_m.column("stage", width=70, anchor="center")
-        tree_m.column("score", width=40, anchor="center")
-        tree_m.column("pct", width=55, anchor="center")
-        tree_m.column("turnover", width=55, anchor="center")
-        tree_m.pack(fill=tk.BOTH, expand=True)
-        tree_m.tag_config("acc", foreground=C_ACC, font=("", 10, "bold"))
-        tree_m.tag_config("brk", foreground=C_BRK, font=("", 10, "bold"))
-        tree_m.tag_config("dst", foreground=C_DST, font=("", 10, "bold"))
-        tree_m.tag_config("dec", foreground=C_DEC, font=("", 10, "bold"))
-        tree_m.tag_config("unk", foreground="#888", font=("", 9))
+        # 块2: 主线看板 (占剩余空间)
+        f_ml = tk.LabelFrame(top_row, text="🔥 主线看板 · 龙头标杆", font=("", 10, "bold"))
+        f_ml.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=6)
+        ml_txt = scrolledtext.ScrolledText(f_ml, wrap=tk.WORD, font=("", 9), bg="#FFF8E1", fg="#5D4037")
+        ml_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        # ---- 块4: 📈 流入排行 ----
-        f_in = ttk.LabelFrame(main, text="📈 主力净流入 TOP10", padding=4)
-        main.grid(f_in, row=1, column=0, sticky="nsew", padx=4, pady=4)
-        cols_in = ("rank", "name", "amount_yi", "net_flow", "pct", "limit")
-        tree_in = ttk.Treeview(f_in, columns=cols_in, show="headings", height=10)
-        for c, txt, w, anc in [("rank", "#", 28, "center"), ("name", "板块", 80, "w"),
-                                ("amount_yi", "成交额亿", 75, "e"), ("net_flow", "资金倾向", 85, "e"),
-                                ("pct", "涨%", 45, "center"), ("limit", "涨停", 35, "center")]:
-            tree_in.heading(c, text=txt); tree_in.column(c, width=w, anchor=anc)
-        tree_in.pack(fill=tk.BOTH, expand=True)
-        tree_in.tag_config("up", foreground=C_UP, font=("", 10, "bold"))
+        # 块3: 板块状态矩阵
+        f_mt = tk.LabelFrame(top_row, text="📊 板块状态矩阵", font=("", 10, "bold"))
+        f_mt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
+        cols_m = ("ind", "stg", "sc", "pct", "to")
+        tree_m = ttk.Treeview(f_mt, columns=cols_m, show="headings", height=12)
+        for _c, _t, _w, _a in [("ind","板块",70,"w"),("stg","阶段",52,"center"),
+                               ("sc","评分",32,"center"),("pct","涨跌%",50,"center"),("to","换手%",50,"center")]:
+            tree_m.heading(_c, text=_t); tree_m.column(_c, width=_w, anchor=_a)
+        tree_m.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        for _tag, _fg in [("brk","#66BB6A"),("acc","#42A5F5"),("dst","#EF5350"),("dec","#90A4AE"),("unk","#888")]:
+            tree_m.tag_configure(_tag, foreground=_fg, font=("", 10, "bold"))
 
-        # ---- 块5: 📉 流出排行 ----
-        f_out = ttk.LabelFrame(main, text="📉 主力净流出 TOP10", padding=4)
-        main.grid(f_out, row=1, column=1, sticky="nsew", padx=4, pady=4)
-        cols_out = cols_in
-        tree_out = ttk.Treeview(f_out, columns=cols_out, show="headings", height=10)
-        for c, txt, w, anc in [("rank", "#", 28, "center"), ("name", "板块", 80, "w"),
-                                ("amount_yi", "成交额亿", 75, "e"), ("net_flow", "资金倾向", 85, "e"),
-                                ("pct", "涨%", 45, "center"), ("limit", "涨停", 35, "center")]:
-            tree_out.heading(c, text=txt); tree_out.column(c, width=w, anchor=anc)
-        tree_out.pack(fill=tk.BOTH, expand=True)
-        tree_out.tag_config("dn", foreground=C_DN, font=("", 10, "bold"))
+        # --- 下排 ---
+        bot_row = tk.Frame(body)
+        bot_row.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
-        # ---- 块6: 🌊 资金迁移瀑布 (matplotlib 条形图) ----
-        f_water = ttk.LabelFrame(main, text="🌊 资金迁移 · 流入流出瀑布图", padding=4)
-        main.grid(f_water, row=1, column=2, sticky="nsew", padx=4, pady=4)
+        def _mk_tree(parent, text):
+            f = tk.LabelFrame(parent, text=text, font=("", 10, "bold"))
+            tk_cols = ("rank","name","yi","flow","pct","lim")
+            t = ttk.Treeview(f, columns=tk_cols, show="headings", height=10)
+            for _c,_t,_w,_a in [("rank","#",26,"center"),("name","板块",72,"w"),
+                                ("yi","成交额亿",68,"e"),("flow","资金倾向",78,"e"),
+                                ("pct","涨%",44,"center"),("lim","涨停",32,"center")]:
+                t.heading(_c, text=_t); t.column(_c, width=_w, anchor=_a)
+            t.tag_configure("up", foreground=C_UP, font=("",10,"bold"))
+            t.tag_configure("dn", foreground=C_DN, font=("",10,"bold"))
+            t.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+            return f, t
+
+        f_in, tree_in = _mk_tree(bot_row, "📈 主力净流入 TOP10")
+        f_in.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
+
+        f_out, tree_out = _mk_tree(bot_row, "📉 主力净流出 TOP10")
+        f_out.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=6)
+
+        # 块6: 瀑布图
+        f_w = tk.LabelFrame(bot_row, text="🌊 资金迁移瀑布", font=("", 10, "bold"))
+        f_w.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
+        canvas_w = None
         try:
             import matplotlib
             matplotlib.use("TkAgg")
-            import matplotlib.pyplot as plt
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
             from matplotlib.figure import Figure
-            fig = Figure(figsize=(5, 3.5), dpi=95, facecolor="#fafafa")
+            fig = Figure(figsize=(4.5, 3.8), dpi=95, facecolor="#fafafa")
             ax_w = fig.add_subplot(111)
-            fig.subplots_adjust(left=0.08, right=0.98, top=0.92, bottom=0.18)
-            canvas_w = FigureCanvasTkAgg(fig, master=f_water)
-            canvas_w.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            fig.subplots_adjust(left=0.12, right=0.95, top=0.90, bottom=0.22)
+            canvas_w = FigureCanvasTkAgg(fig, master=f_w)
+            canvas_w.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+            ax_w.text(0.5, 0.5, "⏳ 扫描后加载...", ha="center", va="center",
+                      fontsize=11, color="#999", transform=ax_w.transAxes)
+            canvas_w.draw_idle()
         except Exception as e:
-            canvas_w = None
-            tk.Label(f_water, text=f"matplotlib 不可用: {e}", fg="red").pack()
+            tk.Label(f_w, text=f"matplotlib 不可用: {e}", fg="red").pack()
 
-        # ============ 扫描执行 ============
-        _scan_running = {"flag": False}
+        # ============ 扫描 + 渲染 ============
+        def _set_prog(p, msg):
+            def _do():
+                pct_var.set(p); prog_txt.config(text=msg); win.update_idletasks()
+            self.root.after(0, _do)
 
-        def _run_scan_thread():
+        def _run():
             scan_btn.config(state=tk.DISABLED)
-            status_var.set("⏳ 正在拉取申万31行业数据...")
             try:
+                _set_prog(5, "拉取申万行业列表...")
                 agg, raw, industries, td = self._fetch_industry_capital_data(token=getattr(self, "ts_token", None))
+
+                _set_prog(35, "识别当前主线 + 板块阶段...")
+                mainlines = self._identify_mainline(agg, top_n=3)
+                agg = agg.copy()
+                agg["阶段"] = "震荡整理"
+                for _, row in agg.head(20).iterrows():
+                    agg.loc[agg["industry"] == row["industry"], "阶段"] = self._simple_stage_from_cross_section(row)
+
+                _set_prog(55, "渲染资金总览...")
+                self.root.after(0, lambda: _render_overview(agg, mainlines))
+                _set_prog(65, "渲染主线看板...")
+                self.root.after(0, lambda: _render_mainline(raw, mainlines, td))
+                _set_prog(75, "渲染状态矩阵...")
+                self.root.after(0, lambda: _render_matrix(agg))
+                _set_prog(82, "渲染流入/流出...")
+                self.root.after(0, lambda: _render_flows(agg))
+                _set_prog(92, "渲染瀑布图...")
+                self.root.after(0, lambda: _render_waterfall(agg))
+
+                _set_prog(100, "✅ 扫描完成!")
+                status_var.set(f"✅ 扫描完成 · {len(agg)}行业 · 交易日 {td}")
+                scan_btn.config(state=tk.NORMAL)
+
             except Exception as e:
-                self.root.after(0, lambda: _scan_error(f"数据拉取失败: {e}"))
-                return
+                import traceback
+                _err = traceback.format_exc()
+                status_var.set(f"❌ 扫描失败: {e}")
+                scan_btn.config(state=tk.NORMAL)
+                self.root.after(0, lambda: messagebox.showerror("扫描失败", f"{e}\n\n{_err[-600:]}", parent=win))
 
-            self.root.after(0, lambda: status_var.set(
-                f"⏳ 扫描 {len(agg)} 个行业, {td} 交易日..."))
+        def _render_overview(agg, mainlines):
+            try:
+                _total = agg["总成交额亿"].sum()
+                _in = agg.sort_values("资金倾向", ascending=False).iloc[0]
+                _out = agg.sort_values("资金倾向", ascending=True).iloc[0]
+                ov_vars["全市场总成交额"].config(text=f"{_total:,.0f} 亿")
+                ov_vars["主力净流入TOP"].config(text=f"{_in['industry']} (+{_in['资金倾向']:,.0f}亿)")
+                ov_vars["主力净流出TOP"].config(text=f"{_out['industry']} ({_out['资金倾向']:,.0f}亿)")
+                if mainlines:
+                    ov_vars["当前最强主线"].config(text=f"{mainlines[0][0]} (分:{mainlines[0][1]:.0f})")
+            except Exception as e:
+                ov_vars["全市场总成交额"].config(text=f"❌ {e}")
 
-            # 主线识别
-            mainlines = self._identify_mainline(agg, top_n=3)
+        def _render_mainline(raw, mainlines, td):
+            ml_txt.delete("1.0", tk.END)
+            try:
+                ml_txt.insert(tk.END, f"📅 交易日: {td}\n\n", "title")
+                ml_txt.insert(tk.END, "═" * 45 + "\n\n")
+                for rank, (name, score, reason) in enumerate(mainlines, 1):
+                    ml_txt.insert(tk.END, f"🔥 主线 #{rank}: {name}\n", "title")
+                    ml_txt.insert(tk.END, f"   综合分 {score:.1f}/100  |  {reason}\n\n")
+                    leaders = self._get_sector_leaders(raw, name, top_n=5)
+                    if leaders:
+                        ml_txt.insert(tk.END, "   ─ 龙头标杆 ─\n")
+                        for li, ld in enumerate(leaders, 1):
+                            pct = ld["change_pct"]
+                            arrow = "🟢" if pct >= 0 else "🔴"
+                            ml_txt.insert(tk.END,
+                                           f"   {arrow}{li}. {ld['code']}  价{ld['price']:.2f}  "
+                                           f"{pct:+.2f}%  换手{ld['turnover_rate']:.1f}%\n")
+                    ml_txt.insert(tk.END, "\n")
+            except Exception as e:
+                ml_txt.insert(tk.END, f"❌ 主线渲染失败: {e}")
 
-            # 状态识别: 对成交额Top5行业, 拉龙头股K线合成板块指数代理 → 判断阶段
-            # 其他行业用横截面指标做简化判断
-            self.root.after(0, lambda: status_var.set(
-                "⏳ 对 Top5 行业拉K线识别阶段(吸筹/启动/拉高出货/下跌)..."))
-            agg = agg.copy()
-            agg["阶段"] = "震荡整理"
-            agg["阶段分"] = 0
-            top5 = agg.head(5)  # 对成交额最大的5个行业做精确判断
-
-            for _, row in top5.iterrows():
-                ind = row["industry"]
-                sub = raw[raw["industry"] == ind].copy()
-                if len(sub) < 5:
-                    continue
-                # 取龙头股 (成交额 Top15)
-                leaders = sub.nlargest(15, "amount")["ts_code"].tolist()
-                # 拉 K 线合成板块指数
-                _ind_closes = []
-                _ind_highs = []
-                _ind_lows = []
-                _ind_vols = []
-                for tc in leaders[:10]:  # 取前10只, 减少请求量
-                    _c6 = str(tc).split(".")[0]
-                    try:
-                        _dates, _opens, _highs, _lows, _closes, _vols = self._fetch_recent_daily_ohlcv(
-                            _c6, days=65, source="tushare",
-                            token=getattr(self, "ts_token", None))
-                        _ind_closes.append(np.array(_closes, dtype=float))
-                        _ind_highs.append(np.array(_highs, dtype=float))
-                        _ind_lows.append(np.array(_lows, dtype=float))
-                        _ind_vols.append(np.array(_vols, dtype=float))
-                    except Exception:
-                        pass
-                if len(_ind_closes) >= 3:
-                    # 对齐长度 (取最小)
-                    _min_len = min(len(x) for x in _ind_closes)
-                    _cls_arr = np.column_stack([x[-_min_len:] for x in _ind_closes]).mean(axis=1)
-                    _hhs_arr = np.column_stack([x[-_min_len:] for x in _ind_highs]).max(axis=1)
-                    _lls_arr = np.column_stack([x[-_min_len:] for x in _ind_lows]).min(axis=1)
-                    _vls_arr = np.column_stack([x[-_min_len:] for x in _ind_vols]).mean(axis=1)
-                    _sk, _sl, _ss = self._compute_sector_stage(
-                        None, _cls_arr, _hhs_arr, _lls_arr, _vls_arr)
-                    agg.loc[agg["industry"] == ind, "阶段"] = _sl
-                    agg.loc[agg["industry"] == ind, "阶段分"] = _ss
-                else:
-                    # 简化: 用横截面规则
-                    agg.loc[agg["industry"] == ind, "阶段"] = self._simple_stage_from_cross_section(row)
-
-            # Top6-15 行业: 简化横截面规则
-            for _, row in agg.iloc[5:15].iterrows():
-                agg.loc[agg["industry"] == row["industry"], "阶段"] = self._simple_stage_from_cross_section(row)
-
-            # 更新 UI
-            self.root.after(0, lambda: _update_all(agg, raw, mainlines, td))
-
-        def _scan_error(msg):
-            scan_btn.config(state=tk.NORMAL)
-            status_var.set(f"❌ {msg}")
-            messagebox.showerror("扫描失败", msg, parent=win)
-
-        def _update_all(agg, raw, mainlines, td):
-            import numpy as np
-            # --- 1. 资金总览 ---
-            total_amount = agg["总成交额亿"].sum()
-            top_in = agg.sort_values("资金倾向", ascending=False).iloc[0]
-            top_out = agg.sort_values("资金倾向", ascending=True).iloc[0]
-            ov_total.config(text=f"{total_amount:,.0f} 亿")
-            ov_in.config(text=f"{top_in['industry']}")
-            ov_out.config(text=f"{top_out['industry']}")
-            if mainlines:
-                ov_mainline.config(text=f"{mainlines[0][0]} (分:{mainlines[0][1]:.0f})")
-
-            # --- 2. 主线看板 ---
-            ml_text.delete("1.0", tk.END)
-            ml_text.insert(tk.END, f"📅 交易日: {td}\n\n", "title")
-            ml_text.insert(tk.END, f"═" * 50 + "\n\n")
-            for rank, (name, score, reason) in enumerate(mainlines, 1):
-                ml_text.insert(tk.END, f"  🔥 主线 #{rank}: {name}\n", "title")
-                ml_text.insert(tk.END, f"     综合分: {score:.1f}/100  |  {reason}\n\n")
-                # 龙头股
-                leaders = self._get_sector_leaders(raw, name, top_n=5)
-                if leaders:
-                    ml_text.insert(tk.END, f"     ─ 龙头标杆 ─\n")
-                    for li, ld in enumerate(leaders, 1):
-                        pct = ld["change_pct"]
-                        arrow = "🟢" if pct >= 0 else "🔴"
-                        ml_text.insert(tk.END,
-                                       f"     {arrow} {li}. {ld['code']}  价:{ld['price']:.2f}  "
-                                       f"涨跌:{pct:+.2f}%  换手:{ld['turnover_rate']:.1f}%\n",
-                                       "leader")
-                ml_text.insert(tk.END, "\n")
-
-            # --- 3. 板块状态矩阵 ---
+        def _render_matrix(agg):
             for item in tree_m.get_children():
                 tree_m.delete(item)
-            stage_rank = {"启动": 0, "吸筹": 1, "震荡整理": 2, "拉高出货": 3, "下跌": 4}
-            top20 = agg.head(20).copy()
-            top20["_sr"] = top20["阶段"].map(stage_rank).fillna(99)
-            top20 = top20.sort_values("_sr")
-            for _, row in top20.iterrows():
-                stg = str(row.get("阶段", "震荡整理"))
-                tag_map = {"启动": "brk", "吸筹": "acc", "拉高出货": "dst", "下跌": "dec",
-                           "震荡整理": "unk", "数据不足": "unk", "unknown": "unk"}
-                tag = tag_map.get(stg, "unk")
-                tree_m.insert("", tk.END, values=(
-                    row["industry"], stg, f"{int(row.get('阶段分', 0))}",
-                    f"{row['平均涨跌幅']:+.2f}", f"{row['平均换手率']:.1f}"
-                ), tags=(tag,))
+            try:
+                _rank = {"启动": 0, "吸筹": 1, "震荡整理": 2, "拉高出货": 3, "下跌": 4}
+                t20 = agg.head(20).copy()
+                t20["_sr"] = t20["阶段"].map(_rank).fillna(99)
+                t20 = t20.sort_values("_sr")
+                _tag_map = {"启动": "brk", "吸筹": "acc", "拉高出货": "dst", "下跌": "dec"}
+                for _, r in t20.iterrows():
+                    _stg = str(r.get("阶段", "震荡整理"))
+                    _tag = _tag_map.get(_stg, "unk")
+                    tree_m.insert("", tk.END, values=(
+                        r["industry"], _stg, int(r.get("阶段分", 0)),
+                        f"{r['平均涨跌幅']:+.2f}", f"{r['平均换手率']:.1f}"
+                    ), tags=(_tag,))
+            except Exception as e:
+                tree_m.insert("", tk.END, values=(f"❌ {e}", "", "", "", ""))
 
-            # --- 4. 流入排行 ---
-            for item in tree_in.get_children():
-                tree_in.delete(item)
-            top10_in = agg.nlargest(10, "资金倾向")
-            for i, (_, row) in enumerate(top10_in.iterrows(), 1):
-                tree_in.insert("", tk.END, values=(
-                    i, row["industry"], f"{row['总成交额亿']:,.0f}",
-                    f"{row['资金倾向']:,.0f}", f"{row['平均涨跌幅']:+.2f}",
-                    int(row["涨停数"])
-                ), tags=("up" if row["平均涨跌幅"] > 0 else (),))
+        def _render_flows(agg):
+            for t in [tree_in, tree_out]:
+                for item in t.get_children():
+                    t.delete(item)
+            try:
+                for i, (_, r) in enumerate(agg.nlargest(10, "资金倾向").iterrows(), 1):
+                    tree_in.insert("", tk.END, values=(
+                        i, r["industry"], f"{r['总成交额亿']:,.0f}",
+                        f"{r['资金倾向']:,.0f}", f"{r['平均涨跌幅']:+.2f}", int(r["涨停数"])
+                    ), tags=("up" if r["平均涨跌幅"] > 0 else (),))
+                for i, (_, r) in enumerate(agg.nsmallest(10, "资金倾向").iterrows(), 1):
+                    tree_out.insert("", tk.END, values=(
+                        i, r["industry"], f"{r['总成交额亿']:,.0f}",
+                        f"{r['资金倾向']:,.0f}", f"{r['平均涨跌幅']:+.2f}", int(r["涨停数"])
+                    ), tags=("dn" if r["平均涨跌幅"] < 0 else (),))
+            except Exception as e:
+                tree_in.insert("", tk.END, values=(f"❌ {e}", "", "", "", "", ""))
 
-            # --- 5. 流出排行 ---
-            for item in tree_out.get_children():
-                tree_out.delete(item)
-            top10_out = agg.nsmallest(10, "资金倾向")
-            for i, (_, row) in enumerate(top10_out.iterrows(), 1):
-                tree_out.insert("", tk.END, values=(
-                    i, row["industry"], f"{row['总成交额亿']:,.0f}",
-                    f"{row['资金倾向']:,.0f}", f"{row['平均涨跌幅']:+.2f}",
-                    int(row["涨停数"])
-                ), tags=("dn" if row["平均涨跌幅"] < 0 else (),))
-
-            # --- 6. 资金瀑布图 ---
-            if canvas_w is not None:
+        def _render_waterfall(agg):
+            if canvas_w is None:
+                return
+            try:
+                import numpy as np
                 ax_w.clear()
-                plot_df = agg.head(15).copy()
-                plot_df = plot_df.sort_values("资金倾向")
-                names = plot_df["industry"].tolist()
-                values = plot_df["资金倾向"].tolist()
+                pdf = agg.head(15).copy().sort_values("资金倾向")
+                names = pdf["industry"].tolist()
+                values = pdf["资金倾向"].tolist()
                 colors = [C_UP if v > 0 else C_DN for v in values]
-                y_pos = np.arange(len(names))
-                ax_w.barh(y_pos, values, color=colors, height=0.7)
-                ax_w.set_yticks(y_pos)
-                ax_w.set_yticklabels(names, fontsize=8)
-                ax_w.axvline(x=0, color="#999", linewidth=0.5)
-                ax_w.set_xlabel("资金倾向估算 (亿)", fontsize=8)
-                ax_w.set_title("主力资金流入 ←→ 流出 瀑布", fontsize=9, fontweight="bold")
+                ax_w.barh(np.arange(len(names)), values, color=colors, height=0.7)
+                ax_w.set_yticks(np.arange(len(names)))
+                ax_w.set_yticklabels(names, fontsize=7)
+                ax_w.axvline(x=0, color="#bbb", linewidth=0.5)
+                ax_w.set_title("主力资金 流入 ←→ 流出", fontsize=9, fontweight="bold")
                 ax_w.tick_params(axis="x", labelsize=7)
-                for i, (v, n) in enumerate(zip(values, names)):
+                for i, v in enumerate(values):
                     ax_w.text(v + (5 if v >= 0 else -5), i, f"{v:,.0f}",
-                              va="center", ha="left" if v >= 0 else "right", fontsize=7)
+                              va="center", ha="left" if v >= 0 else "right", fontsize=6)
+                canvas_w.draw_idle()
+            except Exception as e:
+                ax_w.clear()
+                ax_w.text(0.5, 0.5, f"❌ {e}", ha="center", va="center",
+                          fontsize=9, color="red", transform=ax_w.transAxes)
                 canvas_w.draw_idle()
 
-            # --- summary ---
-            if mainlines:
-                _ml1, _ml2 = mainlines[0][0], mainlines[0][2]
-                summary_label.config(text=f"🔥 今日主线: {_ml1}  |  {_ml2[:60]}...", fg=C_GOLD)
-            status_var.set(f"✅ 扫描完成! {len(agg)} 行业, 交易日={td}")
-            scan_btn.config(state=tk.NORMAL)
-
-        # ============ 按钮绑定 ============
-        scan_btn.config(command=lambda: threading.Thread(target=_run_scan_thread, daemon=True).start())
-        refresh_btn.config(command=lambda: threading.Thread(target=_run_scan_thread, daemon=True).start())
-
-        # 自动扫描一次
-        win.after(200, lambda: threading.Thread(target=_run_scan_thread, daemon=True).start())
+        scan_btn.config(command=lambda: threading.Thread(target=_run, daemon=True).start())
+        win.after(250, lambda: threading.Thread(target=_run, daemon=True).start())
 
     # ================================================================
     # 📊 大盘分析师 —— 作战姿态纪律 + 四维度红绿灯 + 分支报告
@@ -7976,7 +7903,7 @@ except Exception as e:
             if _cal is not None and len(_cal) > 0:
                 _open = _cal[_cal["is_open"] == 1]["cal_date"]
                 if len(_open) > 0:
-                    _td = str(_open.iloc[-1])
+                    _td = str(_open.sort_values().iloc[-1])
         except Exception:
             pass
         result["trade_date"] = _td
