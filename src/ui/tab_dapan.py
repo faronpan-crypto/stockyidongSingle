@@ -14631,6 +14631,9 @@ class DapanMixin:
         top = ttk.Frame(parent); top.pack(fill=tk.X, pady=(0, 6))
         ttk.Label(top, text="📯 淘股吧热股扫描 — 邮票格子 (红涨绿跌, 词频徽标=提及次数)",
                   font=("", 11, "bold")).pack(side=tk.LEFT)
+        # 🆕 均线检测按钮
+        ttk.Button(top, text="📈均线检测", width=10,
+                   command=lambda: self._check_stamp_ma_all("taoguba")).pack(side=tk.RIGHT, padx=(0, 4))
         ttk.Button(top, text="🔄刷新淘股吧", width=14,
                    command=lambda: self._refresh_stamp_board("taoguba", force=True)).pack(side=tk.RIGHT)
         self._taoguba_stamp_status = ttk.Label(top, text="")
@@ -14659,6 +14662,9 @@ class DapanMixin:
         top = ttk.Frame(parent); top.pack(fill=tk.X, pady=(0, 6))
         ttk.Label(top, text="🧭 韭研公社热股扫描 — 邮票格子 (红涨绿跌, 词频徽标=提及次数)",
                   font=("", 11, "bold")).pack(side=tk.LEFT)
+        # 🆕 均线检测按钮
+        ttk.Button(top, text="📈均线检测", width=10,
+                   command=lambda: self._check_stamp_ma_all("jiuyan")).pack(side=tk.RIGHT, padx=(0, 4))
         ttk.Button(top, text="🔄刷新韭研公社", width=14,
                    command=lambda: self._refresh_stamp_board("jiuyan", force=True)).pack(side=tk.RIGHT)
         self._jiuyan_stamp_status = ttk.Label(top, text="")
@@ -14681,6 +14687,161 @@ class DapanMixin:
         cv.bind_all("<MouseWheel>", _wheel)
         # 🆕 Tab 构建完自动触发 (force=False → 先读缓存, 无缓存才联网)
         parent.after(200, lambda: self._refresh_stamp_board("jiuyan"))
+
+    def _check_stamp_ma_all(self, source):
+        """📈 邮票格子 — 批量技术指标检测 (新浪日K, 后台线程)
+        输出: MA5/10/20方向 + BIAS6/12/24 + MACD金叉死叉 + KDJ金叉死叉 + 量价背离"""
+        import threading, requests as _req, time as _t, json as _json
+        import numpy as np
+        rows = getattr(self, f"_{source}_stamp_data", []) or []
+        if not rows:
+            status = getattr(self, f"_{source}_stamp_status", None)
+            if status: status.configure(text="⚠️ 先爬取数据", foreground="#EF5350")
+            return
+        if not hasattr(self, '_stamp_ma_cache'): self._stamp_ma_cache = {}
+        self._stamp_ma_cache[source] = {}
+        status = getattr(self, f"_{source}_stamp_status", None)
+
+        def _sina_ohlcv(sina_code, days=120):
+            """新浪拉日K → dict{highs,lows,closes,volumes} 全部 np.array"""
+            try:
+                r = _req.get(
+                    f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+                    f"CN_MarketData.getKLineData?symbol={sina_code}&scale=240&ma=no&datalen={days}",
+                    timeout=8,
+                    headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"})
+                data = _json.loads(r.text)
+                if not data or not isinstance(data, list) or len(data) < 60: return None
+                return {
+                    'highs':   np.array([float(d.get('high', 0))   for d in data], dtype=float),
+                    'lows':    np.array([float(d.get('low', 0))    for d in data], dtype=float),
+                    'closes':  np.array([float(d.get('close', 0))  for d in data], dtype=float),
+                    'volumes': np.array([float(d.get('volume', 0)) for d in data], dtype=float),
+                }
+            except: return None
+
+        def _ema(arr, n):
+            a = np.zeros_like(arr)
+            k = 2.0 / (n + 1); a[0] = arr[0]
+            for i in range(1, len(arr)): a[i] = arr[i] * k + a[i-1] * (1 - k)
+            return a
+
+        def _rsi(closes, n=14):
+            if len(closes) < n + 1: return None
+            deltas = np.diff(closes)
+            gains = np.where(deltas > 0, deltas, 0.0)
+            losses = np.where(deltas < 0, -deltas, 0.0)
+            avg_gain = np.mean(gains[:n]); avg_loss = np.mean(losses[:n])
+            for i in range(n, len(deltas)):
+                avg_gain = (avg_gain * (n-1) + gains[i]) / n
+                avg_loss = (avg_loss * (n-1) + losses[i]) / n
+            if avg_loss == 0: return 100.0
+            rs = avg_gain / avg_loss
+            return 100.0 - 100.0 / (1.0 + rs)
+
+        def _compute_all(ohlcv):
+            closes = ohlcv['closes']; highs = ohlcv['highs']; lows = ohlcv['lows']; vols = ohlcv['volumes']
+            res = {}; n = len(closes)
+            last = closes[-1]
+            # ── MA5/10/20 ──
+            for ma_n, key in [(5,5),(10,10),(20,20)]:
+                if n >= ma_n * 2:
+                    cur = float(np.mean(closes[-ma_n:])); prev = float(np.mean(closes[-2*ma_n:-ma_n]))
+                    res[f'above_ma{key}'] = bool(last >= cur)
+                    res[f'ma{key}_up'] = bool(cur > prev); res[f'ma{key}_down'] = bool(cur < prev)
+                    res[f'ma{key}'] = bool(last >= cur and cur >= prev)
+                    res[f'ma{key}_val'] = cur
+            # 鱼身鱼尾
+            res['fish_body'] = bool(res.get('ma5') and res.get('ma10') and res.get('ma20'))
+            res['fish_tail'] = bool(not res.get('ma10') or res.get('ma20_down', False))
+
+            # ── BIAS 6/12/24 ──
+            for bn, bk in [(6,6),(12,12),(24,24)]:
+                if n >= bn + 1:
+                    ma = float(np.mean(closes[-bn:]))
+                    res[f'bias{bk}'] = round((last - ma) / ma * 100, 2)
+
+            # ── MACD ──
+            if n >= 60:
+                ema12 = _ema(closes, 12); ema26 = _ema(closes, 26)
+                dif = ema12 - ema26; dea = _ema(dif, 9); macd_hist = 2 * (dif - dea)
+                res['macd_dif'] = round(dif[-1], 3); res['macd_dea'] = round(dea[-1], 3)
+                res['macd_hist'] = round(macd_hist[-1], 3)
+                # 金叉死叉 (近5日内)
+                res['macd_golden'] = bool(any(dif[-i] > dea[-i] and dif[-i-1] <= dea[-i-1] for i in range(1, min(6, n-1))))
+                res['macd_death']  = bool(any(dif[-i] < dea[-i] and dif[-i-1] >= dea[-i-1] for i in range(1, min(6, n-1))))
+                # DIF 向上拐头
+                res['macd_dif_up'] = bool(dif[-1] > dif[-2] if n >= 2 else False)
+
+            # ── KDJ ──
+            if n >= 30:
+                kdj_n = 9
+                low9 = np.array([np.min(lows[max(0,i-kdj_n+1):i+1]) for i in range(n)])
+                high9 = np.array([np.max(highs[max(0,i-kdj_n+1):i+1]) for i in range(n)])
+                rsv = np.where(high9 == low9, 50.0, (closes - low9) / (high9 - low9) * 100)
+                k_arr = np.zeros(n); d_arr = np.zeros(n)
+                k_arr[0] = 50.0; d_arr[0] = 50.0
+                for i in range(1, n):
+                    k_arr[i] = 2/3 * k_arr[i-1] + 1/3 * rsv[i]
+                    d_arr[i] = 2/3 * d_arr[i-1] + 1/3 * k_arr[i]
+                j_arr = 3 * k_arr - 2 * d_arr
+                res['kdj_k'] = round(k_arr[-1], 1); res['kdj_d'] = round(d_arr[-1], 1); res['kdj_j'] = round(j_arr[-1], 1)
+                res['kdj_overbought'] = bool(j_arr[-1] > 100)
+                res['kdj_oversold'] = bool(j_arr[-1] < 0)
+                res['kdj_golden'] = bool(any(k_arr[-i] > d_arr[-i] and k_arr[-i-1] <= d_arr[-i-1] for i in range(1, min(6, n-1))))
+                res['kdj_death']  = bool(any(k_arr[-i] < d_arr[-i] and k_arr[-i-1] >= d_arr[-i-1] for i in range(1, min(6, n-1))))
+
+            # ── RSI14 ──
+            r14 = _rsi(closes, 14)
+            if r14 is not None:
+                res['rsi14'] = round(r14, 1)
+                res['rsi_overbought'] = bool(r14 > 70); res['rsi_oversold'] = bool(r14 < 30)
+
+            # ── 量价背离检测 ──
+            res['divergence_top'] = False  # 顶背离: 价新高 但量/指标未新高
+            res['divergence_bottom'] = False
+            if n >= 40:
+                # 价格创出近 20 日新高但 MACD DIF 未创新高 → 顶背离
+                hi_price = np.max(closes[-20:])
+                hi_dif = np.max(dif[-20:]) if 'dif' in dir() else None
+                if hi_dif is not None and closes[-1] >= hi_price * 0.995 and dif[-1] < hi_dif * 0.95:
+                    res['divergence_top'] = True
+                lo_price = np.min(closes[-20:])
+                lo_dif = np.min(dif[-20:]) if 'dif' in dir() else None
+                if lo_dif is not None and closes[-1] <= lo_price * 1.005 and dif[-1] > lo_dif * 1.05:
+                    res['divergence_bottom'] = True
+                # 简单版: 量缩价涨 (连续5天价涨但量能递减)
+                if n >= 10:
+                    price_up5 = closes[-1] > closes[-5]
+                    vol_shrink5 = np.mean(vols[-5:]) < np.mean(vols[-10:-5]) * 0.85
+                    if price_up5 and vol_shrink5: res['divergence_top'] = True
+
+            # ── 均线粘合 (变盘预警) ──
+            m5v = res.get('ma5_val'); m10v = res.get('ma10_val'); m20v = res.get('ma20_val')
+            if m5v and m10v and m20v and m20v > 0:
+                spread = max(abs(m5v-m10v), abs(m10v-m20v), abs(m5v-m20v)) / m20v * 100
+                res['ma_zip'] = bool(spread < 2.0)  # 三线间距 < 2% = 粘合
+
+            return res
+
+        def _bg():
+            total = len(rows); ok = 0
+            for idx, item in enumerate(rows):
+                code = item.get("code", "")
+                if not code or code in self._stamp_ma_cache[source]: continue
+                ohlcv = _sina_ohlcv(code, 120)
+                if ohlcv is not None:
+                    self._stamp_ma_cache[source][code] = _compute_all(ohlcv); ok += 1
+                if status and idx % 5 == 0:
+                    self.root.after(0, lambda i=idx, t=total, o=ok: status.configure(
+                        text=f"⏳指标检测 {i}/{t} ✓{o}", foreground="#FFA726"))
+                _t.sleep(0.06)
+            self.root.after(0, lambda: (
+                self._render_stamp_board(source, rows),
+                status.configure(text=f"✅指标检测 {ok}/{total}", foreground="#81C784") if status else None,
+            ))
+
+        threading.Thread(target=_bg, daemon=True).start()
 
     def _refresh_stamp_board(self, source, force=False):
         """🔄 邮票格子 — 三级热股 + 淘韭文本爬虫加权
@@ -14858,11 +15019,18 @@ class DapanMixin:
                                 if p:
                                     freq_counter[p] += 1
                                     source_map[p] = f"{scr}SSR"
+                                    # 🆕 列表页也记匹配到的文章标题 (取当前页面所有文章标题前2个)
+                                    for _a in arts[:2]:
+                                        if _a['title'] and _a['title'] not in article_hits[p]:
+                                            article_hits[p].append(_a['title'][:60])
                             # 韭研 HTML 匹配股票名
                             for name, code in sorted(_NAME2CODE.items(), key=lambda x: -len(x[0])):
                                 if name in r.text:
                                     freq_counter[code] += 1
                                     source_map[code] = f"{scr}SSR"
+                                    for _a in arts[:2]:
+                                        if _a['title'] and _a['title'] not in article_hits[code]:
+                                            article_hits[code].append(_a['title'][:60])
                         except: pass
                         _time.sleep(0.2)
 
@@ -15301,6 +15469,68 @@ class DapanMixin:
                     _short_logic = BLOCK_LOGIC.get(blk_name, "")[:40]
                     tk.Label(row, text=_short_logic, bg=row_bg, fg="#78909C",
                              font=("", 8), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
+                # 🆕 第6列: 技术指标综合信号 (MA + BIAS + MACD + KDJ + 背离)
+                _ma_cache = getattr(self, '_stamp_ma_cache', {}).get(source, {})
+                _ms = _ma_cache.get(item.get("code", ""))
+                if _ms:
+                    def _ma_disp(_a, _u, _d, n):
+                        if _a and _u: return f"🟢{n}↑"
+                        if _a and not _d: return f"🟡{n}→"
+                        return f"🔴{n}↓"
+                    # MA 三行
+                    _m5 = _ma_disp(_ms.get('above_ma5', False), _ms.get('ma5_up', False), _ms.get('ma5_down', False), 5)
+                    _m10 = _ma_disp(_ms.get('above_ma10', False), _ms.get('ma10_up', False), _ms.get('ma10_down', False), 10)
+                    _m20 = _ma_disp(_ms.get('above_ma20', False), _ms.get('ma20_up', False), _ms.get('ma20_down', False), 20)
+                    # BIAS 值
+                    _bias6 = _ms.get('bias6'); _bias12 = _ms.get('bias12'); _bias24 = _ms.get('bias24')
+                    bias_parts = []
+                    if _bias12 is not None:
+                        _b12_c = "#EF5350" if _bias12 > 5 else "#66BB6A" if _bias12 < -5 else "#90CAF9"
+                        bias_parts.append(f"B12:{_bias12:+.1f}%")
+                    if _bias24 is not None: bias_parts.append(f"B24:{_bias24:+.1f}%")
+                    bias_txt = " ".join(bias_parts)
+                    # MACD 金叉死叉
+                    sig_parts = []
+                    if _ms.get('macd_golden'): sig_parts.append("🟣MACD金")
+                    elif _ms.get('macd_death'): sig_parts.append("🔴MACD死")
+                    elif _ms.get('macd_dif_up'): sig_parts.append("🔵DIF↑")
+                    # KDJ
+                    if _ms.get('kdj_golden'): sig_parts.append("🟢KDJ金")
+                    elif _ms.get('kdj_death'): sig_parts.append("🔴KDJ死")
+                    if _ms.get('kdj_overbought'): sig_parts.append("⚠KDJ超买")
+                    elif _ms.get('kdj_oversold'): sig_parts.append("⚠KDJ超卖")
+                    # RSI
+                    _rsi = _ms.get('rsi14')
+                    if _rsi is not None and _ms.get('rsi_overbought'): sig_parts.append("⏫RSI>70")
+                    elif _rsi is not None and _ms.get('rsi_oversold'): sig_parts.append("⏬RSI<30")
+                    # 背离
+                    if _ms.get('divergence_top'): sig_parts.append("🔻顶背离")
+                    if _ms.get('divergence_bottom'): sig_parts.append("🔺底背离")
+                    if _ms.get('ma_zip'): sig_parts.append("⚠粘合变盘")
+                    # 鱼身鱼尾
+                    _fish = ""
+                    if _ms.get('fish_body'): _fish = "🐟鱼身"
+                    elif _ms.get('fish_tail'): _fish = "🐠鱼尾"
+                    # 组装
+                    _ma_line = f"{_m5} {_m10} {_m20}{(' '+_fish) if _fish else ''}"
+                    _sig_line = "  ".join(sig_parts) if sig_parts else ""
+                    # 背景色: 强/中/弱
+                    all_ma_ok = _ms.get('ma5') and _ms.get('ma10') and _ms.get('ma20')
+                    any_break = not _ms.get('above_ma20', False)
+                    if all_ma_ok: _ma_color = "#81C784"
+                    elif any_break: _ma_color = "#EF5350"
+                    else: _ma_color = "#FFA726"
+                    # 第一行: MA + 鱼身鱼尾
+                    tk.Label(row, text=_ma_line, bg=row_bg, fg=_ma_color,
+                             font=("", 9, "bold")).pack(side=tk.RIGHT, padx=(4,2), pady=(0,0))
+                    # 第二行: BIAS + 信号 (更紧凑, 小字体)
+                    sub_parts = []
+                    if bias_txt: sub_parts.append(bias_txt)
+                    if _sig_line: sub_parts.append(_sig_line)
+                    if sub_parts:
+                        full_sub = "  ".join(sub_parts)
+                        tk.Label(row, text=full_sub, bg=row_bg, fg="#B0BEC5",
+                                 font=("", 8)).pack(side=tk.RIGHT, padx=(4,2), pady=(0,0))
                 cur_row += 1
                 row._stamp = item
                 row._last_click = {"time": 0}  # 🆕 必须初始化, 否则第一次点击就 AttributeError

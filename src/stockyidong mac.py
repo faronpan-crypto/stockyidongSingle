@@ -68885,20 +68885,42 @@ class StockKeywordAnalyzerGUI:
                 # 如果有第二行,添加到显示文本
                 if low_diff_line:
                     display_text += low_diff_line
-                # 鱼身/鱼尾(持仓检测写入 ma_status 后显示在按钮上);五星:5日低+1日线满足
-                fish_suffix = ""
+                # 鱼身/鱼尾 + 均线状态 合并到同一行
+                fish_tag2 = ""
                 if index < len(holding_kelly_results) and holding_kelly_results[index]:
                     _kr_f = holding_kelly_results[index]
                     _rs = bool(_kr_f.get('red_star_signal'))
                     _ms = _kr_f.get('ma_status') or {}
-                    if _ms.get('fish_body'):
-                        fish_suffix = "\n鱼身" + (" ★" if _rs else "")
-                    elif _ms.get('fish_tail'):
-                        fish_suffix = "\n鱼尾" + (" ★" if _rs else "")
-                    elif _rs:
-                        fish_suffix = "\n★"
-                if fish_suffix:
-                    display_text += fish_suffix
+                    if _ms.get('fish_body'): fish_tag2 = "鱼身" + (" ★" if _rs else "")
+                    elif _ms.get('fish_tail'): fish_tag2 = "鱼尾" + (" ★" if _rs else "")
+                    elif _rs: fish_tag2 = "★"
+                # 三条均线紧凑显示
+                def _ma_dot_s(_a, _u, _d):
+                    if _a and _u: return ("🟢", "↑")
+                    if _a and not _d: return ("🟡", "→")
+                    return ("🔴", "↓")
+                ma_line_s = ""
+                if index < len(holding_kelly_results) and holding_kelly_results[index]:
+                    _ms3 = holding_kelly_results[index].get('ma_status') or {}
+                    _d5, _a5 = _ma_dot_s(
+                        _ms3.get('above_ma5', _ms3.get('ma5', False)),
+                        _ms3.get('ma5_up', _ms3.get('ma5', False)),
+                        _ms3.get('ma5_down', False))
+                    _d10, _a10 = _ma_dot_s(
+                        _ms3.get('above_ma10', _ms3.get('ma10', False)),
+                        _ms3.get('ma10_up', _ms3.get('ma10', False)),
+                        _ms3.get('ma10_down', False))
+                    _d20, _a20 = _ma_dot_s(
+                        _ms3.get('above_ma20', _ms3.get('ma20', False)),
+                        _ms3.get('ma20_up', _ms3.get('ma20', False)),
+                        _ms3.get('ma20_down', _ms3.get('below_ma20', False)))
+                    ma_line_s = f"{_d5}5{_a5} {_d10}10{_a10} {_d20}20{_a20}"
+                # 合并
+                _parts2 = []
+                if ma_line_s: _parts2.append(ma_line_s)
+                if fish_tag2: _parts2.append(fish_tag2)
+                if _parts2:
+                    display_text += "\n" + "  ".join(_parts2)
                 golden_suffix = ""
                 if index < len(holding_kelly_results) and holding_kelly_results[index]:
                     if holding_kelly_results[index].get('is_golden_stock'):

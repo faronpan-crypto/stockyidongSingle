@@ -178,6 +178,9 @@ class ChecksMixin:
                     'ma1': False, 'ma5': False, 'ma10': False, 'ma20': False,
                     'below_ma20': False, 'ma10_distance_pct': None, 'near_ma10': False,
                     'fish_body': False, 'fish_tail': False,
+                    'ma5_up': False, 'ma5_down': False, 'above_ma5': False,
+                    'ma10_up': False, 'ma10_down': False, 'above_ma10': False,
+                    'ma20_up': False, 'ma20_down': False, 'above_ma20': False,
                 }
             # 获取最近收盘价数据
             result = self._fetch_recent_daily_closes(stock_code, days=45, source="default", token=self.ts_token, return_volume=False)
@@ -190,6 +193,9 @@ class ChecksMixin:
                     'ma1': False, 'ma5': False, 'ma10': False, 'ma20': False,
                     'below_ma20': False, 'ma10_distance_pct': None, 'near_ma10': False,
                     'fish_body': False, 'fish_tail': False,
+                    'ma5_up': False, 'ma5_down': False, 'above_ma5': False,
+                    'ma10_up': False, 'ma10_down': False, 'above_ma10': False,
+                    'ma20_up': False, 'ma20_down': False, 'above_ma20': False,
                 }
             # 优先获取实时价格或当日价格
             realtime_price = None
@@ -224,6 +230,10 @@ class ChecksMixin:
                 'ma1': False, 'ma5': False, 'ma10': False, 'ma20': False,
                 'below_ma20': False, 'ma10_distance_pct': None, 'near_ma10': False,
                 'fish_body': False, 'fish_tail': False,
+                # 🆕 三条均线的方向 + 股价位置
+                'ma5_up': False, 'ma5_down': False, 'above_ma5': False,
+                'ma10_up': False, 'ma10_down': False, 'above_ma10': False,
+                'ma20_up': False, 'ma20_down': False, 'above_ma20': False,
             }
             # 检测1日线(不判断是否上升,只判断是否站上)
             if len(closes) >= 3:
@@ -241,6 +251,10 @@ class ChecksMixin:
                 ma5_crossed = latest_price >= ref_ma5
                 ma5_uptrend = ref_ma5 >= prev_ma5
                 ma_status['ma5'] = ma5_crossed and ma5_uptrend
+                # 🆕 MA5 方向 + 股价位置
+                ma_status['ma5_up'] = bool(ref_ma5 > prev_ma5)
+                ma_status['ma5_down'] = bool(ref_ma5 < prev_ma5)
+                ma_status['above_ma5'] = bool(ma5_crossed)
             # 检测10日线
             if len(closes) >= 12:
                 ma10_values = [float(closes[i]) for i in range(len(closes)-10, len(closes))]
@@ -250,6 +264,10 @@ class ChecksMixin:
                 ma10_crossed = latest_price >= ref_ma10
                 ma10_uptrend = ref_ma10 >= prev_ma10
                 ma_status['ma10'] = ma10_crossed and ma10_uptrend
+                # 🆕 MA10 方向 + 股价位置
+                ma_status['ma10_up'] = bool(ref_ma10 > prev_ma10)
+                ma_status['ma10_down'] = bool(ref_ma10 < prev_ma10)
+                ma_status['above_ma10'] = bool(ma10_crossed)
                 # 计算价格距离10日均线的百分比
                 if ref_ma10 > 0:
                     distance_pct = abs((latest_price - ref_ma10) / ref_ma10) * 100
@@ -267,6 +285,10 @@ class ChecksMixin:
                 ma_status['ma20'] = ma20_crossed and ma20_uptrend
                 # 检测股价是否低于20日线
                 ma_status['below_ma20'] = latest_price < ref_ma20
+                # 🆕 20日线方向三态 + 股价是否站上20日线
+                ma_status['ma20_up'] = bool(ref_ma20 > prev_ma20)   # 20日线明显向上
+                ma_status['ma20_down'] = bool(ref_ma20 < prev_ma20)  # 20日线向下
+                ma_status['above_ma20'] = bool(ma20_crossed)         # 股价站上20日线
             # 鱼身 / 鱼尾(持仓检测按钮):站上10日线且10日、20日均线向上 → 鱼身;跌破10日线或20日均线向下 → 鱼尾
             if ref_ma20 is not None and ref_ma10 is not None:
                 above_ma10 = latest_price >= ref_ma10
@@ -284,6 +306,9 @@ class ChecksMixin:
                 'ma1': False, 'ma5': False, 'ma10': False, 'ma20': False,
                 'below_ma20': False, 'ma10_distance_pct': None, 'near_ma10': False,
                 'fish_body': False, 'fish_tail': False,
+                'ma5_up': False, 'ma5_down': False, 'above_ma5': False,
+                'ma10_up': False, 'ma10_down': False, 'above_ma10': False,
+                'ma20_up': False, 'ma20_down': False, 'above_ma20': False,
             }
 
     def _check_new_high(self, stock_code, days=60):

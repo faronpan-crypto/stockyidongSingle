@@ -1424,20 +1424,42 @@ class CangweiMixin:
                 # 如果有第二行,添加到显示文本
                 if low_diff_line:
                     display_text += low_diff_line
-                # 鱼身/鱼尾(持仓检测写入 ma_status 后显示在按钮上);五星:5日低+1日线满足
-                fish_suffix = ""
+                # 鱼身/鱼尾 + 均线状态 合并到同一行
+                fish_tag = ""
                 if index < len(holding_kelly_results) and holding_kelly_results[index]:
                     _kr_f = holding_kelly_results[index]
                     _rs = bool(_kr_f.get('red_star_signal'))
                     _ms = _kr_f.get('ma_status') or {}
-                    if _ms.get('fish_body'):
-                        fish_suffix = "\n鱼身" + (" ★" if _rs else "")
-                    elif _ms.get('fish_tail'):
-                        fish_suffix = "\n鱼尾" + (" ★" if _rs else "")
-                    elif _rs:
-                        fish_suffix = "\n★"
-                if fish_suffix:
-                    display_text += fish_suffix
+                    if _ms.get('fish_body'): fish_tag = "鱼身" + (" ★" if _rs else "")
+                    elif _ms.get('fish_tail'): fish_tag = "鱼尾" + (" ★" if _rs else "")
+                    elif _rs: fish_tag = "★"
+                # 三条均线状态紧凑显示
+                def _ma_dot(_above, _up, _down):
+                    if _above and _up: return ("🟢", "↑")
+                    if _above and not _down: return ("🟡", "→")
+                    return ("🔴", "↓")
+                ma_line = ""
+                if index < len(holding_kelly_results) and holding_kelly_results[index]:
+                    _ms = holding_kelly_results[index].get('ma_status') or {}
+                    _d5, _a5 = _ma_dot(
+                        _ms.get('above_ma5', _ms.get('ma5', False)),
+                        _ms.get('ma5_up', _ms.get('ma5', False)),
+                        _ms.get('ma5_down', False))
+                    _d10, _a10 = _ma_dot(
+                        _ms.get('above_ma10', _ms.get('ma10', False)),
+                        _ms.get('ma10_up', _ms.get('ma10', False)),
+                        _ms.get('ma10_down', False))
+                    _d20, _a20 = _ma_dot(
+                        _ms.get('above_ma20', _ms.get('ma20', False)),
+                        _ms.get('ma20_up', _ms.get('ma20', False)),
+                        _ms.get('ma20_down', _ms.get('below_ma20', False)))
+                    ma_line = f"{_d5}5{_a5} {_d10}10{_a10} {_d20}20{_a20}"
+                # 合并: 均线 + 鱼身/鱼尾 同一行
+                _parts = []
+                if ma_line: _parts.append(ma_line)
+                if fish_tag: _parts.append(fish_tag)
+                if _parts:
+                    display_text += "\n" + "  ".join(_parts)
                 golden_suffix = ""
                 if index < len(holding_kelly_results) and holding_kelly_results[index]:
                     if holding_kelly_results[index].get('is_golden_stock'):
@@ -1876,6 +1898,40 @@ class CangweiMixin:
                             # 如果有第二行,添加到显示文本
                             if low_diff_line:
                                 display_text += low_diff_line
+                            # 🆕 三条均线 + 鱼身/鱼尾 合并一行
+                            fish_tag_p = ""
+                            if i < len(current_kelly_results) and current_kelly_results[i]:
+                                _kr_p = current_kelly_results[i]
+                                _rs_p = bool(_kr_p.get('red_star_signal'))
+                                _ms_p = _kr_p.get('ma_status', {})
+                                if _ms_p.get('fish_body'): fish_tag_p = "鱼身" + (" ★" if _rs_p else "")
+                                elif _ms_p.get('fish_tail'): fish_tag_p = "鱼尾" + (" ★" if _rs_p else "")
+                                elif _rs_p: fish_tag_p = "★"
+                            ma_p = ""
+                            if i < len(current_kelly_results) and current_kelly_results[i]:
+                                ms = current_kelly_results[i].get('ma_status', {})
+                                def _mdot(_a, _u, _d):
+                                    if _a and _u: return ("🟢", "↑")
+                                    if _a and not _d: return ("🟡", "→")
+                                    return ("🔴", "↓")
+                                _d5, _a5 = _mdot(
+                                    ms.get('above_ma5', ms.get('ma5', False)),
+                                    ms.get('ma5_up', ms.get('ma5', False)),
+                                    ms.get('ma5_down', False))
+                                _d10, _a10 = _mdot(
+                                    ms.get('above_ma10', ms.get('ma10', False)),
+                                    ms.get('ma10_up', ms.get('ma10', False)),
+                                    ms.get('ma10_down', False))
+                                _d20, _a20 = _mdot(
+                                    ms.get('above_ma20', ms.get('ma20', False)),
+                                    ms.get('ma20_up', ms.get('ma20', False)),
+                                    ms.get('ma20_down', ms.get('below_ma20', False)))
+                                ma_p = f"{_d5}5{_a5} {_d10}10{_a10} {_d20}20{_a20}"
+                            _pparts = []
+                            if ma_p: _pparts.append(ma_p)
+                            if fish_tag_p: _pparts.append(fish_tag_p)
+                            if _pparts:
+                                display_text += f"\n{'  '.join(_pparts)}"
                             # 根据检测结果设置颜色
                             can_open = False
                             near_ma10 = False
