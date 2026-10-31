@@ -7354,6 +7354,1176 @@ except Exception as e:
             _run_scan()
         ttk.Button(save_frame, text="🤖 重新AI分析", command=_rerun_ai).pack(side=tk.LEFT, padx=3)
 
+    # ================================================================
+    # 🔥 主线·资金迁移 —— 核心数据函数
+    # ================================================================
+    def _fetch_industry_capital_data(self, token=None):
+        """拉取申万31行业 + 成分股 + 今日聚合数据。返回 (agg_df, raw_df, industries)。
+        agg_df: 每个行业的聚合指标(成分股数/成交额/市值/涨跌幅/换手率/量比/涨停数...)
+        raw_df: 合并了行业归属的个股快照
+        industries: 申万行业列表
+        """
+        import tushare as _ts
+        _token = (os.environ.get("TUSHARE_TOKEN", "") or token or getattr(self, "ts_token", "") or TS_DEFAULT_TOKEN or "").strip()
+        if not _token:
+            raise RuntimeError("TUSHARE_TOKEN 未配置")
+        os.environ["TUSHARE_TOKEN"] = _token
+        _ts.set_token(_token)
+        _pro = _ts.pro_api()
+        from datetime import datetime, timedelta
+        import pandas as pd
+
+        # 1) 交易日
+        _today = datetime.now().strftime("%Y%m%d")
+        _td = _today
+        try:
+            _cal = _pro.trade_cal(exchange="SSE", start_date=(datetime.now()-timedelta(days=10)).strftime("%Y%m%d"), end_date=_today)
+            if _cal is not None and len(_cal) > 0:
+                _open = _cal[_cal["is_open"] == 1]["cal_date"]
+                if len(_open) > 0:
+                    _td = str(_open.iloc[-1])
+        except Exception:
+            pass
+
+        # 2) 申万行业
+        industries = _pro.index_classify(level="L1", src="SW2021")
+
+        # 3) 拉每个行业的当前成分股 (is_new=Y)
+        all_members = []
+        for _, row in industries.iterrows():
+            idx_code = row["index_code"]
+            name = row["industry_name"]
+            try:
+                m = _pro.index_member(index_code=idx_code)
+                if m is not None and len(m) > 0:
+                    m = m[m["is_new"] == "Y"].copy()
+                    m["industry"] = name
+                    m["index_code"] = idx_code
+                    all_members.append(m)
+            except Exception:
+                pass
+        members_df = pd.concat(all_members, ignore_index=True) if all_members else pd.DataFrame()
+
+        # 4) daily_basic + daily
+        basic = _pro.daily_basic(trade_date=_td, fields="ts_code,close,turnover_rate,pe_ttm,pb,total_mv,circ_mv,volume_ratio")
+        daily = _pro.daily(trade_date=_td, fields="ts_code,pct_chg,vol,amount,open,high,low")
+        if basic is None:
+            raise RuntimeError("daily_basic 返回空")
+
+        # 5) 合并
+        df = basic.copy()
+        if daily is not None and len(daily) > 0:
+            df = df.merge(daily, on="ts_code", how="left")
+        df = df.merge(
+            members_df[["con_code", "industry", "index_code"]].rename(columns={"con_code": "ts_code"}),
+            on="ts_code", how="inner",
+        )
+
+        # 6) 行业聚合
+        agg = df.groupby(["index_code", "industry"]).agg(
+            成分股数=("ts_code", "count"),
+            总成交额亿=("amount", lambda x: x.sum() / 10000.0),
+            总市值亿=("total_mv", lambda x: x.sum() / 10000.0),
+            平均涨跌幅=("pct_chg", "mean"),
+            平均换手率=("turnover_rate", "mean"),
+            平均量比=("volume_ratio", "mean"),
+            涨停数=("pct_chg", lambda x: (x >= 9.5).sum()),
+            上涨数=("pct_chg", lambda x: (x > 0).sum()),
+            下跌数=("pct_chg", lambda x: (x < 0).sum()),
+            平均振幅=("high", lambda x: ((x - df.loc[x.index, "low"]) / df.loc[x.index, "low"]).mean() * 100 if len(x) > 0 else 0),
+        ).reset_index()
+
+        # 7) 资金估算: 成交额 × (上涨数-下跌数)/总数 — 近似主力净流入代理
+        agg["资金倾向"] = agg.apply(
+            lambda r: r["总成交额亿"] * (r["上涨数"] - r["下跌数"]) / max(r["成分股数"], 1), axis=1
+        )
+        agg = agg.sort_values("总成交额亿", ascending=False).reset_index(drop=True)
+
+        return agg, df, industries, _td
+
+    def _compute_sector_stage(self, sector_df_daily, closes, highs, lows, volumes):
+        """对板块指数代理(K线)计算阶段: 吸筹/启动/拉高出货/下跌。
+        输入: 日线 OHLCV (np.array), 输出: (stage_key, stage_label, stage_score)
+        stage_key:  accumulate(吸筹) / breakout(启动) / distribute(拉高出货) / decline(下跌)
+        """
+        import numpy as np
+        n = len(closes)
+        if n < 30:
+            return ("unknown", "数据不足", 0)
+        c = np.array(closes, dtype=float)
+        h = np.array(highs, dtype=float)
+        l = np.array(lows, dtype=float)
+        v = np.array(volumes, dtype=float)
+
+        # MA
+        ma5 = np.mean(c[-5:])
+        ma10 = np.mean(c[-10:])
+        ma20 = np.mean(c[-20:])
+        ma60 = np.mean(c[-60:]) if n >= 60 else np.mean(c)
+        close_now = c[-1]
+
+        # 区间位置 (20日高低)
+        high20 = np.max(h[-20:])
+        low20 = np.min(l[-20:])
+        pos_20 = (close_now - low20) / max(high20 - low20, 0.01)  # 0-1
+
+        # 量比 (近5日均量 / 近20日均量)
+        vol5 = np.mean(v[-5:])
+        vol20 = np.mean(v[-20:]) if np.mean(v[-20:]) > 0 else 1
+        vol_ratio = vol5 / vol20 if vol20 > 0 else 1
+
+        # 均线多空
+        ma_bull = ma5 > ma10 > ma20
+        ma_bear = ma5 < ma10 < ma20
+
+        # 距MA20偏离
+        bias_ma20 = (close_now - ma20) / ma20 * 100
+
+        # 评分规则
+        # 吸筹accumulate: 价格在MA20附近震荡,量比低, pos_20 < 0.4, bias小
+        acc_score = 0
+        if pos_20 < 0.4: acc_score += 2
+        if vol_ratio < 0.8: acc_score += 2
+        if abs(bias_ma20) < 3: acc_score += 2
+        if not ma_bull and not ma_bear: acc_score += 1
+
+        # 启动breakout: MA多头, close站上MA60, pos_20 > 0.7, 量比>1.2
+        brk_score = 0
+        if ma_bull: brk_score += 2
+        if close_now > ma60: brk_score += 2
+        if pos_20 > 0.7: brk_score += 2
+        if vol_ratio > 1.2: brk_score += 2
+        if bias_ma20 > 0 and bias_ma20 < 8: brk_score += 1
+
+        # 拉高出货distribute: MA多头但close开始转弱, pos_20 > 0.85, 量比>1.3(爆量), bias过大
+        dist_score = 0
+        if ma_bull and close_now < ma5: dist_score += 2
+        if pos_20 > 0.85: dist_score += 1
+        if vol_ratio > 1.5: dist_score += 2
+        if bias_ma20 > 8: dist_score += 2
+
+        # 下跌decline: MA空头, close < MA20, pos_20 < 0.3
+        dec_score = 0
+        if ma_bear: dec_score += 2
+        if close_now < ma20: dec_score += 1
+        if pos_20 < 0.3: dec_score += 2
+
+        scores = {
+            "吸筹": acc_score,
+            "启动": brk_score,
+            "拉高出货": dist_score,
+            "下跌": dec_score,
+        }
+        # 取最高分,但要有最低门槛
+        best = max(scores.items(), key=lambda x: x[1])
+        if best[1] < 3:
+            return ("unknown", "震荡整理", best[1])
+        label = best[0]
+        key_map = {"吸筹": "accumulate", "启动": "breakout", "拉高出货": "distribute", "下跌": "decline"}
+        return (key_map[label], label, best[1])
+
+    def _simple_stage_from_cross_section(self, row):
+        """简化阶段识别: 用单日横截面指标(涨跌幅/换手率/量比/涨停数)判断。"""
+        pct = float(row.get("平均涨跌幅", 0) or 0)
+        turnover = float(row.get("平均换手率", 0) or 0)
+        vol_ratio = float(row.get("平均量比", 1) or 1)
+        limit_up = int(row.get("涨停数", 0) or 0)
+        up_n = int(row.get("上涨数", 0) or 0)
+        dn_n = int(row.get("下跌数", 0) or 0)
+        total = max(up_n + dn_n, 1)
+        up_ratio = up_n / total
+        # 规则 (简单启发式)
+        if pct > 1.5 and up_ratio > 0.6 and limit_up >= 2:
+            return "启动"
+        if pct > 0.3 and up_ratio > 0.55 and vol_ratio > 1.1:
+            return "启动"
+        if pct > 0 and abs(pct) < 1.0 and up_ratio < 0.55 and vol_ratio < 1.0:
+            return "吸筹"
+        if pct > 0 and vol_ratio > 1.5 and up_ratio > 0.55 and turnover > 3:
+            return "拉高出货"
+        if pct < -1.5 and up_ratio < 0.35:
+            return "下跌"
+        if pct < -0.3 and up_ratio < 0.45:
+            return "下跌"
+        return "震荡整理"
+
+    def _identify_mainline(self, agg_df, top_n=3):
+        """从行业聚合表中识别当前主线: 综合容纳力 + 成交额 + 动量 + 活跃度。返回 [(name, score, reason), ...]"""
+        import numpy as np
+        if agg_df is None or len(agg_df) == 0:
+            return []
+        df = agg_df.copy()
+        # 4个维度打分 (百分位)
+        df["容量分"] = df["成分股数"].rank(pct=True) * 25        # 容纳力: 25%
+        df["资金分"] = df["总成交额亿"].rank(pct=True) * 30      # 成交额: 30%
+        df["动量分"] = df["平均涨跌幅"].rank(pct=True) * 25     # 动量: 25%
+        df["活跃分"] = df["平均换手率"].rank(pct=True) * 20     # 活跃度: 20%
+        df["主线分"] = df["容量分"] + df["资金分"] + df["动量分"] + df["活跃分"]
+
+        # 热点标签 (行业名称匹配AI/半导体/机器人等关键词)
+        _hot_tags = {
+            "AI": ["电子", "计算机", "通信", "传媒"],
+            "半导体": ["电子"],
+            "机器人": ["机械设备"],
+            "新能源": ["电力设备", "有色金属"],
+            "医药": ["医药生物"],
+            "消费": ["食品饮料", "家用电器", "商贸零售"],
+            "军工": ["国防军工"],
+            "金融": ["银行", "非银金融"],
+        }
+
+        results = []
+        top = df.nlargest(top_n, "主线分")
+        for _, row in top.iterrows():
+            name = row["industry"]
+            score = row["主线分"]
+            tags = [k for k, v in _hot_tags.items() if name in v]
+            reason_parts = []
+            if row["容量分"] > 18: reason_parts.append(f"容纳力强({int(row['成分股数'])}只)")
+            if row["资金分"] > 22: reason_parts.append(f"成交额大({row['总成交额亿']:.0f}亿)")
+            if row["动量分"] > 20: reason_parts.append(f"动量+{row['平均涨跌幅']:.1f}%")
+            if row["活跃分"] > 15: reason_parts.append(f"换手{row['平均换手率']:.1f}%")
+            reason = " | ".join(reason_parts) if reason_parts else "综合评分领先"
+            if tags:
+                reason = f"🔥{'/'.join(tags)} | " + reason
+            results.append((name, score, reason))
+        return results
+
+    def _get_sector_leaders(self, raw_df, sector_name, top_n=5):
+        """获取板块内龙头股: 成交额Top + 涨幅领先"""
+        import pandas as pd
+        if raw_df is None or len(raw_df) == 0:
+            return []
+        sub = raw_df[raw_df["industry"] == sector_name].copy()
+        if len(sub) == 0:
+            return []
+        # 综合评分: 成交额排名 + 涨幅排名
+        sub["成交额排名"] = sub["amount"].rank(ascending=False, pct=True)
+        sub["涨幅排名"] = sub["pct_chg"].rank(ascending=False, pct=True)
+        sub["龙头分"] = sub["成交额排名"] * 0.6 + sub["涨幅排名"] * 0.4
+        leaders = sub.nlargest(top_n, "龙头分")
+        result = []
+        for _, row in leaders.iterrows():
+            _tsc = str(row.get("ts_code", ""))
+            _code = _tsc.split(".")[0]
+            result.append({
+                "code": _code,
+                "name": _tsc,  # 后续用名称填充
+                "price": float(row.get("close", 0) or 0),
+                "change_pct": float(row.get("pct_chg", 0) or 0),
+                "amount": float(row.get("amount", 0) or 0),
+                "turnover_rate": float(row.get("turnover_rate", 0) or 0),
+            })
+        return result
+
+    def _show_mainline_capital_dialog(self):
+        """🔥 主线·资金迁移 —— 6 功能块展示当前市场资金流向、板块状态、主线识别"""
+        import datetime as _dt
+        import threading
+
+        win = self._safe_toplevel(self.root)
+        win.title("🔥 主线·资金迁移 · 主力资金流向全景")
+        win.geometry("1550x900")
+        win.transient(self.root)
+        try:
+            win.tk.call("tk", "scaling", 1.2)
+        except Exception:
+            pass
+
+        # 颜色方案 (红涨绿跌 A股)
+        C_UP = "#EF5350"
+        C_DN = "#66BB6A"
+        C_ACC = "#42A5F5"     # 吸筹 蓝
+        C_BRK = "#66BB6A"     # 启动 绿
+        C_DST = "#EF5350"     # 拉高出货 红
+        C_DEC = "#90A4AE"     # 下跌 灰
+        C_BG = "#1E1E2E"
+        C_PANEL = "#121212"
+        C_GOLD = "#FFD54F"
+
+        # ============ 顶部 Banner ============
+        banner = tk.Frame(win, bg="#B71C1C", height=70)
+        banner.pack(fill=tk.X)
+        banner.pack_propagate(False)
+        bi = tk.Frame(banner, bg="#B71C1C")
+        bi.pack(fill=tk.BOTH, expand=True, padx=16, pady=6)
+        tk.Label(bi, text="🔥 主线·资金迁移 · 主力资金全景",
+                 font=("Microsoft YaHei", 15, "bold"),
+                 bg="#B71C1C", fg="#FFEBEE").pack(anchor="w")
+        status_var = tk.StringVar(value="⏳ 点击「🔄 扫描」加载全市场资金流向...")
+        tk.Label(bi, textvariable=status_var, font=("Microsoft YaHei", 10),
+                 bg="#B71C1C", fg="#FFCCBC").pack(anchor="w")
+
+        # ============ 控制栏 ============
+        ctrl = ttk.Frame(win)
+        ctrl.pack(fill=tk.X, padx=8, pady=4)
+        scan_btn = ttk.Button(ctrl, text="🔄 扫描全市场", width=14)
+        scan_btn.pack(side=tk.LEFT)
+        refresh_btn = ttk.Button(ctrl, text="⏱ 定时30min", width=12)
+        refresh_btn.pack(side=tk.LEFT, padx=4)
+        summary_label = tk.Label(ctrl, text="", font=("Microsoft YaHei", 11, "bold"),
+                                 fg=C_GOLD)
+        summary_label.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
+
+        # ============ 主体 Grid: 2行×3列 ============
+        main = ttk.Frame(win)
+        main.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        for r in range(2):
+            main.rowconfigure(r, weight=1)
+        for c in range(3):
+            main.columnconfigure(c, weight=1)
+
+        # ---- 块1: 💰 资金总览 ----
+        f_overview = ttk.LabelFrame(main, text="💰 资金总览", padding=6)
+        main.grid(f_overview, row=0, column=0, sticky="nsew", padx=4, pady=4)
+        # 数字卡片布局
+        ov_frame = ttk.Frame(f_overview)
+        ov_frame.pack(fill=tk.BOTH, expand=True)
+        def _num_card(parent, title, value, hint, fg="#333"):
+            cf = tk.Frame(parent, bg="#fafafa", highlightbackground="#ddd", highlightthickness=1)
+            cf.pack(fill=tk.X, pady=2)
+            tk.Label(cf, text=title, font=("Microsoft YaHei", 9), bg="#fafafa", fg="#666").pack(anchor="w", padx=6, pady=(4, 0))
+            tk.Label(cf, text=str(value), font=("Microsoft YaHei", 16, "bold"), bg="#fafafa", fg=fg).pack(anchor="w", padx=6)
+            tk.Label(cf, text=hint, font=("Microsoft YaHei", 8), bg="#fafafa", fg="#999").pack(anchor="w", padx=6, pady=(0, 4))
+            return cf
+        ov_total = _num_card(ov_frame, "全市场总成交额", "--", "申万31行业合计", "#333")
+        ov_in = _num_card(ov_frame, "主力净流入 TOP1 行业", "--", "按上涨家数代理", C_UP)
+        ov_out = _num_card(ov_frame, "主力净流出 TOP1 行业", "--", "按下跌家数代理", C_DN)
+        ov_mainline = _num_card(ov_frame, "当前最强主线", "--", "综合评分第一", C_GOLD)
+
+        # ---- 块2: 🔥 主线看板 ----
+        f_mainline = ttk.LabelFrame(main, text="🔥 主线看板 · 龙头标杆", padding=6)
+        main.grid(f_mainline, row=0, column=1, sticky="nsew", padx=4, pady=4)
+        ml_text = scrolledtext.ScrolledText(f_mainline, wrap=tk.WORD, height=14,
+                                             font=("Microsoft YaHei", 10),
+                                             bg="#FFF3E0", fg="#BF360C")
+        ml_text.pack(fill=tk.BOTH, expand=True)
+        ml_text.tag_config("title", font=("Microsoft YaHei", 12, "bold"), foreground="#E65100")
+        ml_text.tag_config("tag", foreground="#1565C0", font=("Microsoft YaHei", 10, "bold"))
+        ml_text.tag_config("leader", foreground="#C62828")
+
+        # ---- 块3: 📊 板块状态矩阵 (四象限) ----
+        f_matrix = ttk.LabelFrame(main, text="📊 板块状态矩阵 · 四象限", padding=4)
+        main.grid(f_matrix, row=0, column=2, sticky="nsew", padx=4, pady=4)
+        cols_m = ("industry", "stage", "score", "pct", "turnover")
+        tree_m = ttk.Treeview(f_matrix, columns=cols_m, show="headings", height=10)
+        tree_m.heading("industry", text="板块")
+        tree_m.heading("stage", text="阶段")
+        tree_m.heading("score", text="评分")
+        tree_m.heading("pct", text="涨跌%")
+        tree_m.heading("turnover", text="换手%")
+        tree_m.column("industry", width=80, anchor="w")
+        tree_m.column("stage", width=70, anchor="center")
+        tree_m.column("score", width=40, anchor="center")
+        tree_m.column("pct", width=55, anchor="center")
+        tree_m.column("turnover", width=55, anchor="center")
+        tree_m.pack(fill=tk.BOTH, expand=True)
+        tree_m.tag_config("acc", foreground=C_ACC, font=("", 10, "bold"))
+        tree_m.tag_config("brk", foreground=C_BRK, font=("", 10, "bold"))
+        tree_m.tag_config("dst", foreground=C_DST, font=("", 10, "bold"))
+        tree_m.tag_config("dec", foreground=C_DEC, font=("", 10, "bold"))
+        tree_m.tag_config("unk", foreground="#888", font=("", 9))
+
+        # ---- 块4: 📈 流入排行 ----
+        f_in = ttk.LabelFrame(main, text="📈 主力净流入 TOP10", padding=4)
+        main.grid(f_in, row=1, column=0, sticky="nsew", padx=4, pady=4)
+        cols_in = ("rank", "name", "amount_yi", "net_flow", "pct", "limit")
+        tree_in = ttk.Treeview(f_in, columns=cols_in, show="headings", height=10)
+        for c, txt, w, anc in [("rank", "#", 28, "center"), ("name", "板块", 80, "w"),
+                                ("amount_yi", "成交额亿", 75, "e"), ("net_flow", "资金倾向", 85, "e"),
+                                ("pct", "涨%", 45, "center"), ("limit", "涨停", 35, "center")]:
+            tree_in.heading(c, text=txt); tree_in.column(c, width=w, anchor=anc)
+        tree_in.pack(fill=tk.BOTH, expand=True)
+        tree_in.tag_config("up", foreground=C_UP, font=("", 10, "bold"))
+
+        # ---- 块5: 📉 流出排行 ----
+        f_out = ttk.LabelFrame(main, text="📉 主力净流出 TOP10", padding=4)
+        main.grid(f_out, row=1, column=1, sticky="nsew", padx=4, pady=4)
+        cols_out = cols_in
+        tree_out = ttk.Treeview(f_out, columns=cols_out, show="headings", height=10)
+        for c, txt, w, anc in [("rank", "#", 28, "center"), ("name", "板块", 80, "w"),
+                                ("amount_yi", "成交额亿", 75, "e"), ("net_flow", "资金倾向", 85, "e"),
+                                ("pct", "涨%", 45, "center"), ("limit", "涨停", 35, "center")]:
+            tree_out.heading(c, text=txt); tree_out.column(c, width=w, anchor=anc)
+        tree_out.pack(fill=tk.BOTH, expand=True)
+        tree_out.tag_config("dn", foreground=C_DN, font=("", 10, "bold"))
+
+        # ---- 块6: 🌊 资金迁移瀑布 (matplotlib 条形图) ----
+        f_water = ttk.LabelFrame(main, text="🌊 资金迁移 · 流入流出瀑布图", padding=4)
+        main.grid(f_water, row=1, column=2, sticky="nsew", padx=4, pady=4)
+        try:
+            import matplotlib
+            matplotlib.use("TkAgg")
+            import matplotlib.pyplot as plt
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            from matplotlib.figure import Figure
+            fig = Figure(figsize=(5, 3.5), dpi=95, facecolor="#fafafa")
+            ax_w = fig.add_subplot(111)
+            fig.subplots_adjust(left=0.08, right=0.98, top=0.92, bottom=0.18)
+            canvas_w = FigureCanvasTkAgg(fig, master=f_water)
+            canvas_w.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        except Exception as e:
+            canvas_w = None
+            tk.Label(f_water, text=f"matplotlib 不可用: {e}", fg="red").pack()
+
+        # ============ 扫描执行 ============
+        _scan_running = {"flag": False}
+
+        def _run_scan_thread():
+            scan_btn.config(state=tk.DISABLED)
+            status_var.set("⏳ 正在拉取申万31行业数据...")
+            try:
+                agg, raw, industries, td = self._fetch_industry_capital_data(token=getattr(self, "ts_token", None))
+            except Exception as e:
+                self.root.after(0, lambda: _scan_error(f"数据拉取失败: {e}"))
+                return
+
+            self.root.after(0, lambda: status_var.set(
+                f"⏳ 扫描 {len(agg)} 个行业, {td} 交易日..."))
+
+            # 主线识别
+            mainlines = self._identify_mainline(agg, top_n=3)
+
+            # 状态识别: 对成交额Top5行业, 拉龙头股K线合成板块指数代理 → 判断阶段
+            # 其他行业用横截面指标做简化判断
+            self.root.after(0, lambda: status_var.set(
+                "⏳ 对 Top5 行业拉K线识别阶段(吸筹/启动/拉高出货/下跌)..."))
+            agg = agg.copy()
+            agg["阶段"] = "震荡整理"
+            agg["阶段分"] = 0
+            top5 = agg.head(5)  # 对成交额最大的5个行业做精确判断
+
+            for _, row in top5.iterrows():
+                ind = row["industry"]
+                sub = raw[raw["industry"] == ind].copy()
+                if len(sub) < 5:
+                    continue
+                # 取龙头股 (成交额 Top15)
+                leaders = sub.nlargest(15, "amount")["ts_code"].tolist()
+                # 拉 K 线合成板块指数
+                _ind_closes = []
+                _ind_highs = []
+                _ind_lows = []
+                _ind_vols = []
+                for tc in leaders[:10]:  # 取前10只, 减少请求量
+                    _c6 = str(tc).split(".")[0]
+                    try:
+                        _dates, _opens, _highs, _lows, _closes, _vols = self._fetch_recent_daily_ohlcv(
+                            _c6, days=65, source="tushare",
+                            token=getattr(self, "ts_token", None))
+                        _ind_closes.append(np.array(_closes, dtype=float))
+                        _ind_highs.append(np.array(_highs, dtype=float))
+                        _ind_lows.append(np.array(_lows, dtype=float))
+                        _ind_vols.append(np.array(_vols, dtype=float))
+                    except Exception:
+                        pass
+                if len(_ind_closes) >= 3:
+                    # 对齐长度 (取最小)
+                    _min_len = min(len(x) for x in _ind_closes)
+                    _cls_arr = np.column_stack([x[-_min_len:] for x in _ind_closes]).mean(axis=1)
+                    _hhs_arr = np.column_stack([x[-_min_len:] for x in _ind_highs]).max(axis=1)
+                    _lls_arr = np.column_stack([x[-_min_len:] for x in _ind_lows]).min(axis=1)
+                    _vls_arr = np.column_stack([x[-_min_len:] for x in _ind_vols]).mean(axis=1)
+                    _sk, _sl, _ss = self._compute_sector_stage(
+                        None, _cls_arr, _hhs_arr, _lls_arr, _vls_arr)
+                    agg.loc[agg["industry"] == ind, "阶段"] = _sl
+                    agg.loc[agg["industry"] == ind, "阶段分"] = _ss
+                else:
+                    # 简化: 用横截面规则
+                    agg.loc[agg["industry"] == ind, "阶段"] = self._simple_stage_from_cross_section(row)
+
+            # Top6-15 行业: 简化横截面规则
+            for _, row in agg.iloc[5:15].iterrows():
+                agg.loc[agg["industry"] == row["industry"], "阶段"] = self._simple_stage_from_cross_section(row)
+
+            # 更新 UI
+            self.root.after(0, lambda: _update_all(agg, raw, mainlines, td))
+
+        def _scan_error(msg):
+            scan_btn.config(state=tk.NORMAL)
+            status_var.set(f"❌ {msg}")
+            messagebox.showerror("扫描失败", msg, parent=win)
+
+        def _update_all(agg, raw, mainlines, td):
+            import numpy as np
+            # --- 1. 资金总览 ---
+            total_amount = agg["总成交额亿"].sum()
+            top_in = agg.sort_values("资金倾向", ascending=False).iloc[0]
+            top_out = agg.sort_values("资金倾向", ascending=True).iloc[0]
+            ov_total.config(text=f"{total_amount:,.0f} 亿")
+            ov_in.config(text=f"{top_in['industry']}")
+            ov_out.config(text=f"{top_out['industry']}")
+            if mainlines:
+                ov_mainline.config(text=f"{mainlines[0][0]} (分:{mainlines[0][1]:.0f})")
+
+            # --- 2. 主线看板 ---
+            ml_text.delete("1.0", tk.END)
+            ml_text.insert(tk.END, f"📅 交易日: {td}\n\n", "title")
+            ml_text.insert(tk.END, f"═" * 50 + "\n\n")
+            for rank, (name, score, reason) in enumerate(mainlines, 1):
+                ml_text.insert(tk.END, f"  🔥 主线 #{rank}: {name}\n", "title")
+                ml_text.insert(tk.END, f"     综合分: {score:.1f}/100  |  {reason}\n\n")
+                # 龙头股
+                leaders = self._get_sector_leaders(raw, name, top_n=5)
+                if leaders:
+                    ml_text.insert(tk.END, f"     ─ 龙头标杆 ─\n")
+                    for li, ld in enumerate(leaders, 1):
+                        pct = ld["change_pct"]
+                        arrow = "🟢" if pct >= 0 else "🔴"
+                        ml_text.insert(tk.END,
+                                       f"     {arrow} {li}. {ld['code']}  价:{ld['price']:.2f}  "
+                                       f"涨跌:{pct:+.2f}%  换手:{ld['turnover_rate']:.1f}%\n",
+                                       "leader")
+                ml_text.insert(tk.END, "\n")
+
+            # --- 3. 板块状态矩阵 ---
+            for item in tree_m.get_children():
+                tree_m.delete(item)
+            stage_rank = {"启动": 0, "吸筹": 1, "震荡整理": 2, "拉高出货": 3, "下跌": 4}
+            top20 = agg.head(20).copy()
+            top20["_sr"] = top20["阶段"].map(stage_rank).fillna(99)
+            top20 = top20.sort_values("_sr")
+            for _, row in top20.iterrows():
+                stg = str(row.get("阶段", "震荡整理"))
+                tag_map = {"启动": "brk", "吸筹": "acc", "拉高出货": "dst", "下跌": "dec",
+                           "震荡整理": "unk", "数据不足": "unk", "unknown": "unk"}
+                tag = tag_map.get(stg, "unk")
+                tree_m.insert("", tk.END, values=(
+                    row["industry"], stg, f"{int(row.get('阶段分', 0))}",
+                    f"{row['平均涨跌幅']:+.2f}", f"{row['平均换手率']:.1f}"
+                ), tags=(tag,))
+
+            # --- 4. 流入排行 ---
+            for item in tree_in.get_children():
+                tree_in.delete(item)
+            top10_in = agg.nlargest(10, "资金倾向")
+            for i, (_, row) in enumerate(top10_in.iterrows(), 1):
+                tree_in.insert("", tk.END, values=(
+                    i, row["industry"], f"{row['总成交额亿']:,.0f}",
+                    f"{row['资金倾向']:,.0f}", f"{row['平均涨跌幅']:+.2f}",
+                    int(row["涨停数"])
+                ), tags=("up" if row["平均涨跌幅"] > 0 else (),))
+
+            # --- 5. 流出排行 ---
+            for item in tree_out.get_children():
+                tree_out.delete(item)
+            top10_out = agg.nsmallest(10, "资金倾向")
+            for i, (_, row) in enumerate(top10_out.iterrows(), 1):
+                tree_out.insert("", tk.END, values=(
+                    i, row["industry"], f"{row['总成交额亿']:,.0f}",
+                    f"{row['资金倾向']:,.0f}", f"{row['平均涨跌幅']:+.2f}",
+                    int(row["涨停数"])
+                ), tags=("dn" if row["平均涨跌幅"] < 0 else (),))
+
+            # --- 6. 资金瀑布图 ---
+            if canvas_w is not None:
+                ax_w.clear()
+                plot_df = agg.head(15).copy()
+                plot_df = plot_df.sort_values("资金倾向")
+                names = plot_df["industry"].tolist()
+                values = plot_df["资金倾向"].tolist()
+                colors = [C_UP if v > 0 else C_DN for v in values]
+                y_pos = np.arange(len(names))
+                ax_w.barh(y_pos, values, color=colors, height=0.7)
+                ax_w.set_yticks(y_pos)
+                ax_w.set_yticklabels(names, fontsize=8)
+                ax_w.axvline(x=0, color="#999", linewidth=0.5)
+                ax_w.set_xlabel("资金倾向估算 (亿)", fontsize=8)
+                ax_w.set_title("主力资金流入 ←→ 流出 瀑布", fontsize=9, fontweight="bold")
+                ax_w.tick_params(axis="x", labelsize=7)
+                for i, (v, n) in enumerate(zip(values, names)):
+                    ax_w.text(v + (5 if v >= 0 else -5), i, f"{v:,.0f}",
+                              va="center", ha="left" if v >= 0 else "right", fontsize=7)
+                canvas_w.draw_idle()
+
+            # --- summary ---
+            if mainlines:
+                _ml1, _ml2 = mainlines[0][0], mainlines[0][2]
+                summary_label.config(text=f"🔥 今日主线: {_ml1}  |  {_ml2[:60]}...", fg=C_GOLD)
+            status_var.set(f"✅ 扫描完成! {len(agg)} 行业, 交易日={td}")
+            scan_btn.config(state=tk.NORMAL)
+
+        # ============ 按钮绑定 ============
+        scan_btn.config(command=lambda: threading.Thread(target=_run_scan_thread, daemon=True).start())
+        refresh_btn.config(command=lambda: threading.Thread(target=_run_scan_thread, daemon=True).start())
+
+        # 自动扫描一次
+        win.after(200, lambda: threading.Thread(target=_run_scan_thread, daemon=True).start())
+
+    # ================================================================
+    # 📊 大盘分析师 —— 作战姿态纪律 + 四维度红绿灯 + 分支报告
+    # ================================================================
+    def _scan_market_analyst_data(self):
+        """采集大盘分析师所需数据。返回 dict with keys:
+        indices, breadth, margin, north, turnover, volume, sectors_top, sectors_bot, mainlines
+        """
+        import tushare as _ts
+        import numpy as np
+        _token = (os.environ.get("TUSHARE_TOKEN", "") or getattr(self, "ts_token", "") or TS_DEFAULT_TOKEN or "").strip()
+        if not _token:
+            return {"error": "TUSHARE_TOKEN 未配置"}
+        os.environ["TUSHARE_TOKEN"] = _token
+        _ts.set_token(_token)
+        _pro = _ts.pro_api()
+        from datetime import datetime, timedelta
+        result = {}
+
+        # 交易日
+        _today = datetime.now().strftime("%Y%m%d")
+        _td = _today
+        try:
+            _cal = _pro.trade_cal(exchange="SSE", start_date=(datetime.now()-timedelta(days=10)).strftime("%Y%m%d"), end_date=_today)
+            if _cal is not None and len(_cal) > 0:
+                _open = _cal[_cal["is_open"] == 1]["cal_date"]
+                if len(_open) > 0:
+                    _td = str(_open.iloc[-1])
+        except Exception:
+            pass
+        result["trade_date"] = _td
+
+        # === 1. 三大指数 (上证指数/深证成指/创业板指) ===
+        _index_map = {"000001.SH": "上证指数", "399001.SZ": "深证成指", "399006.SZ": "创业板指"}
+        indices = {}
+        for _code, _name in _index_map.items():
+            try:
+                # 直接拉历史 90 天 (一次请求搞定)
+                _hist = _pro.index_daily(ts_code=_code, start_date=(datetime.now()-timedelta(days=120)).strftime("%Y%m%d"), end_date=_td)
+                closes = _hist["close"].astype(float).values[::-1] if _hist is not None else []  # 倒序: 最新在前
+                ma5 = float(np.mean(closes[:5])) if len(closes) >= 5 else None
+                ma20 = float(np.mean(closes[:20])) if len(closes) >= 20 else None
+                ma60 = float(np.mean(closes[:60])) if len(closes) >= 60 else None
+                # MA趋势 (只要有前两个就能判断)
+                if ma5 and ma20:
+                    if ma5 > ma20 and (ma60 is None or ma20 > ma60): ma_trend = "多头"
+                    elif ma5 < ma20 and (ma60 is None or ma20 < ma60): ma_trend = "空头"
+                    else: ma_trend = "震荡"
+                else: ma_trend = "数据不足"
+                # 量比
+                vol_ratio = 1.0
+                if len(closes) >= 20:
+                    _vols = _hist["amount"].astype(float).values[::-1] if "amount" in _hist.columns else closes
+                    vol_ratio = float(_vols[0]) / max(float(np.mean(_vols[:20])), 1)
+                # 取最新一天
+                _today_row = _hist.iloc[0] if _hist is not None and len(_hist) > 0 else None
+                indices[_name] = {
+                    "code": _code,
+                    "close": float(_today_row["close"]) if _today_row is not None else 0,
+                    "pct_chg": float(_today_row.get("pct_chg", 0)) if _today_row is not None else 0,
+                    "ma5": ma5, "ma20": ma20, "ma60": ma60,
+                    "ma_trend": ma_trend, "vol_ratio": vol_ratio,
+                }
+            except Exception as e:
+                indices[_name] = {"code": _code, "error": str(e)[:80]}
+        result["indices"] = indices
+
+        # === 2. 涨跌停广度 ===
+        try:
+            _df_limit = _pro.limit_list_d(trade_date=_td)
+            if _df_limit is not None and len(_df_limit) > 0:
+                lu = len(_df_limit[_df_limit["limit"] == "U"])
+                ld = len(_df_limit[_df_limit["limit"] == "D"])
+            else:
+                lu, ld = None, None  # 标记用 daily 兜底
+        except Exception:
+            lu, ld = None, None  # 权限不足
+        # 用 daily 兜底 (更靠谱): 涨停≈pct_chg >= 9.5% (科创板/创业板=19.5%)
+        try:
+            _daily_all = _pro.daily(trade_date=_td, fields="ts_code,pct_chg,amount")
+            if _daily_all is not None and len(_daily_all) > 0:
+                up_n = int((_daily_all["pct_chg"] > 0).sum())
+                dn_n = int((_daily_all["pct_chg"] < 0).sum())
+                flt_n = int((_daily_all["pct_chg"] == 0).sum())
+                amt_total = float(_daily_all["amount"].sum()) / 10000.0
+                if lu is None:
+                    # 估算涨停: pct_chg >= 9.5% 或 >= 19% (科创板688/创业板300)
+                    _pcs = _daily_all["pct_chg"].astype(float)
+                    lu = int((( _pcs >= 9.5 ) | (_pcs >= 19)).sum())
+                    ld = int((( _pcs <= -9.5 ) | (_pcs <= -19)).sum())
+            else:
+                up_n = dn_n = flt_n = 0
+                amt_total = 0
+                lu = lu if lu is not None else 0
+                ld = ld if ld is not None else 0
+        except Exception:
+            up_n = dn_n = flt_n = 0
+            amt_total = 0
+            lu = lu if lu is not None else 0
+            ld = ld if ld is not None else 0
+        total_n = up_n + dn_n + flt_n
+        breadth = {
+            "limit_up": lu, "limit_down": ld,
+            "up": up_n, "down": dn_n, "flat": flt_n, "total": total_n,
+            "breadth_pct": up_n / max(total_n, 1) * 100,
+            "total_amount_yi": amt_total,
+        }
+        result["breadth"] = breadth
+
+        # === 3. 融资融券 ===
+        try:
+            _sh_margin = _pro.sh_margin(trade_date=_td)
+            if _sh_margin is not None and len(_sh_margin) > 0:
+                _df = _sh_margin.iloc[0]
+                # 近5日融资余额变化
+                _sh_hist = _pro.sh_margin(start_date=(datetime.now()-timedelta(days=10)).strftime("%Y%m%d"), end_date=_td)
+                if _sh_hist is not None and len(_sh_hist) >= 2:
+                    _sh_hist = _sh_hist.sort_values("trade_date")
+                    _first = float(_sh_hist.iloc[0]["rzye"])
+                    _last = float(_sh_hist.iloc[-1]["rzye"])
+                    chg_5d = (_last - _first) / max(abs(_first), 1) * 100
+                else:
+                    chg_5d = 0
+                margin = {"rzye": float(_df["rzye"]), "chg_5d": chg_5d}
+            else:
+                margin = {"error": "无融资数据"}
+        except Exception as e:
+            margin = {"error": str(e)[:80]}
+        result["margin"] = margin
+
+        # === 4. 北向资金 ===
+        try:
+            _north = _pro.moneyflow_hsgt(trade_date=_td)
+            if _north is not None and len(_north) > 0:
+                _nf = float(_north.iloc[0].get("north_money", 0))
+                # 近5日趋势
+                _nhist = _pro.moneyflow_hsgt(start_date=(datetime.now()-timedelta(days=10)).strftime("%Y%m%d"), end_date=_td)
+                if _nhist is not None and len(_nhist) >= 3:
+                    _nf_vals = _nhist.sort_values("trade_date")["north_money"].astype(float).values
+                    _recent = _nf_vals[-3:]
+                    if all(x > 0 for x in _recent): trend = "持续流入"
+                    elif all(x < 0 for x in _recent): trend = "持续流出"
+                    else: trend = "震荡"
+                else:
+                    trend = "未知"
+                north = {"today": _nf, "trend": trend}
+            else:
+                north = {"error": "无北向数据(2024起停更)"}
+        except Exception as e:
+            north = {"error": str(e)[:80]}
+        result["north"] = north
+
+        # === 5. 换手率 ===
+        try:
+            _basic = _pro.daily_basic(trade_date=_td, fields="ts_code,turnover_rate,volume_ratio")
+            if _basic is not None and len(_basic) > 0:
+                avg_turnover = float(_basic["turnover_rate"].mean())
+                avg_vol_ratio = float(_basic["volume_ratio"].mean())
+            else:
+                avg_turnover = 0
+                avg_vol_ratio = 0
+        except Exception:
+            avg_turnover = 0
+            avg_vol_ratio = 0
+        result["turnover"] = {"current": avg_turnover}
+        result["volume_avg"] = {"vol_ratio": avg_vol_ratio}
+
+        # === 6. 申万行业聚合 (给板块轮动 + 主线用) ===
+        try:
+            agg, _raw, _ind, _td2 = self._fetch_industry_capital_data(token=_token)
+            result["sectors_top"] = agg.nlargest(5, "资金倾向")[["industry", "总成交额亿", "资金倾向", "平均涨跌幅", "涨停数"]].to_dict("records")
+            result["sectors_bot"] = agg.nsmallest(5, "资金倾向")[["industry", "总成交额亿", "资金倾向", "平均涨跌幅", "涨停数"]].to_dict("records")
+            result["mainlines"] = self._identify_mainline(agg, top_n=3)
+            result["agg"] = agg
+            result["raw"] = _raw
+        except Exception as e:
+            result["sectors_top"] = []
+            result["sectors_bot"] = []
+            result["mainlines"] = []
+        return result
+
+    def _calc_market_analyst_score(self, data):
+        """四维度红绿灯评分: 大盘趋势 + 板块轮动 + 资金面 + 情绪面 → 综合分 + 姿态"""
+        import numpy as np
+        score = 50
+        dims = {}
+
+        # === 维度1: 大盘趋势 ===
+        idx = data.get("indices", {})
+        bull_cnt = sum(1 for v in idx.values() if isinstance(v, dict) and v.get("ma_trend") == "多头")
+        bear_cnt = sum(1 for v in idx.values() if isinstance(v, dict) and v.get("ma_trend") == "空头")
+        idx_pcts = [v.get("pct_chg", 0) for v in idx.values() if isinstance(v, dict)]
+        idx_avg = np.mean(idx_pcts) if idx_pcts else 0
+        dim1 = {"name": "大盘趋势", "lights": [], "score_delta": 0}
+        if bull_cnt >= 2:
+            score += 12; dim1["lights"].append("🟢"); dim1["score_delta"] = +12; dim1["desc"] = f"{bull_cnt}/3指数多头排列"
+        elif bear_cnt >= 2:
+            score -= 12; dim1["lights"].append("🔴"); dim1["score_delta"] = -12; dim1["desc"] = f"{bear_cnt}/3指数空头排列"
+        elif idx_avg > 0.5:
+            score += 4; dim1["lights"].append("🟡"); dim1["score_delta"] = +4; dim1["desc"] = f"指数分化, 平均+{idx_avg:.2f}%"
+        else:
+            score -= 4; dim1["lights"].append("🟡"); dim1["score_delta"] = -4; dim1["desc"] = f"指数分化, 平均{idx_avg:+.2f}%"
+        dims["trend"] = dim1
+
+        # === 维度2: 板块轮动 ===
+        top_sectors = data.get("sectors_top", [])
+        bot_sectors = data.get("sectors_bot", [])
+        dim2 = {"name": "板块轮动", "lights": [], "score_delta": 0}
+        if top_sectors and bot_sectors:
+            top_avg_pct = np.mean([s.get("平均涨跌幅", 0) for s in top_sectors])
+            bot_avg_pct = np.mean([s.get("平均涨跌幅", 0) for s in bot_sectors])
+            if top_avg_pct > 0.5 and bot_avg_pct > -0.3:
+                score += 8; dim2["lights"].append("🟢"); dim2["score_delta"] = +8; dim2["desc"] = f"领涨{top_avg_pct:+.1f}% / 领跌{bot_avg_pct:+.1f}% 有明确主线"
+            elif top_avg_pct < 0 and bot_avg_pct < -0.5:
+                score -= 10; dim2["lights"].append("🔴"); dim2["score_delta"] = -10; dim2["desc"] = f"普跌格局, 领涨也{top_avg_pct:+.1f}%"
+            else:
+                score += 0; dim2["lights"].append("🟡"); dim2["score_delta"] = 0; dim2["desc"] = f"轮动分化, 领涨{top_avg_pct:+.1f}% 领跌{bot_avg_pct:+.1f}%"
+        else:
+            dim2["desc"] = "无板块数据"
+        dims["rotation"] = dim2
+
+        # === 维度3: 资金面 ===
+        dim3 = {"name": "资金面", "lights": [], "score_delta": 0}
+        # 北向
+        north = data.get("north", {})
+        if "error" not in north:
+            trend = north.get("trend", "")
+            if trend == "持续流入": score += 8; dim3["lights"].append("🟢")
+            elif trend == "持续流出": score -= 8; dim3["lights"].append("🔴")
+            else: dim3["lights"].append("🟡")
+        else:
+            dim3["lights"].append("⚪")
+        # 融资
+        margin = data.get("margin", {})
+        if "error" not in margin:
+            c5 = margin.get("chg_5d", 0)
+            if c5 > 3: score -= 5; dim3["lights"].append("🔴")
+            elif c5 < -2: score += 3; dim3["lights"].append("🟢")
+            else: dim3["lights"].append("⚪")
+        # 量比
+        vol_avg = data.get("volume_avg", {})
+        vr = vol_avg.get("vol_ratio", 1.0)
+        if vr > 1.5: score -= 3; dim3["lights"].append("🔴")
+        elif vr < 0.6: score += 2; dim3["lights"].append("⚪")
+        else: dim3["lights"].append("🟢")
+        dim3["score_delta"] = sum(1 for _ in dim3["lights"] if _ == "🟢") * 2 - sum(1 for _ in dim3["lights"] if _ == "🔴") * 3
+        dim3["desc"] = f"北向{north.get('trend','?')} 融资{margin.get('chg_5d',0):+.1f}% 量比{vr:.2f}"
+        dims["capital"] = dim3
+
+        # === 维度4: 情绪面 ===
+        breadth = data.get("breadth", {})
+        dim4 = {"name": "情绪面", "lights": [], "score_delta": 0}
+        lu = breadth.get("limit_up", 0); ld = breadth.get("limit_down", 0)
+        bp = breadth.get("breadth_pct", 50)
+        if lu >= 50 and ld <= 5:
+            score += 10; dim4["lights"].append("🟢"); dim4["score_delta"] = +10
+        elif lu <= 10 and ld >= 20:
+            score -= 12; dim4["lights"].append("🔴"); dim4["score_delta"] = -12
+        elif bp >= 60:
+            score += 5; dim4["lights"].append("🟡"); dim4["score_delta"] = +5
+        elif bp <= 40:
+            score -= 5; dim4["lights"].append("🟡"); dim4["score_delta"] = -5
+        else:
+            dim4["lights"].append("⚪"); dim4["score_delta"] = 0
+        dim4["desc"] = f"涨停{lu} 跌停{ld} 上涨占比{bp:.0f}%"
+        dims["emotion"] = dim4
+
+        score = max(0, min(100, score))
+        # 姿态判定
+        if score >= 65:
+            posture = "进攻"; posture_key = "attack"; icon = "🟢"
+        elif score >= 50:
+            posture = "轻仓进攻"; posture_key = "light_attack"; icon = "🟢🟡"
+        elif score >= 38:
+            posture = "休息/观望"; posture_key = "wait"; icon = "🟡"
+        elif score >= 25:
+            posture = "防御(高股息红利)"; posture_key = "defense"; icon = "🟡🔴"
+        else:
+            posture = "休息/空仓"; posture_key = "empty"; icon = "🔴"
+        return score, posture, posture_key, icon, dims
+
+    def _generate_market_analyst_report(self, data, score, posture, posture_key, icon, dims):
+        """按作战姿态纪律生成结构化文本报告"""
+        from datetime import datetime
+        now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
+        td = data.get("trade_date", "")
+
+        lines = []
+        lines.append("═" * 70)
+        lines.append(f"📊 大盘分析师 · 每日作战姿态报告")
+        lines.append(f"📅 {now_str}  |  交易日: {td}")
+        lines.append("═" * 70)
+        lines.append("")
+
+        # ===== 铁律: 作战姿态放最开头 =====
+        lines.append(f"🚨 今日作战姿态: {icon} {posture}")
+        if posture_key in ("wait", "defense", "empty"):
+            lines.append("⚠️ 铁律提示: 今日不建议主动交易/开新仓, 休息为主!")
+        else:
+            lines.append("✅ 可考虑结构性机会, 但需控制仓位")
+        lines.append("")
+
+        # ===== 四维度红绿灯 =====
+        lines.append("-" * 50)
+        lines.append("🟢🟡🔴 市场红绿灯 · 四维度评分")
+        lines.append("-" * 50)
+        for key, dim in dims.items():
+            _lights_str = " ".join(dim["lights"])
+            lines.append(f"   {_lights_str} {dim['name']}: {dim.get('desc', '')}")
+        lines.append(f"   📊 综合评分: {score}/100 → {icon} {posture}")
+        lines.append("")
+
+        # ===== 分支报告 =====
+        lines.append("━" * 70)
+        if posture_key in ("attack", "light_attack"):
+            lines.append("▶ 进攻 / 轻仓进攻 姿态 — 模块一~三")
+            lines.append("━" * 70)
+            # 模块一: 主线板块 + 龙头
+            mainlines = data.get("mainlines", [])
+            sectors_top = data.get("sectors_top", [])
+            lines.append("")
+            lines.append("📌 模块一: 今日主线板块 + 龙头标杆")
+            if mainlines:
+                for rk, (name, sc, reason) in enumerate(mainlines, 1):
+                    lines.append(f"   #{rk} {name} (分:{sc:.1f}) — {reason}")
+            if sectors_top:
+                lines.append("")
+                lines.append("   💹 主力净流入 TOP5 板块:")
+                for i, s in enumerate(sectors_top, 1):
+                    lines.append(f"      {i}. {s['industry']:8s}  资金倾向+{s['资金倾向']:>8,.0f} 亿  平均涨{s['平均涨跌幅']:+.2f}%  涨停{int(s['涨停数'])}只")
+            # 模块二: 市场趋势
+            indices = data.get("indices", {})
+            lines.append("")
+            lines.append("📌 模块二: 指数趋势 + MA 排列")
+            for nm, v in indices.items():
+                if isinstance(v, dict) and "error" not in v:
+                    _pct = v.get("pct_chg", 0)
+                    _tr = v.get("ma_trend", "?")
+                    _tr_icon = {"多头": "🟢", "空头": "🔴", "震荡": "🟡"}.get(_tr, "⚪")
+                    lines.append(f"   {_tr_icon} {nm}: 收{v.get('close', 0):.2f}  涨跌{_pct:+.2f}%  MA趋势={_tr}")
+            # 模块三: 情绪与广度
+            breadth = data.get("breadth", {})
+            lines.append("")
+            lines.append("📌 模块三: 市场广度 · 情绪面")
+            lines.append(f"   🏆 涨停: {breadth.get('limit_up', 0)} 只  |  💀 跌停: {breadth.get('limit_down', 0)} 只")
+            lines.append(f"   📈 上涨: {breadth.get('up', 0)} 只  |  📉 下跌: {breadth.get('down', 0)} 只  |  ➖ 平盘: {breadth.get('flat', 0)} 只")
+            lines.append(f"   📊 上涨占比: {breadth.get('breadth_pct', 0):.0f}%  |  💵 全市场成交额: {breadth.get('total_amount_yi', 0):,.0f} 亿")
+
+        elif posture_key == "defense":
+            lines.append("▶ 防御 姿态 — 防御信号监测 + 风险确认")
+            lines.append("━" * 70)
+            # 防御信号
+            lines.append("")
+            lines.append("📌 模块一: 防御信号监测 (高股息/红利/银行)")
+            sectors_top = data.get("sectors_top", [])
+            # 防御板块关键词
+            defense_keywords = ["银行", "非银金融", "煤炭", "石油石化", "公用事业", "食品饮料"]
+            if sectors_top:
+                lines.append("   领跌板块观察 (通常防御板块应相对抗跌):")
+                for i, s in enumerate(sectors_top, 1):
+                    _ind = s['industry']
+                    _is_def = any(_k in _ind for _k in defense_keywords)
+                    _tag = "🛡防御" if _is_def else "   "
+                    lines.append(f"   {_tag}{i}. {_ind:8s}  资金倾向{s['资金倾向']:>10,.0f} 亿  平均涨{s['平均涨跌幅']:+.2f}%")
+            # 风险确认
+            indices = data.get("indices", {})
+            lines.append("")
+            lines.append("📌 模块二: 风险确认 · 市场整体")
+            for nm, v in indices.items():
+                if isinstance(v, dict) and "error" not in v:
+                    _pct = v.get("pct_chg", 0)
+                    _tr = v.get("ma_trend", "?")
+                    lines.append(f"   {nm}: {v.get('close', 0):.2f} ({_pct:+.2f}%)  MA趋势={_tr}")
+            breadth = data.get("breadth", {})
+            lines.append(f"   涨跌停: 涨停{breadth.get('limit_up',0)} / 跌停{breadth.get('limit_down',0)}")
+            lines.append(f"   上涨占比: {breadth.get('breadth_pct', 0):.0f}%")
+
+        elif posture_key in ("wait", "empty"):
+            lines.append("▶ 休息/空仓 姿态 — 明确建议不主动交易")
+            lines.append("━" * 70)
+            # 市场确认
+            indices = data.get("indices", {})
+            sectors_bot = data.get("sectors_bot", [])
+            lines.append("")
+            lines.append("📌 市场整体状态 (确认风险)")
+            for nm, v in indices.items():
+                if isinstance(v, dict) and "error" not in v:
+                    _pct = v.get("pct_chg", 0)
+                    _tr = v.get("ma_trend", "?")
+                    lines.append(f"   🔴 {nm}: {v.get('close', 0):.2f} ({_pct:+.2f}%)  MA={_tr}")
+            if sectors_bot:
+                lines.append("")
+                lines.append("   领跌板块 (无有效主线):")
+                for s in sectors_bot[:5]:
+                    lines.append(f"      🔴 {s['industry']:8s}  资金倾向{s['资金倾向']:>10,.0f} 亿")
+            # 操作建议
+            lines.append("")
+            lines.append("🚫 操作纪律: 今日不建议主动交易/开新仓")
+            lines.append("   • 已有持仓: 降低仓位, 以高股息/红利防御为主")
+            lines.append("   • 空仓者: 保持现金为王, 等待企稳信号")
+            lines.append("   • 关注信号: 指数站回5日线 + 量比回升 + 北向资金逆转")
+
+        lines.append("")
+        lines.append("─" * 50)
+        lines.append(f"📊 数据来源: Tushare 实时数据 | 生成时间: {now_str}")
+        lines.append("═" * 70)
+        return "\n".join(lines)
+
+    def _show_market_analyst_dialog(self):
+        """📊 大盘分析师 — 作战姿态纪律 + 四维度红绿灯 + 分支报告"""
+        import threading
+
+        win = self._safe_toplevel(self.root)
+        win.title("📊 大盘分析师 · 作战姿态报告")
+        win.geometry("1100x820")
+        win.transient(self.root)
+
+        # 顶部 Banner
+        banner = tk.Frame(win, bg="#1A237E", height=62)
+        banner.pack(fill=tk.X)
+        banner.pack_propagate(False)
+        bi = tk.Frame(banner, bg="#1A237E")
+        bi.pack(fill=tk.BOTH, expand=True, padx=14, pady=6)
+        tk.Label(bi, text="📊 大盘分析师 · 作战姿态纪律", font=("Microsoft YaHei", 14, "bold"),
+                 bg="#1A237E", fg="#E8EAF6").pack(anchor="w")
+        tk.Label(bi, text="四维度红绿灯 → 作战姿态 → 分支报告(进攻/防御/休息)",
+                 font=("Microsoft YaHei", 10), bg="#1A237E", fg="#9FA8DA").pack(anchor="w")
+
+        # 控制栏
+        ctrl = ttk.Frame(win)
+        ctrl.pack(fill=tk.X, padx=10, pady=6)
+        scan_btn = ttk.Button(ctrl, text="🔄 生成作战报告", width=16)
+        scan_btn.pack(side=tk.LEFT)
+        export_btn = ttk.Button(ctrl, text="💾 导出报告", width=12)
+        export_btn.pack(side=tk.LEFT, padx=6)
+        status_var = tk.StringVar(value="⏳ 点击「生成作战报告」开始四维度扫描...")
+        tk.Label(ctrl, textvariable=status_var, font=("Microsoft YaHei", 10), fg="#666").pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
+
+        # 姿态大卡片 (顶部)
+        posture_frame = tk.Frame(win, bg="#F5F5F5", highlightbackground="#DDD", highlightthickness=2, padx=20, pady=14)
+        posture_frame.pack(fill=tk.X, padx=10, pady=(0, 6))
+        # Canvas 画大圆灯
+        light_cv = tk.Canvas(posture_frame, width=90, height=90, bg="#F5F5F5", highlightthickness=0)
+        light_cv.pack(side=tk.LEFT, padx=6)
+        def _draw_analyst_light(color):
+            light_cv.delete("all")
+            light_cv.create_oval(12, 14, 78, 80, fill="#9E9E9E", outline="")
+            light_cv.create_oval(10, 10, 80, 80, fill=color, outline="#424242", width=3)
+            light_cv.create_oval(18, 14, 44, 38, fill="white", outline="", stipple="gray25")
+        _draw_analyst_light("#BDBDBD")
+
+        posture_text = tk.Label(posture_frame, text="⏳ 等待生成...", font=("Microsoft YaHei", 16, "bold"),
+                                 bg="#F5F5F5", fg="#333")
+        posture_text.pack(side=tk.LEFT, padx=12, anchor="w")
+        posture_score = tk.Label(posture_frame, text="综合分: --/100", font=("Microsoft YaHei", 14),
+                                  bg="#F5F5F5", fg="#555")
+        posture_score.pack(side=tk.RIGHT, padx=12)
+
+        # 四维度小灯行
+        dims_frame = tk.Frame(win)
+        dims_frame.pack(fill=tk.X, padx=10, pady=(0, 6))
+        dim_labels = {}
+        for i, (key, name) in enumerate([("trend", "大盘趋势"), ("rotation", "板块轮动"),
+                                         ("capital", "资金面"), ("emotion", "情绪面")]):
+            card = tk.Frame(dims_frame, bg="white", highlightbackground="#DDD", highlightthickness=2, padx=10, pady=6)
+            card.grid(row=0, column=i, padx=4, sticky="nsew")
+            dims_frame.grid_columnconfigure(i, weight=1)
+            tk.Label(card, text=name, font=("Microsoft YaHei", 10, "bold"), bg="white", fg="#1A237E").pack(anchor="w")
+            val = tk.Label(card, text="⏳", font=("Microsoft YaHei", 12, "bold"), bg="white", fg="#888")
+            val.pack(anchor="w", pady=2)
+            desc = tk.Label(card, text="--", font=("Microsoft YaHei", 9), bg="white", fg="#888", wraplength=160, justify="left")
+            desc.pack(anchor="w")
+            dim_labels[key] = (val, desc)
+
+        # 报告正文
+        report_frame = ttk.LabelFrame(win, text="📝 作战姿态报告", padding=4)
+        report_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 6))
+        report_txt = scrolledtext.ScrolledText(report_frame, wrap=tk.WORD,
+                                                font=("Microsoft YaHei", 11),
+                                                bg="#FAFAFA", fg="#212121")
+        report_txt.pack(fill=tk.BOTH, expand=True)
+        report_txt.tag_config("iron_law", font=("Microsoft YaHei", 12, "bold"), foreground="#C62828")
+        report_txt.tag_config("section", font=("Microsoft YaHei", 11, "bold"), foreground="#1A237E")
+        report_txt.tag_config("green", foreground="#2E7D32")
+        report_txt.tag_config("red", foreground="#C62828")
+        report_txt.tag_config("yellow", foreground="#E65100")
+
+        # 扫描执行
+        _last_report = {"text": "", "score": 0}
+
+        def _run():
+            scan_btn.config(state=tk.DISABLED)
+            status_var.set("⏳ 采集市场数据...")
+            try:
+                data = self._scan_market_analyst_data()
+                if "error" in data:
+                    raise RuntimeError(data["error"])
+                status_var.set("⏳ 四维度评分中...")
+                score, posture, posture_key, icon, dims = self._calc_market_analyst_score(data)
+                status_var.set("⏳ 生成作战姿态报告...")
+                report = self._generate_market_analyst_report(data, score, posture, posture_key, icon, dims)
+                _last_report["text"] = report
+                _last_report["score"] = score
+
+                # 灯颜色
+                if score >= 65: _draw_analyst_light("#43A047"); _p_color = "#2E7D32"
+                elif score >= 50: _draw_analyst_light("#FB8C00"); _p_color = "#E65100"
+                elif score >= 38: _draw_analyst_light("#FDD835"); _p_color = "#F57F17"
+                elif score >= 25: _draw_analyst_light("#EF5350"); _p_color = "#C62828"
+                else: _draw_analyst_light("#C62828"); _p_color = "#B71C1C"
+
+                self.root.after(0, lambda: posture_text.config(text=f"{icon} {posture}", fg=_p_color))
+                self.root.after(0, lambda: posture_score.config(text=f"综合分: {score}/100"))
+                # 更新四维度卡片
+                for k, (_val_lbl, _desc_lbl) in dim_labels.items():
+                    _d = dims.get(k, {})
+                    _lt = " ".join(_d.get("lights", ["⏳"]))
+                    _v_color = {"🟢": "#2E7D32", "🔴": "#C62828", "🟡": "#F57F17", "⚪": "#888"}.get(_lt[:1], "#888")
+                    self.root.after(0, lambda l=_val_lbl, t=_lt, c=_v_color: l.config(text=t, fg=c))
+                    self.root.after(0, lambda l=_desc_lbl, t=_d.get("desc", "--"): l.config(text=t))
+                # 更新报告文本
+                self.root.after(0, lambda: _render_report(report, posture_key))
+                self.root.after(0, lambda: status_var.set(f"✅ 报告生成完成! 评分 {score}/100  姿态: {posture}"))
+            except Exception as e:
+                import traceback
+                _err = traceback.format_exc()
+                self.root.after(0, lambda: report_txt.delete("1.0", tk.END))
+                self.root.after(0, lambda: report_txt.insert("1.0", f"❌ 扫描失败:\n{_err[:2000]}"))
+                self.root.after(0, lambda: status_var.set(f"❌ {str(e)[:60]}"))
+            finally:
+                self.root.after(0, lambda: scan_btn.config(state=tk.NORMAL))
+
+        def _render_report(report, posture_key):
+            """渲染报告到 ScrolledText (加颜色)"""
+            report_txt.delete("1.0", tk.END)
+            for line in report.split("\n"):
+                if "铁律提示" in line or "铁律" in line:
+                    report_txt.insert(tk.END, line + "\n", "iron_law")
+                elif line.startswith("📌") or line.startswith("▶") or line.startswith("━"):
+                    report_txt.insert(tk.END, line + "\n", "section")
+                elif "🟢" in line or "✅" in line:
+                    report_txt.insert(tk.END, line + "\n", "green")
+                elif "🔴" in line or "🚫" in line or "💀" in line:
+                    report_txt.insert(tk.END, line + "\n", "red")
+                elif "🟡" in line or "⚠️" in line:
+                    report_txt.insert(tk.END, line + "\n", "yellow")
+                else:
+                    report_txt.insert(tk.END, line + "\n")
+
+        def _export():
+            if not _last_report["text"]:
+                messagebox.showinfo("提示", "请先生成报告", parent=win)
+                return
+            from tkinter import filedialog
+            from datetime import datetime
+            path = filedialog.asksaveasfilename(
+                title="导出作战姿态报告",
+                defaultextension=".txt",
+                initialfile=f"大盘分析师报告_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                filetypes=[("文本", "*.txt"), ("所有文件", "*.*")],
+            )
+            if path:
+                try:
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(_last_report["text"])
+                    status_var.set(f"✅ 已导出: {path}")
+                except Exception as e:
+                    messagebox.showerror("导出失败", str(e), parent=win)
+
+        scan_btn.config(command=lambda: threading.Thread(target=_run, daemon=True).start())
+        export_btn.config(command=_export)
+
+        # 自动生成
+        win.after(300, lambda: threading.Thread(target=_run, daemon=True).start())
+
     def _show_taojiu_dialog(self):
         """🌱 淘韭雷达:爬淘股吧/韭研 → AI分析 → Treeview热点板块股票 → 双击弹日K"""
         import datetime as _dt

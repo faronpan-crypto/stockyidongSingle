@@ -4728,6 +4728,8 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("🪙筹码", 7, self._show_chouma),
             ("🎯机会", 7, self._show_jianlou),
             ("🎯高抛低吸", 8, self._show_high_low_swing),
+            ("🔥主线·资金迁移", 12, self._show_mainline_capital_dialog),
+            ("📊大盘分析师", 10, self._show_market_analyst_dialog),
             ("💡主力趋势", 8, self._show_main_trend_dialog),
             ("⭐五星跟随", 9, self.show_five_star_follow_dialog),
         ]

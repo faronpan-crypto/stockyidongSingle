@@ -4816,6 +4816,13 @@ class RestMixin:
                     df = df[df[col].notna() & (df[col] >= val)]
             return df
 
+        # 关键保护: 如果完全没解析出任何有效条件 → 不返回 Top100 (那是 bug!)
+        # 提示用户条件可能太复杂,需配置 IWENCAI_COOKIE 使用问财
+        _has_any_condition = bool(_exclude_st or _base_conds or _need_klines)
+        if not _has_any_condition:
+            print(f"[本地选股] 查询条件无法本地解析: {question[:80]}...")
+            return []
+
         if _base_conds:
             print(f"[本地选股] 基础条件: {len(_base_conds)} 个, 粗筛前 {len(_df)} 只")
             _df = _apply_conds(_df, _base_conds)
@@ -4830,7 +4837,7 @@ class RestMixin:
             print(f"[本地选股] 需 K 线精筛, 候选 {len(_df)} 只")
             # 解析 K 线条件
             _ma_periods = sorted(set(int(x) for x in _re.findall(r"ma\s*(\d+)|(\d+)\s*日均线", _q + " " + question, _re.IGNORECASE) if x))
-            _need_ma = bool(_re.search(r"均线|ma\d|多头排列|空头排列|粘合|发散|站上\d+日|突破\d+日", _q, _re.IGNORECASE))
+            _need_ma = bool(_re.search(r"均线|ma\d|多头排列|空头排列|粘合|发散|站上\d+日(?:线)?|突破\d+日(?:线)?", _q, _re.IGNORECASE))
             _bullish_align = bool(_re.search(r"多头排列|多头动能|均线多头", _q))
             _bearish_align = bool(_re.search(r"空头排列|均线空头", _q))
             _macd_golden = bool(_re.search(r"macd.*金叉|macd金叉", _q))
@@ -4949,7 +4956,7 @@ class RestMixin:
                     if _need_ma:
                         _close_now = _arr_c[-1]
                         for _mp in _all_ma:
-                            if _re.search(rf"站上\s*{_mp}\s*日", question):
+                            if _re.search(rf"站上\s*{_mp}\s*日(?:线)?", question):
                                 if not (_close_now > _ma_vals.get(_mp, 0)):
                                     _keep_mask[_idx] = False
                                     break
