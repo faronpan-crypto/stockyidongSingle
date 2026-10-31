@@ -14820,7 +14820,77 @@ class DapanMixin:
             m5v = res.get('ma5_val'); m10v = res.get('ma10_val'); m20v = res.get('ma20_val')
             if m5v and m10v and m20v and m20v > 0:
                 spread = max(abs(m5v-m10v), abs(m10v-m20v), abs(m5v-m20v)) / m20v * 100
-                res['ma_zip'] = bool(spread < 2.0)  # 三线间距 < 2% = 粘合
+                res['ma_zip'] = bool(spread < 2.0)
+
+            # ── 🆕 凯利预测: 胜率/盈亏比/凯利系数 ──
+            # 基础胜率 50%, 根据技术因子加减分 → 最终胜率 p (20%~85%)
+            score = 0
+            score_detail = []
+            # MA 多头排列 (+15), 空头排列 (-15)
+            if res.get('ma5') and res.get('ma10') and res.get('ma20'):
+                score += 15; score_detail.append(("MA多头", +15))
+            elif not res.get('above_ma20', False):
+                score -= 15; score_detail.append(("破MA20", -15))
+            elif not res.get('ma20', False):
+                score -= 8; score_detail.append(("MA20走弱", -8))
+            # MACD 金叉/死叉/DIF↑
+            if res.get('macd_golden'): score += 10; score_detail.append(("MACD金叉", +10))
+            elif res.get('macd_death'): score -= 12; score_detail.append(("MACD死叉", -12))
+            elif res.get('macd_dif_up'): score += 4; score_detail.append(("DIF拐头↑", +4))
+            # KDJ 金叉/死叉
+            if res.get('kdj_golden') and not res.get('kdj_overbought'):
+                score += 8; score_detail.append(("KDJ金叉", +8))
+            elif res.get('kdj_death'):
+                score -= 10; score_detail.append(("KDJ死叉", -10))
+            # 超买超卖
+            if res.get('rsi_overbought'): score -= 12; score_detail.append(("RSI>70超买", -12))
+            elif res.get('rsi_oversold'): score += 10; score_detail.append(("RSI<30超卖", +10))
+            if res.get('kdj_overbought'): score -= 8; score_detail.append(("KDJ超买", -8))
+            elif res.get('kdj_oversold'): score += 6; score_detail.append(("KDJ超卖", +6))
+            # BIAS 极端
+            _b12 = res.get('bias12')
+            if _b12 is not None:
+                if _b12 > 5: score -= 8; score_detail.append((f"BIAS12={_b12:+.1f}%超买", -8))
+                elif _b12 < -5: score += 8; score_detail.append((f"BIAS12={_b12:+.1f}%超卖", +8))
+            # 背离
+            if res.get('divergence_top'): score -= 10; score_detail.append(("顶背离", -10))
+            if res.get('divergence_bottom'): score += 10; score_detail.append(("底背离", +10))
+            # 均线粘合变盘 (方向不明 → 中性)
+            if res.get('ma_zip'): score += 0; score_detail.append(("粘合变盘", 0))
+            # ── 最终胜率 p ──
+            p = max(0.20, min(0.85, 0.50 + score / 100.0))
+            res['kelly_win_rate'] = round(p * 100, 1)  # 百分比
+            res['kelly_score'] = score
+            res['kelly_score_detail'] = score_detail
+            # ── 盈亏比 b (基于 ATR 估算) ──
+            # 用 MA20 支撑位作止损: |last - MA20| / last
+            atr_est = np.mean(np.abs(np.diff(closes[-20:]))) if n >= 5 else last * 0.015
+            stop_loss_pct = max(1.0, atr_est / last * 100)  # 止损位 %
+            # 目标位: 看 BIAS 空间 + 历史波动率
+            target_pct = stop_loss_pct * 2.0  # 默认 2:1
+            if _b12 is not None:
+                if _b12 < -3: target_pct = stop_loss_pct * 3.0  # 深超卖 → 反弹空间大 → 3:1
+                elif _b12 > 5: target_pct = stop_loss_pct * 1.3  # 已涨太多 → 空间小 → 1.3:1
+            b = round(target_pct / stop_loss_pct, 2)
+            res['kelly_b'] = b  # 盈亏比
+            res['kelly_stop_pct'] = round(stop_loss_pct, 2)
+            res['kelly_target_pct'] = round(target_pct, 2)
+            # ── 凯利公式 f* = (bp - q) / b ──
+            q = 1 - p
+            if b > 0:
+                f_star = (b * p - q) / b
+            else:
+                f_star = 0
+            f_star = max(0.0, min(0.25, f_star))  # 封顶 25% 单票仓位
+            res['kelly_f'] = round(f_star * 100, 1)  # 凯利系数 %
+            # 期望值 E = p * b - q (每元投入长期期望)
+            res['kelly_ev'] = round(p * b - q, 3)
+            # 好 / 中 / 差 分级
+            ev = p * b - q
+            if ev > 0.15: res['kelly_grade'] = "A"  # 期望值>0.15
+            elif ev > 0.05: res['kelly_grade'] = "B"
+            elif ev > 0: res['kelly_grade'] = "C"
+            else: res['kelly_grade'] = "D"
 
             return res
 
@@ -14842,6 +14912,93 @@ class DapanMixin:
             ))
 
         threading.Thread(target=_bg, daemon=True).start()
+
+    def _show_kelly_detail(self, code, name, ms):
+        """📐 凯❓详情弹窗 — 展示凯利公式的逻辑推演和具体数据"""
+        import tkinter as tk
+        top = tk.Toplevel(self.root)
+        top.title(f"📐 凯利预测详情 — {name} ({code})")
+        top.configure(bg="#1E1E2E"); top.geometry("520x560")
+        top.transient(self.root); top.grab_set()
+
+        # ── 标题栏 ──
+        tk.Label(top, text=f"📐 {name} ({code}) — 凯利公式胜率预测",
+                 bg="#1E1E2E", fg="#FFD54F", font=("", 12, "bold")).pack(pady=(12, 6))
+
+        # ── 核心指标卡片 ──
+        kf = tk.Frame(top, bg="#263238", padx=14, pady=10); kf.pack(fill=tk.X, padx=12, pady=6)
+        tk.Label(kf, text="🎯 核心预测", bg="#263238", fg="#4FC3F7", font=("", 10, "bold")).grid(row=0, column=0, columnspan=4, sticky="w")
+        # 胜率
+        wr = ms.get('kelly_win_rate', 0)
+        tk.Label(kf, text="胜率 p:", bg="#263238", fg="white", font=("", 9)).grid(row=1, column=0, sticky="w", padx=(0,10))
+        tk.Label(kf, text=f"{wr:.1f}%", bg="#263238", fg="#81C784" if wr > 60 else "#FFA726" if wr > 45 else "#EF5350",
+                 font=("", 14, "bold")).grid(row=1, column=1, sticky="w")
+        # 盈亏比
+        kb = ms.get('kelly_b', 0); kbt = ms.get('kelly_stop_pct', 0); kbtg = ms.get('kelly_target_pct', 0)
+        tk.Label(kf, text="盈亏比 b:", bg="#263238", fg="white", font=("", 9)).grid(row=1, column=2, sticky="w", padx=(20,10))
+        tk.Label(kf, text=f"{kb:.1f} : 1", bg="#263238", fg="#CE93D8", font=("", 14, "bold")).grid(row=1, column=3, sticky="w")
+        # 凯利系数
+        kfval = ms.get('kelly_f', 0)
+        tk.Label(kf, text="凯利系数 f*:", bg="#263238", fg="white", font=("", 9)).grid(row=2, column=0, sticky="w", padx=(0,10), pady=(6,0))
+        tk.Label(kf, text=f"{kfval:.1f}%", bg="#263238", fg="#FFD54F", font=("", 14, "bold")).grid(row=2, column=1, sticky="w", pady=(6,0))
+        # 等级
+        kg = ms.get('kelly_grade', 'D'); kev = ms.get('kelly_ev', 0)
+        _grade_fg = {"A":"#81C784","B":"#AED581","C":"#FFA726","D":"#EF5350"}.get(kg, "#FFA726")
+        tk.Label(kf, text="综合评级:", bg="#263238", fg="white", font=("", 9)).grid(row=2, column=2, sticky="w", padx=(20,10), pady=(6,0))
+        tk.Label(kf, text=f"[{kg}] 期望={kev:+.3f}", bg="#263238", fg=_grade_fg, font=("", 14, "bold")).grid(row=2, column=3, sticky="w", pady=(6,0))
+
+        # ── 凯利公式推导 ──
+        deriv = tk.Frame(top, bg="#1E1E2E", padx=12, pady=6); deriv.pack(fill=tk.X, padx=12, pady=2)
+        tk.Label(deriv, text="📐 凯利公式推导", bg="#1E1E2E", fg="#4FC3F7", font=("", 10, "bold")).pack(anchor="w")
+        _p = ms.get('kelly_win_rate', 50) / 100.0; _b = ms.get('kelly_b', 2); _q = 1 - _p
+        f_calc = f"""f* = (bp - q) / b = ({_b:.1f}×{_p*100:.1f}% - {_q*100:.1f}%) / {_b:.1f} = {_b*_p - _q:.3f} / {_b:.1f} = {kfval:.1f}%"""
+        ev_calc = f"""期望值 E[V] = p×b - q = {_p*100:.1f}%×{_b:.1f} - {_q*100:.1f}% = {_p*_b - _q:+.3f}"""
+        tk.Label(deriv, text=f_calc, bg="#1E1E2E", fg="#E0E0E0", font=("", 9), anchor="w", justify="left").pack(anchor="w", padx=(12,0))
+        tk.Label(deriv, text=ev_calc, bg="#1E1E2E", fg="#B0BEC5", font=("", 9), anchor="w", justify="left").pack(anchor="w", padx=(12,0))
+        tk.Label(deriv, text=f"⚠️ 凯利系数 = 最优单票仓位比例 (保守建议用 1/4 凯利系数: {kfval/4:.1f}%)",
+                 bg="#1E1E2E", fg="#FFA726", font=("", 8), anchor="w").pack(anchor="w", padx=(12,0), pady=(4,0))
+
+        # ── 胜率贡献明细 ──
+        detail = tk.Frame(top, bg="#263238", padx=10, pady=8); detail.pack(fill=tk.X, padx=12, pady=6)
+        tk.Label(detail, text="📊 胜率贡献明细 (基础50分)", bg="#263238", fg="#FFD54F", font=("", 10, "bold")).pack(anchor="w")
+        # 三列: 正向 / 中性 / 负向
+        pos_f = tk.Frame(detail, bg="#263238"); pos_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
+        neu_f = tk.Frame(detail, bg="#263238"); neu_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
+        neg_f = tk.Frame(detail, bg="#263238"); neg_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
+        tk.Label(pos_f, text="🟢 正向因子", bg="#263238", fg="#81C784", font=("", 9, "bold")).pack(anchor="w")
+        tk.Label(neu_f, text="🟡 中性/其他", bg="#263238", fg="#FFA726", font=("", 9, "bold")).pack(anchor="w")
+        tk.Label(neg_f, text="🔴 负向因子", bg="#263238", fg="#EF5350", font=("", 9, "bold")).pack(anchor="w")
+        sd = ms.get('kelly_score_detail', [])
+        for name, delta in sd:
+            if delta > 0:
+                tk.Label(pos_f, text=f"  {name}  +{delta}", bg="#263238", fg="#81C784", font=("", 8)).pack(anchor="w")
+            elif delta < 0:
+                tk.Label(neg_f, text=f"  {name}  {delta}", bg="#263238", fg="#EF5350", font=("", 8)).pack(anchor="w")
+            else:
+                tk.Label(neu_f, text=f"  {name}", bg="#263238", fg="#FFA726", font=("", 8)).pack(anchor="w")
+
+        # ── 具体止损/目标 ──
+        plan = tk.Frame(top, bg="#1E1E2E", padx=12, pady=6); plan.pack(fill=tk.X, padx=12, pady=2)
+        tk.Label(plan, text="🛡️ 交易计划", bg="#1E1E2E", fg="#4FC3F7", font=("", 10, "bold")).pack(anchor="w")
+        tk.Label(plan, text=f"  止损位: -{kbt:.2f}%  (ATR估算)", bg="#1E1E2E", fg="#EF5350", font=("", 9)).pack(anchor="w", padx=(12,0))
+        tk.Label(plan, text=f"  目标位: +{kbtg:.2f}%  (盈亏比 {kb:.1f}:1)", bg="#1E1E2E", fg="#81C784", font=("", 9)).pack(anchor="w", padx=(12,0))
+        tk.Label(plan, text=f"  建议仓位: {kfval:.1f}%  (凯利系数)", bg="#1E1E2E", fg="#FFD54F", font=("", 9)).pack(anchor="w", padx=(12,0))
+
+        # ── 技术指标快照 ──
+        snap = tk.Frame(top, bg="#1E1E2E", padx=12, pady=6); snap.pack(fill=tk.X, padx=12, pady=2)
+        tk.Label(snap, text="📋 技术指标快照", bg="#1E1E2E", fg="#CE93D8", font=("", 10, "bold")).pack(anchor="w")
+        ma_txt = f"  MA5={ms.get('ma5_val', '?'):.2f}  MA10={ms.get('ma10_val', '?'):.2f}  MA20={ms.get('ma20_val', '?'):.2f}"
+        tk.Label(snap, text=ma_txt, bg="#1E1E2E", fg="#E0E0E0", font=("", 9)).pack(anchor="w", padx=(12,0))
+        macd_txt = f"  MACD DIF={ms.get('macd_dif', '?')}  DEA={ms.get('macd_dea', '?')}  HIST={ms.get('macd_hist', '?')}"
+        tk.Label(snap, text=macd_txt, bg="#1E1E2E", fg="#E0E0E0", font=("", 9)).pack(anchor="w", padx=(12,0))
+        kdj_txt = f"  KDJ K={ms.get('kdj_k', '?')}  D={ms.get('kdj_d', '?')}  J={ms.get('kdj_j', '?')}   RSI14={ms.get('rsi14', '?')}"
+        tk.Label(snap, text=kdj_txt, bg="#1E1E2E", fg="#E0E0E0", font=("", 9)).pack(anchor="w", padx=(12,0))
+        bias_txt = f"  BIAS6={ms.get('bias6', '?'):+.2f}%  BIAS12={ms.get('bias12', '?'):+.2f}%  BIAS24={ms.get('bias24', '?'):+.2f}%"
+        tk.Label(snap, text=bias_txt, bg="#1E1E2E", fg="#E0E0E0", font=("", 9)).pack(anchor="w", padx=(12,0))
+
+        # 关闭按钮
+        tk.Button(top, text="关闭", command=top.destroy,
+                  bg="#263238", fg="white", font=("", 10), padx=20).pack(pady=10)
 
     def _refresh_stamp_board(self, source, force=False):
         """🔄 邮票格子 — 三级热股 + 淘韭文本爬虫加权
@@ -15447,27 +15604,25 @@ class DapanMixin:
                              font=("", 9, "bold"), padx=3, pady=0).pack(side=tk.LEFT, padx=2)
                 else:
                     tk.Label(row, text="  ", bg=row_bg, width=5).pack(side=tk.LEFT, padx=2)
-                # 第5列: 板块逻辑 + 匹配的文章标题 (每只股票都显示)
+                # 第5列: 板块逻辑 + 匹配状态
                 _stock_arts = item.get("articles", [])
+                _blk_logic = BLOCK_LOGIC.get(blk_name, "")[:32]
                 if _stock_arts:
-                    # 有淘韭爬取的文章 → 显示文章标题 + 板块逻辑
+                    # 有爬取文章 → 📰文章标题 | 板块逻辑
                     _first = _stock_arts[0][:28]
-                    _blk_logic = BLOCK_LOGIC.get(blk_name, "")[:28]
                     _show = f"📰 {_first}  |  {_blk_logic}"
                     tk.Label(row, text=_show, bg=row_bg, fg="#A5D6A7",
                              font=("", 9), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
                 elif i == 0:
-                    # 板块首行兜底 (无爬取文章)
-                    logic_text = BLOCK_LOGIC.get(blk_name, "")[:55]
-                    arts = _arts(BLOCK_KWS.get(blk_name, []), 1)
-                    if arts and arts[0][0]:
-                        logic_text = f"{logic_text}  |  📰 {arts[0][0][:22]}"
-                    tk.Label(row, text=logic_text, bg=row_bg, fg="#A5D6A7",
+                    # 板块首行无爬取文章 → 📰匹配 | 板块逻辑
+                    _m1 = "📰匹配" if freq < 3 else ""
+                    logic_text = f"{_m1}  {_blk_logic}".strip()
+                    tk.Label(row, text=logic_text, bg=row_bg, fg="#B0BEC5",
                              font=("", 9), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
                 else:
-                    # 非首行无文章 → 显示板块逻辑简写
-                    _short_logic = BLOCK_LOGIC.get(blk_name, "")[:40]
-                    tk.Label(row, text=_short_logic, bg=row_bg, fg="#78909C",
+                    # 非首行无文章 → 📰匹配 | 逻辑简写
+                    _short = f"📰匹配  {_blk_logic[:28]}" if freq < 3 else _blk_logic[:32]
+                    tk.Label(row, text=_short, bg=row_bg, fg="#78909C",
                              font=("", 8), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
                 # 🆕 第6列: 技术指标综合信号 (MA + BIAS + MACD + KDJ + 背离)
                 _ma_cache = getattr(self, '_stamp_ma_cache', {}).get(source, {})
@@ -15523,14 +15678,32 @@ class DapanMixin:
                     # 第一行: MA + 鱼身鱼尾
                     tk.Label(row, text=_ma_line, bg=row_bg, fg=_ma_color,
                              font=("", 9, "bold")).pack(side=tk.RIGHT, padx=(4,2), pady=(0,0))
-                    # 第二行: BIAS + 信号 (更紧凑, 小字体)
+                    # 🆕 第二行: BIAS + 信号 + 凯利胜率/盈亏比
                     sub_parts = []
                     if bias_txt: sub_parts.append(bias_txt)
                     if _sig_line: sub_parts.append(_sig_line)
+                    # 凯利预测
+                    _kwr = _ms.get('kelly_win_rate')
+                    _kb = _ms.get('kelly_b')
+                    _kf = _ms.get('kelly_f')
+                    _kg = _ms.get('kelly_grade', '')
+                    _k_ev = _ms.get('kelly_ev', 0)
+                    if _kwr is not None:
+                        _k_txt = f"胜率{_kwr:.0f}%  {_kb:.1f}:1  凯{_kf:.0f}% [{_kg}]"
+                        sub_parts.append(_k_txt)
                     if sub_parts:
                         full_sub = "  ".join(sub_parts)
-                        tk.Label(row, text=full_sub, bg=row_bg, fg="#B0BEC5",
-                                 font=("", 8)).pack(side=tk.RIGHT, padx=(4,2), pady=(0,0))
+                        _sub_fg = "#81C784" if _k_ev > 0.15 else "#FFA726" if _k_ev > 0 else "#EF5350"
+                        # 凯利部分单独显示, 带凯❓点击
+                        tk.Label(row, text=full_sub, bg=row_bg, fg=_sub_fg,
+                                 font=("", 8, "bold")).pack(side=tk.RIGHT, padx=(4,2), pady=(0,0))
+                    # 🆕 凯❓按钮 (点击看详情)
+                    if _kwr is not None:
+                        _btn_k = tk.Label(row, text="凯❓", bg="#263238", fg="#FFD54F",
+                                          font=("", 8, "bold"), padx=2, cursor="hand2")
+                        _btn_k.pack(side=tk.RIGHT, padx=2, pady=(0,0))
+                        _btn_k.bind("<Button-1>", lambda e, _c=item.get("code",""), _n=item.get("name",""), _m=_ms:
+                                    self._show_kelly_detail(_c, _n, _m))
                 cur_row += 1
                 row._stamp = item
                 row._last_click = {"time": 0}  # 🆕 必须初始化, 否则第一次点击就 AttributeError
