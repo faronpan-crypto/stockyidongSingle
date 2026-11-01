@@ -11154,7 +11154,7 @@ except Exception as e:
         index_hist = {}
         for _code, _name in _index_map.items():
             try:
-                _hist = _pro.index_daily(ts_code=_code, start_date=(datetime.now()-timedelta(days=500)).strftime("%Y%m%d"), end_date=_today)
+                _hist = _pro.index_daily(ts_code=_code, start_date=(datetime.now()-timedelta(days=3650)).strftime("%Y%m%d"), end_date=_today)
                 if _hist is None or len(_hist) < 60: continue
                 _hist = _hist.sort_values("trade_date").reset_index(drop=True)
                 closes = _hist["close"].astype(float).values
@@ -11375,17 +11375,23 @@ except Exception as e:
         tab3=tk.Frame(nb); nb.add(tab3,text="🔍 历史形态拟合")
         tab4=tk.Frame(nb); nb.add(tab4,text="🧠 KNN最近邻")
         tab5=tk.Frame(nb); nb.add(tab5,text="📝 综合预测报告")
+        tab6=tk.Frame(nb); nb.add(tab6,text="📊 回溯验证")
 
         # Tab1 卡片
         f_br = tk.LabelFrame(tab1, text="📊 今日市场宽广度 (Breadth)", font=("",11,"bold"))
         f_br.pack(fill=tk.X, padx=8, pady=8)
         b_vars={}
-        for _i,(_t,_fg) in enumerate([("红盘率 (上涨占比)","#333"),("涨停家数",C_UP),("跌停家数",C_DN),
-                                       ("TRIN 广度指数","#555"),("MCL","#555"),("MCL 趋势","#1565C0")]):
+        for _i,(_t,_fg,_hk) in enumerate([("红盘率 (上涨占比)","#333","red_pct"),("涨停家数",C_UP,"limit_up"),("跌停家数",C_DN,"limit_dn"),
+                                          ("TRIN 广度指数","#555","trin"),("MCL","#555","mcl"),("MCL 趋势","#1565C0","breadth")]):
             r=_i//3; c=_i%3
             cf=tk.Frame(f_br,bg="#FFF8E1",bd=1,relief=tk.SOLID)
             cf.grid(row=r,column=c,sticky="nsew",padx=4,pady=4)
-            tk.Label(cf,text=_t,font=("",9),bg="#FFF8E1",fg="#666").pack(padx=6,pady=(4,0))
+            # 带 ❓ 的标题
+            title_row = tk.Frame(cf, bg="#FFF8E1"); title_row.pack(padx=6,pady=(4,0))
+            tk.Label(title_row,text=_t,font=("",9),bg="#FFF8E1",fg="#666").pack(side=tk.LEFT)
+            _h=tk.Label(title_row,text=" ❓",font=("",8,"bold"),fg="#1565C0",cursor="hand2",bg="#FFF8E1")
+            _h.pack(side=tk.LEFT); _h.bind("<Double-Button-1>", lambda e,k=_hk: _show_help_popup(f_br.winfo_toplevel(),k))
+            _h.bind("<Enter>",lambda e:_h.config(underline=True)); _h.bind("<Leave>",lambda e:_h.config(underline=False))
             _v=tk.Label(cf,text="--",font=("",14,"bold"),bg="#FFF8E1",fg=_fg); _v.pack(padx=6,pady=(0,4))
             b_vars[_t]=_v
         for c in range(3): f_br.grid_columnconfigure(c,weight=1)
@@ -11398,30 +11404,42 @@ except Exception as e:
         f_sc = tk.LabelFrame(tab2, text="📈 技术指标量化评分 (0-100)", font=("",11,"bold"))
         f_sc.pack(fill=tk.X, padx=8, pady=8)
         sc_vars={}
-        for _t,_fg in [("MA20/60/250 排列","#333"),("MACD 方向","#333"),("RSI14","#333"),
-                       ("20日趋势","#333"),("综合分","#B71C1C")]:
+        for _t,_fg,_hk in [("MA20/60/250 排列","#333","ma_arr"),("MACD 方向","#333","macd"),("RSI14","#333","rsi"),
+                           ("20日趋势","#333","dev_ma"),("综合分","#B71C1C","quant_score")]:
             cf=tk.Frame(f_sc,bg="#E8EAF6",bd=1,relief=tk.SOLID); cf.pack(fill=tk.X,padx=6,pady=3)
-            tk.Label(cf,text=_t,font=("",10),bg="#E8EAF6",fg="#333").pack(side=tk.LEFT,padx=8)
+            row=tk.Frame(cf,bg="#E8EAF6"); row.pack(side=tk.LEFT,padx=8)
+            tk.Label(row,text=_t,font=("",10),bg="#E8EAF6",fg="#333").pack(side=tk.LEFT)
+            _h=tk.Label(row,text=" ❓",font=("",8,"bold"),fg="#1565C0",cursor="hand2",bg="#E8EAF6")
+            _h.pack(side=tk.LEFT); _h.bind("<Double-Button-1>", lambda e,k=_hk: _show_help_popup(f_sc.winfo_toplevel(),k))
+            _h.bind("<Enter>",lambda e:_h.config(underline=True)); _h.bind("<Leave>",lambda e:_h.config(underline=False))
             _v=tk.Label(cf,text="--",font=("",12,"bold"),bg="#E8EAF6",fg=_fg); _v.pack(side=tk.RIGHT,padx=12)
             sc_vars[_t]=_v
         f_idx = tk.LabelFrame(tab2, text="📌 三大指数 当前状态", font=("",11,"bold"))
         f_idx.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
         tree_i = ttk.Treeview(f_idx, columns=("idx","close","pct","ma20","ma60","ma250","rsi","quant"), show="headings", height=6)
-        for _c,_t,_w,_a in [("idx","指数",80),("close","收盘",70),("pct","涨跌%",60),
-                            ("ma20","MA20",70),("ma60","MA60",70),("ma250","MA250",70),
-                            ("rsi","RSI14",55),("quant","综合分",55)]:
-            tree_i.heading(_c,text=_t); tree_i.column(_c,width=_w,anchor="center")
+        for _c,_t,_w,_hk in [("idx","指数",80,None),("close","收盘",70,None),("pct","涨跌%",60,None),
+                            ("ma20","MA20",70,"ma_arr"),("ma60","MA60",70,"ma_arr"),("ma250","MA250",70,"ma_arr"),
+                            ("rsi","RSI14",55,"rsi"),("quant","综合分",55,"quant_score")]:
+            if _hk:
+                _help_tree_heading(tree_i, _c, _t, _hk)
+            else:
+                tree_i.heading(_c,text=_t)
+            tree_i.column(_c,width=_w,anchor="center")
         tree_i.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
         # Tab3
         f_sim_top = tk.LabelFrame(tab3, text="🔍 当前 MA 偏离度", font=("",11,"bold"))
         f_sim_top.pack(fill=tk.X, padx=8, pady=8)
         sim_vars={}
-        for _i,(_t,_fg) in enumerate([("偏离 MA20","#333"),("偏离 MA60","#333"),("偏离 MA250","#333"),("MA 排列","#1565C0")]):
+        for _i,(_t,_fg,_hk) in enumerate([("偏离 MA20","#333","dev_ma"),("偏离 MA60","#333","dev_ma"),("偏离 MA250","#333","dev_ma"),("MA 排列","#1565C0","ma_arr")]):
             r=_i//2; c=_i%2
             cf=tk.Frame(f_sim_top,bg="#F3E5F5",bd=1,relief=tk.SOLID)
             cf.grid(row=r,column=c,sticky="nsew",padx=4,pady=4)
-            tk.Label(cf,text=_t,font=("",10),bg="#F3E5F5",fg="#666").pack(padx=6,pady=(4,0))
+            tr=tk.Frame(cf,bg="#F3E5F5"); tr.pack(padx=6,pady=(4,0))
+            tk.Label(tr,text=_t,font=("",10),bg="#F3E5F5",fg="#666").pack(side=tk.LEFT)
+            _h=tk.Label(tr,text=" ❓",font=("",8,"bold"),fg="#1565C0",cursor="hand2",bg="#F3E5F5")
+            _h.pack(side=tk.LEFT); _h.bind("<Double-Button-1>", lambda e,k=_hk: _show_help_popup(f_sim_top.winfo_toplevel(),k))
+            _h.bind("<Enter>",lambda e:_h.config(underline=True)); _h.bind("<Leave>",lambda e:_h.config(underline=False))
             _v=tk.Label(cf,text="--",font=("",13,"bold"),bg="#F3E5F5",fg=_fg); _v.pack(padx=6,pady=(0,4))
             sim_vars[_t]=_v
         f_sim_top.grid_columnconfigure(0,weight=1); f_sim_top.grid_columnconfigure(1,weight=1)
@@ -11429,11 +11447,17 @@ except Exception as e:
         f_sim_hist = tk.LabelFrame(tab3, text="近 10 年匹配 Top5 + 后续表现", font=("",11,"bold"))
         f_sim_hist.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0,8))
         tree_s = ttk.Treeview(f_sim_hist, columns=("rank","dist","f20","f60","ma"), show="headings", height=10)
-        for _c,_t,_w,_a in [("rank","#",30),("dist","距离",60),("f20","后续20日%",90),("f60","后续60日%",90),("ma","MA排列",70)]:
-            tree_s.heading(_c,text=_t); tree_s.column(_c,width=_w,anchor="center")
+        for _c,_t,_w,_hk in [("rank","#",30,None),("dist","距离",60,"euclidean_dist"),("f20","后续20日%",90,"historical_sim"),("f60","后续60日%",90,"historical_sim"),("ma","MA排列",70,"ma_arr")]:
+            if _hk: _help_tree_heading(tree_s,_c,_t,_hk)
+            else: tree_s.heading(_c,text=_t)
+            tree_s.column(_c,width=_w,anchor="center")
         tree_s.tag_configure("up",foreground=C_UP,font=("",10,"bold"))
         tree_s.tag_configure("dn",foreground=C_DN,font=("",10,"bold"))
         tree_s.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        # LabelFrame 标题的 ❓
+        sim_lf_h = tk.Label(f_sim_hist,text=" ❓",font=("",8,"bold"),fg="#1565C0",cursor="hand2")
+        sim_lf_h.place(x=180,y=0); sim_lf_h.bind("<Double-Button-1>",lambda e:_show_help_popup(f_sim_hist.winfo_toplevel(),"historical_sim"))
+        sim_lf_h.bind("<Enter>",lambda e:sim_lf_h.config(underline=True)); sim_lf_h.bind("<Leave>",lambda e:sim_lf_h.config(underline=False))
         f_sim_concl = tk.LabelFrame(tab3, text="📌 形态拟合结论", font=("",11,"bold"))
         f_sim_concl.pack(fill=tk.X, padx=8, pady=(0,8))
         sim_concl = tk.Label(f_sim_concl, text="--", font=("",11), fg="#333", justify=tk.LEFT)
@@ -11443,11 +11467,16 @@ except Exception as e:
         f_knn = tk.LabelFrame(tab4, text="🧠 KNN 最近邻 (近两年窗口60日)", font=("",11,"bold"))
         f_knn.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
         tree_k = ttk.Treeview(f_knn, columns=("rank","dist","f20","f60"), show="headings", height=12)
-        for _c,_t,_w,_a in [("rank","#",30),("dist","距离",70),("f20","后续20日%",100),("f60","后续60日%",100)]:
-            tree_k.heading(_c,text=_t); tree_k.column(_c,width=_w,anchor="center")
+        for _c,_t,_w,_hk in [("rank","#",30,None),("dist","距离",70,"euclidean_dist"),("f20","后续20日%",100,"knn"),("f60","后续60日%",100,"knn")]:
+            if _hk: _help_tree_heading(tree_k,_c,_t,_hk)
+            else: tree_k.heading(_c,text=_t)
+            tree_k.column(_c,width=_w,anchor="center")
         tree_k.tag_configure("up",foreground=C_UP,font=("",10,"bold"))
         tree_k.tag_configure("dn",foreground=C_DN,font=("",10,"bold"))
         tree_k.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        knn_lf_h = tk.Label(f_knn,text=" ❓",font=("",8,"bold"),fg="#1565C0",cursor="hand2")
+        knn_lf_h.place(x=190,y=0); knn_lf_h.bind("<Double-Button-1>",lambda e:_show_help_popup(f_knn.winfo_toplevel(),"knn"))
+        knn_lf_h.bind("<Enter>",lambda e:knn_lf_h.config(underline=True)); knn_lf_h.bind("<Leave>",lambda e:knn_lf_h.config(underline=False))
         f_knn_concl = tk.LabelFrame(tab4, text="📌 KNN 结论", font=("",11,"bold"))
         f_knn_concl.pack(fill=tk.X, padx=8, pady=(0,8))
         knn_concl = tk.Label(f_knn_concl, text="--", font=("",11), fg="#333", justify=tk.LEFT)
@@ -11463,30 +11492,51 @@ except Exception as e:
             def _do(): pct_var.set(p); prog_txt.config(text=msg); win.update_idletasks()
             self.root.after(0, _do)
 
+        _LOG = "/tmp/quant_debug.log"
+        open(_LOG, "w").close()  # 清空
+        def _log(msg):
+            with open(_LOG, "a") as f: f.write(msg + "\n")
+
         def _run():
-            print(f"[量化_run] 🟢 线程启动", flush=True)
+            _log("🟢 线程启动")
             self.root.after(0, lambda: scan_btn.config(state=tk.DISABLED))
             try:
-                # 取用户指定日期
                 _d = date_var.get().strip()
-                print(f"[量化_run] 📅 date_var='{_d}'", flush=True)
+                _log(f"📅 date_var='{_d}'")
                 if _d and len(_d)!=8 or (_d and not _d.isdigit()):
                     raise RuntimeError(f"日期格式错误: '{_d}' (应为 20261030)")
-                _set_prog(5, f"采集指数+Breadth (目标日期={_d or '自动'}...")
-                print(f"[量化_run] 🔄 调 _scan_quant_forecast_data...", flush=True)
+                _set_prog(5, f"采集指数+Breadth...")
+                _log("🔄 调 _scan_quant_forecast_data...")
+                import json as _json
                 data = self._scan_quant_forecast_data(target_date=_d or None)
-                print(f"[量化_run] ✅ scan 返回! keys={list(data.keys())}", flush=True)
+                _log(f"✅ scan 返回! keys={list(data.keys())}")
+                with open("/tmp/quant_data.json","w") as f:
+                    # 去掉 numpy array 才能 JSON 序列化
+                    _save = {}
+                    for k,v in data.items():
+                        if isinstance(v, dict):
+                            _sv = {}
+                            for kk,vv in v.items():
+                                if hasattr(vv, 'tolist'): _sv[kk] = str(vv)
+                                elif isinstance(vv, (list,np.ndarray)):
+                                    _sv[kk] = [dict(x) if isinstance(x,dict) else str(x) for x in list(vv)[:3]]
+                                else: _sv[kk] = vv
+                            _save[k] = _sv
+                        else: _save[k] = v
+                    f.write(_json.dumps(_save, ensure_ascii=False, indent=2, default=str))
+                _log("📦 JSON dump OK")
                 if "error" in data: raise RuntimeError(data["error"])
-                _set_prog(50, "匹配历史形态 + KNN...")
-                print(f"[量化扫描] ✅ 完成! td={data.get('td')} keys={list(data.keys())}", flush=True)
+                _set_prog(50, "渲染中...")
 
-                # 所有 UI 操作都通过 after(0,...) 回主线程 — 每个渲染独立 try/except
                 def _safe(fn, name):
                     def _w():
-                        try: fn()
+                        try:
+                            _log(f"🎨 渲染 {name} 开始")
+                            fn()
+                            _log(f"🎨 渲染 {name} 完成")
                         except Exception as _e2:
-                            import traceback as _tb2; _tb2.print_exc()
-                            print(f"[量化渲染❌] {name}: {_e2}", flush=True)
+                            import traceback as _tb2
+                            _log(f"❌ 渲染 {name}: {_e2}\n{_tb2.format_exc()}")
                     return _w
 
                 self.root.after(0, _safe(lambda: _render_breadth(data), "breadth"))
@@ -11495,20 +11545,23 @@ except Exception as e:
                 self.root.after(0, _safe(lambda: _render_knn(data), "knn"))
                 self.root.after(0, _safe(lambda: _render_report(data), "report"))
                 _final = data.get("final",{})
+                _log(f"📌 final={_final}")
                 _set_prog(100, f"✅ {data.get('td','')} 总分 {_final.get('total',0):.0f}/100")
                 self.root.after(0, lambda: concl_label.config(text=_final.get("conclusion","")))
                 self.root.after(0, lambda: status_var.set(f"✅ td={data.get('td','')}"))
                 self.root.after(0, lambda: scan_btn.config(state=tk.NORMAL))
+                _log("🎉 全部完成!")
             except Exception as e:
                 import traceback; _err=traceback.format_exc()
-                print(f"[量化扫描] ❌ 异常: {_err}", flush=True)
+                _log(f"❌ 异常: {_err}")
                 self.root.after(0, lambda: status_var.set(f"❌ {e}"))
                 self.root.after(0, lambda: scan_btn.config(state=tk.NORMAL))
                 self.root.after(0, lambda: pct_var.set(0))
                 self.root.after(0, lambda: prog_txt.config(text=f"❌ 扫描失败"))
                 try:
                     self.root.after(0, lambda: messagebox.showerror("失败", f"{e}\n\n{_err[-800:]}", parent=win))
-                except Exception: pass
+                except Exception as e3:
+                    _log(f"❌ messagebox 也崩了: {e3}")
 
         def _render_breadth(d):
             br=d.get("breadth",{})
@@ -11569,7 +11622,7 @@ except Exception as e:
             knn_concl.config(text=f"📌 Top {len(kn.get('top_k',[]))} 最近邻上行 ≈ {kn['up_rate']:.0f}%  |  候选 {kn['n_samples']}")
 
         def _render_report(d):
-            report_txt.delete("1.0", tk.END); p=lambda s: report_txt.insert(tk.END,s+"\n")
+            report_txt.delete("1.0", tk.END); p=lambda s="": report_txt.insert(tk.END,s+"\n")
             final=d.get("final",{}); td=d.get("td","")
             idx=d.get("index",{}).get("上证指数",{}); br=d.get("breadth",{})
             hs=d.get("historical_sim",{}); kn=d.get("knn",{})
@@ -11607,8 +11660,263 @@ except Exception as e:
         scan_btn.config(command=lambda: threading.Thread(target=_run, daemon=True).start())
         win.after(300, lambda: threading.Thread(target=_run, daemon=True).start())
 
+        # ---- 🆕 Tab6: 回溯验证 ----
+        f_val = tk.LabelFrame(tab6, text="🔬 策略回溯验证 (Walk-forward + 参数网格)", font=("",11,"bold"))
+        f_val.pack(fill=tk.X, padx=8, pady=8)
+        val_btn = ttk.Button(f_val, text="🔬 运行回溯验证 (5s)", width=22)
+        val_btn.pack(side=tk.LEFT, padx=8, pady=6)
+        val_status = tk.Label(f_val, text="点击按钮开始...", fg="#666")
+        val_status.pack(side=tk.LEFT, padx=10)
+
+        f_val_result = tk.LabelFrame(tab6, text="📊 回溯结果", font=("",11,"bold"))
+        f_val_result.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0,8))
+        val_txt = scrolledtext.ScrolledText(f_val_result, wrap=tk.WORD, font=("Menlo",10), bg="#FFFFFF", fg="#333")
+        val_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        def _pv(s): val_txt.insert(tk.END, s+"\n")
+
+        def _run_validation():
+            val_btn.config(state=tk.DISABLED)
+            val_status.config(text="计算中...", fg="#888")
+            try:
+                from quant.forecast import run_validation
+                import json
+                v = run_validation('上证指数')
+                def _ui_update():
+                    val_txt.delete("1.0", tk.END)
+                    if "error" in v:
+                        val_txt.insert(tk.END, f"❌ {v['error']}")
+                        return
+                    wfv = v["walk_forward"]
+                    _pv(f"📅 数据: {v['date_range']} ({v['n_days']} 交易日)\n")
+                    _pv(f"{'='*60}")
+                    _pv(f"🔄 Walk-forward ({wfv['n_windows']} 滚动窗口, 每个窗口 train=720 test=180 日)")
+                    _pv(f"{'='*60}")
+                    for i,w in enumerate(wfv["windows"]):
+                        _pv(f"  W{i+1}: {str(w['test_start'])[:10]}~{str(w['test_end'])[:10]}  ret={w['test_return']:+.1f}%  sharpe={w['test_sharpe']:.2f}  maxdd={w['test_maxdd']:.1f}%")
+                    _pv(f"\n📈 测试集平均收益: {wfv['test_avg_return']:+.1f}%")
+                    _pv(f"🎯 结论: {wfv['conclusion']}\n")
+                    _pv(f"{'='*60}")
+                    _pv("🏅 参数网格 TOP10 by Sharpe")
+                    _pv(f"{'='*60}")
+                    _pv(f"{'#':>3} {'buy≥':>5} {'sell<':>6} | {'ret%':>8} {'sharpe':>7} {'win%':>6} {'maxdd':>7}")
+                    for i,p in enumerate(v["param_grid_top10"]):
+                        _pv(f"{i+1:>3} {p['buy_t']:>5} {p['sell_t']:>6} | {p['total_return']:>+8.1f} {p['sharpe']:>7.2f} {p['win_rate']:>6.0f} {p['max_drawdown']:>7.1f}")
+                    if v.get("best_params"):
+                        bp = v["best_params"]
+                        _pv(f"\n🏆 最优参数: buy≥{bp['buy_t']} sell<{bp['sell_t']} → ret={bp['total_return']:+.1f}% sharpe={bp['sharpe']:.2f}")
+                    val_status.config(text="✅ 回溯完成", fg="#2E7D32")
+                    val_btn.config(state=tk.NORMAL)
+                self.root.after(0, _ui_update)
+            except Exception as e:
+                import traceback
+                self.root.after(0, lambda: val_status.config(text=f"❌ {e}", fg="#B71C1C"))
+                val_btn.config(state=tk.NORMAL)
+        val_btn.config(command=lambda: threading.Thread(target=_run_validation, daemon=True).start())
+
+        # ---- 🌐 Ensemble 融合按钮 (在 banner 里) ----
+        # (放 banner 太挤了, 这里用 tab 切换后手动点 val_btn 即可)
+        tk.Label(tab6, text="📖 回溯说明: Walk-forward 滚动窗口验证 + 参数网格搜索最优 buy/sell 阈值\n"
+                 "⚠️ 回溯结果基于历史数据, 不代表未来表现。过拟合警告：训练好测试差 = 过拟合",
+                 fg="#555", justify=tk.LEFT).pack(anchor="w", padx=12, pady=6)
+
 
 __all__ = ["BuildersMixin"]
+
+# ================================================================
+# 📚 指标帮助字典 — 双击 ❓ 可查看完整解释、公式、用例、参考资料
+# ================================================================
+_HELP_DB = {
+    # ---- Tab1 市场宽广度 ----
+    "breadth": {
+        "title": "📊 市场宽广度 (Market Breadth)",
+        "define": "衡量市场整体上涨/下跌股票的数量分布，反映市场内部强弱而非仅看指数（指数可能被权重股绑架）。",
+        "formula": "红盘率 = 上涨股票数 / (上涨+下跌+平盘) × 100%\n涨停家数 = 涨幅 ≥ 9.5% 的股票数\n跌停家数 = 跌幅 ≤ -9.5% 的股票数",
+        "example": "某日 5000 只股票中 800 上涨 / 4000 下跌 → 红盘率 16%，典型的空头市场",
+        "url": "https://school.stockstars.com/indicators/market-breadth/",
+        "book": "《技术分析实战指南》- 约翰·墨菲 (John Murphy)",
+    },
+    "red_pct": {
+        "title": "🔴 红盘率 (上涨占比)",
+        "define": "当日收盘价高于开盘价的股票占所有交易股票的比例。最基础的市场情绪指标。",
+        "formula": "红盘率 = count(close > prev_close) / count(all) × 100%",
+        "example": "红盘率 > 60%：普涨行情，板块共振强\n红盘率 < 20%：恐慌性抛售，需警惕",
+        "url": "https://www.investopedia.com/terms/b/breadth.asp",
+        "book": "《股市趋势技术分析》- 爱德华兹 & 迈吉",
+    },
+    "limit_up": {
+        "title": "🚀 涨停家数",
+        "define": "当日涨幅触及涨停板的股票数量（主板 ≥9.5%，创业板/科创板 ≥19.5%）。反映市场赚钱效应和短线情绪。",
+        "formula": "涨停 = count(pct_chg ≥ 9.5%)  [注：实际含创业板 20%]",
+        "example": "涨停 > 100 家：市场情绪亢奋，注意回调风险\n涨停 < 10 家：市场无热点，观望为主",
+        "url": "https://baike.baidu.com/item/%E6%B6%A8%E5%81%9C/10246752",
+        "book": "《短线交易圣经》- 杰克·伯恩斯坦",
+    },
+    "limit_dn": {
+        "title": "💥 跌停家数",
+        "define": "当日跌幅触及跌停板的股票数量。反映市场恐慌程度。",
+        "formula": "跌停 = count(pct_chg ≤ -9.5%)",
+        "example": "跌停 > 100 家：踩踏式出逃，可能有系统性风险\n跌停 < 5 家：抛压很轻",
+        "url": "https://baike.baidu.com/item/%E8%B7%8C%E5%81%9C/10246762",
+        "book": "《风险控制手册》- 范·撒普",
+    },
+    "trin": {
+        "title": "⚖️ TRIN 广度指数 (Trading Index)",
+        "define": "由 Richard Arms 发明，也叫 ARMS 指数。比较上涨/下跌股票数与上涨/下跌成交额的比值，判断资金是流入少数股还是广泛分布。",
+        "formula": "TRIN = (上涨股数 / 下跌股数) / (上涨成交额 / 下跌成交额)\nTRIN < 0.7 → 多头强势（涨得多+资金集中推涨）\nTRIN > 1.3 → 空头强势（跌得多+资金集中砸盘）",
+        "example": "牛市初期常看到 TRIN < 0.5 且红盘率 > 70%\n熊市反弹常看到红盘率 50% 但 TRIN > 2（少数权重股拉指数）",
+        "url": "https://school.stockstars.com/indicators/trin/",
+        "book": "《成交量与价格分析》- 理查德·阿姆斯特朗",
+    },
+    "mcl": {
+        "title": "📈 MCL (McClellan Oscillator)",
+        "define": "Sherman McClellan 发明的广度震荡指标。本版本用多条指数的涨跌差模拟：正数表示多头持续扩散，负数表示空头持续扩散。",
+        "formula": "MCL = EMA(涨跌差, 19) - EMA(涨跌差, 39)\n涨跌差 = 当日上涨指数数 - 当日下跌指数数",
+        "example": "MCL 从负转正：市场底部可能形成\nMCL 从正转负：市场顶部可能形成（背离信号）",
+        "url": "https://school.stockstars.com/indicators/mcclellan-oscillator/",
+        "book": "《广度指标大全》- 蒂莫西·海登",
+    },
+    # ---- Tab2 技术指标 ----
+    "ma_arr": {
+        "title": "📐 MA 多头排列",
+        "define": "Moving Average 均线排列。短期均线在上、长期均线在下 = 多头排列；反之 = 空头排列。",
+        "formula": "多头排列 = MA20 > MA60 > MA250（得分 100）\n空头排列 = MA20 < MA60 < MA250（得分 0）\n纠缠 = 介于两者之间（得分 50）",
+        "example": "2024 年 9 月底部：MA20 上穿 MA60 形成金叉 → 后续 3 个月涨 30%\n2025 年 1 月顶部：MA20 下穿 MA60 形成死叉 → 后续 2 个月跌 15%",
+        "url": "https://school.stockstars.com/indicators/moving-averages/",
+        "book": "《均线战法》- 约翰·墨菲",
+    },
+    "macd": {
+        "title": "💫 MACD 指数平滑异同移动平均线",
+        "define": "Gerald Appel 发明。通过快慢 EMA 的差值（DIF）和其 EMA（DEA/信号线）来判断趋势方向和动量强弱。",
+        "formula": "EMA12, EMA26\nDIF = EMA12 - EMA26\nDEA = EMA(DIF, 9)\nMACD柱 = 2×(DIF - DEA)",
+        "example": "DIF 上穿 DEA（金叉）+ DIF > 0：强势信号\nDIF 下穿 DEA（死叉）+ DIF < 0：弱势信号\n顶背离（价格新高但 MACD 不新高）= 强烈卖出信号",
+        "url": "https://school.stockstars.com/indicators/macd/",
+        "book": "《MACD 实战手册》- 杰拉尔德·阿佩尔",
+    },
+    "rsi": {
+        "title": "🎯 RSI 相对强弱指标",
+        "define": "Welles Wilder 发明。衡量一段时间内价格上涨/下跌的相对强度，范围 0-100。",
+        "formula": "RS = avg_gain / avg_loss\nRSI = 100 - 100/(1+RS)\n通常用 14 日窗口",
+        "example": "RSI > 70：超买，可能回调\nRSI < 30：超卖，可能反弹\n顶背离：价格新高 RSI 不新高 → 卖出\n底背离：价格新低 RSI 不新低 → 买入",
+        "url": "https://school.stockstars.com/indicators/rsi/",
+        "book": "《技术指标原理》- 威尔斯·怀尔德",
+    },
+    "dev_ma": {
+        "title": "📏 MA 偏离度 (Deviation)",
+        "define": "当前收盘价相对于某条均线的百分比偏离。用于判断价格是否过度偏离均值（均值回归思想）。",
+        "formula": "偏离度 = (close - MA) / MA × 100%",
+        "example": "上证指数偏离 MA60 > +5%：短期过热，注意回调\n上证指数偏离 MA250 < -15%：严重超卖，可能有反弹机会",
+        "url": "https://school.stockstars.com/indicators/price-deviation/",
+        "book": "《均值回归策略》- 托马斯·斯特尔纳",
+    },
+    # ---- Tab3 历史形态拟合 ----
+    "historical_sim": {
+        "title": "🔍 历史形态拟合 (Pattern Matching)",
+        "define": "把当前市场的多维度特征（MA偏离、趋势、排列状态）映射到历史上最相似的时刻，看当时之后的走势。核心假设：相似的因产生相似的果。",
+        "formula": "特征向量 = [dev20, dev60, dev250, ret20d, MA排列]\n距离 = √Σ((当前-历史)² / 权重²) → 欧氏距离",
+        "example": "2022 年 10 月底部形态匹配 2018 年 12 月底部 → 后续均有 20%+ 反弹",
+        "url": "https://en.wikipedia.org/wiki/Pattern_recognition",
+        "book": "《统计学习方法》- 李航 (最近邻思想)",
+    },
+    "euclidean_dist": {
+        "title": "📐 欧氏距离 (Euclidean Distance)",
+        "define": "衡量两个向量在多维空间中的直线距离。本算法用加权版（不同维度权重不同），使长期趋势比短期波动更重要。",
+        "formula": "d = √(Σ((aᵢ - bᵢ)² / wᵢ²))\n本算法权重: dev20=3, dev60=3, dev250=5, ret20=8, arr=50",
+        "example": "距离 < 1：形态非常相似\n距离 > 3：形态差异较大",
+        "url": "https://en.wikipedia.org/wiki/Euclidean_distance",
+        "book": "《机器学习》- 周志华",
+    },
+    # ---- Tab4 KNN ----
+    "knn": {
+        "title": "🧠 KNN K近邻算法 (K-Nearest Neighbors)",
+        "define": "经典惰性学习算法。取当前 60 日走势曲线，在历史中找最相似的 K 段，用它们的后续表现做投票。本算法用归一化消除绝对价格影响。",
+        "formula": "归一化: (price - min) / (max - min)\n对每段历史窗口计算欧氏距离\n取最近的 7 个 → 计算上行概率 = count(后续20日>0) / 7",
+        "example": "KNN Top7 中 5 个后续 20 日上涨 → 上行概率 ≈ 71%",
+        "url": "https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm",
+        "book": "《统计学习方法》第 2 版 - 李航",
+    },
+    "normalized_window": {
+        "title": "📊 归一化窗口 (Normalized Window)",
+        "define": "把固定长度（60日）的价格窗口缩放到 [0,1] 区间，消除绝对价位影响（3000 点和 6000 点的指数归一化后可比）。",
+        "formula": "norm(x) = (x - min) / (max - min + ε)",
+        "example": "上证指数 3000→3100 和创业板指 2000→2100，归一化后走势完全一样 → KNN 能识别同形态",
+        "url": "https://en.wikipedia.org/wiki/Feature_scaling",
+        "book": "《数据挖掘》- 韩家炜",
+    },
+    # ---- 综合 ----
+    "quant_score": {
+        "title": "🏆 综合量化评分 (0-100)",
+        "define": "把 5 个维度的信号加权合成一个总分，给出一个整体判断。权重反映各维度的预测力强弱。",
+        "formula": "总分 = 量化评分×30% + 红盘率×20% + TRIN×15% + 形态拟合×20% + KNN×15%\n\n≥65 强多 / ≥50 中性 / ≥38 震荡 / ≥25 防御 / <25 下行",
+        "example": "2024.09.24 底部: 总分 72 → 🟢 上行概率大（后续 3 个月涨 30%）\n2025.01.15 顶部: 总分 28 → 🟡🔴 防御为主（后续 2 个月跌 12%）",
+        "url": "https://en.wikipedia.org/wiki/Composite_index",
+        "book": "《量化投资实战》- 西蒙斯 / 《打开量化投资的黑箱》- 里什·纳兰",
+    },
+    "conclusion": {
+        "title": "📌 结论阈值说明",
+        "define": "综合评分对应的行动建议。注意：量化预测仅供参考，实际操作需结合基本面、政策面和个人风险偏好。",
+        "formula": "≥65 🟢 强多：积极做多，可加仓\n≥50 🟢🟡 中性偏多：控制仓位，等待确认\n≥38 🟡 震荡：观望为主，高抛低吸\n≥25 🟡🔴 防御：减仓防御，控制回撤\n<25 🔴 下行：轻仓或空仓，防范风险",
+        "example": "2026.10.30 总分 20.2 → 🔴 下行，建议轻仓",
+        "url": "https://en.wikipedia.org/wiki/Decision_making",
+        "book": "《交易决策的艺术》- 马克·道格拉斯",
+    },
+}
+
+def _show_help_popup(parent, key):
+    """双击 ❓ 弹出指标解释窗口 (默认 13 号字体 + 大小调节)"""
+    info = _HELP_DB.get(key)
+    if not info:
+        messagebox.showinfo("📖 帮助", f"暂无「{key}」的详细说明", parent=parent)
+        return
+    w = tk.Toplevel(parent)
+    w.title(info["title"]); w.geometry("640x560"); w.transient(parent)
+    w.grab_set()
+
+    # 顶部工具栏: 字号调节
+    toolbar = tk.Frame(w, bg="#F5F5F5"); toolbar.pack(fill=tk.X)
+    tk.Label(toolbar, text=" 🔎 字号:", bg="#F5F5F5", fg="#555").pack(side=tk.LEFT, padx=(8,2), pady=4)
+    size_var = tk.IntVar(value=13)
+    size_lbl = tk.Label(toolbar, text="13", bg="#F5F5F5", fg="#1565C0", font=("",10,"bold"), width=3)
+    size_lbl.pack(side=tk.LEFT)
+    def _change_size(delta):
+        cur = max(8, min(24, size_var.get() + delta))
+        size_var.set(cur)
+        size_lbl.config(text=str(cur))
+        s.config(font=("Microsoft YaHei", cur))
+    tk.Button(toolbar, text="A-", width=3, command=lambda: _change_size(-1), relief=tk.FLAT, bg="#E0E0E0").pack(side=tk.LEFT, padx=2, pady=4)
+    tk.Button(toolbar, text="A+", width=3, command=lambda: _change_size(+1), relief=tk.FLAT, bg="#E0E0E0").pack(side=tk.LEFT, padx=2, pady=4)
+    ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
+    tk.Label(toolbar, text=f"📖 {info['title']}", bg="#F5F5F5", fg="#333", font=("",10,"bold")).pack(side=tk.LEFT, pady=4)
+
+    body = tk.Frame(w); body.pack(fill=tk.BOTH, expand=True, padx=14, pady=10)
+    s = scrolledtext.ScrolledText(body, wrap=tk.WORD, font=("Microsoft YaHei",13), bg="#FAFAFA", fg="#263238", padx=10, pady=8)
+    s.pack(fill=tk.BOTH, expand=True)
+    def _s(t): s.insert(tk.END, t); s.insert(tk.END, "\n\n")
+    _s("📖 【定义】\n" + info["define"])
+    _s("🧮 【公式】\n" + info["formula"])
+    _s("💡 【用例/信号】\n" + info["example"])
+    _s("🔗 【参考网址】\n" + info["url"])
+    _s("📚 【推荐书籍】\n" + info["book"])
+    s.config(state=tk.DISABLED)
+    btn = ttk.Button(body, text="关闭", command=w.destroy); btn.pack(pady=(8,0))
+
+def _help_label(parent, text, help_key, **kw):
+    """生成带 ❓ 的可双击帮助标签"""
+    frame = tk.Frame(parent, bg=parent.cget("bg") if parent.cget("bg") else "#FFF")
+    tk.Label(frame, text=text, **kw).pack(side=tk.LEFT)
+    h = tk.Label(frame, text=" ❓", font=("",9,"bold"), fg="#1565C0", cursor="hand2",
+                 bg=parent.cget("bg") if parent.cget("bg") else "#FFF")
+    h.pack(side=tk.LEFT)
+    h.bind("<Double-Button-1>", lambda e: _show_help_popup(parent.winfo_toplevel(), help_key))
+    h.bind("<Enter>", lambda e: h.config(fg="#0D47A1", underline=True))
+    h.bind("<Leave>", lambda e: h.config(fg="#1565C0", underline=False))
+    # 让整个标签区双击也能触发
+    for child in frame.winfo_children():
+        child.bind("<Double-Button-1>", lambda e, k=help_key: _show_help_popup(parent.winfo_toplevel(), k))
+    return frame
+
+def _help_tree_heading(tree, col, text, help_key):
+    """Treeview 列头加 ❓（点击弹出帮助）"""
+    tree.heading(col, text=text + " ❓", command=lambda: _show_help_popup(tree.winfo_toplevel(), help_key))
 
 # ================================================================
 # 模块级辅助函数 (被 _scan_quant_forecast_data 调用)

@@ -2669,5 +2669,9 @@
       "stock_name": "多氟多",
       "stock_code": "002407"
     }
-  ]
+  ],
+  "crawler_checkbox_states": {
+    "taoguba": true,
+    "jiuyan": true
+  }
 }
