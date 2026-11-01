@@ -4148,7 +4148,7 @@ class StockDetailMixin:
                     except Exception:
                         trade_signals = []
 
-                    # 布局计算: 行数/列数 (先粗估, 后面 emotion/etf_rank 独占整行会跳行)
+                    # 布局计算: 简单网格, emotion/etf_rank 不再独占整行, 和普通图一样占一格
                     n_charts = len(selected)
                     if n_charts == 1: nrows, ncols = 1, 1
                     elif n_charts == 2: nrows, ncols = 2, 1
@@ -4156,28 +4156,9 @@ class StockDetailMixin:
                     elif n_charts <= 6: nrows, ncols = 3, 2
                     elif n_charts <= 9: nrows, ncols = 3, 3
                     else: nrows, ncols = 4, 3
-                    # 🔧 动态修正: emotion/etf_rank 独占整行, 所以 idx 会跳, 重新算 nrows
-                    _idx_preview = 0; _max_row = 0
-                    for k in selected:
-                        _r, _c = divmod(_idx_preview, ncols)
-                        _max_row = max(_max_row, _r)
-                        if k in ("etf_rank", "emotion"): _idx_preview += ncols
-                        else: _idx_preview += 1
-                    nrows = _max_row + 1
-                    # 🔧 动态 height_ratios: etf_rank 行加高 (22只需更多空间), emotion 稍高
-                    row_types = [[] for _ in range(nrows)]
-                    _idx_p2 = 0
-                    for k in selected:
-                        _r2, _c2 = divmod(_idx_p2, ncols)
-                        row_types[_r2].append(k)
-                        if k in ("etf_rank","emotion"): _idx_p2 += ncols
-                        else: _idx_p2 += 1
-                    height_ratios = []
-                    for r in range(nrows):
-                        if "etf_rank" in row_types[r]: height_ratios.append(9.0)  # 22只ETF需要充足纵向空间
-                        elif "emotion" in row_types[r]: height_ratios.append(5.5)
-                        else: height_ratios.append(4.5)
-                    fig_h = max(12, sum(height_ratios) * 1.2)
+                    # 全部行高一样, 让情绪复盘 + ETF 强弱 并排一行和上面 K 线同尺寸
+                    height_ratios = [4.5] * nrows
+                    fig_h = max(10, sum(height_ratios) * 1.2)
                     fig.set_size_inches(12, fig_h)
                     from matplotlib import gridspec
                     gs = gridspec.GridSpec(nrows, ncols, figure=fig, height_ratios=height_ratios,
@@ -4186,13 +4167,9 @@ class StockDetailMixin:
                     idx = 0
                     for k in selected:
                         r, c = divmod(idx, ncols)
-                        # etf_rank / emotion 单独占整行 (横跨所有列, 更大)
-                        if k in ("etf_rank", "emotion"):
-                            ax = fig.add_subplot(gs[r, :])
-                            idx += ncols  # 跳到下一行开头
-                        else:
-                            ax = fig.add_subplot(gs[r, c])
-                            idx += 1
+                        # 所有图统一占一格, 包括 emotion/etf_rank
+                        ax = fig.add_subplot(gs[r, c])
+                        idx += 1
                         ax.set_facecolor("#FFFFFF"); ax.grid(True, alpha=0.2)
                         _skip_regime = False  # 默认值, emotion/etf_rank case 会改成 True
 
@@ -4278,14 +4255,9 @@ class StockDetailMixin:
                             ax.set_ylabel("Money Flow")
 
                         elif k == "emotion":
-                            # 🎯 情绪复盘面板 (纯情绪数据, 不再混 ETF)
+                            # 🎯 情绪复盘 — 紧凑文字面板 (占一格, 与 ETF 并排)
                             ax.axis("off")
                             _skip_regime = True
-                            import matplotlib
-                            matplotlib.rcParams["font.sans-serif"] = [
-                                "Hei", "Heiti TC", "Hiragino Sans GB",
-                                "Arial Unicode MS", "STHeiti", "Noto Sans CJK SC"]
-                            matplotlib.rcParams["axes.unicode_minus"] = False
 
                             emo_cycle = getattr(self, "emotion_cycle_var", None)
                             cycle_text = emo_cycle.get() if emo_cycle else "未获取"
@@ -4309,67 +4281,52 @@ class StockDetailMixin:
                             cycle_position = {"上行": 80, "震荡": 50, "下行": 20}.get(cycle_text, 50)
                             temperature = round((cycle_position + emo_score) / 2)
                             temp_color = "#E53935" if temperature >= 70 else ("#FB8C00" if temperature >= 40 else "#43A047")
+                            emo_label = "贪婪" if emo_score > 70 else ("中性" if emo_score > 40 else "恐惧")
 
-                            # 左: 情绪周期 + 涨跌家数 (占 0.02~0.48 横向)
-                            lines = []
-                            lines.append(f"🕐 {snap.get('time','主界面未刷新') if snap else '主界面未刷新'}")
-                            lines.append("")
-                            lines.append("🎯 情绪周期")
-                            lines.append(f"   ● {cycle_text}  (红绿灯)")
-                            lines.append("")
-                            lines.append("📊 涨跌家数")
-                            lines.append(f"   📈 上涨: {up_cnt}")
-                            lines.append(f"   📉 下跌: {dn_cnt}")
-                            lines.append(f"   ➡️ 平盘: {flat_cnt}")
-                            lines.append("")
-                            lines.append("📈 指数涨跌")
                             hs300_s = f"{m5_hs300_v:+.2f}%" if isinstance(m5_hs300_v, (int, float)) else "—"
                             zz500_s = f"{m5_zz500_v:+.2f}%" if isinstance(m5_zz500_v, (int, float)) else "—"
-                            lines.append(f"   沪深300: {hs300_s}")
-                            lines.append(f"   中证500: {zz500_s}")
-                            ax.text(0.02, 0.96, "\n".join(lines), transform=ax.transAxes,
-                                    fontsize=10, va="top", ha="left", linespacing=1.4,
-                                    bbox=dict(boxstyle="round,pad=0.5", fc="#FAFAFA", ec="#BDBDBD", alpha=0.95))
 
-                            # 右: 情绪分数大圆 + 仓位温度计 (占 0.52~0.98)
-                            # 情绪分数圆 (大!)
-                            ax.add_patch(plt.Circle((0.75, 0.78), 0.18, transform=ax.transAxes,
-                                                    fc=cycle_color, alpha=0.9))
-                            ax.text(0.75, 0.78, f"{emo_score:.0f}", transform=ax.transAxes,
-                                    fontsize=28, fontweight="bold", ha="center", va="center", color="white")
-                            emo_label = "贪婪" if emo_score > 70 else ("中性" if emo_score > 40 else "恐惧")
-                            ax.text(0.75, 0.58, f"情绪分数 · {emo_label}", transform=ax.transAxes,
-                                    fontsize=11, ha="center", color="#333")
-
-                            # 仓位温度计
-                            bx0, by0, bw, bh = 0.58, 0.42, 0.35, 0.06
-                            ax.add_patch(plt.Rectangle((bx0, by0), bw, bh,
-                                                        transform=ax.transAxes, fc="#E0E0E0", ec="#BDBDBD"))
-                            ax.add_patch(plt.Rectangle((bx0, by0), bw * temperature / 100, bh,
-                                                        transform=ax.transAxes, fc=temp_color, ec="none"))
-                            ax.text(bx0 + bw / 2, by0 - 0.07, f"建议仓位 {temperature}%",
-                                    transform=ax.transAxes, fontsize=14, fontweight="bold",
-                                    ha="center", va="center", color=temp_color)
-                            ax.text(bx0, by0 + bh + 0.02, "0%", transform=ax.transAxes, fontsize=10, color="#666")
-                            ax.text(bx0 + bw, by0 + bh + 0.02, "100%", transform=ax.transAxes, fontsize=10, color="#666", ha="right")
-
-                            # 周期 + 情绪状态 (下方两个大标签)
-                            ax.text(0.60, 0.25, f"🎯 周期: {cycle_text}", transform=ax.transAxes,
-                                    fontsize=12, fontweight="bold", color=cycle_color,
-                                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=cycle_color, lw=2))
-                            ax.text(0.83, 0.25, f"⚠️ 情绪: {emo_label}", transform=ax.transAxes,
-                                    fontsize=12, fontweight="bold", color=temp_color,
-                                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=temp_color, lw=2))
-
-                            ax.set_title(f"🎯 情绪复盘 · {display_name}", fontsize=12, fontweight="bold")
+                            # 标题
+                            ax.text(0.02, 0.97, "🎯 情绪复盘", transform=ax.transAxes,
+                                    fontsize=11, fontweight="bold", va="top", ha="left", color="#263238")
+                            ax.plot([0.02, 0.98], [0.93, 0.93], color="#E0E0E0", lw=1, transform=ax.transAxes)
+                            # 主体文字块
+                            lines = [
+                                f"🕐 {snap.get('time','未刷新') if snap else '未刷新'}",
+                                f"🎯 周期: {cycle_text}",
+                                f"📈 涨跌: 上{up_cnt}  下{dn_cnt}  平{flat_cnt}",
+                                f"📊 沪深300: {hs300_s}",
+                                f"📊 中证500: {zz500_s}",
+                            ]
+                            ax.text(0.02, 0.90, "\n".join(lines), transform=ax.transAxes,
+                                    fontsize=9.5, va="top", ha="left", linespacing=1.45)
+                            # 情绪分数卡片
+                            score_bg = "#FFEBEE" if emo_score > 70 else ("#FFF3E0" if emo_score > 40 else "#E8F5E9")
+                            ax.text(0.02, 0.38, "情绪分数", transform=ax.transAxes,
+                                    fontsize=8, va="top", ha="left", color="#666")
+                            ax.text(0.02, 0.32, f"{emo_score:.0f} · {emo_label}",
+                                    transform=ax.transAxes, fontsize=15, fontweight="bold",
+                                    va="top", ha="left", color=temp_color,
+                                    bbox=dict(boxstyle="round,pad=0.25", fc=score_bg,
+                                              ec=temp_color, alpha=0.9, lw=1.2))
+                            # 仓位建议卡片
+                            ax.text(0.62, 0.38, "建议仓位", transform=ax.transAxes,
+                                    fontsize=8, va="top", ha="left", color="#666")
+                            ax.text(0.62, 0.32, f"{temperature}%", transform=ax.transAxes,
+                                    fontsize=15, fontweight="bold", va="top", ha="left",
+                                    color=temp_color,
+                                    bbox=dict(boxstyle="round,pad=0.25", fc=score_bg,
+                                              ec=temp_color, alpha=0.9, lw=1.2))
+                            # 底部总结
+                            ax.text(0.5, 0.06, f"💡 {cycle_text} · {emo_label}",
+                                    transform=ax.transAxes, fontsize=10, fontweight="bold",
+                                    ha="center", va="center", color=cycle_color,
+                                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=cycle_color, lw=1.5))
 
                         elif k == "etf_rank":
-                            # 📊 ETF 板块强弱排行 (真正的横向条形图, 清晰对比)
-                            import matplotlib
-                            matplotlib.rcParams["font.sans-serif"] = [
-                                "Hei", "Heiti TC", "Hiragino Sans GB",
-                                "Arial Unicode MS", "STHeiti"]
-                            matplotlib.rcParams["axes.unicode_minus"] = False
+                            # 📊 ETF 板块强弱 — 纯文字 TOP5/BOTTOM5 列表 (占一格, 与情绪并排)
+                            ax.axis("off")
+                            _skip_regime = True
 
                             ETF_LIST = [
                                 ("510300.SH","沪深300"),("510500.SH","中证500"),("159915.SZ","创业板"),
@@ -4381,7 +4338,6 @@ class StockDetailMixin:
                                 ("513100.SH","纳指"),("513500.SH","标普"),("513520.SH","日经"),
                                 ("513180.SH","恒生科技"),
                             ]
-                            # 拿数据 (带 30min 缓存)
                             try:
                                 import time as _time
                                 import tushare as ts
@@ -4415,118 +4371,45 @@ class StockDetailMixin:
                                 etf_results = []
 
                             if etf_results:
-                                # === 彻底重构: 名字/排名用 fig.text 独立 fig fraction 坐标 ===
-                                # 数据轴只管 bar + 涨幅 + score, 布局绝对不挤
-                                names = [r[1] for r in etf_results]
-                                scores = [r[0] for r in etf_results]
-                                r5s = [r[2] for r in etf_results]
-                                r20s = [r[3] for r in etf_results]
-                                n_items = len(names)
-                                y_pos = np.arange(n_items)
+                                # 🔥 纯文字 TOP5 / BOTTOM5
+                                top5 = etf_results[:5]
+                                bot5 = etf_results[-5:]
 
-                                colors = ["#D32F2F" if s > 0 else "#388E3C" for s in scores]
-                                BAR_H = 0.32
-                                ax.barh(y_pos, scores, color=colors, alpha=0.88,
-                                        edgecolor="white", height=BAR_H)
-                                ax.axvline(0, color="#666", lw=1.2, ls="--")
+                                # 标题
+                                ax.text(0.02, 0.97, "📊 ETF 板块强弱", transform=ax.transAxes,
+                                        fontsize=11, fontweight="bold", va="top", ha="left", color="#263238")
+                                ax.plot([0.02, 0.98], [0.93, 0.93], color="#E0E0E0", lw=1, transform=ax.transAxes)
 
-                                x_span = max(abs(min(scores)), abs(max(scores))) * 1.18
-                                ax.set_xlim(-x_span, x_span)
-                                ax.set_yticks([])
-                                ax.invert_yaxis()
-                                ax.grid(axis="x", alpha=0.25, lw=0.8)
-                                ax.set_xlabel("综合得分  (5日×0.6  +  20日×0.4)", fontsize=10, labelpad=6)
-                                for spine in ["left", "right", "top"]:
-                                    if spine in ax.spines:
-                                        ax.spines[spine].set_visible(False)
+                                # 🔥 TOP5 强势 (红)
+                                ax.text(0.02, 0.89, "🔥 TOP5 强势", transform=ax.transAxes,
+                                        fontsize=9, fontweight="bold", va="top", ha="left", color="#C62828")
+                                top_lines = []
+                                for i, (s, n, r5, r20) in enumerate(top5):
+                                    top_lines.append(f"  {i+1}. {n:<5s}  5日{r5:+.1f}%  20日{r20:+.1f}%  得分{s:+.2f}")
+                                ax.text(0.02, 0.86, "\n".join(top_lines), transform=ax.transAxes,
+                                        fontsize=8.5, va="top", ha="left", linespacing=1.45,
+                                        color="#C62828")
 
-                                # 调整 ax position — 数据区左起点拉到 0.44 fig fraction
-                                pos = ax.get_position()
-                                if pos.x0 < 0.44:
-                                    ax.set_position([0.44, pos.y0, 0.53, pos.height])
-                                    pos = ax.get_position()
-                                ax_bottom, ax_h = pos.y0, pos.height
+                                # ❄️ BOTTOM5 弱势 (绿)
+                                ax.text(0.02, 0.48, "❄️ BOTTOM5 弱势", transform=ax.transAxes,
+                                        fontsize=9, fontweight="bold", va="top", ha="left", color="#2E7D32")
+                                bot_lines = []
+                                for i, (s, n, r5, r20) in enumerate(reversed(bot5)):
+                                    bot_lines.append(f"  {len(etf_results)-i}. {n:<5s}  5日{r5:+.1f}%  20日{r20:+.1f}%  得分{s:+.2f}")
+                                ax.text(0.02, 0.45, "\n".join(bot_lines), transform=ax.transAxes,
+                                        fontsize=8.5, va="top", ha="left", linespacing=1.45,
+                                        color="#2E7D32")
 
-                                # —— ① fig.text 放左边名字 + 排名圆圈 ——
-                                # 名字从 0.02 左对齐, 排名圆圈在 0.36, y 由 data→fig 转换
-                                for i in range(n_items):
-                                    ax_frac = (n_items - 1 - i + 0.5) / n_items  # invert_yaxis 转换
-                                    fig_y = ax_bottom + ax_frac * ax_h
-
-                                    fig.text(0.02, fig_y, names[i], va="center", ha="left",
-                                             fontsize=9, color="#1A237E", fontweight="bold")
-
-                                    rank_color = "#C62828" if i == 0 else (
-                                        "#2E7D32" if i == n_items - 1 else "#78909C")
-                                    fig.text(0.36, fig_y, f"#{i+1}", va="center", ha="center",
-                                             fontsize=7, color=rank_color, fontweight="bold",
-                                             bbox=dict(boxstyle="round,pad=0.15", fc="#FAFAFA",
-                                                       ec=rank_color, alpha=0.88))
-
-                                # —— ② 数据轴内: bar + 涨幅 tag (上下交错) + score ——
-                                for i in range(n_items):
-                                    s = scores[i]; r5 = r5s[i]; r20 = r20s[i]
-                                    r5_color = "#D32F2F" if r5 >= 0 else "#388E3C"
-                                    r20_color = "#D32F2F" if r20 >= 0 else "#388E3C"
-                                    r5_str = f"5日{r5:+.1f}%"
-                                    r20_str = f"20日{r20:+.1f}%"
-
-                                    dy = 0.26
-                                    if s >= 0:
-                                        dx = x_span * 0.035
-                                        top_txt, bot_txt, top_c, bot_c = (
-                                            (r5_str, r20_str, r5_color, r20_color)
-                                            if i % 2 == 1 else
-                                            (r20_str, r5_str, r20_color, r5_color))
-                                        ax.text(s + dx, i + dy, top_txt, va="center", ha="left",
-                                                fontsize=7, color=top_c, fontweight="bold",
-                                                bbox=dict(boxstyle="round,pad=0.12", fc="#FFF",
-                                                          ec=top_c, alpha=0.9, lw=0.7))
-                                        ax.text(s + dx, i - dy, bot_txt, va="center", ha="left",
-                                                fontsize=7, color=bot_c, fontweight="bold",
-                                                bbox=dict(boxstyle="round,pad=0.12", fc="#FFF",
-                                                          ec=bot_c, alpha=0.9, lw=0.7))
-                                    else:
-                                        dx = x_span * 0.035
-                                        top_txt, bot_txt, top_c, bot_c = (
-                                            (r5_str, r20_str, r5_color, r20_color)
-                                            if i % 2 == 1 else
-                                            (r20_str, r5_str, r20_color, r5_color))
-                                        ax.text(s - dx, i + dy, top_txt, va="center", ha="right",
-                                                fontsize=7, color=top_c, fontweight="bold",
-                                                bbox=dict(boxstyle="round,pad=0.12", fc="#FFF",
-                                                          ec=top_c, alpha=0.9, lw=0.7))
-                                        ax.text(s - dx, i - dy, bot_txt, va="center", ha="right",
-                                                fontsize=7, color=bot_c, fontweight="bold",
-                                                bbox=dict(boxstyle="round,pad=0.12", fc="#FFF",
-                                                          ec=bot_c, alpha=0.9, lw=0.7))
-
-                                    # score 数值 —— bar 内部白色字
-                                    score_ha = "right" if s >= 0 else "left"
-                                    score_x = s - x_span * 0.025 if s >= 0 else s + x_span * 0.025
-                                    ax.text(score_x, i, f"{s:+.2f}", va="center", ha=score_ha,
-                                            fontsize=8, color="white", fontweight="bold", alpha=0.95)
-
-                                # TOP1 / BOTTOM1 粗描边
-                                ax.barh(y_pos[0], scores[0], color="#D32F2F", alpha=1.0,
-                                        edgecolor="#FFEBEE", lw=3, height=BAR_H)
-                                ax.barh(y_pos[-1], scores[-1], color="#388E3C", alpha=1.0,
-                                        edgecolor="#E8F5E9", lw=3, height=BAR_H)
-
-                                top_name = names[0]; bot_name = names[-1]
-                                ax.text(0.98, 0.02,
-                                        f"💡 顺势{top_name}  ·  规避{bot_name}",
+                                # 💡 建议
+                                top_name = top5[0][1]; bot_name = etf_results[-1][1]
+                                ax.text(0.5, 0.06,
+                                        f"💡 顺势 {top_name}  ·  规避 {bot_name}",
                                         transform=ax.transAxes, fontsize=10, fontweight="bold",
-                                        ha="right", va="bottom", color="#1565C0",
+                                        ha="center", va="center", color="#1565C0",
                                         bbox=dict(boxstyle="round,pad=0.3", fc="#E3F2FD", ec="#90CAF9", alpha=0.95))
                             else:
-                                ax.axis("off")
-                                ax.text(0.5, 0.5, "📊 ETF 数据加载失败\n(检查主界面联网 / tushare token)",
-                                        transform=ax.transAxes, fontsize=12, ha="center", va="center", color="#999")
-                            ax.set_title(f"📊 ETF 板块强弱 · {display_name}", fontsize=12, fontweight="bold")
-                            ax.legend([], [], frameon=False)  # 清掉多空背景带残留
-                            # ETF rank 不用多空背景带 (已经自己有红绿色了)
-                            _skip_regime = True
+                                ax.text(0.5, 0.5, "ETF 数据加载失败\n(检查主界面联网 / tushare token)",
+                                        transform=ax.transAxes, fontsize=10, ha="center", va="center", color="#999")
 
                         # 🎨 多空背景带 (浅红看多 / 浅绿看空) — 跳过 emotion/etf_rank
                         ax.autoscale_view()
