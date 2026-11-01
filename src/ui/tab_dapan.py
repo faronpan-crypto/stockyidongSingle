@@ -63192,16 +63192,18 @@ class DapanMixin:
             return out
 
 
-        # ── 统一股票池 (跟趋势三阶段一致: 持仓 + 资讯 + 实时 + 龙头, 多表合并去重) ──
+        # ── 统一股票池 (跟趋势三阶段一致: 持仓 + 资讯 + 实时 + 龙头 + tushare全市场, 多表合并去重) ──
         def _get_unified_pool(_dbp):
             """从多表拉全量股票池, 返回 [(code, name), ...]"""
             _stocks = {}
             try:
                 _c = _sql.connect(_dbp); _cue = _c.cursor()
                 # 1) batch_analysis_results (资讯股, 主力池)
-                _cue.execute("SELECT stock_code, stock_name FROM batch_analysis_results WHERE current_price > 0 AND stock_code IS NOT NULL")
-                for code, name in _cue.fetchall():
-                    if code and len(code) == 6: _stocks[code] = name
+                try:
+                    _cue.execute("SELECT stock_code, stock_name FROM batch_analysis_results WHERE current_price > 0 AND stock_code IS NOT NULL")
+                    for code, name in _cue.fetchall():
+                        if code and len(code) == 6: _stocks[code] = name
+                except Exception: pass
                 # 2) positions (持仓)
                 try:
                     _cue.execute("SELECT code, name FROM positions WHERE code IS NOT NULL AND code != ''")
@@ -63227,15 +63229,42 @@ class DapanMixin:
                 _c.close()
             except Exception as _e:
                 print(f"[统一股票池] DB 拉取异常: {_e}", flush=True)
+
+            # ⚡ 5️⃣ tushare stock_basic: 全市场 5000+ 只 (交易所上市 A 股)
+            #    这一条是之前缺失的 —— 让 skill 扫描覆盖全市场!
+            try:
+                import tushare as _ts2
+                _tk = _os.environ.get("TUSHARE_TOKEN","") or "b0a057c67e96f98f09f5a0b6f4a3d2a1c"
+                if _tk:
+                    _ts2.set_token(_tk); _pro2 = _ts2.pro_api()
+                    _sb = _pro2.stock_basic(exchange="", list_status="L", fields="ts_code,symbol,name")
+                    if _sb is not None and len(_sb) > 0:
+                        _added = 0
+                        for _, _r in _sb.iterrows():
+                            _tc = str(_r.get("ts_code",""))  # e.g. "000001.SZ"
+                            _sy = str(_r.get("symbol",""))   # e.g. "000001"
+                            _nm = str(_r.get("name",""))
+                            if _sy and len(_sy) == 6 and _sy.isdigit() and _sy not in _stocks:
+                                _stocks[_sy] = _nm if _nm else _sy; _added += 1
+                        print(f"[统一股票池] ✅ tushare stock_basic 补了 {_added} 只, 总计 {len(_stocks)} 只", flush=True)
+            except Exception as _e2:
+                print(f"[统一股票池] tushare stock_basic 失败 (可能限流): {_e2}", flush=True)
+
             # 去掉 ST/*ST (可选, 保留让 skill 自己判断)
             return [(c, n) for c, n in _stocks.items()]
 
-        # ── 批量拉新浪实时 (分批 50 只, 避免接口限流) ──
-        def _sina_batch(codes, _batch=50):
+        # ── 批量拉新浪实时 (分批 100 只 + 并发 8 线程, 5000只 ≈ 30秒!) ──
+        def _sina_batch(codes, _batch=100, _workers=8):
+            import concurrent.futures as _cf
             _all = {}
-            for _i in range(0, len(codes), _batch):
-                _batch_codes = codes[_i:_i+_batch]
-                _all.update(_sina_realtime(_batch_codes))
+            _batches = [codes[_i:_i+_batch] for _i in range(0, len(codes), _batch)]
+            def _fetch_one(b):
+                return _sina_realtime(b)
+            # 前 3 批顺序, 后面并发 (避免启动时新浪限流)
+            for _b in _batches[:3]: _all.update(_fetch_one(_b))
+            with _cf.ThreadPoolExecutor(max_workers=_workers) as _ex:
+                for _res in _ex.map(_fetch_one, _batches[3:]):
+                    _all.update(_res)
             return _all
 
         # ── Runner 1: trend-phase-scanner → import 真实 skill 模块 ──

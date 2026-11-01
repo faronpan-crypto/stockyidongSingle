@@ -738,17 +738,21 @@ def build_fund_holdings_tab(parent, root=None):
         _plt.rcParams['axes.unicode_minus'] = False
     except Exception: pass
 
-    # Tab A: 📈 日K周期
+    # Tab A: 📈 日K周期 (3 子图: K线 + 成交量 + MACD)
     tab_rk = ttk.Frame(right_nb); right_nb.add(tab_rk, text="📈 日K")
-    rk_fig = Figure(figsize=(7, 6), facecolor=_BG_PANEL)
-    rk_ax1 = rk_fig.add_subplot(211); rk_ax2 = rk_fig.add_subplot(212, sharex=rk_ax1)
-    rk_ax1.set_facecolor(_BG_PANEL); rk_ax2.set_facecolor(_BG_PANEL)
+    rk_fig = Figure(figsize=(7, 7.5), facecolor=_BG_PANEL)
+    _rk_gs = rk_fig.add_gridspec(3, 1, height_ratios=[3, 1, 1], hspace=0.06)
+    rk_ax1 = rk_fig.add_subplot(_rk_gs[0])
+    rk_ax2 = rk_fig.add_subplot(_rk_gs[1], sharex=rk_ax1)
+    rk_ax3 = rk_fig.add_subplot(_rk_gs[2], sharex=rk_ax1)
+    for ax in (rk_ax1, rk_ax2, rk_ax3): ax.set_facecolor(_BG_PANEL)
     rk_canvas = FigureCanvasTkAgg(rk_fig, master=tab_rk); rk_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     NavigationToolbar2Tk(rk_canvas, tab_rk, pack_toolbar=False).update()
 
-    # Tab B: 🌈 一目均衡 (3 行 + 13 toggle)
+    # Tab B: 🌈 一目均衡 (3 行 + 17 toggle, 分两行避免截断!)
     tab_ri = ttk.Frame(right_nb); right_nb.add(tab_ri, text="🌈 一目均衡")
     ri_toggle = ttk.Frame(tab_ri); ri_toggle.pack(fill=tk.X, padx=2, pady=(2,0))
+    ri_toggle2 = ttk.Frame(tab_ri); ri_toggle2.pack(fill=tk.X, padx=2, pady=(0,2))
     rc = '#AAAAAA'
     ri_cloud_var = tk.BooleanVar(value=True); ri_tenkan_var = tk.BooleanVar(value=True)
     ri_kijun_var = tk.BooleanVar(value=True); ri_chikou_var = tk.BooleanVar(value=True)
@@ -757,18 +761,24 @@ def build_fund_holdings_tab(parent, root=None):
     ri_ma_var = tk.BooleanVar(value=False); ri_boll_var = tk.BooleanVar(value=False)
     ri_bias_var = tk.BooleanVar(value=False); ri_vwmacd_var = tk.BooleanVar(value=True)
     ri_volma_var = tk.BooleanVar(value=True); ri_cci_var = tk.BooleanVar(value=False)
+    ri_ene_var = tk.BooleanVar(value=False); ri_sar_var = tk.BooleanVar(value=False)
+    ri_bbi_var = tk.BooleanVar(value=False)
     def _mkcb(parent, txt, var):
         cb = tk.Checkbutton(parent, text=txt, variable=var, fg=rc, bg=_BG_PANEL,
                             activebackground=_BG_PANEL, activeforeground=rc,
                             selectcolor=_BG_DEEP, font=("Menlo", 8))
         return cb
+    # 第一行: 一目均衡核心指标 + 通道型指标 (9 个)
     for txt, v in [("☁️云", ri_cloud_var), ("转换", ri_tenkan_var), ("基准", ri_kijun_var),
                    ("迟行", ri_chikou_var), ("SuperTrend", ri_supertrend_var),
                    ("VWAP+σ带", ri_vwap_band_var), ("TD", ri_td_var),
-                   ("Camari", ri_camarilla_var), ("MA", ri_ma_var), ("BOLL", ri_boll_var),
-                   ("BIAS", ri_bias_var), ("VW-MACD", ri_vwmacd_var), ("量MA", ri_volma_var),
-                   ("🎵五线谱", ri_cci_var)]:
+                   ("Camari", ri_camarilla_var), ("MA", ri_ma_var)]:
         _mkcb(ri_toggle, txt, v).pack(side=tk.LEFT, padx=1)
+    # 第二行: 震荡/副图/新增指标 (8 个)
+    for txt, v in [("BOLL", ri_boll_var), ("BIAS", ri_bias_var), ("VW-MACD", ri_vwmacd_var),
+                   ("量MA", ri_volma_var), ("🎵五线谱", ri_cci_var), ("ENE", ri_ene_var),
+                   ("SAR", ri_sar_var), ("BBI", ri_bbi_var)]:
+        _mkcb(ri_toggle2, txt, v).pack(side=tk.LEFT, padx=1)
     ri_fig = Figure(figsize=(7, 7), facecolor=_BG_PANEL)
     _ri_gs = ri_fig.add_gridspec(3, 1, height_ratios=[5, 3, 2], hspace=0.06)
     ri_ax1 = ri_fig.add_subplot(_ri_gs[0]); ri_ax2 = ri_fig.add_subplot(_ri_gs[1], sharex=ri_ax1)
@@ -785,7 +795,7 @@ def build_fund_holdings_tab(parent, root=None):
     for _v in (ri_cloud_var, ri_tenkan_var, ri_kijun_var, ri_chikou_var,
                ri_supertrend_var, ri_vwap_band_var, ri_td_var, ri_camarilla_var,
                ri_ma_var, ri_boll_var, ri_bias_var, ri_vwmacd_var, ri_volma_var,
-               ri_cci_var):
+               ri_cci_var, ri_ene_var, ri_sar_var, ri_bbi_var):
         _v.trace_add('write', _ri_redraw_on_toggle)
 
     # Tab C: 📊 财务 (3行 subplots: 利润率 + 增长率 + 比率)
@@ -828,11 +838,19 @@ def build_fund_holdings_tab(parent, root=None):
             root.after(0, _apply)
         threading.Thread(target=_w, daemon=True).start()
 
+    def _ema_rk(a, p):
+        o = np.zeros_like(a, dtype=float); o[0] = a[0]; k = 2/(p+1)
+        for ii in range(1, len(a)): o[ii] = o[ii]*k + a[ii-1]*(1-k)
+        # 修正: 上面是旧版, 正确EMA是当前值*k + 上次EMA*(1-k)
+        o2 = np.zeros_like(a, dtype=float); o2[0] = a[0]
+        for ii in range(1, len(a)): o2[ii] = a[ii]*k + o2[ii-1]*(1-k)
+        return o2
+
     def _draw_rk_tab(sina, name, df):
-        rk_ax1.clear(); rk_ax2.clear()
+        rk_ax1.clear(); rk_ax2.clear(); rk_ax3.clear()
         if not df:
             rk_ax1.text(0.5, 0.5, f"加载中 {sina}...", transform=rk_ax1.transAxes, ha='center', color=_FG_DIM)
-            rk_canvas.draw(); return
+            rk_canvas.draw_idle(); return
         if isinstance(df, list):
             opens = np.array([float(d.get('open', 0)) for d in df])
             highs = np.array([float(d.get('high', 0)) for d in df])
@@ -844,6 +862,8 @@ def build_fund_holdings_tab(parent, root=None):
             lows  = df['low'].astype(float).values; closes = df['close'].astype(float).values
             vols  = df['volume'].astype(float).values
         n = len(closes); x = np.arange(n)
+
+        # ═══ 主图: K线 + MA ═══
         for ma_n, c in [(5, _FG_BLUE), (10, _FG_CYAN), (20, _FG_GOLD), (60, _FG_DIM)]:
             ma_v = pd.Series(closes).rolling(ma_n, min_periods=1).mean().values
             rk_ax1.plot(x, ma_v, color=c, linewidth=0.8, alpha=0.8, label=f'MA{ma_n}')
@@ -854,13 +874,34 @@ def build_fund_holdings_tab(parent, root=None):
             rk_ax1.bar(x[i], max(body_hi - body_lo, 0.001), bottom=body_lo, width=0.6,
                        color=_FG_RED if closes[i] >= opens[i] else _FG_GREEN)
         rk_ax1.set_title(f"{name}({sina}) · 日K", color=_FG_TEXT, fontsize=10)
-        rk_ax1.tick_params(colors=_FG_DIM); rk_ax1.legend(fontsize=7, loc='upper left',
-                                                         facecolor=_BG_PANEL, edgecolor=_FG_DIM)
+        rk_ax1.tick_params(colors=_FG_DIM, labelbottom=False)
+        rk_ax1.legend(fontsize=7, loc='upper left', facecolor=_BG_PANEL, edgecolor=_FG_DIM)
         rk_ax1.grid(True, alpha=0.15, color=_FG_DIM)
-        cv = [_FG_RED if closes[i] >= opens[i] else _FG_GREEN for i in range(n)]
+
+        # ═══ 副图1: 成交量 ═══
+        cv = [_FG_RED if closes[i] >= closes[max(0,i-1)] else _FG_GREEN for i in range(n)]
         rk_ax2.bar(x, vols, color=cv, width=0.6, alpha=0.7)
-        rk_ax2.tick_params(colors=_FG_DIM); rk_ax2.grid(True, alpha=0.15, color=_FG_DIM)
-        rk_fig.tight_layout(); rk_canvas.draw()
+        vm5 = pd.Series(vols).rolling(5, min_periods=1).mean().values
+        rk_ax2.plot(x, vm5, color=_FG_GOLD, linewidth=0.7, label='VOL_MA5')
+        rk_ax2.tick_params(colors=_FG_DIM, labelbottom=False)
+        rk_ax2.legend(fontsize=6, loc='upper left', facecolor=_BG_PANEL, edgecolor=_FG_DIM)
+        rk_ax2.grid(True, alpha=0.15, color=_FG_DIM)
+
+        # ═══ 副图2: MACD(12,26,9) ═══
+        e12 = _ema_rk(closes, 12); e26 = _ema_rk(closes, 26)
+        dif = e12 - e26; dea = _ema_rk(dif, 9)
+        macd_h = 2 * (dif - dea)
+        h_colors = [_FG_RED if v >= 0 else _FG_GREEN for v in macd_h]
+        rk_ax3.bar(x, macd_h, color=h_colors, width=0.7, alpha=0.8)
+        rk_ax3.plot(x, dif, color=_FG_BLUE, linewidth=0.9, label='DIF')
+        rk_ax3.plot(x, dea, color='#FFB74D', linewidth=0.9, label='DEA')
+        rk_ax3.axhline(y=0, color=_FG_DIM, lw=0.5, ls=':')
+        rk_ax3.tick_params(colors=_FG_DIM)
+        rk_ax3.legend(fontsize=6, loc='upper left', facecolor=_BG_PANEL, edgecolor=_FG_DIM)
+        rk_ax3.grid(True, alpha=0.15, color=_FG_DIM)
+        step = max(1, n//10); rk_ax3.set_xticks(x[::step])
+
+        rk_fig.tight_layout(); rk_canvas.draw_idle()
 
     def _draw_ri_tab(sina, name, df):
         """🌈 完整版一目均衡: 3 行 + 13 toggle."""
@@ -873,7 +914,7 @@ def build_fund_holdings_tab(parent, root=None):
         ri_ax1.clear(); ri_ax2.clear(); ri_ax3.clear()
         if not df:
             ri_ax1.text(0.5, 0.5, "加载中...", transform=ri_ax1.transAxes, ha='center', color=_FG_DIM)
-            ri_canvas.draw(); return
+            ri_canvas.draw_idle(); return
         if isinstance(df, list):
             highs = np.array([float(d.get('high', 0)) for d in df])
             lows  = np.array([float(d.get('low', 0)) for d in df])
@@ -977,6 +1018,64 @@ def build_fund_holdings_tab(parent, root=None):
                         color=_FG_RED if bv>0 else _FG_GREEN,va='top',
                         bbox=dict(boxstyle='round,pad=0.3',facecolor=_BG_DEEP,alpha=0.8))
 
+        # ═══ ENE (轨道线) ═══ 标准 ENE=(MA10±2*N*ATR) 这里用 MA10 为中轨 ± ATR
+        if ri_ene_var.get():
+            _ene_ma = pd.Series(closes).rolling(10, min_periods=1).mean().values
+            _tr = np.maximum(highs-lows, np.maximum(np.abs(highs-np.roll(closes,1)), np.abs(lows-np.roll(closes,1))))
+            _tr[0] = highs[0]-lows[0]
+            _atr = pd.Series(_tr).rolling(10, min_periods=1).mean().values
+            _ene_upper = _ene_ma + _atr * 1.1
+            _ene_lower = _ene_ma - _atr * 1.1
+            ri_ax1.plot(x, _ene_ma, color='#FFD700', linewidth=0.9, label='ENE中轨MA10', linestyle='-')
+            ri_ax1.plot(x, _ene_upper, color='#FFD700', linewidth=0.5, alpha=0.6, linestyle='--')
+            ri_ax1.plot(x, _ene_lower, color='#FFD700', linewidth=0.5, alpha=0.6, linestyle='--')
+            ri_ax1.fill_between(x, _ene_lower, _ene_upper, color='#FFD700', alpha=0.05)
+
+        # ═══ SAR (抛物线指标) ═══ 经典 Welles Wilder SAR
+        if ri_sar_var.get() and n >= 30:
+            _sar = np.full(n, np.nan)
+            _af = 0.02  # acceleration factor
+            _max_af = 0.2
+            _ep = highs[0]  # extreme point
+            _trend = 1  # 1=up, -1=down
+            _af_cur = _af
+            _sar[0] = lows[0]
+            for _i in range(1, n):
+                if _trend == 1:
+                    _sar[_i] = _sar[_i-1] + _af_cur * (_ep - _sar[_i-1])
+                    _sar[_i] = min(_sar[_i], lows[_i-1])
+                    if _i >= 2: _sar[_i] = min(_sar[_i], lows[_i-2])
+                    if highs[_i] > _ep:
+                        _ep = highs[_i]; _af_cur = min(_af_cur + _af, _max_af)
+                    if closes[_i] < _sar[_i]:
+                        _trend = -1; _sar[_i] = _ep; _ep = lows[_i]; _af_cur = _af
+                else:
+                    _sar[_i] = _sar[_i-1] + _af_cur * (_ep - _sar[_i-1])
+                    _sar[_i] = max(_sar[_i], highs[_i-1])
+                    if _i >= 2: _sar[_i] = max(_sar[_i], highs[_i-2])
+                    if lows[_i] < _ep:
+                        _ep = lows[_i]; _af_cur = min(_af_cur + _af, _max_af)
+                    if closes[_i] > _sar[_i]:
+                        _trend = 1; _sar[_i] = _ep; _ep = highs[_i]; _af_cur = _af
+            # SAR 画成点, 上涨期 sar 在价格下方(红), 下跌期在上方(绿)
+            ri_ax1.scatter(x, _sar, c=[_FG_RED if closes[_i] >= _sar[_i] else _FG_GREEN for _i in range(n)],
+                           s=6, marker='.', alpha=0.8, label='SAR', zorder=4)
+
+        # ═══ BBI (多空指标) ═══ (MA3+MA6+MA12+MA24)/4
+        if ri_bbi_var.get():
+            _bbi = (pd.Series(closes).rolling(3, min_periods=1).mean().values +
+                    pd.Series(closes).rolling(6, min_periods=1).mean().values +
+                    pd.Series(closes).rolling(12, min_periods=1).mean().values +
+                    pd.Series(closes).rolling(24, min_periods=1).mean().values) / 4
+            ri_ax1.plot(x, _bbi, color='#FF69B4', linewidth=1.0, label='BBI(3,6,12,24)', zorder=6)
+            # BBI 方向变色
+            for _i in range(1, n):
+                _c = _FG_RED if _bbi[_i] > _bbi[_i-1] else _FG_GREEN
+                ri_ax1.plot(x[_i-1:_i+1], _bbi[_i-1:_i+1], color=_c, linewidth=1.2, solid_capstyle='round')
+            # 价格 vs BBI 填充
+            ri_ax1.fill_between(x, closes, _bbi, where=(closes >= _bbi), color=_FG_RED, alpha=0.04)
+            ri_ax1.fill_between(x, closes, _bbi, where=(closes < _bbi), color=_FG_GREEN, alpha=0.04)
+
         ri_ax1.set_title(f"{name}({sina}) · 一目均衡",color=_FG_TEXT,fontsize=10)
         ri_ax1.tick_params(colors=_FG_DIM); ri_ax1.legend(fontsize=6,loc='upper left',
                                                           facecolor=_BG_PANEL, edgecolor=_FG_DIM)
@@ -1041,7 +1140,7 @@ def build_fund_holdings_tab(parent, root=None):
         ri_ax3.grid(True,alpha=0.15,color=_FG_DIM)
         step=max(1,n//10); ri_ax3.set_xticks(x[::step])
 
-        ri_fig.tight_layout(); ri_canvas.draw()
+        ri_fig.tight_layout(); ri_canvas.draw_idle()
 
     def _draw_rf_tab(sina, name):
         """📊 财务 Tab — 3 行 subplots: 利润率(ROE/EPS) + 增长率(营收/净利同比) + 比率(毛利率/负债率)."""
@@ -1301,58 +1400,70 @@ def build_fund_holdings_tab(parent, root=None):
         def _worker():
             try:
                 import akshare as ak
-                from collections import defaultdict
                 import datetime as _dt
+                # 1️⃣ 公募重仓股 (东方财富) — fund_portfolio_hold_em
                 _季 = _dt.datetime.now().month
-                _q = f"{_dt.datetime.now().year}{((_季-1)//3)+1}"  # Q1/Q2/Q3/Q4
-                _q_last = _dt.datetime.now().year - 1
+                _q = f"{_dt.datetime.now().year}{((_季-1)//3)+1}"
+                df = None
                 try:
                     df = ak.fund_portfolio_hold_em(date=str(_q))
-                except Exception:
-                    df = None
-                    # 尝试上一季度
+                    print(f"[机构重仓] ✅ 拉到 {len(df)} 行 ({_q})", flush=True)
+                except Exception as e1:
+                    print(f"[机构重仓] ❌ {_q} 失败: {e1}, 尝试上季度", flush=True)
                     try:
-                        import datetime as _dt2
-                        _y = _dt2.datetime.now().year
-                        _m = _dt2.datetime.now().month
+                        _y = _dt.datetime.now().year; _m = _dt.datetime.now().month
                         if _m <= 3: _y -= 1; _qq = "4"
                         elif _m <= 6: _qq = "1"
                         elif _m <= 9: _qq = "2"
                         else: _qq = "3"
                         df = ak.fund_portfolio_hold_em(date=f"{_y}{_qq}")
-                    except Exception: pass
-                _fund_stock = defaultdict(lambda: {"funds": set(), "pct": 0.0})
+                        print(f"[机构重仓] ✅ 上季度 {_y}{_qq}: {len(df)} 行", flush=True)
+                    except Exception as e2:
+                        print(f"[机构重仓] ❌ 上季度也失败: {e2}", flush=True)
+
+                # ⚡ akshare 这个 API 没有基金代码列! 不能聚合"多少只基金持有"
+                #    但同一只股票可能出现在多行 (不同基金), 所以按 代码聚合 pct 求和
+                from collections import defaultdict
+                _stock_pct = defaultdict(float)  # (code, name) → 累计 pct
+                _stock_code_name = {}
                 if df is not None and len(df) > 0:
                     for _, row in df.head(2000).iterrows():
-                        _nm = str(row.get("股票名称","")); _cd = str(row.get("股票代码",""))
-                        _fc = str(row.get("基金代码",""))
+                        _nm = str(row.get("股票名称","")).strip()
+                        _cd = str(row.get("股票代码","")).strip()
                         _pct = float(row.get("占净值比例", 0) or 0)
-                        if _cd and len(_cd)==6:
-                            _fund_stock[(_cd,_nm)]["funds"].add(_fc)
-                            _fund_stock[(_cd,_nm)]["pct"] += _pct
-                # 兜底: 种子数据 (从 _FUND_TOP_HOLDINGS 聚合)
-                if not _fund_stock:
+                        if _cd and _nm and len(_cd) == 6 and _pct > 0:
+                            _stock_pct[(_cd, _nm)] += _pct
+                            _stock_code_name[_cd] = _nm
+                # 转为 rows 列表
+                _rows = []
+                for (_cd, _nm), _pct_sum in _stock_pct.items():
+                    _rows.append({"code": _cd, "name": _nm, "industry": "待归类",
+                                  "funds": "-", "pct": round(_pct_sum, 1)})
+                print(f"[机构重仓] 聚合去重后 {len(_rows)} 只", flush=True)
+
+                # 兜底: 种子数据 (如果 akshare 没返回或太少)
+                if len(_rows) < 10:
+                    print(f"[机构重仓] akshare 数据不足, 用种子兜底", flush=True)
                     for _fc, _fn, _ind, _holds in _FUND_TOP_HOLDINGS:
                         for _cs, _sn in _holds:
                             _6 = _cs[2:] if _cs.startswith(("sh","sz","bj")) else _cs
-                            _fund_stock[(_6, _sn)]["funds"].add(_fc)
-                            _fund_stock[(_6, _sn)]["pct"] += 1.0
-                _rows = []
-                for (_cd, _nm), _d in _fund_stock.items():
-                    _funds_count = len(_d["funds"])
-                    if _funds_count >= 2:  # 至少 2 只基金持有
-                        # 行业匹配: 从 _FUND_TOP_HOLDINGS 找或种子
-                        _ind = "科技"
+                            # 避免重复
+                            if not any(r["code"] == _6 for r in _rows):
+                                _rows.append({"code": _6, "name": _sn, "industry": _ind,
+                                              "funds": "种子", "pct": 2.0})
+
+                # 行业匹配: 从种子数据补 (akshare 没给行业)
+                for _r in _rows:
+                    if _r["industry"] == "待归类":
                         for _fc2, _fn2, _ind2, _holds2 in _FUND_TOP_HOLDINGS:
                             for _cs2, _sn2 in _holds2:
-                                if _sn2 == _nm: _ind = _ind2; break
-                        _rows.append({
-                            "code": _cd, "name": _nm, "industry": _ind,
-                            "funds": _funds_count, "pct": round(_d["pct"], 1),
-                        })
-                _rows.sort(key=lambda x: x["funds"], reverse=True)
+                                if _sn2 == _r["name"]: _r["industry"] = _ind2; break
+
+                # 排序 + 截断
+                _rows.sort(key=lambda x: x["pct"], reverse=True)
                 _inst_cache["funds"] = _rows[:20]
-                # 行业变化: 用东方财富行业涨幅
+
+                # 2️⃣ 行业涨跌 (东方财富行业板块)
                 try:
                     _ind_df = ak.stock_board_industry_name_em()
                     if _ind_df is not None and len(_ind_df) > 0:
@@ -1365,16 +1476,13 @@ def build_fund_holdings_tab(parent, root=None):
                             })
                         _ind_rows.sort(key=lambda x: x["pct_chg"], reverse=True)
                         _inst_cache["industry"] = _ind_rows[:20]
-                except Exception: pass
+                        print(f"[机构重仓] ✅ 行业涨跌 {len(_ind_rows)} 条", flush=True)
+                except Exception as e3:
+                    print(f"[机构重仓] ❌ 行业涨跌失败: {e3}", flush=True)
+
                 # 刷新 UI
                 def _refresh_ui():
                     for it in inst_tree.get_children(): inst_tree.delete(it)
-                    _quote_map = {}
-                    try:
-                        import akshare as _ak2
-                        for _r in _inst_cache["funds"][:5]:
-                            pass  # 行情稍后统一刷新
-                    except Exception: pass
                     for rank, s in enumerate(_inst_cache["funds"], 1):
                         _tag = "hi" if rank <= 3 else ""
                         inst_tree.insert("", tk.END, values=(rank, s["code"], s["name"],
@@ -1386,7 +1494,7 @@ def build_fund_holdings_tab(parent, root=None):
                         ind_tree.insert("", tk.END, values=(rank, s["industry"],
                             f"{_pct:+.2f}", f"{s['vol']:,.0f}", "-", "-",
                             "↑领涨" if _pct > 1 else ("↓领跌" if _pct < -1 else "-")), tags=(_tag,))
-                    inst_status.config(text=f"✅ 公募重仓 Top{len(_inst_cache['funds'])} · 行业 Top{len(_inst_cache['industry'])} 已刷新")
+                    inst_status.config(text=f"✅ 公募重仓 Top{len(_inst_cache['funds'])} · 行业 Top{len(_inst_cache['industry'])}")
                 parent.after(0, _refresh_ui)
             except Exception as _e:
                 import traceback as _tb; _tb.print_exc()

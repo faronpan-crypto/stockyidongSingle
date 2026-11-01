@@ -4720,7 +4720,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             else:
                 ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(**_pad)
 
-        # ── Row 2: 🎯 选股 / 量化 / 机会 (actionable) ──
+        # ── Row 2: 🎯 选股 / 量化 / 机会 (actionable) — 精简到 7 个, 避免一行挤爆! ──
         _ROW2 = [
             ("📈价增量涨", 10, self._show_price_volume_dialog),
             ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
@@ -4729,24 +4729,24 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("🪙筹码", 7, self._show_chouma),
             ("🎯机会", 7, self._show_jianlou),
             ("🎯高抛低吸", 8, self._show_high_low_swing),
-            ("🔥主线·资金迁移", 12, self._show_mainline_capital_dialog),
-            ("📊大盘分析师", 10, self._show_market_analyst_dialog),
-            ("💡主力趋势", 8, self._show_main_trend_dialog),
-            ("⭐五星跟随", 9, self.show_five_star_follow_dialog),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW2):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
             ttk.Button(toolbar_row2, text=txt, width=w, command=cmd).pack(**_pad)
 
-        # ── Row 3: 📈 K线 / 个股分析 (per-stock deep dive) ──
+        # ── Row 3: 🔥 主线 / 大盘分析 + K线 / 个股分析 (合并, 精简 width!) ──
         _ROW3 = [
-            ("📊K线图", 7, self.show_kline_dialog),
-            ("📈一目均衡", 8, self._show_ichimoku_kline_dialog),
+            ("🔥主线·资金", 10, self._show_mainline_capital_dialog),
+            ("📊大盘分析", 9, self._show_market_analyst_dialog),
+            ("💡主力趋势", 8, self._show_main_trend_dialog),
+            ("⭐五星跟随", 8, self.show_five_star_follow_dialog),
+            ("📊K线", 6, self.show_kline_dialog),
+            ("📈一目均衡", 7, self._show_ichimoku_kline_dialog),
             ("📈1minK", 7, self._show_1min_kline_dialog),
-            ("📊分析深度", 8, self._show_stock_analysis_dialog),
-            ("📊比价横向", 8, self._show_stock_compare_dialog),
-            ("🔍多股对比", 8, self._show_multi_compare_dialog),
-            ("📐β-α", 7, self._show_beta_alpha),
+            ("📊分析深度", 7, self._show_stock_analysis_dialog),
+            ("📊比价", 6, self._show_stock_compare_dialog),
+            ("🔍多股对比", 7, self._show_multi_compare_dialog),
+            ("📐β-α", 6, self._show_beta_alpha),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW3):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
@@ -4776,7 +4776,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
                 _last_tab_idx[0] = _idx
                 _tab = crawler_control_notebook.nametowidget(_sel)
                 _refresher = _tab_refreshers.get(_tab)
-                if _refresher and callable(_refresher.get("refresh")):
+                if _refresher and _refresher.get("auto_refresh", True) and callable(_refresher.get("refresh")):
                     def _safe_call():
                         try:
                             _refresher["refresh"]()
@@ -4817,6 +4817,8 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             from ui.fund_holdings_tab import build_fund_holdings_tab
             _fund_refresher = build_fund_holdings_tab(fund_frame, root=self.root)
             if _fund_refresher and isinstance(_fund_refresher, dict):
+                # ⚡ 基金持仓数据量大(akshare拉全量), 不要自动刷 — 手动点 🔄 按钮才刷
+                _fund_refresher["auto_refresh"] = False
                 _tab_refreshers[fund_frame] = _fund_refresher
                 print("[Tab刷新] 📊基金持仓 已注册刷新函数", flush=True)
         except Exception as _fe:

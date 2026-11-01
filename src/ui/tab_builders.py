@@ -7741,12 +7741,17 @@ except Exception as e:
                 pct_var.set(p); prog_txt.config(text=msg); win.update_idletasks()
             self.root.after(0, _do)
 
-        def _open_kline(code6, name):
+        def _open_kline(code6, name, _extra_list=None):
             try:
                 from ui.high_low_swing import _quick_open_daily_kline
-                _quick_open_daily_kline(win, str(code6), str(name or ""))
+                # 🆕 收集当前板块所有龙头, 传给 stock_list → 左侧 Listbox 可快速切换
+                _all_leaders = list(_extra_list) if _extra_list else []
+                _quick_open_daily_kline(win, str(code6), str(name or ""), stock_list=_all_leaders or None)
             except Exception as _e:
                 import traceback; traceback.print_exc()
+
+        # 🆕 收集主线看板里所有龙头 (给 _open_kline 用)
+        _all_mainline_leaders = []
 
         def _run():
             scan_btn.config(state=tk.DISABLED)
@@ -7800,6 +7805,9 @@ except Exception as e:
                     ml_txt.insert(tk.END, f"   综合分 {score:.1f}/100  |  {reason}\n\n")
                     leaders = self._get_sector_leaders(raw, name, top_n=5)
                     if leaders:
+                        # 🆕 收集所有龙头给左侧 Listbox
+                        for ld in leaders:
+                            _all_mainline_leaders.append((ld["code"], ld.get("name","")))
                         ml_txt.insert(tk.END, "   ─ 龙头标杆 ─ (双击股票名→日K线)\n")
                         for li, ld in enumerate(leaders, 1):
                             pct = ld["change_pct"]
@@ -7811,7 +7819,9 @@ except Exception as e:
                             ml_txt.insert(tk.END, f"{_display}", _tag)
                             ml_txt.insert(tk.END, f"  价{ld['price']:.2f}  {pct:+.2f}%  换手{ld['turnover_rate']:.1f}%\n")
                             ml_txt.tag_config(_tag, foreground="#1565C0", font=("", 10, "bold"), underline=True)
-                            ml_txt.tag_bind(_tag, "<Double-Button-1>", lambda e, c=_code, n=_nm: _open_kline(c, n))
+                            # 🆕 传完整龙头列表, 打开后左侧可快速切换
+                            ml_txt.tag_bind(_tag, "<Double-Button-1>",
+                                            lambda e, c=_code, n=_nm: _open_kline(c, n, _all_mainline_leaders))
                     ml_txt.insert(tk.END, "\n")
             except Exception as e: ml_txt.insert(tk.END, f"❌ 主线渲染失败: {e}")
 
@@ -8064,15 +8074,20 @@ except Exception as e:
 
         # === 维度1: 大盘趋势 ===
         idx = data.get("indices", {})
-        bull_cnt = sum(1 for v in idx.values() if isinstance(v, dict) and v.get("ma_trend") == "多头")
-        bear_cnt = sum(1 for v in idx.values() if isinstance(v, dict) and v.get("ma_trend") == "空头")
+        _BULL_STATES = {"多头"}
+        _BEAR_STATES = {"空头", "暴跌转空", "跌破MA20"}  # 修复: 暴跌转空/跌破MA20 都算空方
+        bull_cnt = sum(1 for v in idx.values() if isinstance(v, dict) and v.get("ma_trend") in _BULL_STATES)
+        bear_cnt = sum(1 for v in idx.values() if isinstance(v, dict) and v.get("ma_trend") in _BEAR_STATES)
         idx_pcts = [v.get("pct_chg", 0) for v in idx.values() if isinstance(v, dict)]
         idx_avg = np.mean(idx_pcts) if idx_pcts else 0
         dim1 = {"name": "大盘趋势", "lights": [], "score_delta": 0}
+        # 修复后评分: 收盘价优先的状态判断
         if bull_cnt >= 2:
-            score += 12; dim1["lights"].append("🟢"); dim1["score_delta"] = +12; dim1["desc"] = f"{bull_cnt}/3指数多头排列"
+            score += 12; dim1["lights"].append("🟢"); dim1["score_delta"] = +12; dim1["desc"] = f"{bull_cnt}/3指数多头排列(收盘>MA20>MA60)"
         elif bear_cnt >= 2:
-            score -= 12; dim1["lights"].append("🔴"); dim1["score_delta"] = -12; dim1["desc"] = f"{bear_cnt}/3指数空头排列"
+            score -= 15; dim1["lights"].append("🔴"); dim1["score_delta"] = -15; dim1["desc"] = f"{bear_cnt}/3指数空头或跌破MA (优先收盘价!)"
+        elif bear_cnt >= 1:
+            score -= 6; dim1["lights"].append("🟡"); dim1["score_delta"] = -6; dim1["desc"] = f"{bear_cnt}指数已破位, 余震荡"
         elif idx_avg > 0.5:
             score += 4; dim1["lights"].append("🟡"); dim1["score_delta"] = +4; dim1["desc"] = f"指数分化, 平均+{idx_avg:.2f}%"
         else:
@@ -8213,7 +8228,7 @@ except Exception as e:
                 if isinstance(v, dict) and "error" not in v:
                     _pct = v.get("pct_chg", 0)
                     _tr = v.get("ma_trend", "?")
-                    _tr_icon = {"多头": "🟢", "空头": "🔴", "震荡": "🟡"}.get(_tr, "⚪")
+                    _tr_icon = {"多头": "🟢", "空头": "🔴", "暴跌转空": "🔴", "跌破MA20": "🟡🔴", "震荡": "🟡"}.get(_tr, "⚪")
                     lines.append(f"   {_tr_icon} {nm}: 收{v.get('close', 0):.2f}  涨跌{_pct:+.2f}%  MA趋势={_tr}")
             # 模块三: 情绪与广度
             breadth = data.get("breadth", {})
@@ -11103,22 +11118,36 @@ except Exception as e:
     # ================================================================
     # 🎯 量化预测 —— 市场走势预测 5 维闭环
     # ================================================================
-    def _scan_quant_forecast_data(self):
-        """采集量化预测所需全部数据。"""
+    def _scan_quant_forecast_data(self, target_date=None):
+        """采集量化预测所需全部数据。target_date='YYYYMMDD' 或 None(=最近交易日)"""
         import tushare as _ts, pandas as pd
         _token = (os.environ.get("TUSHARE_TOKEN","") or getattr(self,"ts_token","") or TS_DEFAULT_TOKEN or "").strip()
         if not _token: return {"error": "TUSHARE_TOKEN 未配置"}
         os.environ["TUSHARE_TOKEN"] = _token; _ts.set_token(_token)
         _pro = _ts.pro_api()
         from datetime import datetime, timedelta
-        result = {}; _today = datetime.now().strftime("%Y%m%d")
+        result = {}
+
+        # 日期解析: 先用用户指定, 再找最近交易日
+        if target_date and len(str(target_date))==8:
+            _user_date = str(target_date)
+        else:
+            _user_date = datetime.now().strftime("%Y%m%d")
+
+        _today = _user_date
         try:
-            _cal = _pro.trade_cal(exchange="SSE", start_date=(datetime.now()-timedelta(days=10)).strftime("%Y%m%d"), end_date=_today)
+            # 先查用户指定日是否是交易日, 如果不是则往前找最近的
+            _cal_start = (datetime.strptime(_user_date,"%Y%m%d") - timedelta(days=14)).strftime("%Y%m%d")
+            _cal = _pro.trade_cal(exchange="SSE", start_date=_cal_start, end_date=_user_date)
             if _cal is not None and len(_cal) > 0:
                 _open = _cal[_cal["is_open"]==1]["cal_date"]
-                if len(_open) > 0: _today = str(_open.sort_values().iloc[-1])
-        except Exception: pass
+                if len(_open) > 0:
+                    _today = str(_open.sort_values().iloc[-1])  # 取最后一个 ≤ target_date 的交易日
+        except Exception as _e_cal:
+            print(f"[量化扫描] trade_cal 警告: {_e_cal}", flush=True)
         result["td"] = _today
+        if _today != _user_date:
+            print(f"[量化扫描] 用户指定 {_user_date} → 使用最近交易日 {_today}", flush=True)
 
         # 指数历史 500 天
         _index_map = {"000001.SH":"上证指数","399001.SZ":"深证成指","399006.SZ":"创业板指"}
@@ -11179,24 +11208,35 @@ except Exception as e:
                 limit_up = len(_df[_df["pct_chg"]>=9.5]); limit_dn = len(_df[_df["pct_chg"]<=-9.5])
                 up_amt = _df[_df["pct_chg"]>0]["amount"].sum(); dn_amt = _df[_df["pct_chg"]<0]["amount"].sum()
                 trin = ((up/max(dn,1))/(up_amt/max(dn_amt,1))) if dn>0 and dn_amt>0 else 1.0
-                _hist_bd = []
-                for _dt2 in pd.date_range(end=_today, periods=120, freq="B").strftime("%Y%m%d").tolist():
-                    try:
-                        _d = _pro.daily(trade_date=_dt2, fields="ts_code,pct_chg")
-                        if _d is not None and len(_d)>0:
-                            _hist_bd.append(len(_d[_d["pct_chg"]>0]) - len(_d[_d["pct_chg"]<0]))
-                    except Exception: pass
+                # ⚡ 优化: MCL 用 3 条指数涨跌差近似 (1 次调用, 秒级完成 — 原来要拉 120 天 daily 太慢!)
                 mcl_val_pct = 0.0; mcl_trend = "无数据"
-                if len(_hist_bd) >= 45:
-                    _arr = np.array(_hist_bd, dtype=float)
-                    _ema19 = _ema(_arr, 19); _ema39 = _ema(_arr, 39)
-                    mcl = _ema19[-1] - _ema39[-1]
-                    mcl_val_pct = mcl / max(float(len(_hist_bd[0])),1.0)*100 if len(_hist_bd)>0 else 0.0
-                    if mcl_val_pct > 20: mcl_trend = "超买·回落风险"
-                    elif mcl_val_pct > 5: mcl_trend = "偏强"
-                    elif mcl_val_pct < -20: mcl_trend = "超卖·反弹概率"
-                    elif mcl_val_pct < -5: mcl_trend = "偏弱"
-                    else: mcl_trend = "中性"
+                try:
+                    _idx_hist_list = []
+                    for _ic, _in in _index_map.items():
+                        _ih = _pro.index_daily(ts_code=_ic, start_date=(datetime.now()-timedelta(days=180)).strftime("%Y%m%d"), end_date=_today)
+                        if _ih is not None and len(_ih) >= 45:
+                            _ih = _ih.sort_values("trade_date")
+                            _idx_hist_list.append(_ih["pct_chg"].fillna(0).values)
+                    if len(_idx_hist_list) >= 2:
+                        # 每天的市场广度 = 上涨指数数 - 下跌指数数 (3 条指数)
+                        _min_len = min(len(x) for x in _idx_hist_list)
+                        _bd = np.zeros(_min_len, dtype=float)
+                        for i in range(_min_len):
+                            _up_cnt = sum(1 for arr in _idx_hist_list if arr[-_min_len+i] > 0)
+                            _dn_cnt = sum(1 for arr in _idx_hist_list if arr[-_min_len+i] < 0)
+                            _bd[i] = _up_cnt - _dn_cnt  # 范围 [-3, 3]
+                        # MCL = EMA(bd,19) - EMA(bd,39), 用标准差归一化
+                        if len(_bd) >= 45:
+                            _e19 = _ema(_bd, 19); _e39 = _ema(_bd, 39)
+                            mcl = float(_e19[-1] - _e39[-1])
+                            _std = float(np.std(_bd[-60:])) if len(_bd)>=60 else 1.0
+                            mcl_val_pct = mcl / max(_std, 0.1) * 50  # 归一化到 %
+                            if mcl_val_pct > 20: mcl_trend = "超买·回落风险"
+                            elif mcl_val_pct > 5: mcl_trend = "偏强"
+                            elif mcl_val_pct < -20: mcl_trend = "超卖·反弹概率"
+                            elif mcl_val_pct < -5: mcl_trend = "偏弱"
+                            else: mcl_trend = "中性"
+                except Exception: pass
                 result["breadth"] = {
                     "total":len(_df), "up":up, "dn":dn, "flat":flat, "red_pct":red_pct,
                     "limit_up":limit_up, "limit_dn":limit_dn, "trin":trin,
@@ -11310,8 +11350,21 @@ except Exception as e:
 
         ctrl = ttk.Frame(win); ctrl.pack(fill=tk.X,padx=8,pady=(6,2))
         scan_btn = ttk.Button(ctrl, text="🔄 量化扫描", width=14); scan_btn.pack(side=tk.LEFT)
+        # 🆕 日期选择器: 默认空 = 最近交易日, 可手动指定
+        tk.Label(ctrl, text="📅日期:", font=("",10)).pack(side=tk.LEFT,padx=(12,2))
+        date_var = tk.StringVar(value="")
+        date_entry = ttk.Entry(ctrl, textvariable=date_var, width=12, font=("Menlo",10))
+        date_entry.pack(side=tk.LEFT)
+        date_entry.insert(0, "")  # 空 = 自动
+        tk.Label(ctrl, text="(空=最近交易日, 格式: 20261030)", fg="#888", font=("",8)).pack(side=tk.LEFT,padx=2)
+        ttk.Button(ctrl, text="昨天", width=4,
+                   command=lambda: date_var.set((__import__("datetime").datetime.now()-__import__("datetime").timedelta(days=1)).strftime("%Y%m%d"))
+                   ).pack(side=tk.LEFT,padx=2)
+        ttk.Button(ctrl, text="今天", width=4,
+                   command=lambda: date_var.set(__import__("datetime").datetime.now().strftime("%Y%m%d"))
+                   ).pack(side=tk.LEFT,padx=2)
         pct_var = tk.DoubleVar(value=0)
-        prog = ttk.Progressbar(ctrl, variable=pct_var, maximum=100, length=260); prog.pack(side=tk.LEFT,padx=8)
+        prog = ttk.Progressbar(ctrl, variable=pct_var, maximum=100, length=200); prog.pack(side=tk.LEFT,padx=8)
         prog_txt = tk.Label(ctrl, text="", fg="#555"); prog_txt.pack(side=tk.LEFT)
         concl_label = tk.Label(ctrl, text="", font=("",11,"bold"), fg="#B71C1C")
         concl_label.pack(side=tk.LEFT,padx=10)
@@ -11411,26 +11464,51 @@ except Exception as e:
             self.root.after(0, _do)
 
         def _run():
-            scan_btn.config(state=tk.DISABLED)
+            print(f"[量化_run] 🟢 线程启动", flush=True)
+            self.root.after(0, lambda: scan_btn.config(state=tk.DISABLED))
             try:
-                _set_prog(5, "采集指数+Breadth...")
-                data = self._scan_quant_forecast_data()
+                # 取用户指定日期
+                _d = date_var.get().strip()
+                print(f"[量化_run] 📅 date_var='{_d}'", flush=True)
+                if _d and len(_d)!=8 or (_d and not _d.isdigit()):
+                    raise RuntimeError(f"日期格式错误: '{_d}' (应为 20261030)")
+                _set_prog(5, f"采集指数+Breadth (目标日期={_d or '自动'}...")
+                print(f"[量化_run] 🔄 调 _scan_quant_forecast_data...", flush=True)
+                data = self._scan_quant_forecast_data(target_date=_d or None)
+                print(f"[量化_run] ✅ scan 返回! keys={list(data.keys())}", flush=True)
                 if "error" in data: raise RuntimeError(data["error"])
                 _set_prog(50, "匹配历史形态 + KNN...")
-                self.root.after(0, lambda: _render_breadth(data))
-                self.root.after(0, lambda: _render_scores(data))
-                self.root.after(0, lambda: _render_sim(data))
-                self.root.after(0, lambda: _render_knn(data))
-                self.root.after(0, lambda: _render_report(data))
+                print(f"[量化扫描] ✅ 完成! td={data.get('td')} keys={list(data.keys())}", flush=True)
+
+                # 所有 UI 操作都通过 after(0,...) 回主线程 — 每个渲染独立 try/except
+                def _safe(fn, name):
+                    def _w():
+                        try: fn()
+                        except Exception as _e2:
+                            import traceback as _tb2; _tb2.print_exc()
+                            print(f"[量化渲染❌] {name}: {_e2}", flush=True)
+                    return _w
+
+                self.root.after(0, _safe(lambda: _render_breadth(data), "breadth"))
+                self.root.after(0, _safe(lambda: _render_scores(data), "scores"))
+                self.root.after(0, _safe(lambda: _render_sim(data), "sim"))
+                self.root.after(0, _safe(lambda: _render_knn(data), "knn"))
+                self.root.after(0, _safe(lambda: _render_report(data), "report"))
                 _final = data.get("final",{})
-                _set_prog(100, f"✅ 总分 {_final.get('total',0):.0f}/100")
-                concl_label.config(text=_final.get("conclusion",""))
-                status_var.set(f"✅ td={data.get('td','')}")
-                scan_btn.config(state=tk.NORMAL)
+                _set_prog(100, f"✅ {data.get('td','')} 总分 {_final.get('total',0):.0f}/100")
+                self.root.after(0, lambda: concl_label.config(text=_final.get("conclusion","")))
+                self.root.after(0, lambda: status_var.set(f"✅ td={data.get('td','')}"))
+                self.root.after(0, lambda: scan_btn.config(state=tk.NORMAL))
             except Exception as e:
                 import traceback; _err=traceback.format_exc()
-                status_var.set(f"❌ {e}"); scan_btn.config(state=tk.NORMAL)
-                self.root.after(0, lambda: messagebox.showerror("失败", f"{e}\n\n{_err[-500:]}", parent=win))
+                print(f"[量化扫描] ❌ 异常: {_err}", flush=True)
+                self.root.after(0, lambda: status_var.set(f"❌ {e}"))
+                self.root.after(0, lambda: scan_btn.config(state=tk.NORMAL))
+                self.root.after(0, lambda: pct_var.set(0))
+                self.root.after(0, lambda: prog_txt.config(text=f"❌ 扫描失败"))
+                try:
+                    self.root.after(0, lambda: messagebox.showerror("失败", f"{e}\n\n{_err[-800:]}", parent=win))
+                except Exception: pass
 
         def _render_breadth(d):
             br=d.get("breadth",{})

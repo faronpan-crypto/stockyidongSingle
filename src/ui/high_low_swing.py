@@ -3423,8 +3423,9 @@ def _show_multi_kline_comparison(parent_root, app=None):
 # 数据源: 新浪 CN_MarketData.getKLineData
 # ═════════════════════════════════════════════════════════════════════════
 
-def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
-    """双击股票弹日K线 — 轻量版, 支持周期切换. 传 embed_frame 则内嵌而非弹窗"""
+def _quick_open_daily_kline(parent, code6, name, embed_frame=None, stock_list=None):
+    """双击股票弹日K线 — 轻量版, 支持周期切换.
+       stock_list: [(code6, name), ...] 可选, 有则左侧显示 Listbox 快速切换"""
     import tkinter as tk
     from tkinter import ttk, messagebox
     import requests, json
@@ -3433,6 +3434,13 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
     _is_embed = embed_frame is not None
+    # 🆕 左侧股票列表: 统一成 list[(code6, name)]
+    _stocks = []
+    if stock_list:
+        _stocks = [(str(c), str(n)) for c, n in stock_list if c and n and len(str(c))==6]
+        # 把当前股票也加进去(去重)
+        if code6 and name and code6 not in [c for c, _ in _stocks]:
+            _stocks.insert(0, (code6, name))
 
     # 单例: 关掉之前已打开的日K窗口 (内嵌则清掉 embed_frame 里残留)
     global _active_kline_win
@@ -3532,57 +3540,63 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                        activebackground=_BG_TOOLBAR, activeforeground="white",
                        command=lambda: _reload()).pack(side=tk.LEFT, padx=4)
 
-    # 🆕 两个分析勾选项
+    # 🆕 第二行: 分析/形态/副图指标 (避免一行挤爆!)
+    top2 = tk.Frame(dlg, bg=_BG_TOOLBAR, height=28); top2.pack(fill=tk.X)
+    top2.pack_propagate(False)
+
+    # 蜡烛分析 + 期货技术分析
     candle_var = tk.BooleanVar(value=False)
     futures_var = tk.BooleanVar(value=False)
-    tk.Checkbutton(top, text="🕯️ 蜡烛分析 (日本)", variable=candle_var,
+    tk.Checkbutton(top2, text="🕯️蜡烛分析", variable=candle_var,
                    bg=_BG_TOOLBAR, fg="#FFAB91", selectcolor=_BG_DEEP,
                    activebackground=_BG_TOOLBAR, activeforeground="#FFAB91",
-                   command=lambda: _on_analyze()).pack(side=tk.LEFT, padx=(20, 6))
-    tk.Checkbutton(top, text="📊 期货技术分析", variable=futures_var,
+                   command=lambda: _on_analyze()).pack(side=tk.LEFT, padx=(6, 4))
+    tk.Checkbutton(top2, text="📊期货分析", variable=futures_var,
                    bg=_BG_TOOLBAR, fg="#80CBC4", selectcolor=_BG_DEEP,
                    activebackground=_BG_TOOLBAR, activeforeground="#80CBC4",
-                   command=lambda: _on_analyze()).pack(side=tk.LEFT, padx=6)
+                   command=lambda: _on_analyze()).pack(side=tk.LEFT, padx=4)
 
-    # 🆕 支撑线 / 买卖点 / 一目均衡
+    # 支撑线 / 买卖点 / 一目均衡
     sup_var = tk.BooleanVar(value=True)
     bsp_var = tk.BooleanVar(value=True)
     ich_var = tk.BooleanVar(value=False)
-    tk.Checkbutton(top, text="📏 支撑线", variable=sup_var,
+    tk.Checkbutton(top2, text="📏支撑线", variable=sup_var,
                    bg=_BG_TOOLBAR, fg="#81D4FA", selectcolor=_BG_DEEP,
                    activebackground=_BG_TOOLBAR, activeforeground="#81D4FA",
-                   command=lambda: _reload()).pack(side=tk.LEFT, padx=(20, 6))
-    tk.Checkbutton(top, text="🎯 买卖点", variable=bsp_var,
+                   command=lambda: _reload()).pack(side=tk.LEFT, padx=(16, 4))
+    tk.Checkbutton(top2, text="🎯买卖点", variable=bsp_var,
                    bg=_BG_TOOLBAR, fg="#FFD54F", selectcolor=_BG_DEEP,
                    activebackground=_BG_TOOLBAR, activeforeground="#FFD54F",
-                   command=lambda: _reload()).pack(side=tk.LEFT, padx=6)
-    tk.Checkbutton(top, text="🌥️ 一目均衡", variable=ich_var,
+                   command=lambda: _reload()).pack(side=tk.LEFT, padx=4)
+    tk.Checkbutton(top2, text="🌥️一目均衡", variable=ich_var,
                    bg=_BG_TOOLBAR, fg="#26C6DA", selectcolor=_BG_DEEP,
                    activebackground=_BG_TOOLBAR, activeforeground="#26C6DA",
-                   command=lambda: _reload()).pack(side=tk.LEFT, padx=6)
+                   command=lambda: _reload()).pack(side=tk.LEFT, padx=4)
 
-    # 🆕 副图指标多选 (右侧可勾选, 勾选几个画几个)
-    tk.Label(top, text="副图指标:", bg=_BG_TOOLBAR, fg=_FG_DIM,
-             font=("", 9)).pack(side=tk.LEFT, padx=(18, 2))
+    # 🆕 副图指标多选: MACD/KDJ/RSI/BIAS/BOLL/OBV/ENE + SAR/BBI
+    tk.Label(top2, text="副图:", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("", 9)).pack(side=tk.LEFT, padx=(16, 2))
     _sub_defs = [
-        ("MACD",   True,  "#4FC3F7"),
-        ("KDJ",    False, "#CE93D8"),
-        ("RSI",    False, "#AB47BC"),
-        ("BIAS",   False, "#FFB74D"),
-        ("BOLL",   False, "#80CBC4"),
-        ("OBV",    False, "#78909C"),
-        ("ENE",    False, "#EF9A9A"),  # 🆕 ENE 轨道线
+        ("MACD", True,  "#4FC3F7"),
+        ("KDJ",  False, "#CE93D8"),
+        ("RSI",  False, "#AB47BC"),
+        ("BIAS", False, "#FFB74D"),
+        ("BOLL", False, "#80CBC4"),
+        ("OBV",  False, "#78909C"),
+        ("ENE",  False, "#EF9A9A"),
+        ("SAR",  False, "#F06292"),  # 🆕 抛物线
+        ("BBI",  False, "#BA68C8"),  # 🆕 多空指标
     ]
     _sub_vars = {}
     for _name, _default, _color in _sub_defs:
         _v = tk.BooleanVar(value=_default)
         _sub_vars[_name] = _v
-        tk.Checkbutton(top, text=_name, variable=_v,
+        tk.Checkbutton(top2, text=_name, variable=_v,
                        bg=_BG_TOOLBAR, fg=_color, selectcolor=_BG_DEEP,
                        activebackground=_BG_TOOLBAR, activeforeground=_color,
                        command=lambda: _reload()).pack(side=tk.LEFT, padx=2)
-    # 🆕 ❓按钮 — 双击查看所有副图指标解释
-    _btn_help = tk.Label(top, text="❓", bg=_BG_TOOLBAR, fg=_FG_GOLD,
+    # ❓按钮
+    _btn_help = tk.Label(top2, text="❓", bg=_BG_TOOLBAR, fg=_FG_GOLD,
                          font=("", 10, "bold"), cursor="hand2")
     _btn_help.pack(side=tk.LEFT, padx=(4, 2))
     _ENE_HELP = """📚 副图指标详解 (双击❓随时查看)
@@ -3652,11 +3666,31 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
   ⬇ ENE% < 0.0 = 触下轨 (超卖, 关注反弹)
   ✨ 最适合识别短线启动和见顶!
 
+━ SAR (抛物线 Welles Wilder) ━
+  SAR = SAR + AF × (EP - SAR)
+  AF = 加速因子 0.02 → 0.2 (每次创新极值 +0.02)
+  EP = Extreme Point (趋势内最高价/最低价)
+  
+  🔴 红点在价格下方 = 多头趋势, 持有
+  🟢 绿点在价格上方 = 空头趋势, 观望
+  ⚠ 颜色翻转 = 趋势反转信号 (最强买卖点)
+  ✨ 最适合中短线止损! SAR 就是你的移动止损线
+
+━ BBI (多空指标) ━
+  BBI = (MA3 + MA6 + MA12 + MA24) / 4
+  
+  🟢 收盘价在 BBI 之上 = 多头市场, 持股
+  🔴 收盘价在 BBI 之下 = 空头市场, 持币
+  ⚠ BBI 方向改变 = 趋势反转信号
+  ✨ 最适合判断大趋势多空, 过滤假突破!
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 💡 实战建议:
   • MACD + KDJ 组合 = 中短期买卖信号双确认
   • ENE + BIAS 组合 = 短线超买超卖精准捕捉
-  • RSI + BOLL%B 组合 = 反转概率最高的超卖识别"""
+  • RSI + BOLL%B 组合 = 反转概率最高的超卖识别
+  • SAR + BBI 组合 = BBI 定方向 + SAR 定止损 (黄金搭档!)
+  • SAR + MACD 组合 = MACD 确认动能 + SAR 保护利润"""
     def _show_sub_help():
         """弹出副图指标帮助窗口"""
         top2 = tk.Toplevel(dlg)
@@ -3676,10 +3710,49 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
     status = tk.Label(top, text="⏳ 加载中...", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9))
     status.pack(side=tk.RIGHT, padx=10)
 
+    # 🆕 主体布局: 有股票列表则左侧 Listbox + 右侧 canvas; 否则直接 canvas
+    _main_body = tk.Frame(dlg, bg=_BG_DEEP)
+    _main_body.pack(fill=tk.BOTH, expand=True)
+
+    _left_lb = None  # 避免未定义警告
+    if _stocks:
+        # 左侧股票列表
+        _left_frame = tk.Frame(_main_body, bg=_BG_PANEL, width=180)
+        _left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(2,0), pady=2)
+        _left_frame.pack_propagate(False)
+        tk.Label(_left_frame, text=f"📋 相关股票 ({len(_stocks)})", bg=_BG_PANEL,
+                 fg=_FG_GOLD, font=("", 10, "bold")).pack(fill=tk.X, pady=(4,2))
+        _left_lb = tk.Listbox(_left_frame, bg=_BG_DEEP, fg=_FG_TEXT,
+                              selectbackground="#1565C0", selectforeground="white",
+                              font=("Menlo", 10), activestyle="dotbox",
+                              height=20)
+        _left_lb.pack(fill=tk.BOTH, expand=True, padx=2, pady=(0,2))
+        _left_sb = ttk.Scrollbar(_left_frame, orient="vertical", command=_left_lb.yview)
+        _left_lb.configure(yscrollcommand=_left_sb.set)
+        # 填充列表
+        for _c, _n in _stocks:
+            _left_lb.insert(tk.END, f"{_c} {_n}")
+        # 选中当前
+        for _i, (_c, _n) in enumerate(_stocks):
+            if _c == code6:
+                _left_lb.selection_set(_i); _left_lb.see(_i); break
+
+        def _on_lb_select(_evt=None):
+            if not _left_lb.curselection(): return
+            _idx = _left_lb.curselection()[0]
+            _c, _n = _stocks[_idx]
+            if _c != code6:
+                _code_input.set(_c)
+                _switch_code(_c)
+
+        _left_lb.bind("<Double-Button-1>", _on_lb_select)
+        _left_lb.bind("<<ListboxSelect>>", _on_lb_select)
+
+    # 右侧 canvas
     fig = Figure(figsize=(12, 7.2), facecolor=_BG_DEEP, dpi=100)
-    canvas = FigureCanvasTkAgg(fig, master=dlg)
+    canvas = FigureCanvasTkAgg(fig, master=_main_body)
     canvas.get_tk_widget().configure(bg=_BG_DEEP)
-    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    canvas.get_tk_widget().pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     # 🆕 保留 NavigationToolbar (支持缩放/平移/框选/返回/保存) — 之前被 destroy 了!
     tb_frame = tk.Frame(dlg, bg=_BG_TOOLBAR); tb_frame.pack(fill=tk.X, side=tk.BOTTOM)
     tb = NavigationToolbar2Tk(canvas, tb_frame); tb.update()
@@ -4830,6 +4903,56 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None):
                                      color="#66BB6A", alpha=0.2)  # 超卖区
                     _ax.set_ylim(-0.15, 1.15)
                     _ax.set_ylabel("ENE", color=_FG_DIM, fontsize=8)
+
+                # ── 🆕 SAR 抛物线 (Welles Wilder) ──
+                elif _sname == "SAR":
+                    _sar = np.full(n, np.nan)
+                    if n >= 5:
+                        _af = 0.02; _max_af = 0.2
+                        _trend = 1  # 1=上涨, -1=下跌
+                        _ep = highs[0]  # extreme point
+                        _sar[0] = lows[0] if _trend == 1 else highs[0]
+                        for i in range(1, n):
+                            # SAR_t = SAR_{t-1} + AF * (EP - SAR_{t-1})
+                            _sar[i] = _sar[i-1] + _af * (_ep - _sar[i-1])
+                            if _trend == 1:
+                                # 上涨期: EP = max(EP, 当日最高)
+                                if highs[i] > _ep: _ep = highs[i]; _af = min(_af + 0.02, _max_af)
+                                # 止损: SAR 不能高于前两日最低
+                                _sar[i] = min(_sar[i], lows[i-1])
+                                if i >= 2: _sar[i] = min(_sar[i], lows[i-2])
+                                # 翻空: 收盘价 < SAR
+                                if closes[i] < _sar[i]:
+                                    _trend = -1; _sar[i] = _ep; _ep = lows[i]; _af = 0.02
+                            else:
+                                # 下跌期: EP = min(EP, 当日最低)
+                                if lows[i] < _ep: _ep = lows[i]; _af = min(_af + 0.02, _max_af)
+                                # 止损: SAR 不能低于前两日最高
+                                _sar[i] = max(_sar[i], highs[i-1])
+                                if i >= 2: _sar[i] = max(_sar[i], highs[i-2])
+                                # 翻多: 收盘价 > SAR
+                                if closes[i] > _sar[i]:
+                                    _trend = 1; _sar[i] = _ep; _ep = highs[i]; _af = 0.02
+                    _ax.plot(x, closes, color=_FG_TEXT, lw=0.8, alpha=0.7, label="收盘")
+                    # SAR 点: 上涨(价格>SAR)=红, 下跌(价格<SAR)=绿
+                    _bull = closes > _sar
+                    _ax.scatter(x[_bull], _sar[_bull], color="#EF5350", s=10, zorder=5, label="SAR多头")
+                    _ax.scatter(x[~_bull], _sar[~_bull], color="#66BB6A", s=10, zorder=5, label="SAR空头")
+                    _ax.set_ylabel("SAR", color=_FG_DIM, fontsize=8)
+                    _ax.legend(fontsize=7, loc="upper left", ncol=3)
+
+                # ── 🆕 BBI 多空指标 (3/6/12/24 均线均值) ──
+                elif _sname == "BBI":
+                    _bbi = (_ma(closes, 3) + _ma(closes, 6) + _ma(closes, 12) + _ma(closes, 24)) / 4
+                    _ax.plot(x, closes, color=_FG_TEXT, lw=0.7, alpha=0.6, label="收盘")
+                    _ax.plot(x, _bbi, color="#BA68C8", lw=1.4, label="BBI")
+                    # 多空填充: 收盘在 BBI 之上=红色多, 之下=绿色空
+                    _ax.fill_between(x, closes, _bbi, where=closes >= _bbi,
+                                     color="#EF5350", alpha=0.18, label="多头区")
+                    _ax.fill_between(x, closes, _bbi, where=closes < _bbi,
+                                     color="#66BB6A", alpha=0.18, label="空头区")
+                    _ax.set_ylabel("BBI", color=_FG_DIM, fontsize=8)
+                    _ax.legend(fontsize=7, loc="upper left", ncol=3)
 
                 # ── OBV ──
                 elif _sname == "OBV":
