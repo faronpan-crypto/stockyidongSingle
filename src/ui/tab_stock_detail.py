@@ -3719,27 +3719,94 @@ class StockDetailMixin:
             try: win.state("zoomed")
             except:
                 try: win.attributes("-zoomed", True)
-                except: win.geometry("1400x900")
+                except: win.geometry("1600x1000")
 
             # ── 顶部工具栏 ──
             top = ttk.Frame(win, padding=6); top.pack(fill=tk.X)
             ttk.Label(top, text="📊 标的:", font=("",10,"bold")).pack(side=tk.LEFT)
-            symbols = [
-                "上证指数(sh000001)","深证成指(sz399001)","创业板指(sz399006)",
-                "沪深300(sh000300)","中证500(sh000905)","科创50(sh000688)",
-                "贵州茅台(600519)","宁德时代(300750)","比亚迪(002594)",
-                "中国平安(601318)","招商银行(600036)","中国中免(601888)",
-                "长江电力(600900)","美的集团(000333)","五粮液(000858)",
-                "恒瑞医药(600276)","中芯国际(688981)","药明康德(603259)",
-                "比亚迪(002594)","招商银行(600036)","立讯精密(002475)",
-            ]
-            sym_var = tk.StringVar(value="上证指数(sh000001)")
-            sym_combo = ttk.Combobox(top, textvariable=sym_var, values=symbols, width=22)
+
+            # ── 动态构建下拉: 指数 → 持仓股 → 龙头股 → 资讯股 → 热门 ──
+            def _build_symbols():
+                syms = []; seen = set()
+                def _add(tag, name, code):
+                    key = code.strip()
+                    if not key or key in seen: return
+                    seen.add(key)
+                    # code 格式: 纯数字 6 位, 自动补 sina 前缀
+                    if code.isdigit() and len(code)==6:
+                        sina = f"sh{code}" if code.startswith(("6","9","000","399")) else f"sz{code}"
+                        syms.append(f"[{tag}] {name}({sina})")
+                    else:
+                        syms.append(f"[{tag}] {name}({code})")
+                # 1. 主要指数 (固定)
+                for nm, cd in [("上证指数","sh000001"),("深证成指","sz399001"),("创业板指","sz399006"),
+                               ("沪深300","sh000300"),("中证500","sh000905"),("科创50","sh000688")]:
+                    _add("指数", nm, cd)
+                # 2. 持仓股 (group_idx=1)
+                try:
+                    for i, h in enumerate(getattr(self, 'holding_stocks', []) or []):
+                        if h: _add("持仓", h[0], h[1])
+                except Exception: pass
+                # 3. 龙头股 (group_idx=2)
+                try:
+                    for i, h in enumerate(getattr(self, 'holding_stocks_2', []) or []):
+                        if h: _add("龙头", h[0], h[1])
+                except Exception: pass
+                # 4. 资讯股/同花顺 (group_idx=6)
+                try:
+                    for i, h in enumerate(getattr(self, 'holding_stocks_6', []) or []):
+                        if h: _add("资讯", h[0], h[1])
+                except Exception: pass
+                # 5. Main (group_idx=4)
+                try:
+                    for i, h in enumerate(getattr(self, 'holding_stocks_4', []) or []):
+                        if h: _add("Main", h[0], h[1])
+                except Exception: pass
+                # 6. 热门兜底 (硬编码)
+                for nm, cd in [("贵州茅台","600519"),("宁德时代","300750"),("比亚迪","002594"),
+                               ("中国平安","601318"),("招商银行","600036"),("五粮液","000858"),
+                               ("长江电力","600900"),("美的集团","000333"),("中芯国际","688981")]:
+                    _add("热门", nm, cd)
+                return syms
+
+            symbols = _build_symbols()
+            sym_var = tk.StringVar(value=symbols[0] if symbols else "上证指数(sh000001)")
+            sym_combo = ttk.Combobox(top, textvariable=sym_var, values=symbols, width=28)
             sym_combo.pack(side=tk.LEFT, padx=4)
-            # 自定义代码输入
-            ttk.Label(top, text="或代码:").pack(side=tk.LEFT, padx=(8,2))
-            custom_code = tk.StringVar(value="")
-            ttk.Entry(top, textvariable=custom_code, width=8).pack(side=tk.LEFT)
+
+            # 股票名/代码快速搜索
+            ttk.Label(top, text="🔍 输入:", font=("",10)).pack(side=tk.LEFT, padx=(8,2))
+            search_var = tk.StringVar(value="")
+            search_entry = ttk.Entry(top, textvariable=search_var, width=12, font=("Menlo",10))
+            search_entry.pack(side=tk.LEFT)
+
+            def _on_search(_evt=None):
+                """根据输入过滤下拉或直接触发刷新"""
+                q = search_var.get().strip()
+                if not q:
+                    sym_combo["values"] = symbols
+                    return
+                ql = q.lower()
+                matched = [s for s in symbols if ql in s.lower()]
+                # 如果输入的是纯 6 位代码或带 sina 前缀, 也支持
+                if len(matched) < 3:
+                    # 尝试直接构造 sina 代码作为 fallback
+                    code = q.zfill(6) if q.isdigit() else q
+                    if code.isdigit() and len(code)==6:
+                        sina = f"sh{code}" if code.startswith(("6","9","000","399")) else f"sz{code}"
+                        matched.append(f"[手动] 自定义({sina})")
+                    elif code.startswith(("sh","sz")) and len(code)==8:
+                        matched.append(f"[手动] 自定义({code})")
+                sym_combo["values"] = matched if matched else symbols
+                if matched: sym_combo.set(matched[0])
+            search_entry.bind("<KeyRelease>", _on_search)
+            search_entry.bind("<Return>", lambda e: _refresh())
+
+            # 清除搜索恢复全量
+            def _on_focus_out(_evt=None):
+                if not search_var.get().strip():
+                    sym_combo["values"] = symbols
+            search_entry.bind("<FocusOut>", _on_focus_out)
 
             ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
             ttk.Label(top, text="📐 图表:", font=("",10,"bold")).pack(side=tk.LEFT)
@@ -3752,6 +3819,8 @@ class StockDetailMixin:
                 ("vol", "📦成交量", True),
                 ("macd", "📐MACD", True),
                 ("moneyflow", "💵资金流向", False),
+                ("emotion", "🎯情绪复盘", False),
+                ("etf_rank", "📊ETF强弱", False),
             ]
             chart_vars = {}
             for key, lbl, default in chart_types:
@@ -3765,7 +3834,7 @@ class StockDetailMixin:
 
             # ── 主绘图区 ──
             chart_area = tk.Frame(win); chart_area.pack(fill=tk.BOTH, expand=True)
-            fig = Figure(figsize=(14, 9), dpi=100, facecolor="#FAFAFA")
+            fig = Figure(figsize=(16, 10), dpi=100, facecolor="#FAFAFA")
             canvas = FigureCanvasTkAgg(fig, chart_area); canvas.draw()
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, side=tk.TOP)
             # matplotlib 工具栏 (缩放/平移/保存)
@@ -3774,22 +3843,45 @@ class StockDetailMixin:
 
             # ── 辅助函数: 解析 symbol → tushare code + is_index ──
             def _parse_symbol(raw):
-                """解析 symbol → (tushare_code, sina_symbol, is_index)"""
-                raw = (custom_code.get().strip() or sym_var.get().strip())
-                if "(" in raw and ")" in raw:
-                    # "上证指数(sh000001)" 格式
-                    code = raw.split("(")[1].rstrip(")")
+                """解析 symbol → (sina_code, tushare_code, is_index, display_name)
+                支持格式:
+                  [指数] 上证指数(sh000001)
+                  [持仓] 贵州茅台(sh600519)
+                  [手动] 自定义(sh600519)
+                  或直接输入: sh600519 / sz399001 / 600519
+                """
+                raw = (search_var.get().strip() or sym_var.get().strip())
+                # 从最后一个 (...) 中提取 code
+                import re
+                m = re.search(r'\(([^()]+)\)\s*$', raw)
+                if m:
+                    code = m.group(1).strip()
+                    # 提取名字: ] XXX( 中间的 XXX
+                    m2 = re.search(r'\]\s*([^\(\[]+?)\s*\(', raw)
+                    display = m2.group(1).strip() if m2 else raw.split("(")[0].strip()
+                    if display.startswith("自定义"):
+                        # 只从 code 推导显示名
+                        display = code
                 else:
+                    # 纯代码输入
                     code = raw.strip()
-                is_index = code.startswith("sh000") or code.startswith("sz399") or code.startswith("000") or code.startswith("399")
-                # tushare 指数: sh000001 → 000001.SH
-                # tushare 个股: 600519 → 600519.SH / 002594 → 002594.SZ
+                    display = code
+
+                # code 归一化: 纯 6 位数字 → 补 sina 前缀
+                if code.isdigit() and len(code) == 6:
+                    code = f"sh{code}" if code.startswith(("6","9","000","399")) else f"sz{code}"
+
+                # 判断是否指数
+                is_index = code.startswith("sh000") or code.startswith("sz399")
+
+                # tushare 代码: sh000001 → 000001.SH, sh600519 → 600519.SH
                 if is_index:
                     ts_code = f"{code[2:]}.SH" if code.startswith("sh") else f"{code[2:]}.SZ"
                 else:
-                    if code.startswith("6") or code.startswith("9"): ts_code = f"{code}.SH"
-                    else: ts_code = f"{code}.SZ"
-                return code, ts_code, is_index
+                    digits = code[2:] if code.startswith(("sh","sz")) else code
+                    if digits.startswith(("6","9")): ts_code = f"{digits}.SH"
+                    else: ts_code = f"{digits}.SZ"
+                return code, ts_code, is_index, display
 
             # ── 辅助函数: 计算技术指标 ──
             def _ma(series, n):
@@ -3811,6 +3903,120 @@ class StockDetailMixin:
                 dea = dif.ewm(span=m, adjust=False).mean()
                 macd_hist = (dif - dea) * 2
                 return dif.values, dea.values, macd_hist.values
+            def _compute_regime(closes, highs, lows):
+                """每根K线计算多空得分: +1=看多红, -1=看空绿, 0=中性"""
+                s = pd.Series(closes)
+                n = len(closes)
+                ma20 = _ma(closes, 20); ma60 = _ma(closes, 60)
+                dif, dea, _h = _macd(closes)
+                # 简易 RSI
+                delta = s.diff(); gain = delta.clip(lower=0); loss = -delta.clip(upper=0)
+                rs = gain.rolling(14).mean() / loss.rolling(14).mean()
+                rsi = 100 - 100 / (1 + rs)
+                scores = np.zeros(n, dtype=float)
+                for i in range(n):
+                    bull = 0; bear = 0; total = 0
+                    # 价格 > MA20
+                    if not np.isnan(ma20[i]):
+                        total += 2
+                        if closes[i] > ma20[i]: bull += 2
+                        else: bear += 2
+                    # MA20 > MA60
+                    if not np.isnan(ma20[i]) and not np.isnan(ma60[i]):
+                        total += 2
+                        if ma20[i] > ma60[i]: bull += 2
+                        else: bear += 2
+                    # MACD 金叉
+                    if not np.isnan(dif[i]) and not np.isnan(dea[i]):
+                        total += 2
+                        if dif[i] > dea[i]: bull += 2
+                        else: bear += 2
+                    # RSI (nan 不计入)
+                    if not np.isnan(rsi.iloc[i]):
+                        total += 2
+                        if rsi.iloc[i] > 55: bull += 2
+                        elif rsi.iloc[i] < 45: bear += 2
+                    if total == 0:
+                        scores[i] = 0
+                    else:
+                        scores[i] = (bull - bear) / total  # -1.0 ~ +1.0
+                # 平滑避免抖动
+                smooth = pd.Series(scores).rolling(5, min_periods=1).mean().values
+                return smooth
+            def _draw_regime_bg(ax, x, regime, y_lo=None, y_hi=None):
+                """在 ax 上画浅红/浅绿背景带"""
+                if y_lo is None or y_hi is None:
+                    yl = ax.get_ylim(); y_lo, y_hi = yl[0], yl[1]
+                ax.fill_between(x, y_lo, y_hi, where=regime > 0,
+                                color="#FFCDD2", alpha=0.45, zorder=0)
+                ax.fill_between(x, y_lo, y_hi, where=regime < 0,
+                                color="#C8E6C9", alpha=0.45, zorder=0)
+
+            def _find_support_resistance(highs, lows, n_levels=3):
+                """ZigZag 式局部极值 → 聚类合并 → 返回 (supports, resistances)
+                每个都是 [(x_idx, price), ...] 按价格排序, 取最近 n_levels 条
+                """
+                n = len(highs)
+                if n < 20: return [], []
+                # 1. 找局部高点 (左右各 5 根内最高)
+                peaks = []; troughs = []
+                w = 5  # 左右窗口
+                for i in range(w, n - w):
+                    if highs[i] == max(highs[i-w:i+w+1]):
+                        peaks.append((i, highs[i]))
+                    if lows[i] == min(lows[i-w:i+w+1]):
+                        troughs.append((i, lows[i]))
+                # 2. 聚类: 相邻峰/谷价格差 < 1% 合并
+                def _cluster(points):
+                    if not points: return []
+                    pts = sorted(points, key=lambda p: p[1])
+                    merged = [pts[0]]
+                    for x_idx, price in pts[1:]:
+                        if abs(price - merged[-1][1]) / merged[-1][1] < 0.01:
+                            # 合并: 取平均价, 保留第一个的 x
+                            prev_x, prev_p = merged[-1]
+                            merged[-1] = (prev_x, (prev_p + price) / 2)
+                        else:
+                            merged.append((x_idx, price))
+                    return merged
+                peaks_c = _cluster(peaks)
+                troughs_c = _cluster(troughs)
+                # 3. 取最近的: 离最后一根 K 线最近的 n_levels 条
+                def _recent(points):
+                    if not points: return []
+                    points_sorted = sorted(points, key=lambda p: -p[0])  # x 降序
+                    return points_sorted[:n_levels]
+                return _recent(troughs_c), _recent(peaks_c)  # 支撑, 压力
+
+            def _find_trade_signals(closes, highs, lows):
+                """MACD 金叉/死叉 + MA20 过滤 → 返回 [(x, price, 'BUY'/'SELL'), ...]"""
+                n = len(closes)
+                if n < 30: return []
+                def _ma(s, p): return pd.Series(s).rolling(p).mean().values
+                def _macd(c, f=12, se=26, m=9):
+                    cp = pd.Series(c)
+                    ef = cp.ewm(span=f, adjust=False).mean()
+                    es = cp.ewm(span=se, adjust=False).mean()
+                    d = ef - es; de = d.ewm(span=m, adjust=False).mean()
+                    return d.values, de.values
+                ma20 = _ma(closes, 20)
+                dif, dea = _macd(closes)
+                signals = []
+                for i in range(1, n):
+                    if np.isnan(dif[i]) or np.isnan(dif[i-1]) or np.isnan(dea[i]) or np.isnan(dea[i-1]):
+                        continue
+                    # 金叉: dif 上穿 dea
+                    if dif[i-1] <= dea[i-1] and dif[i] > dea[i]:
+                        # 买点确认: 价格在 MA20 之上, 且不是太近 (避免重复)
+                        if not np.isnan(ma20[i]) and closes[i] > ma20[i]:
+                            if not signals or i - signals[-1][0] > 3:
+                                signals.append((i, lows[i], "BUY"))
+                    # 死叉: dif 下穿 dea
+                    elif dif[i-1] >= dea[i-1] and dif[i] < dea[i]:
+                        if not np.isnan(ma20[i]) and closes[i] < ma20[i]:
+                            if not signals or i - signals[-1][0] > 3:
+                                signals.append((i, highs[i], "SELL"))
+                return signals
 
             # ── 主刷新函数 ──
             def _refresh():
@@ -3819,8 +4025,7 @@ class StockDetailMixin:
                 selected = [k for k,v in chart_vars.items() if v.get()]
                 if not selected:
                     status_var.set("⚠️ 请至少选一个图表类型"); canvas.draw(); return
-                raw_sym, ts_code, is_index = _parse_symbol(sym_var.get())
-                display_name = sym_var.get().split("(")[0].strip() if "(" in sym_var.get() else raw_sym
+                raw_sym, ts_code, is_index, display_name = _parse_symbol(sym_var.get())
                 status_var.set(f"⏳ 加载 {display_name} ({ts_code})...")
                 win.update_idletasks()
 
@@ -3848,6 +4053,22 @@ class StockDetailMixin:
                     n = len(closes)
                     x = np.arange(n)
 
+                    # 计算多空状态 (一次, 给所有图复用)
+                    try:
+                        regime = _compute_regime(closes, highs, lows)
+                    except Exception:
+                        regime = np.zeros(n)  # fallback: 全中性
+
+                    # 计算支撑压力 + 买卖点 (一次, 复用)
+                    try:
+                        supports, resistances = _find_support_resistance(highs, lows, n_levels=3)
+                    except Exception:
+                        supports, resistances = [], []
+                    try:
+                        trade_signals = _find_trade_signals(closes, highs, lows)
+                    except Exception:
+                        trade_signals = []
+
                     # 布局计算: 行数/列数 (严格基于 n_charts)
                     n_charts = len(selected)
                     if n_charts == 1: nrows, ncols = 1, 1
@@ -3862,15 +4083,16 @@ class StockDetailMixin:
                     for i, k in enumerate(selected):
                         r, _c = divmod(i, ncols)
                         if k in ("daily_k", "ichimoku", "boll"): row_has_main[r] = True
-                    height_ratios = [3.0 if row_has_main[r] else 1.2 for r in range(nrows)]
+                    height_ratios = [4.0 if row_has_main[r] else 1.5 for r in range(nrows)]
                     from matplotlib import gridspec
                     gs = gridspec.GridSpec(nrows, ncols, figure=fig, height_ratios=height_ratios,
-                                           hspace=0.35, wspace=0.25)
+                                           hspace=0.45, wspace=0.30)
 
                     idx = 0
                     for k in selected:
                         r, c = divmod(idx, ncols); ax = fig.add_subplot(gs[r, c])
                         ax.set_facecolor("#FFFFFF"); ax.grid(True, alpha=0.2)
+                        _skip_regime = False  # 默认值, emotion/etf_rank case 会改成 True
 
                         if k == "daily_k":
                             # 标准日K + MA5/10/20/60
@@ -3890,8 +4112,16 @@ class StockDetailMixin:
                             ax.set_ylabel("价格")
 
                         elif k == "ichimoku":
+                            # 先画 K 线蜡烛 (和 daily_k 同方式)
+                            up_col, dn_col = "#EF5350", "#66BB6A"
+                            for i in range(n):
+                                col = up_col if closes[i] >= opens[i] else dn_col
+                                ax.plot([x[i],x[i]], [lows[i], highs[i]], color=col, lw=0.8)
+                                ax.bar(x[i], closes[i]-opens[i], bottom=opens[i], color=col, width=0.6)
+                            # 再叠加一目均衡 (tenkan/kijun 用 x, Kumo 云用 extended_x 自动右移 26)
                             self._plot_ichimoku_ax(ax, x, highs, lows, closes, show_explanation=False)
                             ax.set_title(f"📊 一目均衡 · {display_name}", fontsize=11, fontweight="bold")
+                            ax.legend(fontsize=7, loc="upper left")
                             ax.set_ylabel("价格")
 
                         elif k == "boll":
@@ -3944,6 +4174,225 @@ class StockDetailMixin:
                             ax.set_title(f"💵 资金流向(近似) · {display_name}", fontsize=11, fontweight="bold")
                             ax.legend(fontsize=7, loc="upper left")
                             ax.set_ylabel("Money Flow")
+
+                        elif k == "emotion":
+                            # 🎯 情绪复盘面板 (纯情绪数据, 不再混 ETF)
+                            ax.axis("off")
+                            _skip_regime = True
+                            import matplotlib
+                            matplotlib.rcParams["font.sans-serif"] = [
+                                "Hei", "Heiti TC", "Hiragino Sans GB",
+                                "Arial Unicode MS", "STHeiti", "Noto Sans CJK SC"]
+                            matplotlib.rcParams["axes.unicode_minus"] = False
+
+                            emo_cycle = getattr(self, "emotion_cycle_var", None)
+                            cycle_text = emo_cycle.get() if emo_cycle else "未获取"
+                            cycle_color = {"上行": "#E53935", "震荡": "#FB8C00", "下行": "#43A047"}.get(cycle_text, "#9E9E9E")
+
+                            snap = getattr(self, "_last_sentiment_zone_snapshot", None)
+                            m = snap.get("metrics", {}) if snap else {}
+                            m2 = m.get("m2_market", {}) if isinstance(m, dict) else {}
+                            up_cnt = m2.get("up", "—") if isinstance(m2, dict) else "—"
+                            dn_cnt = m2.get("down", "—") if isinstance(m2, dict) else "—"
+                            flat_cnt = m2.get("flat", "—") if isinstance(m2, dict) else "—"
+                            m5_hs300_v = m.get("m5_hs300", {}).get("value") if isinstance(m.get("m5_hs300"), dict) else None
+                            m5_zz500_v = m.get("m5_zz500", {}).get("value") if isinstance(m.get("m5_zz500"), dict) else None
+
+                            try:
+                                total = int(up_cnt) + int(dn_cnt) + int(flat_cnt)
+                                emo_score = round(int(up_cnt) / total * 100, 1) if total > 0 else 50
+                            except Exception:
+                                emo_score = 50.0
+
+                            cycle_position = {"上行": 80, "震荡": 50, "下行": 20}.get(cycle_text, 50)
+                            temperature = round((cycle_position + emo_score) / 2)
+                            temp_color = "#E53935" if temperature >= 70 else ("#FB8C00" if temperature >= 40 else "#43A047")
+
+                            # 左: 情绪周期 + 涨跌家数 (占 0.02~0.48 横向)
+                            lines = []
+                            lines.append(f"🕐 {snap.get('time','主界面未刷新') if snap else '主界面未刷新'}")
+                            lines.append("")
+                            lines.append("🎯 情绪周期")
+                            lines.append(f"   ● {cycle_text}  (红绿灯)")
+                            lines.append("")
+                            lines.append("📊 涨跌家数")
+                            lines.append(f"   📈 上涨: {up_cnt}")
+                            lines.append(f"   📉 下跌: {dn_cnt}")
+                            lines.append(f"   ➡️ 平盘: {flat_cnt}")
+                            lines.append("")
+                            lines.append("📈 指数涨跌")
+                            hs300_s = f"{m5_hs300_v:+.2f}%" if isinstance(m5_hs300_v, (int, float)) else "—"
+                            zz500_s = f"{m5_zz500_v:+.2f}%" if isinstance(m5_zz500_v, (int, float)) else "—"
+                            lines.append(f"   沪深300: {hs300_s}")
+                            lines.append(f"   中证500: {zz500_s}")
+                            ax.text(0.02, 0.96, "\n".join(lines), transform=ax.transAxes,
+                                    fontsize=10, va="top", ha="left", linespacing=1.4,
+                                    bbox=dict(boxstyle="round,pad=0.5", fc="#FAFAFA", ec="#BDBDBD", alpha=0.95))
+
+                            # 右: 情绪分数大圆 + 仓位温度计 (占 0.52~0.98)
+                            # 情绪分数圆 (大!)
+                            ax.add_patch(plt.Circle((0.75, 0.78), 0.18, transform=ax.transAxes,
+                                                    fc=cycle_color, alpha=0.9))
+                            ax.text(0.75, 0.78, f"{emo_score:.0f}", transform=ax.transAxes,
+                                    fontsize=28, fontweight="bold", ha="center", va="center", color="white")
+                            emo_label = "贪婪" if emo_score > 70 else ("中性" if emo_score > 40 else "恐惧")
+                            ax.text(0.75, 0.58, f"情绪分数 · {emo_label}", transform=ax.transAxes,
+                                    fontsize=11, ha="center", color="#333")
+
+                            # 仓位温度计
+                            bx0, by0, bw, bh = 0.58, 0.42, 0.35, 0.06
+                            ax.add_patch(plt.Rectangle((bx0, by0), bw, bh,
+                                                        transform=ax.transAxes, fc="#E0E0E0", ec="#BDBDBD"))
+                            ax.add_patch(plt.Rectangle((bx0, by0), bw * temperature / 100, bh,
+                                                        transform=ax.transAxes, fc=temp_color, ec="none"))
+                            ax.text(bx0 + bw / 2, by0 - 0.07, f"建议仓位 {temperature}%",
+                                    transform=ax.transAxes, fontsize=14, fontweight="bold",
+                                    ha="center", va="center", color=temp_color)
+                            ax.text(bx0, by0 + bh + 0.02, "0%", transform=ax.transAxes, fontsize=10, color="#666")
+                            ax.text(bx0 + bw, by0 + bh + 0.02, "100%", transform=ax.transAxes, fontsize=10, color="#666", ha="right")
+
+                            # 周期 + 情绪状态 (下方两个大标签)
+                            ax.text(0.60, 0.25, f"🎯 周期: {cycle_text}", transform=ax.transAxes,
+                                    fontsize=12, fontweight="bold", color=cycle_color,
+                                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=cycle_color, lw=2))
+                            ax.text(0.83, 0.25, f"⚠️ 情绪: {emo_label}", transform=ax.transAxes,
+                                    fontsize=12, fontweight="bold", color=temp_color,
+                                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=temp_color, lw=2))
+
+                            ax.set_title(f"🎯 情绪复盘 · {display_name}", fontsize=12, fontweight="bold")
+
+                        elif k == "etf_rank":
+                            # 📊 ETF 板块强弱排行 (真正的横向条形图, 清晰对比)
+                            import matplotlib
+                            matplotlib.rcParams["font.sans-serif"] = [
+                                "Hei", "Heiti TC", "Hiragino Sans GB",
+                                "Arial Unicode MS", "STHeiti"]
+                            matplotlib.rcParams["axes.unicode_minus"] = False
+
+                            ETF_LIST = [
+                                ("510300.SH","沪深300"),("510500.SH","中证500"),("159915.SZ","创业板"),
+                                ("588000.SH","科创50"),("510050.SH","上证50"),("512100.SH","中证1000"),
+                                ("512880.SH","证券"),("512000.SH","银行"),("512010.SH","医药"),
+                                ("510880.SH","红利"),("159928.SZ","消费"),("159875.SZ","新能源"),
+                                ("512480.SH","半导体"),("512660.SH","军工"),("515790.SH","光伏"),
+                                ("512400.SH","有色"),("515220.SH","煤炭"),("512690.SH","酒"),
+                                ("513100.SH","纳指"),("513500.SH","标普"),("513520.SH","日经"),
+                                ("513180.SH","恒生科技"),
+                            ]
+                            # 拿数据 (带 30min 缓存)
+                            try:
+                                import time as _time
+                                import tushare as ts
+                                from utils.config import TS_DEFAULT_TOKEN
+                                cache = getattr(self, "_etf_rank_cache", None)
+                                if cache and (_time.time() - cache[0]) < 1800:
+                                    etf_results = cache[1]
+                                else:
+                                    if not getattr(self, "_ts_pro_init", False):
+                                        ts.set_token(TS_DEFAULT_TOKEN)
+                                        self._ts_pro = ts.pro_api()
+                                        self._ts_pro_init = True
+                                    etf_results = []
+                                    for ecode, ename in ETF_LIST:
+                                        try:
+                                            edf = self._ts_pro.fund_daily(ts_code=ecode,
+                                                                          start_date="20260901", end_date="20261101")
+                                            if edf is None or len(edf) < 21: continue
+                                            edf = edf.sort_values("trade_date").reset_index(drop=True)
+                                            ecloses = edf["close"].astype(float).values
+                                            r5 = (ecloses[-1]/ecloses[-6]-1)*100 if len(ecloses)>=6 else np.nan
+                                            r20 = (ecloses[-1]/ecloses[-21]-1)*100 if len(ecloses)>=21 else np.nan
+                                            if np.isnan(r5) or np.isnan(r20): continue
+                                            score = r5*0.6 + r20*0.4
+                                            etf_results.append((score, ename, r5, r20))
+                                        except Exception:
+                                            pass
+                                    etf_results.sort(reverse=True)
+                                    self._etf_rank_cache = (_time.time(), etf_results)
+                            except Exception:
+                                etf_results = []
+
+                            if etf_results:
+                                # 画真正的水平条形图
+                                names = [r[1] for r in etf_results]
+                                scores = [r[0] for r in etf_results]
+                                r5s = [r[2] for r in etf_results]
+                                r20s = [r[3] for r in etf_results]
+                                y_pos = np.arange(len(names))
+                                colors = ["#D32F2F" if s > 0 else "#388E3C" for s in scores]
+                                # barh
+                                ax.barh(y_pos, scores, color=colors, alpha=0.85, edgecolor="white", height=0.7)
+                                ax.axvline(0, color="#666", lw=0.8, ls="--")
+                                # y 轴 (名字 + 5日 + 20日 标签)
+                                labels = [f"{n:<8}  5日{r5:+.1f}%  20日{r20:+.1f}%"
+                                         for n, r5, r20 in zip(names, r5s, r20s)]
+                                ax.set_yticks(y_pos)
+                                ax.set_yticklabels(labels, fontsize=9)
+                                ax.invert_yaxis()  # TOP 在上面
+                                ax.set_xlabel("综合得分 (5日×0.6 + 20日×0.4)", fontsize=10)
+                                ax.grid(axis="x", alpha=0.3)
+                                # 最强/最弱标注
+                                ax.barh(y_pos[0], scores[0], color="#D32F2F", alpha=1.0, edgecolor="#FFEBEE", lw=2)
+                                ax.barh(y_pos[-1], scores[-1], color="#388E3C", alpha=1.0, edgecolor="#E8F5E9", lw=2)
+                                # 数值标注在 bar 末端
+                                for i, (s, n) in enumerate(zip(scores, names)):
+                                    ha = "left" if s >= 0 else "right"
+                                    offset = 0.05 if s >= 0 else -0.05
+                                    ax.text(s + offset, i, f"{s:+.2f}", va="center", ha=ha, fontsize=9, fontweight="bold")
+                                # 操作建议 (右下角)
+                                top_name = names[0]; bot_name = names[-1]
+                                ax.text(0.98, 0.02,
+                                        f"💡 建议: {top_name}顺势  规避{bot_name}",
+                                        transform=ax.transAxes, fontsize=10, fontweight="bold",
+                                        ha="right", va="bottom", color="#1565C0",
+                                        bbox=dict(boxstyle="round,pad=0.3", fc="#E3F2FD", ec="#90CAF9", alpha=0.95))
+                            else:
+                                ax.axis("off")
+                                ax.text(0.5, 0.5, "📊 ETF 数据加载失败\n(检查主界面联网 / tushare token)",
+                                        transform=ax.transAxes, fontsize=12, ha="center", va="center", color="#999")
+                            ax.set_title(f"📊 ETF 板块强弱 · {display_name}", fontsize=12, fontweight="bold")
+                            ax.legend([], [], frameon=False)  # 清掉多空背景带残留
+                            # ETF rank 不用多空背景带 (已经自己有红绿色了)
+                            _skip_regime = True
+
+                        # 🎨 多空背景带 (浅红看多 / 浅绿看空) — 跳过 emotion/etf_rank
+                        ax.autoscale_view()
+                        if not _skip_regime:
+                            _draw_regime_bg(ax, x, regime)
+                            ax.set_ylim(ax.get_ylim())
+
+                        # 📏 支撑压力线 + 买卖点标记 (只在主图类型显示)
+                        if k in ("daily_k", "ichimoku", "boll"):
+                            # 支撑线: 青绿色虚线
+                            for sx_idx, sp in supports:
+                                ax.axhline(y=sp, color="#00BCD4", ls="--", lw=0.9, alpha=0.7, zorder=4)
+                                ax.annotate(f"支撑 {sp:.1f}", xy=(n-1, sp),
+                                            xytext=(4, -14), textcoords="offset points",
+                                            fontsize=8, color="#00838F", fontweight="bold",
+                                            backgroundcolor="#E0F7FA", alpha=0.8, zorder=6)
+                            # 压力线: 橙色虚线
+                            for rx_idx, rp in resistances:
+                                ax.axhline(y=rp, color="#FF9800", ls="--", lw=0.9, alpha=0.7, zorder=4)
+                                ax.annotate(f"压力 {rp:.1f}", xy=(n-1, rp),
+                                            xytext=(4, 6), textcoords="offset points",
+                                            fontsize=8, color="#E65100", fontweight="bold",
+                                            backgroundcolor="#FFF3E0", alpha=0.8, zorder=6)
+                            # 买点: 🟢 红三角 (底部向上指)
+                            for tx_idx, tp, ttype in trade_signals:
+                                if ttype == "BUY":
+                                    ax.annotate("⬆买", xy=(tx_idx, tp), xytext=(0, -22),
+                                                textcoords="offset points", fontsize=8,
+                                                color="#D32F2F", fontweight="bold", ha="center",
+                                                arrowprops=dict(arrowstyle="->", color="#D32F2F", lw=1.2),
+                                                bbox=dict(boxstyle="round,pad=0.2", fc="#FFEBEE", ec="#D32F2F", alpha=0.9),
+                                                zorder=7)
+                                else:
+                                    ax.annotate("⬇卖", xy=(tx_idx, tp), xytext=(0, 22),
+                                                textcoords="offset points", fontsize=8,
+                                                color="#388E3C", fontweight="bold", ha="center",
+                                                arrowprops=dict(arrowstyle="->", color="#388E3C", lw=1.2),
+                                                bbox=dict(boxstyle="round,pad=0.2", fc="#E8F5E9", ec="#388E3C", alpha=0.9),
+                                                zorder=7)
 
                         # 统一: x 轴日期稀疏显示
                         step = max(1, n // 12)
