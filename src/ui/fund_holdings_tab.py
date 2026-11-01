@@ -1228,6 +1228,174 @@ def build_fund_holdings_tab(parent, root=None):
     guide_canvas.create_window((0, 0), window=guide_inner, anchor="nw")
     guide_inner.bind("<Configure>", lambda e: guide_canvas.configure(scrollregion=guide_canvas.bbox("all")))
 
+    # ── Tab4: 🏛️ 机构重仓追踪 (公募前十大 + 行业变化) ──
+    inst_frame = ttk.Frame(nb); nb.add(inst_frame, text="🏛️ 机构重仓追踪")
+    # 顶部标题栏 + 刷新按钮
+    inst_top = ttk.Frame(inst_frame); inst_top.pack(fill=tk.X, padx=8, pady=(8, 4))
+    tk.Label(inst_top, text="🏛️ 机构重仓追踪", bg=_BG_PANEL, fg=_FG_GOLD,
+             font=("", 12, "bold")).pack(side=tk.LEFT)
+    inst_status = tk.Label(inst_top, text="⏳ 加载中...", bg=_BG_PANEL, fg=_FG_DIM, font=("", 9))
+    inst_status.pack(side=tk.RIGHT, padx=6)
+    ttk.Button(inst_top, text="🔄 刷新机构重仓", width=16,
+               command=lambda: _load_institution(force=True)).pack(side=tk.RIGHT, padx=4)
+
+    # 左右分栏: 左=公募前十大重仓股  右=行业变化
+    inst_paned = ttk.Frame(inst_frame); inst_paned.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+    # 左: 公募前十大重仓股 Treeview
+    inst_left = tk.LabelFrame(inst_paned, text="🏆 公募基金前二十大重仓股 (硬科技榜)",
+                              bg=_BG_PANEL, fg=_FG_GOLD, font=("", 10, "bold"))
+    inst_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
+    _INST_COLS = ("rank", "code", "name", "industry", "funds", "pct", "price", "pct_chg")
+    inst_tree = ttk.Treeview(inst_left, columns=_INST_COLS, show="headings", height=14)
+    for _c, _t, _w, _a in [("rank","#",30,"center"),("code","代码",70,"center"),
+                           ("name","名称",90,"w"),("industry","行业",90,"center"),
+                           ("funds","持基数",60,"center"),("pct","占净值%",70,"center"),
+                           ("price","现价",65,"e"),("pct_chg","涨跌%",60,"center")]:
+        inst_tree.heading(_c, text=_t); inst_tree.column(_c, width=_w, anchor=_a)
+    inst_tree.tag_configure("up", foreground=_FG_RED, font=("", 10, "bold"))
+    inst_tree.tag_configure("down", foreground=_FG_GREEN, font=("", 10, "bold"))
+    inst_tree.tag_configure("hi", foreground=_FG_GOLD, font=("", 10, "bold"))
+    inst_sb = ttk.Scrollbar(inst_left, orient="vertical", command=inst_tree.yview)
+    inst_tree.configure(yscrollcommand=inst_sb.set)
+    inst_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
+    inst_sb.pack(side=tk.RIGHT, fill=tk.Y)
+    # 双击 Treeview 行 → 日K线
+    def _on_inst_dbl(_e):
+        sel = inst_tree.selection()
+        if not sel: return
+        item = inst_tree.item(sel[0])
+        _code = str(item["values"][1]); _name = str(item["values"][2])
+        if len(_code) == 6 and _code.isdigit():
+            try:
+                from ui.high_low_swing import _quick_open_daily_kline
+                _quick_open_daily_kline(win if 'win' in dir() else parent.winfo_toplevel(), _code, _name)
+            except Exception as _ie: print(f"[机构重仓] 打开K线失败: {_ie}", flush=True)
+    inst_tree.bind("<Double-1>", _on_inst_dbl)
+
+    # 右: 行业变化
+    inst_right = tk.LabelFrame(inst_paned, text="📊 行业涨跌变化",
+                               bg=_BG_PANEL, fg=_FG_CYAN, font=("", 10, "bold"))
+    inst_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
+    _IND_COLS = ("rank", "industry", "pct_chg", "vol", "limit_up", "limit_dn", "trend")
+    ind_tree = ttk.Treeview(inst_right, columns=_IND_COLS, show="headings", height=14)
+    for _c, _t, _w, _a in [("rank","#",30,"center"),("industry","行业",100,"w"),
+                           ("pct_chg","涨跌%",65,"center"),("vol","成交额亿",75,"e"),
+                           ("limit_up","涨停",45,"center"),("limit_dn","跌停",45,"center"),
+                           ("trend","趋势",80,"center")]:
+        ind_tree.heading(_c, text=_t); ind_tree.column(_c, width=_w, anchor=_a)
+    ind_tree.tag_configure("up", foreground=_FG_RED, font=("", 10, "bold"))
+    ind_tree.tag_configure("down", foreground=_FG_GREEN, font=("", 10, "bold"))
+    ind_sb = ttk.Scrollbar(inst_right, orient="vertical", command=ind_tree.yview)
+    ind_tree.configure(yscrollcommand=ind_sb.set)
+    ind_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
+    ind_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+    # 缓存 + 刷新函数
+    _inst_cache = {"funds": [], "industry": []}
+    _inst_running = False
+    def _load_institution(force=False):
+        """加载机构重仓数据 — akshare 拉 + 种子兜底"""
+        nonlocal _inst_running
+        if _inst_running and not force: return
+        _inst_running = True; inst_status.config(text="⏳ 拉取机构重仓...")
+        def _worker():
+            try:
+                import akshare as ak
+                from collections import defaultdict
+                import datetime as _dt
+                _季 = _dt.datetime.now().month
+                _q = f"{_dt.datetime.now().year}{((_季-1)//3)+1}"  # Q1/Q2/Q3/Q4
+                _q_last = _dt.datetime.now().year - 1
+                try:
+                    df = ak.fund_portfolio_hold_em(date=str(_q))
+                except Exception:
+                    df = None
+                    # 尝试上一季度
+                    try:
+                        import datetime as _dt2
+                        _y = _dt2.datetime.now().year
+                        _m = _dt2.datetime.now().month
+                        if _m <= 3: _y -= 1; _qq = "4"
+                        elif _m <= 6: _qq = "1"
+                        elif _m <= 9: _qq = "2"
+                        else: _qq = "3"
+                        df = ak.fund_portfolio_hold_em(date=f"{_y}{_qq}")
+                    except Exception: pass
+                _fund_stock = defaultdict(lambda: {"funds": set(), "pct": 0.0})
+                if df is not None and len(df) > 0:
+                    for _, row in df.head(2000).iterrows():
+                        _nm = str(row.get("股票名称","")); _cd = str(row.get("股票代码",""))
+                        _fc = str(row.get("基金代码",""))
+                        _pct = float(row.get("占净值比例", 0) or 0)
+                        if _cd and len(_cd)==6:
+                            _fund_stock[(_cd,_nm)]["funds"].add(_fc)
+                            _fund_stock[(_cd,_nm)]["pct"] += _pct
+                # 兜底: 种子数据 (从 _FUND_TOP_HOLDINGS 聚合)
+                if not _fund_stock:
+                    for _fc, _fn, _ind, _holds in _FUND_TOP_HOLDINGS:
+                        for _cs, _sn in _holds:
+                            _6 = _cs[2:] if _cs.startswith(("sh","sz","bj")) else _cs
+                            _fund_stock[(_6, _sn)]["funds"].add(_fc)
+                            _fund_stock[(_6, _sn)]["pct"] += 1.0
+                _rows = []
+                for (_cd, _nm), _d in _fund_stock.items():
+                    _funds_count = len(_d["funds"])
+                    if _funds_count >= 2:  # 至少 2 只基金持有
+                        # 行业匹配: 从 _FUND_TOP_HOLDINGS 找或种子
+                        _ind = "科技"
+                        for _fc2, _fn2, _ind2, _holds2 in _FUND_TOP_HOLDINGS:
+                            for _cs2, _sn2 in _holds2:
+                                if _sn2 == _nm: _ind = _ind2; break
+                        _rows.append({
+                            "code": _cd, "name": _nm, "industry": _ind,
+                            "funds": _funds_count, "pct": round(_d["pct"], 1),
+                        })
+                _rows.sort(key=lambda x: x["funds"], reverse=True)
+                _inst_cache["funds"] = _rows[:20]
+                # 行业变化: 用东方财富行业涨幅
+                try:
+                    _ind_df = ak.stock_board_industry_name_em()
+                    if _ind_df is not None and len(_ind_df) > 0:
+                        _ind_rows = []
+                        for _, row in _ind_df.head(30).iterrows():
+                            _ind_rows.append({
+                                "industry": str(row.get("板块名称","")),
+                                "pct_chg": float(row.get("涨跌幅",0) or 0),
+                                "vol": float(row.get("总成交额",0) or 0)/1e8,
+                            })
+                        _ind_rows.sort(key=lambda x: x["pct_chg"], reverse=True)
+                        _inst_cache["industry"] = _ind_rows[:20]
+                except Exception: pass
+                # 刷新 UI
+                def _refresh_ui():
+                    for it in inst_tree.get_children(): inst_tree.delete(it)
+                    _quote_map = {}
+                    try:
+                        import akshare as _ak2
+                        for _r in _inst_cache["funds"][:5]:
+                            pass  # 行情稍后统一刷新
+                    except Exception: pass
+                    for rank, s in enumerate(_inst_cache["funds"], 1):
+                        _tag = "hi" if rank <= 3 else ""
+                        inst_tree.insert("", tk.END, values=(rank, s["code"], s["name"],
+                            s["industry"], s["funds"], f"{s['pct']:.1f}", "-", "-"), tags=(_tag,))
+                    for it in ind_tree.get_children(): ind_tree.delete(it)
+                    for rank, s in enumerate(_inst_cache["industry"], 1):
+                        _pct = s["pct_chg"]
+                        _tag = "up" if _pct > 0 else ("down" if _pct < 0 else "")
+                        ind_tree.insert("", tk.END, values=(rank, s["industry"],
+                            f"{_pct:+.2f}", f"{s['vol']:,.0f}", "-", "-",
+                            "↑领涨" if _pct > 1 else ("↓领跌" if _pct < -1 else "-")), tags=(_tag,))
+                    inst_status.config(text=f"✅ 公募重仓 Top{len(_inst_cache['funds'])} · 行业 Top{len(_inst_cache['industry'])} 已刷新")
+                parent.after(0, _refresh_ui)
+            except Exception as _e:
+                import traceback as _tb; _tb.print_exc()
+                parent.after(0, lambda: inst_status.config(text=f"❌ {_e}"))
+            finally:
+                _inst_running = False
+        threading.Thread(target=_worker, daemon=True).start()
+    parent.after(2500, lambda: _load_institution(force=False))  # 首次加载
+
     # ── 🤖 择时缓存 ──
     _fund_timing_cache = {}  # {fund_code: {"score":, "bull":, "bear":, "summary":}}
     _fund_timing_running = False
@@ -1923,3 +2091,17 @@ def build_fund_holdings_tab(parent, root=None):
     # ── 自动触发 ──
     parent.after(300, lambda: _load_data(force=False))
     parent.after(2000, lambda: _load_timing(force=False))  # 择时等宏观数据
+
+    # ── 返回刷新接口 (供 Tab 切换时调用) ──
+    def _on_tab_selected():
+        """Tab 切换过来时调用 — 轻量刷新 (用 force=False 读缓存)"""
+        try:
+            _load_data(force=False)
+            _fetch_quotes(force=False)
+        except Exception:
+            pass
+    return {
+        "refresh": _on_tab_selected,
+        "refresh_full": lambda: (_load_data(force=True), _fetch_quotes(force=True)),
+        "refresh_timing": lambda: _load_timing(force=True),
+    }

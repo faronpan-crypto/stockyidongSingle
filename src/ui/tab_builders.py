@@ -7414,10 +7414,29 @@ except Exception as e:
         df = basic.copy()
         if daily is not None and len(daily) > 0:
             df = df.merge(daily, on="ts_code", how="left")
+        # 4.5) 股票名称映射 (用于龙头标杆显示真实名称)
+        _name_map = {}
+        try:
+            _sb = _pro.stock_basic(exchange="", list_status="L", fields="ts_code,name")
+            if _sb is not None and len(_sb) > 0:
+                _name_map = dict(zip(_sb["ts_code"], _sb["name"]))
+        except Exception:
+            pass
+        try:
+            from logic.stock_names import STOCK_CODES_DICT as _scd
+            if _scd:
+                for _c, _n in _scd.items():
+                    _t = f"{_c}.SH" if _c.startswith(("6","9")) else f"{_c}.SZ"
+                    if _t not in _name_map and _n:
+                        _name_map[_t] = _n
+        except Exception:
+            pass
+
         df = df.merge(
             members_df[["con_code", "industry", "index_code"]].rename(columns={"con_code": "ts_code"}),
             on="ts_code", how="inner",
         )
+        df["name"] = df["ts_code"].map(_name_map).fillna(df["ts_code"].str.split(".").str[0])
 
         # 6) 行业聚合
         agg = df.groupby(["index_code", "industry"]).agg(
@@ -7606,31 +7625,31 @@ except Exception as e:
         for _, row in leaders.iterrows():
             _tsc = str(row.get("ts_code", ""))
             _code = _tsc.split(".")[0]
+            _nm = str(row.get("name", "") or "").strip()
             result.append({
                 "code": _code,
-                "name": _tsc,  # 后续用名称填充
+                "name": _nm,
+                "ts_code": _tsc,
                 "price": float(row.get("close", 0) or 0),
                 "change_pct": float(row.get("pct_chg", 0) or 0),
                 "amount": float(row.get("amount", 0) or 0),
                 "turnover_rate": float(row.get("turnover_rate", 0) or 0),
             })
         return result
-
     def _show_mainline_capital_dialog(self):
-        """🔥 主线·资金迁移 —— 资金流向全景 (pack-only 布局 + 进度条 + 分步渲染)"""
+        """🔥 主线·资金迁移 —— 资金流向全景 (pack-only + 进度条 + 龙头双击K线)"""
         import threading
+        import numpy as np
 
         win = self._safe_toplevel(self.root)
         win.title("🔥 主线·资金迁移 · 主力资金流向全景")
         win.geometry("1400x820")
         win.transient(self.root)
-
         C_UP = "#EF5350"; C_DN = "#66BB6A"
 
-        # ============ 顶部 Banner ============
+        # Banner
         banner = tk.Frame(win, bg="#B71C1C", height=52)
-        banner.pack(fill=tk.X)
-        banner.pack_propagate(False)
+        banner.pack(fill=tk.X); banner.pack_propagate(False)
         tk.Label(banner, text="🔥 主线·资金迁移 · 主力资金全景",
                  font=("Microsoft YaHei", 13, "bold"),
                  bg="#B71C1C", fg="#FFEBEE").pack(side=tk.LEFT, padx=14, pady=10)
@@ -7638,7 +7657,7 @@ except Exception as e:
         tk.Label(banner, textvariable=status_var, font=("Microsoft YaHei", 10),
                  bg="#B71C1C", fg="#FFCCBC").pack(side=tk.LEFT, pady=14)
 
-        # ============ 控制栏 + 进度条 ============
+        # 控制栏 + 进度条
         ctrl = ttk.Frame(win)
         ctrl.pack(fill=tk.X, padx=8, pady=(6, 2))
         scan_btn = ttk.Button(ctrl, text="🔄 扫描全市场", width=14)
@@ -7649,43 +7668,31 @@ except Exception as e:
         prog_txt = tk.Label(ctrl, text="", font=("Microsoft YaHei", 10), fg="#555")
         prog_txt.pack(side=tk.LEFT)
 
-        # ============ 主体: 两行 三列 pack (用 side=LEFT) ============
-        body = tk.Frame(win)
-        body.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        # 主体 (全 pack, side=LEFT 并排)
+        body = tk.Frame(win); body.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
-        # --- 上排 ---
-        top_row = tk.Frame(body)
-        top_row.pack(fill=tk.BOTH, expand=True)
-
-        # 块1: 资金总览 (最小宽度, 占 1/4)
+        # 上排
+        top_row = tk.Frame(body); top_row.pack(fill=tk.BOTH, expand=True)
         f_ov = tk.LabelFrame(top_row, text="💰 资金总览", font=("", 10, "bold"))
         f_ov.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 6))
         ov_vars = {}
-        for _t, _h, _fg in [
-            ("全市场总成交额", "申万31行业合计", "#333"),
-            ("主力净流入TOP", "资金正向板块", C_UP),
-            ("主力净流出TOP", "资金负向板块", C_DN),
-            ("当前最强主线", "综合评分第一", "#B8860B"),
-        ]:
-            cf = tk.Frame(f_ov, bg="#f5f5f5")
-            cf.pack(fill=tk.X, pady=3, padx=4)
+        for _t, _h, _fg in [("全市场总成交额", "申万31行业合计", "#333"),
+                            ("主力净流入TOP", "资金正向板块", C_UP),
+                            ("主力净流出TOP", "资金负向板块", C_DN),
+                            ("当前最强主线", "综合评分第一", "#B8860B")]:
+            cf = tk.Frame(f_ov, bg="#f5f5f5"); cf.pack(fill=tk.X, pady=3, padx=4)
             tk.Label(cf, text=_t, font=("", 9), bg="#f5f5f5", fg="#666").pack(anchor="w", padx=6)
             _v = tk.Label(cf, text="--", font=("", 14, "bold"), bg="#f5f5f5", fg=_fg)
             _v.pack(anchor="w", padx=6)
             tk.Label(cf, text=_h, font=("", 8), bg="#f5f5f5", fg="#aaa").pack(anchor="w", padx=6)
             ov_vars[_t] = _v
-
-        # 块2: 主线看板 (占剩余空间)
-        f_ml = tk.LabelFrame(top_row, text="🔥 主线看板 · 龙头标杆", font=("", 10, "bold"))
+        f_ml = tk.LabelFrame(top_row, text="🔥 主线看板 · 龙头标杆 (双击股票→日K)", font=("", 10, "bold"))
         f_ml.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=6)
         ml_txt = scrolledtext.ScrolledText(f_ml, wrap=tk.WORD, font=("", 9), bg="#FFF8E1", fg="#5D4037")
         ml_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        # 块3: 板块状态矩阵
         f_mt = tk.LabelFrame(top_row, text="📊 板块状态矩阵", font=("", 10, "bold"))
         f_mt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
-        cols_m = ("ind", "stg", "sc", "pct", "to")
-        tree_m = ttk.Treeview(f_mt, columns=cols_m, show="headings", height=12)
+        tree_m = ttk.Treeview(f_mt, columns=("ind","stg","sc","pct","to"), show="headings", height=12)
         for _c, _t, _w, _a in [("ind","板块",70,"w"),("stg","阶段",52,"center"),
                                ("sc","评分",32,"center"),("pct","涨跌%",50,"center"),("to","换手%",50,"center")]:
             tree_m.heading(_c, text=_t); tree_m.column(_c, width=_w, anchor=_a)
@@ -7693,14 +7700,11 @@ except Exception as e:
         for _tag, _fg in [("brk","#66BB6A"),("acc","#42A5F5"),("dst","#EF5350"),("dec","#90A4AE"),("unk","#888")]:
             tree_m.tag_configure(_tag, foreground=_fg, font=("", 10, "bold"))
 
-        # --- 下排 ---
-        bot_row = tk.Frame(body)
-        bot_row.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
-
+        # 下排
+        bot_row = tk.Frame(body); bot_row.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
         def _mk_tree(parent, text):
             f = tk.LabelFrame(parent, text=text, font=("", 10, "bold"))
-            tk_cols = ("rank","name","yi","flow","pct","lim")
-            t = ttk.Treeview(f, columns=tk_cols, show="headings", height=10)
+            t = ttk.Treeview(f, columns=("rank","name","yi","flow","pct","lim"), show="headings", height=10)
             for _c,_t,_w,_a in [("rank","#",26,"center"),("name","板块",72,"w"),
                                 ("yi","成交额亿",68,"e"),("flow","资金倾向",78,"e"),
                                 ("pct","涨%",44,"center"),("lim","涨停",32,"center")]:
@@ -7709,20 +7713,15 @@ except Exception as e:
             t.tag_configure("dn", foreground=C_DN, font=("",10,"bold"))
             t.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
             return f, t
-
         f_in, tree_in = _mk_tree(bot_row, "📈 主力净流入 TOP10")
         f_in.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
-
         f_out, tree_out = _mk_tree(bot_row, "📉 主力净流出 TOP10")
         f_out.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=6)
-
-        # 块6: 瀑布图
         f_w = tk.LabelFrame(bot_row, text="🌊 资金迁移瀑布", font=("", 10, "bold"))
         f_w.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
         canvas_w = None
         try:
-            import matplotlib
-            matplotlib.use("TkAgg")
+            import matplotlib; matplotlib.use("TkAgg")
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
             from matplotlib.figure import Figure
             fig = Figure(figsize=(4.5, 3.8), dpi=95, facecolor="#fafafa")
@@ -7736,22 +7735,27 @@ except Exception as e:
         except Exception as e:
             tk.Label(f_w, text=f"matplotlib 不可用: {e}", fg="red").pack()
 
-        # ============ 扫描 + 渲染 ============
+        # 扫描 + 渲染
         def _set_prog(p, msg):
             def _do():
                 pct_var.set(p); prog_txt.config(text=msg); win.update_idletasks()
             self.root.after(0, _do)
+
+        def _open_kline(code6, name):
+            try:
+                from ui.high_low_swing import _quick_open_daily_kline
+                _quick_open_daily_kline(win, str(code6), str(name or ""))
+            except Exception as _e:
+                import traceback; traceback.print_exc()
 
         def _run():
             scan_btn.config(state=tk.DISABLED)
             try:
                 _set_prog(5, "拉取申万行业列表...")
                 agg, raw, industries, td = self._fetch_industry_capital_data(token=getattr(self, "ts_token", None))
-
                 _set_prog(35, "识别当前主线 + 板块阶段...")
                 mainlines = self._identify_mainline(agg, top_n=3)
-                agg = agg.copy()
-                agg["阶段"] = "震荡整理"
+                agg = agg.copy(); agg["阶段"] = "震荡整理"; agg["阶段分"] = 0
                 for _, row in agg.head(20).iterrows():
                     agg.loc[agg["industry"] == row["industry"], "阶段"] = self._simple_stage_from_cross_section(row)
 
@@ -7765,16 +7769,12 @@ except Exception as e:
                 self.root.after(0, lambda: _render_flows(agg))
                 _set_prog(92, "渲染瀑布图...")
                 self.root.after(0, lambda: _render_waterfall(agg))
-
                 _set_prog(100, "✅ 扫描完成!")
                 status_var.set(f"✅ 扫描完成 · {len(agg)}行业 · 交易日 {td}")
                 scan_btn.config(state=tk.NORMAL)
-
             except Exception as e:
-                import traceback
-                _err = traceback.format_exc()
-                status_var.set(f"❌ 扫描失败: {e}")
-                scan_btn.config(state=tk.NORMAL)
+                import traceback; _err = traceback.format_exc()
+                status_var.set(f"❌ 扫描失败: {e}"); scan_btn.config(state=tk.NORMAL)
                 self.root.after(0, lambda: messagebox.showerror("扫描失败", f"{e}\n\n{_err[-600:]}", parent=win))
 
         def _render_overview(agg, mainlines):
@@ -7785,13 +7785,13 @@ except Exception as e:
                 ov_vars["全市场总成交额"].config(text=f"{_total:,.0f} 亿")
                 ov_vars["主力净流入TOP"].config(text=f"{_in['industry']} (+{_in['资金倾向']:,.0f}亿)")
                 ov_vars["主力净流出TOP"].config(text=f"{_out['industry']} ({_out['资金倾向']:,.0f}亿)")
-                if mainlines:
-                    ov_vars["当前最强主线"].config(text=f"{mainlines[0][0]} (分:{mainlines[0][1]:.0f})")
-            except Exception as e:
-                ov_vars["全市场总成交额"].config(text=f"❌ {e}")
+                if mainlines: ov_vars["当前最强主线"].config(text=f"{mainlines[0][0]} (分:{mainlines[0][1]:.0f})")
+            except Exception as e: ov_vars["全市场总成交额"].config(text=f"❌ {e}")
 
         def _render_mainline(raw, mainlines, td):
             ml_txt.delete("1.0", tk.END)
+            for _t in ml_txt.tag_names():
+                if _t.startswith("stock_"): ml_txt.tag_unbind(_t, "<Double-Button-1>")
             try:
                 ml_txt.insert(tk.END, f"📅 交易日: {td}\n\n", "title")
                 ml_txt.insert(tk.END, "═" * 45 + "\n\n")
@@ -7800,86 +7800,69 @@ except Exception as e:
                     ml_txt.insert(tk.END, f"   综合分 {score:.1f}/100  |  {reason}\n\n")
                     leaders = self._get_sector_leaders(raw, name, top_n=5)
                     if leaders:
-                        ml_txt.insert(tk.END, "   ─ 龙头标杆 ─\n")
+                        ml_txt.insert(tk.END, "   ─ 龙头标杆 ─ (双击股票名→日K线)\n")
                         for li, ld in enumerate(leaders, 1):
                             pct = ld["change_pct"]
                             arrow = "🟢" if pct >= 0 else "🔴"
-                            ml_txt.insert(tk.END,
-                                           f"   {arrow}{li}. {ld['code']}  价{ld['price']:.2f}  "
-                                           f"{pct:+.2f}%  换手{ld['turnover_rate']:.1f}%\n")
+                            _code = ld["code"]; _nm = ld.get("name", "")
+                            _display = f"{_code} {_nm}" if _nm else _code
+                            _tag = f"stock_{rank}_{li}"
+                            ml_txt.insert(tk.END, f"   {arrow}{li}. ", "normal")
+                            ml_txt.insert(tk.END, f"{_display}", _tag)
+                            ml_txt.insert(tk.END, f"  价{ld['price']:.2f}  {pct:+.2f}%  换手{ld['turnover_rate']:.1f}%\n")
+                            ml_txt.tag_config(_tag, foreground="#1565C0", font=("", 10, "bold"), underline=True)
+                            ml_txt.tag_bind(_tag, "<Double-Button-1>", lambda e, c=_code, n=_nm: _open_kline(c, n))
                     ml_txt.insert(tk.END, "\n")
-            except Exception as e:
-                ml_txt.insert(tk.END, f"❌ 主线渲染失败: {e}")
+            except Exception as e: ml_txt.insert(tk.END, f"❌ 主线渲染失败: {e}")
 
         def _render_matrix(agg):
-            for item in tree_m.get_children():
-                tree_m.delete(item)
+            for it in tree_m.get_children(): tree_m.delete(it)
             try:
                 _rank = {"启动": 0, "吸筹": 1, "震荡整理": 2, "拉高出货": 3, "下跌": 4}
-                t20 = agg.head(20).copy()
-                t20["_sr"] = t20["阶段"].map(_rank).fillna(99)
+                t20 = agg.head(20).copy(); t20["_sr"] = t20["阶段"].map(_rank).fillna(99)
                 t20 = t20.sort_values("_sr")
                 _tag_map = {"启动": "brk", "吸筹": "acc", "拉高出货": "dst", "下跌": "dec"}
                 for _, r in t20.iterrows():
-                    _stg = str(r.get("阶段", "震荡整理"))
-                    _tag = _tag_map.get(_stg, "unk")
-                    tree_m.insert("", tk.END, values=(
-                        r["industry"], _stg, int(r.get("阶段分", 0)),
-                        f"{r['平均涨跌幅']:+.2f}", f"{r['平均换手率']:.1f}"
-                    ), tags=(_tag,))
-            except Exception as e:
-                tree_m.insert("", tk.END, values=(f"❌ {e}", "", "", "", ""))
+                    _stg = str(r.get("阶段", "震荡整理")); _tag = _tag_map.get(_stg, "unk")
+                    tree_m.insert("", tk.END, values=(r["industry"], _stg, int(r.get("阶段分", 0)),
+                        f"{r['平均涨跌幅']:+.2f}", f"{r['平均换手率']:.1f}"), tags=(_tag,))
+            except Exception as e: tree_m.insert("", tk.END, values=(f"❌ {e}", "", "", "", ""))
 
         def _render_flows(agg):
             for t in [tree_in, tree_out]:
-                for item in t.get_children():
-                    t.delete(item)
+                for it in t.get_children(): t.delete(it)
             try:
                 for i, (_, r) in enumerate(agg.nlargest(10, "资金倾向").iterrows(), 1):
-                    tree_in.insert("", tk.END, values=(
-                        i, r["industry"], f"{r['总成交额亿']:,.0f}",
-                        f"{r['资金倾向']:,.0f}", f"{r['平均涨跌幅']:+.2f}", int(r["涨停数"])
-                    ), tags=("up" if r["平均涨跌幅"] > 0 else (),))
+                    tree_in.insert("", tk.END, values=(i, r["industry"], f"{r['总成交额亿']:,.0f}",
+                        f"{r['资金倾向']:,.0f}", f"{r['平均涨跌幅']:+.2f}", int(r["涨停数"])),
+                        tags=("up" if r["平均涨跌幅"] > 0 else (),))
                 for i, (_, r) in enumerate(agg.nsmallest(10, "资金倾向").iterrows(), 1):
-                    tree_out.insert("", tk.END, values=(
-                        i, r["industry"], f"{r['总成交额亿']:,.0f}",
-                        f"{r['资金倾向']:,.0f}", f"{r['平均涨跌幅']:+.2f}", int(r["涨停数"])
-                    ), tags=("dn" if r["平均涨跌幅"] < 0 else (),))
-            except Exception as e:
-                tree_in.insert("", tk.END, values=(f"❌ {e}", "", "", "", "", ""))
+                    tree_out.insert("", tk.END, values=(i, r["industry"], f"{r['总成交额亿']:,.0f}",
+                        f"{r['资金倾向']:,.0f}", f"{r['平均涨跌幅']:+.2f}", int(r["涨停数"])),
+                        tags=("dn" if r["平均涨跌幅"] < 0 else (),))
+            except Exception as e: tree_in.insert("", tk.END, values=(f"❌ {e}", "", "", "", "", ""))
 
         def _render_waterfall(agg):
-            if canvas_w is None:
-                return
+            if canvas_w is None: return
             try:
-                import numpy as np
                 ax_w.clear()
                 pdf = agg.head(15).copy().sort_values("资金倾向")
-                names = pdf["industry"].tolist()
-                values = pdf["资金倾向"].tolist()
-                colors = [C_UP if v > 0 else C_DN for v in values]
-                ax_w.barh(np.arange(len(names)), values, color=colors, height=0.7)
-                ax_w.set_yticks(np.arange(len(names)))
-                ax_w.set_yticklabels(names, fontsize=7)
+                ax_w.barh(np.arange(len(pdf)), pdf["资金倾向"].tolist(),
+                          color=[C_UP if v > 0 else C_DN for v in pdf["资金倾向"].tolist()], height=0.7)
+                ax_w.set_yticks(np.arange(len(pdf))); ax_w.set_yticklabels(pdf["industry"].tolist(), fontsize=7)
                 ax_w.axvline(x=0, color="#bbb", linewidth=0.5)
                 ax_w.set_title("主力资金 流入 ←→ 流出", fontsize=9, fontweight="bold")
                 ax_w.tick_params(axis="x", labelsize=7)
-                for i, v in enumerate(values):
-                    ax_w.text(v + (5 if v >= 0 else -5), i, f"{v:,.0f}",
-                              va="center", ha="left" if v >= 0 else "right", fontsize=6)
                 canvas_w.draw_idle()
             except Exception as e:
-                ax_w.clear()
-                ax_w.text(0.5, 0.5, f"❌ {e}", ha="center", va="center",
-                          fontsize=9, color="red", transform=ax_w.transAxes)
-                canvas_w.draw_idle()
+                ax_w.clear(); ax_w.text(0.5, 0.5, f"❌ {e}", ha="center", va="center",
+                          fontsize=9, color="red", transform=ax_w.transAxes); canvas_w.draw_idle()
 
         scan_btn.config(command=lambda: threading.Thread(target=_run, daemon=True).start())
         win.after(250, lambda: threading.Thread(target=_run, daemon=True).start())
 
-    # ================================================================
-    # 📊 大盘分析师 —— 作战姿态纪律 + 四维度红绿灯 + 分支报告
-    # ================================================================
+
+
     def _scan_market_analyst_data(self):
         """采集大盘分析师所需数据。返回 dict with keys:
         indices, breadth, margin, north, turnover, volume, sectors_top, sectors_bot, mainlines
@@ -7919,11 +7902,27 @@ except Exception as e:
                 ma5 = float(np.mean(closes[:5])) if len(closes) >= 5 else None
                 ma20 = float(np.mean(closes[:20])) if len(closes) >= 20 else None
                 ma60 = float(np.mean(closes[:60])) if len(closes) >= 60 else None
-                # MA趋势 (只要有前两个就能判断)
+                # MA趋势 — 收盘价优先 + 均线排列 + 短期跌幅惩罚 (解决暴跌后还报多头的滞后bug!)
+                _close_now = float(closes[0]) if len(closes) >= 1 else 0
+                _close_5d = float(closes[4]) if len(closes) >= 5 else _close_now
+                _close_20d = float(closes[19]) if len(closes) >= 20 else _close_now
+                _ret_1d = (_close_now / _close_5d - 1) * 100  # 近5日涨跌(近似单日)
+                # 修复后判断 (收盘价位置 > 均线排列)
                 if ma5 and ma20:
-                    if ma5 > ma20 and (ma60 is None or ma20 > ma60): ma_trend = "多头"
-                    elif ma5 < ma20 and (ma60 is None or ma20 < ma60): ma_trend = "空头"
-                    else: ma_trend = "震荡"
+                    _above_ma20 = _close_now > ma20
+                    _ma5_up = ma5 > ma20
+                    _ma20_up = ma60 is None or ma20 > ma60
+                    _big_drop = _ret_1d < -3  # 单日暴跌>3%
+                    if _above_ma20 and _ma5_up and _ma20_up and not _big_drop:
+                        ma_trend = "多头"
+                    elif not _above_ma20 and not _ma5_up and not _ma20_up:
+                        ma_trend = "空头"
+                    elif _big_drop:
+                        ma_trend = "暴跌转空"  # 关键修复! 暴跌后不认多头
+                    elif not _above_ma20 and _ma5_up:
+                        ma_trend = "跌破MA20"  # 顶背离预警
+                    else:
+                        ma_trend = "震荡"
                 else: ma_trend = "数据不足"
                 # 量比
                 vol_ratio = 1.0
@@ -8283,6 +8282,7 @@ except Exception as e:
         lines.append(f"📊 数据来源: Tushare 实时数据 | 生成时间: {now_str}")
         lines.append("═" * 70)
         return "\n".join(lines)
+
 
     def _show_market_analyst_dialog(self):
         """📊 大盘分析师 — 作战姿态纪律 + 四维度红绿灯 + 分支报告"""
@@ -11100,4 +11100,460 @@ except Exception as e:
                  bg="#E0F2F1", fg="#00695C", padx=10, pady=3).pack(fill=tk.X, side=tk.BOTTOM)
 
 
+    # ================================================================
+    # 🎯 量化预测 —— 市场走势预测 5 维闭环
+    # ================================================================
+    def _scan_quant_forecast_data(self):
+        """采集量化预测所需全部数据。"""
+        import tushare as _ts, pandas as pd
+        _token = (os.environ.get("TUSHARE_TOKEN","") or getattr(self,"ts_token","") or TS_DEFAULT_TOKEN or "").strip()
+        if not _token: return {"error": "TUSHARE_TOKEN 未配置"}
+        os.environ["TUSHARE_TOKEN"] = _token; _ts.set_token(_token)
+        _pro = _ts.pro_api()
+        from datetime import datetime, timedelta
+        result = {}; _today = datetime.now().strftime("%Y%m%d")
+        try:
+            _cal = _pro.trade_cal(exchange="SSE", start_date=(datetime.now()-timedelta(days=10)).strftime("%Y%m%d"), end_date=_today)
+            if _cal is not None and len(_cal) > 0:
+                _open = _cal[_cal["is_open"]==1]["cal_date"]
+                if len(_open) > 0: _today = str(_open.sort_values().iloc[-1])
+        except Exception: pass
+        result["td"] = _today
+
+        # 指数历史 500 天
+        _index_map = {"000001.SH":"上证指数","399001.SZ":"深证成指","399006.SZ":"创业板指"}
+        index_hist = {}
+        for _code, _name in _index_map.items():
+            try:
+                _hist = _pro.index_daily(ts_code=_code, start_date=(datetime.now()-timedelta(days=500)).strftime("%Y%m%d"), end_date=_today)
+                if _hist is None or len(_hist) < 60: continue
+                _hist = _hist.sort_values("trade_date").reset_index(drop=True)
+                closes = _hist["close"].astype(float).values
+                ma20 = float(np.mean(closes[-20:])) if len(closes)>=20 else None
+                ma60 = float(np.mean(closes[-60:])) if len(closes)>=60 else None
+                ma250 = float(np.mean(closes[-250:])) if len(closes)>=250 else None
+                close_now = float(closes[-1]); prev_close = float(closes[-2]) if len(closes)>=2 else close_now
+                arr_score = 0
+                if ma20 and ma60 and ma250:
+                    if ma20 > ma60 > ma250: arr_score = 100
+                    elif ma20 < ma60 < ma250: arr_score = 0
+                    else: arr_score = 50
+                dev20 = (close_now-ma20)/ma20*100 if ma20 else 0
+                dev60 = (close_now-ma60)/ma60*100 if ma60 else 0
+                dev250 = (close_now-ma250)/ma250*100 if ma250 else 0
+                if len(closes)>=35:
+                    ema12 = _ema(closes, 12); ema26 = _ema(closes, 26)
+                    dif = ema12 - ema26; dea = _ema(dif, 9)
+                    dif_dir = 1 if dif[-1] > dif[-2] else -1
+                    dea_pos = dif[-1] > 0
+                else: dif_dir = 0; dea_pos = False; dif = np.array([0.0]); dea = np.array([0.0])
+                rsi = _rsi(closes, 14) if len(closes)>=15 else 50.0
+                ret_20d = (closes[-1]/closes[-21]-1)*100 if len(closes)>=21 else 0
+                ma_score = arr_score; macd_score = 50
+                if dea_pos and dif_dir>0: macd_score=80
+                elif not dea_pos and dif_dir<0: macd_score=20
+                elif dea_pos and dif_dir<0: macd_score=45
+                elif not dea_pos and dif_dir>0: macd_score=60
+                trend_score = max(0, min(100, 50 + ret_20d*3))
+                quant_score = arr_score*0.4 + macd_score*0.3 + rsi/100*100*0.2 + trend_score*0.1
+                index_hist[_name] = {
+                    "close":close_now, "pct_chg":(close_now-prev_close)/prev_close*100,
+                    "ma20":ma20, "ma60":ma60, "ma250":ma250,
+                    "arr_score":arr_score, "dev20":dev20, "dev60":dev60, "dev250":dev250,
+                    "dif":float(dif[-1]), "dea":float(dea[-1]), "dif_dir":dif_dir, "dea_pos":dea_pos,
+                    "rsi":float(rsi), "ret_20d":ret_20d,
+                    "ma_score":ma_score, "macd_score":macd_score, "trend_score":trend_score,
+                    "quant_score":quant_score, "closes":closes,
+                }
+            except Exception as e: index_hist[_name] = {"_err":str(e)}
+        result["index"] = index_hist
+
+        # Breadth
+        try:
+            _basic = _pro.daily_basic(trade_date=_today, fields="ts_code,turnover_rate,volume_ratio")
+            _daily = _pro.daily(trade_date=_today, fields="ts_code,pct_chg,amount,vol")
+            if _basic is not None and len(_basic)>0 and _daily is not None and len(_daily)>0:
+                _df = _basic.merge(_daily, on="ts_code", how="inner")
+                up = len(_df[_df["pct_chg"]>0]); dn = len(_df[_df["pct_chg"]<0]); flat = len(_df[_df["pct_chg"]==0])
+                red_pct = up/max(up+dn+flat,1)*100
+                limit_up = len(_df[_df["pct_chg"]>=9.5]); limit_dn = len(_df[_df["pct_chg"]<=-9.5])
+                up_amt = _df[_df["pct_chg"]>0]["amount"].sum(); dn_amt = _df[_df["pct_chg"]<0]["amount"].sum()
+                trin = ((up/max(dn,1))/(up_amt/max(dn_amt,1))) if dn>0 and dn_amt>0 else 1.0
+                _hist_bd = []
+                for _dt2 in pd.date_range(end=_today, periods=120, freq="B").strftime("%Y%m%d").tolist():
+                    try:
+                        _d = _pro.daily(trade_date=_dt2, fields="ts_code,pct_chg")
+                        if _d is not None and len(_d)>0:
+                            _hist_bd.append(len(_d[_d["pct_chg"]>0]) - len(_d[_d["pct_chg"]<0]))
+                    except Exception: pass
+                mcl_val_pct = 0.0; mcl_trend = "无数据"
+                if len(_hist_bd) >= 45:
+                    _arr = np.array(_hist_bd, dtype=float)
+                    _ema19 = _ema(_arr, 19); _ema39 = _ema(_arr, 39)
+                    mcl = _ema19[-1] - _ema39[-1]
+                    mcl_val_pct = mcl / max(float(len(_hist_bd[0])),1.0)*100 if len(_hist_bd)>0 else 0.0
+                    if mcl_val_pct > 20: mcl_trend = "超买·回落风险"
+                    elif mcl_val_pct > 5: mcl_trend = "偏强"
+                    elif mcl_val_pct < -20: mcl_trend = "超卖·反弹概率"
+                    elif mcl_val_pct < -5: mcl_trend = "偏弱"
+                    else: mcl_trend = "中性"
+                result["breadth"] = {
+                    "total":len(_df), "up":up, "dn":dn, "flat":flat, "red_pct":red_pct,
+                    "limit_up":limit_up, "limit_dn":limit_dn, "trin":trin,
+                    "trin_label":("强" if trin<0.7 else ("中性" if trin<1.3 else "弱")),
+                    "mcl_pct":mcl_val_pct, "mcl_trend":mcl_trend,
+                }
+            else: result["breadth"] = {"error":"daily 返回空"}
+        except Exception as e: result["breadth"] = {"error":str(e)}
+
+        # 历史形态拟合
+        try:
+            _sh = index_hist.get("上证指数")
+            if _sh and len(_sh.get("closes",[])) >= 260:
+                closes = _sh["closes"]; _sim = []
+                cur_dev20 = float((closes[-1]-np.mean(closes[-20:]))/np.mean(closes[-20:])*100)
+                cur_dev60 = float((closes[-1]-np.mean(closes[-60:]))/np.mean(closes[-60:])*100)
+                cur_dev250 = float((closes[-1]-np.mean(closes[-250:]))/np.mean(closes[-250:])*100)
+                cur_ret20 = float((closes[-1]/closes[-21]-1)*100)
+                cur_arr = _sh["arr_score"]
+                cur_feat = np.array([cur_dev20, cur_dev60, cur_dev250, cur_ret20, cur_arr])
+                for i in range(260, len(closes)-60, 20):
+                    _c = closes[:i+1]
+                    if len(_c)<250: continue
+                    d20 = float((_c[-1]-np.mean(_c[-20:]))/np.mean(_c[-20:])*100)
+                    d60 = float((_c[-1]-np.mean(_c[-60:]))/np.mean(_c[-60:])*100)
+                    d250 = float((_c[-1]-np.mean(_c[-250:]))/np.mean(_c[-250:])*100)
+                    r20 = float((_c[-1]/_c[-21]-1)*100) if len(_c)>=21 else 0
+                    m20=np.mean(_c[-20:]); m60=np.mean(_c[-60:]); m250=np.mean(_c[-250:])
+                    if m20>m60>m250: ma_a=100
+                    elif m20<m60<m250: ma_a=0
+                    else: ma_a=50
+                    f20 = float((closes[i+20]/closes[i]-1)*100) if i+20<len(closes) else None
+                    f60 = float((closes[i+60]/closes[i]-1)*100) if i+60<len(closes) else None
+                    f = np.array([d20,d60,d250,r20,ma_a])
+                    dist = float(np.sqrt(np.sum(((cur_feat-f)/np.array([3,3,5,8,50]))**2)))
+                    _sim.append({"idx":i,"dist":dist,"future_20":f20,"future_60":f60,"ma_arr":ma_a})
+                _sim.sort(key=lambda x:x["dist"])
+                top5 = _sim[:5]
+                up20 = sum(1 for s in top5 if s["future_20"] and s["future_20"]>0)
+                up60 = sum(1 for s in top5 if s["future_60"] and s["future_60"]>0)
+                _v20 = [s["future_20"] for s in top5 if s["future_20"] is not None]
+                _v60 = [s["future_60"] for s in top5 if s["future_60"] is not None]
+                avg20 = float(np.mean(_v20)) if _v20 else 0
+                avg60 = float(np.mean(_v60)) if _v60 else 0
+                result["historical_sim"] = {
+                    "cur_dev20":cur_dev20,"cur_dev60":cur_dev60,"cur_dev250":cur_dev250,"cur_ma_arr":cur_arr,
+                    "top5":top5,"up_prob_20":up20/max(len(top5),1)*100,
+                    "up_prob_60":up60/max(len(top5),1)*100,"avg_ret_20":avg20,"avg_ret_60":avg60,
+                }
+            else: result["historical_sim"] = {"error":"数据不足"}
+        except Exception as e: result["historical_sim"] = {"error":str(e)}
+
+        # KNN 最近邻
+        try:
+            _sh = index_hist.get("上证指数")
+            if _sh and len(_sh.get("closes",[])) >= 260:
+                closes = _sh["closes"]; window = 60
+                cur = (closes[-window:]-np.min(closes[-window:]))/max(np.max(closes[-window:])-np.min(closes[-window:]),0.001)
+                knn = []
+                for i in range(250, len(closes)-window-20, 5):
+                    w = closes[i:i+window]
+                    if len(w)<window: continue
+                    wn = (w-np.min(w))/max(np.max(w)-np.min(w),0.001)
+                    d = float(np.sqrt(np.sum((cur-wn)**2)))
+                    f20 = float((closes[i+window+20]/closes[i+window]-1)*100) if i+window+20<len(closes) else None
+                    f60 = float((closes[i+window+60]/closes[i+window]-1)*100) if i+window+60<len(closes) else None
+                    knn.append({"dist":d,"f20":f20,"f60":f60})
+                knn.sort(key=lambda x:x["dist"])
+                top_k = knn[:7]
+                up = sum(1 for s in top_k if s["f20"] and s["f20"]>0)
+                result["knn"] = {"top_k":top_k,"up_rate":up/max(len(top_k),1)*100,"n_samples":len(knn)}
+            else: result["knn"] = {"error":"数据不足"}
+        except Exception as e: result["knn"] = {"error":str(e)}
+
+        # 综合评分
+        try:
+            _sh = index_hist.get("上证指数",{})
+            br = result.get("breadth",{})
+            hs = result.get("historical_sim",{})
+            kn = result.get("knn",{})
+            qs = _sh.get("quant_score",50)
+            bs = br.get("red_pct",50)
+            trin_s = max(0,min(100,(1.5-br.get("trin",1.0))/1.0*100))
+            sim_s = hs.get("up_prob_60",50)
+            knn_s = kn.get("up_rate",50)
+            total = qs*0.30 + bs*0.20 + trin_s*0.15 + sim_s*0.20 + knn_s*0.15
+            if total>=65: conclusion = "🟢 中期上行概率较大，可适度积极"
+            elif total>=50: conclusion = "🟢🟡 中性偏多，控制仓位等待确认"
+            elif total>=38: conclusion = "🟡 震荡整理，观望为主"
+            elif total>=25: conclusion = "🟡🔴 中期下行风险，防御/轻仓"
+            else: conclusion = "🔴 中期大概率下行，谨慎操作"
+            result["final"] = {"quant_score":qs,"breadth_score":bs,"trin_score":trin_s,
+                "sim_score":sim_s,"knn_score":knn_s,"total":total,"conclusion":conclusion}
+        except Exception as e: result["final"] = {"error":str(e)}
+        return result
+
+    def _show_quant_forecast_dialog(self):
+        """🎯 量化预测 5 维闭环 UI"""
+        import threading
+        win = self._safe_toplevel(self.root)
+        win.title("🎯 量化预测 · 市场走势预测 5 维闭环")
+        win.geometry("1350x850"); win.transient(self.root)
+        C_UP="#EF5350"; C_DN="#66BB6A"
+
+        banner = tk.Frame(win, bg="#5D4037", height=50); banner.pack(fill=tk.X); banner.pack_propagate(False)
+        tk.Label(banner, text="🎯 量化预测 · 市场走势 5 维闭环 (数据-模型-验证)",
+                 font=("Microsoft YaHei",12,"bold"),bg="#5D4037",fg="#FFF3E0").pack(side=tk.LEFT,padx=14,pady=10)
+        status_var = tk.StringVar(value="⏳ 点击 🔄 开始量化预测...")
+        tk.Label(banner, textvariable=status_var, font=("Microsoft YaHei",10),
+                 bg="#5D4037",fg="#FFCCBC").pack(side=tk.LEFT,pady=12)
+
+        ctrl = ttk.Frame(win); ctrl.pack(fill=tk.X,padx=8,pady=(6,2))
+        scan_btn = ttk.Button(ctrl, text="🔄 量化扫描", width=14); scan_btn.pack(side=tk.LEFT)
+        pct_var = tk.DoubleVar(value=0)
+        prog = ttk.Progressbar(ctrl, variable=pct_var, maximum=100, length=260); prog.pack(side=tk.LEFT,padx=8)
+        prog_txt = tk.Label(ctrl, text="", fg="#555"); prog_txt.pack(side=tk.LEFT)
+        concl_label = tk.Label(ctrl, text="", font=("",11,"bold"), fg="#B71C1C")
+        concl_label.pack(side=tk.LEFT,padx=10)
+
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0,8))
+        tab1=tk.Frame(nb); nb.add(tab1,text="📊 市场宽广度")
+        tab2=tk.Frame(nb); nb.add(tab2,text="📈 技术指标评分")
+        tab3=tk.Frame(nb); nb.add(tab3,text="🔍 历史形态拟合")
+        tab4=tk.Frame(nb); nb.add(tab4,text="🧠 KNN最近邻")
+        tab5=tk.Frame(nb); nb.add(tab5,text="📝 综合预测报告")
+
+        # Tab1 卡片
+        f_br = tk.LabelFrame(tab1, text="📊 今日市场宽广度 (Breadth)", font=("",11,"bold"))
+        f_br.pack(fill=tk.X, padx=8, pady=8)
+        b_vars={}
+        for _i,(_t,_fg) in enumerate([("红盘率 (上涨占比)","#333"),("涨停家数",C_UP),("跌停家数",C_DN),
+                                       ("TRIN 广度指数","#555"),("MCL","#555"),("MCL 趋势","#1565C0")]):
+            r=_i//3; c=_i%3
+            cf=tk.Frame(f_br,bg="#FFF8E1",bd=1,relief=tk.SOLID)
+            cf.grid(row=r,column=c,sticky="nsew",padx=4,pady=4)
+            tk.Label(cf,text=_t,font=("",9),bg="#FFF8E1",fg="#666").pack(padx=6,pady=(4,0))
+            _v=tk.Label(cf,text="--",font=("",14,"bold"),bg="#FFF8E1",fg=_fg); _v.pack(padx=6,pady=(0,4))
+            b_vars[_t]=_v
+        for c in range(3): f_br.grid_columnconfigure(c,weight=1)
+        for r in range(2): f_br.grid_rowconfigure(r,weight=1)
+        tk.Label(tab1,text="📐 TRIN=(上涨/下跌)/(上涨额/下跌额) → <0.7强, >1.3弱\n"
+                 "MCL=EMA(涨跌差,19)-EMA(涨跌差,39) → 正值多头扩散, 负值空头扩散",
+                 fg="#555",justify=tk.LEFT).pack(anchor="w",padx=12,pady=6)
+
+        # Tab2
+        f_sc = tk.LabelFrame(tab2, text="📈 技术指标量化评分 (0-100)", font=("",11,"bold"))
+        f_sc.pack(fill=tk.X, padx=8, pady=8)
+        sc_vars={}
+        for _t,_fg in [("MA20/60/250 排列","#333"),("MACD 方向","#333"),("RSI14","#333"),
+                       ("20日趋势","#333"),("综合分","#B71C1C")]:
+            cf=tk.Frame(f_sc,bg="#E8EAF6",bd=1,relief=tk.SOLID); cf.pack(fill=tk.X,padx=6,pady=3)
+            tk.Label(cf,text=_t,font=("",10),bg="#E8EAF6",fg="#333").pack(side=tk.LEFT,padx=8)
+            _v=tk.Label(cf,text="--",font=("",12,"bold"),bg="#E8EAF6",fg=_fg); _v.pack(side=tk.RIGHT,padx=12)
+            sc_vars[_t]=_v
+        f_idx = tk.LabelFrame(tab2, text="📌 三大指数 当前状态", font=("",11,"bold"))
+        f_idx.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        tree_i = ttk.Treeview(f_idx, columns=("idx","close","pct","ma20","ma60","ma250","rsi","quant"), show="headings", height=6)
+        for _c,_t,_w,_a in [("idx","指数",80),("close","收盘",70),("pct","涨跌%",60),
+                            ("ma20","MA20",70),("ma60","MA60",70),("ma250","MA250",70),
+                            ("rsi","RSI14",55),("quant","综合分",55)]:
+            tree_i.heading(_c,text=_t); tree_i.column(_c,width=_w,anchor="center")
+        tree_i.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        # Tab3
+        f_sim_top = tk.LabelFrame(tab3, text="🔍 当前 MA 偏离度", font=("",11,"bold"))
+        f_sim_top.pack(fill=tk.X, padx=8, pady=8)
+        sim_vars={}
+        for _i,(_t,_fg) in enumerate([("偏离 MA20","#333"),("偏离 MA60","#333"),("偏离 MA250","#333"),("MA 排列","#1565C0")]):
+            r=_i//2; c=_i%2
+            cf=tk.Frame(f_sim_top,bg="#F3E5F5",bd=1,relief=tk.SOLID)
+            cf.grid(row=r,column=c,sticky="nsew",padx=4,pady=4)
+            tk.Label(cf,text=_t,font=("",10),bg="#F3E5F5",fg="#666").pack(padx=6,pady=(4,0))
+            _v=tk.Label(cf,text="--",font=("",13,"bold"),bg="#F3E5F5",fg=_fg); _v.pack(padx=6,pady=(0,4))
+            sim_vars[_t]=_v
+        f_sim_top.grid_columnconfigure(0,weight=1); f_sim_top.grid_columnconfigure(1,weight=1)
+        f_sim_top.grid_rowconfigure(0,weight=1); f_sim_top.grid_rowconfigure(1,weight=1)
+        f_sim_hist = tk.LabelFrame(tab3, text="近 10 年匹配 Top5 + 后续表现", font=("",11,"bold"))
+        f_sim_hist.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0,8))
+        tree_s = ttk.Treeview(f_sim_hist, columns=("rank","dist","f20","f60","ma"), show="headings", height=10)
+        for _c,_t,_w,_a in [("rank","#",30),("dist","距离",60),("f20","后续20日%",90),("f60","后续60日%",90),("ma","MA排列",70)]:
+            tree_s.heading(_c,text=_t); tree_s.column(_c,width=_w,anchor="center")
+        tree_s.tag_configure("up",foreground=C_UP,font=("",10,"bold"))
+        tree_s.tag_configure("dn",foreground=C_DN,font=("",10,"bold"))
+        tree_s.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        f_sim_concl = tk.LabelFrame(tab3, text="📌 形态拟合结论", font=("",11,"bold"))
+        f_sim_concl.pack(fill=tk.X, padx=8, pady=(0,8))
+        sim_concl = tk.Label(f_sim_concl, text="--", font=("",11), fg="#333", justify=tk.LEFT)
+        sim_concl.pack(fill=tk.X, padx=8, pady=6)
+
+        # Tab4
+        f_knn = tk.LabelFrame(tab4, text="🧠 KNN 最近邻 (近两年窗口60日)", font=("",11,"bold"))
+        f_knn.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        tree_k = ttk.Treeview(f_knn, columns=("rank","dist","f20","f60"), show="headings", height=12)
+        for _c,_t,_w,_a in [("rank","#",30),("dist","距离",70),("f20","后续20日%",100),("f60","后续60日%",100)]:
+            tree_k.heading(_c,text=_t); tree_k.column(_c,width=_w,anchor="center")
+        tree_k.tag_configure("up",foreground=C_UP,font=("",10,"bold"))
+        tree_k.tag_configure("dn",foreground=C_DN,font=("",10,"bold"))
+        tree_k.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        f_knn_concl = tk.LabelFrame(tab4, text="📌 KNN 结论", font=("",11,"bold"))
+        f_knn_concl.pack(fill=tk.X, padx=8, pady=(0,8))
+        knn_concl = tk.Label(f_knn_concl, text="--", font=("",11), fg="#333", justify=tk.LEFT)
+        knn_concl.pack(fill=tk.X, padx=8, pady=6)
+
+        # Tab5
+        f_rp = tk.LabelFrame(tab5, text="📝 量化预测综合报告", font=("",11,"bold"))
+        f_rp.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        report_txt = scrolledtext.ScrolledText(f_rp, wrap=tk.WORD, font=("Consolas",11), bg="#FFFFFF", fg="#263238")
+        report_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        def _set_prog(p, msg):
+            def _do(): pct_var.set(p); prog_txt.config(text=msg); win.update_idletasks()
+            self.root.after(0, _do)
+
+        def _run():
+            scan_btn.config(state=tk.DISABLED)
+            try:
+                _set_prog(5, "采集指数+Breadth...")
+                data = self._scan_quant_forecast_data()
+                if "error" in data: raise RuntimeError(data["error"])
+                _set_prog(50, "匹配历史形态 + KNN...")
+                self.root.after(0, lambda: _render_breadth(data))
+                self.root.after(0, lambda: _render_scores(data))
+                self.root.after(0, lambda: _render_sim(data))
+                self.root.after(0, lambda: _render_knn(data))
+                self.root.after(0, lambda: _render_report(data))
+                _final = data.get("final",{})
+                _set_prog(100, f"✅ 总分 {_final.get('total',0):.0f}/100")
+                concl_label.config(text=_final.get("conclusion",""))
+                status_var.set(f"✅ td={data.get('td','')}")
+                scan_btn.config(state=tk.NORMAL)
+            except Exception as e:
+                import traceback; _err=traceback.format_exc()
+                status_var.set(f"❌ {e}"); scan_btn.config(state=tk.NORMAL)
+                self.root.after(0, lambda: messagebox.showerror("失败", f"{e}\n\n{_err[-500:]}", parent=win))
+
+        def _render_breadth(d):
+            br=d.get("breadth",{})
+            if "error" in br: b_vars["红盘率 (上涨占比)"].config(text=f"❌"); return
+            b_vars["红盘率 (上涨占比)"].config(text=f"{br['red_pct']:.1f}%")
+            b_vars["涨停家数"].config(text=f"{br['limit_up']}")
+            b_vars["跌停家数"].config(text=f"{br['limit_dn']}")
+            b_vars["TRIN 广度指数"].config(text=f"{br['trin']:.2f} ({br['trin_label']})")
+            b_vars["MCL"].config(text=f"{br['mcl_pct']:.1f}%")
+            b_vars["MCL 趋势"].config(text=br['mcl_trend'])
+
+        def _render_scores(d):
+            idx=d.get("index",{})
+            sh=idx.get("上证指数",{})
+            if not sh: return
+            sc_vars["MA20/60/250 排列"].config(text=f"{sh['ma_score']:.0f}/100")
+            sc_vars["MACD 方向"].config(text=f"{sh['macd_score']:.0f} (DIF{'↑' if sh['dif_dir']>0 else '↓'})")
+            sc_vars["RSI14"].config(text=f"{sh['rsi']:.1f}")
+            sc_vars["20日趋势"].config(text=f"{sh['trend_score']:.0f}/100")
+            sc_vars["综合分"].config(text=f"{sh['quant_score']:.1f}/100")
+            for it in tree_i.get_children(): tree_i.delete(it)
+            for _n,_dd in idx.items():
+                if _n.startswith("_"): continue
+                tree_i.insert("",tk.END,values=(
+                    _n, f"{_dd['close']:.2f}", f"{_dd['pct_chg']:+.2f}",
+                    f"{_dd['ma20']:.2f}" if _dd.get("ma20") else "-",
+                    f"{_dd['ma60']:.2f}" if _dd.get("ma60") else "-",
+                    f"{_dd['ma250']:.2f}" if _dd.get("ma250") else "-",
+                    f"{_dd['rsi']:.1f}", f"{_dd['quant_score']:.1f}"))
+
+        def _render_sim(d):
+            hs=d.get("historical_sim",{})
+            if "error" in hs: sim_vars["偏离 MA20"].config(text=f"❌"); return
+            sim_vars["偏离 MA20"].config(text=f"{hs['cur_dev20']:+.2f}%")
+            sim_vars["偏离 MA60"].config(text=f"{hs['cur_dev60']:+.2f}%")
+            sim_vars["偏离 MA250"].config(text=f"{hs['cur_dev250']:+.2f}%")
+            sim_vars["MA 排列"].config(text=f"{hs['cur_ma_arr']:.0f}")
+            for it in tree_s.get_children(): tree_s.delete(it)
+            for rank,s in enumerate(hs.get("top5",[]),1):
+                f20=s.get("future_20"); f60=s.get("future_60")
+                tag="up" if (f20 is not None and f20>0) else ("dn" if (f20 is not None and f20<0) else "")
+                tree_s.insert("",tk.END,values=(rank,f"{s['dist']:.2f}",
+                    f"{f20:+.2f}" if f20 is not None else "-",
+                    f"{f60:+.2f}" if f60 is not None else "-", f"{s['ma_arr']:.0f}"),tags=(tag,))
+            sim_concl.config(text=f"📌 未来 20 日上行 ≈ {hs['up_prob_20']:.0f}% (均值 {hs['avg_ret_20']:+.2f}%)\n"
+                                 f"   未来 60 日上行 ≈ {hs['up_prob_60']:.0f}% (均值 {hs['avg_ret_60']:+.2f}%)")
+
+        def _render_knn(d):
+            kn=d.get("knn",{})
+            if "error" in kn: knn_concl.config(text=f"❌ {kn['error']}"); return
+            for it in tree_k.get_children(): tree_k.delete(it)
+            for rank,s in enumerate(kn.get("top_k",[]),1):
+                f20=s.get("f20"); f60=s.get("f60")
+                tag="up" if (f20 is not None and f20>0) else ("dn" if (f20 is not None and f20<0) else "")
+                tree_k.insert("",tk.END,values=(rank,f"{s['dist']:.3f}",
+                    f"{f20:+.2f}" if f20 is not None else "-",
+                    f"{f60:+.2f}" if f60 is not None else "-"),tags=(tag,))
+            knn_concl.config(text=f"📌 Top {len(kn.get('top_k',[]))} 最近邻上行 ≈ {kn['up_rate']:.0f}%  |  候选 {kn['n_samples']}")
+
+        def _render_report(d):
+            report_txt.delete("1.0", tk.END); p=lambda s: report_txt.insert(tk.END,s+"\n")
+            final=d.get("final",{}); td=d.get("td","")
+            idx=d.get("index",{}).get("上证指数",{}); br=d.get("breadth",{})
+            hs=d.get("historical_sim",{}); kn=d.get("knn",{})
+            p("╔══════════════════════════════════════════════════════════════╗")
+            p(f"║   🎯 量化预测报告   交易日: {td}")
+            p("╠══════════════════════════════════════════════════════════════╣")
+            p(f"║  🔴 核心结论: {final.get('conclusion','--')}")
+            p(f"║     综合评分 = {final.get('total',0):.1f} / 100")
+            p("╚══════════════════════════════════════════════════════════════╝")
+            p(); p("─"*60); p("一、市场宽广度 Breadth"); p("─"*60)
+            p(f"  红盘率 {br.get('red_pct',0):.1f}%  上涨 {br.get('up',0)} / 下跌 {br.get('dn',0)}")
+            p(f"  涨停 {br.get('limit_up',0)}  跌停 {br.get('limit_dn',0)}")
+            p(f"  TRIN = {br.get('trin',1):.2f} ({br.get('trin_label','')})  MCL = {br.get('mcl_pct',0):.1f}% ({br.get('mcl_trend','')})")
+            p(); p("─"*60); p("二、技术指标综合评分"); p("─"*60)
+            if idx:
+                p(f"  上证 {idx.get('close',0):.2f}  {idx.get('pct_chg',0):+.2f}%  MA偏离 {idx.get('dev20',0):+.2f}%/{idx.get('dev60',0):+.2f}%/{idx.get('dev250',0):+.2f}%")
+                p(f"  MA排列 {idx.get('ma_score',0):.0f}  MACD {idx.get('macd_score',0):.0f}  RSI {idx.get('rsi',0):.1f}  综合量化 {idx.get('quant_score',0):.1f}")
+            p(); p("─"*60); p("三、历史形态拟合 (近10年)"); p("─"*60)
+            if "error" not in hs:
+                p(f"  Top5 → 20日上行 {hs['up_prob_20']:.0f}%  60日上行 {hs['up_prob_60']:.0f}%")
+                for i,s in enumerate(hs.get("top5",[])[:3],1): p(f"    {i}. dist={s['dist']:.2f}  20日{s.get('future_20',0):+.2f}%  60日{s.get('future_60',0):+.2f}%")
+            p(); p("─"*60); p("四、KNN 最近邻 (近两年)"); p("─"*60)
+            if "error" not in kn: p(f"  Top7 → 20日上行 {kn['up_rate']:.0f}%  |  候选形态 {kn['n_samples']}")
+            p(); p("─"*60); p("五、综合判断 (数据-模型-验证)"); p("─"*60)
+            p(f"  量化评分  30% × {final.get('quant_score',0):.0f}")
+            p(f"  Breadth   20% × {final.get('breadth_score',0):.0f}")
+            p(f"  TRIN      15% × {final.get('trin_score',0):.0f}")
+            p(f"  形态拟合  20% × {final.get('sim_score',0):.0f}")
+            p(f"  KNN       15% × {final.get('knn_score',0):.0f}")
+            p(f"  ──────────────")
+            p(f"  加权总分  100% = {final.get('total',0):.0f}")
+            p(f"\n  ✅ 判定: {final.get('conclusion','')}")
+            p(); p("═"*60); p("📌 本报告为量化模型自动生成, 仅供参考, 不构成投资建议")
+
+        scan_btn.config(command=lambda: threading.Thread(target=_run, daemon=True).start())
+        win.after(300, lambda: threading.Thread(target=_run, daemon=True).start())
+
+
 __all__ = ["BuildersMixin"]
+
+# ================================================================
+# 模块级辅助函数 (被 _scan_quant_forecast_data 调用)
+# ================================================================
+def _ema(arr, n):
+    """指数加权移动平均 (tushare 风格)"""
+    arr = np.array(arr, dtype=float)
+    k = 2.0 / (n + 1)
+    result = np.empty_like(arr); result[0] = arr[0]
+    for i in range(1, len(arr)):
+        result[i] = arr[i] * k + result[i-1] * (1 - k)
+    return result
+
+def _rsi(arr, n=14):
+    """RSI 指标"""
+    arr = np.array(arr, dtype=float)
+    deltas = np.diff(arr)
+    gains = np.where(deltas > 0, deltas, 0); losses = np.where(deltas < 0, -deltas, 0)
+    if len(gains) < n: return 50.0
+    avg_gain = np.mean(gains[:n]); avg_loss = np.mean(losses[:n])
+    for i in range(n, len(gains)):
+        avg_gain = (avg_gain * (n - 1) + gains[i]) / n
+        avg_loss = (avg_loss * (n - 1) + losses[i]) / n
+    rs = avg_gain / max(avg_loss, 1e-10)
+    return 100 - 100 / (1 + rs)
+

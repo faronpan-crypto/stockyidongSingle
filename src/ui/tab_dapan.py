@@ -63845,8 +63845,8 @@ class DapanMixin:
         skill_result_tree.tag_configure("down", foreground="#66BB6A")
         skill_result_tree.tag_configure("hi", foreground="#FFA000", font=("", 10, "bold"))
 
-        # 双击 → 区分 cat: 选股/ETF → K线弹窗; 宏观 → AI 分析
-        def _on_result_dbl(_e):
+        # 双击 → 区分 cat: 选股 → 日K线弹窗; 宏观/ETF → AI 分析
+        def _on_result_dbl(_e=None):
             sel = skill_result_tree.selection()
             if not sel: return
             item = skill_result_tree.item(sel[0])
@@ -63854,18 +63854,38 @@ class DapanMixin:
             code6 = str(item["values"][0]); name = str(item["values"][1])
             reason = str(item["values"][4]) if len(item["values"]) > 4 else ""
             if _cat in ("macro", "etf") or (_cat == "analyze" and not code6.isdigit()):
-                # 宏观/ETF类: 双击触发 AI 逻辑分析, 显示到 Tab2
                 self._ai_analyze_result_row(name, reason, skill_nb, skill_ai_text)
             elif code6 and code6 != "None" and len(code6) == 6:
-                # 选股/分析类: 打开 K线+一目均衡
                 try:
-                    self._show_stock_analysis_dialog(code6, name)
+                    from ui.high_low_swing import _quick_open_daily_kline
+                    _quick_open_daily_kline(win, code6, name or "")
                 except Exception as _ed:
                     import traceback; traceback.print_exc()
                     skill_status_var.set(f"❌ K线弹窗失败: {_ed}")
             else:
                 skill_status_var.set(f"ℹ️ 这是分析行, 不是股票 — 看 Tab2 AI 分析")
+
         skill_result_tree.bind("<Double-1>", _on_result_dbl)
+
+        # 右键菜单: 打开日K线 / AI 分析
+        def _on_right_click(event):
+            sel = skill_result_tree.identify_row(event.y)
+            if not sel: return
+            skill_result_tree.selection_set(sel)
+            item = skill_result_tree.item(sel)
+            code6 = str(item["values"][0]) if item["values"] else ""
+            name = str(item["values"][1]) if len(item["values"]) > 1 else ""
+            m = tk.Menu(skill_result_tree, tearoff=0)
+            if code6 and code6 != "None" and len(code6) == 6:
+                m.add_command(label=f"📈 打开 {name or code6} 日K线 (双击)",
+                              command=_on_result_dbl, accelerator="双击")
+            _cat = getattr(self, "_last_skill_cat", "screener")
+            reason = str(item["values"][4]) if len(item["values"]) > 4 else ""
+            if _cat in ("macro", "etf") or (_cat == "analyze" and not code6.isdigit()):
+                m.add_command(label=f"🤖 AI 分析 {name}",
+                              command=lambda: self._ai_analyze_result_row(name, reason, skill_nb, skill_ai_text))
+            m.tk_popup(event.x_root, event.y_root)
+        skill_result_tree.bind("<Button-3>", _on_right_click)
 
         # ── Tab2: AI 分析 Text (股票诊断/宏观研判/ETF套利) ──
         tab_ai = ttk.Frame(skill_nb); skill_nb.add(tab_ai, text="🤖 AI 分析")

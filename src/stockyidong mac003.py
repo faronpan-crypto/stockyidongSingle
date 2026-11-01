@@ -4725,6 +4725,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("📈价增量涨", 10, self._show_price_volume_dialog),
             ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
             ("🤖量化", 7, self._show_quant_dialog),
+            ("🎯量化预测", 10, self._show_quant_forecast_dialog),
             ("🪙筹码", 7, self._show_chouma),
             ("🎯机会", 7, self._show_jianlou),
             ("🎯高抛低吸", 8, self._show_high_low_swing),
@@ -4762,6 +4763,29 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         # 快速爬取/文本控制标签页控件框(共用一块区域,可以切换)
         crawler_control_notebook = ttk.Notebook(left_frame)
         crawler_control_notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 0))
+        # ── Tab 刷新注册表 (切 tab 时自动调 refresh 函数) ──
+        _tab_refreshers = {}  # {tab_frame: {"refresh": fn, "refresh_full": fn, ...}}
+        _last_tab_idx = [None]
+
+        def _on_crawler_tab_changed(_e):
+            """Tab 切换自动刷新 — 每个 tab 注册自己的 refresh 函数"""
+            try:
+                _sel = crawler_control_notebook.select()
+                _idx = crawler_control_notebook.index(_sel)
+                if _idx == _last_tab_idx[0]: return  # 同一个 tab 不要重复刷
+                _last_tab_idx[0] = _idx
+                _tab = crawler_control_notebook.nametowidget(_sel)
+                _refresher = _tab_refreshers.get(_tab)
+                if _refresher and callable(_refresher.get("refresh")):
+                    def _safe_call():
+                        try:
+                            _refresher["refresh"]()
+                        except Exception as _re:
+                            pass  # 后台刷新, 静默失败
+                    threading.Thread(target=_safe_call, daemon=True).start()
+            except Exception:
+                pass
+        crawler_control_notebook.bind("<<NotebookTabChanged>>", _on_crawler_tab_changed)
         # 情绪日历标签页 (放到第一个, 让用户第一眼看到)
         try:
             emo_tab = ttk.Frame(crawler_control_notebook, padding=4)
@@ -4791,7 +4815,10 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
         crawler_control_notebook.add(fund_frame, text="📊基金持仓")
         try:
             from ui.fund_holdings_tab import build_fund_holdings_tab
-            build_fund_holdings_tab(fund_frame, root=self.root)
+            _fund_refresher = build_fund_holdings_tab(fund_frame, root=self.root)
+            if _fund_refresher and isinstance(_fund_refresher, dict):
+                _tab_refreshers[fund_frame] = _fund_refresher
+                print("[Tab刷新] 📊基金持仓 已注册刷新函数", flush=True)
         except Exception as _fe:
             import traceback as _tb; _tb.print_exc()
             ttk.Label(fund_frame, text=f"❌ 基金持仓加载失败: {_fe}").pack(pady=20)
