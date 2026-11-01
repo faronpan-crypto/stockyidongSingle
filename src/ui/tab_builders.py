@@ -11363,6 +11363,13 @@ except Exception as e:
         ttk.Button(ctrl, text="今天", width=4,
                    command=lambda: date_var.set(__import__("datetime").datetime.now().strftime("%Y%m%d"))
                    ).pack(side=tk.LEFT,padx=2)
+        # 🆕 日K + 一目均衡按钮
+        ichimoku_btn = ttk.Button(ctrl, text="📈 日K+一目均衡", width=16,
+                                   command=lambda: self._show_ichimoku_kline_dialog())
+        ichimoku_btn.pack(side=tk.LEFT, padx=(16, 4))
+        _h_ich = tk.Label(ctrl, text=" ❓", font=("",10,"bold"), fg="#1565C0", cursor="hand2")
+        _h_ich.pack(side=tk.LEFT, padx=2); _h_ich.bind("<Double-Button-1>", lambda e: _show_help_popup(win, "engine_overview"))
+        _h_ich.bind("<Enter>",lambda e:_h_ich.config(underline=True)); _h_ich.bind("<Leave>",lambda e:_h_ich.config(underline=False))
         pct_var = tk.DoubleVar(value=0)
         prog = ttk.Progressbar(ctrl, variable=pct_var, maximum=100, length=200); prog.pack(side=tk.LEFT,padx=8)
         prog_txt = tk.Label(ctrl, text="", fg="#555"); prog_txt.pack(side=tk.LEFT)
@@ -11376,6 +11383,7 @@ except Exception as e:
         tab4=tk.Frame(nb); nb.add(tab4,text="🧠 KNN最近邻")
         tab5=tk.Frame(nb); nb.add(tab5,text="📝 综合预测报告")
         tab6=tk.Frame(nb); nb.add(tab6,text="📊 回溯验证")
+        tab7=tk.Frame(nb); nb.add(tab7,text="⚙️ 引擎")
 
         # Tab1 卡片
         f_br = tk.LabelFrame(tab1, text="📊 今日市场宽广度 (Breadth)", font=("",11,"bold"))
@@ -11719,6 +11727,321 @@ except Exception as e:
                  "⚠️ 回溯结果基于历史数据, 不代表未来表现。过拟合警告：训练好测试差 = 过拟合",
                  fg="#555", justify=tk.LEFT).pack(anchor="w", padx=12, pady=6)
 
+        # ═══════════════════════════════════════════════════════════════════════
+        # 🆕 Tab7: ⚙️ 量化引擎工作台 (quant/ 包 5 大功能模块)
+        # ═══════════════════════════════════════════════════════════════════════
+        # 引擎状态条
+        eng_top = tk.Frame(tab7, bg="#263238"); eng_top.pack(fill=tk.X)
+        tk.Label(eng_top, text=" 🎯 quant/ v1.0.0  ", bg="#263238", fg="#80CBC4",
+                 font=("",11,"bold")).pack(side=tk.LEFT, padx=4, pady=4)
+        eng_status = tk.Label(eng_top, text="检查依赖中...", bg="#263238", fg="#FFD54F",
+                              font=("",9))
+        eng_status.pack(side=tk.LEFT, padx=8, pady=4)
+        # 立即在后台检查依赖
+        def _check_deps():
+            missing=[]
+            for pkg,disp in [("numpy","numpy"),("pandas","pandas"),("tushare","tushare"),
+                             ("vectorbt","vectorbt"),("statsmodels","statsmodels"),
+                             ("sklearn","sklearn"),("pmdarima","pmdarima"),("torch","torch")]:
+                try: __import__(pkg)
+                except ImportError: missing.append(disp)
+            def _upd():
+                if missing:
+                    eng_status.config(text=f"⚠️ 缺: {', '.join(missing)}", fg="#EF5350")
+                else:
+                    eng_status.config(text="✅ 全部依赖就绪 (8/8)", fg="#66BB6A")
+            self.root.after(0, _upd)
+        threading.Thread(target=_check_deps, daemon=True).start()
+
+        # Tab7 内部子 Notebook (5 功能模块 + 架构)
+        eng_nb = ttk.Notebook(tab7); eng_nb.pack(fill=tk.BOTH, expand=True, padx=4, pady=(4,4))
+
+        # ── 子 Tab A: 🏗️ 架构总览 ──
+        eng_a = tk.Frame(eng_nb); eng_nb.add(eng_a, text="🏗️ 架构总览")
+        # 流程图
+        f_flow = tk.LabelFrame(eng_a, text="🔄 数据流架构", font=("",11,"bold"))
+        f_flow.pack(fill=tk.X, padx=8, pady=8)
+        tk.Label(f_flow, text=(
+            "┌─────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐\n"
+            "│ get_index_  │──▶│  features.py │──▶│  forecast.py │──▶│  models/     │\n"
+            "│ hist()      │   │ 20+ 技术因子  │   │ 传统评分     │   │ ARIMA/SVM/   │\n"
+            "│ tushare 日线 │   │ MA/MACD/RSI  │   │ run_forecast │   │ RF/LSTM      │\n"
+            "└─────────────┘   └──────────────┘   └──────┬───────┘   └──────┬───────┘\n"
+            "                                              │                   │\n"
+            "                                              ▼                   ▼\n"
+            "                                     ┌──────────────────────────────┐\n"
+            "                                     │     ensemble.py 融合         │\n"
+            "                                     │  confidence 加权 → 共识结论   │\n"
+            "                                     └──────────┬───────────────────┘\n"
+            "                                                │\n"
+            "                                                ▼\n"
+            "                                     ┌──────────────────────────────┐\n"
+            "                                     │   backtest.py vectorbt 验证   │\n"
+            "                                     │ Walk-forward 8窗口 + 参数网格  │\n"
+            "                                     └──────────────────────────────┘"
+        ), font=("Menlo",10), justify=tk.LEFT, fg="#37474F", bg="#ECEFF1").pack(padx=6, pady=6)
+
+        # 5 功能卡片
+        f_cards = tk.LabelFrame(eng_a, text="🧩 5 大功能模块 (点击右侧子 Tab 使用)", font=("",11,"bold"))
+        f_cards.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0,8))
+        _modules = [
+            ("① 传统量化评分", "_calc_traditional_score()", "0.1s · 0依赖", "engine_traditional"),
+            ("② Ensemble Forecast", "run_forecast()", "6s · 4模型融合", "engine_forecast"),
+            ("③ 单次回溯", "backtest_score_strategy()", "1s · 指定阈值", "engine_backtest"),
+            ("④ 参数网格搜索", "grid_search_scores()", "3s · 找最优阈值", "engine_grid"),
+            ("⑤ Walk-forward 验证", "run_validation()", "5s · 8窗口滚动", "engine_wfv"),
+        ]
+        for i,(name,fn,tip,hk) in enumerate(_modules):
+            cf = tk.Frame(f_cards, bg="#E3F2FD", bd=1, relief=tk.SOLID)
+            cf.pack(fill=tk.X, padx=6, pady=3)
+            row = tk.Frame(cf, bg="#E3F2FD"); row.pack(fill=tk.X, padx=8, pady=6)
+            tk.Label(row, text=name, font=("",11,"bold"), bg="#E3F2FD", fg="#1565C0").pack(side=tk.LEFT)
+            _h2 = tk.Label(row, text=" ❓", font=("",9,"bold"), fg="#1565C0", cursor="hand2", bg="#E3F2FD")
+            _h2.pack(side=tk.LEFT); _h2.bind("<Double-Button-1>", lambda e,k=hk: _show_help_popup(eng_a.winfo_toplevel(),k))
+            _h2.bind("<Enter>",lambda e:_h2.config(underline=True)); _h2.bind("<Leave>",lambda e:_h2.config(underline=False))
+            tk.Label(row, text=f"  {fn}", font=("Menlo",9), bg="#E3F2FD", fg="#555").pack(side=tk.LEFT)
+            tk.Label(row, text=f"  ({tip})", font=("",9,"italic"), bg="#E3F2FD", fg="#888").pack(side=tk.LEFT, padx=4)
+
+        # ── 子 Tab B: ① 传统评分 ──
+        eng_b = tk.Frame(eng_nb); eng_nb.add(eng_b, text="① 传统评分")
+        f_b = tk.LabelFrame(eng_b, text="① 传统量化评分 (0 额外依赖, ~0.1s)", font=("",11,"bold"))
+        f_b.pack(fill=tk.X, padx=8, pady=8)
+        row_b = tk.Frame(f_b); row_b.pack(pady=6)
+        tk.Label(row_b, text="指数: ").pack(side=tk.LEFT, padx=4)
+        idx_b = ttk.Combobox(row_b, values=["上证指数","深证成指","创业板指","沪深300","中证500"], width=10, state="readonly")
+        idx_b.set("上证指数"); idx_b.pack(side=tk.LEFT)
+        tk.Label(row_b, text="  回溯天数: ").pack(side=tk.LEFT, padx=4)
+        days_b = tk.IntVar(value=720)
+        tk.Spinbox(row_b, from_=260, to=3650, textvariable=days_b, width=5).pack(side=tk.LEFT)
+        _hb = tk.Label(row_b, text=" ❓", font=("",10,"bold"), fg="#1565C0", cursor="hand2")
+        _hb.pack(side=tk.LEFT); _hb.bind("<Double-Button-1>", lambda e: _show_help_popup(eng_b.winfo_toplevel(),"engine_traditional"))
+        _hb.bind("<Enter>",lambda e:_hb.config(underline=True)); _hb.bind("<Leave>",lambda e:_hb.config(underline=False))
+        btn_b = ttk.Button(row_b, text="▶ 运行", width=10); btn_b.pack(side=tk.LEFT, padx=10)
+        txt_b = scrolledtext.ScrolledText(eng_b, wrap=tk.WORD, font=("Menlo",10), bg="#FFFFFF")
+        txt_b.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0,8))
+        def _run_b():
+            btn_b.config(state=tk.DISABLED)
+            txt_b.delete("1.0", tk.END); txt_b.insert(tk.END, "⏳ 加载数据 + 计算指标...\n")
+            def _do():
+                try:
+                    from quant.forecast import _calc_traditional_score, get_index_hist
+                    h = get_index_hist(idx_b.get(), days_back=days_b.get())
+                    s = _calc_traditional_score(h['close'].astype(float).values)
+                    out = (f"📅 指数: {idx_b.get()}  回溯: {days_b.get()} 天\n"
+                           f"┌─────────────────────────────────────\n"
+                           f"│ quant_score = {s['quant_score']:.1f} / 100\n"
+                           f"│ ma_arr (MA排列) = {s['arr_score']}  (0=空头, 1=多头)\n"
+                           f"│ ma_score = {s['ma_score']}\n"
+                           f"│ macd_score = {s['macd_score']}\n"
+                           f"│ trend_score = {s['trend_score']:.1f}\n"
+                           f"│ RSI14 = {s['rsi']:.1f}\n"
+                           f"│ MA20/60/250 偏离 = {s['dev20']:.1f}% / {s['dev60']:.1f}% / {s['dev250']:.1f}%\n"
+                           f"│ 收盘价 = {s['close']:.2f}\n"
+                           f"└─────────────────────────────────────")
+                    self.root.after(0, lambda: (txt_b.delete("1.0",tk.END), txt_b.insert(tk.END,out), btn_b.config(state=tk.NORMAL)))
+                except Exception as e:
+                    self.root.after(0, lambda: (txt_b.insert(tk.END, f"\n❌ {e}"), btn_b.config(state=tk.NORMAL)))
+            threading.Thread(target=_do, daemon=True).start()
+        btn_b.config(command=_run_b)
+
+        # ── 子 Tab C: ② Ensemble Forecast ──
+        eng_c = tk.Frame(eng_nb); eng_nb.add(eng_c, text="② Ensemble Forecast")
+        f_c = tk.LabelFrame(eng_c, text="② 多模型 Ensemble 预测 (ARIMA + SVM + RF + LSTM)", font=("",11,"bold"))
+        f_c.pack(fill=tk.X, padx=8, pady=8)
+        row_c = tk.Frame(f_c); row_c.pack(pady=6, anchor="w")
+        tk.Label(row_c, text="选择模型: ", font=("",10)).pack(side=tk.LEFT, padx=4)
+        model_vars = {}
+        for m,d in [("arima","ARIMA"),("svm","SVM"),("rf","RandomForest"),("lstm","LSTM(慢)")]:
+            v = tk.BooleanVar(value=(m!="lstm"))
+            model_vars[m]=v
+            ttk.Checkbutton(row_c, text=d, variable=v).pack(side=tk.LEFT, padx=2)
+        _hc = tk.Label(row_c, text=" ❓", font=("",10,"bold"), fg="#1565C0", cursor="hand2")
+        _hc.pack(side=tk.LEFT, padx=6); _hc.bind("<Double-Button-1>", lambda e: _show_help_popup(eng_c.winfo_toplevel(),"engine_forecast"))
+        _hc.bind("<Enter>",lambda e:_hc.config(underline=True)); _hc.bind("<Leave>",lambda e:_hc.config(underline=False))
+        btn_c = ttk.Button(row_c, text="▶ 运行 Forecast (6~150s)", width=24); btn_c.pack(side=tk.LEFT, padx=10)
+        txt_c = scrolledtext.ScrolledText(eng_c, wrap=tk.WORD, font=("Menlo",10), bg="#FFFFFF")
+        txt_c.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0,8))
+        def _run_c():
+            btn_c.config(state=tk.DISABLED); txt_c.delete("1.0", tk.END)
+            selected = [m for m,v in model_vars.items() if v.get()]
+            txt_c.insert(tk.END, f"⏳ 运行 4 模型 Ensemble: {selected}\n")
+            def _do():
+                import time; t0=time.time()
+                try:
+                    from quant.forecast import run_forecast
+                    r = run_forecast(models=selected)
+                    dt=time.time()-t0
+                    if "error" in r:
+                        self.root.after(0, lambda: (txt_c.insert(tk.END, f"❌ {r['error']}"), btn_c.config(state=tk.NORMAL)))
+                        return
+                    out = f"✅ 完成  耗时 {dt:.1f}s\n{'='*55}\n"
+                    for idx,data in r['targets'].items():
+                        out += f"\n📌 {idx}\n"
+                        trad = data.get('traditional',{})
+                        out += f"  传统评分 → quant_score={trad.get('quant_score',0):.1f}  rsi={trad.get('rsi',0):.1f}\n"
+                        models = data.get('models',{})
+                        for mn,md in models.items():
+                            if md is None: continue
+                            out += f"  {mn:>6} → fwd_5d={md.get('fwd_5d','?')}  conf={md.get('confidence',0):.2f}\n"
+                        ens = data.get('ensemble',{})
+                        out += f"  {'─'*40}\n"
+                        out += f"  🎯 Ensemble → up_prob={ens.get('up_prob',0):.1%}  n_models={ens.get('n_models',0)}\n"
+                        out += f"  📝 结论: {ens.get('conclusion','')}\n"
+                    self.root.after(0, lambda: (txt_c.delete("1.0",tk.END), txt_c.insert(tk.END,out), btn_c.config(state=tk.NORMAL)))
+                except Exception as e:
+                    import traceback
+                    self.root.after(0, lambda: (txt_c.insert(tk.END, f"\n❌ {e}\n{traceback.format_exc()[-500:]}"), btn_c.config(state=tk.NORMAL)))
+            threading.Thread(target=_do, daemon=True).start()
+        btn_c.config(command=_run_c)
+
+        # ── 子 Tab D: ③ 单次回溯 ──
+        eng_d = tk.Frame(eng_nb); eng_nb.add(eng_d, text="③ 单次回溯")
+        f_d = tk.LabelFrame(eng_d, text="③ vectorbt 单次回溯 (指定 buy/sell 阈值)", font=("",11,"bold"))
+        f_d.pack(fill=tk.X, padx=8, pady=8)
+        row_d = tk.Frame(f_d); row_d.pack(pady=6)
+        tk.Label(row_d, text="指数: ").pack(side=tk.LEFT, padx=4)
+        idx_d = ttk.Combobox(row_d, values=["上证指数","深证成指","创业板指"], width=10, state="readonly")
+        idx_d.set("上证指数"); idx_d.pack(side=tk.LEFT)
+        tk.Label(row_d, text=" buy≥").pack(side=tk.LEFT, padx=(10,2))
+        buy_d = tk.IntVar(value=55); tk.Spinbox(row_d, from_=30, to=90, textvariable=buy_d, width=4).pack(side=tk.LEFT)
+        tk.Label(row_d, text="  sell<").pack(side=tk.LEFT, padx=(6,2))
+        sell_d = tk.IntVar(value=30); tk.Spinbox(row_d, from_=10, to=50, textvariable=sell_d, width=4).pack(side=tk.LEFT)
+        _hd = tk.Label(row_d, text=" ❓", font=("",10,"bold"), fg="#1565C0", cursor="hand2")
+        _hd.pack(side=tk.LEFT, padx=6); _hd.bind("<Double-Button-1>", lambda e: _show_help_popup(eng_d.winfo_toplevel(),"engine_backtest"))
+        _hd.bind("<Enter>",lambda e:_hd.config(underline=True)); _hd.bind("<Leave>",lambda e:_hd.config(underline=False))
+        btn_d = ttk.Button(row_d, text="▶ 运行回溯", width=12); btn_d.pack(side=tk.LEFT, padx=10)
+        txt_d = scrolledtext.ScrolledText(eng_d, wrap=tk.WORD, font=("Menlo",10), bg="#FFFFFF")
+        txt_d.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0,8))
+        def _run_d():
+            btn_d.config(state=tk.DISABLED); txt_d.delete("1.0", tk.END)
+            txt_d.insert(tk.END, f"⏳ 计算 buy≥{buy_d.get()} sell<{sell_d.get()} 回溯...\n")
+            def _do():
+                try:
+                    from quant.forecast import _calc_traditional_score, get_index_hist
+                    from quant.backtest import backtest_score_strategy
+                    import pandas as pd
+                    h = get_index_hist(idx_d.get(), days_back=3650)
+                    closes = h['close'].astype(float).values
+                    scores = [_calc_traditional_score(closes[:i+1])['quant_score'] for i in range(260, len(closes))]
+                    cs = pd.Series(closes[260:].astype(float))
+                    ss = pd.Series(scores).astype(float)
+                    r = backtest_score_strategy(cs, ss, buy_d.get(), sell_d.get())
+                    bh_ret = (closes[-1]/closes[260]-1)*100
+                    out = (f"📅 {idx_d.get()}  数据: {len(closes)-260} 交易日\n"
+                           f"{'='*50}\n"
+                           f"  策略 buy≥{buy_d.get()} sell<{sell_d.get()}:\n"
+                           f"    total_return = {r.get('total_return',0):+.2f}%\n"
+                           f"    sharpe       = {r.get('sharpe',0):.3f}\n"
+                           f"    win_rate     = {r.get('win_rate',0):.1f}%\n"
+                           f"    max_drawdown = {r.get('max_drawdown',0):.2f}%\n"
+                           f"    n_trades     = {r.get('n_trades',0)}\n"
+                           f"{'─'*50}\n"
+                           f"  买入持有基准 = {bh_ret:+.2f}%\n"
+                           f"  策略 alpha   = {r.get('total_return',0)-bh_ret:+.2f}%\n")
+                    if r.get('error'): out += f"\n⚠️ 警告: {r['error']}"
+                    self.root.after(0, lambda: (txt_d.delete("1.0",tk.END), txt_d.insert(tk.END,out), btn_d.config(state=tk.NORMAL)))
+                except Exception as e:
+                    import traceback
+                    self.root.after(0, lambda: (txt_d.insert(tk.END, f"\n❌ {e}\n{traceback.format_exc()[-500:]}"), btn_d.config(state=tk.NORMAL)))
+            threading.Thread(target=_do, daemon=True).start()
+        btn_d.config(command=_run_d)
+
+        # ── 子 Tab E: ④ 参数网格 ──
+        eng_e = tk.Frame(eng_nb); eng_nb.add(eng_e, text="④ 参数网格")
+        f_e = tk.LabelFrame(eng_e, text="④ 参数网格搜索 (找最优 buy/sell 阈值)", font=("",11,"bold"))
+        f_e.pack(fill=tk.X, padx=8, pady=8)
+        row_e = tk.Frame(f_e); row_e.pack(pady=6)
+        tk.Label(row_e, text="buy 范围 (起,止,步): ").pack(side=tk.LEFT, padx=4)
+        buy_start = tk.IntVar(value=40); tk.Spinbox(row_e, from_=30, to=70, textvariable=buy_start, width=4).pack(side=tk.LEFT)
+        buy_end = tk.IntVar(value=75); tk.Spinbox(row_e, from_=40, to=90, textvariable=buy_end, width=4).pack(side=tk.LEFT, padx=2)
+        buy_step = tk.IntVar(value=5); tk.Spinbox(row_e, from_=1, to=10, textvariable=buy_step, width=3).pack(side=tk.LEFT)
+        tk.Label(row_e, text="  sell 步: ").pack(side=tk.LEFT, padx=(10,2))
+        sell_step = tk.IntVar(value=5); tk.Spinbox(row_e, from_=1, to=10, textvariable=sell_step, width=3).pack(side=tk.LEFT)
+        _he = tk.Label(row_e, text=" ❓", font=("",10,"bold"), fg="#1565C0", cursor="hand2")
+        _he.pack(side=tk.LEFT, padx=6); _he.bind("<Double-Button-1>", lambda e: _show_help_popup(eng_e.winfo_toplevel(),"engine_grid"))
+        _he.bind("<Enter>",lambda e:_he.config(underline=True)); _he.bind("<Leave>",lambda e:_he.config(underline=False))
+        btn_e = ttk.Button(row_e, text="▶ 运行网格 (3s)", width=16); btn_e.pack(side=tk.LEFT, padx=10)
+        txt_e = scrolledtext.ScrolledText(eng_e, wrap=tk.WORD, font=("Menlo",10), bg="#FFFFFF")
+        txt_e.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0,8))
+        def _run_e():
+            btn_e.config(state=tk.DISABLED); txt_e.delete("1.0", tk.END)
+            txt_e.insert(tk.END, "⏳ 参数网格搜索中...\n")
+            def _do():
+                import time; t0=time.time()
+                try:
+                    from quant.forecast import _calc_traditional_score, get_index_hist
+                    from quant.backtest import grid_search_scores
+                    import pandas as pd
+                    h = get_index_hist('上证指数', days_back=3650)
+                    closes = h['close'].astype(float).values
+                    scores = [_calc_traditional_score(closes[:i+1])['quant_score'] for i in range(260, len(closes))]
+                    cs = pd.Series(closes[260:].astype(float))
+                    ss = pd.Series(scores).astype(float)
+                    df = grid_search_scores(cs, ss,
+                                            buy_range=(buy_start.get(), buy_end.get(), buy_step.get()),
+                                            sell_range=(15, 35, sell_step.get()))
+                    dt=time.time()-t0
+                    if df.empty:
+                        self.root.after(0, lambda: (txt_e.insert(tk.END, "❌ 网格返回 0 组合 (检查 buy_range/sell_range)"), btn_e.config(state=tk.NORMAL)))
+                        return
+                    df = df.sort_values('sharpe', ascending=False)
+                    out = f"✅ {len(df)} 组合  耗时 {dt:.1f}s\n{'='*65}\n"
+                    out += f"{'#':>3} {'buy≥':>5} {'sell<':>6} | {'ret%':>8} {'sharpe':>7} {'win%':>6} {'maxdd':>7} {'trades':>7}\n"
+                    for i,r in df.head(15).iterrows():
+                        out += f"{df.index.tolist().index(i)+1:>3} {int(r['buy_t']):>5} {int(r['sell_t']):>6} | {r['total_return']:>+8.1f} {r['sharpe']:>7.2f} {r['win_rate']:>6.0f} {r['max_drawdown']:>7.1f} {int(r['n_trades']):>7}\n"
+                    top = df.iloc[0]
+                    out += f"\n🏆 TOP1: buy≥{int(top['buy_t'])} sell<{int(top['sell_t'])} → ret={top['total_return']:+.1f}% sharpe={top['sharpe']:.2f}"
+                    self.root.after(0, lambda: (txt_e.delete("1.0",tk.END), txt_e.insert(tk.END,out), btn_e.config(state=tk.NORMAL)))
+                except Exception as ex:
+                    import traceback
+                    self.root.after(0, lambda: (txt_e.insert(tk.END, f"\n❌ {ex}\n{traceback.format_exc()[-500:]}"), btn_e.config(state=tk.NORMAL)))
+            threading.Thread(target=_do, daemon=True).start()
+        btn_e.config(command=_run_e)
+
+        # ── 子 Tab F: ⑤ Walk-forward ──
+        eng_f = tk.Frame(eng_nb); eng_nb.add(eng_f, text="⑤ Walk-forward")
+        f_f = tk.LabelFrame(eng_f, text="⑤ Walk-forward 滚动验证 (8 窗口, train=720 test=180)", font=("",11,"bold"))
+        f_f.pack(fill=tk.X, padx=8, pady=8)
+        row_f = tk.Frame(f_f); row_f.pack(pady=6)
+        btn_f = ttk.Button(row_f, text="▶ 运行 Walk-forward (5s)", width=24); btn_f.pack(side=tk.LEFT, padx=4)
+        _hf = tk.Label(row_f, text=" ❓", font=("",10,"bold"), fg="#1565C0", cursor="hand2")
+        _hf.pack(side=tk.LEFT); _hf.bind("<Double-Button-1>", lambda e: _show_help_popup(eng_f.winfo_toplevel(),"engine_wfv"))
+        _hf.bind("<Enter>",lambda e:_hf.config(underline=True)); _hf.bind("<Leave>",lambda e:_hf.config(underline=False))
+        txt_f = scrolledtext.ScrolledText(eng_f, wrap=tk.WORD, font=("Menlo",10), bg="#FFFFFF")
+        txt_f.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0,8))
+        def _run_f():
+            btn_f.config(state=tk.DISABLED); txt_f.delete("1.0", tk.END); txt_f.insert(tk.END, "⏳ Walk-forward 8 窗口验证...\n")
+            def _do():
+                import time; t0=time.time()
+                try:
+                    from quant.forecast import run_validation
+                    v = run_validation('上证指数')
+                    dt=time.time()-t0
+                    if "error" in v:
+                        self.root.after(0, lambda: (txt_f.insert(tk.END, f"❌ {v['error']}"), btn_f.config(state=tk.NORMAL)))
+                        return
+                    wfv = v['walk_forward']
+                    out = f"✅ 完成  耗时 {dt:.1f}s\n📅 {v['date_range']} ({v['n_days']} 交易日)\n{'='*60}\n"
+                    out += f"🔄 Walk-forward 8 窗口 (train=720 test=180):\n"
+                    for i,w in enumerate(wfv['windows']):
+                        flag = "✅" if w['test_return']>0 else "❌"
+                        out += f"  W{i+1} [{str(w['test_start'])[:10]} ~ {str(w['test_end'])[:10]}] {flag} ret={w['test_return']:+.1f}% sharpe={w['test_sharpe']:.2f}\n"
+                    out += f"{'─'*60}\n"
+                    out += f"  测试集 avg = {wfv['test_avg_return']:+.1f}%\n"
+                    out += f"  过拟合 gap = {wfv['overfitting_gap']:+.1f}%\n"
+                    out += f"  🎯 结论: {wfv['conclusion']}\n"
+                    if v.get('best_params'):
+                        bp = v['best_params']
+                        out += f"\n🏅 最优参数 buy≥{bp['buy_t']} sell<{bp['sell_t']} → ret={bp['total_return']:+.1f}% sharpe={bp['sharpe']:.2f}"
+                    self.root.after(0, lambda: (txt_f.delete("1.0",tk.END), txt_f.insert(tk.END,out), btn_f.config(state=tk.NORMAL)))
+                except Exception as e:
+                    import traceback
+                    self.root.after(0, lambda: (txt_f.insert(tk.END, f"\n❌ {e}\n{traceback.format_exc()[-500:]}"), btn_f.config(state=tk.NORMAL)))
+            threading.Thread(target=_do, daemon=True).start()
+        btn_f.config(command=_run_f)
+        # Walk-forward 自动跑一次
+        self.root.after(500, _run_f)
+
 
 __all__ = ["BuildersMixin"]
 
@@ -11858,6 +12181,55 @@ _HELP_DB = {
         "example": "2026.10.30 总分 20.2 → 🔴 下行，建议轻仓",
         "url": "https://en.wikipedia.org/wiki/Decision_making",
         "book": "《交易决策的艺术》- 马克·道格拉斯",
+    },
+    # ---- Tab7 引擎帮助 ----
+    "engine_overview": {
+        "title": "🎯 quant/ 量化引擎 v1.0 总览",
+        "define": "集成 4 种主流量化模型（ARIMA/SVM/RF/LSTM）+ vectorbt 向量化回溯验证的完整量化引擎包。从数据获取→特征工程→多模型预测→Ensemble 融合→Walk-forward 验证，形成闭环。",
+        "formula": "数据流:\n  get_index_hist() → features.py(20+因子) → forecast.py(传统评分) → models/(4模型)\n                                                                                    ↓\n                                                                              ensemble.py(融合)\n                                                                                    ↓\n                                                                              backtest.py(验证)",
+        "example": "传统评分 0.1s · 0依赖，Ensemble 6~150s，Walk-forward 5s。先从 ① 开始，再 ②，最后 ⑤ 验证策略有效性。",
+        "url": "https://vectorbt.dev / https://pmdarima.com / https://pytorch.org",
+        "book": "《打开量化投资的黑箱》- 里什·纳兰 / 《深度学习在量化中的应用》",
+    },
+    "engine_traditional": {
+        "title": "① 传统量化评分",
+        "define": "纯技术指标加权评分（0-100），包含 MA 排列、MACD、RSI、趋势偏离度 4 个子分。速度极快（0.1s），无需 sklearn/torch 等重依赖。",
+        "formula": "quant_score = ma_score×30% + macd_score×30% + trend_score×40%\nma_score: MA20>MA60>MA250 多头 → 100, 反之 0, 中间按比例\nmacd_score: DIF-DEA 正值且扩大 → 100\ntrend_score: 20/60/250 日偏离 MA 的综合判断",
+        "example": "quant_score=14.4 → 极度超卖区（RSI=28.3, MA 空头排列）\nquant_score=85+ → 多头强势区",
+        "url": "https://school.stockcharts.com",
+        "book": "《技术分析》- 马丁·普林格",
+    },
+    "engine_forecast": {
+        "title": "② Ensemble Forecast 多模型融合",
+        "define": "同时运行多个预测模型，按模型 confidence 加权融合得出最终共识。支持 ARIMA（统计时序）、SVM/RF（机器学习分类）、LSTM（深度学习序列）。ARIMA 6s, SVM/RF 秒级, LSTM 150s（torch MPS 训练 40 epoch）。",
+        "formula": "ensemble_up_prob = Σ(model_up_prob × model_confidence) / Σ(model_confidence)\nconclusion: 模型共识度≥0.7 → 单边, 否则震荡观望",
+        "example": "arima conf=0.20, svm conf=0.65, rf conf=0.58 → up_prob 接近 SVM/RF 方向\n若 arima/svm/rf 方向不一致 → conclusion 显示「模型分歧较大，观望」",
+        "url": "https://scikit-learn.org / https://pmdarima.com",
+        "book": "《统计学习方法》- 李航 / 《Hands-on Machine Learning》- Geron",
+    },
+    "engine_backtest": {
+        "title": "③ vectorbt 单次回溯",
+        "define": "指定一个 buy_threshold 和 sell_threshold，用 vectorbt 向量化计算整个历史区间的策略表现。vectorbt 基于 NumPy，运行 3650 日仅需 ~1s。",
+        "formula": "buy 条件: quant_score ≥ buy_threshold (55)\nsell 条件: quant_score < sell_threshold (30)\n交易规则: 信号次日开盘成交，满仓/空仓切换（无杠杆无手续费）\nalpha = 策略总收益 - 买入持有总收益",
+        "example": "buy≥55 sell<30 → ret=+24.6% sharpe=0.31 alpha=+17.3% (vs 持有+7.3%)",
+        "url": "https://vectorbt.dev/api/base/",
+        "book": "《量化投资：Python 实现》",
+    },
+    "engine_grid": {
+        "title": "④ 参数网格搜索",
+        "define": "遍历多组 buy_threshold / sell_threshold 组合，对每组都跑一次 vectorbt 回溯，按 Sharpe ratio 排序输出 TOP10~15。用来找「最优阈值」，但要警惕过拟合。",
+        "formula": "buy_range: np.arange(start, end, step) → [40,45,50,...,70]\nsell_range: np.arange(15, 35, step) → [15,20,25,30]\n遍历所有 buy>sell 组合，按 sharpe 降序排列",
+        "example": "网格 7×4=28 组合，TOP1 buy≥55 sell<30 → sharpe=0.31 ret=+24.6%\n⚠️ 过拟合警告：网格最优不一定是 Walk-forward 最优",
+        "url": "https://en.wikipedia.org/wiki/Hyperparameter_optimization",
+        "book": "《统计学习的要素》- Hastie/Tibshirani",
+    },
+    "engine_wfv": {
+        "title": "⑤ Walk-forward 滚动验证",
+        "define": "把历史分成 8 个滚动窗口（train=720 天 → test=180 天），用训练集选参数、测试集独立验证。这是检验策略**是否过拟合**的黄金标准 — 训练好测试差 = 过拟合。",
+        "formula": "W1: 2020.11~2021.08 (test=180d)\nW2: 2021.08~2022.05\n...\nW8: 2026.01~2026.10\noverfit_gap = 训练集均值 - 测试集均值\n gap > 5% → 严重过拟合\n gap ≈ 0  → 策略真实有效",
+        "example": "本次上证 Walk-forward: 测试集 avg=-0.7%, overfit=-1.9%\n→ ❌ 策略熊市保护不住，不能实盘",
+        "url": "https://en.wikipedia.org/wiki/Walk-forward_analysis",
+        "book": "《金融时间序列分析》- Ruey Tsay",
     },
 }
 
