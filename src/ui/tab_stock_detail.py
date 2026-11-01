@@ -3699,5 +3699,283 @@ class StockDetailMixin:
             _tb.print_exc()
             messagebox.showerror("错误", f"打开一目均衡K线图失败: {e}", parent=getattr(self, 'root', None))
 
+    # ═══════════════════════════════════════════════════════════════
+    # 🖼️ 图像分析弹窗 — 多图联动同时展示
+    # ═══════════════════════════════════════════════════════════════
+
+    def _show_image_analysis_dialog(self):
+        """🖼️ 图像分析弹窗: 多图联动展示 (日K/一目均衡/BOLL/VOL/MACD/资金流向)"""
+        import traceback as _tb_img
+        try:
+            import matplotlib
+            matplotlib.use("TkAgg")
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+            from matplotlib.figure import Figure
+            import matplotlib.dates as mdates
+            import numpy as np
+
+            win = self._safe_toplevel(self.root)
+            win.title("🖼️ 图像分析 · 多图联动")
+            try: win.state("zoomed")
+            except:
+                try: win.attributes("-zoomed", True)
+                except: win.geometry("1400x900")
+
+            # ── 顶部工具栏 ──
+            top = ttk.Frame(win, padding=6); top.pack(fill=tk.X)
+            ttk.Label(top, text="📊 标的:", font=("",10,"bold")).pack(side=tk.LEFT)
+            symbols = [
+                "上证指数(sh000001)","深证成指(sz399001)","创业板指(sz399006)",
+                "沪深300(sh000300)","中证500(sh000905)","科创50(sh000688)",
+                "贵州茅台(600519)","宁德时代(300750)","比亚迪(002594)",
+                "中国平安(601318)","招商银行(600036)","中国中免(601888)",
+                "长江电力(600900)","美的集团(000333)","五粮液(000858)",
+                "恒瑞医药(600276)","中芯国际(688981)","药明康德(603259)",
+                "比亚迪(002594)","招商银行(600036)","立讯精密(002475)",
+            ]
+            sym_var = tk.StringVar(value="上证指数(sh000001)")
+            sym_combo = ttk.Combobox(top, textvariable=sym_var, values=symbols, width=22)
+            sym_combo.pack(side=tk.LEFT, padx=4)
+            # 自定义代码输入
+            ttk.Label(top, text="或代码:").pack(side=tk.LEFT, padx=(8,2))
+            custom_code = tk.StringVar(value="")
+            ttk.Entry(top, textvariable=custom_code, width=8).pack(side=tk.LEFT)
+
+            ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+            ttk.Label(top, text="📐 图表:", font=("",10,"bold")).pack(side=tk.LEFT)
+
+            # 图表类型
+            chart_types = [
+                ("daily_k", "📈日K线", True),
+                ("ichimoku", "📊一目均衡", True),
+                ("boll", "📉BOLL带", True),
+                ("vol", "📦成交量", True),
+                ("macd", "📐MACD", True),
+                ("moneyflow", "💵资金流向", False),
+            ]
+            chart_vars = {}
+            for key, lbl, default in chart_types:
+                v = tk.BooleanVar(value=default); chart_vars[key] = v
+                ttk.Checkbutton(top, text=lbl, variable=v).pack(side=tk.LEFT, padx=2)
+
+            ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+            refresh_btn = ttk.Button(top, text="🔄 刷新", width=10); refresh_btn.pack(side=tk.LEFT, padx=4)
+            status_var = tk.StringVar(value="")
+            ttk.Label(top, textvariable=status_var, foreground="gray").pack(side=tk.LEFT, padx=8)
+
+            # ── 主绘图区 ──
+            chart_area = tk.Frame(win); chart_area.pack(fill=tk.BOTH, expand=True)
+            fig = Figure(figsize=(14, 9), dpi=100, facecolor="#FAFAFA")
+            canvas = FigureCanvasTkAgg(fig, chart_area); canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, side=tk.TOP)
+            # matplotlib 工具栏 (缩放/平移/保存)
+            mpl_tb = NavigationToolbar2Tk(canvas, chart_area); mpl_tb.update()
+            mpl_tb.pack(side=tk.BOTTOM, fill=tk.X)
+
+            # ── 辅助函数: 解析 symbol → tushare code + is_index ──
+            def _parse_symbol(raw):
+                """解析 symbol → (tushare_code, sina_symbol, is_index)"""
+                raw = (custom_code.get().strip() or sym_var.get().strip())
+                if "(" in raw and ")" in raw:
+                    # "上证指数(sh000001)" 格式
+                    code = raw.split("(")[1].rstrip(")")
+                else:
+                    code = raw.strip()
+                is_index = code.startswith("sh000") or code.startswith("sz399") or code.startswith("000") or code.startswith("399")
+                # tushare 指数: sh000001 → 000001.SH
+                # tushare 个股: 600519 → 600519.SH / 002594 → 002594.SZ
+                if is_index:
+                    ts_code = f"{code[2:]}.SH" if code.startswith("sh") else f"{code[2:]}.SZ"
+                else:
+                    if code.startswith("6") or code.startswith("9"): ts_code = f"{code}.SH"
+                    else: ts_code = f"{code}.SZ"
+                return code, ts_code, is_index
+
+            # ── 辅助函数: 计算技术指标 ──
+            def _ma(series, n):
+                s = pd.Series(series)
+                return s.rolling(n).mean().values
+            def _ema(series, n):
+                s = pd.Series(series)
+                return s.ewm(span=n, adjust=False).mean().values
+            def _boll(series, n=20, k=2):
+                s = pd.Series(series)
+                mid = s.rolling(n).mean()
+                std = s.rolling(n).std()
+                return mid.values, (mid + k*std).values, (mid - k*std).values
+            def _macd(close, f=12, s=26, m=9):
+                c = pd.Series(close)
+                ema_f = c.ewm(span=f, adjust=False).mean()
+                ema_s = c.ewm(span=s, adjust=False).mean()
+                dif = ema_f - ema_s
+                dea = dif.ewm(span=m, adjust=False).mean()
+                macd_hist = (dif - dea) * 2
+                return dif.values, dea.values, macd_hist.values
+
+            # ── 主刷新函数 ──
+            def _refresh():
+                import pandas as pd
+                fig.clear()
+                selected = [k for k,v in chart_vars.items() if v.get()]
+                if not selected:
+                    status_var.set("⚠️ 请至少选一个图表类型"); canvas.draw(); return
+                raw_sym, ts_code, is_index = _parse_symbol(sym_var.get())
+                display_name = sym_var.get().split("(")[0].strip() if "(" in sym_var.get() else raw_sym
+                status_var.set(f"⏳ 加载 {display_name} ({ts_code})...")
+                win.update_idletasks()
+
+                try:
+                    # 拉取日K数据 (用一目均衡的成熟 fallback 链, 自动 150+ 根)
+                    kdf = self._fetch_ichimoku_kline_data(raw_sym, period="daily", is_index=is_index)
+                    if kdf is None or len(kdf) < 60:
+                        # fallback: tushare 直接拉
+                        if not is_index:
+                            kdf = self._get_daily_kline_data_tushare(raw_sym if not raw_sym.startswith("sh") and not raw_sym.startswith("sz") else raw_sym[2:], days=200)
+                        if kdf is None or len(kdf) < 60:
+                            status_var.set(f"❌ 数据不足 ({len(kdf) if kdf is not None else 0} 根)"); canvas.draw(); return
+
+                    # 统一列名
+                    if "日期" in kdf.columns: dates_str = kdf["日期"].tolist()
+                    elif "trade_date" in kdf.columns: dates_str = kdf["trade_date"].tolist()
+                    else: dates_str = list(range(len(kdf)))
+                    opens  = kdf["开盘"].astype(float).values if "开盘" in kdf.columns else kdf["open"].astype(float).values
+                    highs  = kdf["最高"].astype(float).values if "最高" in kdf.columns else kdf["high"].astype(float).values
+                    lows   = kdf["最低"].astype(float).values if "最低" in kdf.columns else kdf["low"].astype(float).values
+                    closes = kdf["收盘"].astype(float).values if "收盘" in kdf.columns else kdf["close"].astype(float).values
+                    vols   = kdf["成交量"].astype(float).values if "成交量" in kdf.columns else (kdf["vol"].astype(float).values if "vol" in kdf.columns else np.zeros_like(closes))
+
+                    # 统一 dates 为数值索引 (matplotlib 兼容)
+                    n = len(closes)
+                    x = np.arange(n)
+
+                    # 布局计算: 行数/列数 (严格基于 n_charts)
+                    n_charts = len(selected)
+                    if n_charts == 1: nrows, ncols = 1, 1
+                    elif n_charts == 2: nrows, ncols = 2, 1
+                    elif n_charts <= 4: nrows, ncols = 2, 2
+                    elif n_charts <= 6: nrows, ncols = 3, 2
+                    elif n_charts <= 9: nrows, ncols = 3, 3
+                    else: nrows, ncols = 4, 3
+                    # gridspec height ratios: 主图行(含 daily_k/ichimoku/boll) 高, 纯副图行矮
+                    # 注意: height_ratios 长度必须 == nrows (matplotlib 要求)
+                    row_has_main = [False] * nrows  # 每行是否有主图
+                    for i, k in enumerate(selected):
+                        r, _c = divmod(i, ncols)
+                        if k in ("daily_k", "ichimoku", "boll"): row_has_main[r] = True
+                    height_ratios = [3.0 if row_has_main[r] else 1.2 for r in range(nrows)]
+                    from matplotlib import gridspec
+                    gs = gridspec.GridSpec(nrows, ncols, figure=fig, height_ratios=height_ratios,
+                                           hspace=0.35, wspace=0.25)
+
+                    idx = 0
+                    for k in selected:
+                        r, c = divmod(idx, ncols); ax = fig.add_subplot(gs[r, c])
+                        ax.set_facecolor("#FFFFFF"); ax.grid(True, alpha=0.2)
+
+                        if k == "daily_k":
+                            # 标准日K + MA5/10/20/60
+                            up_col, dn_col = "#EF5350", "#66BB6A"
+                            for i in range(n):
+                                col = up_col if closes[i] >= opens[i] else dn_col
+                                ax.plot([x[i],x[i]], [lows[i], highs[i]], color=col, lw=0.8)
+                                ax.bar(x[i], closes[i]-opens[i], bottom=opens[i], color=col, width=0.6)
+                            # MA
+                            ma5, ma10, ma20, ma60 = _ma(closes,5), _ma(closes,10), _ma(closes,20), _ma(closes,60)
+                            ax.plot(x, ma5, color="#FFC107", lw=1.0, label="MA5")
+                            ax.plot(x, ma10, color="#2196F3", lw=1.0, label="MA10")
+                            ax.plot(x, ma20, color="#9C27B0", lw=1.2, label="MA20")
+                            ax.plot(x, ma60, color="#FF5722", lw=1.2, label="MA60")
+                            ax.set_title(f"📈 日K线 · {display_name}", fontsize=11, fontweight="bold")
+                            ax.legend(fontsize=7, loc="upper left", ncol=4)
+                            ax.set_ylabel("价格")
+
+                        elif k == "ichimoku":
+                            self._plot_ichimoku_ax(ax, x, highs, lows, closes, show_explanation=False)
+                            ax.set_title(f"📊 一目均衡 · {display_name}", fontsize=11, fontweight="bold")
+                            ax.set_ylabel("价格")
+
+                        elif k == "boll":
+                            # 主图 + BOLL 带
+                            up_col, dn_col = "#EF5350", "#66BB6A"
+                            for i in range(n):
+                                col = up_col if closes[i] >= opens[i] else dn_col
+                                ax.plot([x[i],x[i]], [lows[i], highs[i]], color=col, lw=0.8)
+                                ax.bar(x[i], closes[i]-opens[i], bottom=opens[i], color=col, width=0.6)
+                            mid, top, bot = _boll(closes, 20, 2)
+                            ax.plot(x, mid, color="#2196F3", lw=1.0, label="MID")
+                            ax.plot(x, top, color="#FF9800", lw=0.8, ls="--", label="UPPER")
+                            ax.plot(x, bot, color="#4CAF50", lw=0.8, ls="--", label="LOWER")
+                            ax.fill_between(x, bot, top, alpha=0.08, color="#2196F3")
+                            ax.set_title(f"📉 BOLL带 · {display_name}", fontsize=11, fontweight="bold")
+                            ax.legend(fontsize=7, loc="upper left")
+                            ax.set_ylabel("价格")
+
+                        elif k == "vol":
+                            up_col, dn_col = "#EF5350", "#66BB6A"
+                            colors = [up_col if closes[i] >= opens[i] else dn_col for i in range(n)]
+                            ax.bar(x, vols, color=colors, width=0.6, alpha=0.8)
+                            vol_ma5 = _ma(vols, 5); vol_ma10 = _ma(vols, 10)
+                            ax.plot(x, vol_ma5, color="#FFC107", lw=1.0, label="VOL_MA5")
+                            ax.plot(x, vol_ma10, color="#2196F3", lw=1.0, label="VOL_MA10")
+                            ax.set_title(f"📦 成交量 · {display_name}", fontsize=11, fontweight="bold")
+                            ax.legend(fontsize=7, loc="upper left")
+                            ax.set_ylabel("VOL")
+
+                        elif k == "macd":
+                            dif, dea, hist = _macd(closes)
+                            colors = ["#EF5350" if h >= 0 else "#66BB6A" for h in hist]
+                            ax.bar(x, hist, color=colors, width=0.6, alpha=0.8)
+                            ax.plot(x, dif, color="#FF9800", lw=1.0, label="DIF")
+                            ax.plot(x, dea, color="#2196F3", lw=1.0, label="DEA")
+                            ax.axhline(0, color="#999", lw=0.5)
+                            ax.set_title(f"📐 MACD · {display_name}", fontsize=11, fontweight="bold")
+                            ax.legend(fontsize=7, loc="upper left")
+                            ax.set_ylabel("MACD")
+
+                        elif k == "moneyflow":
+                            # 简单资金流向: (close - open) * volume 近似 + OBV
+                            money_flow = (closes - opens) * vols
+                            colors = ["#EF5350" if m >= 0 else "#66BB6A" for m in money_flow]
+                            ax.bar(x, money_flow, color=colors, width=0.6, alpha=0.8)
+                            mf_ma5 = _ma(money_flow, 5); mf_ma10 = _ma(money_flow, 10)
+                            ax.plot(x, mf_ma5, color="#FFC107", lw=1.2, label="MF_MA5")
+                            ax.plot(x, mf_ma10, color="#9C27B0", lw=1.2, label="MF_MA10")
+                            ax.axhline(0, color="#999", lw=0.5)
+                            ax.set_title(f"💵 资金流向(近似) · {display_name}", fontsize=11, fontweight="bold")
+                            ax.legend(fontsize=7, loc="upper left")
+                            ax.set_ylabel("Money Flow")
+
+                        # 统一: x 轴日期稀疏显示
+                        step = max(1, n // 12)
+                        tick_idx = list(range(0, n, step)) + [n-1]
+                        tick_idx = sorted(set(tick_idx))
+                        if len(dates_str) == n:
+                            tick_labels = [str(dates_str[i])[-8:] if len(str(dates_str[i]))>=8 else str(dates_str[i]) for i in tick_idx]
+                        else:
+                            tick_labels = [str(x[i]) for i in tick_idx]
+                        ax.set_xticks([x[i] for i in tick_idx])
+                        ax.set_xticklabels(tick_labels, rotation=30, fontsize=7)
+
+                        idx += 1
+
+                    fig.suptitle(f"🖼️ 图像分析 · {display_name} · {ts_code} · {n} 根日K",
+                                 fontsize=13, fontweight="bold", y=0.995)
+                    canvas.draw()
+                    status_var.set(f"✅ {n} 根K线 · {n_charts} 图 · {display_name}")
+
+                except Exception as e:
+                    _tb_img.print_exc()
+                    status_var.set(f"❌ {e}"); canvas.draw()
+
+            refresh_btn.config(command=_refresh)
+            sym_combo.bind("<<ComboboxSelected>>", lambda e: _refresh())
+            win.bind("<Control-r>", lambda e: _refresh())
+            # 首次加载
+            win.after(200, _refresh)
+
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            messagebox.showerror("错误", f"打开图像分析失败: {e}", parent=getattr(self, 'root', None))
+
 
 __all__ = ["StockDetailMixin"]
