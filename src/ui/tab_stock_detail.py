@@ -3719,7 +3719,7 @@ class StockDetailMixin:
             try: win.state("zoomed")
             except:
                 try: win.attributes("-zoomed", True)
-                except: win.geometry("1600x1000")
+                except: win.geometry("1200x1400")
 
             # ── 顶部工具栏 ──
             top = ttk.Frame(win, padding=6); top.pack(fill=tk.X)
@@ -3829,12 +3829,91 @@ class StockDetailMixin:
 
             ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
             refresh_btn = ttk.Button(top, text="🔄 刷新", width=10); refresh_btn.pack(side=tk.LEFT, padx=4)
+            # ❓ 帮助按钮 — 弹 6 图说明分 3 列
+            def _show_chart_help():
+                help_win = tk.Toplevel(win); help_win.title("📖 图像分析 · 图表说明")
+                help_win.geometry("900x560"); help_win.configure(bg="#FAFAFA")
+                help_win.transient(win); help_win.grab_set()
+                import tkinter.font as tkf
+                try: help_win.attributes("-topmost", True)
+                except: pass
+                help_win.update_idletasks()
+                sw = help_win.winfo_screenwidth()
+                help_win.geometry(f"+{(sw-900)//2}+120")
+
+                # 顶部标题栏
+                title_frame = tk.Frame(help_win, bg="#2C3E50", height=50)
+                title_frame.pack(fill=tk.X, side=tk.TOP)
+                title_frame.pack_propagate(False)
+                tk.Label(title_frame, text="📖 图像分析 · 六大图表说明", bg="#2C3E50", fg="white",
+                         font=("Microsoft YaHei", 16, "bold")).pack(side=tk.LEFT, padx=20, pady=8)
+                tk.Label(title_frame, text="鼠标悬停查看详情 · 点击卡片缩放", bg="#2C3E50", fg="#BDC3C7",
+                         font=("", 10)).pack(side=tk.RIGHT, padx=20)
+
+                # 帮助条目 (6 个)
+                HELP_ITEMS = [
+                    ("📈 日K线", "#E74C3C", "标准蜡烛图 + MA5/10/20/60 均线。\n最基础的技术分析视图，看多空排列和均线关系。",
+                     "• 红涨绿跌（A股习惯）\n• MA20/MA60 判断趋势方向\n• 配合一目均衡更准"),
+                    ("📊 一目均衡", "#3498DB", "Ichimoku Kinko Hyo — 一目均衡表。\n日本最流行的趋势判断工具，看云图多空区。",
+                     "• 5 条线：转换/基准/先行A/B/迟行\n• Kumo 云 = 未来 26 天预测区\n• 红云看涨，绿云看跌"),
+                    ("📉 BOLL带", "#9B59B6", "布林带 Bollinger Bands。\n标准差通道，判断波动区间和突破。",
+                     "• 20日均线 ± 2倍标准差\n• 带宽收缩 = 变盘在即\n• 价格触上轨卖出，触下轨买入"),
+                    ("📦 成交量", "#1ABC9C", "蜡烛色量柱 + VOL_MA5/10。\n量能是价的先行指标，量价配合才可靠。",
+                     "• 放量突破更可靠\n• 缩量上涨警惕回调\n• 量能背离 = 趋势乏力"),
+                    ("📐 MACD", "#F39C12", "DIF/DEA 差离值 + MACD 柱。\n经典金叉死叉信号，判断趋势动量。",
+                     "• DIF 上穿 DEA = 金叉买入\n• DIF 下穿 DEA = 死叉卖出\n• 零轴上方金叉更可靠"),
+                    ("🎯 情绪复盘", "#E67E22", "市场整体情绪 + 仓位温度计。\n从涨跌家数、涨停跌停判断市场温度。",
+                     "• 上涨家数 > 60% = 强势市场\n• 涨停多 = 情绪亢奋\n• 建议仓位 = 情绪 × 周期"),
+                    ("📊 ETF强弱", "#27AE60", "22 只主流 ETF 5日×0.6 + 20日×0.4 综合评分。\n横向条形图一眼看清最强最弱板块。",
+                     "• 红条 = 近期强势板块\n• 绿条 = 近期弱势板块\n• 最强顺势，最弱规避"),
+                ]
+
+                # 滚动区 (Canvas + Frame)
+                outer = tk.Frame(help_win, bg="#FAFAFA")
+                outer.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
+                canvas = tk.Canvas(outer, bg="#FAFAFA", highlightthickness=0)
+                sb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
+                inner = tk.Frame(canvas, bg="#FAFAFA")
+                inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+                canvas.create_window((0, 0), window=inner, anchor="nw")
+                canvas.configure(yscrollcommand=sb.set)
+                canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+                # 3 列网格
+                ncols = 3
+                card_w = 275
+                for i, (title, color, summary, detail) in enumerate(HELP_ITEMS):
+                    r, c = divmod(i, ncols)
+                    card = tk.Frame(inner, bg="white", highlightbackground="#E0E0E0", highlightthickness=1,
+                                    width=card_w, bd=0)
+                    card.grid(row=r, column=c, padx=8, pady=8, sticky="nsew")
+                    inner.grid_columnconfigure(c, weight=1)
+                    # 彩色标题条
+                    tk.Frame(card, bg=color, height=4).pack(fill=tk.X)
+                    tk.Label(card, text=title, bg="white", fg=color,
+                             font=("Microsoft YaHei", 13, "bold")).pack(anchor="w", padx=14, pady=(10, 4))
+                    # summary
+                    tk.Label(card, text=summary, bg="white", fg="#333", wraplength=card_w-28,
+                             justify="left", font=("", 10)).pack(anchor="w", padx=14, pady=(0, 8))
+                    # 分割线
+                    tk.Frame(card, bg="#EEEEEE", height=1).pack(fill=tk.X, padx=14)
+                    # detail (小字号)
+                    tk.Label(card, text=detail, bg="white", fg="#666", wraplength=card_w-28,
+                             justify="left", font=("", 9)).pack(anchor="w", padx=14, pady=(6, 10))
+
+                # 鼠标滚轮
+                def _on_mousewheel(evt): canvas.yview_scroll(int(-evt.delta/120), "units")
+                canvas.bind_all("<MouseWheel>", _on_mousewheel)
+                help_win.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+            help_btn = ttk.Button(top, text="❓帮助", width=7, command=_show_chart_help)
+            help_btn.pack(side=tk.LEFT, padx=(4, 4))
             status_var = tk.StringVar(value="")
             ttk.Label(top, textvariable=status_var, foreground="gray").pack(side=tk.LEFT, padx=8)
 
             # ── 主绘图区 ──
             chart_area = tk.Frame(win); chart_area.pack(fill=tk.BOTH, expand=True)
-            fig = Figure(figsize=(16, 10), dpi=100, facecolor="#FAFAFA")
+            fig = Figure(figsize=(12, 16), dpi=100, facecolor="#FAFAFA")
             canvas = FigureCanvasTkAgg(fig, chart_area); canvas.draw()
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, side=tk.TOP)
             # matplotlib 工具栏 (缩放/平移/保存)
@@ -4069,7 +4148,7 @@ class StockDetailMixin:
                     except Exception:
                         trade_signals = []
 
-                    # 布局计算: 行数/列数 (严格基于 n_charts)
+                    # 布局计算: 行数/列数 (先粗估, 后面 emotion/etf_rank 独占整行会跳行)
                     n_charts = len(selected)
                     if n_charts == 1: nrows, ncols = 1, 1
                     elif n_charts == 2: nrows, ncols = 2, 1
@@ -4077,20 +4156,43 @@ class StockDetailMixin:
                     elif n_charts <= 6: nrows, ncols = 3, 2
                     elif n_charts <= 9: nrows, ncols = 3, 3
                     else: nrows, ncols = 4, 3
-                    # gridspec height ratios: 主图行(含 daily_k/ichimoku/boll) 高, 纯副图行矮
-                    # 注意: height_ratios 长度必须 == nrows (matplotlib 要求)
-                    row_has_main = [False] * nrows  # 每行是否有主图
-                    for i, k in enumerate(selected):
-                        r, _c = divmod(i, ncols)
-                        if k in ("daily_k", "ichimoku", "boll"): row_has_main[r] = True
-                    height_ratios = [4.0 if row_has_main[r] else 1.5 for r in range(nrows)]
+                    # 🔧 动态修正: emotion/etf_rank 独占整行, 所以 idx 会跳, 重新算 nrows
+                    _idx_preview = 0; _max_row = 0
+                    for k in selected:
+                        _r, _c = divmod(_idx_preview, ncols)
+                        _max_row = max(_max_row, _r)
+                        if k in ("etf_rank", "emotion"): _idx_preview += ncols
+                        else: _idx_preview += 1
+                    nrows = _max_row + 1
+                    # 🔧 动态 height_ratios: etf_rank 行加高 (22只需更多空间), emotion 稍高
+                    row_types = [[] for _ in range(nrows)]
+                    _idx_p2 = 0
+                    for k in selected:
+                        _r2, _c2 = divmod(_idx_p2, ncols)
+                        row_types[_r2].append(k)
+                        if k in ("etf_rank","emotion"): _idx_p2 += ncols
+                        else: _idx_p2 += 1
+                    height_ratios = []
+                    for r in range(nrows):
+                        if "etf_rank" in row_types[r]: height_ratios.append(9.0)  # 22只ETF需要充足纵向空间
+                        elif "emotion" in row_types[r]: height_ratios.append(5.5)
+                        else: height_ratios.append(4.5)
+                    fig_h = max(12, sum(height_ratios) * 1.2)
+                    fig.set_size_inches(12, fig_h)
                     from matplotlib import gridspec
                     gs = gridspec.GridSpec(nrows, ncols, figure=fig, height_ratios=height_ratios,
                                            hspace=0.45, wspace=0.30)
 
                     idx = 0
                     for k in selected:
-                        r, c = divmod(idx, ncols); ax = fig.add_subplot(gs[r, c])
+                        r, c = divmod(idx, ncols)
+                        # etf_rank / emotion 单独占整行 (横跨所有列, 更大)
+                        if k in ("etf_rank", "emotion"):
+                            ax = fig.add_subplot(gs[r, :])
+                            idx += ncols  # 跳到下一行开头
+                        else:
+                            ax = fig.add_subplot(gs[r, c])
+                            idx += 1
                         ax.set_facecolor("#FFFFFF"); ax.grid(True, alpha=0.2)
                         _skip_regime = False  # 默认值, emotion/etf_rank case 会改成 True
 
@@ -4313,36 +4415,107 @@ class StockDetailMixin:
                                 etf_results = []
 
                             if etf_results:
-                                # 画真正的水平条形图
+                                # === 彻底重构: 名字/排名用 fig.text 独立 fig fraction 坐标 ===
+                                # 数据轴只管 bar + 涨幅 + score, 布局绝对不挤
                                 names = [r[1] for r in etf_results]
                                 scores = [r[0] for r in etf_results]
                                 r5s = [r[2] for r in etf_results]
                                 r20s = [r[3] for r in etf_results]
-                                y_pos = np.arange(len(names))
+                                n_items = len(names)
+                                y_pos = np.arange(n_items)
+
                                 colors = ["#D32F2F" if s > 0 else "#388E3C" for s in scores]
-                                # barh
-                                ax.barh(y_pos, scores, color=colors, alpha=0.85, edgecolor="white", height=0.7)
-                                ax.axvline(0, color="#666", lw=0.8, ls="--")
-                                # y 轴 (名字 + 5日 + 20日 标签)
-                                labels = [f"{n:<8}  5日{r5:+.1f}%  20日{r20:+.1f}%"
-                                         for n, r5, r20 in zip(names, r5s, r20s)]
-                                ax.set_yticks(y_pos)
-                                ax.set_yticklabels(labels, fontsize=9)
-                                ax.invert_yaxis()  # TOP 在上面
-                                ax.set_xlabel("综合得分 (5日×0.6 + 20日×0.4)", fontsize=10)
-                                ax.grid(axis="x", alpha=0.3)
-                                # 最强/最弱标注
-                                ax.barh(y_pos[0], scores[0], color="#D32F2F", alpha=1.0, edgecolor="#FFEBEE", lw=2)
-                                ax.barh(y_pos[-1], scores[-1], color="#388E3C", alpha=1.0, edgecolor="#E8F5E9", lw=2)
-                                # 数值标注在 bar 末端
-                                for i, (s, n) in enumerate(zip(scores, names)):
-                                    ha = "left" if s >= 0 else "right"
-                                    offset = 0.05 if s >= 0 else -0.05
-                                    ax.text(s + offset, i, f"{s:+.2f}", va="center", ha=ha, fontsize=9, fontweight="bold")
-                                # 操作建议 (右下角)
+                                BAR_H = 0.32
+                                ax.barh(y_pos, scores, color=colors, alpha=0.88,
+                                        edgecolor="white", height=BAR_H)
+                                ax.axvline(0, color="#666", lw=1.2, ls="--")
+
+                                x_span = max(abs(min(scores)), abs(max(scores))) * 1.18
+                                ax.set_xlim(-x_span, x_span)
+                                ax.set_yticks([])
+                                ax.invert_yaxis()
+                                ax.grid(axis="x", alpha=0.25, lw=0.8)
+                                ax.set_xlabel("综合得分  (5日×0.6  +  20日×0.4)", fontsize=10, labelpad=6)
+                                for spine in ["left", "right", "top"]:
+                                    if spine in ax.spines:
+                                        ax.spines[spine].set_visible(False)
+
+                                # 调整 ax position — 数据区左起点拉到 0.44 fig fraction
+                                pos = ax.get_position()
+                                if pos.x0 < 0.44:
+                                    ax.set_position([0.44, pos.y0, 0.53, pos.height])
+                                    pos = ax.get_position()
+                                ax_bottom, ax_h = pos.y0, pos.height
+
+                                # —— ① fig.text 放左边名字 + 排名圆圈 ——
+                                # 名字从 0.02 左对齐, 排名圆圈在 0.36, y 由 data→fig 转换
+                                for i in range(n_items):
+                                    ax_frac = (n_items - 1 - i + 0.5) / n_items  # invert_yaxis 转换
+                                    fig_y = ax_bottom + ax_frac * ax_h
+
+                                    fig.text(0.02, fig_y, names[i], va="center", ha="left",
+                                             fontsize=9, color="#1A237E", fontweight="bold")
+
+                                    rank_color = "#C62828" if i == 0 else (
+                                        "#2E7D32" if i == n_items - 1 else "#78909C")
+                                    fig.text(0.36, fig_y, f"#{i+1}", va="center", ha="center",
+                                             fontsize=7, color=rank_color, fontweight="bold",
+                                             bbox=dict(boxstyle="round,pad=0.15", fc="#FAFAFA",
+                                                       ec=rank_color, alpha=0.88))
+
+                                # —— ② 数据轴内: bar + 涨幅 tag (上下交错) + score ——
+                                for i in range(n_items):
+                                    s = scores[i]; r5 = r5s[i]; r20 = r20s[i]
+                                    r5_color = "#D32F2F" if r5 >= 0 else "#388E3C"
+                                    r20_color = "#D32F2F" if r20 >= 0 else "#388E3C"
+                                    r5_str = f"5日{r5:+.1f}%"
+                                    r20_str = f"20日{r20:+.1f}%"
+
+                                    dy = 0.26
+                                    if s >= 0:
+                                        dx = x_span * 0.035
+                                        top_txt, bot_txt, top_c, bot_c = (
+                                            (r5_str, r20_str, r5_color, r20_color)
+                                            if i % 2 == 1 else
+                                            (r20_str, r5_str, r20_color, r5_color))
+                                        ax.text(s + dx, i + dy, top_txt, va="center", ha="left",
+                                                fontsize=7, color=top_c, fontweight="bold",
+                                                bbox=dict(boxstyle="round,pad=0.12", fc="#FFF",
+                                                          ec=top_c, alpha=0.9, lw=0.7))
+                                        ax.text(s + dx, i - dy, bot_txt, va="center", ha="left",
+                                                fontsize=7, color=bot_c, fontweight="bold",
+                                                bbox=dict(boxstyle="round,pad=0.12", fc="#FFF",
+                                                          ec=bot_c, alpha=0.9, lw=0.7))
+                                    else:
+                                        dx = x_span * 0.035
+                                        top_txt, bot_txt, top_c, bot_c = (
+                                            (r5_str, r20_str, r5_color, r20_color)
+                                            if i % 2 == 1 else
+                                            (r20_str, r5_str, r20_color, r5_color))
+                                        ax.text(s - dx, i + dy, top_txt, va="center", ha="right",
+                                                fontsize=7, color=top_c, fontweight="bold",
+                                                bbox=dict(boxstyle="round,pad=0.12", fc="#FFF",
+                                                          ec=top_c, alpha=0.9, lw=0.7))
+                                        ax.text(s - dx, i - dy, bot_txt, va="center", ha="right",
+                                                fontsize=7, color=bot_c, fontweight="bold",
+                                                bbox=dict(boxstyle="round,pad=0.12", fc="#FFF",
+                                                          ec=bot_c, alpha=0.9, lw=0.7))
+
+                                    # score 数值 —— bar 内部白色字
+                                    score_ha = "right" if s >= 0 else "left"
+                                    score_x = s - x_span * 0.025 if s >= 0 else s + x_span * 0.025
+                                    ax.text(score_x, i, f"{s:+.2f}", va="center", ha=score_ha,
+                                            fontsize=8, color="white", fontweight="bold", alpha=0.95)
+
+                                # TOP1 / BOTTOM1 粗描边
+                                ax.barh(y_pos[0], scores[0], color="#D32F2F", alpha=1.0,
+                                        edgecolor="#FFEBEE", lw=3, height=BAR_H)
+                                ax.barh(y_pos[-1], scores[-1], color="#388E3C", alpha=1.0,
+                                        edgecolor="#E8F5E9", lw=3, height=BAR_H)
+
                                 top_name = names[0]; bot_name = names[-1]
                                 ax.text(0.98, 0.02,
-                                        f"💡 建议: {top_name}顺势  规避{bot_name}",
+                                        f"💡 顺势{top_name}  ·  规避{bot_name}",
                                         transform=ax.transAxes, fontsize=10, fontweight="bold",
                                         ha="right", va="bottom", color="#1565C0",
                                         bbox=dict(boxstyle="round,pad=0.3", fc="#E3F2FD", ec="#90CAF9", alpha=0.95))
@@ -4405,7 +4578,7 @@ class StockDetailMixin:
                         ax.set_xticks([x[i] for i in tick_idx])
                         ax.set_xticklabels(tick_labels, rotation=30, fontsize=7)
 
-                        idx += 1
+                    # 注意: idx 已在循环开头的 gs 分配代码里递增, 这里不再 +=1
 
                     fig.suptitle(f"🖼️ 图像分析 · {display_name} · {ts_code} · {n} 根日K",
                                  fontsize=13, fontweight="bold", y=0.995)
