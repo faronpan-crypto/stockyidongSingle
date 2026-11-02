@@ -3599,112 +3599,103 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None, stock_list=No
     _btn_help = tk.Label(top2, text="❓", bg=_BG_TOOLBAR, fg=_FG_GOLD,
                          font=("", 10, "bold"), cursor="hand2")
     _btn_help.pack(side=tk.LEFT, padx=(4, 2))
-    _ENE_HELP = """📚 副图指标详解 (双击❓随时查看)
-
-━ MACD (指数平滑异同移动平均线) ━
-  DIF = EMA12 - EMA26 (快慢线差值)
-  DEA = DIF 的 EMA9 (信号线)
-  HIST = 2 × (DIF - DEA) (柱状图)
-  
-  🟢 DIF 上穿 DEA = 金叉 = 买入信号
-  🔴 DIF 下穿 DEA = 死叉 = 卖出信号
-  📈 DIF 向上拐头 = 动能转强
-  📉 DIF 向下拐头 = 动能转弱
-  ⚠ DIF 新高但价格未新高 = 顶背离 (卖出)
-  ⚠ DIF 新低但价格未新低 = 底背离 (买入)
-
-━ KDJ (随机指标 9-3-3) ━
-  RSV = (收盘 - 9日最低) / (9日最高 - 9日最低) × 100
-  K = 2/3 × K + 1/3 × RSV
-  D = 2/3 × D + 1/3 × K
-  J = 3K - 2D
-  
-  🟢 K 上穿 D = 金叉 = 买入信号
-  🔴 K 下穿 D = 死叉 = 卖出信号
-  ⬆ J > 100 = 超买 (谨慎追高)
-  ⬇ J < 0 = 超卖 (关注反弹机会)
-
-━ RSI (相对强弱指标 14) ━
-  RSI = 100 - 100 / (1 + 平均涨幅 / 平均跌幅)
-  
-  ⬆ RSI > 70 = 超买 (涨太多了, 警惕回调)
-  ⬇ RSI < 30 = 超卖 (跌太多了, 关注反转)
-  RSI 在 50 附近 = 中性震荡区
-
-━ BIAS (乖离率 6/12/24) ━
-  BIAS = (当前价 - N日均线) / N日均线 × 100%
-  
-  ⬆ BIAS > 12% = 短期严重超买 (追高风险大)
-  ⬇ BIAS < -12% = 短期严重超卖 (超跌反弹机会)
-  三条 BIAS 线同时向上发散 = 多头强势
-
-━ BOLL%B (布林带相对位置) ━
-  中轨 = MA20
-  上/下轨 = 中轨 ± 2×标准差
-  %B = (价格 - 下轨) / (上轨 - 下轨)
-  
-  %B > 1.0 = 突破上轨 (极端强势或超买)
-  %B < 0.0 = 跌破下轨 (极端弱势或超卖)
-  %B 在 0.5 附近 = 中轨附近震荡
-
-━ OBV (能量潮) ━
-  上涨日 +成交量, 下跌日 -成交量
-  
-  OBV 向上 = 资金持续流入
-  OBV 向下 = 资金持续流出
-  OBV 与价格背离 = 趋势可能反转
-
-━ ENE (轨道线 ✨ 重点推荐) ━
-  中轨 = MA10 (10日均线)
-  上轨 = MA10 × 1.10 (+10%)
-  下轨 = MA10 × 0.90 (-10%)
-  ENE% = (价格 - 下轨) / (上轨 - 下轨)
-  
-  🟢 ENE% 从下轨向上穿越中轨 = 启动信号 (买入)
-  🔴 ENE% 从上轨向下穿越中轨 = 见顶信号 (卖出)
-  ⬆ ENE% > 1.0 = 触上轨 (超买, 谨慎追高)
-  ⬇ ENE% < 0.0 = 触下轨 (超卖, 关注反弹)
-  ✨ 最适合识别短线启动和见顶!
-
-━ SAR (抛物线 Welles Wilder) ━
-  SAR = SAR + AF × (EP - SAR)
-  AF = 加速因子 0.02 → 0.2 (每次创新极值 +0.02)
-  EP = Extreme Point (趋势内最高价/最低价)
-  
-  🔴 红点在价格下方 = 多头趋势, 持有
-  🟢 绿点在价格上方 = 空头趋势, 观望
-  ⚠ 颜色翻转 = 趋势反转信号 (最强买卖点)
-  ✨ 最适合中短线止损! SAR 就是你的移动止损线
-
-━ BBI (多空指标) ━
-  BBI = (MA3 + MA6 + MA12 + MA24) / 4
-  
-  🟢 收盘价在 BBI 之上 = 多头市场, 持股
-  🔴 收盘价在 BBI 之下 = 空头市场, 持币
-  ⚠ BBI 方向改变 = 趋势反转信号
-  ✨ 最适合判断大趋势多空, 过滤假突破!
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💡 实战建议:
-  • MACD + KDJ 组合 = 中短期买卖信号双确认
-  • ENE + BIAS 组合 = 短线超买超卖精准捕捉
-  • RSI + BOLL%B 组合 = 反转概率最高的超卖识别
-  • SAR + BBI 组合 = BBI 定方向 + SAR 定止损 (黄金搭档!)
-  • SAR + MACD 组合 = MACD 确认动能 + SAR 保护利润"""
+    # ── 🎨 副图指标帮助卡片 (结构化, 三列网格) ──
+    _HELP_CARDS = [
+        {"title":"💫 MACD 指数平滑异同移动平均线", "color":"#1565C0",
+         "define":"DIF = EMA12 - EMA26 (快慢线差值)\nDEA = DIF 的 EMA9 (信号线)\nHIST = 2 × (DIF - DEA) (柱状图)",
+         "signals":["🟢 DIF 上穿 DEA = 金叉 = 买入信号","🔴 DIF 下穿 DEA = 死叉 = 卖出信号","📈 DIF 向上拐头 = 动能转强","📉 DIF 向下拐头 = 动能转弱","⚠ DIF 新高但价格未新高 = 顶背离 (卖出)","⚠ DIF 新低但价格未新低 = 底背离 (买入)"]},
+        {"title":"🎲 KDJ 随机指标 (9-3-3)", "color":"#2E7D32",
+         "define":"RSV = (收盘 - 9日最低) / (9日最高 - 9日最低) × 100\nK = 2/3 × K + 1/3 × RSV\nD = 2/3 × D + 1/3 × K\nJ = 3K - 2D",
+         "signals":["🟢 K 上穿 D = 金叉 = 买入信号","🔴 K 下穿 D = 死叉 = 卖出信号","⬆ J > 100 = 超买 (谨慎追高)","⬇ J < 0 = 超卖 (关注反弹机会)"]},
+        {"title":"🎯 RSI 相对强弱指标 (14)", "color":"#6A1B9A",
+         "define":"RSI = 100 - 100 / (1 + 平均涨幅 / 平均跌幅)",
+         "signals":["⬆ RSI > 70 = 超买 (涨太多了, 警惕回调)","⬇ RSI < 30 = 超卖 (跌太多了, 关注反转)","RSI 在 50 附近 = 中性震荡区"]},
+        {"title":"📏 BIAS 乖离率 (6/12/24)", "color":"#E65100",
+         "define":"BIAS = (当前价 - N日均线) / N日均线 × 100%",
+         "signals":["⬆ BIAS > 12% = 短期严重超买 (追高风险大)","⬇ BIAS < -12% = 短期严重超卖 (超跌反弹机会)","三条 BIAS 线同时向上发散 = 多头强势"]},
+        {"title":"📊 BOLL%B 布林带相对位置", "color":"#00695C",
+         "define":"中轨 = MA20\n上/下轨 = 中轨 ± 2×标准差\n%B = (价格 - 下轨) / (上轨 - 下轨)",
+         "signals":["%B > 1.0 = 突破上轨 (极端强势或超买)","%B < 0.0 = 跌破下轨 (极端弱势或超卖)","%B 在 0.5 附近 = 中轨附近震荡"]},
+        {"title":"🌊 OBV 能量潮", "color":"#C2185B",
+         "define":"上涨日 +成交量, 下跌日 -成交量",
+         "signals":["OBV 向上 = 资金持续流入","OBV 向下 = 资金持续流出","OBV 与价格背离 = 趋势可能反转"]},
+        {"title":"✨ ENE 轨道线 ⭐重点推荐", "color":"#C62828",
+         "define":"中轨 = MA10 (10日均线)\n上轨 = MA10 × 1.10 (+10%)\n下轨 = MA10 × 0.90 (-10%)\nENE% = (价格 - 下轨) / (上轨 - 下轨)",
+         "signals":["🟢 ENE% 从下轨向上穿越中轨 = 启动信号 (买入)","🔴 ENE% 从上轨向下穿越中轨 = 见顶信号 (卖出)","⬆ ENE% > 1.0 = 触上轨 (超买, 谨慎追高)","⬇ ENE% < 0.0 = 触下轨 (超卖, 关注反弹)","✨ 最适合识别短线启动和见顶!"]},
+        {"title":"🚀 SAR 抛物线 (Welles Wilder)", "color":"#FF6F00",
+         "define":"SAR = SAR + AF × (EP - SAR)\nAF = 加速因子 0.02 → 0.2\nEP = 趋势内最高/最低价",
+         "signals":["🔴 红点在价格下方 = 多头趋势, 持有","🟢 绿点在价格上方 = 空头趋势, 观望","⚠ 颜色翻转 = 趋势反转信号 (最强买卖点)","✨ SAR 就是你的移动止损线"]},
+        {"title":"⚖️ BBI 多空指标", "color":"#283593",
+         "define":"BBI = (MA3 + MA6 + MA12 + MA24) / 4",
+         "signals":["🟢 收盘价在 BBI 之上 = 多头市场, 持股","🔴 收盘价在 BBI 之下 = 空头市场, 持币","⚠ BBI 方向改变 = 趋势反转信号","✨ 最适合判断大趋势多空, 过滤假突破"]},
+        {"title":"💡 实战组合建议", "color":"#F57F17",
+         "define":"经典指标组合 = 信号双确认, 大幅提升胜率",
+         "signals":["MACD + KDJ = 中短期买卖信号双确认","ENE + BIAS = 短线超买超卖精准捕捉","RSI + BOLL%B = 反转概率最高的超卖识别","SAR + BBI = BBI 定方向 + SAR 定止损 (黄金搭档!)","SAR + MACD = MACD 确认动能 + SAR 保护利润"]},
+    ]
     def _show_sub_help():
-        """弹出副图指标帮助窗口"""
+        """弹出副图指标帮助窗口 — 三列彩色卡片网格, 大字体"""
         top2 = tk.Toplevel(dlg)
         top2.title("📚 副图指标详解")
-        top2.configure(bg=_BG_DEEP); top2.geometry("560x620")
+        top2.configure(bg="#1565C0"); top2.geometry("1180x780")
         top2.transient(dlg); top2.grab_set()
-        import tkinter.scrolledtext as _st2
-        txt = _st2.ScrolledText(top2, bg=_BG_PANEL, fg="#ECEFF1", font=("", 10),
-                                wrap=tk.WORD, padx=10, pady=10, relief=tk.FLAT)
-        txt.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        txt.insert("1.0", _ENE_HELP)
-        txt.configure(state="disabled")
+        FONT_TITLE = ("Microsoft YaHei", 13, "bold")
+        FONT_BODY  = ("Microsoft YaHei", 11)
+
+        # 顶栏
+        header = tk.Frame(top2, bg="#1565C0", height=48); header.pack(fill=tk.X)
+        tk.Label(header, text="📚 副图指标详解", bg="#1565C0", fg="white",
+                 font=("Microsoft YaHei", 16, "bold")).pack(side=tk.LEFT, padx=18, pady=10)
+        tk.Label(header, text="三列彩色网格  |  字体 13pt  |  鼠标滚轮翻页",
+                 bg="#1565C0", fg="#BBDEFB", font=("", 11)).pack(side=tk.RIGHT, padx=18)
+
+        # Canvas + 滚动条
+        cv = tk.Canvas(top2, bg="#F5F5F5", highlightthickness=0)
+        sb = ttk.Scrollbar(top2, orient=tk.VERTICAL, command=cv.yview)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        cv.configure(yscrollcommand=sb.set)
+        inner = tk.Frame(cv, bg="#F5F5F5")
+        win_id = cv.create_window((0, 0), window=inner, anchor="nw")
+        cv.bind("<Configure>", lambda e: cv.itemconfigure(win_id, width=e.width))
+        inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        def _wheel(e): cv.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        cv.bind_all("<MouseWheel>", _wheel)
+        top2.bind("<Destroy>", lambda e: cv.unbind_all("<MouseWheel>"))
+
+        # 渲染三列网格
+        cols_per_row = 3
+        card_w = 360  # px, 足够宽显示中文
+        gap_x, gap_y = 10, 10
+        for idx, card in enumerate(_HELP_CARDS):
+            r, c = divmod(idx, cols_per_row)
+            x = gap_x + c * (card_w + gap_x)
+            y = gap_y + r * 240  # 每行高约 240
+            # 卡片主体
+            cf = tk.Frame(inner, bg="white", width=card_w, height=230,
+                          highlightthickness=1, highlightbackground="#E0E0E0")
+            cf.place(x=x, y=y, width=card_w, height=230)
+            # 彩色顶条 (5px)
+            tk.Frame(cf, bg=card["color"], height=5).pack(fill=tk.X)
+            # 标题
+            tk.Label(cf, text=card["title"], bg="white", fg=card["color"],
+                     font=FONT_TITLE, anchor="w", wraplength=card_w-24,
+                     justify="left").pack(fill=tk.X, padx=12, pady=(8, 2))
+            # 公式/定义
+            tk.Label(cf, text=card["define"], bg="white", fg="#37474F",
+                     font=FONT_BODY, anchor="w", justify="left",
+                     wraplength=card_w-24).pack(fill=tk.X, padx=12, pady=(2, 4))
+            # 分隔线
+            tk.Frame(cf, bg="#EEEEEE", height=1).pack(fill=tk.X, padx=12)
+            # 信号列表
+            sig_text = "\n".join(card["signals"])
+            tk.Label(cf, text=sig_text, bg="white", fg="#424242",
+                     font=("Microsoft YaHei", 10), anchor="w", justify="left",
+                     wraplength=card_w-24).pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
+
+        # 关闭按钮
         tk.Button(top2, text="关闭", command=top2.destroy,
-                  bg=_BG_TOOLBAR, fg="white", font=("", 10), padx=20).pack(pady=8)
+                  bg="#1565C0", fg="white", font=("", 12),
+                  padx=30, pady=6, relief=tk.FLAT).pack(pady=8)
     _btn_help.bind("<Button-1>", lambda e: _show_sub_help())  # 单击也能打开
 
     status = tk.Label(top, text="⏳ 加载中...", bg=_BG_TOOLBAR, fg=_FG_DIM, font=("", 9))

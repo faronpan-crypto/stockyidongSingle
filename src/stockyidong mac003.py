@@ -4724,11 +4724,10 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             else:
                 ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(**_pad)
 
-        # ── Row 2: 🎯 选股 / 量化 / 机会 (actionable) — 精简到 7 个, 避免一行挤爆! ──
+        # ── Row 2: 🎯 选股 / 量化 / 机会 (actionable) — 精简到 6 个 ──
         _ROW2 = [
-            ("📈价增量涨", 10, self._show_price_volume_dialog),
             ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
-            ("🤖量化", 7, self._show_quant_dialog),
+            ("🤖量化总览", 9, self._show_quant_dialog),
             ("🎯量化预测", 10, self._show_quant_forecast_dialog),
             ("🪙筹码", 7, self._show_chouma),
             ("🎯机会", 7, self._show_jianlou),
@@ -4747,9 +4746,9 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("📊K线", 6, self.show_kline_dialog),
             ("📈一目均衡", 7, self._show_ichimoku_kline_dialog),
             ("📈1minK", 7, self._show_1min_kline_dialog),
-            ("📊分析深度", 7, self._show_stock_analysis_dialog),
-            ("📊比价", 6, self._show_stock_compare_dialog),
-            ("🔍多股对比", 7, self._show_multi_compare_dialog),
+            ("📊深度技术", 8, self._show_stock_analysis_dialog),
+            ("📊板块个股分析", 10, self._show_stock_compare_dialog),
+            ("🔍多股同列", 7, self._show_multi_compare_dialog),
             ("📐β-α", 6, self._show_beta_alpha),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW3):
@@ -5098,7 +5097,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("凯利设定", self._show_kelly_config, False, "tools"),
             ("情绪", self.show_market_sentiment_dialog, False, "tools"),
             ("行情统计", self.show_market_breadth_stats_dialog, False, "tools"),
-            ("量化", self.show_quant_strategy_dialog, False, "tools"),
+            ("量化总览", self.show_quant_strategy_dialog, False, "tools"),
             # ---- 🔧 技术工具 (tools) ----
             ("关键词搜索", self.launch_keyword_search_app, False, "tools"),
             ("操作系统1", self.show_os1_trading_rules_dialog, False, "tools"),
@@ -5108,7 +5107,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("tushare", self.show_tushare_skills_dialog, False, "tools"),
             ("📸照片风格化", self._show_photo_style_dialog, False, "tools"),
             ("💰比价", self._show_price_compare_dialog, False, "tools"),
-            ("📊股票比价", self._show_stock_compare_dialog, False, "tools"),
+            ("📊板块个股分析", self._show_stock_compare_dialog, False, "tools"),
             # ---- 💼 持仓/预测 (tools) ----
             ("自持股监测", self._show_self_holding_monitor_popup, False, "tools"),
             ("🧬生命周期", self._show_lifecycle_popup, False, "tools"),

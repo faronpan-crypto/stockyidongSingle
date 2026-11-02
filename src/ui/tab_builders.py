@@ -12233,43 +12233,68 @@ _HELP_DB = {
     },
 }
 
+def _try_load_help_json():
+    """优先从 data/help_knowledge.json 读帮助 (学习Tab可编辑的那套)"""
+    import os as _os, json as _json
+    _fp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                        "data", "help_knowledge.json")
+    if not _os.path.exists(_fp): return None
+    try:
+        with open(_fp, "r", encoding="utf-8") as f:
+            items = _json.load(f)
+        return {h["key"]: {k: h.get(k, "") for k in ("title","define","formula","example","url","book")}
+                for h in items if h.get("key")}
+    except Exception:
+        return None
+
 def _show_help_popup(parent, key):
-    """双击 ❓ 弹出指标解释窗口 (默认 13 号字体 + 大小调节)"""
-    info = _HELP_DB.get(key)
+    """双击 ❓ 弹出指标解释窗口 — 优先读 JSON 帮助知识库"""
+    info = None
+    # 1. 先尝试学习Tab的 JSON (可编辑)
+    _json_db = _try_load_help_json()
+    if _json_db and key in _json_db:
+        info = _json_db[key]
+    # 2. fallback 到硬编码 _HELP_DB
+    if info is None:
+        info = _HELP_DB.get(key)
     if not info:
         messagebox.showinfo("📖 帮助", f"暂无「{key}」的详细说明", parent=parent)
         return
     w = tk.Toplevel(parent)
-    w.title(info["title"]); w.geometry("640x560"); w.transient(parent)
+    w.title(info["title"]); w.geometry("720x580"); w.transient(parent)
     w.grab_set()
 
-    # 顶部工具栏: 字号调节
-    toolbar = tk.Frame(w, bg="#F5F5F5"); toolbar.pack(fill=tk.X)
-    tk.Label(toolbar, text=" 🔎 字号:", bg="#F5F5F5", fg="#555").pack(side=tk.LEFT, padx=(8,2), pady=4)
-    size_var = tk.IntVar(value=13)
-    size_lbl = tk.Label(toolbar, text="13", bg="#F5F5F5", fg="#1565C0", font=("",10,"bold"), width=3)
-    size_lbl.pack(side=tk.LEFT)
-    def _change_size(delta):
-        cur = max(8, min(24, size_var.get() + delta))
-        size_var.set(cur)
-        size_lbl.config(text=str(cur))
-        s.config(font=("Microsoft YaHei", cur))
-    tk.Button(toolbar, text="A-", width=3, command=lambda: _change_size(-1), relief=tk.FLAT, bg="#E0E0E0").pack(side=tk.LEFT, padx=2, pady=4)
-    tk.Button(toolbar, text="A+", width=3, command=lambda: _change_size(+1), relief=tk.FLAT, bg="#E0E0E0").pack(side=tk.LEFT, padx=2, pady=4)
-    ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
-    tk.Label(toolbar, text=f"📖 {info['title']}", bg="#F5F5F5", fg="#333", font=("",10,"bold")).pack(side=tk.LEFT, pady=4)
+    # 🎨 深蓝顶栏 (统一风格)
+    header = tk.Frame(w, bg="#1565C0", height=52); header.pack(fill=tk.X)
+    tk.Label(header, text=info["title"], bg="#1565C0", fg="white",
+             font=("Microsoft YaHei", 15, "bold")).pack(side=tk.LEFT, padx=18, pady=12)
+    tk.Label(header, text="📖 技术指标详解", bg="#1565C0", fg="#BBDEFB",
+             font=("", 11)).pack(side=tk.RIGHT, padx=18, pady=16)
 
-    body = tk.Frame(w); body.pack(fill=tk.BOTH, expand=True, padx=14, pady=10)
-    s = scrolledtext.ScrolledText(body, wrap=tk.WORD, font=("Microsoft YaHei",13), bg="#FAFAFA", fg="#263238", padx=10, pady=8)
-    s.pack(fill=tk.BOTH, expand=True)
-    def _s(t): s.insert(tk.END, t); s.insert(tk.END, "\n\n")
-    _s("📖 【定义】\n" + info["define"])
-    _s("🧮 【公式】\n" + info["formula"])
-    _s("💡 【用例/信号】\n" + info["example"])
-    _s("🔗 【参考网址】\n" + info["url"])
-    _s("📚 【推荐书籍】\n" + info["book"])
-    s.config(state=tk.DISABLED)
-    btn = ttk.Button(body, text="关闭", command=w.destroy); btn.pack(pady=(8,0))
+    body = tk.Frame(w, bg="#F5F5F5"); body.pack(fill=tk.BOTH, expand=True, padx=14, pady=14)
+
+    # 📖 【定义】卡片 (绿)
+    _section_card(body, "📖 定义", "#2E7D32", info["define"])
+    # 🧮 【公式】卡片 (蓝)
+    _section_card(body, "🧮 公式", "#1565C0", info["formula"])
+    # 💡 【用例/信号】卡片 (橙)
+    _section_card(body, "💡 用例 / 信号", "#E65100", info["example"])
+    # 🔗 【参考】链接
+    _section_card(body, "🔗 参考", "#6A1B9A", f"网址: {info['url']}\n书籍: {info['book']}")
+
+    # 关闭按钮
+    ttk.Button(body, text="关闭", command=w.destroy).pack(pady=(12, 0))
+
+def _section_card(parent, title, color, content):
+    """帮助弹窗内的彩色分区卡片"""
+    card = tk.Frame(parent, bg="white", highlightthickness=1, highlightbackground="#E0E0E0")
+    card.pack(fill=tk.X, pady=6)
+    tk.Frame(card, bg=color, height=4).pack(fill=tk.X)  # 顶条
+    tk.Label(card, text=title, bg="white", fg=color,
+             font=("Microsoft YaHei", 13, "bold"), anchor="w").pack(fill=tk.X, padx=12, pady=(6, 2))
+    tk.Label(card, text=content, bg="white", fg="#37474F",
+             font=("Microsoft YaHei", 11), anchor="w", justify="left",
+             wraplength=670).pack(fill=tk.X, padx=12, pady=(0, 8))
 
 def _help_label(parent, text, help_key, **kw):
     """生成带 ❓ 的可双击帮助标签"""

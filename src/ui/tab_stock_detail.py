@@ -3700,6 +3700,377 @@ class StockDetailMixin:
             messagebox.showerror("错误", f"打开一目均衡K线图失败: {e}", parent=getattr(self, 'root', None))
 
     # ═══════════════════════════════════════════════════════════════
+    # 📯🧭 淘股吧/韭研 联动弹窗 — 左列热股 + 右列ETF联动分析
+    # ═══════════════════════════════════════════════════════════════
+    def _show_source_link_dialog(self, source):
+        """📯淘股吧联动 / 🧭韭研联动: 左列=对应tab的热股数据, 点击→ETF联动分析"""
+        import traceback as _tb_src
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+
+            # ① 取数据
+            data_attr = f"_{source}_stamp_data"
+            rows = getattr(self, data_attr, None) or []
+            if not rows:
+                import tkinter.messagebox as _mb
+                _mb.showinfo("提示",
+                    f"{'📯淘股吧' if source=='taoguba' else '🧭韭研公社'}数据还没加载完!\n"
+                    f"请先在对应 Tab 点「🔄刷新」或等它自动加载。")
+                return
+
+            is_taoguba = (source == "taoguba")
+            emoji = "📯" if is_taoguba else "🧭"
+            name = "淘股吧" if is_taoguba else "韭研公社"
+            bg_color = "#1A237E" if is_taoguba else "#1B5E20"   # 深蓝 / 深绿
+            accent = "#64B5F6" if is_taoguba else "#81C784"
+
+            win = self._safe_toplevel(self.root)
+            win.title(f"{emoji} {name}联动 — 热股 → ETF联动分析")
+            win.geometry("1500x920")
+            try: win.state("zoomed")
+            except: pass
+
+            # 顶部标题
+            top = tk.Frame(win, bg=bg_color); top.pack(fill=tk.X)
+            tk.Label(top, text=f"{emoji} {name}联动分析  ({len(rows)} 只热股)",
+                     font=("Menlo", 15, "bold"), bg=bg_color, fg="white").pack(side=tk.LEFT, padx=14, pady=10)
+            tk.Label(top, text="   点击左列股票 → 右列自动显示 K线/概要/情绪",
+                     font=("Menlo", 11), bg=bg_color, fg=accent).pack(side=tk.LEFT)
+
+            # PanedWindow: 左=热股列表 | 中=同板块关联个股 | 右=K线+概要+情绪
+            pw = ttk.PanedWindow(win, orient=tk.HORIZONTAL)
+            pw.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+            # ═══════════════════════════════════════
+            # 板块归类映射 (精简版, 从 BLOCK_GROUPS 抄)
+            # ═══════════════════════════════════════
+            BLOCK_MAP = {
+                "银行": ["sh601398","sh601939","sh601288","sh601988","sh600036","sh601166","sz002142","sh600016","sh601328","sh600000","sh601818","sh600015"],
+                "券商": ["sh600030","sh601211","sh601788","sh600837","sh601688","sz000776","sh600109","sz300059","sh600018","sh601377","sh600999","sh601901","sz002736"],
+                "保险": ["sh601318","sh601628","sh601601","sh601336"],
+                "白酒": ["sh600519","sz000858","sh600809","sz000568","sh603369","sz000596","sz002304","sz300999","sh603589"],
+                "半导体": ["sh603986","sh688256","sh688981","sz002049","sz300223","sh603501","sh600584","sz300782","sh688012","sz002371","sz002185","sz002456","sh603160","sz300661"],
+                "AI算力": ["sz002230","sz300496","sh600588","sz002415","sh603019","sh600570","sz300033","sz300750","sz300454","sz002236","sh600050","sz300364","sh600406","sz002281"],
+                "CPO光模块": ["sz002281","sh600487","sz002222","sh601869","sh603502","sz300394","sz300502","sz002268"],
+                "新能源": ["sz300750","sz002594","sz300014","sh601012","sz002460","sh600438","sz300274","sz002074","sz300763","sz002580","sz002466","sz300650","sh600482"],
+                "光伏": ["sh601012","sz002459","sh601865","sz300118","sh600438","sz300274","sh600089","sh603799","sh688599","sz002218","sz300438","sz002610"],
+                "军工": ["sh600893","sh600760","sh600118","sz002414","sz000768","sh601698","sz300034","sh600150","sh600372","sz002025","sh601126"],
+                "机器人": ["sz300024","sz300274","sz300607","sh600021","sh601100","sz300124","sz002527","sz300003","sz300157","sz002230","sz300223","sh600760"],
+                "煤炭能源": ["sh601225","sh601088","sh600188","sh600395","sh601985","sz000933","sh600508","sh600985","sh601699"],
+                "医药医疗": ["sh600276","sz000538","sz002422","sh600196","sz002007","sh600535","sz300015","sh603259","sh600085","sz002821","sz000423","sh600518"],
+                "黄金有色": ["sh600547","sh600489","sh601899","sz002155","sh600362","sh601600","sz000878","sh600111","sz002182","sh603189","sh600988"],
+                "地产建材": ["sh600048","sh600340","sz001979","sh600585","sh601155","sz000002","sh600031","sh600690","sh601668","sz300737","sz002080"],
+                "消费家电": ["sh600690","sz000651","sh600887","sz002475","sh601888","sz300999","sh600599","sh600298"],
+                "游戏传媒": ["sz002555","sz300413","sz002624","sh603444","sz300418","sz002602","sh600637","sz300251"],
+                "通信设备": ["sh600050","sz300502","sh600487","sz002281","sh601012","sh603502","sh600406","sz000063","sh601869"],
+            }
+            # 反查: code → 板块名
+            _code_to_block = {}
+            for _bn, _codes in BLOCK_MAP.items():
+                for _c in _codes:
+                    _code_to_block[_c] = _bn
+
+            # ═══════════════════════════════════════
+            # 左列: 热股 Treeview
+            # ═══════════════════════════════════════
+            left = tk.Frame(pw, bg="#FAFAFA")
+            pw.add(left, weight=3)
+
+            tk.Label(left, text=f"{emoji} {name}热股池", font=("", 12, "bold"),
+                     bg="#FAFAFA", fg=bg_color).pack(anchor="w", padx=8, pady=(6, 2))
+
+            tree_cols = ("code", "name", "pct", "freq", "origin")
+            tree = ttk.Treeview(left, columns=tree_cols, show="headings", height=20)
+            _cfg = [
+                ("code",    80, "代码"),
+                ("name",   100, "名称"),
+                ("pct",     65, "涨跌%"),
+                ("freq",    65, "提及"),
+                ("origin",  90, "来源"),
+            ]
+            for c, w, t in _cfg:
+                tree.heading(c, text=t)
+                tree.column(c, width=w, anchor="center" if c != "name" else "w")
+            sb1 = ttk.Scrollbar(left, orient="vertical", command=tree.yview)
+            tree.configure(yscrollcommand=sb1.set)
+            tree.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
+            sb1.pack(side="right", fill="y", pady=4)
+
+            tree.tag_configure("up", foreground="#E53935")
+            tree.tag_configure("down", foreground="#43A047")
+            tree.tag_configure("hot", foreground="#FF6F00", font=("", 10, "bold"))
+
+            for i, r in enumerate(rows):
+                pct = r.get("pct", 0)
+                tag = "up" if pct > 0 else ("down" if pct < 0 else "")
+                if r.get("freq", 0) >= 10:
+                    tag = (tag + " hot").strip()
+                tree.insert("", "end", iid=str(i),
+                            values=(r.get("code", "")[-6:],
+                                    r.get("name", ""),
+                                    f"{pct:+.2f}",
+                                    r.get("freq", 1),
+                                    r.get("origin", "")),
+                            tags=(tag,) if tag else ())
+
+            # 中列: 板块名标签 + 关联个股 Treeview (先占位空树)
+            _block_label = tk.Label(left, text="💡 单击选股票 → 中列显示同板块个股",
+                                    bg="#FAFAFA", fg="#888", font=("", 9))
+            _block_label.pack(anchor="w", padx=8, pady=(2, 6))
+
+            # ═══════════════════════════════════════
+            # 中列: 同板块关联个股 (动态刷新)
+            # ═══════════════════════════════════════
+            mid = tk.Frame(pw, bg="#FAFAFA")
+            pw.add(mid, weight=3)
+
+            _mid_head = tk.Frame(mid, bg="#FAFAFA"); _mid_head.pack(fill=tk.X, padx=6, pady=(6, 2))
+            _mid_title = tk.Label(_mid_head, text="🏭 同板块关联个股", font=("", 12, "bold"),
+                                  bg="#FAFAFA", fg=bg_color)
+            _mid_title.pack(side=tk.LEFT)
+            _mid_block = tk.Label(_mid_head, text="", font=("", 10),
+                                  bg="#FAFAFA", fg="#666")
+            _mid_block.pack(side=tk.LEFT, padx=6)
+
+            mid_cols = ("code", "name", "pct", "relation")
+            mid_tree = ttk.Treeview(mid, columns=mid_cols, show="headings", height=20)
+            for c, w, t in [("code",80,"代码"),("name",100,"名称"),("pct",65,"涨跌%"),("relation",80,"关联度")]:
+                mid_tree.heading(c, text=t)
+                mid_tree.column(c, width=w, anchor="center" if c != "name" else "w")
+            sb_mid = ttk.Scrollbar(mid, orient="vertical", command=mid_tree.yview)
+            mid_tree.configure(yscrollcommand=sb_mid.set)
+            mid_tree.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
+            sb_mid.pack(side="right", fill="y", pady=4)
+
+            mid_tree.tag_configure("up", foreground="#E53935")
+            mid_tree.tag_configure("down", foreground="#43A047")
+            mid_tree.tag_configure("peer", foreground="#1565C0", font=("", 10, "bold"))
+
+            # ═══════════════════════════════════════
+            # 右列: K线预览 Notebook (日K + 概要 + 情绪)
+            # ═══════════════════════════════════════
+            right = tk.Frame(pw, bg="#FAFAFA")
+            pw.add(right, weight=5)
+
+            nb = ttk.Notebook(right)
+            nb.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+            _placeholder = tk.Label(nb,
+                text=f"👈 从左列选择一只 {name}热股\n\n"
+                     f"   中列: 自动显示同板块关联个股\n"
+                     f"   右列: 日K线 + 概要 + 情绪\n\n"
+                     f"   双击 → 弹出完整 ETF 联动分析窗口",
+                font=("Menlo", 13), bg="#F5F5F5", fg="#777",
+                justify="center")
+            nb.add(_placeholder, text="📊 等待选择...")
+
+            # 当前选中的
+            _state = {"ts_code": None, "sina_code": None, "name": None, "block": None}
+
+            def _sina_to_ts(sina_code):
+                """sina → tushare"""
+                if not sina_code: return ""
+                code = sina_code.lower()
+                if code.startswith("sh"): return code[2:] + ".SH"
+                if code.startswith("sz"): return code[2:] + ".SZ"
+                if code.startswith("bj"): return code[2:] + ".BJ"
+                return sina_code
+
+            def _clear_nb():
+                for t in nb.tabs(): nb.forget(t)
+
+            def _get_peers(block_name, exclude_code=None):
+                """从 rows + BLOCK_MAP 找同板块个股"""
+                peers = []
+                # ① 从已有 rows 里找 (已经有行情数据)
+                for r in rows:
+                    rc = r.get("code", "")
+                    if rc == exclude_code: continue
+                    if _code_to_block.get(rc) == block_name:
+                        peers.append({"code": rc, "name": r.get("name",""), "pct": r.get("pct",0), "freq": r.get("freq",1), "source": rows.index(r)})
+                # ② 不够的话, 从 BLOCK_MAP 加 (如果没在 rows 里)
+                block_codes = BLOCK_MAP.get(block_name, [])
+                if len(peers) < 8:
+                    for bc in block_codes:
+                        if bc == exclude_code: continue
+                        if any(p["code"] == bc for p in peers): continue
+                        # 没行情数据, 用代码撑住
+                        peers.append({"code": bc, "name": bc[-6:], "pct": 0, "freq": 0, "source": -1})
+                        if len(peers) >= 12: break
+                # 排序: 有提及次数的优先 (已经在 rows 里的), 然后按涨跌排
+                peers.sort(key=lambda x: (-1 if x["source"] >= 0 else 0, -x["pct"]))
+                return peers[:15]
+
+            def _refresh_mid(sina_code, block_name, self_name):
+                """刷新中列: 同板块个股"""
+                # 清空
+                for i in mid_tree.get_children(): mid_tree.delete(i)
+                if not block_name:
+                    _mid_block.configure(text="(未归类板块)")
+                    mid_tree.insert("", "end", values=("—", "未归类到板块", "", "—"))
+                    return
+                peers = _get_peers(block_name, exclude_code=sina_code)
+                _mid_block.configure(text=f"→ {block_name}  ({len(peers)} 只)")
+                for i, p in enumerate(peers):
+                    pct = p["pct"]
+                    tag = "peer" if p["code"] in BLOCK_MAP.get(block_name, []) else ""
+                    tag += " up" if pct > 0 else (" down" if pct < 0 else "")
+                    mid_tree.insert("", "end",
+                        values=(p["code"][-6:], p["name"], f"{pct:+.2f}",
+                                "热股池✓" if p["source"] >= 0 else "板块成员"),
+                        tags=(tag.strip(),))
+
+            def _build_right_tabs(sina_code, ts_code, sname, block_name):
+                """构建右列 3 个 tab"""
+                import numpy as np
+
+                # Tab1: 日K线
+                tab_kline = tk.Frame(nb, bg="#FAFAFA")
+                nb.add(tab_kline, text="📈 日K线")
+                try:
+                    kdf = self._fetch_ichimoku_kline_data(sina_code, period="daily", is_index=False)
+                    if kdf is not None and len(kdf) >= 30:
+                        kline_data = {"data": kdf}
+                        self._draw_daily_kline_chart(tab_kline, kline_data, sname, embed_zoom_handler=True)
+                    else:
+                        tk.Label(tab_kline, text=f"{sname}\nK线数据不足", font=("Menlo", 14), fg="#E53935", bg="#FAFAFA").pack(expand=True)
+                except Exception as _ke:
+                    tk.Label(tab_kline, text=f"K线加载失败: {_ke}", font=("", 11), fg="#E53935", bg="#FAFAFA").pack(expand=True)
+
+                # Tab2: 概要 + 板块信息
+                tab_summary = tk.Frame(nb, bg="#FAFAFA")
+                nb.add(tab_summary, text="📋 概要")
+                try:
+                    row = next((r for r in rows if r.get("code", "") == sina_code), {})
+                    block_info = f"🏭 所属板块: {block_name}" if block_name else "🏭 板块: 未归类"
+                    summary_text = (
+                        f"📌 股票: {sname} ({ts_code})\n"
+                        f"{block_info}\n"
+                        f"📡 来源: {row.get('origin', '—')}\n"
+                        f"🔥 提及次数: {row.get('freq', 1)}\n"
+                        f"📈 今日涨跌: {row.get('pct', 0):+.2f}%\n\n"
+                        f"📰 相关文章:\n"
+                    )
+                    for i, art in enumerate(row.get("articles", [])[:5], 1):
+                        summary_text += f"  {i}. {art}\n"
+                    if not row.get("articles"):
+                        summary_text += "  (无)\n"
+                    import tkinter.scrolledtext as _st
+                    txt = _st.ScrolledText(tab_summary, font=("Menlo", 11), wrap=tk.WORD,
+                                           bg="#FAFAFA", fg="#333", bd=0, padx=10, pady=10)
+                    txt.pack(fill=tk.BOTH, expand=True)
+                    txt.insert("1.0", summary_text)
+                    txt.config(state=tk.DISABLED)
+                except Exception as _se:
+                    tk.Label(tab_summary, text=f"概要加载失败: {_se}", font=("", 11), fg="#E53935", bg="#FAFAFA").pack(expand=True)
+
+                # Tab3: 情绪指标
+                tab_sent = tk.Frame(nb, bg="#FAFAFA")
+                nb.add(tab_sent, text="🔥 情绪")
+                try:
+                    kdf2 = self._fetch_ichimoku_kline_data(sina_code, period="daily", is_index=False)
+                    if kdf2 is not None and len(kdf2) >= 60:
+                        closes = kdf2["收盘"].astype(float).values if "收盘" in kdf2.columns else kdf2["close"].astype(float).values
+                        ma5 = np.mean(closes[-5:]); ma20 = np.mean(closes[-20:])
+                        ma60 = np.mean(closes[-60:]) if len(closes) >= 60 else np.mean(closes)
+                        last = closes[-1]
+                        rsi_val = self._compute_rsi(closes, 14) if hasattr(self, '_compute_rsi') else 50
+                        signals = []
+                        if last > ma5 > ma20: signals.append("🟢 多头排列 (MA5>MA20)")
+                        elif last < ma5 < ma20: signals.append("🔴 空头排列 (MA5<MA20)")
+                        else: signals.append("🟡 均线纠缠")
+                        if rsi_val > 70: signals.append(f"🔴 RSI超买 ({rsi_val:.0f})")
+                        elif rsi_val < 30: signals.append(f"🟢 RSI超卖 ({rsi_val:.0f})")
+                        else: signals.append(f"🟡 RSI中性 ({rsi_val:.0f})")
+                        up = 0
+                        for v in closes[::-1]:
+                            if v > ma20: up += 1
+                            else: break
+                        signals.append(f"📊 站上MA20 已 {up} 日")
+                        # 板块涨跌统计
+                        peers = _get_peers(block_name or "", exclude_code=sina_code)
+                        up_count = sum(1 for p in peers if p["pct"] > 0)
+                        down_count = sum(1 for p in peers if p["pct"] < 0)
+                        signals.append(f"🏭 板块内: {up_count}红 {down_count}绿")
+
+                        sent_text = (
+                            f"📊 {sname} 情绪指标\n{'─'*40}\n"
+                            f"  最新收盘: {last:.2f}\n"
+                            f"  MA5: {ma5:.2f}  MA20: {ma20:.2f}  MA60: {ma60:.2f}\n"
+                            f"  RSI(14): {rsi_val:.1f}\n\n"
+                            f"📡 情绪信号:\n" +
+                            "\n".join(f"  {s}" for s in signals)
+                        )
+                        tk.Label(tab_sent, text=sent_text, font=("Menlo", 11),
+                                 bg="#FAFAFA", fg="#333", justify="left").pack(padx=12, pady=10, anchor="nw")
+                    else:
+                        tk.Label(tab_sent, text="数据不足, 无法计算情绪", font=("Menlo", 12), fg="#888", bg="#FAFAFA").pack(expand=True)
+                except Exception as _sye:
+                    tk.Label(tab_sent, text=f"情绪计算失败: {_sye}", font=("", 11), fg="#E53935", bg="#FAFAFA").pack(expand=True)
+
+            def _on_select(evt=None):
+                """单击左列 → 刷新中列(板块个股) + 右列(K线/概要/情绪)"""
+                sel = tree.selection()
+                if not sel: return
+                idx = int(sel[0])
+                row = rows[idx]
+                sina_code = row.get("code", "")
+                ts_code = _sina_to_ts(sina_code)
+                sname = row.get("name", "")
+                block = _code_to_block.get(sina_code, "")
+                if _state["sina_code"] == sina_code: return
+                _state.update({"ts_code": ts_code, "sina_code": sina_code, "name": sname, "block": block})
+
+                # 中列: 板块名 + 关联个股
+                _block_label.configure(text=f"🏭 所属板块: {block or '未归类'}")
+                _refresh_mid(sina_code, block, sname)
+
+                # 右列: Notebook
+                _clear_nb()
+                win.update_idletasks()
+                _build_right_tabs(sina_code, ts_code, sname, block)
+
+            def _on_mid_select(evt=None):
+                """单击中列个股 → 同步选中左列 (如果存在)"""
+                sel = mid_tree.selection()
+                if not sel: return
+                item = mid_tree.item(sel[0])
+                code6 = str(item["values"][0])
+                # 在左列找
+                for i, r in enumerate(rows):
+                    if r.get("code", "")[-6:] == code6:
+                        try:
+                            tree.selection_set(str(i))
+                            tree.see(str(i))
+                        except: pass
+                        break
+
+            def _on_dbl(evt=None):
+                self._show_etf_link_dialog()
+
+            tree.bind("<<TreeviewSelect>>", _on_select)
+            tree.bind("<Double-1>", _on_dbl)
+            mid_tree.bind("<<TreeviewSelect>>", _on_mid_select)
+            mid_tree.bind("<Double-1>", _on_dbl)
+
+            # 底部按钮行
+            bottom = tk.Frame(win, bg="#FAFAFA")
+            bottom.pack(fill=tk.X, padx=8, pady=4)
+            tk.Button(bottom, text=f"📊 打开完整 ETF 联动窗口",
+                      bg=bg_color, fg="white", font=("", 10, "bold"),
+                      command=lambda: self._show_etf_link_dialog()).pack(side=tk.LEFT, padx=4)
+            tk.Button(bottom, text="❌ 关闭",
+                      command=win.destroy).pack(side=tk.RIGHT, padx=4)
+
+        except Exception as _e:
+            _tb_src.print_exc()
+            try:
+                import tkinter.messagebox as _mb
+                _mb.showerror("错误", f"{name}联动弹窗失败: {_e}")
+            except: pass
+
+    # ═══════════════════════════════════════════════════════════════
     # 📊 ETF 联动分析弹窗 — 三列: ETF列表 → 持仓股 → K线图
     # ═══════════════════════════════════════════════════════════════
     def _show_etf_link_dialog(self):
@@ -6184,27 +6555,38 @@ class StockDetailMixin:
         ttk.Combobox(toolbar, textvariable=source_var,
                      values=["全部","东方财富新闻","机构研报","东财热帖","淘股吧热帖","韭研公社","雪球讨论","手动导入"],
                      width=14, state="readonly").pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🔄刷新", width=7).pack(side=tk.LEFT, padx=4)
+        ttk.Button(toolbar, text="🔄刷新", width=7,
+                   command=_refresh_list).pack(side=tk.LEFT, padx=4)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
         # 爬取区
         ttk.Label(toolbar, text="📥爬取:").pack(side=tk.LEFT)
         crawl_stock_var = tk.StringVar(value=prefill_stock_code or "")
         ttk.Entry(toolbar, textvariable=crawl_stock_var, width=10).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🚀爬个股新闻", width=14).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🌐全站热帖", width=10).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🏮淘股吧", width=9).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🌾韭研公社", width=10).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="☃️雪球讨论", width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🚀爬个股新闻", width=14,
+                   command=lambda: _do_crawl_stock()).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🌐全站热帖", width=10,
+                   command=lambda: _do_crawl_global()).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🏮淘股吧", width=9,
+                   command=lambda: _do_crawl_taoguba()).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🌾韭研公社", width=10,
+                   command=lambda: _do_crawl_jiuyan()).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="☃️雪球讨论", width=10,
+                   command=lambda: _do_crawl_xueqiu()).pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
-        ttk.Button(toolbar, text="➕新增", width=7).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🗑️删除", width=7).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🏷️打标签", width=8).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="➕新增", width=7,
+                   command=lambda: _do_add_manual()).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🗑️删除", width=7,
+                   command=lambda: _do_delete()).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🏷️打标签", width=8,
+                   command=lambda: _do_tag()).pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
-        ttk.Button(toolbar, text="🔗联动分析", width=10, foreground="#1565C0").pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🔄遍历喂入", width=10, foreground="#E65100").pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🔗联动分析", width=10,
+                   command=lambda: _do_linked_analysis()).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🔄遍历喂入", width=10,
+                   command=lambda: _do_crawl_feed_in()).pack(side=tk.LEFT, padx=2)
 
         # 主区: 左列表 + 右详情
         paned = ttk.PanedWindow(win, orient=tk.HORIZONTAL)

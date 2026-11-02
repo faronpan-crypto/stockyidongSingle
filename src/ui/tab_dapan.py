@@ -14631,7 +14631,13 @@ class DapanMixin:
         top = ttk.Frame(parent); top.pack(fill=tk.X, pady=(0, 6))
         ttk.Label(top, text="📯 淘股吧热股扫描 — 邮票格子 (红涨绿跌, 词频徽标=提及次数)",
                   font=("", 11, "bold")).pack(side=tk.LEFT)
-        # 🆕 均线检测按钮
+        # 🆕 淘股吧联动 + 文章库 (优先 pack → side=RIGHT 最左)
+        ttk.Button(top, text="📯淘股吧联动", width=11,
+                   command=lambda: self._show_source_link_dialog("taoguba")).pack(side=tk.RIGHT, padx=(0, 4))
+        ttk.Button(top, text="📚文章库", width=9,
+                   command=lambda: self._show_article_library_dialog()).pack(side=tk.RIGHT, padx=(0, 4))
+        ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.RIGHT, fill=tk.Y, padx=6)
+        # 均线检测按钮
         ttk.Button(top, text="📈均线检测", width=10,
                    command=lambda: self._check_stamp_ma_all("taoguba")).pack(side=tk.RIGHT, padx=(0, 4))
         ttk.Button(top, text="🔄刷新淘股吧", width=14,
@@ -14662,7 +14668,13 @@ class DapanMixin:
         top = ttk.Frame(parent); top.pack(fill=tk.X, pady=(0, 6))
         ttk.Label(top, text="🧭 韭研公社热股扫描 — 邮票格子 (红涨绿跌, 词频徽标=提及次数)",
                   font=("", 11, "bold")).pack(side=tk.LEFT)
-        # 🆕 均线检测按钮
+        # 🆕 韭研联动 + 文章库 (优先 pack → side=RIGHT 最左)
+        ttk.Button(top, text="🧭韭研联动", width=10,
+                   command=lambda: self._show_source_link_dialog("jiuyan")).pack(side=tk.RIGHT, padx=(0, 4))
+        ttk.Button(top, text="📚文章库", width=9,
+                   command=lambda: self._show_article_library_dialog()).pack(side=tk.RIGHT, padx=(0, 4))
+        ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.RIGHT, fill=tk.Y, padx=6)
+        # 均线检测按钮
         ttk.Button(top, text="📈均线检测", width=10,
                    command=lambda: self._check_stamp_ma_all("jiuyan")).pack(side=tk.RIGHT, padx=(0, 4))
         ttk.Button(top, text="🔄刷新韭研公社", width=14,
@@ -63989,6 +64001,77 @@ class DapanMixin:
     □ 买卖清单 wechat 推送
 """)
         pitfall_text.config(state=tk.DISABLED)
+
+        # ── Tab 6: 💰 价增量涨扫描 (原主工具栏按钮 → 内嵌量化总览) ──
+        tab_pv = ttk.Frame(nb); nb.add(tab_pv, text="💰 价增量涨")
+
+        pv_head = ttk.Frame(tab_pv); pv_head.pack(fill=tk.X, padx=10, pady=(10, 4))
+        ttk.Label(pv_head, text="💰 价增量涨选股扫描", font=("Menlo", 15, "bold")).pack(side=tk.LEFT)
+        ttk.Label(pv_head, text="   资金去哪了? — 价增=涨跌幅超阈值, 量涨=成交额活跃",
+                  font=("Menlo", 11), foreground="#888").pack(side=tk.LEFT, padx=6)
+
+        # 左: 原理说明 | 右: 启动按钮 + 快速参数
+        pv_split = ttk.Panedwindow(tab_pv, orient=tk.HORIZONTAL)
+        pv_split.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+        # ══ 左: 原理卡片 (3列网格) ══
+        pv_left = ttk.Frame(pv_split)
+        pv_split.add(pv_left, weight=5)
+
+        pv_canvas = tk.Canvas(pv_left, bg="#FAFAFA", highlightthickness=0)
+        pv_sb = ttk.Scrollbar(pv_left, orient="vertical", command=pv_canvas.yview)
+        pv_canvas.configure(yscrollcommand=pv_sb.set)
+        pv_canvas.pack(side="left", fill="both", expand=True)
+        pv_sb.pack(side="right", fill="y")
+        pv_grid = tk.Frame(pv_canvas, bg="#FAFAFA")
+        _pv_cv_win = pv_canvas.create_window((0, 0), window=pv_grid, anchor="nw")
+        pv_canvas.bind("<Configure>", lambda e: pv_canvas.itemconfig(_pv_cv_win, width=e.width))
+        pv_grid.bind("<Configure>", lambda e: pv_canvas.configure(scrollregion=pv_canvas.bbox("all")))
+
+        _PV_CARDS = [
+            {"icon":"📈","title":"价增","color":"#1565C0","bg":"#E3F2FD",
+             "desc":"涨幅 ≥ 阈值 (默认2%)\n→ 资金主动买入意愿强\n→ 排除跟风微涨股"},
+            {"icon":"💧","title":"量涨","color":"#2E7D32","bg":"#E8F5E9",
+             "desc":"成交额 ≥ 阈值 (默认3亿)\n成交量 ≥ 阈值 (默认50万手)\n→ 排除无量空涨"},
+            {"icon":"🏭","title":"板块归类","color":"#6A1B9A","bg":"#F3E5F5",
+             "desc":"同花顺行业板块\n按板块聚合价量股\n→ 识别热点资金流向"},
+            {"icon":"α","title":"阿尔法","color":"#E65100","bg":"#FFF3E0",
+             "desc":"个股收益 - 沪深300收益\n→ 超越大盘的独立行情\n→ 排除大盘普涨假象"},
+            {"icon":"β","title":"贝塔","color":"#00695C","bg":"#E0F2F1",
+             "desc":"相对大盘波动敏感度\nβ>1 高弹性进攻型\nβ<1 防守稳健型"},
+            {"icon":"🎯","title":"实战信号","color":"#C2185B","bg":"#FCE4EC",
+             "desc":"价增+量涨同时出现\n→ 主力资金进场信号\n→ 常出现在主升浪初期"},
+        ]
+        for i, card in enumerate(_PV_CARDS):
+            r, c = divmod(i, 3)
+            frm = tk.Frame(pv_grid, bg=card["bg"], bd=0,
+                           highlightbackground=card["color"], highlightthickness=2)
+            frm.grid(row=r, column=c, padx=8, pady=8, sticky="nsew", ipadx=8, ipady=6)
+            tk.Label(frm, text=f"{card['icon']}  {card['title']}", bg=card["bg"],
+                     fg=card["color"], font=("", 13, "bold"), anchor="w").pack(fill="x", padx=6, pady=(4, 0))
+            tk.Label(frm, text=card["desc"], bg=card["bg"], fg="#333",
+                     font=("", 10), justify="left", anchor="w").pack(fill="x", padx=6, pady=(2, 6))
+
+        # ══ 右: 启动按钮 + 参数 ══
+        pv_right = ttk.Frame(pv_split)
+        pv_split.add(pv_right, weight=2)
+
+        # 启动按钮
+        ttk.Label(pv_right, text="🚀 启动扫描", font=("", 12, "bold")).pack(anchor="w", padx=8, pady=(12, 4))
+        big_btn = tk.Button(pv_right, text="📈 打开价增量涨扫描窗口",
+                            bg="#1565C0", fg="white", font=("", 13, "bold"),
+                            height=2, cursor="hand2",
+                            command=lambda: self._show_price_volume_dialog())
+        big_btn.pack(fill="x", padx=8, pady=6)
+
+        ttk.Label(pv_right, text="快速参数提示:", font=("", 10), foreground="#888").pack(anchor="w", padx=8, pady=(8, 2))
+        for t in ["📈 涨幅 ≥ 2%", "💰 成交额 ≥ 3亿", "📊 成交量 ≥ 50万手", "🏭 同花顺板块归类", "αβ 因子打分"]:
+            ttk.Label(pv_right, text=t, font=("", 10)).pack(anchor="w", padx=12)
+
+        ttk.Separator(pv_right, orient=tk.HORIZONTAL).pack(fill="x", padx=8, pady=12)
+        ttk.Label(pv_right, text="💡 使用场景:", font=("", 10, "bold")).pack(anchor="w", padx=8)
+        ttk.Label(pv_right, text="· 盘中找主力资金进场\n· 收盘复盘热点板块\n· 筛选主升浪启动股\n· 配合 ETF 联动分析",
+                  font=("", 10), foreground="#555", justify="left").pack(anchor="w", padx=12, pady=2)
 
         # 底部按钮行
         bottom = ttk.Frame(win); bottom.pack(fill=tk.X, padx=8, pady=6)
