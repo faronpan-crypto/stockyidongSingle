@@ -4241,40 +4241,95 @@ class StockDetailMixin:
             # 缓存当前股票数据 (指标重绘时复用)
             kline_cache = {"sina": None, "sname": None, "data": None}
 
-            # ── 6. ETF 数据拉取 (tushare fund_daily) ──
-            def _load_etf_list():
-                """拉所有 ETF 的 5日 / 20日 / 综合得分, 排序后填 Treeview"""
-                status_var_etf.set("⏳ 拉取 ETF 行情..."); win.update_idletasks()
-                etf_results = []
-                for ts_code, ename in MAINSTREAM_ETFS:
-                    try:
-                        edf = self._ts_pro.fund_daily(
-                            ts_code=ts_code,
-                            start_date="20260901", end_date=_time_etf.strftime("%Y%m%d"))
-                        if edf is None or len(edf) < 21: continue
-                        edf = edf.sort_values("trade_date").reset_index(drop=True)
-                        ecloses = edf["close"].astype(float).values
-                        r0 = (ecloses[-1]/ecloses[-2]-1)*100 if len(ecloses)>=2 else np.nan
-                        r3 = (ecloses[-1]/ecloses[-4]-1)*100 if len(ecloses)>=4 else np.nan
-                        r5 = (ecloses[-1]/ecloses[-6]-1)*100 if len(ecloses)>=6 else np.nan
-                        r20 = (ecloses[-1]/ecloses[-21]-1)*100 if len(ecloses)>=21 else np.nan
-                        if np.isnan(r5) or np.isnan(r20): continue
-                        score = r3*0.2 + r5*0.4 + r20*0.4
-                        etf_results.append((score, ts_code, ename, r0, r3, r5, r20))
-                    except Exception:
-                        pass
-                etf_results.sort(reverse=True)
-                # 清 Treeview 重填
+            # ── 模块级缓存 (挂 self, 窗口关闭不丢) ──
+            # 格式: (trade_date_str, fetch_ts, [(score,ts_code,ename,r0,r3,r5,r20), ...])
+            if not hasattr(self, "_etf_link_cache"):
+                self._etf_link_cache = None
+
+            # ── 6. ETF 数据拉取 (带缓存 + 交易日判断 + 分级刷新) ──
+            def _fill_tree(etf_results):
+                """清 Treeview 填数据 (公共函数)"""
                 for iid in etf_tree.get_children(): etf_tree.delete(iid)
                 for rank, (score, ts_code, ename, r0, r3, r5, r20) in enumerate(etf_results):
                     tag = "top" if rank < 3 else ("bot" if rank >= len(etf_results)-3 else "")
                     rtag = "up" if score >= 0 else "dn"
-                    iid = etf_tree.insert("", "end",
+                    etf_tree.insert("", "end",
                         values=(ts_code, ename, f"{r0:+.1f}", f"{r3:+.1f}", f"{r5:+.1f}",
                                 f"{r20:+.1f}", f"{score:+.2f}"),
                         tags=(rtag, tag))
-                status_var_etf.set(f"✅ 已加载 {len(etf_results)} 只 ETF (含当日/3日/5日/20日)")
-                return etf_results
+
+            def _compute_from_closes(ecloses):
+                r0 = (ecloses[-1]/ecloses[-2]-1)*100 if len(ecloses)>=2 else np.nan
+                r3 = (ecloses[-1]/ecloses[-4]-1)*100 if len(ecloses)>=4 else np.nan
+                r5 = (ecloses[-1]/ecloses[-6]-1)*100 if len(ecloses)>=6 else np.nan
+                r20 = (ecloses[-1]/ecloses[-21]-1)*100 if len(ecloses)>=21 else np.nan
+                return r0, r3, r5, r20
+
+            def _load_etf_list(force=False):
+                """拉所有 ETF, 带缓存判断:
+                force=True → 完全重拉; force=False → 先查缓存
+                返回 (etf_results, trade_date) 或 None
+                """
+                now_ts = _time_etf.time()
+                today_str = _time_etf.strftime("%Y%m%d")
+
+                # ── 缓存命中 → 秒返回 ──
+                if not force and self._etf_link_cache is not None:
+                    cd_trade, cd_ts, cd_data = self._etf_link_cache
+                    cache_age = now_ts - cd_ts
+                    # 同交易日 & 30分钟内 → 直接用
+                    if cd_trade == today_str and cache_age < 1800:
+                        _fill_tree(cd_data)
+                        status_var_etf.set(f"✅ 缓存命中 · 交易日 {cd_trade} · {len(cd_data)} 只 · {cache_age/60:.0f}min前")
+                        return cd_data, cd_trade
+                    # 同交易日但超过 30min → 增量刷新当日 (后台)
+                    if cd_trade == today_str and cache_age >= 1800:
+                        _fill_tree(cd_data)  # 先秒显示
+                        status_var_etf.set(f"⏳ 缓存 {cache_age/60:.0f}min, 增量刷新当日..."); win.update_idletasks()
+                        # 只重拉前 N 只做抽样验证, 如果 trade_date 没变就不重拉全量
+                        sample_ts_code, sample_name = MAINSTREAM_ETFS[0]
+                        try:
+                            sdf = self._ts_pro.fund_daily(ts_code=sample_ts_code,
+                                                          start_date="20260901", end_date=today_str)
+                            if sdf is not None and len(sdf) > 0:
+                                latest_trade = sdf["trade_date"].iloc[-1]
+                                if latest_trade == cd_trade:
+                                    status_var_etf.set(f"✅ {cd_trade} 盘中, 30min缓存有效")
+                                    return cd_data, cd_trade
+                        except Exception: pass
+                        # trade_date 变了 → 完全重拉
+                        force = True
+
+                # ── 完全重拉 (force=True 或 首次 或 新交易日) ──
+                status_var_etf.set("⏳ 拉取 ETF 行情 (40只)..."); win.update_idletasks()
+                etf_results = []
+                latest_trade_date = ""
+                for idx, (ts_code, ename) in enumerate(MAINSTREAM_ETFS):
+                    try:
+                        edf = self._ts_pro.fund_daily(
+                            ts_code=ts_code,
+                            start_date="20260901", end_date=today_str)
+                        if edf is None or len(edf) < 21: continue
+                        edf = edf.sort_values("trade_date").reset_index(drop=True)
+                        ecloses = edf["close"].astype(float).values
+                        r0, r3, r5, r20 = _compute_from_closes(ecloses)
+                        if np.isnan(r5) or np.isnan(r20): continue
+                        score = r3*0.2 + r5*0.4 + r20*0.4
+                        etf_results.append((score, ts_code, ename, r0, r3, r5, r20))
+                        td = str(edf["trade_date"].iloc[-1])
+                        if td > latest_trade_date: latest_trade_date = td
+                        # 每 10 只刷一次 status (进度反馈)
+                        if (idx+1) % 10 == 0:
+                            status_var_etf.set(f"⏳ 已拉 {idx+1}/{len(MAINSTREAM_ETFS)} 只..."); win.update_idletasks()
+                    except Exception:
+                        pass
+                etf_results.sort(reverse=True)
+                _fill_tree(etf_results)
+                # 写缓存
+                self._etf_link_cache = (latest_trade_date or today_str, now_ts, etf_results)
+                status_var_etf.set(f"✅ {latest_trade_date or today_str} · {len(etf_results)} 只 ETF 已刷新")
+                return etf_results, (latest_trade_date or today_str)
+
             etf_cache = {"data": None}
 
             # ── 7. 选中 ETF → 刷新中列持仓股 ──
@@ -4591,13 +4646,14 @@ class StockDetailMixin:
             hold_tree.bind("<<TreeviewSelect>>", _on_hold_select)
             hold_tree.bind("<Double-1>", lambda e: _on_hold_double(e))
 
-            refresh_etf.config(command=lambda: _load_etf_list())
+            refresh_etf.config(command=lambda: _load_etf_list(force=True))
             redraw_etf.config(command=lambda: _render_kline_from_cache(only_redraw=True))
 
             # ── 10. 启动加载 ──
             win.update_idletasks()
             try:
-                etf_cache["data"] = _load_etf_list()
+                result = _load_etf_list(force=False)  # 先查缓存, 秒填
+                if result: etf_cache["data"] = result[0]
                 # 默认选中 Top1
                 first_child = etf_tree.get_children()
                 if first_child:
