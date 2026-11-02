@@ -4011,12 +4011,13 @@ class StockDetailMixin:
             ttk.Label(logic_tool, text="当前股票:").pack(side=tk.LEFT)
             logic_stock_var = tk.StringVar(value="未选中")
             ttk.Label(logic_tool, textvariable=logic_stock_var, foreground="#1565C0", font=("", 10, "bold")).pack(side=tk.LEFT, padx=(0, 8))
-            ttk.Button(logic_tool, text="➕新增", width=7).pack(side=tk.LEFT, padx=1)
-            ttk.Button(logic_tool, text="✏️编辑", width=7).pack(side=tk.LEFT, padx=1)
-            ttk.Button(logic_tool, text="🗑️删除", width=7).pack(side=tk.LEFT, padx=1)
+            # 先占位创建按钮, 后面 config(command=...) 绑回调
+            btn_logic_add = ttk.Button(logic_tool, text="➕新增", width=7); btn_logic_add.pack(side=tk.LEFT, padx=1)
+            btn_logic_edit = ttk.Button(logic_tool, text="✏️编辑", width=7); btn_logic_edit.pack(side=tk.LEFT, padx=1)
+            btn_logic_del = ttk.Button(logic_tool, text="🗑️删除", width=7); btn_logic_del.pack(side=tk.LEFT, padx=1)
             ttk.Separator(logic_tool, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
-            ttk.Button(logic_tool, text="📥导入文章", width=10).pack(side=tk.LEFT, padx=1)
-            ttk.Button(logic_tool, text="🔄刷新", width=7).pack(side=tk.LEFT, padx=1)
+            btn_logic_import = ttk.Button(logic_tool, text="📥导入文章", width=10); btn_logic_import.pack(side=tk.LEFT, padx=1)
+            btn_logic_refresh = ttk.Button(logic_tool, text="🔄刷新", width=7); btn_logic_refresh.pack(side=tk.LEFT, padx=1)
 
             # Treeview
             logic_cols = ("id", "type", "content", "author", "source", "time")
@@ -4190,12 +4191,12 @@ class StockDetailMixin:
                 except Exception as _e:
                     messagebox.showerror("错误", str(_e), parent=win)
 
-            # 绑定按钮
-            for w, cmd in [(logic_tool.winfo_children()[2], _logic_add), (logic_tool.winfo_children()[4], _logic_edit),
-                           (logic_tool.winfo_children()[6], _logic_del), (logic_tool.winfo_children()[10], _logic_import),
-                           (logic_tool.winfo_children()[12], lambda: _logic_load(kline_cache.get("sina"), kline_cache.get("sname")))]:
-                try: w.config(command=cmd)
-                except: pass
+            # 用变量直接绑 command (彻底避免 winfo_children 硬索引越界)
+            btn_logic_add.config(command=_logic_add)
+            btn_logic_edit.config(command=_logic_edit)
+            btn_logic_del.config(command=_logic_del)
+            btn_logic_import.config(command=_logic_import)
+            btn_logic_refresh.config(command=lambda: _logic_load(kline_cache.get("sina"), kline_cache.get("sname")))
 
             # ── 辅助: 支撑压力线 (ZigZag 局部极值) ──
             def _sr_local(highs, lows, n_levels=3):
