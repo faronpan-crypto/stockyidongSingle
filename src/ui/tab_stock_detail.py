@@ -3871,25 +3871,87 @@ class StockDetailMixin:
             hold_tree.tag_configure("up", foreground="#C62828", font=("", 10, "bold"))
             hold_tree.tag_configure("dn", foreground="#2E7D32", font=("", 10, "bold"))
 
-            # ══════════ 右列: Notebook 3 tab K线 ══════════
+            # ══════════ 右列: Notebook 3 tab K线 + 指标工具栏 ══════════
             right_frame = ttk.Frame(pw)
             pw.add(right_frame, weight=5)
+
+            # ── 指标工具栏 (Notebook 上面) ──
+            right_tool = ttk.Frame(right_frame); right_tool.pack(fill=tk.X, padx=4, pady=(4, 0))
+            ttk.Label(right_tool, text="📐 指标:", font=("",9,"bold")).pack(side=tk.LEFT)
+            ma_chk_vars = {}
+            for ma, label in [("ma5","MA5"),("ma10","MA10"),("ma20","MA20"),("ma60","MA60")]:
+                v = tk.BooleanVar(value=(ma in ("ma5","ma10","ma20")))
+                ma_chk_vars[ma] = v
+                ttk.Checkbutton(right_tool, text=label, variable=v).pack(side=tk.LEFT, padx=1)
+            ttk.Separator(right_tool, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+            chk_sr = tk.BooleanVar(value=True)
+            ttk.Checkbutton(right_tool, text="支撑压力", variable=chk_sr).pack(side=tk.LEFT, padx=1)
+            chk_sig = tk.BooleanVar(value=True)
+            ttk.Checkbutton(right_tool, text="买卖点", variable=chk_sig).pack(side=tk.LEFT, padx=1)
+            ttk.Separator(right_tool, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+            redraw_etf = ttk.Button(right_tool, text="🔄重绘", width=7)
+            redraw_etf.pack(side=tk.LEFT, padx=2)
+
+            # Notebook
             nb = ttk.Notebook(right_frame); nb.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-            # tab1: 日K线
+            # tab1: 日K线 (蜡烛+MA+指标)
             tab_kline = ttk.Frame(nb); nb.add(tab_kline, text="📈 日K线")
-            fig1 = Figure(figsize=(7, 8), dpi=100); ax1 = fig1.add_subplot(111)
+            fig1 = Figure(figsize=(7, 7), dpi=100); ax1 = fig1.add_subplot(111)
             cv1 = FigureCanvasTkAgg(fig1, master=tab_kline); cv1.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-            # tab2: K线蜡烛
-            tab_candle = ttk.Frame(nb); nb.add(tab_candle, text="🕯️ K线蜡烛")
-            fig2 = Figure(figsize=(7, 8), dpi=100); ax2 = fig2.add_subplot(111)
+            # tab2: K线蜡烛 (简洁版, 也带支撑压力)
+            tab_candle = ttk.Frame(nb); nb.add(tab_candle, text="🕯️ 蜡烛")
+            fig2 = Figure(figsize=(7, 7), dpi=100); ax2 = fig2.add_subplot(111)
             cv2 = FigureCanvasTkAgg(fig2, master=tab_candle); cv2.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
             # tab3: 一目均衡
             tab_ichi = ttk.Frame(nb); nb.add(tab_ichi, text="📊 一目均衡")
-            fig3 = Figure(figsize=(7, 8), dpi=100); ax3 = fig3.add_subplot(111)
+            fig3 = Figure(figsize=(7, 7), dpi=100); ax3 = fig3.add_subplot(111)
             cv3 = FigureCanvasTkAgg(fig3, master=tab_ichi); cv3.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+            # ── 辅助: 支撑压力线 (ZigZag 局部极值) ──
+            def _sr_local(highs, lows, n_levels=3):
+                """返回 (supports, resistances) 各 [(x_idx, price), ...]"""
+                n = len(highs)
+                if n < 20: return [], []
+                peaks, troughs = [], []; w = 5
+                for i in range(w, n - w):
+                    if highs[i] == max(highs[i-w:i+w+1]): peaks.append((i, highs[i]))
+                    if lows[i] == min(lows[i-w:i+w+1]): troughs.append((i, lows[i]))
+                # 聚类相邻
+                def _cluster(pts, is_high):
+                    if not pts: return []
+                    pts_sorted = sorted(pts, key=lambda p: p[1], reverse=is_high)
+                    merged = [pts_sorted[0]]
+                    for x_idx, price in pts_sorted[1:]:
+                        if abs(price - merged[-1][1]) / merged[-1][1] < 0.01:
+                            prev_x, prev_p = merged[-1]
+                            merged[-1] = (prev_x, (prev_p + price) / 2)
+                        else: merged.append((x_idx, price))
+                    return merged
+                p_c = _cluster(peaks, True); t_c = _cluster(troughs, False)
+                # 取离最后K线最近的
+                p_c.sort(key=lambda p: -p[0]); t_c.sort(key=lambda p: -p[0])
+                return t_c[:n_levels], p_c[:n_levels]
+
+            # ── 辅助: 买卖点 (MA5/MA20 金叉死叉) ──
+            def _sig_local(closes):
+                """返回 [(x, price, 'BUY'/'SELL'), ...]"""
+                if len(closes) < 30: return []
+                ma5 = pd.Series(closes).rolling(5).mean().values
+                ma20 = pd.Series(closes).rolling(20).mean().values
+                sigs = []
+                for i in range(20, len(closes)):
+                    if np.isnan(ma5[i]) or np.isnan(ma20[i]) or np.isnan(ma5[i-1]) or np.isnan(ma20[i-1]): continue
+                    if ma5[i-1] <= ma20[i-1] and ma5[i] > ma20[i]:
+                        if closes[i] > ma20[i]: sigs.append((i, closes[i], "BUY"))
+                    elif ma5[i-1] >= ma20[i-1] and ma5[i] < ma20[i]:
+                        if closes[i] < ma20[i]: sigs.append((i, closes[i], "SELL"))
+                return sigs
+
+            # 缓存当前股票数据 (指标重绘时复用)
+            kline_cache = {"sina": None, "sname": None, "data": None}
 
             # ── 6. ETF 数据拉取 (tushare fund_daily) ──
             def _load_etf_list():
@@ -3962,77 +4024,120 @@ class StockDetailMixin:
                 status_var_etf.set(f"✅ {ename} · {len(holders)} 只持仓股")
 
             # ── 8. 选中股票 → 刷新右列 3 tab K线 ──
-            def _draw_kline_tabs(sina, sname):
-                """右列 3 tab 全部画 K 线"""
-                status_var_etf.set(f"⏳ 加载 {sname}({sina}) K线..."); win.update_idletasks()
-                # 判断类型 (us→美股, jp→日股, hk→港股, 默认 A 股)
-                is_us = sina.startswith("us"); is_jp = sina.startswith("jp")
-                is_hk = sina.startswith("hk")
-                symbol_for_fetch = sina
-                if is_us or is_jp:
-                    # 美股/日股 _fetch_ichimoku 不支持, 用 fallback 只画空标题
-                    for ax in [ax1, ax2, ax3]:
-                        ax.clear()
-                        ax.text(0.5, 0.5, f"{sname}\n({sina})\n⚠️ 海外暂不支持",
-                                transform=ax.transAxes, fontsize=14,
-                                ha="center", va="center", color="#999")
-                    for cv in [cv1, cv2, cv3]: cv.draw()
-                    status_var_etf.set(f"ℹ️ {sname} 海外暂不支持 K 线")
-                    return
-                # A股 (sh/sz 开头)
-                kdf = self._fetch_ichimoku_kline_data(sina, period="daily", is_index=False)
-                if kdf is None or len(kdf) < 30:
-                    for ax in [ax1, ax2, ax3]:
-                        ax.clear()
-                        ax.text(0.5, 0.5, f"{sname}\n数据不足",
-                                transform=ax.transAxes, fontsize=14,
-                                ha="center", va="center", color="#E53935")
-                    for cv in [cv1, cv2, cv3]: cv.draw()
-                    status_var_etf.set(f"❌ {sname} 数据不足")
-                    return
-                # 取列
-                opens = kdf["开盘"].astype(float).values if "开盘" in kdf.columns else kdf["open"].astype(float).values
-                highs = kdf["最高"].astype(float).values if "最高" in kdf.columns else kdf["high"].astype(float).values
-                lows  = kdf["最低"].astype(float).values if "最低" in kdf.columns else kdf["low"].astype(float).values
-                closes = kdf["收盘"].astype(float).values if "收盘" in kdf.columns else kdf["close"].astype(float).values
-                vols  = kdf["成交量"].astype(float).values if "成交量" in kdf.columns else np.zeros_like(closes)
-                n = len(closes); x = np.arange(n)
-                up_c, dn_c = "#EF5350", "#66BB6A"
+            def _render_kline_from_cache(only_redraw=False):
+                """从缓存重绘 (重绘按钮/指标变化时调用)"""
+                if kline_cache["data"] is None: return
+                sina = kline_cache["sina"]; sname = kline_cache["sname"]
+                opens, highs, lows, closes, n, x, up_c, dn_c = kline_cache["data"]
 
-                # ── tab1: 日K线 (蜡烛 + MA) ──
+                # 收集启用的 MA
+                ma_on = []
+                if ma_chk_vars["ma5"].get(): ma_on.append((5, "#FFC107", "MA5"))
+                if ma_chk_vars["ma10"].get(): ma_on.append((10, "#2196F3", "MA10"))
+                if ma_chk_vars["ma20"].get(): ma_on.append((20, "#9C27B0", "MA20"))
+                if ma_chk_vars["ma60"].get(): ma_on.append((60, "#FF5722", "MA60"))
+
+                # 支撑压力线
+                sr_lines = []
+                if chk_sr.get():
+                    sup, res = _sr_local(highs, lows, n_levels=3)
+                    sr_lines = [("S", p, "#2E7D32") for _, p in sup] + [("R", p, "#C62828") for _, p in res]
+
+                # 买卖点
+                sigs = _sig_local(closes) if chk_sig.get() else []
+
+                # ── tab1: 日K线 ──
                 ax1.clear()
                 for i in range(n):
                     col = up_c if closes[i] >= opens[i] else dn_c
                     ax1.plot([x[i],x[i]], [lows[i], highs[i]], color=col, lw=0.8)
                     ax1.bar(x[i], closes[i]-opens[i], bottom=opens[i], color=col, width=0.6)
-                ma5 = pd.Series(closes).rolling(5).mean().values
-                ma10 = pd.Series(closes).rolling(10).mean().values
-                ma20 = pd.Series(closes).rolling(20).mean().values
-                ma60 = pd.Series(closes).rolling(60).mean().values
-                ax1.plot(x, ma5, color="#FFC107", lw=1.0, label="MA5")
-                ax1.plot(x, ma10, color="#2196F3", lw=1.0, label="MA10")
-                ax1.plot(x, ma20, color="#9C27B0", lw=1.2, label="MA20")
-                ax1.plot(x, ma60, color="#FF5722", lw=1.2, label="MA60")
-                ax1.set_title(f"📈 日K线 · {sname}", fontsize=11, fontweight="bold")
-                ax1.legend(fontsize=7, loc="upper left", ncol=4)
+                for period, color, lbl in ma_on:
+                    ma_v = pd.Series(closes).rolling(period).mean().values
+                    ax1.plot(x, ma_v, color=color, lw=1.1, label=lbl)
+                for kind, price, color in sr_lines:
+                    ax1.axhline(price, color=color, lw=0.9, ls="--", alpha=0.75)
+                    ax1.text(n - 1, price, f"  {kind} {price:.2f}", va="center", fontsize=7, color=color,
+                             bbox=dict(boxstyle="round,pad=0.12", fc="white", ec=color, alpha=0.85))
+                for sx, sp, stype in sigs:
+                    if stype == "BUY":
+                        ax1.scatter(sx, lows[sx] * 0.995, marker="^", color="#C62828", s=45, zorder=5)
+                        ax1.annotate(f"买 {sp:.2f}", (sx, lows[sx]), xytext=(0, -18),
+                                    textcoords="offset points", fontsize=7, color="#C62828",
+                                    ha="center", fontweight="bold")
+                    else:
+                        ax1.scatter(sx, highs[sx] * 1.005, marker="v", color="#2E7D32", s=45, zorder=5)
+                        ax1.annotate(f"卖 {sp:.2f}", (sx, highs[sx]), xytext=(0, 10),
+                                    textcoords="offset points", fontsize=7, color="#2E7D32",
+                                    ha="center", fontweight="bold")
+                title1 = f"📈 日K线 · {sname}  |  MA:{','.join(l for _,_,l in ma_on) if ma_on else '无'}"
+                if sr_lines: title1 += f"  |  S/R:{len(sr_lines)}"
+                if sigs: title1 += f"  |  买卖:{len(sigs)}"
+                ax1.set_title(title1, fontsize=10, fontweight="bold")
+                if ma_on: ax1.legend(fontsize=6.5, loc="upper left", ncol=len(ma_on))
+                ax1.grid(True, alpha=0.2, lw=0.6)
                 cv1.draw()
 
-                # ── tab2: K线蜡烛 (简洁版) ──
+                # ── tab2: 蜡烛 ──
                 ax2.clear()
                 for i in range(n):
                     col = up_c if closes[i] >= opens[i] else dn_c
                     ax2.plot([x[i],x[i]], [lows[i], highs[i]], color=col, lw=0.8)
                     ax2.bar(x[i], closes[i]-opens[i], bottom=opens[i], color=col, width=0.6)
-                ax2.set_title(f"🕯️ K线蜡烛 · {sname}", fontsize=11, fontweight="bold")
+                for kind, price, color in sr_lines:
+                    ax2.axhline(price, color=color, lw=0.9, ls="--", alpha=0.75)
+                    ax2.text(n - 1, price, f"  {kind} {price:.2f}", va="center", fontsize=7, color=color,
+                             bbox=dict(boxstyle="round,pad=0.12", fc="white", ec=color, alpha=0.85))
+                for sx, sp, stype in sigs:
+                    if stype == "BUY":
+                        ax2.scatter(sx, lows[sx] * 0.995, marker="^", color="#C62828", s=45, zorder=5)
+                    else:
+                        ax2.scatter(sx, highs[sx] * 1.005, marker="v", color="#2E7D32", s=45, zorder=5)
+                ax2.set_title(f"🕯️ 蜡烛 · {sname}", fontsize=10, fontweight="bold")
+                ax2.grid(True, alpha=0.2, lw=0.6)
                 cv2.draw()
 
                 # ── tab3: 一目均衡 ──
                 ax3.clear()
                 self._plot_ichimoku_ax(ax3, x, highs, lows, closes, show_explanation=False)
-                ax3.set_title(f"📊 一目均衡 · {sname}", fontsize=11, fontweight="bold")
+                # 一目均衡也叠支撑压力线
+                for kind, price, color in sr_lines:
+                    ax3.axhline(price, color=color, lw=0.8, ls="--", alpha=0.6)
+                    ax3.text(n - 1, price, f"  {kind} {price:.2f}", va="center", fontsize=6.5, color=color)
+                ax3.set_title(f"📊 一目均衡 · {sname}", fontsize=10, fontweight="bold")
                 cv3.draw()
 
-                status_var_etf.set(f"✅ {sname} K线已加载 ({n} 根)")
+                status_var_etf.set(f"✅ {sname} · MA:{len(ma_on)} S/R:{len(sr_lines)} 买卖:{len(sigs)}")
+
+            def _draw_kline_tabs(sina, sname):
+                """右列 3 tab 画 K 线 (首次加载 → 缓存 → 渲染)"""
+                status_var_etf.set(f"⏳ 加载 {sname}({sina}) K线..."); win.update_idletasks()
+                # 海外兜底
+                is_us = sina.startswith("us"); is_jp = sina.startswith("jp"); is_hk = sina.startswith("hk")
+                if is_us or is_jp or is_hk:
+                    for ax in [ax1, ax2, ax3]:
+                        ax.clear()
+                        ax.text(0.5, 0.5, f"{sname}\n({sina})\n⚠️ 海外暂不支持",
+                                transform=ax.transAxes, fontsize=13, ha="center", va="center", color="#999")
+                    for cv in [cv1, cv2, cv3]: cv.draw()
+                    status_var_etf.set(f"ℹ️ {sname} 海外暂不支持"); return
+                # A股拉数据
+                kdf = self._fetch_ichimoku_kline_data(sina, period="daily", is_index=False)
+                if kdf is None or len(kdf) < 30:
+                    for ax in [ax1, ax2, ax3]:
+                        ax.clear()
+                        ax.text(0.5, 0.5, f"{sname}\n数据不足", transform=ax.transAxes,
+                                fontsize=14, ha="center", va="center", color="#E53935")
+                    for cv in [cv1, cv2, cv3]: cv.draw()
+                    status_var_etf.set(f"❌ {sname} 数据不足"); return
+                opens = kdf["开盘"].astype(float).values if "开盘" in kdf.columns else kdf["open"].astype(float).values
+                highs = kdf["最高"].astype(float).values if "最高" in kdf.columns else kdf["high"].astype(float).values
+                lows  = kdf["最低"].astype(float).values if "最低" in kdf.columns else kdf["low"].astype(float).values
+                closes = kdf["收盘"].astype(float).values if "收盘" in kdf.columns else kdf["close"].astype(float).values
+                n = len(closes); x = np.arange(n); up_c, dn_c = "#EF5350", "#66BB6A"
+                kline_cache["sina"] = sina; kline_cache["sname"] = sname
+                kline_cache["data"] = (opens, highs, lows, closes, n, x, up_c, dn_c)
+                _render_kline_from_cache(only_redraw=False)
 
             # ── 9. 双击事件绑定 ──
             def _on_etf_double(_evt):
@@ -4076,6 +4181,7 @@ class StockDetailMixin:
             hold_tree.bind("<Double-1>", lambda e: _on_hold_double(e))
 
             refresh_etf.config(command=lambda: _load_etf_list())
+            redraw_etf.config(command=lambda: _render_kline_from_cache(only_redraw=True))
 
             # ── 10. 启动加载 ──
             win.update_idletasks()
