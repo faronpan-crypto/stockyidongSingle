@@ -4654,11 +4654,25 @@ class StockDetailMixin:
             try:
                 result = _load_etf_list(force=False)  # 先查缓存, 秒填
                 if result: etf_cache["data"] = result[0]
-                # 默认选中 Top1
-                first_child = etf_tree.get_children()
-                if first_child:
-                    etf_tree.selection_set(first_child[0])
-                    etf_tree.see(first_child[0])
+                # 默认选中: 优先预选 → 否则 Top1
+                prefill_name = getattr(self, "_etf_link_prefill_name", None)
+                matched_prefill = None
+                if prefill_name:
+                    for cid in etf_tree.get_children():
+                        cvals = etf_tree.item(cid, "values")
+                        if cvals and prefill_name in str(cvals[1]):
+                            matched_prefill = cid; break
+                if matched_prefill:
+                    etf_tree.selection_set(matched_prefill)
+                    etf_tree.see(matched_prefill)
+                else:
+                    first_child = etf_tree.get_children()
+                    if first_child:
+                        etf_tree.selection_set(first_child[0])
+                        etf_tree.see(first_child[0])
+                # 清预选标记 (一次性)
+                try: del self._etf_link_prefill_name
+                except Exception: pass
             except Exception as _e:
                 status_var_etf.set(f"❌ 加载失败: {_e}")
                 print(f"[📊ETF联动❌] {_e}", flush=True)
@@ -5749,7 +5763,9 @@ class StockDetailMixin:
         ttk.Entry(toolbar, textvariable=search_var, width=20).pack(side=tk.LEFT, padx=4)
         ttk.Label(toolbar, text="来源:").pack(side=tk.LEFT, padx=(8,0))
         source_var = tk.StringVar(value="全部")
-        ttk.Combobox(toolbar, textvariable=source_var, values=["全部","东方财富新闻","机构研报","东财热帖","手动导入"], width=12, state="readonly").pack(side=tk.LEFT, padx=2)
+        ttk.Combobox(toolbar, textvariable=source_var,
+                     values=["全部","东方财富新闻","机构研报","东财热帖","淘股吧热帖","韭研公社","雪球讨论","手动导入"],
+                     width=14, state="readonly").pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="🔄刷新", width=7).pack(side=tk.LEFT, padx=4)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
@@ -5759,11 +5775,17 @@ class StockDetailMixin:
         ttk.Entry(toolbar, textvariable=crawl_stock_var, width=10).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="🚀爬个股新闻", width=14).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="🌐全站热帖", width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🏮淘股吧", width=9).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🌾韭研公社", width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="☃️雪球讨论", width=10).pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
         ttk.Button(toolbar, text="➕新增", width=7).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="🗑️删除", width=7).pack(side=tk.LEFT, padx=2)
         ttk.Button(toolbar, text="🏷️打标签", width=8).pack(side=tk.LEFT, padx=2)
+
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+        ttk.Button(toolbar, text="🔗联动分析", width=10, foreground="#1565C0").pack(side=tk.LEFT, padx=2)
 
         # 主区: 左列表 + 右详情
         paned = ttk.PanedWindow(win, orient=tk.HORIZONTAL)
@@ -5947,13 +5969,184 @@ class StockDetailMixin:
             conn.commit(); conn.close()
             _refresh_list(); _current_article_id[0] = None; tags_chips_var.set("(无)"); r_title_var.set("⬅️ 左侧选中文章")
 
-        # ── 绑按钮 ──
-        toolbar.winfo_children()[3].config(command=_refresh_list)          # 🔄刷新
-        toolbar.winfo_children()[7].config(command=_do_crawl_stock)        # 🚀爬个股
-        toolbar.winfo_children()[9].config(command=_do_crawl_global)       # 🌐全站
-        toolbar.winfo_children()[12].config(command=_do_add_manual)        # ➕新增
-        toolbar.winfo_children()[14].config(command=_do_delete)            # 🗑️删除
-        toolbar.winfo_children()[16].config(command=_do_tag)               # 🏷️打标签
+        # ── 爬淘股吧 (尽力而为, 反爬严时抓标题存手动待补) ──
+        def _do_crawl_taoguba():
+            status.set("⏳ 爬取淘股吧热帖..."); win.update_idletasks()
+            items = []
+            try:
+                import requests
+                from bs4 import BeautifulSoup
+                headers = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                           "Referer":"https://www.taoguba.com.cn/"}
+                # 尝试多个页面
+                for url in ["https://www.taoguba.com.cn/hot",
+                            "https://www.taoguba.com.cn/NewTopic",
+                            "https://www.taoguba.com.cn/GubaAllTopic?ltype=1"]:
+                    try:
+                        r = requests.get(url, headers=headers, timeout=12)
+                        if r.status_code != 200: continue
+                        soup = BeautifulSoup(r.text, "html.parser")
+                        # 找所有 a 标签里的文章链接
+                        for a in soup.select("a[href]"):
+                            href = a.get("href", "")
+                            txt = a.get_text(strip=True)
+                            if len(txt) > 8 and len(txt) < 100 and ("Article" in href or "topic" in href.lower() or "NewTopic" in href):
+                                if txt not in [i["title"] for i in items]:
+                                    items.append({
+                                        "source": "淘股吧热帖", "author": "淘股吧",
+                                        "title": txt, "url": href if href.startswith("http") else f"https://www.taoguba.com.cn{href}",
+                                        "content": "", "stock_code": "", "stock_name": ""
+                                    })
+                        if items: break
+                    except Exception: continue
+            except Exception as e:
+                status.set(f"⚠️ 淘股吧爬取异常: {e}")
+            # 如果还没爬到, 存占位提示用户手动粘贴
+            if not items:
+                try:
+                    items = [{
+                        "source": "淘股吧热帖", "author": "系统",
+                        "title": "⚠️ 淘股吧反爬严格 — 请手动复制文章内容后点➕新增粘贴",
+                        "url": "https://www.taoguba.com.cn/hot", "content": "反爬提示", "stock_code": "", "stock_name": ""
+                    }]
+                except Exception: pass
+            _save_and_refresh(items, "淘股吧热帖")
+
+        # ── 爬韭研公社 ──
+        def _do_crawl_jiuyan():
+            status.set("⏳ 爬取韭研公社热帖..."); win.update_idletasks()
+            items = []
+            try:
+                import requests
+                from bs4 import BeautifulSoup
+                headers = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                           "Accept":"text/html,application/xhtml+xml"}
+                r = requests.get("https://www.jiuyangongshe.com/explore?sort=hot", headers=headers, timeout=15)
+                soup = BeautifulSoup(r.text, "html.parser")
+                for a in soup.find_all("a", href=True):
+                    txt = a.get_text(strip=True)
+                    href = a["href"]
+                    if len(txt) > 10 and ("/article/" in href or "/share/" in href or "/posts/" in href):
+                        full = href if href.startswith("http") else f"https://www.jiuyangongshe.com{href}"
+                        if txt not in [i["title"] for i in items]:
+                            items.append({
+                                "source": "韭研公社", "author": "韭研公社",
+                                "title": txt[:120], "url": full,
+                                "content": "", "stock_code": "", "stock_name": ""
+                            })
+            except Exception as e:
+                status.set(f"⚠️ 韭研公社爬取异常: {e}")
+            if not items:
+                items = [{"source":"韭研公社","author":"系统","title":"⚠️ 韭研公社反爬严格 — 请手动复制粘贴",
+                         "url":"https://www.jiuyangongshe.com","content":"反爬提示","stock_code":"","stock_name":""}]
+            _save_and_refresh(items, "韭研公社")
+
+        # ── 爬雪球讨论 ──
+        def _do_crawl_xueqiu():
+            status.set("⏳ 爬取雪球热帖..."); win.update_idletasks()
+            items = []
+            try:
+                import requests, json
+                headers = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                           "Referer":"https://xueqiu.com/"}
+                s = requests.Session()
+                s.get("https://xueqiu.com/", headers=headers, timeout=10)  # 拿 cookie
+                for cat in [115, 116, 117]:  # 热门讨论/策略/其他
+                    try:
+                        r = s.get(f"https://xueqiu.com/v4/statuses/public_timeline_by_category.json?since_id=-1&max_id=-1&count=15&category={cat}",
+                                  headers=headers, timeout=10)
+                        d = r.json()
+                        list_items = d.get("data", {}).get("list") or d.get("list") or []
+                        for it in list_items:
+                            desc = it.get("description", "") or it.get("text", "") or ""
+                            title = it.get("title", "") or desc[:50]
+                            user = it.get("user", {}).get("screen_name", "")
+                            if title and len(title) > 5:
+                                items.append({
+                                    "source":"雪球讨论","author":user or "雪球",
+                                    "title":title[:120],"url":f"https://xueqiu.com/{it.get('user',{}).get('id','')}/{it.get('id','')}",
+                                    "content":desc,"stock_code":"","stock_name":""
+                                })
+                    except Exception: continue
+            except Exception as e:
+                status.set(f"⚠️ 雪球爬取异常: {e}")
+            if not items:
+                items = [{"source":"雪球讨论","author":"系统","title":"⚠️ 雪球反爬 — 请手动复制粘贴 或 东财股吧更全",
+                         "url":"https://xueqiu.com","content":"反爬提示","stock_code":"","stock_name":""}]
+            _save_and_refresh(items, "雪球讨论")
+
+        def _save_and_refresh(items, label):
+            """通用: 去重保存到 DB + 刷新列表 + status"""
+            saved = 0
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            for a in items:
+                cur.execute("SELECT id FROM articles WHERE title=? AND source=?", (a.get("title",""), label))
+                if cur.fetchone(): continue
+                cur.execute("INSERT INTO articles(source,author,title,url,content,stock_code,stock_name,saved) VALUES(?,?,?,?,?,?,?,1)",
+                            (a.get("source",""), a.get("author",""), a.get("title",""), a.get("url",""),
+                             a.get("content",""), a.get("stock_code",""), a.get("stock_name","")))
+                saved += 1
+            conn.commit(); conn.close(); _refresh_list()
+            status.set(f"✅ {label}: 新增 {saved}/{len(items)} 篇")
+
+        # ── 🔗 联动分析: 从文章提取股票 → 跳 ETF 联动弹窗预选 ──
+        def _do_linked_analysis():
+            sel = tree.selection();
+            if not sel: messagebox.showinfo("提示", "请先选中一篇文章", parent=win); return
+            vals = tree.item(sel[0], "values"); aid = vals[0]
+            # 取文章详情 (可能包含 stock_code/stock_name)
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            cur.execute("SELECT title,content,stock_code,stock_name FROM articles WHERE id=?", (aid,))
+            row = cur.fetchone(); conn.close()
+            if not row: return
+            title, content, scode, sname = row
+            # 反向构建: 股票名 → ETF 列表
+            etf_link_fn = getattr(self, "_show_etf_link_dialog", None)
+            if etf_link_fn is None:
+                messagebox.showwarning("提示", "ETF 联动功能暂未就绪", parent=win); return
+            # 如果文章里没直接存股票, 从 content/title 模糊匹配 ETF_HOLDERS
+            target_stock = sname or ""
+            if not target_stock:
+                from src.ui.tab_stock_detail import ETF_HOLDERS as _EH  # 懒导入
+                search_text = f"{title} {content}"
+                for ename, holders in _EH.items():
+                    for _, hname in holders:
+                        if hname and hname in search_text:
+                            target_stock = hname; break
+                    if target_stock: break
+            if not target_stock:
+                target_stock = simpledialog.askstring("🔗联动分析",
+                    "文章未识别到股票, 请手动输入股票名称/代码:", parent=win)
+                if not target_stock: return
+            # 找到该股票所属的 ETF
+            from src.ui.tab_stock_detail import ETF_HOLDERS as _EH
+            matching_etfs = []
+            for ename, holders in _EH.items():
+                for _, hname in holders:
+                    if target_stock and (target_stock in hname or hname in target_stock):
+                        matching_etfs.append(ename); break
+            if not matching_etfs:
+                # 没匹配到, 直接打开 ETF 联动弹窗让用户手动选
+                self._etf_link_prefill_name = None
+                self._show_etf_link_dialog(); return
+            # 打开 ETF 联动 + 预选第一个匹配的 ETF
+            target_etf = matching_etfs[0]
+            self._etf_link_prefill_name = target_etf
+            self._show_etf_link_dialog()
+            status.set(f"🔗 跳 ETF 联动: ETF={target_etf}, 股票={target_stock}")
+
+        # ── 绑按钮 (索引已更新) ──
+        tw = toolbar.winfo_children()
+        tw[4].config(command=_refresh_list)              # 🔄刷新
+        tw[8].config(command=_do_crawl_stock)            # 🚀爬个股
+        tw[9].config(command=_do_crawl_global)           # 🌐全站热帖
+        tw[10].config(command=_do_crawl_taoguba)          # 🏮淘股吧
+        tw[11].config(command=_do_crawl_jiuyan)           # 🌾韭研公社
+        tw[12].config(command=_do_crawl_xueqiu)           # ☃️雪球讨论
+        tw[14].config(command=_do_add_manual)             # ➕新增
+        tw[15].config(command=_do_delete)                 # 🗑️删除
+        tw[16].config(command=_do_tag)                    # 🏷️打标签
+        tw[18].config(command=_do_linked_analysis)        # 🔗联动分析
         tree.bind("<<TreeviewSelect>>", _load_detail)
         search_var.trace_add("write", lambda *_: _refresh_list())
         source_var.trace_add("write", lambda *_: _refresh_list())
