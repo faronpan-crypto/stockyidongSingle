@@ -4397,7 +4397,17 @@ class StockDetailMixin:
                         hold_tree.insert("", "end", values=(sina, sname, "—", "—", ""))
                 # ETF reason tag 样式 (浅蓝底)
                 hold_tree.tag_configure("etf_reason", background="#E3F2FD", font=("", 9, "bold"))
-                status_var_etf.set(f"✅ {ename} · {len(holders)}只持仓  |  {etf_reason[:50]}")
+                # 🆕 同时刷右列 ETF 视角
+                ts_code = vals[0]  # e.g. "510300.SH"
+                _mode_var.set("etf")
+                _draw_etf_tabs(ts_code, ename)
+                _refresh_etf_summary(ts_code, ename)
+                _refresh_etf_sent(ts_code, ename)
+                nb.select(0)  # 默认回到日K线 tab
+                status_var_etf.set(f"✅ {ename} · {len(holders)}只持仓 · 右列已切 ETF 视角")
+
+            # ── _mode 变量: "etf" | "stock" ──
+            _mode_var = tk.StringVar(value="stock")
 
             # ── 8. 选中股票 → 刷新右列 3 tab K线 ──
             def _render_kline_from_cache(only_redraw=False):
@@ -4618,8 +4628,228 @@ class StockDetailMixin:
                     sent_text.config(state="normal"); sent_text.delete("1.0", "end")
                     sent_text.insert("end", f"❌ 情绪加载失败: {_e}"); sent_text.config(state="disabled")
 
+            # ── ETF 视角: 刷右列 3 个 K 线 tab (用 tushare fund_daily) ──
+            def _draw_etf_tabs(ts_code, ename):
+                """用 tushare fund_daily 拉 ETF K 线, 画 ax1/ax2/ax3"""
+                status_var_etf.set(f"⏳ 加载 ETF {ename} K线..."); win.update_idletasks()
+                try:
+                    edf = self._ts_pro.fund_daily(ts_code=ts_code,
+                                                  start_date="20250101",
+                                                  end_date=_time_etf.strftime("%Y%m%d"))
+                    if edf is None or len(edf) < 20:
+                        for ax in [ax1, ax2, ax3]:
+                            ax.clear(); ax.text(0.5, 0.5, f"⚠️ {ename} K线数据不足", ha="center", va="center", transform=ax.transAxes)
+                        for cv in [cv1, cv2, cv3]: cv.draw(); return
+                    edf = edf.sort_values("trade_date").reset_index(drop=True)
+                    opens = edf["open"].astype(float).values
+                    highs = edf["high"].astype(float).values
+                    lows = edf["low"].astype(float).values
+                    closes = edf["close"].astype(float).values
+                    vols = edf["vol"].astype(float).values
+                    n = len(closes); x = np.arange(n)
+
+                    # 辅助 MA
+                    def _ma(arr, w):
+                        if len(arr) < w: return arr
+                        m = np.convolve(arr, np.ones(w)/w, mode="valid")
+                        return np.concatenate([np.full(w-1, np.nan), m])
+
+                    # ── ax1: ETF 日K线 + MA ──
+                    ax1.clear()
+                    ax1.set_title(f"📈 {ename} ({ts_code}) 日K线", fontsize=11)
+                    # 简化蜡烛 (ETF 用线图+MA 更清晰)
+                    ax1.plot(x, closes, color="#1976D2", linewidth=1.2, label="收盘价")
+                    ax1.plot(x, _ma(closes,5), color="#FF9800", linewidth=0.9, label="MA5", alpha=0.8)
+                    ax1.plot(x, _ma(closes,20), color="#4CAF50", linewidth=0.9, label="MA20", alpha=0.8)
+                    ax1.plot(x, _ma(closes,60), color="#9C27B0", linewidth=0.9, label="MA60", alpha=0.7)
+                    # 支撑压力 (简单 ZigZag 局部极值)
+                    from scipy.signal import argrelextrema
+                    try:
+                        local_max = argrelextrema(closes, np.greater, order=5)[0]
+                        local_min = argrelextrema(closes, np.less, order=5)[0]
+                        for idx in local_max[-3:]:
+                            ax1.axhline(closes[idx], color="#FF5722", linestyle="--", linewidth=0.7, alpha=0.6, xmin=0.02, xmax=0.98)
+                            ax1.annotate(f"R {closes[idx]:.2f}", xy=(n*0.98, closes[idx]), fontsize=7, color="#FF5722", ha="right")
+                        for idx in local_min[-3:]:
+                            ax1.axhline(closes[idx], color="#00BCD4", linestyle="--", linewidth=0.7, alpha=0.6, xmin=0.02, xmax=0.98)
+                            ax1.annotate(f"S {closes[idx]:.2f}", xy=(n*0.98, closes[idx]), fontsize=7, color="#00BCD4", ha="right")
+                    except Exception: pass
+                    ax1.legend(loc="upper left", fontsize=8); ax1.grid(True, alpha=0.3); ax1.set_xlim(0, n-1)
+                    cv1.draw()
+
+                    # ── ax2: ETF 蜡烛图 (简化 OHLC 柱) ──
+                    ax2.clear()
+                    ax2.set_title(f"🕯️ {ename} ETF 蜡烛图", fontsize=11)
+                    colors = ["#4CAF50" if closes[i] >= opens[i] else "#F44336" for i in range(n)]
+                    ax2.bar(x, closes - opens, bottom=opens, color=colors, width=0.6, alpha=0.9)
+                    ax2.vlines(x, lows, highs, color=colors, linewidth=0.6, alpha=0.8)
+                    ax2.grid(True, alpha=0.3); ax2.set_xlim(0, n-1)
+                    cv2.draw()
+
+                    # ── ax3: ETF 一目均衡 (用收盘价构建近似) ──
+                    ax3.clear()
+                    ax3.set_title(f"📊 {ename} ETF 一目均衡 (近似)", fontsize=11)
+                    # 基准线 (26 周期最高最低中点)
+                    base_line = np.full(n, np.nan)
+                    for i in range(26, n):
+                        base_line[i] = (max(highs[i-26:i]) + min(lows[i-26:i])) / 2
+                    # 转换线 (9 周期)
+                    conv_line = np.full(n, np.nan)
+                    for i in range(9, n):
+                        conv_line[i] = (max(highs[i-9:i]) + min(lows[i-9:i])) / 2
+                    ax3.plot(x, closes, color="#1976D2", linewidth=1.0, label="收盘价")
+                    ax3.plot(x, base_line, color="#FF9800", linewidth=0.9, label="基准线", alpha=0.8)
+                    ax3.plot(x, conv_line, color="#E91E63", linewidth=0.9, label="转换线", alpha=0.8)
+                    # 云 (26 偏移)
+                    cloud_a = np.full(n, np.nan)
+                    for i in range(26, n):
+                        cloud_a[i] = (conv_line[i-26] + base_line[i-26]) / 2
+                    cloud_b = np.full(n, np.nan)
+                    for i in range(26*2, n):
+                        cloud_b[i] = (max(highs[i-26*2:i-26]) + min(lows[i-26*2:i-26])) / 2
+                    ax3.fill_between(x, cloud_a, cloud_b, where=cloud_a > cloud_b, color="#4CAF50", alpha=0.15)
+                    ax3.fill_between(x, cloud_a, cloud_b, where=cloud_a <= cloud_b, color="#F44336", alpha=0.15)
+                    ax3.legend(loc="upper left", fontsize=8); ax3.grid(True, alpha=0.3); ax3.set_xlim(0, n-1)
+                    cv3.draw()
+
+                    # 更新缓存
+                    kline_cache.update({"mode":"etf", "ts_code":ts_code, "ename":ename, "opens":opens, "highs":highs, "lows":lows, "closes":closes, "vols":vols})
+                    status_var_etf.set(f"✅ {ename} ETF K线 · {n} 根")
+                except Exception as _e:
+                    import traceback; traceback.print_exc()
+                    for ax in [ax1, ax2, ax3]:
+                        ax.clear(); ax.text(0.5, 0.5, f"❌ ETF K线加载失败: {_e}", ha="center", va="center", transform=ax.transAxes)
+                    for cv in [cv1, cv2, cv3]: cv.draw()
+
+            # ── ETF 视角: tab4 概要 ──
+            def _refresh_etf_summary(ts_code, ename):
+                """ETF 概要: basic + fund_nav + 涨跌统计"""
+                summary_text.config(state="normal"); summary_text.delete("1.0", "end")
+                lines = [f"📋 ETF 概要 · {ename} ({ts_code})", "=" * 45]
+                try:
+                    # 1. fund_basic (tushare 基金基础信息)
+                    try:
+                        fb = self._ts_pro.fund_basic(ts_code=ts_code)
+                        if fb is not None and len(fb) > 0:
+                            r = fb.iloc[0]
+                            lines.extend([
+                                f"类型: {r.get('fund_type', 'ETF')}  |  管理人: {r.get('management', '')}",
+                                f"发行公司: {r.get('name', '')}  |  上市日期: {r.get('list_date', '')}",
+                                f"管理费率: {r.get('fee_rate', '')}  |  托管费率: {r.get('cust_fee', '')}",
+                            ])
+                    except Exception: pass
+                    # 2. 从 fund_daily 计算涨跌统计
+                    edf = self._ts_pro.fund_daily(ts_code=ts_code, start_date="20250101", end_date=_time_etf.strftime("%Y%m%d"))
+                    if edf is not None and len(edf) > 20:
+                        edf = edf.sort_values("trade_date").reset_index(drop=True)
+                        closes = edf["close"].astype(float).values
+                        ret1 = (closes[-1]/closes[-2]-1)*100 if len(closes)>=2 else 0
+                        ret5 = (closes[-1]/closes[-6]-1)*100 if len(closes)>=6 else 0
+                        ret20 = (closes[-1]/closes[-21]-1)*100 if len(closes)>=21 else 0
+                        ret60 = (closes[-1]/closes[-61]-1)*100 if len(closes)>=61 else 0
+                        # 波动率 (20日)
+                        daily_ret = np.diff(closes)/closes[:-1]
+                        vol20 = np.std(daily_ret[-20:]) * np.sqrt(252) * 100 if len(daily_ret) >= 20 else 0
+                        # 最大回撤 (60日)
+                        peak = np.maximum.accumulate(closes[-60:])
+                        drawdown = (closes[-60:] - peak) / peak * 100
+                        max_dd = abs(np.min(drawdown)) if len(drawdown) > 0 else 0
+                        lines.extend([
+                            "", "📊 涨跌幅统计", "-" * 28,
+                            f"  当日:  {ret1:+.2f}%",
+                            f"  5日:   {ret5:+.2f}%",
+                            f"  20日:  {ret20:+.2f}%",
+                            f"  60日:  {ret60:+.2f}%",
+                            "", "📉 风险指标", "-" * 28,
+                            f"  20日年化波动率: {vol20:.1f}%",
+                            f"  60日最大回撤:   {max_dd:.2f}%",
+                            f"  近 {len(closes)} 个交易日数据",
+                        ])
+                    # 3. 持仓股概览 (从 ETF_HOLDERS)
+                    holders = ETF_HOLDERS.get(ename, [])
+                    if holders:
+                        lines.extend([
+                            "", f"📦 核心持仓股 ({len(holders)} 只)", "-" * 28,
+                            "  " + "、".join(n for _, n in holders[:8]),
+                            "  " + ("..." if len(holders) > 8 else ""),
+                        ])
+                    # 4. 文章库匹配
+                    try:
+                        conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+                        cur.execute("SELECT COUNT(*) FROM articles WHERE title LIKE ? OR content LIKE ?", (f"%{ename}%", f"%{ename}%"))
+                        art_cnt = cur.fetchone()[0]
+                        cur.execute("SELECT COUNT(*) FROM articles WHERE stock_code=? OR stock_name LIKE ?",
+                                    (ts_code.split(".")[0], f"%{ename}%"))
+                        etf_art = cur.fetchone()[0]
+                        conn.close()
+                        lines.extend([
+                            "", "📚 文章库", "-" * 28,
+                            f"  提到 '{ename}' 的文章: {art_cnt} 篇",
+                            f"  关联个股文章:         {etf_art} 篇",
+                        ])
+                    except Exception: pass
+                except Exception as _e:
+                    lines.append(f"\n⚠️ 概要加载异常: {_e}")
+                summary_text.insert("end", "\n".join(lines)); summary_text.config(state="disabled")
+
+            # ── ETF 视角: tab5 情绪 ──
+            def _refresh_etf_sent(ts_code, ename):
+                """ETF 情绪: 资金流 + 成交活跃度 + 关联持仓股资金"""
+                sent_text.config(state="normal"); sent_text.delete("1.0", "end")
+                lines = [f"🔥 ETF 资金情绪 · {ename}", "=" * 45]
+                try:
+                    # 1. ETF 自身成交活跃度 (从 fund_daily 算)
+                    edf = self._ts_pro.fund_daily(ts_code=ts_code, start_date="20251001", end_date=_time_etf.strftime("%Y%m%d"))
+                    if edf is not None and len(edf) >= 10:
+                        edf = edf.sort_values("trade_date").reset_index(drop=True)
+                        vols = edf["vol"].astype(float).values  # 手
+                        amount = edf["amount"].astype(float).values if "amount" in edf.columns else np.zeros(len(vols))
+                        avg_vol20 = np.mean(vols[-20:]) if len(vols) >= 20 else np.mean(vols)
+                        avg_vol5 = np.mean(vols[-5:])
+                        vol_ratio = avg_vol5 / avg_vol20 if avg_vol20 > 0 else 1
+                        lines.extend([
+                            "📊 ETF 成交活跃度", "-" * 35,
+                            f"  20日均量:  {avg_vol20/1e4:.1f} 万手",
+                            f"  5日均量:   {avg_vol5/1e4:.1f} 万手",
+                            f"  量比(5/20): {vol_ratio:.2f}x",
+                            f"  成交额(亿): {amount[-1]/1e4:.1f}" if len(amount)>0 else "",
+                        ])
+                        if vol_ratio > 2.0: lines.append(f"  ⚠️ 显著放量 ({vol_ratio:.1f}x), 资金关注度上升")
+                        elif vol_ratio < 0.5: lines.append(f"  💤 明显缩量 ({vol_ratio:.1f}x), 交投清淡")
+                    # 2. 关联持仓股资金流 TOP3
+                    holders = ETF_HOLDERS.get(ename, [])
+                    if holders:
+                        lines.extend([
+                            "", "💰 关联持仓股主力资金流 (TOP3)", "-" * 35,
+                        ])
+                        net_inflow_list = []
+                        for sina, sname in holders[:10]:
+                            if sina.startswith("sh") or sina.startswith("sz"):
+                                code6 = sina[2:8]
+                                try:
+                                    mf = self._ts_pro.moneyflow(ts_code=code6 + ".SH" if sina.startswith("sh") else code6 + ".SZ", limit=1)
+                                    if mf is not None and len(mf) > 0:
+                                        r = mf.iloc[0]
+                                        net = r.get("buy_sm_amount", 0) - r.get("sell_sm_amount", 0)
+                                        net_inflow_list.append((sname, net))
+                                except Exception: pass
+                        net_inflow_list.sort(key=lambda x: x[1], reverse=True)
+                        for sname, net in net_inflow_list[:3]:
+                            flag = "🟢" if net >= 0 else "🔴"
+                            lines.append(f"  {flag} {sname}: {net:+.2f}亿")
+                        # 整体判断
+                        if net_inflow_list:
+                            total = sum(n for _, n in net_inflow_list)
+                            if total > 1: lines.append(f"  ✅ ETF 核心持仓整体净流入 +{total:.2f}亿, 板块看多")
+                            elif total < -1: lines.append(f"  ⚠️ ETF 核心持仓整体净流出 {total:.2f}亿, 板块看空")
+                            else: lines.append(f"  ⚖️ ETF 持仓股资金整体均衡 ({total:+.2f}亿)")
+                except Exception as _e:
+                    lines.append(f"\n⚠️ 情绪加载异常: {_e}")
+                sent_text.insert("end", "\n".join(lines)); sent_text.config(state="disabled")
+
             def _on_stock_selected(sina, sname):
-                """统一刷新: K线 + 概要 + 情绪 + 逻辑股评"""
+                """统一刷新: K线 + 概要 + 情绪 + 逻辑股评 (切 stock 模式)"""
+                _mode_var.set("stock")
                 _draw_kline_tabs(sina, sname)
                 logic_stock_var.set(f"{sname} ({sina})")
                 _logic_load(sina, sname)
