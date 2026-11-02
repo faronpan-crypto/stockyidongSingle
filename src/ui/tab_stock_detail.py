@@ -4370,6 +4370,47 @@ class StockDetailMixin:
                 hold_tree.insert("", "end", values=(
                     "ETF原因", f"💡 {etf_reason}", "", "", "", ""),
                     tags=("etf_reason",))
+
+                # ── 🆕 批量拉 tushare daily 官方 pct_chg (一次搞定所有持仓股) ──
+                ts_pct_map = {}  # {sina: pct_chg}
+                try:
+                    import tushare as _ts2
+                    if not getattr(self, "_ts2_init", False):
+                        from utils.config import TS_DEFAULT_TOKEN as _T2
+                        _ts2.set_token(_T2); self._ts2_pro = _ts2.pro_api(); self._ts2_init = True
+                    # 构造 ts_code 列表
+                    ts_codes_list = []
+                    for sina, _ in holders:
+                        if sina.startswith("sh") and len(sina) == 8: ts_codes_list.append(sina[2:] + ".SH")
+                        elif sina.startswith("sz") and len(sina) == 8: ts_codes_list.append(sina[2:] + ".SZ")
+                    if ts_codes_list:
+                        # 查最近交易日 (用 ETF 列表里第一只已缓存的 trade_date)
+                        _tradedate = None
+                        try:
+                            import tushare as _ts3
+                            if not getattr(self, "_ts3_init", False):
+                                from utils.config import TS_DEFAULT_TOKEN as _T3
+                                _ts3.set_token(_T3); self._ts3_pro = _ts3.pro_api(); self._ts3_init = True
+                            # 直接拿沪深300 ETF 最近一根 trade_date (快且准)
+                            _edf = self._ts3_pro.fund_daily(ts_code="510300.SH",
+                                                            start_date="20261001", end_date="20261130")
+                            if _edf is not None and len(_edf) > 0:
+                                _edf = _edf.sort_values("trade_date")
+                                _tradedate = str(_edf.iloc[-1]["trade_date"])
+                        except Exception: pass
+                        if _tradedate:
+                            batch = self._ts2_pro.daily(ts_code=",".join(ts_codes_list), trade_date=_tradedate)
+                            if batch is not None and len(batch) > 0:
+                                for _, row in batch.iterrows():
+                                    tc = row["ts_code"]
+                                    # 反向映射回 sina
+                                    for sina2, _ in holders:
+                                        code6 = sina2[2:] if len(sina2)==8 else sina2
+                                        if tc.startswith(code6):
+                                            ts_pct_map[sina2] = float(row["pct_chg"])
+                                            break
+                except Exception: pass  # tushare 失败不阻塞
+
                 # 拉每只持仓股 当日/5日/20日
                 for sina, sname in holders:
                     try:
@@ -4379,7 +4420,11 @@ class StockDetailMixin:
                             hold_tree.insert("", "end", values=(sina, sname, "—", "—", "—", "数据不足"))
                             continue
                         closes = kdf["收盘"].astype(float).values if "收盘" in kdf.columns else kdf["close"].astype(float).values
-                        r0s = (closes[-1]/closes[-2]-1)*100 if len(closes)>=2 else np.nan
+                        # r0: 优先用 tushare 官方 pct_chg, fallback 到自己算
+                        if sina in ts_pct_map:
+                            r0s = ts_pct_map[sina]  # ✅ 官方值
+                        else:
+                            r0s = (closes[-1]/closes[-2]-1)*100 if len(closes)>=2 else np.nan
                         r5s = (closes[-1]/closes[-6]-1)*100 if len(closes)>=6 else np.nan
                         r20s = (closes[-1]/closes[-21]-1)*100 if len(closes)>=21 else np.nan
                         if np.isnan(r5s) or np.isnan(r20s):
