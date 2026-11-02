@@ -3864,6 +3864,83 @@ class StockDetailMixin:
             ttk.Label(top, textvariable=status_var_etf, foreground="#666").pack(side=tk.LEFT)
             refresh_etf = ttk.Button(top, text="🔄 刷新", width=8); refresh_etf.pack(side=tk.RIGHT, padx=4)
 
+            # ❓ 帮助按钮 — 三列卡片网格 (统一风格)
+            def _show_etf_help():
+                hw = tk.Toplevel(win); hw.title("📖 ETF 联动分析 · 功能说明")
+                hw.geometry("960x620"); hw.configure(bg="#FAFAFA")
+                hw.transient(win); hw.grab_set()
+                try: hw.attributes("-topmost", True)
+                except: pass
+                hw.update_idletasks()
+                _sw = hw.winfo_screenwidth(); hw.geometry(f"+{(_sw-960)//2}+120")
+
+                # 顶部标题栏 (深蓝)
+                tf = tk.Frame(hw, bg="#1565C0", height=54); tf.pack(fill=tk.X)
+                tf.pack_propagate(False)
+                tk.Label(tf, text="📖 ETF 联动分析 · 三列联动功能详解", bg="#1565C0", fg="white",
+                         font=("Microsoft YaHei", 17, "bold")).pack(side=tk.LEFT, padx=22, pady=8)
+                tk.Label(tf, text="单击选中 · 双击联动 · 实时行情", bg="#1565C0", fg="#BBDEFB",
+                         font=("", 11)).pack(side=tk.RIGHT, padx=22)
+
+                # 8 张卡片 (3+3+2 布局)
+                _CARDS = [
+                    ("📊 左列 · ETF板块", "#1565C0",
+                     "40 只主流 ETF 强弱排行\n当日%腾讯实时, 3/5/20日 tushare 日K",
+                     "• 盘中实时更新当日涨跌\n• 单击只刷中列, 双击联动右列\n• Top3 浅红底, Bot3 浅绿底"),
+                    ("📦 中列 · 持仓股", "#2E7D32",
+                     "当前 ETF 的核心成分股\n6 列 Treeview: 代码|名称|当日|5日|20日|逻辑",
+                     "• 当日% 用 tushare 官方 pct_chg\n• 自动生成原因 (🔥强势/📈走强/⚠️领跌)\n• 点击切换右列视角"),
+                    ("📈 右列 · K线三连", "#C62828",
+                     "个股/ETF K线图 + 一目均衡 + 蜡烛\n指标工具栏可自由组合",
+                     "• MA5/10/20/60 多选\n• 支撑压力线 ZigZag 自动标\n• 买卖点 MA 金叉死叉"),
+                    ("📋 概要 tab", "#6A1B9A",
+                     "股票/ETF 基本面数据\n行业/市值/PE/股息率/波动率",
+                     "• 股票: stock_basic + daily_basic\n• ETF: fund_basic + 持仓分布\n• 一目了然估值高低"),
+                    ("🔥 情绪 tab", "#E65100",
+                     "资金流 + 北向 + 龙虎榜\n主力/北向南向/融资融券",
+                     "• 个股 moneyflow 3日净额\n• 北向持股 hsgt_top10\n• 龙虎榜 top_list"),
+                    ("💡 逻辑股评 tab", "#00695C",
+                     "SQLite 本地多对多 CRUD\n支持手动写/导入文章/喂入资讯",
+                     "• 🔄遍历喂入: 自动匹配文章→股票\n• 📥导入: txt/md 逐段匹配\n• 🏷️标签浮窗: 3列彩色网格"),
+                    ("🖱️ 单击 vs 双击", "#AD1457",
+                     "单击 ETF → 只刷中列\n双击 ETF → 中列 + 右列全联动",
+                     "• 单击: 快速浏览成分不打断右列\n• 双击: 一键切入最强持仓股\n• 中列单击/双击效果相同"),
+                    ("🔗 联动分析跳转", "#4527A0",
+                     "从 📚文章库一键跳到 ETF 联动\n文章→股票→ETF 自动匹配",
+                     "• 选中文章点 🔗联动分析\n• 内容匹配 ETF_HOLDERS\n• 自动预选匹配 ETF + 第一持仓股"),
+                ]
+
+                outer = tk.Frame(hw, bg="#FAFAFA"); outer.pack(fill=tk.BOTH, expand=True, padx=16, pady=14)
+                cvs = tk.Canvas(outer, bg="#FAFAFA", highlightthickness=0)
+                sb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=cvs.yview)
+                inn = tk.Frame(cvs, bg="#FAFAFA")
+                inn.bind("<Configure>", lambda e: cvs.configure(scrollregion=cvs.bbox("all")))
+                cvs.create_window((0, 0), window=inn, anchor="nw")
+                cvs.configure(yscrollcommand=sb.set)
+                cvs.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+                _NC = 3; _CW = 285
+                for _i, (_t, _c, _s, _d) in enumerate(_CARDS):
+                    _r, _cc = divmod(_i, _NC)
+                    _card = tk.Frame(inn, bg="white", highlightbackground="#E0E0E0",
+                                     highlightthickness=1, width=_CW)
+                    _card.grid(row=_r, column=_cc, padx=8, pady=8, sticky="nsew")
+                    inn.grid_columnconfigure(_cc, weight=1)
+                    tk.Frame(_card, bg=_c, height=5).pack(fill=tk.X)
+                    tk.Label(_card, text=_t, bg="white", fg=_c, width=_CW-20,
+                             font=("Microsoft YaHei", 13, "bold")).pack(anchor="w", padx=14, pady=(12, 2))
+                    tk.Label(_card, text=_s, bg="white", fg="#222", wraplength=_CW-28,
+                             justify="left", font=("Microsoft YaHei", 11)).pack(anchor="w", padx=14, pady=(0, 8))
+                    tk.Frame(_card, bg="#EEEEEE", height=1).pack(fill=tk.X, padx=14)
+                    tk.Label(_card, text=_d, bg="white", fg="#555", wraplength=_CW-28,
+                             justify="left", font=("Microsoft YaHei", 10)).pack(anchor="w", padx=14, pady=(8, 12))
+
+                def _mw(evt): cvs.yview_scroll(int(-evt.delta/120), "units")
+                cvs.bind_all("<MouseWheel>", _mw)
+                hw.bind("<Destroy>", lambda e: cvs.unbind_all("<MouseWheel>"))
+
+            ttk.Button(top, text="❓帮助", width=7, command=_show_etf_help).pack(side=tk.RIGHT, padx=4)
+
             # ── 5. 三列 PanedWindow ──
             pw = ttk.PanedWindow(win, orient=tk.HORIZONTAL)
             pw.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
@@ -5149,48 +5226,48 @@ class StockDetailMixin:
 
             ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
             refresh_btn = ttk.Button(top, text="🔄 刷新", width=10); refresh_btn.pack(side=tk.LEFT, padx=4)
-            # ❓ 帮助按钮 — 弹 6 图说明分 3 列
+            # ❓ 帮助按钮 — 弹 6 图说明分 3 列 (大字体 + 不同颜色 + 统一风格)
             def _show_chart_help():
                 help_win = tk.Toplevel(win); help_win.title("📖 图像分析 · 图表说明")
-                help_win.geometry("900x560"); help_win.configure(bg="#FAFAFA")
+                help_win.geometry("960x620"); help_win.configure(bg="#FAFAFA")
                 help_win.transient(win); help_win.grab_set()
                 import tkinter.font as tkf
                 try: help_win.attributes("-topmost", True)
                 except: pass
                 help_win.update_idletasks()
                 sw = help_win.winfo_screenwidth()
-                help_win.geometry(f"+{(sw-900)//2}+120")
+                help_win.geometry(f"+{(sw-960)//2}+120")
 
-                # 顶部标题栏
-                title_frame = tk.Frame(help_win, bg="#2C3E50", height=50)
+                # 顶部标题栏 (深蓝, 跟 ETF 帮助一致)
+                title_frame = tk.Frame(help_win, bg="#1565C0", height=54)
                 title_frame.pack(fill=tk.X, side=tk.TOP)
                 title_frame.pack_propagate(False)
-                tk.Label(title_frame, text="📖 图像分析 · 六大图表说明", bg="#2C3E50", fg="white",
-                         font=("Microsoft YaHei", 16, "bold")).pack(side=tk.LEFT, padx=20, pady=8)
-                tk.Label(title_frame, text="鼠标悬停查看详情 · 点击卡片缩放", bg="#2C3E50", fg="#BDC3C7",
-                         font=("", 10)).pack(side=tk.RIGHT, padx=20)
+                tk.Label(title_frame, text="📖 图像分析 · 六大图表说明", bg="#1565C0", fg="white",
+                         font=("Microsoft YaHei", 17, "bold")).pack(side=tk.LEFT, padx=22, pady=8)
+                tk.Label(title_frame, text="勾选图表 → 自动布局 → 支持多图联动", bg="#1565C0", fg="#BBDEFB",
+                         font=("", 11)).pack(side=tk.RIGHT, padx=22)
 
-                # 帮助条目 (6 个)
+                # 帮助条目 (7 个, 每种颜色不同)
                 HELP_ITEMS = [
-                    ("📈 日K线", "#E74C3C", "标准蜡烛图 + MA5/10/20/60 均线。\n最基础的技术分析视图，看多空排列和均线关系。",
+                    ("📈 日K线", "#E74C3C", "标准蜡烛图 + MA5/10/20/60 均线\n最基础的技术分析视图，看多空排列和均线关系",
                      "• 红涨绿跌（A股习惯）\n• MA20/MA60 判断趋势方向\n• 配合一目均衡更准"),
-                    ("📊 一目均衡", "#3498DB", "Ichimoku Kinko Hyo — 一目均衡表。\n日本最流行的趋势判断工具，看云图多空区。",
+                    ("📊 一目均衡", "#3498DB", "Ichimoku Kinko Hyo — 一目均衡表\n日本最流行的趋势判断工具，看云图多空区",
                      "• 5 条线：转换/基准/先行A/B/迟行\n• Kumo 云 = 未来 26 天预测区\n• 红云看涨，绿云看跌"),
-                    ("📉 BOLL带", "#9B59B6", "布林带 Bollinger Bands。\n标准差通道，判断波动区间和突破。",
+                    ("📉 BOLL带", "#9B59B6", "布林带 Bollinger Bands\n标准差通道，判断波动区间和突破",
                      "• 20日均线 ± 2倍标准差\n• 带宽收缩 = 变盘在即\n• 价格触上轨卖出，触下轨买入"),
-                    ("📦 成交量", "#1ABC9C", "蜡烛色量柱 + VOL_MA5/10。\n量能是价的先行指标，量价配合才可靠。",
+                    ("📦 成交量", "#1ABC9C", "蜡烛色量柱 + VOL_MA5/10\n量能是价的先行指标，量价配合才可靠",
                      "• 放量突破更可靠\n• 缩量上涨警惕回调\n• 量能背离 = 趋势乏力"),
-                    ("📐 MACD", "#F39C12", "DIF/DEA 差离值 + MACD 柱。\n经典金叉死叉信号，判断趋势动量。",
+                    ("📐 MACD", "#F39C12", "DIF/DEA 差离值 + MACD 柱\n经典金叉死叉信号，判断趋势动量",
                      "• DIF 上穿 DEA = 金叉买入\n• DIF 下穿 DEA = 死叉卖出\n• 零轴上方金叉更可靠"),
-                    ("🎯 情绪复盘", "#E67E22", "市场整体情绪 + 仓位温度计。\n从涨跌家数、涨停跌停判断市场温度。",
+                    ("🎯 情绪复盘", "#E67E22", "市场整体情绪 + 仓位温度计\n从涨跌家数、涨停跌停判断市场温度",
                      "• 上涨家数 > 60% = 强势市场\n• 涨停多 = 情绪亢奋\n• 建议仓位 = 情绪 × 周期"),
-                    ("📊 ETF强弱", "#27AE60", "22 只主流 ETF 5日×0.6 + 20日×0.4 综合评分。\n横向条形图一眼看清最强最弱板块。",
-                     "• 红条 = 近期强势板块\n• 绿条 = 近期弱势板块\n• 最强顺势，最弱规避"),
+                    ("📊 ETF强弱", "#27AE60", "40 只主流 ETF 综合评分\n腾讯实时当日 + tushare 日K 3/5/20日",
+                     "• Top3 浅红底, Bot3 浅绿底\n• 盘中实时更新当日涨跌\n• 最强顺势，最弱规避"),
                 ]
 
-                # 滚动区 (Canvas + Frame)
+                # 滚动区
                 outer = tk.Frame(help_win, bg="#FAFAFA")
-                outer.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
+                outer.pack(fill=tk.BOTH, expand=True, padx=16, pady=14)
                 canvas = tk.Canvas(outer, bg="#FAFAFA", highlightthickness=0)
                 sb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
                 inner = tk.Frame(canvas, bg="#FAFAFA")
@@ -5199,29 +5276,27 @@ class StockDetailMixin:
                 canvas.configure(yscrollcommand=sb.set)
                 canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-                # 3 列网格
+                # 3 列网格, 大字体, 跟 ETF 帮助一致
                 ncols = 3
-                card_w = 275
+                card_w = 285
                 for i, (title, color, summary, detail) in enumerate(HELP_ITEMS):
                     r, c = divmod(i, ncols)
                     card = tk.Frame(inner, bg="white", highlightbackground="#E0E0E0", highlightthickness=1,
                                     width=card_w, bd=0)
                     card.grid(row=r, column=c, padx=8, pady=8, sticky="nsew")
                     inner.grid_columnconfigure(c, weight=1)
-                    # 彩色标题条
-                    tk.Frame(card, bg=color, height=4).pack(fill=tk.X)
+                    # 彩色顶条 (高 5px, 跟 ETF 帮助一致)
+                    tk.Frame(card, bg=color, height=5).pack(fill=tk.X)
                     tk.Label(card, text=title, bg="white", fg=color,
-                             font=("Microsoft YaHei", 13, "bold")).pack(anchor="w", padx=14, pady=(10, 4))
-                    # summary
-                    tk.Label(card, text=summary, bg="white", fg="#333", wraplength=card_w-28,
-                             justify="left", font=("", 10)).pack(anchor="w", padx=14, pady=(0, 8))
-                    # 分割线
+                             font=("Microsoft YaHei", 13, "bold")).pack(anchor="w", padx=14, pady=(12, 2))
+                    # summary 大字体 11 (改前 10)
+                    tk.Label(card, text=summary, bg="white", fg="#222", wraplength=card_w-28,
+                             justify="left", font=("Microsoft YaHei", 11)).pack(anchor="w", padx=14, pady=(0, 8))
                     tk.Frame(card, bg="#EEEEEE", height=1).pack(fill=tk.X, padx=14)
-                    # detail (小字号)
-                    tk.Label(card, text=detail, bg="white", fg="#666", wraplength=card_w-28,
-                             justify="left", font=("", 9)).pack(anchor="w", padx=14, pady=(6, 10))
+                    # detail 中字体 10 (改前 9)
+                    tk.Label(card, text=detail, bg="white", fg="#555", wraplength=card_w-28,
+                             justify="left", font=("Microsoft YaHei", 10)).pack(anchor="w", padx=14, pady=(8, 12))
 
-                # 鼠标滚轮
                 def _on_mousewheel(evt): canvas.yview_scroll(int(-evt.delta/120), "units")
                 canvas.bind_all("<MouseWheel>", _on_mousewheel)
                 help_win.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
