@@ -3899,10 +3899,10 @@ class StockDetailMixin:
                       font=("", 10, "bold")).pack(anchor="w", padx=6, pady=(4, 2))
             hold_tree_frame = ttk.Frame(mid_frame)
             hold_tree_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
-            hold_cols = ("code", "name", "r5", "r20", "reason")
+            hold_cols = ("code", "name", "r0", "r5", "r20", "reason")
             hold_tree = ttk.Treeview(hold_tree_frame, columns=hold_cols, show="headings", height=30)
             for col, txt, w in [("code","代码",78),("name","股票名称",92),
-                                ("r5","5日%",50),("r20","20日%",54),("reason","逻辑/原因",180)]:
+                                ("r0","当日%",50),("r5","5日%",50),("r20","20日%",54),("reason","逻辑/原因",170)]:
                 hold_tree.heading(col, text=txt)
                 hold_tree.column(col, width=w, anchor="center" if col!="reason" and col!="name" else "w", stretch=False)
             vs2 = ttk.Scrollbar(hold_tree_frame, orient=tk.VERTICAL, command=hold_tree.yview)
@@ -4363,26 +4363,28 @@ class StockDetailMixin:
                 for iid in hold_tree.get_children(): hold_tree.delete(iid)
                 holders = ETF_HOLDERS.get(ename, [])
                 if not holders:
-                    hold_tree.insert("", "end", values=("", "暂无映射持仓", "", "", ""))
+                    hold_tree.insert("", "end", values=("", "暂无映射持仓", "", "", "", ""))
                     status_var_etf.set(f"ℹ️ {ename} 暂无持仓映射")
                     return
-                # 顶部插入 ETF 原因 banner (不可选)
+                # 顶部插入 ETF 原因 banner (不可选) — 6 列空值占位
                 hold_tree.insert("", "end", values=(
-                    "ETF原因", f"💡 {etf_reason}", "", "", ""),
+                    "ETF原因", f"💡 {etf_reason}", "", "", "", ""),
                     tags=("etf_reason",))
-                # 拉每只持仓股 5日/20日
+                # 拉每只持仓股 当日/5日/20日
                 for sina, sname in holders:
                     try:
                         kdf = self._fetch_ichimoku_kline_data(sina, period="daily",
                                                               is_index=isinstance(sina, str) and sina.startswith("us"))
                         if kdf is None or len(kdf) < 21:
-                            hold_tree.insert("", "end", values=(sina, sname, "—", "—", "数据不足"))
+                            hold_tree.insert("", "end", values=(sina, sname, "—", "—", "—", "数据不足"))
                             continue
                         closes = kdf["收盘"].astype(float).values if "收盘" in kdf.columns else kdf["close"].astype(float).values
+                        r0s = (closes[-1]/closes[-2]-1)*100 if len(closes)>=2 else np.nan
                         r5s = (closes[-1]/closes[-6]-1)*100 if len(closes)>=6 else np.nan
                         r20s = (closes[-1]/closes[-21]-1)*100 if len(closes)>=21 else np.nan
                         if np.isnan(r5s) or np.isnan(r20s):
-                            hold_tree.insert("", "end", values=(sina, sname, "—", "—", ""))
+                            r0s_s = f"{r0s:+.1f}" if not np.isnan(r0s) else "—"
+                            hold_tree.insert("", "end", values=(sina, sname, r0s_s, "—", "—", ""))
                             continue
                         # 股票自动 reason
                         if r5s > 5: s_reason = "🔥 强势领涨, 5日+" + f"{r5s:.1f}%"
@@ -4390,11 +4392,11 @@ class StockDetailMixin:
                         elif r5s < -5: s_reason = "⚠️ 领跌 5日" + f"{r5s:.1f}%"
                         elif r5s < -2: s_reason = "📉 持续走弱"
                         else: s_reason = "⚖️ 区间震荡"
-                        tag = "up" if r5s >= 0 else "dn"
+                        tag = "up" if r0s >= 0 else "dn"  # 当日红涨绿跌
                         hold_tree.insert("", "end",
-                            values=(sina, sname, f"{r5s:+.1f}", f"{r20s:+.1f}", s_reason), tags=(tag,))
+                            values=(sina, sname, f"{r0s:+.1f}", f"{r5s:+.1f}", f"{r20s:+.1f}", s_reason), tags=(tag,))
                     except Exception:
-                        hold_tree.insert("", "end", values=(sina, sname, "—", "—", ""))
+                        hold_tree.insert("", "end", values=(sina, sname, "—", "—", "—", ""))
                 # ETF reason tag 样式 (浅蓝底)
                 hold_tree.tag_configure("etf_reason", background="#E3F2FD", font=("", 9, "bold"))
                 # 单击只刷中列, 不碰右列 (右列保持之前状态)
