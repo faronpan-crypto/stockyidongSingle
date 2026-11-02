@@ -4273,14 +4273,42 @@ class StockDetailMixin:
                 now_ts = _time_etf.time()
                 today_str = _time_etf.strftime("%Y%m%d")
 
-                # ── 缓存命中 → 秒返回 ──
+                # ── 缓存命中 → 秒返回 (但当日涨跌如果是盘中要叠加实时) ──
                 if not force and self._etf_link_cache is not None:
                     cd_trade, cd_ts, cd_data = self._etf_link_cache
                     cache_age = now_ts - cd_ts
-                    # 同交易日 & 30分钟内 → 直接用
+                    # 同交易日 & 30分钟内 → 先秒填, 后台叠加实时
                     if cd_trade == today_str and cache_age < 1800:
                         _fill_tree(cd_data)
-                        status_var_etf.set(f"✅ 缓存命中 · 交易日 {cd_trade} · {len(cd_data)} 只 · {cache_age/60:.0f}min前")
+                        # 🆕 盘中叠加实时行情 (不阻塞 UI)
+                        try:
+                            import requests as _req2
+                            _syms2 = [f"sh{t[0].split('.')[0]}" if t[0].endswith(".SH") else f"sz{t[0].split('.')[0]}"
+                                      for t in cd_data]
+                            _rr2 = _req2.get(f"https://qt.gtimg.cn/q={','.join(_syms2)}",
+                                             headers={"User-Agent":"Mozilla/5.0"}, timeout=5)
+                            if _rr2.status_code == 200:
+                                _rt_map = {}
+                                for _ln in _rr2.text.strip().split(";"):
+                                    if "=" not in _ln: continue
+                                    _fv = _ln.split("=",1)[1].strip('"').split("~")
+                                    if len(_fv) < 5: continue
+                                    _c6 = _fv[2]; _p = float(_fv[3]) if _fv[3] else 0; _pv = float(_fv[4]) if _fv[4] else 0
+                                    if _p > 0 and _pv > 0:
+                                        _key = _c6 + (".SH" if _c6.startswith(("6","5","9")) else ".SZ")
+                                        _rt_map[_key] = (_p/_pv - 1)*100
+                                if _rt_map:
+                                    _updated = []
+                                    for _row in cd_data:
+                                        _score, _tc, _nm, _r0, _r3, _r5, _r20 = _row
+                                        if _tc in _rt_map:
+                                            _r0 = _rt_map[_tc]  # 覆盖为实时
+                                        _updated.append((_score, _tc, _nm, _r0, _r3, _r5, _r20))
+                                    _fill_tree(_updated)
+                                    status_var_etf.set(f"✅ 缓存+实时 · {cd_trade} · {len(_updated)} 只 · {cache_age/60:.0f}min前")
+                                    return _updated, cd_trade
+                        except Exception: pass
+                        status_var_etf.set(f"✅ 缓存命中 · {cd_trade} · {len(cd_data)} 只 · {cache_age/60:.0f}min前")
                         return cd_data, cd_trade
                     # 同交易日但超过 30min → 增量刷新当日 (后台)
                     if cd_trade == today_str and cache_age >= 1800:
@@ -4302,6 +4330,39 @@ class StockDetailMixin:
 
                 # ── 完全重拉 (force=True 或 首次 或 新交易日) ──
                 status_var_etf.set("⏳ 拉取 ETF 行情 (40只)..."); win.update_idletasks()
+
+                # 🆕 先批量拉腾讯实时行情 (盘中有实时涨跌)
+                realtime_pct = {}  # {ts_code: pct_chg} (腾讯实时)
+                try:
+                    import requests as _req
+                    _syms = []
+                    for _tsc, _ in MAINSTREAM_ETFS:
+                        # tushare ts_code → 腾讯 sina 代码
+                        _code6, _mkt = _tsc.split(".")
+                        _prefix = "sh" if _mkt == "SH" else "sz"
+                        _syms.append(f"{_prefix}{_code6}")
+                    _url = f"https://qt.gtimg.cn/q={','.join(_syms)}"
+                    _rh = {"User-Agent":"Mozilla/5.0","Referer":"https://finance.qq.com/"}
+                    _rr = _req.get(_url, headers=_rh, timeout=8)
+                    if _rr.status_code == 200:
+                        for _line in _rr.text.strip().split(";"):
+                            if "=" not in _line: continue
+                            _var, _val = _line.split("=", 1)
+                            _val = _val.strip('"')
+                            _f = _val.split("~")
+                            if len(_f) < 5: continue
+                            _code6 = _f[2]
+                            _price = float(_f[3]) if _f[3] else 0
+                            _prev = float(_f[4]) if _f[4] else 0
+                            if _price > 0 and _prev > 0:
+                                _pct = (_price/_prev - 1) * 100
+                                # 反向映射回 tushare ts_code
+                                if _code6.startswith(("6","5","9")):
+                                    realtime_pct[_code6 + ".SH"] = _pct
+                                else:
+                                    realtime_pct[_code6 + ".SZ"] = _pct
+                except Exception: pass  # 实时接口挂了不阻塞
+
                 etf_results = []
                 latest_trade_date = ""
                 for idx, (ts_code, ename) in enumerate(MAINSTREAM_ETFS):
@@ -4312,22 +4373,25 @@ class StockDetailMixin:
                         if edf is None or len(edf) < 21: continue
                         edf = edf.sort_values("trade_date").reset_index(drop=True)
                         ecloses = edf["close"].astype(float).values
-                        r0, r3, r5, r20 = _compute_from_closes(ecloses)
+                        r0_daily, r3, r5, r20 = _compute_from_closes(ecloses)
                         if np.isnan(r5) or np.isnan(r20): continue
+                        # 🆕 当日涨幅: 优先用腾讯实时 (盘中), 没实时则用日K
+                        r0 = realtime_pct.get(ts_code, r0_daily)
                         score = r3*0.2 + r5*0.4 + r20*0.4
                         etf_results.append((score, ts_code, ename, r0, r3, r5, r20))
                         td = str(edf["trade_date"].iloc[-1])
                         if td > latest_trade_date: latest_trade_date = td
-                        # 每 10 只刷一次 status (进度反馈)
                         if (idx+1) % 10 == 0:
                             status_var_etf.set(f"⏳ 已拉 {idx+1}/{len(MAINSTREAM_ETFS)} 只..."); win.update_idletasks()
                     except Exception:
                         pass
                 etf_results.sort(reverse=True)
                 _fill_tree(etf_results)
-                # 写缓存
+                # 写缓存 (注意: 实时行情不进缓存, 每次刷新都重拉腾讯)
                 self._etf_link_cache = (latest_trade_date or today_str, now_ts, etf_results)
-                status_var_etf.set(f"✅ {latest_trade_date or today_str} · {len(etf_results)} 只 ETF 已刷新")
+                _has_realtime = len(realtime_pct) > 0
+                _realtime_tag = "盘中实时" if _has_realtime else "日K收盘"
+                status_var_etf.set(f"✅ {latest_trade_date or today_str} · {len(etf_results)} 只 ETF · {_realtime_tag} 已刷新")
                 return etf_results, (latest_trade_date or today_str)
 
             etf_cache = {"data": None}
