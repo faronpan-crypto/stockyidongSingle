@@ -6016,6 +6016,7 @@ class StockDetailMixin:
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
         ttk.Button(toolbar, text="🔗联动分析", width=10, foreground="#1565C0").pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🔄遍历喂入", width=10, foreground="#E65100").pack(side=tk.LEFT, padx=2)
 
         # 主区: 左列表 + 右详情
         paned = ttk.PanedWindow(win, orient=tk.HORIZONTAL)
@@ -6365,6 +6366,183 @@ class StockDetailMixin:
             self._show_etf_link_dialog()
             status.set(f"🔗 跳 ETF 联动: ETF={target_etf}, 股票={target_stock}")
 
+        # ── 🔄遍历喂入: articles → logic_reviews 自动匹配 ──
+        def _do_crawl_feed_in():
+            """遍历 articles 表 → 匹配 ETF_HOLDERS → 批量写入 logic_reviews"""
+            self._init_article_db()
+            from src.ui.tab_stock_detail import ETF_HOLDERS as _EH
+            status.set("⏳ 遍历资讯库..."); win.update_idletasks()
+            import sqlite3 as _sql3
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            cur.execute("SELECT id, title, content, source, stock_code, stock_name, author FROM articles ORDER BY id DESC LIMIT 500")
+            arts = cur.fetchall(); conn.close()
+
+            # 构建反向映射: 股票名 → [(sina, sname), ...]
+            stock_name_to_code = {}
+            for ename, holders in _EH.items():
+                for sina, sname in holders:
+                    if sname not in stock_name_to_code:
+                        stock_name_to_code[sname] = []
+                    if sina not in [x[0] for x in stock_name_to_code[sname]]:
+                        stock_name_to_code[sname].append((sina, sname))
+            # ETF 名 → ETF 名
+            etf_names = list(_EH.keys())
+
+            # 遍历匹配
+            candidates = []  # [(sina, sname, match_type, matched_key, art_id, art_title, art_src, snippet)]
+            match_stock_cnt = 0; match_etf_cnt = 0
+            for art_id, title, content, source, art_scode, art_sname, author in arts:
+                text = f"{title} {content}" if content else title
+                if not text or len(text.strip()) < 3: continue
+                matched_keys = set()
+                # 1. 股票名匹配 (从 ETF_HOLDERS 反向)
+                for sname, code_list in stock_name_to_code.items():
+                    if sname in text and sname not in matched_keys:
+                        matched_keys.add(sname)
+                        for sina, sn2 in code_list:
+                            snippet = title[:60] + ("…" if len(title) > 60 else "")
+                            candidates.append((sina, sname, "股票", sname, art_id, snippet, source, ""))
+                            match_stock_cnt += 1
+                # 2. ETF 名匹配
+                for ename in etf_names:
+                    if ename in text and ename not in matched_keys:
+                        matched_keys.add(ename)
+                        snippet = title[:60] + ("…" if len(title) > 60 else "")
+                        candidates.append((ename, ename, "ETF", ename, art_id, snippet, source, ""))
+                        match_etf_cnt += 1
+                # 3. 文章已标记 stock_code 直接用
+                if art_scode and art_sname and art_scode not in [c[0] for c in candidates if c[4] == art_id]:
+                    if art_scode.startswith("sh") or art_scode.startswith("sz"):
+                        snippet = title[:60] + ("…" if len(title) > 60 else "")
+                        candidates.append((art_scode, art_sname, "文章标记", art_sname, art_id, snippet, source, ""))
+
+            if not candidates:
+                messagebox.showinfo("结果", f"📚 共遍历 {len(arts)} 篇文章, 未匹配到股票/ETF", parent=win); return
+
+            # 去重 (同一 stock + 同一文章只保留第一条)
+            seen = set(); dedup = []
+            for c in candidates:
+                key = (c[0], c[4])  # (sina, art_id)
+                if key not in seen:
+                    seen.add(key); dedup.append(c)
+            candidates = dedup
+
+            # 弹出审核窗口
+            dlg = tk.Toplevel(win); dlg.title("🔄遍历喂入 — 审核并选择"); dlg.geometry("1100x620")
+            dlg.transient(win); dlg.grab_set()
+
+            ttk.Label(dlg,
+                      text=f"📚 遍历 {len(arts)} 篇文章 → 匹配 {match_stock_cnt} 股票 + {match_etf_cnt} ETF → 去重后 {len(candidates)} 条候选",
+                      font=("", 10, "bold"), foreground="#1565C0").pack(anchor="w", padx=8, pady=(8,4))
+
+            cols = ("sel", "target", "match_type", "article_id", "article_title", "source")
+            tree = ttk.Treeview(dlg, columns=cols, show="headings", height=20)
+            for c, t, w in [("sel","✓",35),("target","股票/ETF",140),("match_type","匹配方式",80),
+                            ("article_id","#",40),("article_title","文章标题",420),("source","来源",120)]:
+                tree.heading(c, text=t); tree.column(c, width=w, anchor="w" if c != "sel" else "center", stretch=True)
+
+            # Checkbutton 选中
+            sel_vars = {}
+            import tkinter as _tk
+            for i, (sina, sname, mtype, mkey, art_id, snippet, src, _) in enumerate(candidates):
+                var = _tk.BooleanVar(value=True)  # 默认全选
+                sel_vars[i] = var
+                prefix = "🔴" if mtype == "股票" else ("🟢" if mtype == "ETF" else "🔵")
+                tree.insert("", "end", iid=str(i),
+                            values=("☑", f"{prefix} {sname} ({sina})", mtype, art_id, snippet, src))
+                if i % 2 == 1: tree.tag_configure(str(i), background="#F5F5F5"); tree.item(str(i), tags=(str(i),))
+
+            vs = ttk.Scrollbar(dlg, orient=tk.VERTICAL, command=tree.yview)
+            tree.configure(yscrollcommand=vs.set)
+            tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=8, pady=4)
+            vs.pack(side=tk.RIGHT, fill=tk.Y, pady=4)
+
+            # 全选/取消
+            def _sel_all(v):
+                for var in sel_vars.values(): var.set(v)
+            sel_btns = ttk.Frame(dlg); sel_btns.pack(fill=tk.X, padx=8, pady=2)
+            ttk.Button(sel_btns, text="✅ 全选", width=8, command=lambda: _sel_all(True)).pack(side=tk.LEFT, padx=2)
+            ttk.Button(sel_btns, text="❌ 全不选", width=8, command=lambda: _sel_all(False)).pack(side=tk.LEFT, padx=2)
+            ttk.Button(sel_btns, text="🔀 切换", width=8, command=lambda: [var.set(not var.get()) for var in sel_vars.values()]).pack(side=tk.LEFT, padx=2)
+
+            ttk.Separator(dlg, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=8, pady=4)
+            ttk.Label(dlg, text="点击 '✓' 列切换勾选状态").pack(anchor="w", padx=8)
+
+            # 点击行时切换选中
+            def _on_row_click(evt):
+                region = tree.identify("region", evt.x, evt.y)
+                row_id = tree.identify_row(evt.y)
+                if region == "cell" and row_id:
+                    try:
+                        idx = int(row_id)
+                        sel_vars[idx].set(not sel_vars[idx].get())
+                        tree.item(row_id, values=("☑" if sel_vars[idx].get() else "☐",) + tree.item(row_id, "values")[1:])
+                    except Exception: pass
+            tree.bind("<Button-1>", _on_row_click)
+
+            # 底部按钮
+            btns = ttk.Frame(dlg); btns.pack(fill=tk.X, padx=8, pady=8)
+            result_var = tk.StringVar(value="")
+
+            def _do_feed_in():
+                # 收集选中项
+                selected = [(i, c) for i, c in enumerate(candidates) if sel_vars[i].get()]
+                if not selected: messagebox.showinfo("提示", "请至少勾选一条", parent=dlg); return
+                status_var_feed = tk.StringVar(value="")
+                status_lbl = ttk.Label(btns, textvariable=status_var_feed, foreground="#1565C0")
+                status_lbl.pack(side=tk.LEFT, padx=16)
+                status_var_feed.set(f"⏳ 写入 {len(selected)} 条 logic_reviews...")
+                dlg.update_idletasks()
+                import sqlite3 as _sql3
+                conn2 = _sql3.connect(self._ARTICLE_DB); cur2 = conn2.cursor()
+                written = 0; skipped = 0
+                for i, (sina, sname, mtype, mkey, art_id, snippet, src, _) in selected:
+                    try:
+                        # 去重: 同一 stock + 同标题的 logic 不重复写
+                        cur2.execute("SELECT id FROM logic_reviews WHERE stock_code=? AND article_title=?",
+                                     (sina, snippet[:80]))
+                        if cur2.fetchone(): skipped += 1; continue
+                        # 构造内容 (简洁版)
+                        content = f"【资讯匹配·{mtype}】来自 {src} 的文章提到 '{mkey}'。\n标题: {snippet}\n建议: 结合技术面判断是否跟进。"
+                        cur2.execute("INSERT INTO logic_reviews(stock_code,stock_name,review_type,content,author,source,article_title) VALUES(?,?,?,?,?,?,?)",
+                                     (sina, sname, "资讯匹配", content, "系统", src, snippet[:80]))
+                        written += 1
+                        # 同时给这篇文章打个"资讯匹配"标签 (自动)
+                        cur2.execute("SELECT id FROM tags WHERE name='资讯匹配'")
+                        tid_row = cur2.fetchone()
+                        if not tid_row:
+                            cur2.execute("INSERT INTO tags(name,category,color) VALUES('资讯匹配','操作方向','#607D8B')")
+                            tid_row = cur2.lastrowid
+                        tid = tid_row[0] if isinstance(tid_row, (tuple, list)) else tid_row
+                        cur2.execute("INSERT OR IGNORE INTO article_tags(article_id,tag_id) VALUES(?,?)", (art_id, tid))
+                        cur2.execute("UPDATE tags SET usage_count=usage_count+1 WHERE id=?", (tid,))
+                    except Exception as _e:
+                        print(f"[🔄喂入❌] {sina}: {_e}", flush=True)
+                        skipped += 1
+                conn2.commit(); conn2.close()
+                result_var.set(f"✅ 已写入 {written} 条 logic_reviews (跳过重复 {skipped} 条)")
+                status_var_feed.set(result_var.get())
+                messagebox.showinfo("✅ 喂入完成",
+                    f"遍历: {len(arts)} 篇\n匹配: {len(candidates)} 条候选\n勾选: {len(selected)} 条\n✅ 写入: {written} 条\n⏭️ 跳过重复: {skipped} 条\n\n👉 打开 ETF 联动 → 💡逻辑股评 tab 查看",
+                    parent=dlg)
+                # 刷新文章库列表
+                _refresh_list()
+                # 自动打开 ETF 联动 + 选中第一个匹配的股票
+                if written > 0:
+                    first_sina, first_sname = selected[0][1][0], selected[0][1][1]
+                    # 找到所属 ETF
+                    from src.ui.tab_stock_detail import ETF_HOLDERS as _EH2
+                    for ename, holders in _EH2.items():
+                        if any(s[0] == first_sina for s in holders):
+                            self._etf_link_prefill_name = ename; break
+                    self._show_etf_link_dialog()
+                    status.set(f"✅ 喂入完成 {written} 条 → 已打开 ETF 联动")
+                dlg.destroy()
+
+            ttk.Button(btns, text="✅ 确认喂入", command=_do_feed_in, width=14).pack(side=tk.RIGHT, padx=6)
+            ttk.Button(btns, text="取消", command=dlg.destroy, width=10).pack(side=tk.RIGHT)
+            status.set(f"✅ 遍历完成: {len(arts)} 篇 → {len(candidates)} 条候选 (股票{match_stock_cnt} / ETF{match_etf_cnt})")
+
         # ── 绑按钮 (索引已更新) ──
         tw = toolbar.winfo_children()
         tw[4].config(command=_refresh_list)              # 🔄刷新
@@ -6377,6 +6555,7 @@ class StockDetailMixin:
         tw[15].config(command=_do_delete)                 # 🗑️删除
         tw[16].config(command=_do_tag)                    # 🏷️打标签
         tw[18].config(command=_do_linked_analysis)        # 🔗联动分析
+        tw[19].config(command=_do_crawl_feed_in)          # 🔄遍历喂入 🆕
         tree.bind("<<TreeviewSelect>>", _load_detail)
         search_var.trace_add("write", lambda *_: _refresh_list())
         source_var.trace_add("write", lambda *_: _refresh_list())
