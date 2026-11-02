@@ -5457,5 +5457,621 @@ class StockDetailMixin:
             import traceback; traceback.print_exc()
             messagebox.showerror("错误", f"打开图像分析失败: {e}", parent=getattr(self, 'root', None))
 
+    # ═══════════════════════════════════════════════════════════════════
+    # 🏷️ 标签库 + 📚 文章库 — 完整实现
+    # ═══════════════════════════════════════════════════════════════════
+
+    # ── DB 路径 + 预设标签 ──
+    _ARTICLE_DB = "/Users/faronpan/Agent/stockyidong_project/data/stock_analysis.db"
+    _PRESET_TAGS = [
+        # 技术形态 (红橙系)
+        ("大涨", "技术形态", "#F44336"), ("大跌", "技术形态", "#4CAF50"),
+        ("涨停", "技术形态", "#FF5722"), ("跌停", "技术形态", "#00BCD4"),
+        ("连板", "技术形态", "#E91E63"), ("突破", "技术形态", "#9C27B0"),
+        ("回调", "技术形态", "#3F51B5"), ("金叉", "技术形态", "#8BC34A"),
+        ("死叉", "技术形态", "#FF9800"), ("底背离", "技术形态", "#00BCD4"),
+        ("顶背离", "技术形态", "#FF5722"), ("缩量整理", "技术形态", "#607D8B"),
+        ("V型反转", "技术形态", "#4CAF50"), ("箱体震荡", "技术形态", "#9E9E9E"),
+        # 量价
+        ("量增价涨", "量价", "#FF5722"), ("量增价跌", "量价", "#2196F3"),
+        ("缩量上涨", "量价", "#8BC34A"), ("放量滞涨", "量价", "#FF9800"),
+        ("巨量成交", "量价", "#E91E63"), ("地量见底", "量价", "#00BCD4"),
+        # 资金情绪 (蓝绿系)
+        ("主力净流入", "资金情绪", "#4CAF50"), ("主力净流出", "资金情绪", "#F44336"),
+        ("北向增持", "资金情绪", "#8BC34A"), ("北向减持", "资金情绪", "#FF9800"),
+        ("龙虎榜上榜", "资金情绪", "#9C27B0"), ("融资余额上升", "资金情绪", "#2196F3"),
+        # 题材概念 (多彩)
+        ("AI人工智能", "题材概念", "#2196F3"), ("半导体芯片", "题材概念", "#3F51B5"),
+        ("新能源", "题材概念", "#8BC34A"), ("光伏", "题材概念", "#FFC107"),
+        ("医药医疗", "题材概念", "#E91E63"), ("消费白酒", "题材概念", "#FF9800"),
+        ("军工", "题材概念", "#607D8B"), ("机器人", "题材概念", "#00BCD4"),
+        ("低空经济", "题材概念", "#9C27B0"), ("国产替代", "题材概念", "#4CAF50"),
+        ("算力", "题材概念", "#795548"), ("储能", "题材概念", "#009688"),
+        ("有色金属", "题材概念", "#FFD54F"), ("稀土", "题材概念", "#FF7043"),
+        # 操作方向 (基本色)
+        ("买入", "操作方向", "#4CAF50"), ("卖出", "操作方向", "#F44336"),
+        ("持有", "操作方向", "#2196F3"), ("观望", "操作方向", "#9E9E9E"),
+        ("抄底", "操作方向", "#00BCD4"), ("逃顶", "操作方向", "#FF9800"),
+        ("止损", "操作方向", "#F44336"), ("加仓", "操作方向", "#8BC34A"),
+    ]
+    _TAG_CATEGORIES = ["技术形态", "量价", "资金情绪", "题材概念", "操作方向"]
+
+    def _init_article_db(self):
+        """首次调用时建表 + 插入预设标签"""
+        import sqlite3 as _sql3
+        conn = _sql3.connect(self._ARTICLE_DB)
+        cur = conn.cursor()
+        # 表 1: 标签库
+        cur.execute("""CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            category TEXT DEFAULT '技术形态',
+            color TEXT DEFAULT '#1565C0',
+            usage_count INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        )""")
+        # 表 2: 文章库
+        cur.execute("""CREATE TABLE IF NOT EXISTS articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT, author TEXT, title TEXT, url TEXT,
+            content TEXT, stock_code TEXT DEFAULT '', stock_name TEXT DEFAULT '',
+            sentiment TEXT DEFAULT '', saved INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        )""")
+        # 表 3: 文章-标签关联 (多对多)
+        cur.execute("""CREATE TABLE IF NOT EXISTS article_tags (
+            article_id INTEGER, tag_id INTEGER,
+            PRIMARY KEY (article_id, tag_id)
+        )""")
+        # 预设标签 (如果还没插过)
+        cur.execute("SELECT COUNT(*) FROM tags")
+        if cur.fetchone()[0] == 0:
+            for name, cat, color in self._PRESET_TAGS:
+                cur.execute("INSERT OR IGNORE INTO tags(name,category,color) VALUES(?,?,?)", (name, cat, color))
+        conn.commit(); conn.close()
+
+    # ── 爬取函数 (akshare) ──
+    def _crawl_akshare_news(self, stock_code="", stock_name="", max_items=20):
+        """爬取 akshare 个股新闻 + 研报 → 返回 list of dict"""
+        results = []
+        try:
+            import akshare as ak
+            code6 = stock_code.replace(".SH", "").replace(".SZ", "").replace("sh", "").replace("sz", "")
+            if code6 and len(code6) == 6:
+                # 个股新闻
+                try:
+                    df = ak.stock_news_em(symbol=code6)
+                    if df is not None and len(df) > 0:
+                        for _, row in df.head(max_items).iterrows():
+                            results.append({
+                                "source": "东方财富新闻",
+                                "author": row.get("文章来源", "东财"),
+                                "title": row.get("新闻标题", ""),
+                                "url": row.get("新闻链接", ""),
+                                "content": row.get("新闻内容", ""),
+                                "stock_code": stock_code,
+                                "stock_name": stock_name,
+                                "created_at": str(row.get("发布时间", "")),
+                            })
+                except Exception: pass
+                # 研报
+                try:
+                    df2 = ak.stock_research_report_em(symbol=code6)
+                    if df2 is not None and len(df2) > 0:
+                        for _, row in df2.head(max_items).iterrows():
+                            results.append({
+                                "source": "机构研报",
+                                "author": row.get("机构名称", row.get("机构", "")),
+                                "title": row.get("研报标题", row.get("标题", "")),
+                                "url": "",
+                                "content": f"评级: {row.get('评级', '')} | 目标价: {row.get('目标价', '')}",
+                                "stock_code": stock_code,
+                                "stock_name": stock_name,
+                                "created_at": str(row.get("发布日期", row.get("日期", ""))),
+                            })
+                except Exception: pass
+        except Exception as _e:
+            print(f"[📚文章库❌爬取] {_e}", flush=True)
+        # 全局热帖 (stock_comment_em)
+        try:
+            import akshare as ak
+            df3 = ak.stock_comment_em()
+            if df3 is not None and len(df3) > 0:
+                for _, row in df3.head(max_items).iterrows():
+                    results.append({
+                        "source": "东财热帖",
+                        "author": row.get("作者", ""),
+                        "title": row.get("标题", row.get("帖子标题", "")),
+                        "url": row.get("链接", row.get("帖子链接", "")),
+                        "content": row.get("内容", ""),
+                        "stock_code": "", "stock_name": "",
+                        "created_at": str(row.get("时间", "")),
+                    })
+        except Exception: pass
+        return results
+
+    def _save_article_to_db(self, article):
+        """保存一篇文章到 articles 表, 返回 article_id"""
+        import sqlite3 as _sql3
+        conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+        cur.execute("INSERT INTO articles(source,author,title,url,content,stock_code,stock_name,saved) VALUES(?,?,?,?,?,?,?,1)",
+                    (article.get("source",""), article.get("author",""), article.get("title",""),
+                     article.get("url",""), article.get("content",""),
+                     article.get("stock_code",""), article.get("stock_name","")))
+        aid = cur.lastrowid; conn.commit(); conn.close()
+        return aid
+
+    # ── 🏷️ 标签浮窗 (核心组件) ──
+    def _show_tag_picker(self, parent, current_tag_ids=None, on_done=None):
+        """弹出标签浮窗: Notebook 分类 + 搜索 + Checkbutton 多选
+        返回选中的 tag_id list
+        """
+        import sqlite3 as _sql3
+        current_tag_ids = set(current_tag_ids or [])
+        conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+        cur.execute("SELECT id,name,category,color FROM tags ORDER BY category, name")
+        all_tags = cur.fetchall()  # [(id,name,cat,color), ...]
+        conn.close()
+
+        win = tk.Toplevel(parent)
+        win.title("🏷️ 选择标签"); win.geometry("520x480"); win.transient(parent); win.grab_set()
+        # 让浮窗居中
+        parent.update_idletasks()
+        px = parent.winfo_rootx() + parent.winfo_width()//2 - 260
+        py = parent.winfo_rooty() + parent.winfo_height()//2 - 240
+        win.geometry(f"+{max(0,px)}+{max(0,py)}")
+
+        # 搜索框
+        search_frame = ttk.Frame(win); search_frame.pack(fill=tk.X, padx=8, pady=(8, 4))
+        ttk.Label(search_frame, text="🔍 搜索标签:").pack(side=tk.LEFT)
+        search_var = tk.StringVar()
+        search_entry = ttk.Entry(search_frame, textvariable=search_var, width=30)
+        search_entry.pack(side=tk.LEFT, padx=4)
+
+        # Notebook 分类 tab
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        check_vars = {}  # tag_id → BooleanVar
+        check_widgets = {}  # tag_id → Checkbutton
+
+        def _build_category_tab(cat_name):
+            frame = ttk.Frame(nb)
+            nb.add(frame, text=f"🏷️ {cat_name}")
+            canvas = tk.Canvas(frame, highlightthickness=0)
+            vs = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=canvas.yview)
+            inner = ttk.Frame(canvas)
+            inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+            canvas.create_window((0,0), window=inner, anchor="nw")
+            canvas.configure(yscrollcommand=vs.set)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); vs.pack(side=tk.RIGHT, fill=tk.Y)
+            # 放标签
+            tags_in_cat = [(tid, tname, tcolor) for tid, tname, tcat, tcolor in all_tags if tcat == cat_name]
+            for i, (tid, tname, tcolor) in enumerate(tags_in_cat):
+                var = tk.BooleanVar(value=(tid in current_tag_ids))
+                check_vars[tid] = var
+                cb = ttk.Checkbutton(inner, text=tname, variable=var, width=12)
+                cb.grid(row=i//3, column=i%3, sticky="w", padx=4, pady=2)
+                # 给文字上色
+                try:
+                    # 用 tk 原生 Checkbutton 才能改前景色
+                    cb.destroy()
+                    cb2 = tk.Checkbutton(inner, text=tname, variable=var, fg=tcolor, activeforeground=tcolor,
+                                        selectcolor="#FFFFFF", width=12, anchor="w")
+                    cb2.grid(row=i//3, column=i%3, sticky="w", padx=4, pady=2)
+                    check_widgets[tid] = cb2
+                except Exception:
+                    check_widgets[tid] = cb
+            return frame, canvas, inner
+
+        # 动态构建所有分类 tab
+        tabs_info = {}
+        for cat in self._TAG_CATEGORIES:
+            t, cv, inner = _build_category_tab(cat)
+            tabs_info[cat] = (t, cv, inner)
+
+        # 底部已选标签展示
+        sel_frame = ttk.Frame(win); sel_frame.pack(fill=tk.X, padx=8, pady=4)
+        ttk.Label(sel_frame, text="已选:").pack(side=tk.LEFT)
+        sel_label = ttk.Label(sel_frame, text="(无)", foreground="#666")
+        sel_label.pack(side=tk.LEFT, padx=4)
+
+        def _update_sel_label(*_):
+            sel = [tid for tid, v in check_vars.items() if v.get()]
+            names = []
+            for tid in sel:
+                for t in all_tags:
+                    if t[0] == tid: names.append(t[1]); break
+            sel_label.config(text=f"{len(sel)} 个标签: {', '.join(names[:6])}{'...' if len(names)>6 else ''}")
+
+        # 绑定所有 var 变化
+        for v in check_vars.values():
+            v.trace_add("write", _update_sel_label)
+
+        # 搜索过滤
+        def _on_search(*_):
+            kw = search_var.get().strip()
+            for cat, (frame, canvas, inner) in tabs_info.items():
+                for child in inner.winfo_children():
+                    child.destroy()
+                tags_in_cat = [(tid, tname, tcolor) for tid, tname, tcat, tcolor in all_tags
+                               if tcat == cat and (kw in tname or not kw)]
+                for i, (tid, tname, tcolor) in enumerate(tags_in_cat):
+                    var = check_vars.get(tid) or tk.BooleanVar(value=(tid in current_tag_ids))
+                    check_vars[tid] = var
+                    cb = tk.Checkbutton(inner, text=tname, variable=var, fg=tcolor,
+                                        activeforeground=tcolor, selectcolor="#FFFFFF", width=12, anchor="w")
+                    cb.grid(row=i//3, column=i%3, sticky="w", padx=4, pady=2)
+
+        search_var.trace_add("write", _on_search)
+
+        # 按钮
+        btns = ttk.Frame(win); btns.pack(fill=tk.X, padx=8, pady=8)
+        result = {"tags": None}
+
+        def _confirm():
+            result["tags"] = [tid for tid, v in check_vars.items() if v.get()]
+            if on_done: on_done(result["tags"])
+            win.destroy()
+
+        ttk.Button(btns, text="✅ 确定", command=_confirm, width=10).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btns, text="取消", command=win.destroy, width=10).pack(side=tk.RIGHT)
+        ttk.Button(btns, text="🆕新增标签", width=10,
+                  command=lambda: self._add_tag_inline(win, all_tags, tabs_info, check_vars, _on_search)).pack(side=tk.LEFT)
+
+        win.wait_window()
+        return result["tags"]
+
+    def _add_tag_inline(self, parent, all_tags, tabs_info, check_vars, refresh_fn):
+        """浮窗内快速新增标签"""
+        name = simpledialog.askstring("🆕 新增标签", "标签名称:", parent=parent)
+        if not name: return
+        cat = simpledialog.askstring("🆕 新增标签", f"分类 ({'/'.join(self._TAG_CATEGORIES)}):",
+                                     initialvalue="技术形态", parent=parent)
+        if cat not in self._TAG_CATEGORIES: cat = "技术形态"
+        import sqlite3 as _sql3
+        conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+        cur.execute("INSERT OR IGNORE INTO tags(name,category,color) VALUES(?,?,?)", (name, cat, "#1565C0"))
+        conn.commit(); conn.close()
+        messagebox.showinfo("✅", f"标签 '{name}' 已添加到 {cat} 分类", parent=parent)
+
+    # ── 📚 文章库弹窗 ──
+    def _show_article_library_dialog(self, prefill_stock_code="", prefill_stock_name=""):
+        """完整文章库: 列表 + 筛选 + 爬取 + 查看 + 打标签"""
+        self._init_article_db()
+        import sqlite3 as _sql3
+        win = tk.Toplevel(getattr(self, "root", None) or tk.Tk())
+        win.title("📚 文章库 — 爬取+归档+打标签"); win.geometry("1100x720")
+        win.transient(getattr(self, "root", None) or win.master)
+
+        # 工具栏
+        toolbar = ttk.Frame(win); toolbar.pack(fill=tk.X, padx=8, pady=6)
+        ttk.Label(toolbar, text="🔍搜索:").pack(side=tk.LEFT)
+        search_var = tk.StringVar()
+        ttk.Entry(toolbar, textvariable=search_var, width=20).pack(side=tk.LEFT, padx=4)
+        ttk.Label(toolbar, text="来源:").pack(side=tk.LEFT, padx=(8,0))
+        source_var = tk.StringVar(value="全部")
+        ttk.Combobox(toolbar, textvariable=source_var, values=["全部","东方财富新闻","机构研报","东财热帖","手动导入"], width=12, state="readonly").pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🔄刷新", width=7).pack(side=tk.LEFT, padx=4)
+
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+        # 爬取区
+        ttk.Label(toolbar, text="📥爬取:").pack(side=tk.LEFT)
+        crawl_stock_var = tk.StringVar(value=prefill_stock_code or "")
+        ttk.Entry(toolbar, textvariable=crawl_stock_var, width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🚀爬个股新闻", width=14).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🌐全站热帖", width=10).pack(side=tk.LEFT, padx=2)
+
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+        ttk.Button(toolbar, text="➕新增", width=7).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🗑️删除", width=7).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="🏷️打标签", width=8).pack(side=tk.LEFT, padx=2)
+
+        # 主区: 左列表 + 右详情
+        paned = ttk.PanedWindow(win, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+        # 左: Treeview
+        left_frame = ttk.Frame(paned); paned.add(left_frame, weight=3)
+        cols = ("id", "title", "source", "stock", "time")
+        tree = ttk.Treeview(left_frame, columns=cols, show="headings", height=20)
+        for c, t, w in [("id","#",45),("title","标题",320),("source","来源",100),("stock","股票",100),("time","时间",110)]:
+            tree.heading(c, text=t); tree.column(c, width=w, anchor="w", stretch=True)
+        vs = ttk.Scrollbar(left_frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=vs.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); vs.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.tag_configure("saved", background="#E8F5E9")
+        tree.tag_configure("hot", foreground="#D32F2F")
+
+        # 右: 详情 + 标签
+        right_frame = ttk.Frame(paned); paned.add(right_frame, weight=4)
+        r_top = ttk.Frame(right_frame); r_top.pack(fill=tk.X, pady=(0, 4))
+        r_title_var = tk.StringVar(value="⬅️ 左侧选中文章查看详情")
+        ttk.Label(r_top, textvariable=r_title_var, font=("", 12, "bold"), wraplength=500).pack(anchor="w")
+        r_meta_var = tk.StringVar(value="")
+        ttk.Label(r_top, textvariable=r_meta_var, foreground="#666").pack(anchor="w")
+
+        # 当前标签 chip 区
+        tags_frame = ttk.LabelFrame(r_top, text="🏷️ 已打标签", padding=4)
+        tags_frame.pack(fill=tk.X, pady=4)
+        tags_chips_var = tk.StringVar(value="(无)")
+        ttk.Label(tags_frame, textvariable=tags_chips_var, foreground="#1565C0").pack(side=tk.LEFT)
+
+        # 内容 text
+        content_text = tk.Text(right_frame, wrap="word", font=("PingFang SC", 10), height=22, bg="#FAFAFA")
+        content_text.pack(fill=tk.BOTH, expand=True)
+
+        status = tk.StringVar(value="就绪")
+        ttk.Label(win, textvariable=status, anchor="w").pack(fill=tk.X, padx=8, pady=2)
+
+        # ── 刷新列表 ──
+        def _refresh_list():
+            for iid in tree.get_children(): tree.delete(iid)
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            kw = search_var.get().strip()
+            src = source_var.get()
+            sql = "SELECT id,title,source,COALESCE(stock_code,''),COALESCE(stock_name,''),COALESCE(created_at,'') FROM articles WHERE 1=1"
+            params = []
+            if kw: sql += " AND (title LIKE ? OR content LIKE ?)"; params.extend([f"%{kw}%", f"%{kw}%"])
+            if src != "全部": sql += " AND source=?"; params.append(src)
+            sql += " ORDER BY id DESC LIMIT 500"
+            cur.execute(sql, params)
+            for row in cur.fetchall():
+                aid, title, src2, scode, sname, ctime = row
+                stock_col = f"{sname}({scode})" if sname else scode
+                tag = "saved"
+                tree.insert("", "end", values=(aid, title[:80], src2, stock_col, ctime), tags=(tag,))
+            conn.close()
+            status.set(f"📚 共显示 {len(tree.get_children())} 篇文章")
+
+        def _load_detail(_evt=None):
+            sel = tree.selection();
+            if not sel: return
+            vals = tree.item(sel[0], "values"); aid = vals[0]
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            cur.execute("SELECT title,author,source,url,content,stock_code,stock_name,created_at FROM articles WHERE id=?", (aid,))
+            row = cur.fetchone()
+            # 标签
+            cur.execute("SELECT t.id,t.name,t.color FROM tags t JOIN article_tags at ON t.id=at.tag_id WHERE at.article_id=?", (aid,))
+            atags = cur.fetchall()
+            conn.close()
+            if not row: return
+            title, author, source, url, content, scode, sname, ctime = row
+            r_title_var.set(title)
+            r_meta_var.set(f"✍️ {author}  |  📌 {source}  |  📅 {ctime}  |  🔗 {url[:60]}")
+            content_text.config(state="normal"); content_text.delete("1.0", "end")
+            content_text.insert("end", content or "(正文为空)"); content_text.config(state="disabled")
+            # 标签 chips
+            if atags:
+                chip_str = "  ".join(f"[{n}]" for _, n, _ in atags)
+                tags_chips_var.set(chip_str)
+            else:
+                tags_chips_var.set("(无标签)")
+            # 保存当前 aid 到 closure
+            _current_article_id[0] = aid
+            _current_tags_ids[0] = [t[0] for t in atags]
+
+        _current_article_id = [None]
+        _current_tags_ids = [[]]
+
+        # ── 爬取 ──
+        def _do_crawl_stock():
+            code = crawl_stock_var.get().strip()
+            if not code: messagebox.showinfo("提示", "请输入股票代码 (如 002230)", parent=win); return
+            status.set(f"⏳ 爬取 {code} 新闻..."); win.update_idletasks()
+            items = self._crawl_akshare_news(stock_code=code, max_items=15)
+            saved = 0
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            for a in items:
+                cur.execute("SELECT id FROM articles WHERE url=? AND title=?", (a.get("url",""), a.get("title","")))
+                if cur.fetchone(): continue
+                cur.execute("INSERT INTO articles(source,author,title,url,content,stock_code,stock_name,saved) VALUES(?,?,?,?,?,?,?,1)",
+                            (a.get("source",""), a.get("author",""), a.get("title",""), a.get("url",""),
+                             a.get("content",""), a.get("stock_code",""), a.get("stock_name","")))
+                saved += 1
+            conn.commit(); conn.close()
+            _refresh_list()
+            status.set(f"✅ 爬取完成: 新增 {saved} 篇 (共 {len(items)} 条)")
+
+        def _do_crawl_global():
+            status.set("⏳ 爬取全站热帖..."); win.update_idletasks()
+            items = self._crawl_akshare_news(max_items=30)
+            saved = 0
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            for a in items:
+                cur.execute("INSERT OR IGNORE INTO articles(source,author,title,url,content,stock_code,stock_name,saved) VALUES(?,?,?,?,?,?,?,1)",
+                            (a.get("source",""), a.get("author",""), a.get("title",""), a.get("url",""),
+                             a.get("content",""), a.get("stock_code",""), a.get("stock_name","")))
+                if cur.rowcount > 0: saved += 1
+            conn.commit(); conn.close()
+            _refresh_list()
+            status.set(f"✅ 全站热帖: 新增 {saved} 篇")
+
+        # ── 打标签 ──
+        def _do_tag():
+            aid = _current_article_id[0]
+            if not aid: messagebox.showinfo("提示", "请先选中文章", parent=win); return
+            selected = self._show_tag_picker(win, current_tag_ids=_current_tags_ids[0])
+            if selected is None: return
+            import sqlite3 as _sql3
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            cur.execute("DELETE FROM article_tags WHERE article_id=?", (aid,))
+            for tid in selected:
+                cur.execute("INSERT OR IGNORE INTO article_tags(article_id,tag_id) VALUES(?,?)", (aid, tid))
+                cur.execute("UPDATE tags SET usage_count=usage_count+1 WHERE id=?", (tid,))
+            conn.commit(); conn.close()
+            _load_detail()
+            status.set(f"✅ 已为 #{aid} 打 {len(selected)} 个标签")
+
+        # ── 新增手动 ──
+        def _do_add_manual():
+            dlg = tk.Toplevel(win); dlg.title("➕ 手动新增文章"); dlg.geometry("560x460")
+            dlg.transient(win); dlg.grab_set()
+            ttk.Label(dlg, text="来源:").grid(row=0, column=0, padx=8, pady=(10,2), sticky="e")
+            src_v = tk.StringVar(value="手动导入")
+            ttk.Entry(dlg, textvariable=src_v, width=40).grid(row=0, column=1, pady=(10,2), sticky="w")
+            ttk.Label(dlg, text="标题:").grid(row=1, column=0, padx=8, pady=2, sticky="e")
+            tit_v = tk.StringVar()
+            ttk.Entry(dlg, textvariable=tit_v, width=40).grid(row=1, column=1, pady=2, sticky="w")
+            ttk.Label(dlg, text="作者:").grid(row=2, column=0, padx=8, pady=2, sticky="e")
+            auth_v = tk.StringVar()
+            ttk.Entry(dlg, textvariable=auth_v, width=40).grid(row=2, column=1, pady=2, sticky="w")
+            ttk.Label(dlg, text="URL:").grid(row=3, column=0, padx=8, pady=2, sticky="e")
+            url_v = tk.StringVar()
+            ttk.Entry(dlg, textvariable=url_v, width=40).grid(row=3, column=1, pady=2, sticky="w")
+            ttk.Label(dlg, text="股票:").grid(row=4, column=0, padx=8, pady=2, sticky="e")
+            stk_v = tk.StringVar(value=prefill_stock_code or "")
+            ttk.Entry(dlg, textvariable=stk_v, width=40).grid(row=4, column=1, pady=2, sticky="w")
+            ttk.Label(dlg, text="正文:").grid(row=5, column=0, padx=8, pady=2, sticky="ne")
+            body_txt = tk.Text(dlg, width=42, height=12); body_txt.grid(row=5, column=1, pady=2, sticky="nsew")
+            dlg.rowconfigure(5, weight=1); dlg.columnconfigure(1, weight=1)
+
+            def _save():
+                body = body_txt.get("1.0","end").strip()
+                if not tit_v.get(): messagebox.showwarning("提示", "标题不能为空", parent=dlg); return
+                conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+                cur.execute("INSERT INTO articles(source,author,title,url,content,stock_code,saved) VALUES(?,?,?,?,?,?,1)",
+                            (src_v.get(), auth_v.get(), tit_v.get(), url_v.get(), body, stk_v.get()))
+                conn.commit(); conn.close()
+                dlg.destroy(); _refresh_list(); status.set(f"✅ 已新增: {tit_v.get()[:30]}")
+            ttk.Button(dlg, text="💾保存", command=_save, width=10).grid(row=6, column=1, pady=8, sticky="e")
+
+        # ── 删除 ──
+        def _do_delete():
+            sel = tree.selection()
+            if not sel: return
+            if not messagebox.askyesno("确认", f"删除选中的 {len(sel)} 篇文章?", parent=win): return
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            for s in sel:
+                aid = tree.item(s, "values")[0]
+                cur.execute("DELETE FROM article_tags WHERE article_id=?", (aid,))
+                cur.execute("DELETE FROM articles WHERE id=?", (aid,))
+            conn.commit(); conn.close()
+            _refresh_list(); _current_article_id[0] = None; tags_chips_var.set("(无)"); r_title_var.set("⬅️ 左侧选中文章")
+
+        # ── 绑按钮 ──
+        toolbar.winfo_children()[3].config(command=_refresh_list)          # 🔄刷新
+        toolbar.winfo_children()[7].config(command=_do_crawl_stock)        # 🚀爬个股
+        toolbar.winfo_children()[9].config(command=_do_crawl_global)       # 🌐全站
+        toolbar.winfo_children()[12].config(command=_do_add_manual)        # ➕新增
+        toolbar.winfo_children()[14].config(command=_do_delete)            # 🗑️删除
+        toolbar.winfo_children()[16].config(command=_do_tag)               # 🏷️打标签
+        tree.bind("<<TreeviewSelect>>", _load_detail)
+        search_var.trace_add("write", lambda *_: _refresh_list())
+        source_var.trace_add("write", lambda *_: _refresh_list())
+
+        # 初始加载
+        _refresh_list()
+        if prefill_stock_code:
+            crawl_stock_var.set(prefill_stock_code)
+
+    # ── 🏷️ 标签库维护弹窗 ──
+    def _show_tag_manager_dialog(self):
+        """完整标签 CRUD + 预设管理"""
+        self._init_article_db()
+        import sqlite3 as _sql3
+        win = tk.Toplevel(getattr(self, "root", None) or tk.Tk())
+        win.title("🏷️ 标签库管理"); win.geometry("860x620")
+        win.transient(getattr(self, "root", None) or win.master)
+
+        # 工具栏
+        tb = ttk.Frame(win); tb.pack(fill=tk.X, padx=8, pady=6)
+        ttk.Label(tb, text="分类:").pack(side=tk.LEFT)
+        cat_var = tk.StringVar(value="全部")
+        ttk.Combobox(tb, textvariable=cat_var, values=["全部"] + self._TAG_CATEGORIES, width=10, state="readonly").pack(side=tk.LEFT, padx=4)
+        ttk.Button(tb, text="🔄刷新", width=7).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(tb, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+        ttk.Button(tb, text="➕新增", width=7).pack(side=tk.LEFT, padx=2)
+        ttk.Button(tb, text="✏️编辑", width=7).pack(side=tk.LEFT, padx=2)
+        ttk.Button(tb, text="🗑️删除", width=7).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(tb, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+        ttk.Button(tb, text="📥导入预设40+标签", width=16).pack(side=tk.LEFT, padx=2)
+
+        # 列表
+        cols = ("id", "name", "category", "color", "usage", "created")
+        tree = ttk.Treeview(win, columns=cols, show="headings", height=22)
+        for c, t, w in [("id","#",45),("name","标签名",120),("category","分类",100),("color","颜色",80),("usage","使用次数",80),("created","创建时间",150)]:
+            tree.heading(c, text=t); tree.column(c, width=w, anchor="w", stretch=False)
+        tree.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        tree.tag_configure("has_usage", background="#E3F2FD")
+
+        def _refresh():
+            for iid in tree.get_children(): tree.delete(iid)
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            cat = cat_var.get()
+            sql = "SELECT id,name,category,color,usage_count,created_at FROM tags"
+            if cat != "全部": sql += " WHERE category=?"; cur.execute(sql, (cat,))
+            else: cur.execute(sql)
+            for row in cur.fetchall():
+                r = "has_usage" if row[4] > 0 else ""
+                tree.insert("", "end", values=row, tags=(r,))
+            conn.close()
+
+        def _add_tag():
+            dlg = tk.Toplevel(win); dlg.title("➕ 新增标签"); dlg.geometry("380x240"); dlg.transient(win); dlg.grab_set()
+            ttk.Label(dlg, text="标签名:").grid(row=0, column=0, padx=8, pady=(15,4), sticky="e")
+            n_var = tk.StringVar()
+            ttk.Entry(dlg, textvariable=n_var, width=24).grid(row=0, column=1, pady=(15,4), sticky="w")
+            ttk.Label(dlg, text="分类:").grid(row=1, column=0, padx=8, pady=4, sticky="e")
+            c_var = tk.StringVar(value="技术形态")
+            ttk.Combobox(dlg, textvariable=c_var, values=self._TAG_CATEGORIES, width=10, state="readonly").grid(row=1, column=1, pady=4, sticky="w")
+            ttk.Label(dlg, text="颜色(Hex):").grid(row=2, column=0, padx=8, pady=4, sticky="e")
+            col_var = tk.StringVar(value="#1565C0")
+            ttk.Entry(dlg, textvariable=col_var, width=24).grid(row=2, column=1, pady=4, sticky="w")
+            def _save():
+                conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+                try:
+                    cur.execute("INSERT INTO tags(name,category,color) VALUES(?,?,?)", (n_var.get(), c_var.get(), col_var.get()))
+                    conn.commit(); conn.close(); dlg.destroy(); _refresh()
+                except Exception as _e:
+                    messagebox.showerror("错误", f"重复? {_e}", parent=dlg)
+            ttk.Button(dlg, text="💾保存", command=_save, width=10).grid(row=3, column=1, pady=12, sticky="e")
+
+        def _edit_tag():
+            sel = tree.selection();
+            if not sel: return
+            row = tree.item(sel[0], "values"); tid = row[0]
+            dlg = tk.Toplevel(win); dlg.title(f"✏️ 编辑 #{tid}"); dlg.geometry("380x240"); dlg.transient(win); dlg.grab_set()
+            ttk.Label(dlg, text="标签名:").grid(row=0, column=0, padx=8, pady=(15,4), sticky="e")
+            n_var = tk.StringVar(value=row[1])
+            ttk.Entry(dlg, textvariable=n_var, width=24).grid(row=0, column=1, pady=(15,4), sticky="w")
+            ttk.Label(dlg, text="分类:").grid(row=1, column=0, padx=8, pady=4, sticky="e")
+            c_var = tk.StringVar(value=row[2])
+            ttk.Combobox(dlg, textvariable=c_var, values=self._TAG_CATEGORIES, width=10, state="readonly").grid(row=1, column=1, pady=4, sticky="w")
+            ttk.Label(dlg, text="颜色(Hex):").grid(row=2, column=0, padx=8, pady=4, sticky="e")
+            col_var = tk.StringVar(value=row[3])
+            ttk.Entry(dlg, textvariable=col_var, width=24).grid(row=2, column=1, pady=4, sticky="w")
+            def _save():
+                conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+                cur.execute("UPDATE tags SET name=?, category=?, color=? WHERE id=?", (n_var.get(), c_var.get(), col_var.get(), tid))
+                conn.commit(); conn.close(); dlg.destroy(); _refresh()
+            ttk.Button(dlg, text="💾保存", command=_save, width=10).grid(row=3, column=1, pady=12, sticky="e")
+
+        def _del_tag():
+            sel = tree.selection();
+            if not sel: return
+            ids = [tree.item(s, "values")[0] for s in sel]
+            if not messagebox.askyesno("确认", f"删除 {len(ids)} 个标签? (关联文章会保留)", parent=win): return
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            for tid in ids:
+                cur.execute("DELETE FROM article_tags WHERE tag_id=?", (tid,))
+                cur.execute("DELETE FROM tags WHERE id=?", (tid,))
+            conn.commit(); conn.close(); _refresh()
+
+        def _import_preset():
+            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+            inserted = 0
+            for name, cat, color in self._PRESET_TAGS:
+                cur.execute("INSERT OR IGNORE INTO tags(name,category,color) VALUES(?,?,?)", (name, cat, color))
+                if cur.rowcount > 0: inserted += 1
+            conn.commit(); conn.close(); _refresh()
+            messagebox.showinfo("✅", f"已导入 {inserted} 个预设标签", parent=win)
+
+        tb.winfo_children()[2].config(command=_refresh)
+        tb.winfo_children()[5].config(command=_add_tag)
+        tb.winfo_children()[7].config(command=_edit_tag)
+        tb.winfo_children()[9].config(command=_del_tag)
+        tb.winfo_children()[12].config(command=_import_preset)
+        cat_var.trace_add("write", lambda *_: _refresh())
+        _refresh()
+
 
 __all__ = ["StockDetailMixin"]

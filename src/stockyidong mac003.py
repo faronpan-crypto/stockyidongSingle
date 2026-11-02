@@ -4706,6 +4706,8 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("🌏纳指套利", 10, self._show_etf_holiday_dialog),
             ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
             ("📊ETF联动", 10, self._show_etf_link_dialog),
+            ("🏷️标签库", 9, self._show_tag_manager_dialog),
+            ("📚文章库", 9, self._show_article_library_dialog),
             ("📱日报", 7, self._show_wechat_dialog),
             ("🖼️图像分析", 9, self._show_image_analysis_dialog),
         ]
