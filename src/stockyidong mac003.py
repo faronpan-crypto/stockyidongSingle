@@ -431,8 +431,9 @@ from ui.tab_render import RenderMixin
 from ui.tab_rest import RestMixin
 from ui.tab_toplevel import ToplevelMixin
 from ui.tab_web import WebMixin
+from ui.tab_ifind import IfindMixin
 
-class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ConfigMixin, CrawlerMixin, ChouMaMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, ExportMixin, FileIoMixin, FinanceMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, WarningMixin, WebMixin, WencaiMixin, WordcloudMixin, BetaAlphaMixin):
+class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ConfigMixin, CrawlerMixin, ChouMaMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, ExportMixin, FileIoMixin, FinanceMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IfindMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, WarningMixin, WebMixin, WencaiMixin, WordcloudMixin, BetaAlphaMixin):
 
     def __init__(self, root):
         self.root = root
@@ -4724,7 +4725,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             else:
                 ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(**_pad)
 
-        # ── Row 2: 🎯 选股 / 量化 / 机会 (actionable) — 精简到 6 个 ──
+        # ── Row 2: 🎯 选股 / 量化 / 机会 (actionable) — 精简到 7 个 ──
         _ROW2 = [
             ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
             ("🤖量化总览", 9, self._show_quant_dialog),
@@ -4732,6 +4733,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("🪙筹码", 7, self._show_chouma),
             ("🎯机会", 7, self._show_jianlou),
             ("🎯高抛低吸", 8, self._show_high_low_swing),
+            ("🔷同花顺", 9, self._show_ths_ifind_dialog),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW2):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
