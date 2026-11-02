@@ -15385,6 +15385,8 @@ class DapanMixin:
                     for k, v in r.items():
                         if isinstance(v, (str, int, float, bool)) or v is None:
                             sr[k] = v
+                        elif isinstance(v, list):
+                            sr[k] = [x for x in v if isinstance(x, (str, int, float, bool))]
                     _safe_rows.append(sr)
                 _os.makedirs(_os.path.dirname(_cache_path), exist_ok=True)
                 with open(_cache_path, "w", encoding="utf-8") as f:

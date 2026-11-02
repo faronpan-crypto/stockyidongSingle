@@ -3761,6 +3761,33 @@ class StockDetailMixin:
             for _bn, _cs in BLOCK_MAP_LOCAL.items():
                 for _c in _cs: CODE_TO_BLOCK[_c] = _bn
 
+            # 🆕 名称关键词 → 板块 映射 (扩展覆盖率)
+            _NAME_KW_BLOCK = [
+                ("白酒", "白酒"), ("茅台", "白酒"), ("五粮液", "白酒"), ("汾酒", "白酒"), ("老窖", "白酒"),
+                ("医药", "医药医疗"), ("生物", "医药医疗"), ("健康", "医药医疗"), ("药", "医药医疗"),
+                ("医疗", "医药医疗"), ("药业", "医药医疗"), ("医院", "医药医疗"),
+                ("半导体", "半导体"), ("芯片", "半导体"), ("集成电路", "半导体"), ("微电子", "半导体"),
+                ("电子", "半导体"), ("紫光", "半导体"), ("中芯", "半导体"), ("韦尔", "半导体"),
+                ("AI", "AI算力"), ("人工智能", "AI算力"), ("讯飞", "AI算力"), ("智能", "AI算力"),
+                ("科技", "AI算力"), ("数据", "AI算力"), ("信息", "AI算力"),
+                ("新能源", "新能源"), ("电池", "新能源"), ("宁德", "新能源"), ("比亚迪", "新能源"),
+                ("隆基", "光伏"), ("光伏", "光伏"), ("阳光", "光伏"),
+                ("军工", "军工"), ("航空", "军工"), ("航天", "军工"), ("雷达", "军工"), ("船舶", "军工"),
+                ("黄金", "黄金有色"), ("有色", "黄金有色"), ("紫金", "黄金有色"), ("铜", "黄金有色"),
+                ("银行", "金融保险"), ("招商", "金融保险"), ("平安", "金融保险"), ("证券", "金融保险"),
+                ("保险", "金融保险"), ("中信", "金融保险"),
+                ("汽车", "新能源"), ("上汽", "新能源"), ("长城", "新能源"),
+                ("地产", "消费家电"), ("建材", "消费家电"), ("海螺", "消费家电"),
+                ("机械", "消费家电"), ("三一", "消费家电"),
+                ("消费", "消费家电"), ("食品", "消费家电"), ("伊利", "消费家电"), ("家电", "消费家电"),
+                ("煤炭", "黄金有色"), ("能源", "黄金有色"), ("电力", "黄金有色"),
+                ("石油", "黄金有色"), ("石化", "黄金有色"),
+            ]
+            def _match_block_by_name(sname):
+                for _kw, _bn in _NAME_KW_BLOCK:
+                    if _kw in sname: return _bn
+                return ""
+
             # 中文名缓存 (从热股池构建 + 兜底)
             CODE_TO_NAME = {}
             for _r in rows:
@@ -3968,12 +3995,16 @@ class StockDetailMixin:
                     if r.get("code","") == sina_code:
                         freq = r.get("freq",1); pct = r.get("pct",0)
                         label = f"📯淘 提及{freq}次  涨跌{pct:+.2f}%  [{r.get('origin','淘股吧')}]"
-                        items.append((label, "hot" if freq>=10 else "taoguba"))
+                        items.append((label, "hot" if freq>=10 else "taoguba", None))
+                        for _art in r.get("articles", [])[:3]:
+                            if _art: items.append((f"  📄 {_art}", "taoguba_art", "taoguba"))
                 for r in (getattr(self, '_jiuyan_stamp_data', None) or []):
                     if r.get("code","") == sina_code:
                         freq = r.get("freq",1); pct = r.get("pct",0)
                         label = f"🧭韭 提及{freq}次  涨跌{pct:+.2f}%  [{r.get('origin','韭研')}]"
-                        items.append((label, "hot" if freq>=10 else "jiuyan"))
+                        items.append((label, "hot" if freq>=10 else "jiuyan", None))
+                        for _art in r.get("articles", [])[:3]:
+                            if _art: items.append((f"  📄 {_art}", "jiuyan_art", "jiuyan"))
                 try:
                     for _dp in [_os_src.path.join(_os_src.path.dirname(__file__), "..", "stock_analysis.db"),
                                 "stock_analysis.db", _os_src.path.join(_os_src.getcwd(), "data", "stock_analysis.db")]:
@@ -3986,13 +4017,18 @@ class StockDetailMixin:
                                 for row in cur.fetchall():
                                     content = (row[0] or "")[:60]; source = row[1] or ""; ca = row[2] or ""
                                     label = f"📝{source}  {ca[:10]}  {content}{'...' if len(str(row[0] or ''))>60 else ''}"
-                                    items.append((label, "db"))
+                                    items.append((label, "db", None))
                             conn.close(); break
                 except: pass
-                for txt, tag in items:
+                _ART_FG = {"taoguba_art": "#1565C0", "jiuyan_art": "#2E7D32"}
+                _ART_BOLD = {"taoguba", "jiuyan", "hot"}
+                for txt, tag, _src_ref in items:
                     news_lb.insert(tk.END, txt)
-                    try: news_lb.itemconfig(tk.END, fg=_NEWS_TAG_FG.get(tag, "#5D4037"),
-                                             font=("",10,"bold") if tag in _NEWS_TAG_BOLD else ("",10))
+                    try:
+                        _fg = _NEWS_TAG_FG.get(tag, "#5D4037")
+                        if tag in _ART_FG: _fg = _ART_FG[tag]
+                        _bold = (tag in _ART_BOLD)
+                        news_lb.itemconfig(tk.END, fg=_fg, font=("",10,"bold") if _bold else ("",10))
                     except: news_lb.itemconfig(tk.END, fg=_NEWS_TAG_FG.get(tag, "#5D4037"))
                 if not items: news_lb.insert(tk.END, f"  (无匹配资讯 — {sname} 不在淘韭热股池)")
                 news_lbl.configure(text=f"{len(items)} 条资讯", fg="#333")
@@ -4000,7 +4036,7 @@ class StockDetailMixin:
             # ═══ 辅助: 刷板块强度 (红绿比例条 + 板块个股Treeview) ═══
             def _fill_block(block_frame, block_lbl, block_placeholder, block_cache, sina_code, sname):
                 for w in block_frame.winfo_children(): w.destroy()
-                block = CODE_TO_BLOCK.get(sina_code, "")
+                block = CODE_TO_BLOCK.get(sina_code, "") or _match_block_by_name(sname)
                 if not block:
                     tk.Label(block_frame, text=f"❌ {sname} 未匹配到板块\n当前支持: {', '.join(BLOCK_MAP_LOCAL.keys())}",
                              font=("",11), bg="#FAFAFA", fg="#E53935", justify="center").pack(expand=True)
@@ -4424,12 +4460,13 @@ class StockDetailMixin:
                 fig4.tight_layout(); FCA(fig4, t4).get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
             # ═══ 联动回调 ═══
+            _bg_busy = [False]  # 仅后台算 K 线时保护 _build_right_kline 重入
             def _on_left_select(evt=None):
                 sel = ltree.selection()
                 if not sel: return
                 idx = int(sel[0]); row = rows[idx]
                 sina = row.get("code",""); sname = row.get("name","")
-                block = CODE_TO_BLOCK.get(sina, "")
+                block = CODE_TO_BLOCK.get(sina, "") or _match_block_by_name(sname)
                 # 刷中列 Tab1: 关联个股
                 for _i in mtree.get_children(): mtree.delete(_i)
                 peers = _find_peers(sina)
@@ -4444,20 +4481,25 @@ class StockDetailMixin:
                     _mid_rows.append({"sina":sc,"name":peer_name})
                 if not peers: mid_lbl.configure(text=f"{block or '未归类'} · 无关联", fg="#999")
                 else: mid_lbl.configure(text=f"{block or '未归类'} · {len(peers)} 只", fg="#333")
-                # 刷中列 Tab2: 匹配资讯
+                # 刷中列 Tab2-4 (资讯/板块/指标)
                 _fill_news(news_lb, news_lbl, sina, sname)
-                # 刷中列 Tab3: 板块强度
                 block_placeholder.place_forget()
                 _fill_block(block_frame, block_lbl, block_placeholder, _block_cache, sina, sname)
-                # 刷中列 Tab4: 技术指标
                 ind_placeholder.place_forget()
                 win.update_idletasks()
                 _fill_indicator(ind_frame, ind_lbl, ind_placeholder, _ind_cache, sina, sname)
-                # 刷右列 4tab
-                if _state["sina"] != sina:
-                    _state["sina"] = sina
-                    win.update_idletasks()
+                _state["sina"] = sina
+                import matplotlib; matplotlib.use("TkAgg")
+                from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+                from matplotlib.figure import Figure
+                from matplotlib import gridspec as _gs
+                def _do_build():
                     _build_right_kline(right_nb, sina, sname, _np, Figure, FigureCanvasTkAgg, _gs)
+                    _bg_busy.__setitem__(0, False)
+                if _bg_busy[0]:
+                    try: right_nb.after_cancel(_bg_busy[0])
+                    except: pass
+                _bg_busy[0] = right_nb.after(5, _do_build)
 
             def _on_mid_select(evt=None):
                 sel = mtree.selection()
@@ -4465,18 +4507,17 @@ class StockDetailMixin:
                 idx = int(sel[0])
                 if idx >= len(_mid_rows): return
                 d = _mid_rows[idx]
-                # 同步中列其他tab
                 _fill_news(news_lb, news_lbl, d["sina"], d["name"])
                 block_placeholder.place_forget()
                 _fill_block(block_frame, block_lbl, block_placeholder, _block_cache, d["sina"], d["name"])
                 ind_placeholder.place_forget()
                 _fill_indicator(ind_frame, ind_lbl, ind_placeholder, _ind_cache, d["sina"], d["name"])
-                # 刷右列
-                if _state["sina"] != d["sina"]:
-                    _state["sina"] = d["sina"]
-                    win.update_idletasks()
-                    _build_right_kline(right_nb, d["sina"], d["name"], _np, Figure, FigureCanvasTkAgg, _gs)
-                # 同步左列
+                _state["sina"] = d["sina"]
+                import matplotlib; matplotlib.use("TkAgg")
+                from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+                from matplotlib.figure import Figure
+                from matplotlib import gridspec as _gs
+                _build_right_kline(right_nb, d["sina"], d["name"], _np, Figure, FigureCanvasTkAgg, _gs)
                 for i, rr in enumerate(rows):
                     if rr.get("code","") == d["sina"]:
                         try: ltree.selection_set(str(i)); ltree.see(str(i))
@@ -4689,6 +4730,26 @@ class StockDetailMixin:
             for _bn, _codes in BLOCK_MAP_LOCAL.items():
                 for _c in _codes: CODE_TO_BLOCK[_c] = _bn
 
+            # 🆕 名称关键词 → 板块 (扩展覆盖率)
+            _NAME_KW_BLOCK2 = [
+                ("白酒", "白酒"), ("茅台", "白酒"), ("五粮液", "白酒"), ("汾酒", "白酒"),
+                ("医药", "医药医疗"), ("生物", "医药医疗"), ("健康", "医药医疗"), ("药业", "医药医疗"),
+                ("半导体", "半导体"), ("芯片", "半导体"), ("电子", "半导体"),
+                ("AI", "AI算力"), ("智能", "AI算力"), ("科技", "AI算力"), ("信息", "AI算力"),
+                ("新能源", "新能源"), ("电池", "新能源"),
+                ("光伏", "光伏"),
+                ("军工", "军工"), ("航空", "军工"), ("航天", "军工"),
+                ("黄金", "黄金有色"), ("有色", "黄金有色"), ("紫金", "黄金有色"),
+                ("银行", "金融保险"), ("招商", "金融保险"), ("平安", "金融保险"), ("证券", "金融保险"), ("保险", "金融保险"),
+                ("消费", "消费家电"), ("食品", "消费家电"), ("家电", "消费家电"), ("伊利", "消费家电"),
+                ("煤炭", "黄金有色"), ("能源", "黄金有色"), ("电力", "黄金有色"),
+                ("汽车", "新能源"), ("机械", "消费家电"), ("地产", "消费家电"),
+            ]
+            def _match_block_by_name2(sname):
+                for _kw, _bn in _NAME_KW_BLOCK2:
+                    if _kw in sname: return _bn
+                return ""
+
             # ETF→持仓股简化映射 (用于 ETF tab 的关联)
             ETF_HOLDERS_LOCAL = {
                 "沪深300": [("sh600519","贵州茅台"),("sh601318","中国平安"),("sh600036","招商银行"),
@@ -4826,26 +4887,31 @@ class StockDetailMixin:
                 """根据 tab 类型找关联个股 → [(ts_code, name), ...]"""
                 sina = _ts_to_sina(ts_code)
                 if pool_key == "etf":
-                    # ETF tab → 用 ETF_HOLDERS_LOCAL (ETF名称 → 持仓)
+                    # ETF tab → 同池其他 ETF 就是 peer
                     peers = []
-                    for sc, nm in ETF_HOLDERS_LOCAL.get(sname, []):
-                        ts = sc[2:] + ".SH" if sc.startswith("sh") else sc[2:] + ".SZ"
-                        peers.append((ts, nm, sc.startswith("sh") or sc.startswith("sz")))
-                    # 去掉 self
-                    peers = [p for p in peers if _ts_to_sina(p[0]) != sina]
-                    return peers  # [(ts, name, is_stock)]
+                    for _ts, _nm in ETF_POOL:
+                        if _ts == ts_code: continue
+                        peers.append((_ts, _nm, True))
+                    return peers[:15]  # 限制15只
                 else:
                     # 股票/龙头/自持/资讯 → 同板块
-                    block = CODE_TO_BLOCK.get(sina, "")
+                    block = CODE_TO_BLOCK.get(sina, "") or _match_block_by_name2(sname)
                     if block:
                         peers = []
                         for sc in BLOCK_MAP_LOCAL.get(block, []):
                             ts = sc[2:] + ".SH" if sc.startswith("sh") else sc[2:] + ".SZ"
-                            nm = CODE_TO_NAME.get(sc, sc[-6:])  # 找不到名字就用后6位代码
+                            nm = CODE_TO_NAME.get(sc, sc[-6:])
                             peers.append((ts, nm, True))
                         peers = [p for p in peers if _ts_to_sina(p[0]) != sina]
-                        return peers
-                    return []
+                        if peers: return peers
+                    # Fallback: 同池其他股票
+                    pool_map = {"stock": STOCK_POOL, "watch": WATCH_POOL, "leader": LEADER_POOL,
+                                "taoguba": _tao_pool, "jiuyan": _jiu_pool, "lhb": LHB_POOL,
+                                "zt": ZT_POOL, "news": NEWS_POOL}
+                    for _ts, _nm in pool_map.get(pool_key, [])[:15]:
+                        if _ts == ts_code: continue
+                        peers.append((_ts, _nm, True))
+                    return peers[:15]
 
             # ═══ 辅助函数: 折扣 tag ═══
             def _pct_tag(pct):
@@ -4873,7 +4939,8 @@ class StockDetailMixin:
 
             # ═══ 辅助函数: 刷中列 (给定左列选中的一行) ═══
             def _fill_mid(mid_tree, cfg, left_data_row):
-                """根据左列选中, 刷中列关联个股 + 回撤数据"""
+                """根据左列选中, 刷中列关联个股 → 秒显名称 → 后台算回撤"""
+                import threading as _th_mid
                 ts = left_data_row["ts"]; sname = left_data_row["name"]
                 peers = _find_peers(ts, sname, cfg["pool_key"])
                 # 清空
@@ -4882,21 +4949,38 @@ class StockDetailMixin:
                     mid_tree.insert("", "end", values=("—", "未找到关联个股", "", "", "", "", ""), tags=("no_data",))
                     _mid_cache[cfg["pool_key"]] = []
                     return
-                # 批量算回撤
-                is_fund = peers[0][2] if len(peers) > 0 else False
-                peer_pool = [(p[0], p[1]) for p in peers]
-                mid_data = _batch_calc(peer_pool, is_fund=False,
-                    progress_cb=lambda s: status_lbl.configure(text=s))
-                mid_data.sort(key=lambda x: x["pct"])
-                _mid_cache[cfg["pool_key"]] = mid_data
-                for i, d in enumerate(mid_data):
-                    if not d["ok"]:
-                        mid_tree.insert("", "end", values=(d["ts"][:6], d["name"], "—", "—", "—", "—", "—"), tags=("no_data",)); continue
+                # 先秒显名称 (无回撤数据)
+                for i, (p_ts, p_nm, _is_stock) in enumerate(peers):
                     mid_tree.insert("", "end", iid=str(i), values=(
-                        d["ts"][:6], d["name"],
-                        f"{d['high250']:.2f}", f"{d['low250']:.2f}", f"{d['now']:.2f}",
-                        f"{d['pct']:+.1f}%", d["discount"]),
-                        tags=(_pct_tag(d["pct"]),))
+                        p_ts[:6], p_nm, "计算中...", "", "", "", ""), tags=())
+                _mid_cache[cfg["pool_key"]] = [{"ts": p[0], "name": p[1], "sina": _ts_to_sina(p[0]),
+                                                "high250": 0, "low250": 0, "now": 0, "pct": 0, "discount": "—", "ok": False}
+                                               for p in peers]
+                # 后台线程算真实回撤
+                def _bg_mid():
+                    try:
+                        peer_pool = [(p[0], p[1]) for p in peers]
+                        mid_data = _batch_calc(peer_pool, is_fund=False,
+                            progress_cb=lambda s: status_lbl.configure(text=s))
+                        mid_data.sort(key=lambda x: x["pct"])
+                        _mid_cache[cfg["pool_key"]] = mid_data
+                        def _fill_back():
+                            for i, d in enumerate(mid_data):
+                                try:
+                                    mid_tree.item(str(i), values=(
+                                        d["ts"][:6], d["name"],
+                                        f"{d['high250']:.2f}" if d["ok"] else "—",
+                                        f"{d['low250']:.2f}" if d["ok"] else "—",
+                                        f"{d['now']:.2f}" if d["ok"] else "—",
+                                        f"{d['pct']:+.1f}%" if d["ok"] else "—",
+                                        d["discount"]))
+                                    mid_tree.item(str(i), tags=(_pct_tag(d["pct"]),) if d["ok"] else ("no_data",))
+                                except: pass
+                            cfg["mid_lbl"].configure(text=f"关联 {len(mid_data)} 只", fg="#333")
+                        root.after(0, _fill_back)
+                    except Exception as _me:
+                        print(f"[mid bg warn] {_me}", flush=True)
+                _th_mid.Thread(target=_bg_mid, daemon=True).start()
 
             # ═══ 辅助函数: 构建右列嵌入式K线三tab ═══
             def _build_right_kline(right_nb, sina_code, sname, _np, Figure, FigureCanvasTkAgg, _gs):
@@ -5228,6 +5312,8 @@ class StockDetailMixin:
                         origin = r.get("origin", "淘股吧")
                         label = f"📯淘 提及{freq}次  涨跌{pct:+.2f}%  [{origin}]"
                         items.append((label, "hot" if freq>=10 else "taoguba"))
+                        for _art in r.get("articles", [])[:3]:
+                            if _art: items.append((f"  📄 {_art}", "taoguba_art"))
                 # 2. 韭研公社热股池
                 for r in (getattr(self, '_jiuyan_stamp_data', None) or []):
                     if r.get("code","") == sina_code:
@@ -5235,6 +5321,8 @@ class StockDetailMixin:
                         origin = r.get("origin", "韭研")
                         label = f"🧭韭 提及{freq}次  涨跌{pct:+.2f}%  [{origin}]"
                         items.append((label, "hot" if freq>=10 else "jiuyan"))
+                        for _art in r.get("articles", [])[:3]:
+                            if _art: items.append((f"  📄 {_art}", "jiuyan_art"))
                 # 3. DB logic_reviews
                 try:
                     db_path = os.path.join(os.path.dirname(__file__), "..", "stock_analysis.db")
@@ -5256,9 +5344,10 @@ class StockDetailMixin:
                 except Exception as _ne:
                     pass  # DB 可能不存在, 静默跳过
                 # 显示 — Listbox 用 itemconfig(fg=...) 逐行着色
+                _ART_FG2 = {"taoguba_art": "#1565C0", "jiuyan_art": "#2E7D32"}
                 for txt, tag in items:
                     news_lb.insert(tk.END, txt)
-                    _fg = _NEWS_TAG_FG.get(tag, "#5D4037")
+                    _fg = _ART_FG2.get(tag, _NEWS_TAG_FG.get(tag, "#5D4037"))
                     _font = ("", 10, "bold") if tag in _NEWS_TAG_BOLD else ("", 10)
                     try:
                         news_lb.itemconfig(tk.END, fg=_fg, font=_font)
@@ -5274,7 +5363,7 @@ class StockDetailMixin:
                 # 清旧内容
                 for w in block_frame.winfo_children(): w.destroy()
                 # 匹配板块
-                block = CODE_TO_BLOCK.get(sina_code, "")
+                block = CODE_TO_BLOCK.get(sina_code, "") or _match_block_by_name2(sname)
                 if not block:
                     tk.Label(block_frame, text=f"❌ {sname} 未匹配到板块\n当前仅有映射: 银行/券商/白酒/半导体/AI算力/新能源/光伏/军工/医药/黄金/消费/保险",
                              font=("",11), bg="#FAFAFA", fg="#E53935", justify="center").pack(expand=True)
@@ -5582,10 +5671,49 @@ class StockDetailMixin:
                     tk.Label(ind_frame, text=f"❌ 计算失败: {_ie}", font=("",11), bg="#FAFAFA", fg="#E53935").pack(expand=True)
                     ind_lbl.configure(text="计算失败", fg="#E53935")
 
-            # ═══ 联动回调 ═══
+            # ═══ 按需算回撤: 选中行 ok=False 时后台算这一只 ═══
+            def _calc_single_and_peers(cfg, _key, left_data, idx, d):
+                """后台算这一只的 250d 回撤 → 填回左列"""
+                import threading as _th2
+                ts_code = d["ts"]; sname = d["name"]
+                pool = [(ts_code, sname)]
+                is_fund = cfg.get("is_fund", False)
+                def _bg_one():
+                    try:
+                        one_data = _batch_calc(pool, is_fund=is_fund)
+                        if not one_data: return
+                        real = one_data[0]
+                        # 更新 _all_data
+                        left_data[idx] = real
+                        # 填回 Treeview
+                        def _fill():
+                            _iid = cfg["left_tree"].get_children()[idx]
+                            if real["ok"]:
+                                cfg["left_tree"].item(_iid, values=(
+                                    real["ts"][:6], real["name"],
+                                    f"{real['now']:.2f}", f"{real['pct']:+.1f}%", real["discount"]))
+                                cfg["left_tree"].item(_iid, tags=(_pct_tag(real["pct"]),))
+                            else:
+                                cfg["left_tree"].item(_iid, values=(
+                                    real["ts"][:6], real["name"], "—", "无数据", "—"))
+                                cfg["left_tree"].item(_iid, tags=("no_data",))
+                            # 刷新 label
+                            valid = [x["pct"] for x in left_data[:idx+1] if x["ok"]]
+                            if valid:
+                                cfg["left_lbl"].configure(
+                                    text=f"已算 {len(valid)}/{idx+1}", fg="#333")
+                            _calcing_rows.discard(idx)
+                        root.after(0, _fill)
+                    except Exception as _ce:
+                        print(f"[single calc warn] {_ce}", flush=True)
+                        _calcing_rows.discard(idx)
+                _th2.Thread(target=_bg_one, daemon=True).start()
+
+            # ═══ 联动回调 (永不吞点击! + 按需算回撤) ═══
+            _kline_bg = [None]
+            _calcing_rows = set()  # 正在算回撤的行 (避免重复)
+
             def _on_left_select(evt=None, _key=None):
-                if _loading[0]: return  # 刷新中, 禁用
-                """左列选中 → 刷中列 + 刷右列K线 + 刷资讯"""
                 cfg = _trees[_key]
                 sel = cfg["left_tree"].selection()
                 if not sel: return
@@ -5593,51 +5721,54 @@ class StockDetailMixin:
                 left_data = _all_data.get(_key, [])
                 if idx >= len(left_data): return
                 d = left_data[idx]
-                if not d["ok"]: return
 
-                # 刷中列 (关联个股)
+                # 🆕 按需计算: 如果这只还没算过回撤, 后台算 + peers
+                if not d["ok"] and idx not in _calcing_rows:
+                    _calcing_rows.add(idx)
+                    _calc_single_and_peers(cfg, _key, left_data, idx, d)
+
+                # 左列联动: 中列 (关联个股)
                 try:
                     _fill_mid(cfg["mid_tree"], cfg, d)
+                    _mid_cache[_key] = _mid_cache.get(_key, [])
                     cfg["mid_lbl"].configure(text=f"关联 {len(_mid_cache.get(_key,[]))} 只", fg="#333")
                 except Exception as _fm:
                     print(f"[mid fill warn] {_fm}", flush=True)
 
-                # 刷资讯列表
-                try:
-                    _fill_news(cfg["news_lb"], cfg["news_lbl"], d["sina"], d["name"])
-                except Exception as _nf:
-                    print(f"[news fill warn] {_nf}", flush=True)
+                # 左列联动: 资讯列表
+                try: _fill_news(cfg["news_lb"], cfg["news_lbl"], d["sina"], d["name"])
+                except Exception as _nf: print(f"[news fill warn] {_nf}", flush=True)
 
-                # 刷板块强度 (Tab3)
+                # 左列联动: 板块强度 (Tab3)
                 try:
                     _fill_block(cfg["block_frame"], cfg["block_lbl"], cfg["block_placeholder"],
                                 cfg["block_cache"], d["sina"], d["name"])
-                except Exception as _bf:
-                    print(f"[block fill warn] {_bf}", flush=True)
+                except Exception as _bf: print(f"[block fill warn] {_bf}", flush=True)
 
-                # 刷技术指标 (Tab4)
+                # 左列联动: 技术指标 (Tab4)
                 try:
                     _fill_indicator(cfg["ind_frame"], cfg["ind_lbl"], cfg["ind_placeholder"],
                                     cfg["ind_cache"], d["sina"], d["name"])
                 except Exception as _if:
                     print(f"[indicator fill warn] {_if}", flush=True)
 
-                # 刷右列K线
-                if cfg["right_state"] == d["sina"]: return
+                # 左列联动: 右列K线 (永不跳过, 用 after 合并快速双击)
                 cfg["right_state"] = d["sina"]
-                win.update_idletasks()
-                try:
-                    import matplotlib; matplotlib.use("TkAgg")
-                    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-                    from matplotlib.figure import Figure
-                    from matplotlib import gridspec as _gs
-                    _build_right_kline(cfg["right_nb"], d["sina"], d["name"], _np, Figure, FigureCanvasTkAgg, _gs)
-                except Exception as _rk:
-                    import tkinter.messagebox as _mb_rk; _mb_rk.showerror("错误", f"K线刷新失败: {_rk}")
+                import matplotlib; matplotlib.use("TkAgg")
+                from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+                from matplotlib.figure import Figure
+                from matplotlib import gridspec as _gs
+                def _do_kline(cfg=cfg, d=d):
+                    _build_right_kline(cfg["right_nb"], d["sina"], d["name"],
+                                       _np, Figure, FigureCanvasTkAgg, _gs)
+                    _kline_bg.__setitem__(0, None)
+                if _kline_bg[0]:
+                    try: cfg["right_nb"].after_cancel(_kline_bg[0])
+                    except: pass
+                _kline_bg[0] = cfg["right_nb"].after(5, _do_kline)
 
             def _on_mid_select(evt=None, _key=None):
-                if _loading[0]: return  # 刷新中, 禁用
-                """中列选中 → 刷右列K线 + 刷资讯 + 同步左列"""
+                """中列选中 → 刷右列K线 + 刷资讯 + 同步左列 (🆕 永不吞点击!)"""
                 cfg = _trees[_key]
                 sel = cfg["mid_tree"].selection()
                 if not sel: return
@@ -5645,7 +5776,6 @@ class StockDetailMixin:
                 mid_data = _mid_cache.get(_key, [])
                 if idx >= len(mid_data): return
                 d = mid_data[idx]
-                if not d["ok"]: return
 
                 # 刷资讯列表 (中列选中也要同步)
                 try:
@@ -5667,8 +5797,7 @@ class StockDetailMixin:
                 except Exception as _if2:
                     pass
 
-                # 刷右列K线
-                if cfg["right_state"] == d["sina"]: return
+                # 刷右列K线 (🆕 强制刷新, 不管同股否)
                 cfg["right_state"] = d["sina"]
                 win.update_idletasks()
                 try:
@@ -5695,37 +5824,47 @@ class StockDetailMixin:
                 cfg["left_tree"].bind("<Double-1>", lambda e, k=_k: _on_left_select(e, k))
                 cfg["mid_tree"].bind("<Double-1>", lambda e, k=_k: _on_mid_select(e, k))
 
-            # ═══ 刷新全部 ═══
+            # ═══ 刷新全部 — 只塞名称占位, 不后台计算 ═══
             def _refresh_all():
-                _loading[0] = True  # 锁定联动
-                total = sum(len(cfg["pool"]) for cfg in _trees.values())
+                """只塞名称占位, 回撤数据按需双击才算"""
+                _loading[0] = True
                 for _k, cfg in _trees.items():
-                    status_lbl.configure(text=f"计算中 {cfg['tab_name']} ({len(cfg['pool'])} 只)...")
-                    win.update_idletasks()
-                    data = _batch_calc(cfg["pool"], is_fund=cfg["is_fund"],
-                        progress_cb=lambda s: status_lbl.configure(text=s))
-                    _all_data[_k] = data
-                    _fill_left(cfg["left_tree"], data, cfg["left_lbl"])
-                    # 中列先清空
-                    for i in cfg["mid_tree"].get_children(): cfg["mid_tree"].delete(i)
-                    cfg["mid_lbl"].configure(text="(等待左列选中)", fg="#999")
+                    _placeholders = []
+                    for _pool_item in cfg["pool"][:30]:
+                        if isinstance(_pool_item, (list, tuple)):
+                            _ts, _nm = _pool_item[0], _pool_item[1] if len(_pool_item)>1 else ""
+                        elif isinstance(_pool_item, dict):
+                            _ts = _pool_item.get("ts_code", _pool_item.get("ts", ""))
+                            _nm = _pool_item.get("name", "")
+                        else:
+                            _ts = str(_pool_item); _nm = ""
+                        _sina = ""
+                        if _ts.endswith(".SH"): _sina = "sh" + _ts[:-3]
+                        elif _ts.endswith(".SZ"): _sina = "sz" + _ts[:-3]
+                        else: _sina = _ts
+                        _placeholders.append({
+                            "ts": _ts, "name": _nm, "sina": _sina,
+                            "high250": 0.0, "low250": 0.0,
+                            "now": 0.0, "pct": 0.0, "discount": "双击算", "ok": False,
+                        })
+                    _all_data[_k] = _placeholders
+                    _fill_left(cfg["left_tree"], _placeholders, cfg["left_lbl"])
+                    for _iid in cfg["left_tree"].get_children()[:30]:
+                        _vals = list(cfg["left_tree"].item(_iid, "values"))
+                        _vals[2] = "—"; _vals[3] = "—"
+                        cfg["left_tree"].item(_iid, values=tuple(_vals))
+                    for _i in cfg["mid_tree"].get_children(): cfg["mid_tree"].delete(_i)
+                    cfg["mid_lbl"].configure(text="(点股票联动K线 · 双击算回撤)", fg="#999")
                     for _t in cfg["right_nb"].tabs(): cfg["right_nb"].forget(_t)
-                    _ph = tk.Label(cfg["right_nb"], text="✅ 计算完成\n\n请点左列股票",
-                                   font=("Menlo",12), bg="#F5F5F5", fg="#888", justify="center")
-                    cfg["right_nb"].add(_ph, text="📊 等待选择")
                     cfg["right_state"] = None
-                    win.update_idletasks()
-                status_lbl.configure(text=f"✅ 全部完成 {total} 只! 请点左列股票")
-                _loading[0] = False  # 解锁联动
+                status_lbl.configure(text="✅ 就绪! 点任意股票联动K线", fg="white")
+                _loading[0] = False
 
             # 底部按钮
             bottom = tk.Frame(win, bg="#FAFAFA"); bottom.pack(fill=tk.X, padx=8, pady=6)
-            tk.Button(bottom, text="🚀 重新计算回撤", bg="#E65100", fg="white",
-                      font=("",11,"bold"), width=16,
-                      command=_refresh_all).pack(side=tk.LEFT, padx=4)
             tk.Button(bottom, text="❌ 关闭", command=win.destroy).pack(side=tk.RIGHT, padx=4)
 
-            # 自动开始
+            # 自动塞占位 (200ms 后)
             win.after(200, _refresh_all)
 
         except Exception as _e:
