@@ -5688,8 +5688,16 @@ class StockDetailMixin:
                     status_var.set(f"✅ {n} 根K线 · {n_charts} 图 · {display_name}")
 
                 except Exception as e:
-                    _tb_img.print_exc()
-                    status_var.set(f"❌ {e}"); canvas.draw()
+                    import traceback as _tb
+                    _tb.print_exc()
+                    _err = _tb.format_exc()
+                    # 取最后 4 行显示到 status_var
+                    lines = [l for l in _err.strip().split("\n") if l]
+                    short = "\n".join(lines[-4:])
+                    status_var.set(f"❌ {short[:120]}")
+                    try: canvas.draw()
+                    except Exception as e2:
+                        status_var.set(f"❌ 连 canvas.draw 也崩了: {e2}")
 
             refresh_btn.config(command=_refresh)
             sym_combo.bind("<<ComboboxSelected>>", lambda e: _refresh())
