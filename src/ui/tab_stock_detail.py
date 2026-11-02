@@ -3751,11 +3751,12 @@ class StockDetailMixin:
             # ── 2. ETF → 核心持仓股映射 (硬编码 Top 5-8, 定期可更新) ──
             # 格式: [(sina_code, stock_name), ...]
             ETF_HOLDERS = {
+                # ── 宽基 ──
                 "沪深300": [("sh600519","贵州茅台"),("sh601318","中国平安"),("sh600036","招商银行"),
                             ("sh601398","工商银行"),("sh600900","长江电力"),("sh601012","隆基绿能"),
                             ("sz300750","宁德时代"),("sz002594","比亚迪")],
-                "中证500": [("sh601872","招商轮船"),("sh600741","华域汽车"),("sh601166","兴业银行"),
-                            ("sz002415","海康威视"),("sz002230","科大讯飞"),("sh600309","万华化学")],
+                "中证500": [("sh601872","招商轮船"),("sh600741","华域汽车"),("sz002415","海康威视"),
+                            ("sz002230","科大讯飞"),("sh600309","万华化学"),("sz000568","泸州老窖")],
                 "创业板": [("sz300750","宁德时代"),("sz300059","东方财富"),("sz300760","迈瑞医疗"),
                            ("sz300015","爱尔眼科"),("sz300124","汇川技术"),("sz300014","亿纬锂能")],
                 "科创50": [("sh688981","中芯国际"),("sh688111","金山办公"),("sh688012","中微公司"),
@@ -3763,45 +3764,84 @@ class StockDetailMixin:
                 "上证50": [("sh600519","贵州茅台"),("sh601318","中国平安"),("sh600036","招商银行"),
                            ("sh601398","工商银行"),("sh601288","农业银行"),("sh600028","中国石化")],
                 "中证1000": [("sh601872","招商轮船"),("sh603195","公牛集团"),("sz002812","恩捷股份"),
-                            ("sz002371","北方华创"),("sz002049","紫光国微")],
-                "芯片ETF": [("sh688981","中芯国际"),("sz002371","北方华创"),("sz002049","紫光国微"),
-                            ("sh688041","海光信息"),("sz300782","卓胜微"),("sh603986","兆易创新")],
+                            ("sz002371","北方华创"),("sz002049","紫光国微"),("sz300124","汇川技术")],
+                "中证红利": [("sh601398","工商银行"),("sh600036","招商银行"),("sh601985","中国核电"),
+                            ("sh601088","中国神华"),("sh600028","中国石化"),("sh601225","陕西煤业")],
+                "红利ETF": [("sh601398","工商银行"),("sh600036","招商银行"),("sh601288","农业银行"),
+                            ("sh600028","中国石化"),("sh601985","中国核电"),("sh601088","中国神华")],
+                "红利低波": [("sh601398","工商银行"),("sh601288","农业银行"),("sh601985","中国核电"),
+                            ("sh600036","招商银行"),("sh601318","中国平安"),("sh601088","中国神华")],
+                # ── 科技成长 ──
                 "半导体": [("sh688981","中芯国际"),("sz002371","北方华创"),("sz002049","紫光国微"),
                             ("sh688041","海光信息"),("sz300782","卓胜微"),("sh603986","兆易创新")],
+                "芯片ETF": [("sh688981","中芯国际"),("sz002371","北方华创"),("sz002049","紫光国微"),
+                            ("sh688041","海光信息"),("sz300782","卓胜微"),("sh603986","兆易创新")],
                 "新能源": [("sz300750","宁德时代"),("sz002594","比亚迪"),("sz300014","亿纬锂能"),
-                           ("sz002460","赣锋锂业"),("sz300015","爱尔眼科"),("sh600104","上汽集团")],
+                           ("sz002460","赣锋锂业"),("sh600104","上汽集团"),("sz002812","恩捷股份")],
                 "新能源车": [("sz002594","比亚迪"),("sz300750","宁德时代"),("sh601127","赛力斯"),
-                             ("sz300014","亿纬锂能"),("sz002812","恩捷股份")],
-                "光伏ETF": [("sh601012","隆基绿能"),("sz002456","欧菲光"),("sz002049","紫光国微"),
-                            ("sz300750","宁德时代"),("sh600438","通威股份"),("sz300274","阳光电源")],
+                             ("sz300014","亿纬锂能"),("sz002812","恩捷股份"),("sh600104","上汽集团")],
+                "光伏ETF": [("sh601012","隆基绿能"),("sh600438","通威股份"),("sz300274","阳光电源"),
+                            ("sz002456","欧菲光"),("sh601899","紫金矿业"),("sz300750","宁德时代")],
                 "军工ETF": [("sh600760","中航沈飞"),("sz000768","中航西飞"),("sh600862","中航高科"),
                             ("sz300034","钢研高纳"),("sh600372","中航机载"),("sz002179","中航光电")],
+                "人工智能": [("sz002230","科大讯飞"),("sh688111","金山办公"),("sz300750","宁德时代"),
+                            ("sh688041","海光信息"),("sz300059","东方财富"),("sh688981","中芯国际")],
+                "大数据ETF": [("sz300059","东方财富"),("sz002230","科大讯飞"),("sh688111","金山办公"),
+                              ("sh603881","数据港"),("sh600588","用友网络"),("sz300454","深信服")],
+                "机器人ETF": [("sz300124","汇川技术"),("sh600031","三一重工"),("sz002747","埃斯顿"),
+                              ("sz300693","盛弘股份"),("sh603416","信捷电气"),("sh688271","联影医疗")],
+                "算力ETF": [("sh688981","中芯国际"),("sh688041","海光信息"),("sh688111","金山办公"),
+                            ("sz002230","科大讯飞"),("sz300059","东方财富"),("sh600745","闻泰科技")],
+                "芯片50": [("sh688981","中芯国际"),("sz002371","北方华创"),("sz002049","紫光国微"),
+                           ("sh688041","海光信息"),("sz300782","卓胜微"),("sh603986","兆易创新")],
+                # ── 消费医药 ──
                 "消费ETF": [("sh600519","贵州茅台"),("sz000858","五粮液"),("sz000568","泸州老窖"),
-                            ("sh600809","山西汾酒"),("sz002594","比亚迪"),("sz002714","牧原股份")],
+                            ("sh600809","山西汾酒"),("sz002714","牧原股份"),("sz002594","比亚迪")],
                 "酒ETF": [("sh600519","贵州茅台"),("sz000858","五粮液"),("sz000568","泸州老窖"),
                           ("sh600809","山西汾酒"),("sh603589","口子窖"),("sz000799","酒鬼酒")],
                 "医药ETF": [("sz300760","迈瑞医疗"),("sh600276","恒瑞医药"),("sz300015","爱尔眼科"),
                             ("sh600196","复星医药"),("sz000538","云南白药"),("sz002007","华兰生物")],
+                "创新药": [("sh600276","恒瑞医药"),("sz300760","迈瑞医疗"),("sz002007","华兰生物"),
+                          ("sh600196","复星医药"),("sz300015","爱尔眼科"),("sh603259","药明康德")],
+                "医药50": [("sz300760","迈瑞医疗"),("sh600276","恒瑞医药"),("sz300015","爱尔眼科"),
+                          ("sh600196","复星医药"),("sz000538","云南白药"),("sz002007","华兰生物")],
+                # ── 金融周期 ──
                 "证券ETF": [("sh601211","国泰君安"),("sh600999","招商证券"),("sh601788","光大证券"),
                             ("sz000776","广发证券"),("sz002736","国信证券"),("sh600109","国金证券")],
                 "银行ETF": [("sh601398","工商银行"),("sh600036","招商银行"),("sh601288","农业银行"),
                             ("sh601939","建设银行"),("sh601166","兴业银行"),("sh600016","民生银行")],
+                "煤炭ETF": [("sh601088","中国神华"),("sh601225","陕西煤业"),("sh600508","上海能源"),
+                            ("sh600188","兖矿能源"),("sz000933","神火股份"),("sh601699","潞安环能")],
+                "有色ETF": [("sh601899","紫金矿业"),("sz000630","铜陵有色"),("sz000807","云铝股份"),
+                            ("sh601600","中国铝业"),("sz002460","赣锋锂业"),("sz300750","宁德时代")],
+                "房地产": [("sh600048","保利发展"),("sh600340","华夏幸福"),("sz001979","招商蛇口"),
+                          ("sz000002","万科A"),("sh601155","新城控股"),("sh600036","招商银行")],
+                "周期ETF": [("sh601088","中国神华"),("sh601899","紫金矿业"),("sh601600","中国铝业"),
+                            ("sh600028","中国石化"),("sh601225","陕西煤业"),("sz000858","五粮液")],
+                "钢铁ETF": [("sh600019","宝钢股份"),("sh601003","柳钢股份"),("sz000708","中信特钢"),
+                          ("sh600282","南钢股份"),("sz000717","韶钢松山"),("sh600507","方大特钢")],
+                # ── 港股通 ──
                 "恒生科技": [("hk00700","腾讯控股"),("hk03690","美团-W"),("hk09988","阿里巴巴-W"),
                              ("hk09888","百度集团-W"),("hk03888","金山软件"),("hk01024","快手-W")],
                 "中概互联": [("hk09988","阿里巴巴-W"),("hk00700","腾讯控股"),("hk03690","美团-W"),
                              ("hk09888","百度集团-W"),("hk09618","京东集团-SW"),("hk01024","快手-W")],
+                "港股通医药": [("hk0005","汇丰控股"),("hk00700","腾讯控股"),("hk03690","美团-W"),
+                               ("hk0017","新世界发展"),("hk0177","新世界中国"),("hk09988","阿里巴巴-W")],
+                "港股通科技": [("hk00700","腾讯控股"),("hk09988","阿里巴巴-W"),("hk03690","美团-W"),
+                               ("hk09888","百度集团-W"),("hk01024","快手-W"),("hk03888","金山软件")],
+                "恒生指数": [("hk00700","腾讯控股"),("hk0005","汇丰控股"),("hk03690","美团-W"),
+                             ("hk09988","阿里巴巴-W"),("hk0016","新鸿基地产"),("hk0011","恒生银行")],
+                # ── 跨境QDII ──
                 "纳指100": [("usAAPL","苹果"),("usMSFT","微软"),("usNVDA","英伟达"),
                             ("usGOOGL","谷歌"),("usAMZN","亚马逊"),("usMETA","Meta")],
                 "标普500": [("usAAPL","苹果"),("usMSFT","微软"),("usNVDA","英伟达"),
                             ("usAMZN","亚马逊"),("usGOOGL","谷歌"),("usTSLA","特斯拉")],
                 "日经225": [("jp7203","丰田汽车"),("jp6758","索尼集团"),("jp6594","日本发那科"),
                             ("jp8306","东京海上"),("jp4063","新日铁住金")],
-                "红利ETF": [("sh601398","工商银行"),("sh600036","招商银行"),("sh601288","农业银行"),
-                            ("sh600028","中国石化"),("sh601985","中国核电"),("sh601088","中国神华")],
-                "煤炭ETF": [("sh601088","中国神华"),("sh601225","陕西煤业"),("sh600508","上海能源"),
-                            ("sh600188","兖矿能源"),("sz000933","神火股份")],
-                "有色ETF": [("sh601899","紫金矿业"),("sz000630","铜陵有色"),("sz000807","云铝股份"),
-                            ("sh601600","中国铝业"),("sz002460","赣锋锂业")],
+                "法国CAC": [("frAC","安盛集团"),("frAI","空中客车"),("frBNP","法国巴黎银行"),
+                            ("frFP","标致汽车"),("frGLE","欧莱雅"),("frOR","威立雅")],
+                "德国DAX": [("deDAI","戴姆勒奔驰"),("deBMW","宝马集团"),("deVOW3","大众汽车"),
+                            ("deSIE","西门子"),("deSAP","SAP"),("deALV","阿迪达斯")],
             }
 
             # ── 3. tushare token (复用 ETF 强弱的 tushare 初始化) ──
@@ -3835,10 +3875,11 @@ class StockDetailMixin:
                       font=("", 10, "bold")).pack(anchor="w", padx=6, pady=(4, 2))
             etf_tree_frame = ttk.Frame(left_frame)
             etf_tree_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
-            etf_cols = ("code", "name", "r5", "r20", "score")
+            etf_cols = ("code", "name", "r0", "r3", "r5", "r20", "score")
             etf_tree = ttk.Treeview(etf_tree_frame, columns=etf_cols, show="headings", height=30)
-            for col, txt, w in [("code","代码",90),("name","ETF名称",110),
-                                ("r5","5日%",55),("r20","20日%",60),("score","得分",55)]:
+            for col, txt, w in [("code","代码",90),("name","ETF名称",100),
+                                ("r0","当日%",52),("r3","3日%",52),("r5","5日%",52),
+                                ("r20","20日%",58),("score","得分",52)]:
                 etf_tree.heading(col, text=txt)
                 etf_tree.column(col, width=w, anchor="center" if col!="name" else "w", stretch=False)
             vs1 = ttk.Scrollbar(etf_tree_frame, orient=tk.VERTICAL, command=etf_tree.yview)
@@ -3858,12 +3899,12 @@ class StockDetailMixin:
                       font=("", 10, "bold")).pack(anchor="w", padx=6, pady=(4, 2))
             hold_tree_frame = ttk.Frame(mid_frame)
             hold_tree_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
-            hold_cols = ("code", "name", "r5", "r20")
+            hold_cols = ("code", "name", "r5", "r20", "reason")
             hold_tree = ttk.Treeview(hold_tree_frame, columns=hold_cols, show="headings", height=30)
-            for col, txt, w in [("code","代码",80),("name","股票名称",100),
-                                ("r5","5日%",55),("r20","20日%",60)]:
+            for col, txt, w in [("code","代码",78),("name","股票名称",92),
+                                ("r5","5日%",50),("r20","20日%",54),("reason","逻辑/原因",180)]:
                 hold_tree.heading(col, text=txt)
-                hold_tree.column(col, width=w, anchor="center" if col!="name" else "w", stretch=False)
+                hold_tree.column(col, width=w, anchor="center" if col!="reason" and col!="name" else "w", stretch=False)
             vs2 = ttk.Scrollbar(hold_tree_frame, orient=tk.VERTICAL, command=hold_tree.yview)
             hold_tree.configure(yscrollcommand=vs2.set)
             hold_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -3909,6 +3950,252 @@ class StockDetailMixin:
             tab_ichi = ttk.Frame(nb); nb.add(tab_ichi, text="📊 一目均衡")
             fig3 = Figure(figsize=(7, 7), dpi=100); ax3 = fig3.add_subplot(111)
             cv3 = FigureCanvasTkAgg(fig3, master=tab_ichi); cv3.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+            # ── tab4: 概要 (公司简介 + 基本数据) ──
+            tab_summary = ttk.Frame(nb); nb.add(tab_summary, text="📋 概要")
+            sum_canvas = tk.Canvas(tab_summary); sum_scroll = ttk.Scrollbar(tab_summary, orient=tk.VERTICAL, command=sum_canvas.yview)
+            sum_inner = ttk.Frame(sum_canvas); sum_inner.bind("<Configure>", lambda e: sum_canvas.configure(scrollregion=sum_canvas.bbox("all")))
+            sum_canvas.create_window((0,0), window=sum_inner, anchor="nw"); sum_canvas.configure(yscrollcommand=sum_scroll.set)
+            sum_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sum_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            summary_text = tk.Text(sum_inner, wrap="word", font=("PingFang SC", 10), height=25, bg="#FAFAFA")
+            summary_text.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+            summary_text.insert("1.0", "⏳ 选中左侧持仓股后显示公司概要...\n\n数据源: tushare stock_basic + daily_basic + 新浪财经")
+            summary_text.config(state="disabled")
+
+            # ── tab5: 情绪 (资金流 + 北向 + 龙虎榜) ──
+            tab_sent = ttk.Frame(nb); nb.add(tab_sent, text="🔥 情绪")
+            sent_canvas = tk.Canvas(tab_sent); sent_scroll = ttk.Scrollbar(tab_sent, orient=tk.VERTICAL, command=sent_canvas.yview)
+            sent_inner = ttk.Frame(sent_canvas); sent_inner.bind("<Configure>", lambda e: sent_canvas.configure(scrollregion=sent_canvas.bbox("all")))
+            sent_canvas.create_window((0,0), window=sent_inner, anchor="nw"); sent_canvas.configure(yscrollcommand=sent_scroll.set)
+            sent_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); sent_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            sent_text = tk.Text(sent_inner, wrap="word", font=("PingFang SC", 10), height=25, bg="#FAFAFA")
+            sent_text.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+            sent_text.insert("1.0", "⏳ 选中左侧持仓股后显示资金情绪...\n\n数据源: tushare moneyflow + hsgt + margin + top_list")
+            sent_text.config(state="disabled")
+
+            # ── tab6: 逻辑股评 (SQLite DB + CRUD + 导入) ──
+            import sqlite3 as _sql3
+            _LOGIC_DB = "/Users/faronpan/Agent/stockyidong_project/data/stock_analysis.db"
+            # 建表 (如果不存在)
+            try:
+                _conn_init = _sql3.connect(_LOGIC_DB)
+                _cur_init = _conn_init.cursor()
+                _cur_init.execute("""CREATE TABLE IF NOT EXISTS logic_reviews (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stock_code TEXT NOT NULL,
+                    stock_name TEXT,
+                    review_type TEXT DEFAULT '逻辑',
+                    content TEXT NOT NULL,
+                    author TEXT DEFAULT '我',
+                    source TEXT DEFAULT '手动',
+                    article_title TEXT DEFAULT '',
+                    created_at TEXT DEFAULT (datetime('now','localtime')),
+                    updated_at TEXT DEFAULT (datetime('now','localtime'))
+                )""")
+                _cur_init.execute("""CREATE TABLE IF NOT EXISTS logic_articles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    source TEXT DEFAULT '本地文件',
+                    file_path TEXT,
+                    content TEXT,
+                    matching_stocks TEXT DEFAULT '',
+                    created_at TEXT DEFAULT (datetime('now','localtime'))
+                )""")
+                _conn_init.commit(); _conn_init.close()
+            except Exception as _e_db:
+                print(f"[📊ETF联动❌DB初始化] {_e_db}", flush=True)
+
+            tab_logic = ttk.Frame(nb); nb.add(tab_logic, text="💡 逻辑股评")
+            # 工具栏
+            logic_tool = ttk.Frame(tab_logic); logic_tool.pack(fill=tk.X, padx=4, pady=(4, 2))
+            ttk.Label(logic_tool, text="当前股票:").pack(side=tk.LEFT)
+            logic_stock_var = tk.StringVar(value="未选中")
+            ttk.Label(logic_tool, textvariable=logic_stock_var, foreground="#1565C0", font=("", 10, "bold")).pack(side=tk.LEFT, padx=(0, 8))
+            ttk.Button(logic_tool, text="➕新增", width=7).pack(side=tk.LEFT, padx=1)
+            ttk.Button(logic_tool, text="✏️编辑", width=7).pack(side=tk.LEFT, padx=1)
+            ttk.Button(logic_tool, text="🗑️删除", width=7).pack(side=tk.LEFT, padx=1)
+            ttk.Separator(logic_tool, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
+            ttk.Button(logic_tool, text="📥导入文章", width=10).pack(side=tk.LEFT, padx=1)
+            ttk.Button(logic_tool, text="🔄刷新", width=7).pack(side=tk.LEFT, padx=1)
+
+            # Treeview
+            logic_cols = ("id", "type", "content", "author", "source", "time")
+            logic_tree_frame = ttk.Frame(tab_logic); logic_tree_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
+            logic_tree = ttk.Treeview(logic_tree_frame, columns=logic_cols, show="headings", height=10)
+            for col, txt, w in [("id","#",40),("type","类型",60),("content","内容/逻辑",380),
+                                ("author","作者",55),("source","来源",75),("time","时间",110)]:
+                logic_tree.heading(col, text=txt)
+                logic_tree.column(col, width=w, anchor="w", stretch=False)
+            log_vs = ttk.Scrollbar(logic_tree_frame, orient=tk.VERTICAL, command=logic_tree.yview)
+            logic_tree.configure(yscrollcommand=log_vs.set)
+            logic_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            log_vs.pack(side=tk.RIGHT, fill=tk.Y)
+            logic_tree.tag_configure("logic", background="#E8F5E9")
+            logic_tree.tag_configure("comment", background="#E3F2FD")
+            logic_tree.tag_configure("article", background="#FFF8E1")
+
+            # ── 逻辑股评辅助函数 ──
+            def _logic_load(sina, sname):
+                """从 DB 加载当前股票的所有 review"""
+                for iid in logic_tree.get_children(): logic_tree.delete(iid)
+                if not sina or sina == "未选中": return
+                try:
+                    conn = _sql3.connect(_LOGIC_DB); cur = conn.cursor()
+                    cur.execute("SELECT id, review_type, content, author, source, created_at FROM logic_reviews WHERE stock_code=? ORDER BY created_at DESC", (sina,))
+                    for row in cur.fetchall():
+                        rid, rtype, content, author, source, ctime = row
+                        t = "logic" if rtype == "逻辑" else ("comment" if rtype == "评论" else "article")
+                        content_short = (content[:80] + "…") if content and len(content) > 80 else content
+                        logic_tree.insert("", "end", values=(rid, rtype, content_short, author, source, ctime), tags=(t,))
+                    conn.close()
+                except Exception as _e:
+                    print(f"[💡logic_load❌] {_e}", flush=True)
+
+            def _logic_add(_evt=None):
+                """新增逻辑/评论"""
+                sina = kline_cache.get("sina"); sname = kline_cache.get("sname")
+                if not sina or sina.startswith("us") or sina.startswith("hk") or sina.startswith("jp"):
+                    messagebox.showinfo("提示", "请先选中 A 股持仓股", parent=win); return
+                dlg = tk.Toplevel(win); dlg.title(f"💡 新增逻辑股评 · {sname}"); dlg.geometry("520x420")
+                ttk.Label(dlg, text="类型:").grid(row=0, column=0, padx=8, pady=(10,2), sticky="e")
+                type_var = tk.StringVar(value="逻辑")
+                ttk.Combobox(dlg, textvariable=type_var, values=["逻辑","评论","文章摘录"], width=10, state="readonly").grid(row=0, column=1, pady=(10,2), sticky="w")
+                ttk.Label(dlg, text="作者:").grid(row=1, column=0, padx=8, pady=2, sticky="e")
+                auth_var = tk.StringVar(value="我")
+                ttk.Entry(dlg, textvariable=auth_var, width=30).grid(row=1, column=1, pady=2, sticky="w")
+                ttk.Label(dlg, text="内容/逻辑:").grid(row=2, column=0, padx=8, pady=2, sticky="ne")
+                content_txt = tk.Text(dlg, width=50, height=12, font=("PingFang SC", 10))
+                content_txt.grid(row=2, column=1, pady=2, sticky="nsew"); dlg.rowconfigure(2, weight=1); dlg.columnconfigure(1, weight=1)
+                def _save():
+                    txt = content_txt.get("1.0", "end").strip()
+                    if not txt: messagebox.showwarning("提示", "内容不能为空", parent=dlg); return
+                    try:
+                        conn = _sql3.connect(_LOGIC_DB); cur = conn.cursor()
+                        cur.execute("INSERT INTO logic_reviews(stock_code,stock_name,review_type,content,author,source) VALUES(?,?,?,?,?,?)",
+                                    (sina, sname, type_var.get(), txt, auth_var.get(), "手动"))
+                        conn.commit(); conn.close()
+                        dlg.destroy(); _logic_load(sina, sname)
+                        status_var_etf.set(f"✅ {sname} 已新增 {type_var.get()}")
+                    except Exception as _e:
+                        messagebox.showerror("错误", str(_e), parent=dlg)
+                btns = ttk.Frame(dlg); btns.grid(row=3, column=0, columnspan=2, pady=8)
+                ttk.Button(btns, text="💾保存", command=_save, width=10).pack(side=tk.LEFT, padx=8)
+                ttk.Button(btns, text="取消", command=dlg.destroy, width=10).pack(side=tk.LEFT)
+
+            def _logic_edit(_evt=None):
+                """编辑选中行"""
+                sel = logic_tree.selection()
+                if not sel: messagebox.showinfo("提示", "请先选中一行", parent=win); return
+                vals = logic_tree.item(sel[0], "values")
+                rid = vals[0]; sina = kline_cache.get("sina"); sname = kline_cache.get("sname")
+                # 取完整内容
+                try:
+                    conn = _sql3.connect(_LOGIC_DB); cur = conn.cursor()
+                    cur.execute("SELECT review_type, content, author FROM logic_reviews WHERE id=?", (rid,))
+                    row = cur.fetchone(); conn.close()
+                    if not row: return
+                    rtype, content, author = row
+                except Exception: return
+                dlg = tk.Toplevel(win); dlg.title(f"✏️ 编辑 #{rid}"); dlg.geometry("520x420")
+                ttk.Label(dlg, text="类型:").grid(row=0, column=0, padx=8, pady=(10,2), sticky="e")
+                type_var2 = tk.StringVar(value=rtype)
+                ttk.Combobox(dlg, textvariable=type_var2, values=["逻辑","评论","文章摘录"], width=10, state="readonly").grid(row=0, column=1, pady=(10,2), sticky="w")
+                ttk.Label(dlg, text="作者:").grid(row=1, column=0, padx=8, pady=2, sticky="e")
+                auth_var2 = tk.StringVar(value=author)
+                ttk.Entry(dlg, textvariable=auth_var2, width=30).grid(row=1, column=1, pady=2, sticky="w")
+                content_txt2 = tk.Text(dlg, width=50, height=12, font=("PingFang SC", 10))
+                content_txt2.grid(row=2, column=1, pady=2, sticky="nsew"); dlg.rowconfigure(2, weight=1); dlg.columnconfigure(1, weight=1)
+                content_txt2.insert("1.0", content or "")
+                def _save_edit():
+                    txt = content_txt2.get("1.0", "end").strip()
+                    try:
+                        conn = _sql3.connect(_LOGIC_DB); cur = conn.cursor()
+                        cur.execute("UPDATE logic_reviews SET review_type=?, content=?, author=?, updated_at=datetime('now','localtime') WHERE id=?",
+                                    (type_var2.get(), txt, auth_var2.get(), rid))
+                        conn.commit(); conn.close()
+                        dlg.destroy(); _logic_load(sina, sname)
+                        status_var_etf.set(f"✅ #{rid} 已更新")
+                    except Exception as _e:
+                        messagebox.showerror("错误", str(_e), parent=dlg)
+                btns2 = ttk.Frame(dlg); btns2.grid(row=3, column=0, columnspan=2, pady=8)
+                ttk.Button(btns2, text="💾保存", command=_save_edit, width=10).pack(side=tk.LEFT, padx=8)
+                ttk.Button(btns2, text="取消", command=dlg.destroy, width=10).pack(side=tk.LEFT)
+
+            def _logic_del(_evt=None):
+                sel = logic_tree.selection()
+                if not sel: return
+                vals = logic_tree.item(sel[0], "values"); rid = vals[0]
+                if not messagebox.askyesno("确认", f"删除 #{rid}?", parent=win): return
+                sina = kline_cache.get("sina"); sname = kline_cache.get("sname")
+                try:
+                    conn = _sql3.connect(_LOGIC_DB); cur = conn.cursor()
+                    cur.execute("DELETE FROM logic_reviews WHERE id=?", (rid,))
+                    conn.commit(); conn.close(); _logic_load(sina, sname)
+                    status_var_etf.set(f"🗑️ #{rid} 已删除")
+                except Exception as _e: messagebox.showerror("错误", str(_e), parent=win)
+
+            def _logic_import(_evt=None):
+                """导入 txt/md 文件 → 逐行匹配持仓股名 → 写 review"""
+                from tkinter import filedialog
+                fpath = filedialog.askopenfilename(parent=win, title="选择文章文件 (.txt/.md)",
+                                                   filetypes=[("文本文件","*.txt"),("Markdown","*.md"),("所有","*.*")])
+                if not fpath: return
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f: text = f.read()
+                except Exception as _e:
+                    messagebox.showerror("错误", f"读取失败: {_e}", parent=win); return
+                # 取当前 ETF 的所有持仓股名做匹配
+                sel = etf_tree.selection()
+                if not sel: messagebox.showinfo("提示", "请先选中 ETF", parent=win); return
+                evals = etf_tree.item(sel[0], "values"); ename = evals[1]
+                holders = ETF_HOLDERS.get(ename, [])
+                if not holders: messagebox.showinfo("提示", f"{ename} 暂无持仓映射", parent=win); return
+                # 匹配每个股票名在文章中出现的段落
+                matched = {}
+                for sina, sname in holders:
+                    import re
+                    # 找包含股票名的行或段落
+                    lines = text.split("\n")
+                    hits = []
+                    for i, line in enumerate(lines):
+                        if sname in line or sina.replace("sh","").replace("sz","") in line:
+                            # 取上下文 (前1行 + 当前行 + 后1行) 作为段落
+                            start = max(0, i-1); end = min(len(lines), i+2)
+                            paragraph = "\n".join(lines[start:end]).strip()
+                            if paragraph and len(paragraph) > 10: hits.append(paragraph)
+                    if hits: matched[sina] = (sname, hits)
+                if not matched:
+                    messagebox.showinfo("结果", f"文章中未匹配到 {ename} 持仓股的提及", parent=win); return
+                # 批量写入 DB
+                try:
+                    conn = _sql3.connect(_LOGIC_DB); cur = conn.cursor()
+                    import os
+                    fname = os.path.basename(fpath)
+                    for sina, (sname, paras) in matched.items():
+                        for p in paras[:3]:  # 每只股最多 3 段
+                            cur.execute("INSERT INTO logic_reviews(stock_code,stock_name,review_type,content,author,source,article_title) VALUES(?,?,?,?,?,?,?)",
+                                        (sina, sname, "文章摘录", p[:500], "导入", fname, fname))
+                    conn.commit(); conn.close()
+                    # 同时写 articles 表
+                    try:
+                        conn2 = _sql3.connect(_LOGIC_DB); cur2 = conn2.cursor()
+                        cur2.execute("INSERT INTO logic_articles(title,source,file_path,content,matching_stocks) VALUES(?,?,?,?,?)",
+                                     (fname, "本地文件", fpath, text[:5000], ",".join([n for _,n in matched.values()])))
+                        conn2.commit(); conn2.close()
+                    except Exception: pass
+                    # 刷新当前股票
+                    cur_sina = kline_cache.get("sina"); cur_sname = kline_cache.get("sname")
+                    if cur_sina in matched: _logic_load(cur_sina, cur_sname)
+                    messagebox.showinfo("导入完成", f"✅ {fname}\n匹配到 {len(matched)} 只持仓股\n共写入 {sum(len(p[1]) for p in matched.values())} 条摘录", parent=win)
+                except Exception as _e:
+                    messagebox.showerror("错误", str(_e), parent=win)
+
+            # 绑定按钮
+            for w, cmd in [(logic_tool.winfo_children()[2], _logic_add), (logic_tool.winfo_children()[4], _logic_edit),
+                           (logic_tool.winfo_children()[6], _logic_del), (logic_tool.winfo_children()[10], _logic_import),
+                           (logic_tool.winfo_children()[12], lambda: _logic_load(kline_cache.get("sina"), kline_cache.get("sname")))]:
+                try: w.config(command=cmd)
+                except: pass
 
             # ── 辅助: 支撑压力线 (ZigZag 局部极值) ──
             def _sr_local(highs, lows, n_levels=3):
@@ -3966,62 +4253,95 @@ class StockDetailMixin:
                         if edf is None or len(edf) < 21: continue
                         edf = edf.sort_values("trade_date").reset_index(drop=True)
                         ecloses = edf["close"].astype(float).values
+                        r0 = (ecloses[-1]/ecloses[-2]-1)*100 if len(ecloses)>=2 else np.nan
+                        r3 = (ecloses[-1]/ecloses[-4]-1)*100 if len(ecloses)>=4 else np.nan
                         r5 = (ecloses[-1]/ecloses[-6]-1)*100 if len(ecloses)>=6 else np.nan
                         r20 = (ecloses[-1]/ecloses[-21]-1)*100 if len(ecloses)>=21 else np.nan
                         if np.isnan(r5) or np.isnan(r20): continue
-                        score = r5*0.6 + r20*0.4
-                        etf_results.append((score, ts_code, ename, r5, r20))
+                        score = r3*0.2 + r5*0.4 + r20*0.4
+                        etf_results.append((score, ts_code, ename, r0, r3, r5, r20))
                     except Exception:
                         pass
                 etf_results.sort(reverse=True)
                 # 清 Treeview 重填
                 for iid in etf_tree.get_children(): etf_tree.delete(iid)
-                for rank, (score, ts_code, ename, r5, r20) in enumerate(etf_results):
+                for rank, (score, ts_code, ename, r0, r3, r5, r20) in enumerate(etf_results):
                     tag = "top" if rank < 3 else ("bot" if rank >= len(etf_results)-3 else "")
                     rtag = "up" if score >= 0 else "dn"
                     iid = etf_tree.insert("", "end",
-                        values=(ts_code, ename, f"{r5:+.1f}", f"{r20:+.1f}", f"{score:+.2f}"),
+                        values=(ts_code, ename, f"{r0:+.1f}", f"{r3:+.1f}", f"{r5:+.1f}",
+                                f"{r20:+.1f}", f"{score:+.2f}"),
                         tags=(rtag, tag))
-                status_var_etf.set(f"✅ 已加载 {len(etf_results)} 只 ETF")
+                status_var_etf.set(f"✅ 已加载 {len(etf_results)} 只 ETF (含当日/3日/5日/20日)")
                 return etf_results
             etf_cache = {"data": None}
 
             # ── 7. 选中 ETF → 刷新中列持仓股 ──
             def _on_etf_select(_evt=None):
-                """左列选中 ETF, 刷中列持仓股"""
+                """左列选中 ETF, 刷中列持仓股 + 看多/看空原因"""
                 sel = etf_tree.selection()
                 if not sel: return
                 vals = etf_tree.item(sel[0], "values")
                 if not vals: return
-                ename = vals[1]  # ETF名称
+                ename = vals[1]
+                # 从 Treeview 取 r0/r3/r5/r20/score (都是 "+X.X%" 字符串, 去掉%)
+                def _to_f(s):
+                    try: return float(str(s).replace("%","").replace("+",""))
+                    except: return 0.0
+                r0 = _to_f(vals[2]); r3 = _to_f(vals[3]); r5 = _to_f(vals[4])
+                r20 = _to_f(vals[5]); score = _to_f(vals[6])
+                # 自动推断 ETF 看多/看空原因
+                if score > 2 and r20 > 0:
+                    etf_reason = f"✅ 综合得分 +{score:.2f}, 20日涨 +{r20:.1f}%, 短期强势领涨板块"
+                elif score < -2 and r20 < 0:
+                    etf_reason = f"⚠️ 综合得分 {score:.2f}, 20日跌 {r20:.1f}%, 短期弱势领跌板块"
+                elif r0 > 1.5 and r5 > 3:
+                    etf_reason = f"🔥 当日 +{r0:.1f}%, 5日 +{r5:.1f}%, 动量加速上涨"
+                elif r0 < -1.5 and r5 < -3:
+                    etf_reason = f"❄️ 当日 {r0:.1f}%, 5日 {r5:.1f}%, 动量加速下跌"
+                else:
+                    etf_reason = f"⚖️ 综合 {score:+.2f}, 20日 {r20:+.1f}%, 震荡观望"
+
                 status_var_etf.set(f"⏳ 加载 {ename} 持仓股..."); win.update_idletasks()
                 # 清中列
                 for iid in hold_tree.get_children(): hold_tree.delete(iid)
                 holders = ETF_HOLDERS.get(ename, [])
                 if not holders:
-                    hold_tree.insert("", "end", values=("", "暂无映射持仓", "", ""))
-                    status_var_etf.set(f"ℹ️ {ename} 暂无预定义持仓映射")
+                    hold_tree.insert("", "end", values=("", "暂无映射持仓", "", "", ""))
+                    status_var_etf.set(f"ℹ️ {ename} 暂无持仓映射")
                     return
-                # 拉每只持仓股 5日/20日 (复用 _fetch_ichimoku_kline_data)
+                # 顶部插入 ETF 原因 banner (不可选)
+                hold_tree.insert("", "end", values=(
+                    "ETF原因", f"💡 {etf_reason}", "", "", ""),
+                    tags=("etf_reason",))
+                # 拉每只持仓股 5日/20日
                 for sina, sname in holders:
                     try:
                         kdf = self._fetch_ichimoku_kline_data(sina, period="daily",
                                                               is_index=isinstance(sina, str) and sina.startswith("us"))
                         if kdf is None or len(kdf) < 21:
-                            hold_tree.insert("", "end", values=(sina, sname, "—", "—"))
+                            hold_tree.insert("", "end", values=(sina, sname, "—", "—", "数据不足"))
                             continue
                         closes = kdf["收盘"].astype(float).values if "收盘" in kdf.columns else kdf["close"].astype(float).values
-                        r5 = (closes[-1]/closes[-6]-1)*100 if len(closes)>=6 else np.nan
-                        r20 = (closes[-1]/closes[-21]-1)*100 if len(closes)>=21 else np.nan
-                        if np.isnan(r5) or np.isnan(r20):
-                            hold_tree.insert("", "end", values=(sina, sname, "—", "—"))
+                        r5s = (closes[-1]/closes[-6]-1)*100 if len(closes)>=6 else np.nan
+                        r20s = (closes[-1]/closes[-21]-1)*100 if len(closes)>=21 else np.nan
+                        if np.isnan(r5s) or np.isnan(r20s):
+                            hold_tree.insert("", "end", values=(sina, sname, "—", "—", ""))
                             continue
-                        tag = "up" if r5 >= 0 else "dn"
+                        # 股票自动 reason
+                        if r5s > 5: s_reason = "🔥 强势领涨, 5日+" + f"{r5s:.1f}%"
+                        elif r5s > 2: s_reason = "📈 持续走强"
+                        elif r5s < -5: s_reason = "⚠️ 领跌 5日" + f"{r5s:.1f}%"
+                        elif r5s < -2: s_reason = "📉 持续走弱"
+                        else: s_reason = "⚖️ 区间震荡"
+                        tag = "up" if r5s >= 0 else "dn"
                         hold_tree.insert("", "end",
-                            values=(sina, sname, f"{r5:+.1f}", f"{r20:+.1f}"), tags=(tag,))
+                            values=(sina, sname, f"{r5s:+.1f}", f"{r20s:+.1f}", s_reason), tags=(tag,))
                     except Exception:
-                        hold_tree.insert("", "end", values=(sina, sname, "—", "—"))
-                status_var_etf.set(f"✅ {ename} · {len(holders)} 只持仓股")
+                        hold_tree.insert("", "end", values=(sina, sname, "—", "—", ""))
+                # ETF reason tag 样式 (浅蓝底)
+                hold_tree.tag_configure("etf_reason", background="#E3F2FD", font=("", 9, "bold"))
+                status_var_etf.set(f"✅ {ename} · {len(holders)}只持仓  |  {etf_reason[:50]}")
 
             # ── 8. 选中股票 → 刷新右列 3 tab K线 ──
             def _render_kline_from_cache(only_redraw=False):
@@ -4155,25 +4475,115 @@ class StockDetailMixin:
                 if first_child:
                     hold_tree.selection_set(first_child[0])
                     hold_tree.see(first_child[0])
-                # 刷右列
+                # 刷右列 (K线+概要+情绪+逻辑)
                 sina, sname = holders[0]
+                _on_stock_selected(sina, sname)
+
+            def _refresh_summary(sina, sname):
+                """刷新概要 tab (tushare stock_basic + daily_basic)"""
+                # sina 转 tushare ts_code
+                ts_code = None
+                if sina.startswith("sh") and len(sina) == 8: ts_code = sina[2:] + ".SH"
+                elif sina.startswith("sz") and len(sina) == 8: ts_code = sina[2:] + ".SZ"
+                summary_text.config(state="normal"); summary_text.delete("1.0", "end")
+                summary_text.insert("end", f"⏳ 加载 {sname} 概要..."); summary_text.config(state="disabled")
+                if not ts_code:
+                    summary_text.config(state="normal"); summary_text.delete("1.0", "end")
+                    summary_text.insert("end", f"❌ {sname} 概要暂不支持 (海外/非A股)"); summary_text.config(state="disabled"); return
+                try:
+                    sb = self._ts_pro.stock_basic(ts_code=ts_code, fields="ts_code,name,area,industry,list_date,market")
+                    db = self._ts_pro.daily_basic(ts_code=ts_code, fields="ts_code,total_mv,circ_mv,pe,pe_ttm,pb,ps_ttm,dv_ttm", limit=1)
+                    sb = sb.iloc[0] if len(sb) > 0 else None
+                    db = db.iloc[0] if len(db) > 0 else None
+                    lines = [f"📋 {sname} ({ts_code})", "=" * 40]
+                    if sb is not None:
+                        lines.extend([
+                            f"行业: {sb.get('industry','—')}  |  地区: {sb.get('area','—')}",
+                            f"上市日: {sb.get('list_date','—')}  |  市场: {sb.get('market','—')}",
+                        ])
+                    if db is not None:
+                        lines.extend([
+                            "", "📊 估值指标", "-" * 24,
+                            f"总市值: {db.get('total_mv',0)/10000:.2f} 万亿" if db.get('total_mv') else "",
+                            f"流通市值: {db.get('circ_mv',0)/10000:.2f} 万亿" if db.get('circ_mv') else "",
+                            f"PE(TTM): {db.get('pe_ttm','—')}  |  PB: {db.get('pb','—')}",
+                            f"PS(TTM): {db.get('ps_ttm','—')}  |  股息率: {db.get('dv_ttm','—')}%",
+                        ])
+                    else:
+                        lines.append("\n⚠️ daily_basic 数据暂不可用")
+                    summary_text.config(state="normal"); summary_text.delete("1.0", "end")
+                    summary_text.insert("end", "\n".join(l for l in lines if l is not None)); summary_text.config(state="disabled")
+                except Exception as _e:
+                    summary_text.config(state="normal"); summary_text.delete("1.0", "end")
+                    summary_text.insert("end", f"❌ 概要加载失败: {_e}"); summary_text.config(state="disabled")
+
+            def _refresh_sent(sina, sname):
+                """刷新情绪 tab (moneyflow + hsgt + top_list)"""
+                ts_code = None
+                if sina.startswith("sh") and len(sina) == 8: ts_code = sina[2:] + ".SH"
+                elif sina.startswith("sz") and len(sina) == 8: ts_code = sina[2:] + ".SZ"
+                sent_text.config(state="normal"); sent_text.delete("1.0", "end")
+                sent_text.insert("end", f"⏳ 加载 {sname} 资金情绪..."); sent_text.config(state="disabled")
+                if not ts_code:
+                    sent_text.config(state="normal"); sent_text.delete("1.0", "end")
+                    sent_text.insert("end", f"❌ {sname} 海外暂不支持资金情绪"); sent_text.config(state="disabled"); return
+                lines = [f"🔥 {sname} 资金情绪", "=" * 40]
+                try:
+                    # 1. 主力资金流 (最近3日)
+                    mf = self._ts_pro.moneyflow(ts_code=ts_code, limit=3)
+                    if mf is not None and len(mf) > 0:
+                        mf = mf.sort_values("trade_date", ascending=False)
+                        lines.append("📦 主力资金流 (最近3日)"); lines.append("-" * 24)
+                        for _, row in mf.iterrows():
+                            net = row.get("buy_sm_amount", 0) - row.get("sell_sm_amount", 0)
+                            lines.append(f"  {row.get('trade_date','')}  主力净额: {net:+.2f}亿")
+                        total_net = sum((r.get("buy_sm_amount",0)-r.get("sell_sm_amount",0)) for _,r in mf.iterrows())
+                        lines.append(f"  3日合计: {total_net:+.2f}亿")
+                    # 2. 北向持股 (如果是沪深港通)
+                    try:
+                        hsgt = self._ts_pro.hsgt_top10(ts_code=ts_code, limit=3)
+                        if hsgt is not None and len(hsgt) > 0:
+                            lines.append("\n🌏 北向持股变动"); lines.append("-" * 24)
+                            for _, row in hsgt.sort_values("trade_date", ascending=False).iterrows():
+                                lines.append(f"  {row.get('trade_date','')}  净买入: {row.get('net_buy_amount',0):+.2f}亿  持股: {row.get('hold_amount',0):.2f}亿")
+                    except Exception: pass
+                    # 3. 龙虎榜 (最近上榜)
+                    try:
+                        tl = self._ts_pro.top_list(ts_code=ts_code, limit=3)
+                        if tl is not None and len(tl) > 0:
+                            lines.append("\n🐉 龙虎榜上榜记录"); lines.append("-" * 24)
+                            for _, row in tl.sort_values("trade_date", ascending=False).iterrows():
+                                lines.append(f"  {row.get('trade_date','')}  {row.get('reason','')}  {row.get('close','')}  {row.get('pct_change',0):+.2f}%")
+                    except Exception: pass
+                    if len(lines) == 2: lines.append("\n⚠️ 暂无资金情绪数据 (tushare 接口可能需要更高积分)")
+                    sent_text.config(state="normal"); sent_text.delete("1.0", "end")
+                    sent_text.insert("end", "\n".join(lines)); sent_text.config(state="disabled")
+                except Exception as _e:
+                    sent_text.config(state="normal"); sent_text.delete("1.0", "end")
+                    sent_text.insert("end", f"❌ 情绪加载失败: {_e}"); sent_text.config(state="disabled")
+
+            def _on_stock_selected(sina, sname):
+                """统一刷新: K线 + 概要 + 情绪 + 逻辑股评"""
                 _draw_kline_tabs(sina, sname)
+                logic_stock_var.set(f"{sname} ({sina})")
+                _logic_load(sina, sname)
+                if not sina.startswith("us") and not sina.startswith("hk") and not sina.startswith("jp"):
+                    _refresh_summary(sina, sname)
+                    _refresh_sent(sina, sname)
 
             def _on_hold_double(_evt):
-                """双击持仓股 → 刷右列"""
                 sel = hold_tree.selection()
                 if not sel: return
                 vals = hold_tree.item(sel[0], "values")
-                if not vals or not vals[0] or vals[0] == "": return
-                _draw_kline_tabs(vals[0], vals[1])
+                if not vals or not vals[0] or vals[0] == "" or vals[1] == "ETF原因": return
+                _on_stock_selected(vals[0], vals[1])
 
             def _on_hold_select(_evt=None):
-                """单击持仓股也刷 (方便使用)"""
                 sel = hold_tree.selection()
                 if not sel: return
                 vals = hold_tree.item(sel[0], "values")
-                if not vals or not vals[0] or vals[0] == "": return
-                _draw_kline_tabs(vals[0], vals[1])
+                if not vals or not vals[0] or vals[0] == "" or vals[1] == "ETF原因": return
+                _on_stock_selected(vals[0], vals[1])
 
             etf_tree.bind("<<TreeviewSelect>>", _on_etf_select)
             etf_tree.bind("<Double-1>", lambda e: _on_etf_double(e))
