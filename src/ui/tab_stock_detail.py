@@ -6200,110 +6200,110 @@ class StockDetailMixin:
             conn.commit(); conn.close()
             _refresh_list(); _current_article_id[0] = None; tags_chips_var.set("(无)"); r_title_var.set("⬅️ 左侧选中文章")
 
-        # ── 爬淘股吧 (尽力而为, 反爬严时抓标题存手动待补) ──
+        # ── 🏮淘股吧 (东财热度榜 TOP30 + 热门股新闻, 用 akshare 绕开反爬) ──
         def _do_crawl_taoguba():
-            status.set("⏳ 爬取淘股吧热帖..."); win.update_idletasks()
+            status.set("⏳ 爬取东财热度榜 TOP30 + 热门股新闻..."); win.update_idletasks()
+            import akshare as ak
             items = []
             try:
-                import requests
-                from bs4 import BeautifulSoup
-                headers = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-                           "Referer":"https://www.taoguba.com.cn/"}
-                # 尝试多个页面
-                for url in ["https://www.taoguba.com.cn/hot",
-                            "https://www.taoguba.com.cn/NewTopic",
-                            "https://www.taoguba.com.cn/GubaAllTopic?ltype=1"]:
-                    try:
-                        r = requests.get(url, headers=headers, timeout=12)
-                        if r.status_code != 200: continue
-                        soup = BeautifulSoup(r.text, "html.parser")
-                        # 找所有 a 标签里的文章链接
-                        for a in soup.select("a[href]"):
-                            href = a.get("href", "")
-                            txt = a.get_text(strip=True)
-                            if len(txt) > 8 and len(txt) < 100 and ("Article" in href or "topic" in href.lower() or "NewTopic" in href):
-                                if txt not in [i["title"] for i in items]:
+                # 1. 东财热度榜 (5199 只取前 30)
+                hot_df = ak.stock_comment_em()
+                if hot_df is not None and len(hot_df) > 0:
+                    top30 = hot_df.head(30)
+                    for _, row in top30.iterrows():
+                        code = str(row.get("代码", ""))
+                        name = str(row.get("名称", ""))
+                        rank = row.get("序号", "")
+                        chg = row.get("涨跌幅", "")
+                        items.append({
+                            "source": "东财热度榜", "author": "热度榜",
+                            "title": f"🔥 #{rank} {name}({code}) 热度榜 · 涨跌 {chg}%",
+                            "url": f"https://quote.eastmoney.com/{code}.html",
+                            "content": f"东财热度榜 TOP30 · 排名 #{rank} · 涨跌幅 {chg}% · 换手率 {row.get('换手率','')}%",
+                            "stock_code": code, "stock_name": name,
+                        })
+                    status.set(f"⏳ 热度榜 {len(items)} 条, 继续爬 TOP10 热门股新闻..."); win.update_idletasks()
+                    # 2. 给 TOP10 热门股各爬 2 条新闻 (模拟淘股吧热帖效果)
+                    for _, row in top30.head(10).iterrows():
+                        code = str(row.get("代码", ""))
+                        name = str(row.get("名称", ""))
+                        try:
+                            news_df = ak.stock_news_em(symbol=code)
+                            if news_df is not None and len(news_df) > 0:
+                                for _, nr in news_df.head(2).iterrows():
                                     items.append({
-                                        "source": "淘股吧热帖", "author": "淘股吧",
-                                        "title": txt, "url": href if href.startswith("http") else f"https://www.taoguba.com.cn{href}",
-                                        "content": "", "stock_code": "", "stock_name": ""
+                                        "source": "东财新闻", "author": nr.get("文章来源", "东财"),
+                                        "title": nr.get("新闻标题", "")[:120],
+                                        "url": nr.get("新闻链接", ""),
+                                        "content": nr.get("新闻内容", "")[:500],
+                                        "stock_code": code, "stock_name": name,
                                     })
-                        if items: break
-                    except Exception: continue
+                        except Exception: continue
             except Exception as e:
-                status.set(f"⚠️ 淘股吧爬取异常: {e}")
-            # 如果还没爬到, 存占位提示用户手动粘贴
-            if not items:
-                try:
-                    items = [{
-                        "source": "淘股吧热帖", "author": "系统",
-                        "title": "⚠️ 淘股吧反爬严格 — 请手动复制文章内容后点➕新增粘贴",
-                        "url": "https://www.taoguba.com.cn/hot", "content": "反爬提示", "stock_code": "", "stock_name": ""
-                    }]
-                except Exception: pass
-            _save_and_refresh(items, "淘股吧热帖")
+                status.set(f"⚠️ 东财热度榜异常: {e}")
+            _save_and_refresh(items, "东财热帖")
 
-        # ── 爬韭研公社 ──
+        # ── 🌾韭研公社 (东财机构研报, 质量更高) ──
         def _do_crawl_jiuyan():
-            status.set("⏳ 爬取韭研公社热帖..."); win.update_idletasks()
+            status.set("⏳ 爬取东财机构研报 (ETF 热门持仓股)..."); win.update_idletasks()
+            import akshare as ak
             items = []
             try:
-                import requests
-                from bs4 import BeautifulSoup
-                headers = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                           "Accept":"text/html,application/xhtml+xml"}
-                r = requests.get("https://www.jiuyangongshe.com/explore?sort=hot", headers=headers, timeout=15)
-                soup = BeautifulSoup(r.text, "html.parser")
-                for a in soup.find_all("a", href=True):
-                    txt = a.get_text(strip=True)
-                    href = a["href"]
-                    if len(txt) > 10 and ("/article/" in href or "/share/" in href or "/posts/" in href):
-                        full = href if href.startswith("http") else f"https://www.jiuyangongshe.com{href}"
-                        if txt not in [i["title"] for i in items]:
-                            items.append({
-                                "source": "韭研公社", "author": "韭研公社",
-                                "title": txt[:120], "url": full,
-                                "content": "", "stock_code": "", "stock_name": ""
-                            })
-            except Exception as e:
-                status.set(f"⚠️ 韭研公社爬取异常: {e}")
-            if not items:
-                items = [{"source":"韭研公社","author":"系统","title":"⚠️ 韭研公社反爬严格 — 请手动复制粘贴",
-                         "url":"https://www.jiuyangongshe.com","content":"反爬提示","stock_code":"","stock_name":""}]
-            _save_and_refresh(items, "韭研公社")
-
-        # ── 爬雪球讨论 ──
-        def _do_crawl_xueqiu():
-            status.set("⏳ 爬取雪球热帖..."); win.update_idletasks()
-            items = []
-            try:
-                import requests, json
-                headers = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                           "Referer":"https://xueqiu.com/"}
-                s = requests.Session()
-                s.get("https://xueqiu.com/", headers=headers, timeout=10)  # 拿 cookie
-                for cat in [115, 116, 117]:  # 热门讨论/策略/其他
+                # 从 ETF_HOLDERS 取热门股 (覆盖宽基+科技+消费)
+                from src.ui.tab_stock_detail import ETF_HOLDERS as _EH
+                target_stocks = []
+                seen = set()
+                for ename in ["沪深300ETF","中证500ETF","半导体ETF","人工智能ETF","消费ETF","白酒ETF","新能源ETF"]:
+                    for sina, sname in _EH.get(ename, [])[:3]:
+                        if sname not in seen:
+                            seen.add(sname); target_stocks.append(sina[2:8] if len(sina)>8 else sina)
+                # 每只爬机构研报
+                for code in target_stocks[:10]:
                     try:
-                        r = s.get(f"https://xueqiu.com/v4/statuses/public_timeline_by_category.json?since_id=-1&max_id=-1&count=15&category={cat}",
-                                  headers=headers, timeout=10)
-                        d = r.json()
-                        list_items = d.get("data", {}).get("list") or d.get("list") or []
-                        for it in list_items:
-                            desc = it.get("description", "") or it.get("text", "") or ""
-                            title = it.get("title", "") or desc[:50]
-                            user = it.get("user", {}).get("screen_name", "")
-                            if title and len(title) > 5:
+                        df = ak.stock_research_report_em(symbol=code)
+                        if df is not None and len(df) > 0:
+                            for _, row in df.head(3).iterrows():
                                 items.append({
-                                    "source":"雪球讨论","author":user or "雪球",
-                                    "title":title[:120],"url":f"https://xueqiu.com/{it.get('user',{}).get('id','')}/{it.get('id','')}",
-                                    "content":desc,"stock_code":"","stock_name":""
+                                    "source": "机构研报", "author": str(row.get("机构", "研报")),
+                                    "title": str(row.get("报告名称", ""))[:120],
+                                    "url": str(row.get("报告PDF链接", "")),
+                                    "content": f"东财评级: {row.get('东财评级','')} | 行业: {row.get('行业','')} | 日期: {row.get('日期','')}",
+                                    "stock_code": code,
+                                    "stock_name": str(row.get("股票简称", "")),
                                 })
                     except Exception: continue
+                    status.set(f"⏳ 研报: 已爬 {len(items)} 条..."); win.update_idletasks()
             except Exception as e:
-                status.set(f"⚠️ 雪球爬取异常: {e}")
-            if not items:
-                items = [{"source":"雪球讨论","author":"系统","title":"⚠️ 雪球反爬 — 请手动复制粘贴 或 东财股吧更全",
-                         "url":"https://xueqiu.com","content":"反爬提示","stock_code":"","stock_name":""}]
+                status.set(f"⚠️ 研报爬取异常: {e}")
+            _save_and_refresh(items, "机构研报")
+
+        # ── ☃️雪球 (东财热度榜 + 个股新闻, akshare 替代) ──
+        def _do_crawl_xueqiu():
+            status.set("⏳ 爬取东财热门讨论 (热度榜 TOP20 + 新闻)..."); win.update_idletasks()
+            import akshare as ak
+            items = []
+            try:
+                # 热度榜 TOP20
+                hot_df = ak.stock_comment_em()
+                if hot_df is not None and len(hot_df) > 0:
+                    top20 = hot_df.head(20)
+                    for _, row in top20.iterrows():
+                        code = str(row.get("代码", "")); name = str(row.get("名称", ""))
+                        try:
+                            news_df = ak.stock_news_em(symbol=code)
+                            if news_df is not None and len(news_df) > 0:
+                                for _, nr in news_df.head(1).iterrows():
+                                    items.append({
+                                        "source": "雪球讨论替代", "author": nr.get("文章来源", "东财"),
+                                        "title": nr.get("新闻标题", "")[:120],
+                                        "url": nr.get("新闻链接", ""),
+                                        "content": nr.get("新闻内容", "")[:500],
+                                        "stock_code": code, "stock_name": name,
+                                    })
+                        except Exception: continue
+                        status.set(f"⏳ 雪球替代: 已爬 {len(items)} 条..."); win.update_idletasks()
+            except Exception as e:
+                status.set(f"⚠️ 雪球替代异常: {e}")
             _save_and_refresh(items, "雪球讨论")
 
         def _save_and_refresh(items, label):
