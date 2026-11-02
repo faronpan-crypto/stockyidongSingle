@@ -3700,6 +3700,404 @@ class StockDetailMixin:
             messagebox.showerror("错误", f"打开一目均衡K线图失败: {e}", parent=getattr(self, 'root', None))
 
     # ═══════════════════════════════════════════════════════════════
+    # 📊 ETF 联动分析弹窗 — 三列: ETF列表 → 持仓股 → K线图
+    # ═══════════════════════════════════════════════════════════════
+    def _show_etf_link_dialog(self):
+        """📊 ETF 联动分析: 左列 ETF 强弱排行 + 中列持仓股 + 右列 K 线 Notebook"""
+        import traceback as _tb_etf
+        try:
+            import matplotlib
+            matplotlib.use("TkAgg")
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            from matplotlib.figure import Figure
+            import numpy as np
+            import pandas as pd
+
+            win = self._safe_toplevel(self.root)
+            win.title("📊 ETF 联动分析 · ETF → 持仓股 → K线")
+            win.geometry("1560x960")
+            try: win.state("zoomed")
+            except:
+                try: win.attributes("-zoomed", True)
+                except: pass
+
+            # ── 1. 主流 ETF 列表 (40只, 覆盖宽基+行业+跨境) ──
+            MAINSTREAM_ETFS = [
+                # ── 宽基 ──
+                ("510300.SH", "沪深300"), ("510500.SH", "中证500"), ("159915.SZ", "创业板"),
+                ("588000.SH", "科创50"), ("510050.SH", "上证50"), ("512100.SH", "中证1000"),
+                ("512980.SH", "中证红利"), ("510880.SH", "红利ETF"),
+                # ── 科技成长 ──
+                ("512480.SH", "半导体"), ("159995.SZ", "芯片ETF"), ("159875.SZ", "新能源"),
+                ("515030.SH", "新能源车"), ("515790.SH", "光伏ETF"), ("512660.SH", "军工ETF"),
+                ("159887.SZ", "人工智能"), ("159280.SZ", "大数据ETF"),
+                # ── 消费医药 ──
+                ("159928.SZ", "消费ETF"), ("512690.SH", "酒ETF"), ("512010.SH", "医药ETF"),
+                ("515120.SH", "创新药"), ("159929.SZ", "医药50"),
+                # ── 金融周期 ──
+                ("512880.SH", "证券ETF"), ("512000.SH", "银行ETF"), ("515220.SH", "煤炭ETF"),
+                ("512400.SH", "有色ETF"), ("512200.SH", "房地产"), ("510440.SH", "周期ETF"),
+                # ── 港股通 ──
+                ("513180.SH", "恒生科技"), ("513050.SH", "中概互联"), ("513070.SH", "港股通医药"),
+                ("513130.SH", "港股通科技"),
+                # ── 跨境QDII ──
+                ("513100.SH", "纳指100"), ("513500.SH", "标普500"), ("513520.SH", "日经225"),
+                ("513080.SH", "法国CAC"), ("513660.SH", "恒生指数"), ("513580.SH", "德国DAX"),
+                # ── 其他主题 ──
+                ("512890.SH", "红利低波"), ("515900.SH", "机器人ETF"), ("515210.SH", "钢铁ETF"),
+                ("512760.SH", "芯片50"), ("159866.SZ", "算力ETF"),
+            ]
+
+            # ── 2. ETF → 核心持仓股映射 (硬编码 Top 5-8, 定期可更新) ──
+            # 格式: [(sina_code, stock_name), ...]
+            ETF_HOLDERS = {
+                "沪深300": [("sh600519","贵州茅台"),("sh601318","中国平安"),("sh600036","招商银行"),
+                            ("sh601398","工商银行"),("sh600900","长江电力"),("sh601012","隆基绿能"),
+                            ("sz300750","宁德时代"),("sz002594","比亚迪")],
+                "中证500": [("sh601872","招商轮船"),("sh600741","华域汽车"),("sh601166","兴业银行"),
+                            ("sz002415","海康威视"),("sz002230","科大讯飞"),("sh600309","万华化学")],
+                "创业板": [("sz300750","宁德时代"),("sz300059","东方财富"),("sz300760","迈瑞医疗"),
+                           ("sz300015","爱尔眼科"),("sz300124","汇川技术"),("sz300014","亿纬锂能")],
+                "科创50": [("sh688981","中芯国际"),("sh688111","金山办公"),("sh688012","中微公司"),
+                           ("sh688271","联影医疗"),("sh688008","澜起科技"),("sh688041","海光信息")],
+                "上证50": [("sh600519","贵州茅台"),("sh601318","中国平安"),("sh600036","招商银行"),
+                           ("sh601398","工商银行"),("sh601288","农业银行"),("sh600028","中国石化")],
+                "中证1000": [("sh601872","招商轮船"),("sh603195","公牛集团"),("sz002812","恩捷股份"),
+                            ("sz002371","北方华创"),("sz002049","紫光国微")],
+                "芯片ETF": [("sh688981","中芯国际"),("sz002371","北方华创"),("sz002049","紫光国微"),
+                            ("sh688041","海光信息"),("sz300782","卓胜微"),("sh603986","兆易创新")],
+                "半导体": [("sh688981","中芯国际"),("sz002371","北方华创"),("sz002049","紫光国微"),
+                            ("sh688041","海光信息"),("sz300782","卓胜微"),("sh603986","兆易创新")],
+                "新能源": [("sz300750","宁德时代"),("sz002594","比亚迪"),("sz300014","亿纬锂能"),
+                           ("sz002460","赣锋锂业"),("sz300015","爱尔眼科"),("sh600104","上汽集团")],
+                "新能源车": [("sz002594","比亚迪"),("sz300750","宁德时代"),("sh601127","赛力斯"),
+                             ("sz300014","亿纬锂能"),("sz002812","恩捷股份")],
+                "光伏ETF": [("sh601012","隆基绿能"),("sz002456","欧菲光"),("sz002049","紫光国微"),
+                            ("sz300750","宁德时代"),("sh600438","通威股份"),("sz300274","阳光电源")],
+                "军工ETF": [("sh600760","中航沈飞"),("sz000768","中航西飞"),("sh600862","中航高科"),
+                            ("sz300034","钢研高纳"),("sh600372","中航机载"),("sz002179","中航光电")],
+                "消费ETF": [("sh600519","贵州茅台"),("sz000858","五粮液"),("sz000568","泸州老窖"),
+                            ("sh600809","山西汾酒"),("sz002594","比亚迪"),("sz002714","牧原股份")],
+                "酒ETF": [("sh600519","贵州茅台"),("sz000858","五粮液"),("sz000568","泸州老窖"),
+                          ("sh600809","山西汾酒"),("sh603589","口子窖"),("sz000799","酒鬼酒")],
+                "医药ETF": [("sz300760","迈瑞医疗"),("sh600276","恒瑞医药"),("sz300015","爱尔眼科"),
+                            ("sh600196","复星医药"),("sz000538","云南白药"),("sz002007","华兰生物")],
+                "证券ETF": [("sh601211","国泰君安"),("sh600999","招商证券"),("sh601788","光大证券"),
+                            ("sz000776","广发证券"),("sz002736","国信证券"),("sh600109","国金证券")],
+                "银行ETF": [("sh601398","工商银行"),("sh600036","招商银行"),("sh601288","农业银行"),
+                            ("sh601939","建设银行"),("sh601166","兴业银行"),("sh600016","民生银行")],
+                "恒生科技": [("hk00700","腾讯控股"),("hk03690","美团-W"),("hk09988","阿里巴巴-W"),
+                             ("hk09888","百度集团-W"),("hk03888","金山软件"),("hk01024","快手-W")],
+                "中概互联": [("hk09988","阿里巴巴-W"),("hk00700","腾讯控股"),("hk03690","美团-W"),
+                             ("hk09888","百度集团-W"),("hk09618","京东集团-SW"),("hk01024","快手-W")],
+                "纳指100": [("usAAPL","苹果"),("usMSFT","微软"),("usNVDA","英伟达"),
+                            ("usGOOGL","谷歌"),("usAMZN","亚马逊"),("usMETA","Meta")],
+                "标普500": [("usAAPL","苹果"),("usMSFT","微软"),("usNVDA","英伟达"),
+                            ("usAMZN","亚马逊"),("usGOOGL","谷歌"),("usTSLA","特斯拉")],
+                "日经225": [("jp7203","丰田汽车"),("jp6758","索尼集团"),("jp6594","日本发那科"),
+                            ("jp8306","东京海上"),("jp4063","新日铁住金")],
+                "红利ETF": [("sh601398","工商银行"),("sh600036","招商银行"),("sh601288","农业银行"),
+                            ("sh600028","中国石化"),("sh601985","中国核电"),("sh601088","中国神华")],
+                "煤炭ETF": [("sh601088","中国神华"),("sh601225","陕西煤业"),("sh600508","上海能源"),
+                            ("sh600188","兖矿能源"),("sz000933","神火股份")],
+                "有色ETF": [("sh601899","紫金矿业"),("sz000630","铜陵有色"),("sz000807","云铝股份"),
+                            ("sh601600","中国铝业"),("sz002460","赣锋锂业")],
+            }
+
+            # ── 3. tushare token (复用 ETF 强弱的 tushare 初始化) ──
+            import time as _time_etf
+            import tushare as ts
+            try:
+                from utils.config import TS_DEFAULT_TOKEN
+                if not getattr(self, "_ts_pro_init", False):
+                    ts.set_token(TS_DEFAULT_TOKEN)
+                    self._ts_pro = ts.pro_api()
+                    self._ts_pro_init = True
+            except Exception:
+                pass
+
+            # ── 4. 顶部工具栏 ──
+            top = ttk.Frame(win, padding=6); top.pack(fill=tk.X)
+            ttk.Label(top, text="📊 ETF 联动分析", font=("", 12, "bold"), foreground="#1565C0").pack(side=tk.LEFT)
+            ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+            status_var_etf = tk.StringVar(value="⏳ 加载 ETF 涨跌幅...")
+            ttk.Label(top, textvariable=status_var_etf, foreground="#666").pack(side=tk.LEFT)
+            refresh_etf = ttk.Button(top, text="🔄 刷新", width=8); refresh_etf.pack(side=tk.RIGHT, padx=4)
+
+            # ── 5. 三列 PanedWindow ──
+            pw = ttk.PanedWindow(win, orient=tk.HORIZONTAL)
+            pw.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+
+            # ══════════ 左列: ETF Treeview ══════════
+            left_frame = ttk.Frame(pw)
+            pw.add(left_frame, weight=3)
+            ttk.Label(left_frame, text="📊 ETF 板块 (点击选中, 双击联动)",
+                      font=("", 10, "bold")).pack(anchor="w", padx=6, pady=(4, 2))
+            etf_tree_frame = ttk.Frame(left_frame)
+            etf_tree_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
+            etf_cols = ("code", "name", "r5", "r20", "score")
+            etf_tree = ttk.Treeview(etf_tree_frame, columns=etf_cols, show="headings", height=30)
+            for col, txt, w in [("code","代码",90),("name","ETF名称",110),
+                                ("r5","5日%",55),("r20","20日%",60),("score","得分",55)]:
+                etf_tree.heading(col, text=txt)
+                etf_tree.column(col, width=w, anchor="center" if col!="name" else "w", stretch=False)
+            vs1 = ttk.Scrollbar(etf_tree_frame, orient=tk.VERTICAL, command=etf_tree.yview)
+            etf_tree.configure(yscrollcommand=vs1.set)
+            etf_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            vs1.pack(side=tk.RIGHT, fill=tk.Y)
+            # 红涨绿跌 tag
+            etf_tree.tag_configure("up", foreground="#C62828", font=("", 10, "bold"))
+            etf_tree.tag_configure("dn", foreground="#2E7D32", font=("", 10, "bold"))
+            etf_tree.tag_configure("top", background="#FFEBEE")
+            etf_tree.tag_configure("bot", background="#E8F5E9")
+
+            # ══════════ 中列: 持仓股 Treeview ══════════
+            mid_frame = ttk.Frame(pw)
+            pw.add(mid_frame, weight=3)
+            ttk.Label(mid_frame, text="📦 核心持仓股 (双击联动K线)",
+                      font=("", 10, "bold")).pack(anchor="w", padx=6, pady=(4, 2))
+            hold_tree_frame = ttk.Frame(mid_frame)
+            hold_tree_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
+            hold_cols = ("code", "name", "r5", "r20")
+            hold_tree = ttk.Treeview(hold_tree_frame, columns=hold_cols, show="headings", height=30)
+            for col, txt, w in [("code","代码",80),("name","股票名称",100),
+                                ("r5","5日%",55),("r20","20日%",60)]:
+                hold_tree.heading(col, text=txt)
+                hold_tree.column(col, width=w, anchor="center" if col!="name" else "w", stretch=False)
+            vs2 = ttk.Scrollbar(hold_tree_frame, orient=tk.VERTICAL, command=hold_tree.yview)
+            hold_tree.configure(yscrollcommand=vs2.set)
+            hold_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            vs2.pack(side=tk.RIGHT, fill=tk.Y)
+            hold_tree.tag_configure("up", foreground="#C62828", font=("", 10, "bold"))
+            hold_tree.tag_configure("dn", foreground="#2E7D32", font=("", 10, "bold"))
+
+            # ══════════ 右列: Notebook 3 tab K线 ══════════
+            right_frame = ttk.Frame(pw)
+            pw.add(right_frame, weight=5)
+            nb = ttk.Notebook(right_frame); nb.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+            # tab1: 日K线
+            tab_kline = ttk.Frame(nb); nb.add(tab_kline, text="📈 日K线")
+            fig1 = Figure(figsize=(7, 8), dpi=100); ax1 = fig1.add_subplot(111)
+            cv1 = FigureCanvasTkAgg(fig1, master=tab_kline); cv1.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+            # tab2: K线蜡烛
+            tab_candle = ttk.Frame(nb); nb.add(tab_candle, text="🕯️ K线蜡烛")
+            fig2 = Figure(figsize=(7, 8), dpi=100); ax2 = fig2.add_subplot(111)
+            cv2 = FigureCanvasTkAgg(fig2, master=tab_candle); cv2.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+            # tab3: 一目均衡
+            tab_ichi = ttk.Frame(nb); nb.add(tab_ichi, text="📊 一目均衡")
+            fig3 = Figure(figsize=(7, 8), dpi=100); ax3 = fig3.add_subplot(111)
+            cv3 = FigureCanvasTkAgg(fig3, master=tab_ichi); cv3.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+            # ── 6. ETF 数据拉取 (tushare fund_daily) ──
+            def _load_etf_list():
+                """拉所有 ETF 的 5日 / 20日 / 综合得分, 排序后填 Treeview"""
+                status_var_etf.set("⏳ 拉取 ETF 行情..."); win.update_idletasks()
+                etf_results = []
+                for ts_code, ename in MAINSTREAM_ETFS:
+                    try:
+                        edf = self._ts_pro.fund_daily(
+                            ts_code=ts_code,
+                            start_date="20260901", end_date=_time_etf.strftime("%Y%m%d"))
+                        if edf is None or len(edf) < 21: continue
+                        edf = edf.sort_values("trade_date").reset_index(drop=True)
+                        ecloses = edf["close"].astype(float).values
+                        r5 = (ecloses[-1]/ecloses[-6]-1)*100 if len(ecloses)>=6 else np.nan
+                        r20 = (ecloses[-1]/ecloses[-21]-1)*100 if len(ecloses)>=21 else np.nan
+                        if np.isnan(r5) or np.isnan(r20): continue
+                        score = r5*0.6 + r20*0.4
+                        etf_results.append((score, ts_code, ename, r5, r20))
+                    except Exception:
+                        pass
+                etf_results.sort(reverse=True)
+                # 清 Treeview 重填
+                for iid in etf_tree.get_children(): etf_tree.delete(iid)
+                for rank, (score, ts_code, ename, r5, r20) in enumerate(etf_results):
+                    tag = "top" if rank < 3 else ("bot" if rank >= len(etf_results)-3 else "")
+                    rtag = "up" if score >= 0 else "dn"
+                    iid = etf_tree.insert("", "end",
+                        values=(ts_code, ename, f"{r5:+.1f}", f"{r20:+.1f}", f"{score:+.2f}"),
+                        tags=(rtag, tag))
+                status_var_etf.set(f"✅ 已加载 {len(etf_results)} 只 ETF")
+                return etf_results
+            etf_cache = {"data": None}
+
+            # ── 7. 选中 ETF → 刷新中列持仓股 ──
+            def _on_etf_select(_evt=None):
+                """左列选中 ETF, 刷中列持仓股"""
+                sel = etf_tree.selection()
+                if not sel: return
+                vals = etf_tree.item(sel[0], "values")
+                if not vals: return
+                ename = vals[1]  # ETF名称
+                status_var_etf.set(f"⏳ 加载 {ename} 持仓股..."); win.update_idletasks()
+                # 清中列
+                for iid in hold_tree.get_children(): hold_tree.delete(iid)
+                holders = ETF_HOLDERS.get(ename, [])
+                if not holders:
+                    hold_tree.insert("", "end", values=("", "暂无映射持仓", "", ""))
+                    status_var_etf.set(f"ℹ️ {ename} 暂无预定义持仓映射")
+                    return
+                # 拉每只持仓股 5日/20日 (复用 _fetch_ichimoku_kline_data)
+                for sina, sname in holders:
+                    try:
+                        kdf = self._fetch_ichimoku_kline_data(sina, period="daily",
+                                                              is_index=isinstance(sina, str) and sina.startswith("us"))
+                        if kdf is None or len(kdf) < 21:
+                            hold_tree.insert("", "end", values=(sina, sname, "—", "—"))
+                            continue
+                        closes = kdf["收盘"].astype(float).values if "收盘" in kdf.columns else kdf["close"].astype(float).values
+                        r5 = (closes[-1]/closes[-6]-1)*100 if len(closes)>=6 else np.nan
+                        r20 = (closes[-1]/closes[-21]-1)*100 if len(closes)>=21 else np.nan
+                        if np.isnan(r5) or np.isnan(r20):
+                            hold_tree.insert("", "end", values=(sina, sname, "—", "—"))
+                            continue
+                        tag = "up" if r5 >= 0 else "dn"
+                        hold_tree.insert("", "end",
+                            values=(sina, sname, f"{r5:+.1f}", f"{r20:+.1f}"), tags=(tag,))
+                    except Exception:
+                        hold_tree.insert("", "end", values=(sina, sname, "—", "—"))
+                status_var_etf.set(f"✅ {ename} · {len(holders)} 只持仓股")
+
+            # ── 8. 选中股票 → 刷新右列 3 tab K线 ──
+            def _draw_kline_tabs(sina, sname):
+                """右列 3 tab 全部画 K 线"""
+                status_var_etf.set(f"⏳ 加载 {sname}({sina}) K线..."); win.update_idletasks()
+                # 判断类型 (us→美股, jp→日股, hk→港股, 默认 A 股)
+                is_us = sina.startswith("us"); is_jp = sina.startswith("jp")
+                is_hk = sina.startswith("hk")
+                symbol_for_fetch = sina
+                if is_us or is_jp:
+                    # 美股/日股 _fetch_ichimoku 不支持, 用 fallback 只画空标题
+                    for ax in [ax1, ax2, ax3]:
+                        ax.clear()
+                        ax.text(0.5, 0.5, f"{sname}\n({sina})\n⚠️ 海外暂不支持",
+                                transform=ax.transAxes, fontsize=14,
+                                ha="center", va="center", color="#999")
+                    for cv in [cv1, cv2, cv3]: cv.draw()
+                    status_var_etf.set(f"ℹ️ {sname} 海外暂不支持 K 线")
+                    return
+                # A股 (sh/sz 开头)
+                kdf = self._fetch_ichimoku_kline_data(sina, period="daily", is_index=False)
+                if kdf is None or len(kdf) < 30:
+                    for ax in [ax1, ax2, ax3]:
+                        ax.clear()
+                        ax.text(0.5, 0.5, f"{sname}\n数据不足",
+                                transform=ax.transAxes, fontsize=14,
+                                ha="center", va="center", color="#E53935")
+                    for cv in [cv1, cv2, cv3]: cv.draw()
+                    status_var_etf.set(f"❌ {sname} 数据不足")
+                    return
+                # 取列
+                opens = kdf["开盘"].astype(float).values if "开盘" in kdf.columns else kdf["open"].astype(float).values
+                highs = kdf["最高"].astype(float).values if "最高" in kdf.columns else kdf["high"].astype(float).values
+                lows  = kdf["最低"].astype(float).values if "最低" in kdf.columns else kdf["low"].astype(float).values
+                closes = kdf["收盘"].astype(float).values if "收盘" in kdf.columns else kdf["close"].astype(float).values
+                vols  = kdf["成交量"].astype(float).values if "成交量" in kdf.columns else np.zeros_like(closes)
+                n = len(closes); x = np.arange(n)
+                up_c, dn_c = "#EF5350", "#66BB6A"
+
+                # ── tab1: 日K线 (蜡烛 + MA) ──
+                ax1.clear()
+                for i in range(n):
+                    col = up_c if closes[i] >= opens[i] else dn_c
+                    ax1.plot([x[i],x[i]], [lows[i], highs[i]], color=col, lw=0.8)
+                    ax1.bar(x[i], closes[i]-opens[i], bottom=opens[i], color=col, width=0.6)
+                ma5 = pd.Series(closes).rolling(5).mean().values
+                ma10 = pd.Series(closes).rolling(10).mean().values
+                ma20 = pd.Series(closes).rolling(20).mean().values
+                ma60 = pd.Series(closes).rolling(60).mean().values
+                ax1.plot(x, ma5, color="#FFC107", lw=1.0, label="MA5")
+                ax1.plot(x, ma10, color="#2196F3", lw=1.0, label="MA10")
+                ax1.plot(x, ma20, color="#9C27B0", lw=1.2, label="MA20")
+                ax1.plot(x, ma60, color="#FF5722", lw=1.2, label="MA60")
+                ax1.set_title(f"📈 日K线 · {sname}", fontsize=11, fontweight="bold")
+                ax1.legend(fontsize=7, loc="upper left", ncol=4)
+                cv1.draw()
+
+                # ── tab2: K线蜡烛 (简洁版) ──
+                ax2.clear()
+                for i in range(n):
+                    col = up_c if closes[i] >= opens[i] else dn_c
+                    ax2.plot([x[i],x[i]], [lows[i], highs[i]], color=col, lw=0.8)
+                    ax2.bar(x[i], closes[i]-opens[i], bottom=opens[i], color=col, width=0.6)
+                ax2.set_title(f"🕯️ K线蜡烛 · {sname}", fontsize=11, fontweight="bold")
+                cv2.draw()
+
+                # ── tab3: 一目均衡 ──
+                ax3.clear()
+                self._plot_ichimoku_ax(ax3, x, highs, lows, closes, show_explanation=False)
+                ax3.set_title(f"📊 一目均衡 · {sname}", fontsize=11, fontweight="bold")
+                cv3.draw()
+
+                status_var_etf.set(f"✅ {sname} K线已加载 ({n} 根)")
+
+            # ── 9. 双击事件绑定 ──
+            def _on_etf_double(_evt):
+                """双击 ETF → 选中 + 刷中列 + 自动刷右列第一只持仓"""
+                _on_etf_select()
+                sel = etf_tree.selection()
+                if not sel: return
+                vals = etf_tree.item(sel[0], "values")
+                ename = vals[1]
+                holders = ETF_HOLDERS.get(ename, [])
+                if not holders: return
+                # 选中中列第一只
+                hold_tree.selection_remove(hold_tree.selection())
+                first_child = hold_tree.get_children()
+                if first_child:
+                    hold_tree.selection_set(first_child[0])
+                    hold_tree.see(first_child[0])
+                # 刷右列
+                sina, sname = holders[0]
+                _draw_kline_tabs(sina, sname)
+
+            def _on_hold_double(_evt):
+                """双击持仓股 → 刷右列"""
+                sel = hold_tree.selection()
+                if not sel: return
+                vals = hold_tree.item(sel[0], "values")
+                if not vals or not vals[0] or vals[0] == "": return
+                _draw_kline_tabs(vals[0], vals[1])
+
+            def _on_hold_select(_evt=None):
+                """单击持仓股也刷 (方便使用)"""
+                sel = hold_tree.selection()
+                if not sel: return
+                vals = hold_tree.item(sel[0], "values")
+                if not vals or not vals[0] or vals[0] == "": return
+                _draw_kline_tabs(vals[0], vals[1])
+
+            etf_tree.bind("<<TreeviewSelect>>", _on_etf_select)
+            etf_tree.bind("<Double-1>", lambda e: _on_etf_double(e))
+            hold_tree.bind("<<TreeviewSelect>>", _on_hold_select)
+            hold_tree.bind("<Double-1>", lambda e: _on_hold_double(e))
+
+            refresh_etf.config(command=lambda: _load_etf_list())
+
+            # ── 10. 启动加载 ──
+            win.update_idletasks()
+            try:
+                etf_cache["data"] = _load_etf_list()
+                # 默认选中 Top1
+                first_child = etf_tree.get_children()
+                if first_child:
+                    etf_tree.selection_set(first_child[0])
+                    etf_tree.see(first_child[0])
+            except Exception as _e:
+                status_var_etf.set(f"❌ 加载失败: {_e}")
+                print(f"[📊ETF联动❌] {_e}", flush=True)
+                _tb_etf.print_exc()
+
+        except Exception as _e:
+            print(f"[📊ETF联动❌] {_e}", flush=True)
+            _tb_etf.print_exc()
+            messagebox.showerror("错误", f"打开 ETF 联动弹窗失败: {_e}",
+                                 parent=getattr(self, 'root', None))
+
+    # ═══════════════════════════════════════════════════════════════
     # 🖼️ 图像分析弹窗 — 多图联动同时展示
     # ═══════════════════════════════════════════════════════════════
 
@@ -3908,6 +4306,10 @@ class StockDetailMixin:
 
             help_btn = ttk.Button(top, text="❓帮助", width=7, command=_show_chart_help)
             help_btn.pack(side=tk.LEFT, padx=(4, 4))
+            # 🆕 ETF 联动分析按钮 — 打开三列 ETF→持仓股→K线 弹窗
+            etf_btn = ttk.Button(top, text="📊ETF联动", width=10,
+                                 command=lambda: self._show_etf_link_dialog())
+            etf_btn.pack(side=tk.LEFT, padx=(0, 4))
             status_var = tk.StringVar(value="")
             ttk.Label(top, textvariable=status_var, foreground="gray").pack(side=tk.LEFT, padx=8)
 
