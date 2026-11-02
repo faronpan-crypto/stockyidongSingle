@@ -4750,6 +4750,7 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("📊板块个股分析", 10, self._show_stock_compare_dialog),
             ("🔍多股同列", 7, self._show_multi_compare_dialog),
             ("📐β-α", 6, self._show_beta_alpha),
+            ("🎁打折促销", 9, self._show_discount_dialog),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW3):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
