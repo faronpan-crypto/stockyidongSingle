@@ -3786,23 +3786,105 @@ class StockDetailMixin:
             # ═══ 三列 PanedWindow ═══
             pw = ttk.PanedWindow(win, orient=tk.HORIZONTAL); pw.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-            # ── 左列: 热股池 ──
+            # ── 左列: 热股池 (8列: 代码/名称/现价/回撤%/折扣/涨跌%/提及/来源) ──
             left = tk.Frame(pw, bg="#FAFAFA"); pw.add(left, weight=3)
             head = tk.Frame(left, bg="#FAFAFA"); head.pack(fill=tk.X, padx=6, pady=(6,2))
             tk.Label(head, text=f"{emoji} {name}热股池", font=("",12,"bold"), bg="#FAFAFA", fg=bg_color).pack(side=tk.LEFT)
-            lcols=("code","name","pct","freq","origin")
+            lcols=("code","name","now","pct250","disc","pct","freq","origin")
             ltree=ttk.Treeview(left,columns=lcols,show="headings",height=22)
-            for c,w,t in [("code",78,"代码"),("name",100,"名称"),("pct",60,"涨跌%"),("freq",55,"提及"),("origin",85,"来源")]:
+            for c,w,t in [("code",58,"代码"),("name",90,"名称"),("now",55,"现价"),
+                          ("pct250",60,"回撤%"),("disc",50,"折扣"),("pct",55,"涨跌%"),
+                          ("freq",45,"提及"),("origin",70,"来源")]:
                 ltree.heading(c,text=t); ltree.column(c,width=w,anchor="center" if c!="name" else "w")
             _sb_l=ttk.Scrollbar(left,orient="vertical",command=ltree.yview); ltree.configure(yscrollcommand=_sb_l.set)
             _sb_l.pack(side="right",fill="y",pady=4); ltree.pack(side="left",fill="both",expand=True,padx=(4,0),pady=4)
             ltree.tag_configure("up",foreground="#E53935",font=("",10,"bold"))
             ltree.tag_configure("down",foreground="#43A047",font=("",10,"bold"))
             ltree.tag_configure("hot",foreground="#FF6F00",font=("",10,"bold"))
+            ltree.tag_configure("p0_20", foreground="#E53935", font=("",10,"bold"))
+            ltree.tag_configure("p20_40", foreground="#FB8C00", font=("",10,"bold"))
+            ltree.tag_configure("p40_60", foreground="#FDD835", font=("",10,"bold"))
+            ltree.tag_configure("p60_80", foreground="#4CAF50", font=("",10))
+            ltree.tag_configure("p80_100", foreground="#1565C0", font=("",10))
+
+            # ═══ 批量计算 250天回撤 (用 tushare) ═══
+            def _fetch_250d_range_disc(ts_code):
+                try:
+                    end = datetime.now().strftime("%Y%m%d")
+                    start = (datetime.now() - timedelta(days=400)).strftime("%Y%m%d")
+                    df = self._ts_pro.daily(ts_code=ts_code, start_date=start, end_date=end)
+                    if df is None or len(df) == 0:
+                        return None, None, None
+                    df = df.sort_values("trade_date").tail(250)
+                    highs = df["high"].astype(float).values
+                    lows = df["low"].astype(float).values
+                    closes = df["close"].astype(float).values
+                    return float(highs.max()), float(lows.min()), float(closes[-1])
+                except Exception:
+                    return None, None, None
+
+            def _sina_to_ts(code):
+                c = code.lower()
+                if c.startswith("sh"): return c[2:]+".SH"
+                if c.startswith("sz"): return c[2:]+".SZ"
+                if c.startswith("bj"): return c[2:]+".BJ"
+                return c + (".SH" if c.startswith("6") else ".SZ")
+
+            # 先塞占位行 (现价/回撤/折扣显示 "—")
             for i,r in enumerate(rows):
                 pct=r.get("pct",0); tag="up" if pct>0 else ("down" if pct<0 else "")
                 if r.get("freq",0)>=10: tag=(tag+" hot").strip()
-                ltree.insert("","end",iid=str(i),values=(r.get("code","")[-6:],r.get("name",""),f"{pct:+.2f}",r.get("freq",1),r.get("origin","")),tags=(tag,) if tag else ())
+                ltree.insert("","end",iid=str(i),values=(
+                    r.get("code","")[-6:], r.get("name",""),
+                    "—", "—", "—",
+                    f"{pct:+.2f}", r.get("freq",1), r.get("origin","")),
+                    tags=(tag,) if tag else ())
+
+            # 后台线程算回撤 (异步)
+            def _bg_calc_discount():
+                import traceback as _tb_bg
+                _ok_cnt = 0
+                try:
+                    for i,r in enumerate(rows):
+                        try:
+                            ts = _sina_to_ts(r.get("code",""))
+                            h250, l250, now = _fetch_250d_range_disc(ts)
+                            if h250 and now and now > 0:
+                                pct250 = (now - h250) / h250 * 100
+                                disc = round(now / h250 * 10, 1)
+                                rows[i]["_now"] = now
+                                rows[i]["_pct250"] = pct250
+                                rows[i]["_disc"] = f"{disc:.1f}折"
+                                _ok_cnt += 1
+                            else:
+                                rows[i]["_now"] = 0; rows[i]["_pct250"] = 0; rows[i]["_disc"] = "—"
+                        except Exception as _e_inner:
+                            rows[i]["_now"] = 0; rows[i]["_pct250"] = 0; rows[i]["_disc"] = "—"
+                        # 逐行更新 UI
+                        def _upd(_idx=i, _row=r):
+                            try:
+                                _v = ltree.item(str(_idx), "values")
+                                _list = list(_v)
+                                _list[2] = f"{_row.get('_now',0):.2f}" if _row.get("_now",0)>0 else "—"
+                                _list[3] = f"{_row.get('_pct250',0):+.1f}%" if _row.get("_now",0)>0 else "—"
+                                _list[4] = _row.get("_disc","—")
+                                ltree.item(str(_idx), values=tuple(_list))
+                                _p = _row.get("_pct250", 0)
+                                if _row.get("_now", 0) > 0:
+                                    if _p <= -50: ltree.item(str(_idx), tags=("p0_20",))
+                                    elif _p <= -30: ltree.item(str(_idx), tags=("p20_40",))
+                                    elif _p <= -20: ltree.item(str(_idx), tags=("p40_60",))
+                                    elif _p <= -10: ltree.item(str(_idx), tags=("p60_80",))
+                                    else: ltree.item(str(_idx), tags=("p80_100",))
+                            except Exception: pass
+                        try: root.after(0, _upd)
+                        except Exception: pass
+                    print(f"[{name}] 回撤计算完成: {_ok_cnt}/{len(rows)} 有数据", flush=True)
+                except Exception as _e_outer:
+                    print(f"[{name}] 后台线程崩了: {_e_outer}", flush=True)
+                    _tb_bg.print_exc()
+            import threading as _th_src
+            _th_src.Thread(target=_bg_calc_discount, daemon=True).start()
 
             # ── 中列: Notebook 4 tab ──
             mid = tk.Frame(pw, bg="#FAFAFA"); pw.add(mid, weight=4)
@@ -3981,83 +4063,190 @@ class StockDetailMixin:
             # ═══ 辅助: 刷技术指标 (3×3 Grid 彩色卡片) ═══
             def _fill_indicator(ind_frame, ind_lbl, ind_placeholder, ind_cache, sina_code, sname):
                 for w in ind_frame.winfo_children(): w.destroy()
-                kdf = self._fetch_ichimoku_kline_data(sina_code, period="daily", is_index=False)
-                if kdf is None or len(kdf) < 30:
-                    tk.Label(ind_frame, text=f"{sname} K线数据不足，无法计算技术指标",
-                             font=("",11), bg="#FAFAFA", fg="#E53935").pack(expand=True)
-                    ind_lbl.configure(text="数据不足", fg="#E53935"); return
-                closes = kdf["收盘"].astype(float).values if "收盘" in kdf.columns else kdf["close"].astype(float).values
-                highs = kdf["最高"].astype(float).values if "最高" in kdf.columns else kdf["high"].astype(float).values
-                lows = kdf["最低"].astype(float).values if "最低" in kdf.columns else kdf["low"].astype(float).values
-                n = len(closes)
-                now = closes[-1]
-                # MA
-                ma5 = float(_np.mean(closes[-5:])) if n>=5 else now
-                ma10 = float(_np.mean(closes[-10:])) if n>=10 else now
-                ma20 = float(_np.mean(closes[-20:])) if n>=20 else now
-                ma_trend = "🟢多头" if now>ma5>ma10>ma20 else ("🔴空头" if now<ma5<ma10<ma20 else "🟡震荡")
-                # RSI14
                 try:
-                    deltas = _np.diff(closes); gains = _np.where(deltas>0, deltas, 0); losses = _np.where(deltas<0, -deltas, 0)
-                    avg_gain = float(_np.mean(gains[-14:])) if len(gains)>=14 else float(_np.mean(gains))
-                    avg_loss = float(_np.mean(losses[-14:])) if len(losses)>=14 else float(_np.mean(losses))
-                    rs = avg_gain/avg_loss if avg_loss>0 else 100
-                    rsi = 100 - 100/(1+rs)
-                    rsi_status = "超买" if rsi>70 else ("超卖" if rsi<30 else "正常")
-                except: rsi, rsi_status = 50, "正常"
-                # MACD
-                try:
-                    e12=_np.zeros(n);e26=_np.zeros(n);e12[0]=e26[0]=closes[0]
-                    for i in range(1,n): e12[i]=closes[i]*2/13+e12[i-1]*11/13; e26[i]=closes[i]*2/27+e26[i-1]*25/27
-                    dif=e12-e26; dea=_np.zeros(n); dea[0]=dif[0]
-                    for i in range(1,n): dea[i]=dif[i]*2/10+dea[i-1]*8/10
-                    macd=(dif-dea)*2
-                    macd_val = float(macd[-1]); dif_val = float(dif[-1])
-                except: macd_val, dif_val = 0, 0
-                # KDJ
-                try:
-                    rsv=_np.full(n,50.0)
-                    for i in range(8,n):
-                        hh=float(max(highs[i-8:i+1])); ll=float(min(lows[i-8:i+1]))
-                        rsv[i]=(closes[i]-ll)/(hh-ll)*100 if hh>ll else 50
-                    k=_np.zeros(n); d=_np.zeros(n); k[0]=d[0]=50
-                    for i in range(1,n): k[i]=rsv[i]*1/3+k[i-1]*2/3; d[i]=k[i]*1/3+d[i-1]*2/3
-                    j=3*k-2*d
-                    k_val, d_val, j_val = float(k[-1]), float(d[-1]), float(j[-1])
-                except: k_val, d_val, j_val = 50, 50, 50
-                # BOLL
-                try:
-                    ma20_boll = float(_np.mean(closes[-20:])) if n>=20 else now
-                    std20 = float(_np.std(closes[-20:])) if n>=20 else 0
-                    boll_pos = (now - (ma20_boll - 2*std20)) / (4*std20) if std20>0 else 0.5
-                    boll_pct = int(max(0, min(100, boll_pos*100)))
-                    boll_zone = "上方" if boll_pct>80 else ("下方" if boll_pct<20 else "中间")
-                except: boll_pct, boll_zone = 50, "中间"
-                # 量价 (简化: 用 KDJ 或 MACD 判断)
-                vol_status = "🟡观望" if abs(macd_val)<0.01 else ("🟢放量涨" if macd_val>0 else "🔴放量跌")
+                    kdf = self._fetch_ichimoku_kline_data(sina_code, period="daily", is_index=False)
+                    if kdf is None or len(kdf) < 30:
+                        tk.Label(ind_frame, text=f"{sname} K线数据不足，无法计算技术指标",
+                                 font=("",11), bg="#FAFAFA", fg="#E53935").pack(expand=True)
+                        ind_lbl.configure(text="数据不足", fg="#E53935"); return
+                    closes = kdf["收盘"].astype(float).values if "收盘" in kdf.columns else kdf["close"].astype(float).values
+                    highs  = kdf["最高"].astype(float).values if "最高" in kdf.columns else kdf["high"].astype(float).values
+                    lows   = kdf["最低"].astype(float).values if "最低" in kdf.columns else kdf["low"].astype(float).values
+                    n = len(closes); now = closes[-1]
+                    # MA
+                    ma5 = float(_np.mean(closes[-5:])) if n>=5 else now
+                    ma10 = float(_np.mean(closes[-10:])) if n>=10 else now
+                    ma20 = float(_np.mean(closes[-20:])) if n>=20 else now
+                    ma_trend = "多头排列" if now>ma5>ma10>ma20 else ("空头排列" if now<ma5<ma10<ma20 else "交织震荡")
+                    # RSI14
+                    try:
+                        deltas = _np.diff(closes); gains = _np.where(deltas>0, deltas, 0); losses = _np.where(deltas<0, -deltas, 0)
+                        avg_gain = float(_np.mean(gains[-14:])) if len(gains)>=14 else float(_np.mean(gains))
+                        avg_loss = float(_np.mean(losses[-14:])) if len(losses)>=14 else float(_np.mean(losses))
+                        rs = avg_gain/avg_loss if avg_loss>0 else 100; rsi = 100 - 100/(1+rs)
+                    except: rsi = 50
+                    # MACD
+                    try:
+                        e12=_np.zeros(n);e26=_np.zeros(n);e12[0]=e26[0]=closes[0]
+                        for i in range(1,n): e12[i]=closes[i]*2/13+e12[i-1]*11/13; e26[i]=closes[i]*2/27+e26[i-1]*25/27
+                        dif=e12-e26; dea=_np.zeros(n); dea[0]=dif[0]
+                        for i in range(1,n): dea[i]=dif[i]*2/10+dea[i-1]*8/10
+                        macd=(dif-dea)*2
+                        dif_val = float(dif[-1]); dea_val = float(dea[-1]); macd_val = float(macd[-1])
+                    except: dif_val, dea_val, macd_val = 0, 0, 0
+                    # KDJ
+                    try:
+                        rsv=_np.full(n,50.0)
+                        for i in range(8,n):
+                            hh=float(max(highs[i-8:i+1])); ll=float(min(lows[i-8:i+1]))
+                            rsv[i]=(closes[i]-ll)/(hh-ll)*100 if hh>ll else 50
+                        k=_np.zeros(n); d=_np.zeros(n); k[0]=d[0]=50
+                        for i in range(1,n): k[i]=rsv[i]*1/3+k[i-1]*2/3; d[i]=k[i]*1/3+d[i-1]*2/3
+                        j=3*k-2*d
+                        k_val, d_val, j_val = float(k[-1]), float(d[-1]), float(j[-1])
+                    except: k_val, d_val, j_val = 50, 50, 50
+                    # BOLL
+                    try:
+                        ma20_boll = float(_np.mean(closes[-20:])) if n>=20 else now
+                        std20 = float(_np.std(closes[-20:])) if n>=20 else 0
+                        boll_pos = (now - (ma20_boll - 2*std20)) / (4*std20) if std20>0 else 0.5
+                        boll_pct = int(max(0, min(100, boll_pos*100)))
+                    except: boll_pct = 50
 
-                # ═══ 3×3 Grid 卡片 ═══
-                CARDS = [
-                    ("💰 现价",  f"{now:.2f}",          "#1565C0"),
-                    ("📈 MA趋势", ma_trend,            "#2E7D32" if "多" in ma_trend else ("#C62828" if "空" in ma_trend else "#F57F17")),
-                    ("🔵 MA值",  f"5:{ma5:.2f} 20:{ma20:.2f}", "#6A1B9A"),
-                    ("⚡ RSI14", f"{rsi:.1f} {rsi_status}", "#C2185B"),
-                    ("📊 MACD",  f"DIF:{dif_val:+.3f} MACD:{macd_val:+.3f}", "#1B5E20"),
-                    ("🎲 KDJ",   f"K:{k_val:.0f} D:{d_val:.0f} J:{j_val:.0f}", "#FF6F00"),
-                    ("📏 BOLL",  f"{boll_pct}% {boll_zone}", "#00695C"),
-                    ("💧 量价",  vol_status,            "#5D4037"),
-                ]
-                ind_lbl.configure(text=f"{sname} · 8指标已算", fg="#2E7D32")
-                grid_f = tk.Frame(ind_frame, bg="#FAFAFA"); grid_f.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-                for idx, (title, val, color) in enumerate(CARDS):
-                    r, c = divmod(idx, 3)
-                    card = tk.Frame(grid_f, bg="white", highlightbackground="#E0E0E0", highlightthickness=1)
-                    card.grid(row=r, column=c, padx=6, pady=6, sticky="nsew")
-                    tk.Frame(card, bg=color, height=4).pack(fill=tk.X)
-                    tk.Label(card, text=title, bg="white", fg=color, font=("",11,"bold")).pack(anchor="w", padx=10, pady=(8,2))
-                    tk.Label(card, text=val, bg="white", fg="#222", font=("",13,"bold"), wraplength=200, justify="left").pack(anchor="w", padx=10, pady=(0,10))
-                for c in range(3): grid_f.grid_columnconfigure(c, weight=1)
-                for r in range(3): grid_f.grid_rowconfigure(r, weight=1)
+                    # ═══ 分析文字函数 ═══
+                    def _a_ma():
+                        if ma_trend == "多头排列": return "均线多头排列, 趋势向上, 短期强势", "MA5>MA10>MA20, 均线向上发散, 资金流入"
+                        elif ma_trend == "空头排列": return "均线空头排列, 趋势向下, 谨慎观望", "MA5<MA10<MA20, 均线向下发散, 资金流出"
+                        return "均线交织, 方向不明, 等待选择", "均线纠缠, 多空博弈, 等待突破方向"
+                    def _a_rsi():
+                        if rsi>70: return f"超买 {rsi:.0f}, 警惕回调", "RSI>70 涨太快, 获利盘涌出, 容易回调"
+                        if rsi<30: return f"超卖 {rsi:.0f}, 关注反弹", "RSI<30 跌太深, 抛压衰竭, 可能反弹"
+                        if rsi>50: return f"偏强 {rsi:.0f}, 多方占优", "RSI 50-70, 多方略优"
+                        return f"偏弱 {rsi:.0f}, 空方占优", "RSI 30-50, 空方略优"
+                    def _a_macd():
+                        if dif_val>dea_val and macd_val>0: return "金叉红柱, 动能向上", "DIF上穿DEA金叉, MACD红柱放大=上涨动能增强"
+                        if dif_val>dea_val and macd_val<=0: return "金叉绿柱缩, 底部见底", "金叉但绿柱还缩, 下跌动能衰竭, 可能见底"
+                        if dif_val<dea_val and macd_val<0: return "死叉绿柱, 动能向下", "DIF下穿DEA死叉, MACD绿柱放大=下跌动能增强"
+                        return "死叉红柱缩, 顶部见顶", "死叉但红柱还缩, 上涨动能衰竭, 可能见顶"
+                    def _a_kdj():
+                        if j_val>100: return f"J={j_val:.0f} 超买, 谨慎追高", "J>100 短期过热, 追高风险大"
+                        if j_val<0: return f"J={j_val:.0f} 超卖, 关注反弹", "J<0 短期超跌, 反弹概率大"
+                        if k_val>d_val and k_val<80: return "K上穿D金叉, 买入信号", "K线上穿D线=金叉, 买入信号"
+                        if k_val<d_val and k_val>20: return "K下穿D死叉, 卖出信号", "K线下穿D线=死叉, 卖出信号"
+                        return "KDJ正常区域, 无明显信号", "KDJ 20-80之间, 等待变化"
+                    def _a_boll():
+                        if boll_pct>80: return f"{boll_pct}% 接近上轨, 压力大", "%B>80% 接近上轨, 涨幅大, 有回调压力"
+                        if boll_pct<20: return f"{boll_pct}% 接近下轨, 支撑强", "%B<20% 接近下轨, 跌幅大, 有反弹支撑"
+                        return f"{boll_pct}% 中间区域, 方向不明", "%B 20-80%, 价格中轨附近, 方向选择中"
+
+                    ma_ana, ma_h = _a_ma(); rsi_ana, rsi_h = _a_rsi()
+                    macd_ana, macd_h = _a_macd(); kdj_ana, kdj_h = _a_kdj(); boll_ana, boll_h = _a_boll()
+                    vol_ana = "放量涨" if macd_val>0 else ("放量跌" if macd_val<0 else "观望")
+                    vol_h = f"MACD柱状={macd_val:+.3f}, {'放量上涨' if macd_val>0 else '放量下跌' if macd_val<0 else '量能均衡'}"
+
+                    # ═══ 综合判断 ═══
+                    bull_score = 0; bear_score = 0
+                    if "多头" in ma_trend: bull_score += 2
+                    elif "空头" in ma_trend: bear_score += 2
+                    if 30<rsi<70 and rsi>50: bull_score += 1
+                    elif 30<rsi<70 and rsi<50: bear_score += 1
+                    elif rsi>70: bear_score += 1
+                    elif rsi<30: bull_score += 1
+                    if dif_val>dea_val: bull_score += 1
+                    else: bear_score += 1
+                    if k_val>d_val: bull_score += 1
+                    else: bear_score += 1
+                    if boll_pct<30: bull_score += 1
+                    elif boll_pct>70: bear_score += 1
+                    if macd_val>0: bull_score += 1
+                    elif macd_val<0: bear_score += 1
+                    net = bull_score - bear_score
+                    if net>=3: overall, oc = "偏多, 可以关注", "#2E7D32"
+                    elif net>=1: overall, oc = "略偏多, 谨慎乐观", "#66BB6A"
+                    elif net<=-3: overall, oc = "偏空, 谨慎观望", "#C62828"
+                    elif net<=-1: overall, oc = "略偏空, 小心回调", "#EF5350"
+                    else: overall, oc = "多空均衡, 方向不明", "#F57F17"
+
+                    # ═══ 渲染 3×3 Grid 9卡片 ═══
+                    def _mk_card(parent, emoji, title, val, ana, color, help_t, is_overall=False, ana_long=""):
+                        card = tk.Frame(parent, bg="white", highlightbackground="#E0E0E0", highlightthickness=1)
+                        header = tk.Frame(card, bg=color); header.pack(fill=tk.X)
+                        tk.Label(header, text=f"{emoji} {title}", bg=color, fg="white",
+                                 font=("", 10, "bold")).pack(side=tk.LEFT, padx=10, pady=5)
+                        def _hlp(_evt=None, _t=title, _h=help_t, _c=color):
+                            tp = tk.Toplevel(); tp.title(f"❓ {_t} 详解")
+                            tp.configure(bg=_c); tp.geometry("520x380"); tp.transient(parent)
+                            tk.Label(tp, text=f"📚 {_t}", bg=_c, fg="white",
+                                     font=("",14,"bold")).pack(anchor="w", padx=16, pady=12)
+                            import tkinter.scrolledtext as _stt
+                            body = _stt.ScrolledText(tp, bg="white", fg="#333", font=("",11), wrap=tk.WORD, relief=tk.FLAT)
+                            body.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0,8))
+                            body.insert(tk.END, _h); body.configure(state="disabled")
+                            tk.Button(tp, text="关闭", command=tp.destroy, bg=_c, fg="white",
+                                      font=("",11), padx=24).pack(pady=8)
+                        _hlp_lbl = tk.Label(header, text="❓", bg=color, fg="white", font=("",10),
+                                            cursor="hand2", padx=6)
+                        _hlp_lbl.pack(side=tk.RIGHT, padx=4, pady=4); _hlp_lbl.bind("<Button-1>", _hlp)
+                        tk.Label(card, text=val, bg="white", fg="#222",
+                                 font=("",13,"bold"), wraplength=200, justify="left").pack(anchor="w", padx=10, pady=(4,2))
+                        if is_overall:
+                            tk.Label(card, text=ana[:58] + ("..." if len(ana)>58 else ""), bg="white", fg=color,
+                                     font=("",10), wraplength=210, justify="left").pack(fill=tk.X, padx=10, pady=(0,2))
+                            if len(ana)>58:
+                                def _dtl(_evt=None, _txt=ana_long, _nm=sname):
+                                    dp = tk.Toplevel(); dp.title(f"📐 {_nm} 技术指标综合分析")
+                                    dp.configure(bg="#1565C0"); dp.geometry("620x480"); dp.transient(parent)
+                                    tk.Label(dp, text=f"📐 {_nm} 技术指标综合分析", bg="#1565C0", fg="white",
+                                             font=("",14,"bold")).pack(anchor="w", padx=16, pady=12)
+                                    import tkinter.scrolledtext as _st3
+                                    tb = _st3.ScrolledText(dp, bg="white", fg="#222", font=("",11), wrap=tk.WORD, relief=tk.FLAT)
+                                    tb.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0,8))
+                                    tb.insert(tk.END, _txt); tb.configure(state="disabled")
+                                    tk.Button(dp, text="关闭", command=dp.destroy, bg="#1565C0", fg="white",
+                                              font=("",11), padx=24).pack(pady=8)
+                                _dtl_lbl = tk.Label(card, text="展开 ▼", bg="white", fg="#1565C0", font=("",9),
+                                                   cursor="hand2")
+                                _dtl_lbl.pack(anchor="e", padx=10, pady=(0,6)); _dtl_lbl.bind("<Button-1>", _dtl)
+                        else:
+                            tk.Label(card, text=ana, bg="white", fg=color, font=("",10),
+                                     wraplength=210, justify="left").pack(anchor="w", padx=10, pady=(0,8))
+                        return card
+
+                    grid_f = tk.Frame(ind_frame, bg="#FAFAFA"); grid_f.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+
+                    cards_data = [
+                        ("💰","现价",    f"{now:.2f}",                 f"当前价 {now:.2f}", "#1565C0",
+                         "当前价格是最新收盘价, 所有技术指标的计算基础, 需结合均线/布林带综合判断."),
+                        ("📈","MA趋势",  ma_trend,                     ma_ana, "#2E7D32" if "多" in ma_trend else ("#C62828" if "空" in ma_trend else "#F57F17"), ma_h),
+                        ("⚡","RSI14",   f"{rsi:.0f} {('超买' if rsi>70 else '超卖' if rsi<30 else '正常')}", rsi_ana, "#C2185B", rsi_h),
+                        ("📊","MACD",    f"DIF:{dif_val:+.3f} {'金叉' if dif_val>dea_val else '死叉'}", macd_ana, "#1B5E20", macd_h),
+                        ("🎲","KDJ",     f"K:{k_val:.0f} D:{d_val:.0f} J:{j_val:.0f}", kdj_ana, "#FF6F00", kdj_h),
+                        ("📏","BOLL",    f"{boll_pct}% {'上轨' if boll_pct>80 else '下轨' if boll_pct<20 else '中轨'}", boll_ana, "#00695C", boll_h),
+                        ("💧","量价",    f"{macd_val:+.3f} {vol_ana}",   vol_ana, "#5D4037", vol_h),
+                        ("🔵","MA值",    f"5:{ma5:.2f} 10:{ma10:.2f} 20:{ma20:.2f}",
+                         f"MA5{'↑' if now>ma5 else '↓'} MA20{'↑' if now>ma20 else '↓'}",
+                         "#6A1B9A", "MA5/MA10/MA20 分别代表 5/10/20日均线, 站上MA20=短期趋势向上."),
+                    ]
+                    for i, (em,t,v,a,c,h) in enumerate(cards_data):
+                        r, col = divmod(i, 3)
+                        _mk_card(grid_f, em, t, v, a, c, h).grid(row=r, column=col, padx=5, pady=5, sticky="nsew")
+                    # 第9张 综合判断
+                    detail = (f"📊 {sname} 技术指标综合报告\n{'='*40}\n\n"
+                              f"📍 现价 {now:.2f}\n📈 MA趋势: {ma_trend}\n  → {ma_ana}\n\n"
+                              f"⚡ RSI14: {rsi:.0f}\n  → {rsi_ana}\n\n📊 MACD: DIF={dif_val:+.3f}\n  → {macd_ana}\n\n"
+                              f"🎲 KDJ: K={k_val:.0f} D={d_val:.0f}\n  → {kdj_ana}\n\n📏 BOLL: {boll_pct}%\n  → {boll_ana}\n\n"
+                              f"💧 量价: {vol_ana}\n{'='*40}\n🏁 综合: {overall}\n📊 净分 {net:+d}\n⚠ 仅供参考!")
+                    _mk_card(grid_f, "📐", "综合判断", overall, detail, oc,
+                             f"基于MA/RSI/MACD/KDJ/BOLL/量价 6维度加权评分, 看多{bull_score}项/看空{bear_score}项, 净分{net:+d}. 仅供参考! ",
+                             is_overall=True, ana_long=detail).grid(row=2, column=2, padx=5, pady=5, sticky="nsew")
+
+                    for c in range(3): grid_f.grid_columnconfigure(c, weight=1)
+                    for r in range(3): grid_f.grid_rowconfigure(r, weight=1)
+                    ind_lbl.configure(text=f"{sname} · 9指标 · 净分 {net:+d}", fg="#333")
+                except Exception as _ie:
+                    import traceback as _tb2; _tb2.print_exc()
+                    tk.Label(ind_frame, text=f"❌ 计算失败: {_ie}", font=("",11), bg="#FAFAFA", fg="#E53935").pack(expand=True)
+                    ind_lbl.configure(text="计算失败", fg="#E53935")
 
             # ═══ 辅助: 右列 Notebook 4 tab 绘图 (📈日K / 🌊一目 / 📊附图 / 📐综合) ═══
             def _build_right_kline(right_nb, sina_code, sname, _np_m, Fig, FCA, _gs_m):
@@ -4365,13 +4554,6 @@ class StockDetailMixin:
                 ("601318.SH", "中国平安"), ("000568.SZ", "泸州老窖"), ("600000.SH", "浦发银行"),
             ]
 
-            # (c) 自持股 — 留空位让用户维护 (默认放一些跟踪标的)
-            WATCH_POOL = [
-                ("600519.SH", "贵州茅台"), ("300750.SZ", "宁德时代"), ("002594.SZ", "比亚迪"),
-                ("601012.SH", "隆基绿能"), ("600276.SH", "恒瑞医药"), ("300059.SZ", "东方财富"),
-                ("002415.SZ", "海康威视"), ("601888.SH", "中国中免"), ("600887.SH", "伊利股份"),
-            ]
-
             # (d) 龙头股池 — 各板块领涨龙头
             LEADER_POOL = [
                 ("600519.SH", "白酒龙头·茅台"), ("300750.SZ", "电池龙头·宁德"),
@@ -4384,22 +4566,109 @@ class StockDetailMixin:
                 ("002475.SZ", "精密龙头·立讯"), ("600036.SH", "银行龙头·招行"),
             ]
 
-            # (e) 资讯股池 — 淘韭热股 (从已有数据取)
+            # (c1) ⭐ 真实自持股 — 从 ai_config.json 读 holding_stocks + holding_stocks_2
+            WATCH_POOL = []
+            try:
+                import json as _json_disc
+                _cfg_path = os.path.join(os.path.dirname(__file__), "..", "config", "ai_config.json")
+                with open(_cfg_path, "r") as _f_cfg:
+                    _cfg_disc = _json_disc.load(_f_cfg)
+                for _hk in ["holding_stocks", "holding_stocks_2", "holding_stocks_4",
+                            "holding_stocks_5", "holding_stocks_6"]:
+                    _hlist = _cfg_disc.get(_hk, [])
+                    for _item in _hlist:
+                        if isinstance(_item, dict):
+                            _code = _item.get("stock_code", "")
+                            _name = _item.get("stock_name", "")
+                            if _code and _name:
+                                _seen2 = {x[0] for x in WATCH_POOL}
+                                if _code not in _seen2:
+                                    _ts = _code + ".SH" if _code.startswith("6") else _code + ".SZ"
+                                    WATCH_POOL.append((_ts, _name))
+            except Exception as _we:
+                print(f"[discount] 读自持仓失败: {_we}, 用硬编码兜底", flush=True)
+                WATCH_POOL = [
+                    ("600519.SH", "贵州茅台"), ("300750.SZ", "宁德时代"), ("002594.SZ", "比亚迪"),
+                    ("601012.SH", "隆基绿能"), ("600276.SH", "恒瑞医药"), ("300059.SZ", "东方财富"),
+                    ("002415.SZ", "海康威视"), ("601888.SH", "中国中免"), ("600887.SH", "伊利股份"),
+                ]
+
+            # (e1) 淘股吧热股
             _tao = getattr(self, '_taoguba_stamp_data', None) or []
             _jiu = getattr(self, '_jiuyan_stamp_data', None) or []
-            NEWS_POOL = []
-            for _r in _tao + _jiu:
-                _code = _r.get("code", "")
-                _name = _r.get("name", "")
+            _tao_pool = []
+            for _r in _tao:
+                _code = _r.get("code", ""); _name = _r.get("name", "")
                 if _code and _name:
                     _c = _code.lower()
                     if _c.startswith("sh"): _ts = _c[2:] + ".SH"
                     elif _c.startswith("sz"): _ts = _c[2:] + ".SZ"
-                    else: _ts = _c
-                    NEWS_POOL.append((_ts, _name))
-            _seen = set(); NEWS_POOL = [x for x in NEWS_POOL if not (x in _seen or _seen.add(x))]
+                    else: _ts = _c + (".SH" if _c.startswith("6") else ".SZ")
+                    _tao_pool.append((_ts, _name))
+            _seen_t = set(); _tao_pool = [x for x in _tao_pool if not (x in _seen_t or _seen_t.add(x))]
+
+            # (e2) 韭研公社热股
+            _jiu_pool = []
+            for _r in _jiu:
+                _code = _r.get("code", ""); _name = _r.get("name", "")
+                if _code and _name:
+                    _c = _code.lower()
+                    if _c.startswith("sh"): _ts = _c[2:] + ".SH"
+                    elif _c.startswith("sz"): _ts = _c[2:] + ".SZ"
+                    else: _ts = _c + (".SH" if _c.startswith("6") else ".SZ")
+                    _jiu_pool.append((_ts, _name))
+            _seen_j = set(); _jiu_pool = [x for x in _jiu_pool if not (x in _seen_j or _seen_j.add(x))]
+
+            # (e3) 资讯股合并
+            NEWS_POOL = _tao_pool + _jiu_pool
+            _seen_n = set(); NEWS_POOL = [x for x in NEWS_POOL if not (x in _seen_n or _seen_n.add(x))]
             if len(NEWS_POOL) < 10:
                 NEWS_POOL = STOCK_POOL[:20]
+
+            # (f) 龙虎榜 — akshare 近1月上榜次数
+            LHB_POOL = []
+            try:
+                import akshare as _ak_disc
+                _lhb_df = _ak_disc.stock_lhb_stock_statistic_em(symbol="近一月")
+                if _lhb_df is not None and len(_lhb_df) > 0:
+                    for _, _row in _lhb_df.head(100).iterrows():
+                        _c = str(_row.get("代码", ""))
+                        _n = str(_row.get("名称", ""))
+                        if _c and _n and _c != "nan":
+                            _ts = _c + ".SH" if _c.startswith("6") else _c + ".SZ"
+                            LHB_POOL.append((_ts, _n))
+            except Exception as _le:
+                print(f"[discount] 龙虎榜拉取失败: {_le}, 用涨停板兜底", flush=True)
+            if len(LHB_POOL) < 5:
+                try:
+                    import akshare as _ak_disc2
+                    _today_disc = datetime.now().strftime("%Y%m%d")
+                    _zt_df = _ak_disc2.stock_zt_pool_em(date=_today_disc)
+                    if _zt_df is not None and len(_zt_df) > 0:
+                        for _, _row in _zt_df.head(80).iterrows():
+                            _c = str(_row.get("代码", ""))
+                            _n = str(_row.get("名称", ""))
+                            if _c and _n and _c != "nan":
+                                _ts = _c + ".SH" if _c.startswith("6") else _c + ".SZ"
+                                LHB_POOL.append((_ts, _n))
+                except Exception as _le2:
+                    print(f"[discount] 涨停板也失败: {_le2}", flush=True)
+
+            # (g) 涨停板池 — 当日涨停
+            ZT_POOL = []
+            try:
+                import akshare as _ak_disc3
+                _today_disc = datetime.now().strftime("%Y%m%d")
+                _zt_df3 = _ak_disc3.stock_zt_pool_em(date=_today_disc)
+                if _zt_df3 is not None and len(_zt_df3) > 0:
+                    for _, _row in _zt_df3.head(100).iterrows():
+                        _c = str(_row.get("代码", ""))
+                        _n = str(_row.get("名称", ""))
+                        if _c and _n and _c != "nan":
+                            _ts = _c + ".SH" if _c.startswith("6") else _c + ".SZ"
+                            ZT_POOL.append((_ts, _n))
+            except Exception as _ze:
+                print(f"[discount] 涨停板拉取失败: {_ze}", flush=True)
 
             # (f) 板块映射 + 反查 + ETF持仓 (用于关联个股)
             BLOCK_MAP_LOCAL = {
@@ -4514,11 +4783,15 @@ class StockDetailMixin:
             nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
             POOL_CONFIG = [
-                ("📊 ETF",       ETF_POOL,     True,  "#1565C0", "etf"),
-                ("💼 股票",      STOCK_POOL,   False, "#2E7D32", "stock"),
-                ("⭐ 自持股",    WATCH_POOL,   False, "#6A1B9A", "watch"),
-                ("🏆 龙头股",    LEADER_POOL,  False, "#C62828", "leader"),
-                ("📰 资讯股",    NEWS_POOL,    False, "#E65100", "news"),
+                ("📊 ETF",          ETF_POOL,      True,  "#1565C0", "etf"),
+                ("💼 股票",         STOCK_POOL,    False, "#2E7D32", "stock"),
+                ("⭐ 自持股",       WATCH_POOL,    False, "#6A1B9A", "watch"),
+                ("🏆 龙头股",       LEADER_POOL,   False, "#C62828", "leader"),
+                ("📯 淘股吧热股",   _tao_pool,     False, "#1A237E", "taoguba"),
+                ("🧭 韭研公社",     _jiu_pool,     False, "#1B5E20", "jiuyan"),
+                ("🐉 龙虎榜",       LHB_POOL,      False, "#EF6C00", "lhb"),
+                ("🔥 涨停板",       ZT_POOL,       False, "#C2185B", "zt"),
+                ("📰 资讯股(合)",   NEWS_POOL,     False, "#E65100", "news"),
             ]
 
             _trees = {}   # key → 完整 cfg
@@ -5071,10 +5344,8 @@ class StockDetailMixin:
                 tvb.tag_configure("flat", foreground="#999", font=("",10))
                 block_lbl.configure(text=f"{block} · {total}只 · 红{len(up)}绿{len(dn)}", fg="#333")
 
-            # ═══ 辅助: 刷技术指标 (Tab4) ═══
+            # ═══ 辅助: 刷技术指标 (Tab4) — 3×3 Grid 9 卡片 + 分析文字 + ❓帮助 ═══
             def _fill_indicator(ind_frame, ind_lbl, ind_placeholder, ind_cache, sina_code, sname):
-                """拉 K 线 → 计算 7 个指标 → 红绿卡片 + 判断"""
-                # 清旧
                 for w in ind_frame.winfo_children(): w.destroy()
                 import numpy as _np2
                 try:
@@ -5086,64 +5357,228 @@ class StockDetailMixin:
                     highs  = kdf["最高"].astype(float).values if "最高" in kdf.columns else kdf["high"].astype(float).values
                     lows   = kdf["最低"].astype(float).values if "最低" in kdf.columns else kdf["low"].astype(float).values
                     n = len(closes); last = closes[-1]
+
+                    # ═══ 1. 计算 8 个指标 ═══
                     # MA
                     ma5 = round(float(_np2.mean(closes[-5:])),2) if n>=5 else None
                     ma20 = round(float(_np2.mean(closes[-20:])),2) if n>=20 else None
                     ma60 = round(float(_np2.mean(closes[-60:])),2) if n>=60 else None
-                    ma_trend = "🟢多头" if (ma5 and ma20 and ma5>ma20>ma60) else ("🔴空头" if (ma5 and ma20 and ma5<ma20<ma60) else "🟡交织")
+                    ma_trend = "多头排列" if (ma5 and ma20 and ma5>ma20 and (not ma60 or ma20>ma60)) else ("空头排列" if (ma5 and ma20 and ma5<ma20 and (not ma60 or ma20<ma60)) else "交织震荡")
                     # RSI14
                     deltas = _np2.diff(closes); gains = _np2.where(deltas>0, deltas, 0); losses = -_np2.where(deltas<0, deltas, 0)
                     avg_gain = float(_np2.mean(gains[-14:])); avg_loss = float(_np2.mean(losses[-14:]))
                     rs = avg_gain/avg_loss if avg_loss>0 else 100; rsi = round(100 - 100/(1+rs), 1)
-                    rsi_status = "🔴超买" if rsi>70 else ("🟢超卖" if rsi<30 else "🟡正常")
                     # MACD
                     e12=_np2.zeros(n);e26=_np2.zeros(n);e12[0]=e26[0]=closes[0]
                     for i in range(1,n): e12[i]=closes[i]*2/13+e12[i-1]*11/13; e26[i]=closes[i]*2/27+e26[i-1]*25/27
                     dif = float(e12[-1]-e26[-1]); dea = float(((e12-e26)*0.2+_np2.roll(e12-e26,1)*0.8)[-1])
-                    macd_bar = round((dif-dea)*2,3); macd_status = "🟢金叉看多" if dif>dea else "🔴死叉看空"
+                    macd_bar = round((dif-dea)*2,3)
                     # KDJ
                     hh = float(max(highs[-9:])); ll = float(min(lows[-9:]))
                     rsv = (closes[-1]-ll)/(hh-ll)*100 if hh>ll else 50
                     k = round(rsv*1/3 + 50*2/3, 1); j = round(3*k - 2*50, 1)
-                    kdj_status = "🔴超买" if j>100 else ("🟢超卖" if j<0 else "🟡正常")
-                    # 布林位置
+                    # BOLL
                     mid_bb = float(_np2.mean(closes[-20:]))
                     std_bb = float(_np2.std(closes[-20:]))
                     bb_up = mid_bb+2*std_bb; bb_dn = mid_bb-2*std_bb
                     bb_pos = (last-bb_dn)/(bb_up-bb_dn)*100 if bb_up>bb_dn else 50
-                    bb_status = "🔴上轨压力" if bb_pos>80 else ("🟢下轨支撑" if bb_pos<20 else "🟡中间区域")
-                    # 量价背离检测 (简化: 价新高量没新高)
+                    # 量价
                     vol_col = "成交额" if "成交额" in kdf.columns else ("volume" if "volume" in kdf.columns else None)
-                    vol_div = "—"
+                    vol_text = "—"
                     if vol_col:
                         vols = kdf[vol_col].astype(float).values
                         if n>=30:
                             price_new_high = closes[-1] >= closes[-30:].max()*0.98
                             vol_new_high = vols[-1] >= vols[-30:].max()*0.8
-                            vol_div = "🟢量价配合" if (price_new_high and vol_new_high) else ("🔴量价背离" if price_new_high and not vol_new_high else "🟡观望")
+                            if price_new_high and vol_new_high: vol_text = "量价配合"
+                            elif price_new_high and not vol_new_high: vol_text = "量价背离"
+                            else: vol_text = "观望"
 
-                    # 渲染卡片 (2行布局)
-                    rows_cfg = [
-                        ("💰 现价", f"{last:.2f}", "#1565C0"),
-                        ("📈 MA趋势", ma_trend, "#2E7D32"),
-                        ("🔵 MA5/20/60", f"{ma5 or '—'}/{ma20 or '—'}/{ma60 or '—'}", "#6A1B9A"),
-                        ("⚡ RSI14", f"{rsi}  {rsi_status}", "#C2185B"),
-                        ("📊 MACD", f"DIF:{dif:.3f}  {macd_status}", "#1B5E20"),
-                        ("🎲 KDJ", f"K:{k} J:{j}  {kdj_status}", "#FF6F00"),
-                        ("📏 BOLL位置", f"{bb_pos:.0f}%  {bb_status}", "#00695C"),
-                        ("💧 量价关系", vol_div, "#5D4037"),
+                    # ═══ 2. 分析文字 + 帮助文本 ═══
+                    def _ma_analysis():
+                        if ma_trend == "多头排列":
+                            return "均线多头排列, 趋势向上, 短期强势", "MA5 > MA20 > MA60, 典型多头格局, 均线向上发散代表资金持续流入"
+                        elif ma_trend == "空头排列":
+                            return "均线空头排列, 趋势向下, 谨慎观望", "MA5 < MA20 < MA60, 典型空头格局, 均线向下发散代表资金持续流出"
+                        else:
+                            return "均线交织, 方向不明, 等待选择", "MA 均线纠缠在一起, 多空博弈剧烈, 短期可能震荡, 等待突破方向"
+
+                    def _rsi_analysis():
+                        if rsi > 70: return f"超买区 {rsi:.0f}, 警惕回调", "RSI > 70 代表涨得太快太猛, 短期获利盘涌出, 容易出现回调或震荡"
+                        if rsi < 30: return f"超卖区 {rsi:.0f}, 关注反弹", "RSI < 30 代表跌得太深, 抛压衰竭, 可能出现技术性反弹"
+                        if rsi > 50: return f"偏强 {rsi:.0f}, 多方占优", "RSI 在 50-70 之间, 多方略占优势, 但尚未到极端"
+                        return f"偏弱 {rsi:.0f}, 空方占优", "RSI 在 30-50 之间, 空方略占优势, 反弹力度不足"
+
+                    def _macd_analysis():
+                        if dif > dea and macd_bar > 0: return "金叉红柱, 动能向上", "DIF 上穿 DEA 为金叉, MACD 红柱放大代表上涨动能持续增强"
+                        if dif > dea and macd_bar < 0: return "金叉绿柱缩短, 底部见底", "DIF 上穿 DEA 但绿柱还在缩短, 代表下跌动能衰竭, 可能见底"
+                        if dif < dea and macd_bar < 0: return "死叉绿柱, 动能向下", "DIF 下穿 DEA 为死叉, MACD 绿柱放大代表下跌动能持续增强"
+                        return "死叉红柱缩短, 顶部见顶", "DIF 下穿 DEA 但红柱还在缩短, 代表上涨动能衰竭, 可能见顶"
+
+                    def _kdj_analysis():
+                        if j > 100: return f"J={j:.0f} 超买, 谨慎追高", "J > 100 代表短期过热, 追高风险大, 注意回调"
+                        if j < 0: return f"J={j:.0f} 超卖, 关注反弹", "J < 0 代表短期超跌, 反弹概率大, 可关注"
+                        if k > d and k < 80: return "K上穿D金叉, 买入信号", "K 线上穿 D 线为金叉, 且不在高位, 是较好的买入信号"
+                        if k < d and k > 20: return "K下穿D死叉, 卖出信号", "K 线下穿 D 线为死叉, 且不在低位, 是较好的卖出信号"
+                        return "KDJ 正常区域, 无明显信号", "KDJ 三线在 20-80 之间, 无极端信号, 等待变化"
+
+                    def _boll_analysis():
+                        if bb_pos > 80: return f"{bb_pos:.0f}% 接近上轨, 压力大", "布林带 %B > 80% 代表价格接近上轨, 短期涨幅较大, 有回调压力"
+                        if bb_pos < 20: return f"{bb_pos:.0f}% 接近下轨, 支撑强", "布林带 %B < 20% 代表价格接近下轨, 短期跌幅较大, 有反弹支撑"
+                        return f"{bb_pos:.0f}% 中间区域, 方向不明", "布林带 %B 在 20-80% 之间, 价格在中轨附近, 方向选择中"
+
+                    def _vol_analysis():
+                        if vol_text == "量价配合": return "量价齐升, 上涨可靠", "价格创新高 + 成交量创新高, 上涨有资金支持, 趋势可靠"
+                        if vol_text == "量价背离": return "价新高量没新高, 警惕", "价格创新高但成交量没有跟上, 上涨动力不足, 警惕见顶"
+                        return "量能观望, 方向待确认", "量能没有明显配合信号, 多空均衡, 等待方向"
+
+                    ma_ana, ma_help = _ma_analysis()
+                    rsi_ana, rsi_help = _rsi_analysis()
+                    macd_ana, macd_help = _macd_analysis()
+                    kdj_ana, kdj_help = _kdj_analysis()
+                    boll_ana, boll_help = _boll_analysis()
+                    vol_ana, vol_help = _vol_analysis()
+
+                    # ═══ 3. 综合判断 (第 9 张卡) ═══
+                    bull_score = 0; bear_score = 0
+                    if "多头" in ma_trend: bull_score += 2
+                    elif "空头" in ma_trend: bear_score += 2
+                    if rsi > 50 and rsi < 70: bull_score += 1
+                    elif rsi < 50 and rsi > 30: bear_score += 1
+                    elif rsi > 70: bear_score += 1
+                    elif rsi < 30: bull_score += 1
+                    if dif > dea: bull_score += 1
+                    else: bear_score += 1
+                    if k > d and k < 80: bull_score += 1
+                    elif k < d and k > 20: bear_score += 1
+                    if bb_pos < 20: bull_score += 1
+                    elif bb_pos > 80: bear_score += 1
+                    if vol_text == "量价配合": bull_score += 1
+                    elif vol_text == "量价背离": bear_score += 1
+
+                    net = bull_score - bear_score
+                    if net >= 3: overall, overall_color = "偏多, 可以关注", "#2E7D32"
+                    elif net >= 1: overall, overall_color = "略偏多, 谨慎乐观", "#66BB6A"
+                    elif net <= -3: overall, overall_color = "偏空, 谨慎观望", "#C62828"
+                    elif net <= -1: overall, overall_color = "略偏空, 小心回调", "#EF5350"
+                    else: overall, overall_color = "多空均衡, 方向不明", "#F57F17"
+                    bull_count = sum(1 for _,_,_,b in [
+                        ("MA",ma_trend,ma_ana,"bull" if "多" in ma_trend else "bear"),
+                        ("RSI",f"{rsi}",rsi_ana,"bull" if 30<rsi<70 and rsi>50 else "bear"),
+                        ("MACD",f"DIF:{dif:.3f}",macd_ana,"bull" if dif>dea else "bear"),
+                        ("KDJ",f"K:{k}",kdj_ana,"bull" if k>d else "bear"),
+                        ("BOLL",f"{bb_pos:.0f}%",boll_ana,"bull" if bb_pos<50 else "bear"),
+                        ("量价",vol_text,vol_ana,"bull" if "配合" in vol_text else "bear"),
+                    ] if b=="bull")
+                    bear_count = 6 - bull_count
+                    overall_help = f"""综合判断基于 6 个维度的简单加权评分:
+• MA均线 ({'🟢' if '多' in ma_trend else '🔴'} {ma_trend})
+• RSI强弱 ({'🟢' if 30<rsi<70 and rsi>50 else '🔴'} {rsi:.0f})
+• MACD动能 ({'🟢' if dif>dea else '🔴'} {'金叉' if dif>dea else '死叉'})
+• KDJ买卖 ({'🟢' if k>d else '🔴'} {'金叉' if k>d else '死叉'})
+• BOLL位置 ({'🟢' if bb_pos<50 else '🔴'} {bb_pos:.0f}%)
+• 量价配合 ({'🟢' if '配合' in vol_text else '🔴'} {vol_text})
+
+看多 {bull_count} 项 / 看空 {bear_count} 项, 净分 {net:+d}
+⚠ 仅供参考, 不构成投资建议! 请结合基本面和消息面综合判断。"""
+
+                    # ═══ 4. 渲染 3×3 Grid (9 卡片) ═══
+                    INDICATORS = [
+                        # (emoji, 标题, 值文本, 分析文字, 颜色, 帮助文本)
+                        ("💰","现价",    f"{last:.2f}",                  f"当前价 {last:.2f}, 距250天高约{(last/float(max(highs[-250:]))-1)*100:+.1f}%" if len(highs)>=250 else f"当前价 {last:.2f}", "#1565C0",
+                         "当前价格是 K 线最新一个交易日的收盘价, 是所有技术指标的计算基础。需要结合均线位置、布林带位置综合判断。"),
+                        ("📈","MA趋势",  ma_trend,                       ma_ana,  "#2E7D32" if "多" in ma_trend else ("#C62828" if "空" in ma_trend else "#F57F17"), ma_help),
+                        ("⚡","RSI14",   f"{rsi}  {'超买' if rsi>70 else ('超卖' if rsi<30 else '正常')}", rsi_ana, "#C2185B", rsi_help),
+                        ("📊","MACD",    f"DIF:{dif:+.3f} {'金叉' if dif>dea else '死叉'}", macd_ana, "#1B5E20", macd_help),
+                        ("🎲","KDJ",     f"K:{k} D:{round((rsv*2/3 + 50*1/3),1)} J:{j}", kdj_ana, "#FF6F00", kdj_help),
+                        ("📏","BOLL",    f"{bb_pos:.0f}% {'上轨' if bb_pos>80 else ('下轨' if bb_pos<20 else '中轨')}", boll_ana, "#00695C", boll_help),
+                        ("💧","量价",    vol_text,                        vol_ana, "#5D4037", vol_help),
+                        ("🔵","MA值",    f"5:{ma5 or '—'} 20:{ma20 or '—'} 60:{ma60 or '—'}",
+                         f"MA5{'↑' if ma5 and last>ma5 else '↓' if ma5 and last<ma5 else '—'} "
+                         f"MA20{'↑' if ma20 and last>ma20 else '↓' if ma20 and last<ma20 else '—'}",
+                         "#6A1B9A", "MA5/MA20/MA60 分别代表 5日/20日/60日均线位置。现价站上 MA20 代表短期趋势向上, 跌破 MA60 代表中期趋势走弱。"),
                     ]
-                    rf = tk.Frame(ind_frame, bg="#FAFAFA"); rf.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-                    for i, (title, val, color) in enumerate(rows_cfg):
+                    # 第 9 张: 综合判断
+                    grid_f = tk.Frame(ind_frame, bg="#FAFAFA"); grid_f.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+                    def _make_card(parent, emoji, title, val, analysis, color, help_text, is_overall=False):
+                        card = tk.Frame(parent, bg="white", highlightbackground="#E0E0E0", highlightthickness=1)
+                        # 彩色顶条 + ❓帮助按钮
+                        header = tk.Frame(card, bg=color); header.pack(fill=tk.X)
+                        tk.Frame(header, bg=color, height=3).pack(fill=tk.X)
+                        tk.Label(header, text=f"{emoji} {title}", bg=color, fg="white",
+                                 font=("", 10, "bold")).pack(side=tk.LEFT, padx=10, pady=(4, 4))
+                        help_btn = tk.Label(header, text="❓", bg=color, fg="white",
+                                            font=("", 10), cursor="hand2", padx=6)
+                        help_btn.pack(side=tk.RIGHT, padx=4, pady=2)
+                        def _show_help(_evt=None, _t=title, _h=help_text, _c=color):
+                            _tp = tk.Toplevel(); _tp.title(f"❓ {_t} 详解")
+                            _tp.configure(bg=_c); _tp.geometry("520x380"); _tp.transient(parent)
+                            tk.Label(_tp, text=f"📚 {_t}", bg=_c, fg="white",
+                                     font=("", 14, "bold")).pack(anchor="w", padx=16, pady=12)
+                            import tkinter.scrolledtext as _st2
+                            body = _st2.ScrolledText(_tp, bg="white", fg="#333", font=("", 11),
+                                                     wrap=tk.WORD, relief=tk.FLAT, borderwidth=0)
+                            body.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 8))
+                            body.insert(tk.END, _h); body.configure(state="disabled")
+                            tk.Button(_tp, text="关闭", command=_tp.destroy,
+                                      bg=_c, fg="white", font=("", 11), padx=24).pack(pady=8)
+                        help_btn.bind("<Button-1>", _show_help)
+                        # 值
+                        tk.Label(card, text=val, bg="white", fg="#222",
+                                 font=("", 13, "bold"), wraplength=200, justify="left").pack(anchor="w", padx=10, pady=(4, 2))
+                        # 分析文字
+                        if is_overall:
+                            # 综合判断卡: 多行分析 + 展开按钮
+                            short_txt = analysis[:60] + ("..." if len(analysis) > 60 else "")
+                            _ana_lbl = tk.Label(card, text=short_txt, bg="white", fg=color,
+                                                font=("", 10), wraplength=210, justify="left", anchor="w")
+                            _ana_lbl.pack(fill=tk.X, padx=10, pady=(0, 2))
+                            if len(analysis) > 60:
+                                tk.Label(card, text="展开 ▼", bg="white", fg="#1565C0",
+                                         font=("", 9), cursor="hand2").pack(anchor="e", padx=10, pady=(0, 6))
+                                def _show_detail(_evt=None, _txt=analysis, _nm=sname):
+                                    _dp = tk.Toplevel(); _dp.title(f"📐 {_nm} 技术指标综合分析")
+                                    _dp.configure(bg="#1565C0"); _dp.geometry("620x480"); _dp.transient(parent)
+                                    tk.Label(_dp, text=f"📐 {_nm} 技术指标综合分析", bg="#1565C0", fg="white",
+                                             font=("", 14, "bold")).pack(anchor="w", padx=16, pady=12)
+                                    import tkinter.scrolledtext as _st3
+                                    tb = _st3.ScrolledText(_dp, bg="white", fg="#222", font=("", 11),
+                                                            wrap=tk.WORD, relief=tk.FLAT, borderwidth=0)
+                                    tb.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 8))
+                                    tb.insert(tk.END, _txt); tb.configure(state="disabled")
+                                    tk.Button(_dp, text="关闭", command=_dp.destroy,
+                                              bg="#1565C0", fg="white", font=("", 11), padx=24).pack(pady=8)
+                        else:
+                            tk.Label(card, text=analysis, bg="white", fg=color,
+                                     font=("", 10), wraplength=210, justify="left").pack(anchor="w", padx=10, pady=(0, 8))
+                        return card
+
+                    # 8 张普通卡
+                    for i, (emoji, title, val, ana, color, help_t) in enumerate(INDICATORS):
                         r, c = divmod(i, 3)
-                        card = tk.Frame(rf, bg=color, padx=10, pady=8)
-                        card.grid(row=r, column=c, sticky="nsew", padx=4, pady=4)
-                        tk.Label(card, text=title, bg=color, fg="white", font=("",10)).pack()
-                        tk.Label(card, text=str(val), bg=color, fg="white", font=("",12,"bold")).pack()
-                    for c in range(3): rf.columnconfigure(c, weight=1, uniform="ind")
-                    for r in range(3): rf.rowconfigure(r, weight=1)
-                    ind_lbl.configure(text=f"已计算 {len(rows_cfg)} 指标", fg="#333")
+                        card = _make_card(grid_f, emoji, title, val, ana, color, help_t)
+                        card.grid(row=r, column=c, sticky="nsew", padx=5, pady=5)
+                    # 第 9 张: 综合判断 (放在第 3 行第 3 列)
+                    all_detail = (
+                        f"📊 {sname} 技术指标综合分析报告\n{'='*40}\n\n"
+                        f"📍 现价 {last:.2f}\n"
+                        f"📈 MA趋势: {ma_trend}\n    → {ma_ana}\n\n"
+                        f"⚡ RSI14: {rsi}\n    → {rsi_ana}\n\n"
+                        f"📊 MACD: DIF={dif:+.3f} DEA={dea:+.3f} MACD={macd_bar:+.3f}\n    → {macd_ana}\n\n"
+                        f"🎲 KDJ: K={k} D={round((rsv*2/3 + 50*1/3),1)} J={j}\n    → {kdj_ana}\n\n"
+                        f"📏 BOLL位置: {bb_pos:.0f}%\n    → {boll_ana}\n\n"
+                        f"💧 量价关系: {vol_text}\n    → {vol_ana}\n\n"
+                        f"{'='*40}\n🏁 综合判断: {overall}\n📊 看多 {bull_count} 项 / 看空 {bear_count} 项\n⚠ 仅供参考, 不构成投资建议!"
+                    )
+                    overall_card = _make_card(grid_f, "📐", "综合判断", overall, all_detail, overall_color, overall_help, is_overall=True)
+                    overall_card.grid(row=2, column=2, sticky="nsew", padx=5, pady=5)
+
+                    for c in range(3): grid_f.grid_columnconfigure(c, weight=1, uniform="indc")
+                    for r in range(3): grid_f.grid_rowconfigure(r, weight=1, uniform="indr")
+                    ind_lbl.configure(text=f"{sname} · 9指标 · 净分 {net:+d}", fg="#333")
                 except Exception as _ie:
+                    import traceback as _tb_ie; _tb_ie.print_exc()
                     tk.Label(ind_frame, text=f"❌ 计算失败: {_ie}", font=("",11), bg="#FAFAFA", fg="#E53935").pack(expand=True)
                     ind_lbl.configure(text="计算失败", fg="#E53935")
 

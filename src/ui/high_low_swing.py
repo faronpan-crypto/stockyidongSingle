@@ -3665,11 +3665,18 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None, stock_list=No
         # 渲染三列网格
         cols_per_row = 3
         card_w = 360  # px, 足够宽显示中文
+        card_h = 230
         gap_x, gap_y = 10, 10
+        total_cards = len(_HELP_CARDS)
+        rows = (total_cards + cols_per_row - 1) // cols_per_row
+        inner_w = cols_per_row * (card_w + gap_x) + gap_x
+        inner_h = rows * (card_h + gap_y) + gap_y
+        # ⚠️ Canvas+create_window 内部用 place() 时 inner 尺寸不会自动扩展, 必须手动设!
+        inner.configure(width=inner_w, height=inner_h)
         for idx, card in enumerate(_HELP_CARDS):
             r, c = divmod(idx, cols_per_row)
             x = gap_x + c * (card_w + gap_x)
-            y = gap_y + r * 240  # 每行高约 240
+            y = gap_y + r * (card_h + gap_y)  # 每行高 = card_h + gap_y
             # 卡片主体
             cf = tk.Frame(inner, bg="white", width=card_w, height=230,
                           highlightthickness=1, highlightbackground="#E0E0E0")
