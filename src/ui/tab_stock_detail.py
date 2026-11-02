@@ -4397,14 +4397,8 @@ class StockDetailMixin:
                         hold_tree.insert("", "end", values=(sina, sname, "—", "—", ""))
                 # ETF reason tag 样式 (浅蓝底)
                 hold_tree.tag_configure("etf_reason", background="#E3F2FD", font=("", 9, "bold"))
-                # 🆕 同时刷右列 ETF 视角
-                ts_code = vals[0]  # e.g. "510300.SH"
-                _mode_var.set("etf")
-                _draw_etf_tabs(ts_code, ename)
-                _refresh_etf_summary(ts_code, ename)
-                _refresh_etf_sent(ts_code, ename)
-                nb.select(0)  # 默认回到日K线 tab
-                status_var_etf.set(f"✅ {ename} · {len(holders)}只持仓 · 右列已切 ETF 视角")
+                # 单击只刷中列, 不碰右列 (右列保持之前状态)
+                status_var_etf.set(f"✅ 单击 ETF: {ename} · {len(holders)}只持仓")
 
             # ── _mode 变量: "etf" | "stock" ──
             _mode_var = tk.StringVar(value="stock")
