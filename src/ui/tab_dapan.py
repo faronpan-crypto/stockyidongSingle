@@ -64716,6 +64716,136 @@ class DapanMixin:
 
         return result
 
+    def _build_regime_combobox_values(self):
+        """🆕 构建红绿图开图 Combobox 的股票列表 — 6源合并去重
+        返回 [(label, ts_code), ...]"""
+        items = []  # [(label, ts_code)]
+        seen = set()
+        history_file = os.path.expanduser("~/.stockyidong_recent_stocks.json")
+
+        def _add(label, ts_code):
+            if not ts_code or ts_code in seen: return
+            seen.add(ts_code); items.append((label, ts_code))
+
+        # 源 A: 历史记录 (优先排前面)
+        try:
+            if os.path.exists(history_file):
+                import json as _j
+                hist = _j.load(open(history_file))
+                for h in hist[-30:]:
+                    if isinstance(h, dict) and "ts_code" in h:
+                        _add(f"🕐 {h.get('name','')} ({h['ts_code']})", h["ts_code"])
+                    elif isinstance(h, str) and h.startswith(("6", "0", "3", "5")):
+                        _add(f"🕐 {h}", h + (".SH" if h[0] in "65" else ".SZ"))
+        except Exception: pass
+
+        # 源 B: 主力宽基 ETF
+        etf_hard = [
+            ("沪深300ETF", "510300.SH"), ("中证500ETF", "510500.SH"),
+            ("中证1000ETF", "512100.SH"), ("科创50ETF", "588000.SH"),
+            ("创业板ETF", "159915.SZ"), ("上证50ETF", "510050.SH"),
+            ("沪深300增强", "159919.SZ"), ("红利ETF", "510880.SH"),
+            ("纳指ETF", "513100.SH"), ("标普500ETF", "513500.SH"),
+            ("黄金ETF", "518880.SH"), ("国债ETF", "511010.SH"),
+            ("半导体ETF", "512760.SH"), ("芯片ETF", "159995.SZ"),
+            ("医药ETF", "512010.SH"), ("券商ETF", "512000.SH"),
+        ]
+        for name, code in etf_hard:
+            _add(f"📊ETF {name}", code)
+
+        # 源 C: 持仓 (从 DB)
+        try:
+            from utils.config import DB_PATH
+            import sqlite3 as _sq
+            db2 = _sq.connect(DB_PATH)
+            cur2 = db2.cursor()
+            cur2.execute("SELECT stock_code, stock_name FROM stock_holdings WHERE stock_code IS NOT NULL LIMIT 40")
+            for code, name in cur2.fetchall():
+                if code and len(code) == 6:
+                    suffix = ".SH" if code[0] in "65" else ".SZ"
+                    _add(f"💼 {name}({code})", code + suffix)
+            db2.close()
+        except Exception: pass
+
+        # 源 D: 资讯股 (DB)
+        try:
+            from utils.config import DB_PATH
+            import sqlite3 as _sq2
+            db3 = _sq2.connect(DB_PATH)
+            cur3 = db3.cursor()
+            cur3.execute("SELECT stock_code, stock_name FROM batch_analysis_results WHERE stock_code IS NOT NULL LIMIT 50")
+            for code, name in cur3.fetchall():
+                if code and len(code) == 6:
+                    suffix = ".SH" if code[0] in "65" else ".SZ"
+                    _add(f"📰 {name}({code})", code + suffix)
+            db3.close()
+        except Exception: pass
+
+        # 源 E/F: 淘股/韭研 (内存数据)
+        for data_attr, emoji in [("_taoguba_stamp_data", "🔥淘"), ("_jiuyan_stamp_data", "🔥韭")]:
+            data = getattr(self, data_attr, []) or []
+            try:
+                for item in data:
+                    if isinstance(item, dict):
+                        code = item.get("code") or item.get("stock_code") or item.get("ts_code", "")
+                        name = item.get("name") or item.get("stock_name", "")
+                    elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                        code, name = str(item[0]), str(item[1])
+                    else: continue
+                    if code:
+                        code = str(code).split(".")[0]
+                        if len(code) == 6:
+                            suffix = ".SH" if code[0] in "65" else ".SZ"
+                            _add(f"{emoji} {name}({code})", code + suffix)
+            except Exception: pass
+
+        return items
+
+    def _resolve_regime_user_input(self, raw, label_to_code=None):
+        """🆕 用户输入 → (ts_code, name) 或 (None, 错误信息)
+        支持: 纯代码 6位, 带后缀 000858.SZ, 纯名称 → tushare stock_basic 反查
+        label_to_code: dict 可选, 用于 Combobox 完整标签解析"""
+        import re as _re
+        raw = (raw or "").strip()
+        if not raw: return None, "请输入股票名或代码"
+        # 优先查 label→code 映射
+        if label_to_code and raw in label_to_code:
+            code = label_to_code[raw]
+            name_match = _re.search(r'[\u4e00-\u9fa5A-Za-z]+', raw.split('(')[0])
+            return code, name_match.group() if name_match else code
+        # 从 label 里提取 6 位代码
+        m = _re.search(r'(\d{6})', raw)
+        if m:
+            code6 = m.group(1)
+            suffix = ".SH" if code6[0] in "65" else ".SZ"
+            return code6 + suffix, raw.split('(')[0].strip()
+        # 已是 ts_code 格式
+        if _re.match(r"^\d{6}\.(SH|SZ|BJ)$", raw.upper()):
+            return raw.upper(), None
+        # 6位纯数字 → 自动加后缀
+        if _re.match(r"^\d{6}$", raw):
+            suffix = ".SH" if raw.startswith(("6","5")) else ".SZ" if raw.startswith(("0","3","2")) else ".BJ"
+            return raw + suffix, None
+        # 名称 → tushare 反查
+        try:
+            if not getattr(self, "_ts_pro_init", False):
+                import tushare as _ts
+                from utils.config import TS_DEFAULT_TOKEN
+                _ts.set_token(TS_DEFAULT_TOKEN)
+                self._ts_pro = _ts.pro_api(); self._ts_pro_init = True
+            basic = self._ts_pro.stock_basic(name=raw, list_status="L",
+                                             fields="ts_code,name,industry")
+            if basic is not None and len(basic) > 0:
+                row = basic.iloc[0]
+                return str(row["ts_code"]), str(row["name"])
+            basic2 = self._ts_pro.fund_basic(market="E", name=raw, fields="ts_code,name")
+            if basic2 is not None and len(basic2) > 0:
+                row = basic2.iloc[0]
+                return str(row["ts_code"]), str(row["name"])
+        except Exception as e:
+            return None, f"名称反查失败: {e}"
+        return None, f"找不到股票: '{raw}' (支持 6位代码 / 000858.SZ / 名称)"
+
     def _open_regime_scanner(self):
         """打开 🌐 多空扫描弹窗 — 可勾选源 + 异步扫描 + 双击 K 线"""
         import threading
@@ -64732,6 +64862,47 @@ class DapanMixin:
         ttk.Label(top, text="🌐 多空扫描器", font=("", 14, "bold")).pack(side=tk.LEFT)
         self._regime_scan_status = tk.StringVar(value="👉 选好数据源后点底部 [🔄 开始扫描]")
         ttk.Label(top, textvariable=self._regime_scan_status, foreground="#c62828", font=("", 11, "bold")).pack(side=tk.RIGHT)
+
+        # ── 🆕 快速开红绿背景图行 (扫描前也能直接开 K 线弹窗) ──
+        quick_frame = ttk.Frame(dlg); quick_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
+        ttk.Label(quick_frame, text="🏥 快速开红绿图:", font=("", 10, "bold"),
+                  foreground="#2e7d32").pack(side=tk.LEFT)
+        # 构建 Combobox 值 (复用独立方法)
+        _quick_items = self._build_regime_combobox_values()
+        _quick_label_to_code = {label: code for label, code in _quick_items}
+        _quick_combo_values = [label for label, _ in _quick_items]
+        _quick_var = tk.StringVar(value="")
+        _quick_combo = ttk.Combobox(quick_frame, textvariable=_quick_var, width=32,
+                                    values=_quick_combo_values, state="normal")
+        _quick_combo.pack(side=tk.LEFT, padx=6)
+
+        # 模糊过滤
+        def _quick_on_input(_evt=None):
+            kw = _quick_var.get().strip().lower()
+            if not kw:
+                _quick_combo["values"] = _quick_combo_values[:100]; return
+            matches = [(l, c) for l, c in _quick_items
+                       if kw in l.lower() or kw in c.lower()]
+            if matches: _quick_combo["values"] = [l for l, _ in matches][:50]
+        _quick_combo.bind("<KeyRelease>", _quick_on_input)
+
+        def _quick_open_kline():
+            raw = _quick_var.get().strip()
+            if not raw:
+                import tkinter.messagebox as _mb
+                _mb.showwarning("提示", "请先选择或输入一只股票!")
+                return
+            code, name = self._resolve_regime_user_input(raw, _quick_label_to_code)
+            if code is None:
+                import tkinter.messagebox as _mb
+                _mb.showerror("解析失败", name)  # name 这里实际上是错误信息
+                return
+            self._open_regime_kline_dialog(code, name or code)
+
+        ttk.Button(quick_frame, text="🚀 开红绿图", width=12,
+                   command=_quick_open_kline).pack(side=tk.LEFT, padx=4)
+        ttk.Label(quick_frame, text="  (可输入 6位代码/名称/下拉选)",
+                  foreground="#888").pack(side=tk.LEFT)
 
         # ── 🆕 数据源筛选面板 (Checkbutton) ──
         filter_frame = ttk.LabelFrame(dlg, text="📋 数据源选择", padding=(8, 4))
