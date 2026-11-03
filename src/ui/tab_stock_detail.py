@@ -3982,56 +3982,119 @@ class StockDetailMixin:
             _state = {"sina": None}
             _mid_rows = []
 
-            # ═══ 辅助: 找关联个股 (同板块) ═══
-            def _find_peers(sina_code):
+            # ═══ 辅助: 找关联个股 (同板块, 升级版!) ═══
+            def _find_peers(sina_code, sname=""):
+                """板块→名称关键词→同池 三级匹配"""
+                # 1️⃣ 精确板块映射
                 block = CODE_TO_BLOCK.get(sina_code, "")
-                if not block: return []
-                return [sc for sc in BLOCK_MAP_LOCAL.get(block, []) if sc != sina_code]
+                # 2️⃣ 🆕 名称关键词二级匹配
+                if not block and sname:
+                    block = _match_block_by_name(sname)
+                # 有板块 → 从 BLOCK_MAP_LOCAL 拿同板块
+                if block:
+                    peers = [sc for sc in BLOCK_MAP_LOCAL.get(block, [])
+                             if sc != sina_code][:15]
+                    if peers:
+                        return peers
+                # 3️⃣ 🆕 Fallback: 同池其他股票 (rows 是左列数据池)
+                peers = [r.get("code","") for r in rows
+                         if r.get("code","") and r.get("code","") != sina_code][:15]
+                return peers
 
             # ═══ 辅助: 刷资讯列表 ═══
             def _fill_news(news_lb, news_lbl, sina_code, sname):
-                news_lb.delete(0, tk.END); items = []
+                """📰 中列 Tab2: 匹配资讯 — 淘韭文章 title+时间+摘要 + DB logic_reviews"""
+                import sqlite3 as _sql3
+                news_lb.delete(0, tk.END); items = []  # [(text, tag, fg)]
+
+                def _short(s, n=60):
+                    s = (s or "").strip().replace("\n", " ").replace("\r", "")
+                    return (s[:n] + "…") if len(s) > n else s
+
+                # ═══ 1. 淘股吧热股池 ═══
                 for r in (getattr(self, '_taoguba_stamp_data', None) or []):
-                    if r.get("code","") == sina_code:
-                        freq = r.get("freq",1); pct = r.get("pct",0)
-                        label = f"📯淘 提及{freq}次  涨跌{pct:+.2f}%  [{r.get('origin','淘股吧')}]"
-                        items.append((label, "hot" if freq>=10 else "taoguba", None))
-                        for _art in r.get("articles", [])[:3]:
-                            if _art: items.append((f"  📄 {_art}", "taoguba_art", "taoguba"))
+                    if r.get("code","") != sina_code: continue
+                    freq = r.get("freq",1); pct = r.get("pct",0)
+                    _bg = f"🔥超热" if freq >= 20 else f"🔶热门" if freq >= 10 else f"📯提及"
+                    header = f"{_bg}  {freq}次  涨跌{pct:+.2f}%  [{r.get('origin','淘股吧')}]"
+                    items.append((header, "hot" if freq>=10 else "taoguba", None))
+                    # articles 可能是 str[] 或 dict[]
+                    for _art in r.get("articles", [])[:5]:
+                        if isinstance(_art, str):
+                            _t = _art; _s = ""; _tm = ""
+                        elif isinstance(_art, dict):
+                            _t = _art.get("title", "") or _art.get("标题", "")
+                            _s = _art.get("summary","") or _art.get("简介","") or _art.get("content","")[:80]
+                            _tm = _art.get("time","") or _art.get("date","") or _art.get("posted_at","")
+                        else: continue
+                        if not _t: continue
+                        _line = f"  📰 {_t}"
+                        if _tm: _line += f"  🕐{_tm[:16]}"
+                        items.append((_line, "taoguba_art", None))
+                        if _s: items.append((f"      💡 {_short(_s,80)}", "taoguba_sum", None))
+
+                # ═══ 2. 韭研公社热股池 ═══
                 for r in (getattr(self, '_jiuyan_stamp_data', None) or []):
-                    if r.get("code","") == sina_code:
-                        freq = r.get("freq",1); pct = r.get("pct",0)
-                        label = f"🧭韭 提及{freq}次  涨跌{pct:+.2f}%  [{r.get('origin','韭研')}]"
-                        items.append((label, "hot" if freq>=10 else "jiuyan", None))
-                        for _art in r.get("articles", [])[:3]:
-                            if _art: items.append((f"  📄 {_art}", "jiuyan_art", "jiuyan"))
-                try:
-                    for _dp in [_os_src.path.join(_os_src.path.dirname(__file__), "..", "stock_analysis.db"),
-                                "stock_analysis.db", _os_src.path.join(_os_src.getcwd(), "data", "stock_analysis.db")]:
-                        if _os_src.path.exists(_dp):
-                            import sqlite3 as _sql3
+                    if r.get("code","") != sina_code: continue
+                    freq = r.get("freq",1); pct = r.get("pct",0)
+                    header = f"🧭韭研  提及{freq}次  涨跌{pct:+.2f}%  [{r.get('origin','韭研')}]"
+                    items.append((header, "hot" if freq>=10 else "jiuyan", None))
+                    for _art in r.get("articles", [])[:5]:
+                        if isinstance(_art, str):
+                            _t = _art; _s = ""; _tm = ""
+                        elif isinstance(_art, dict):
+                            _t = _art.get("title","") or _art.get("标题","")
+                            _s = _art.get("summary","") or _art.get("简介","") or _art.get("content","")[:80]
+                            _tm = _art.get("time","") or _art.get("date","")
+                        else: continue
+                        if not _t: continue
+                        _line = f"  📰 {_t}"
+                        if _tm: _line += f"  🕐{_tm[:16]}"
+                        items.append((_line, "jiuyan_art", None))
+                        if _s: items.append((f"      💡 {_short(_s,80)}", "jiuyan_sum", None))
+
+                # ═══ 3. DB articles + logic_reviews ═══
+                for _dp in [_os_src.path.join(_os_src.path.dirname(__file__), "..", "stock_analysis.db"),
+                            "stock_analysis.db", _os_src.path.join(_os_src.getcwd(), "data", "stock_analysis.db")]:
+                    if _os_src.path.exists(_dp):
+                        try:
                             conn = _sql3.connect(_dp); cur = conn.cursor()
-                            candidates = [sina_code, sina_code[2:]+".SH" if sina_code.startswith("sh") else sina_code[2:]+".SZ", sina_code[-6:]]
-                            for cand in candidates:
-                                cur.execute("SELECT content, source, created_at FROM logic_reviews WHERE stock_code=? OR stock_name=? ORDER BY created_at DESC LIMIT 3", (cand, sname))
+                            cands = [sina_code, sina_code[2:]+".SH" if sina_code.startswith("sh") else sina_code[2:]+".SZ", sina_code[-6:]]
+                            # articles 表 (完整 title + content + time)
+                            for cand in cands:
+                                cur.execute("SELECT title, source, substr(content,1,120), created_at FROM articles WHERE stock_code=? OR stock_name=? ORDER BY created_at DESC LIMIT 5", (cand, sname))
                                 for row in cur.fetchall():
-                                    content = (row[0] or "")[:60]; source = row[1] or ""; ca = row[2] or ""
-                                    label = f"📝{source}  {ca[:10]}  {content}{'...' if len(str(row[0] or ''))>60 else ''}"
-                                    items.append((label, "db", None))
+                                    _t, _src, _c, _ca = row
+                                    _ca_short = (_ca or "")[:16]
+                                    items.append((f"📚{_src or ''}  🕐{_ca_short}  {_t or ''}", "db_title", None))
+                                    if _c: items.append((f"    {_short(_c,90)}", "db_sum", None))
+                            # logic_reviews 表
+                            for cand in cands:
+                                cur.execute("SELECT source, substr(content,1,120), created_at FROM logic_reviews WHERE stock_code=? OR stock_name=? ORDER BY created_at DESC LIMIT 3", (cand, sname))
+                                for row in cur.fetchall():
+                                    _src, _c, _ca = row
+                                    items.append((f"📝{_src or ''}  💬研报  🕐{(_ca or '')[:16]}", "logic_title", None))
+                                    if _c: items.append((f"    {_short(_c,90)}", "logic_sum", None))
                             conn.close(); break
-                except: pass
-                _ART_FG = {"taoguba_art": "#1565C0", "jiuyan_art": "#2E7D32"}
-                _ART_BOLD = {"taoguba", "jiuyan", "hot"}
-                for txt, tag, _src_ref in items:
+                        except: pass
+
+                # ═══ 渲染 ═══
+                _FG = {"hot":"#E65100","taoguba":"#1A237E","jiuyan":"#1B5E20",
+                       "taoguba_art":"#1565C0","jiuyan_art":"#2E7D32",
+                       "taoguba_sum":"#5C6BC0","jiuyan_sum":"#66BB6A",
+                       "db_title":"#6A1B9A","db_sum":"#9575CD",
+                       "logic_title":"#AD1457","logic_sum":"#F48FB1"}
+                _BOLD = {"hot","taoguba","jiuyan"}
+                _total = 0
+                for txt, tag, _ in items:
                     news_lb.insert(tk.END, txt)
-                    try:
-                        _fg = _NEWS_TAG_FG.get(tag, "#5D4037")
-                        if tag in _ART_FG: _fg = _ART_FG[tag]
-                        _bold = (tag in _ART_BOLD)
-                        news_lb.itemconfig(tk.END, fg=_fg, font=("",10,"bold") if _bold else ("",10))
-                    except: news_lb.itemconfig(tk.END, fg=_NEWS_TAG_FG.get(tag, "#5D4037"))
+                    _fg = _FG.get(tag, "#5D4037")
+                    _bold = tag in _BOLD
+                    try: news_lb.itemconfig(tk.END, fg=_fg, font=("",10,"bold") if _bold else ("",10))
+                    except: news_lb.itemconfig(tk.END, fg=_fg)
+                    _total += 1
                 if not items: news_lb.insert(tk.END, f"  (无匹配资讯 — {sname} 不在淘韭热股池)")
-                news_lbl.configure(text=f"{len(items)} 条资讯", fg="#333")
+                news_lbl.configure(text=f"{_total} 条资讯", fg="#333")
 
             # ═══ 辅助: 刷板块强度 (红绿比例条 + 板块个股Treeview) ═══
             def _fill_block(block_frame, block_lbl, block_placeholder, block_cache, sina_code, sname):
@@ -4088,7 +4151,7 @@ class StockDetailMixin:
                 def _on_block_click(evt):
                     sel = tv.selection()
                     if not sel: return
-                    idx = int(sel[0]); sc,nm,pv,ps = rows_data[idx]
+                    idx = tv.index(sel[0]); sc,nm,pv,ps = rows_data[idx]
                     # 刷右列
                     if _state["sina"] != sc:
                         _state["sina"] = sc
@@ -4297,20 +4360,41 @@ class StockDetailMixin:
                 closes= kdf["收盘"].astype(float).values if "收盘" in kdf.columns else kdf["close"].astype(float).values
                 n = len(closes); x = list(range(n)); up_c, dn_c = "#EF5350", "#66BB6A"
 
-                # Tab1: 📈 日K线 + MA
-                t1 = tk.Frame(right_nb); right_nb.add(t1, text="📈 日K线")
+                # Tab1: 🏥 红绿背景图 (Regime → 代替日K放第一个)
+                t1 = tk.Frame(right_nb); right_nb.add(t1, text="🏥 红绿背景图")
                 f1 = Fig(figsize=(10,4.5), dpi=100); ax1 = f1.add_subplot(111)
+                try:
+                    regime_arr, last_color, streak = self._compute_regime_on_closes(closes)
+                    color_str = {1:"🔴红(可买)", -1:"🟢绿(不可买)", 0:"⚪中"}.get(int(last_color), "?")
+                    cur_c = None; seg_i = 0
+                    for i in range(n):
+                        rc = int(regime_arr[i])
+                        if rc != cur_c or i == n - 1:
+                            if cur_c is not None:
+                                cmap1 = {1:("#FFCDD2",0.55), -1:("#C8E6C9",0.55), 0:("#ECEFF1",0.30)}
+                                bg1, alpha1 = cmap1.get(cur_c, ("#ECEFF1",0.30))
+                                ax1.axvspan(seg_i - 0.5, i - 0.5, facecolor=bg1, alpha=alpha1, zorder=0)
+                            cur_c = rc; seg_i = i
+                except: pass
                 for i in range(n):
                     c = up_c if closes[i]>=opens[i] else dn_c
                     ax1.bar(i, abs(closes[i]-opens[i]), bottom=min(opens[i],closes[i]), color=c, width=0.6, alpha=0.85)
                     ax1.plot([i,i], [lows[i],highs[i]], color=c, linewidth=0.8)
-                for mw, mc, ml in [(5,"#FF0000","MA5"),(10,"#0000FF","MA10"),(20,"#FF00FF","MA20"),(60,"#FFA500","MA60")]:
-                    if n >= mw:
-                        ma = _np_m.convolve(closes, _np_m.ones(mw)/mw, mode='valid')
-                        ax1.plot(list(range(mw-1,n)), ma, color=mc, linewidth=1.2, label=ml)
-                ax1.set_title(f"{sname} 日K线+均线", fontsize=12, fontweight="bold")
+                if n >= 20:
+                    ma20v = _np_m.convolve(closes, _np_m.ones(20)/20, mode='valid')
+                    ax1.plot(list(range(19,n)), ma20v, color="#FF9800", lw=1.2, label="MA20")
+                if n >= 60:
+                    ma60v = _np_m.convolve(closes, _np_m.ones(60)/60, mode='valid')
+                    ax1.plot(list(range(59,n)), ma60v, color="#2196F3", lw=1.2, label="MA60")
+                ax1.set_title(f"{sname} 🏥 红绿背景图  当前:{color_str} 连续{streak}根", fontsize=12, fontweight="bold")
                 ax1.legend(loc="upper left", fontsize=8); ax1.grid(True, alpha=0.3)
-                f1.tight_layout(); FCA(f1, t1).get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                f1.tight_layout()
+                _c1 = FCA(f1, t1)
+                _c1.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                _c1.get_tk_widget().bind("<Double-1>",
+                    lambda e, _c=closes: self._show_regime_legend_help(_c))
+                _c1.mpl_connect("button_press_event",
+                    lambda e, _c=closes: self._show_regime_legend_help(_c) if e.dblclick else None)
 
                 # Tab2: 🌊 一目均衡
                 t2 = tk.Frame(right_nb); right_nb.add(t2, text="🌊 一目均衡")
@@ -4466,10 +4550,11 @@ class StockDetailMixin:
                 if not sel: return
                 idx = int(sel[0]); row = rows[idx]
                 sina = row.get("code",""); sname = row.get("name","")
+                print(f"[DEBUG] _on_left_select idx={idx} sina={sina} name={sname}", flush=True)
                 block = CODE_TO_BLOCK.get(sina, "") or _match_block_by_name(sname)
                 # 刷中列 Tab1: 关联个股
                 for _i in mtree.get_children(): mtree.delete(_i)
-                peers = _find_peers(sina)
+                peers = _find_peers(sina, sname)
                 _mid_rows = []
                 for sc in peers:
                     pct_sina = ""
@@ -4479,13 +4564,14 @@ class StockDetailMixin:
                     peer_name = CODE_TO_NAME.get(sc, sc)
                     mtree.insert("","end",values=(sc[-6:],peer_name,pct_sina,block))
                     _mid_rows.append({"sina":sc,"name":peer_name})
+                print(f"[DEBUG] peers={len(peers)} _mid_rows={len(_mid_rows)} block={block}", flush=True)
                 if not peers: mid_lbl.configure(text=f"{block or '未归类'} · 无关联", fg="#999")
                 else: mid_lbl.configure(text=f"{block or '未归类'} · {len(peers)} 只", fg="#333")
                 # 刷中列 Tab2-4 (资讯/板块/指标)
                 _fill_news(news_lb, news_lbl, sina, sname)
-                block_placeholder.place_forget()
+                # ✅ block_placeholder/ind_placeholder 已经被 _fill_block/_fill_indicator 内部
+                #    第一行 destroy 整个 frame 子控件, 不需要手动 forget
                 _fill_block(block_frame, block_lbl, block_placeholder, _block_cache, sina, sname)
-                ind_placeholder.place_forget()
                 win.update_idletasks()
                 _fill_indicator(ind_frame, ind_lbl, ind_placeholder, _ind_cache, sina, sname)
                 _state["sina"] = sina
@@ -4494,7 +4580,17 @@ class StockDetailMixin:
                 from matplotlib.figure import Figure
                 from matplotlib import gridspec as _gs
                 def _do_build():
-                    _build_right_kline(right_nb, sina, sname, _np, Figure, FigureCanvasTkAgg, _gs)
+                    print(f"[DEBUG] _do_build → _build_right_kline({sina}, {sname})", flush=True)
+                    try:
+                        _build_right_kline(right_nb, sina, sname, _np, Figure, FigureCanvasTkAgg, _gs)
+                        print(f"[DEBUG] _build_right_kline OK, tabs={right_nb.tabs()}", flush=True)
+                    except Exception as _ex2:
+                        import traceback as _tb2; _tb2.print_exc()
+                        print(f"[DEBUG] ❌ _build_right_kline 崩了: {_ex2}", flush=True)
+                        # 出错也得放占位符
+                        tk.Label(right_nb, text=f"❌ K线构建失败:\n{_ex2}", 
+                                 font=("",11), fg="#E53935").pack(expand=True)
+                        right_nb.add(tk.Frame(right_nb), text="📈 日K线")
                     _bg_busy.__setitem__(0, False)
                 if _bg_busy[0]:
                     try: right_nb.after_cancel(_bg_busy[0])
@@ -4504,9 +4600,12 @@ class StockDetailMixin:
             def _on_mid_select(evt=None):
                 sel = mtree.selection()
                 if not sel: return
-                idx = int(sel[0])
-                if idx >= len(_mid_rows): return
+                idx = mtree.index(sel[0])  # ✅ item ID → 行号
+                if idx >= len(_mid_rows):
+                    print(f"[DEBUG] _on_mid_select idx={idx} >= len(_mid_rows)={len(_mid_rows)} → return!", flush=True)
+                    return
                 d = _mid_rows[idx]
+                print(f"[DEBUG] _on_mid_select idx={idx} sina={d['sina']} name={d['name']}", flush=True)
                 _fill_news(news_lb, news_lbl, d["sina"], d["name"])
                 block_placeholder.place_forget()
                 _fill_block(block_frame, block_lbl, block_placeholder, _block_cache, d["sina"], d["name"])
@@ -4535,6 +4634,7 @@ class StockDetailMixin:
             tk.Button(bottom, text="❌ 关闭", command=win.destroy).pack(side=tk.RIGHT, padx=4)
 
             # 自动选中第一只 → 触发全链路联动
+            print(f"[DEBUG] ltree rows={len(ltree.get_children())}, auto-select after 300ms", flush=True)
             win.after(300, lambda: ltree.selection_set("0") if ltree.get_children() else None)
 
         except Exception as _e:
@@ -4896,8 +4996,8 @@ class StockDetailMixin:
                 else:
                     # 股票/龙头/自持/资讯 → 同板块
                     block = CODE_TO_BLOCK.get(sina, "") or _match_block_by_name2(sname)
+                    peers = []  # ✅ 确保所有分支都有值
                     if block:
-                        peers = []
                         for sc in BLOCK_MAP_LOCAL.get(block, []):
                             ts = sc[2:] + ".SH" if sc.startswith("sh") else sc[2:] + ".SZ"
                             nm = CODE_TO_NAME.get(sc, sc[-6:])
@@ -4926,13 +5026,15 @@ class StockDetailMixin:
                 for i in tree.get_children(): tree.delete(i)
                 data.sort(key=lambda x: x["pct"])
                 for i, d in enumerate(data):
+                    _s_tag = self._stock_color_tag(d["ts"])  # 板块 tag
                     if not d["ok"]:
-                        tree.insert("", "end", values=(d["ts"][:6], d["name"], "—", "—", "—"), tags=("no_data",)); continue
+                        tree.insert("", "end", values=(d["ts"][:6], d["name"], "—", "—", "—"),
+                                    tags=(_s_tag, "no_data")); continue
                     tree.insert("", "end", iid=str(i), values=(
                         d["ts"][:6], d["name"],
                         f"{d['now']:.2f}",
                         f"{d['pct']:+.1f}%", d["discount"]),
-                        tags=(_pct_tag(d["pct"]),))
+                        tags=(_s_tag, _pct_tag(d["pct"])))  # 板块 tag + 折扣 tag
                 valid = [d["pct"] for d in data if d["ok"]]
                 if valid:
                     pct_lbl.configure(text=f"平均 {sum(valid)/len(valid):+.1f}%  最惨 {min(valid):+.1f}%")
@@ -4946,13 +5048,15 @@ class StockDetailMixin:
                 # 清空
                 for i in mid_tree.get_children(): mid_tree.delete(i)
                 if not peers:
-                    mid_tree.insert("", "end", values=("—", "未找到关联个股", "", "", "", "", ""), tags=("no_data",))
+                    mid_tree.insert("", "end", values=("—", "未找到关联个股", "", "", "", "", ""),
+                                    tags=("def", "no_data"))
                     _mid_cache[cfg["pool_key"]] = []
                     return
-                # 先秒显名称 (无回撤数据)
+                # 先秒显名称 (无回撤数据) — 加板块 tag
                 for i, (p_ts, p_nm, _is_stock) in enumerate(peers):
+                    _s_tag = self._stock_color_tag(p_ts)
                     mid_tree.insert("", "end", iid=str(i), values=(
-                        p_ts[:6], p_nm, "计算中...", "", "", "", ""), tags=())
+                        p_ts[:6], p_nm, "计算中...", "", "", "", ""), tags=(_s_tag,))
                 _mid_cache[cfg["pool_key"]] = [{"ts": p[0], "name": p[1], "sina": _ts_to_sina(p[0]),
                                                 "high250": 0, "low250": 0, "now": 0, "pct": 0, "discount": "—", "ok": False}
                                                for p in peers]
@@ -4967,6 +5071,7 @@ class StockDetailMixin:
                         def _fill_back():
                             for i, d in enumerate(mid_data):
                                 try:
+                                    _s_tag = self._stock_color_tag(d["ts"])
                                     mid_tree.item(str(i), values=(
                                         d["ts"][:6], d["name"],
                                         f"{d['high250']:.2f}" if d["ok"] else "—",
@@ -4974,7 +5079,9 @@ class StockDetailMixin:
                                         f"{d['now']:.2f}" if d["ok"] else "—",
                                         f"{d['pct']:+.1f}%" if d["ok"] else "—",
                                         d["discount"]))
-                                    mid_tree.item(str(i), tags=(_pct_tag(d["pct"]),) if d["ok"] else ("no_data",))
+                                    # 板块 tag + 折扣 tag / no_data tag
+                                    _all_tags = (_s_tag, _pct_tag(d["pct"])) if d["ok"] else (_s_tag, "no_data")
+                                    mid_tree.item(str(i), tags=_all_tags)
                                 except: pass
                             cfg["mid_lbl"].configure(text=f"关联 {len(mid_data)} 只", fg="#333")
                         root.after(0, _fill_back)
@@ -4992,7 +5099,6 @@ class StockDetailMixin:
                              fg="#E53935").pack(expand=True)
                     right_nb.add(tk.Frame(right_nb), text="📈 日K线")
                     return
-
                 opens  = kdf["开盘"].astype(float).values if "开盘" in kdf.columns else kdf["open"].astype(float).values
                 highs  = kdf["最高"].astype(float).values if "最高" in kdf.columns else kdf["high"].astype(float).values
                 lows   = kdf["最低"].astype(float).values if "最低" in kdf.columns else kdf["low"].astype(float).values
@@ -5204,12 +5310,15 @@ class StockDetailMixin:
                 left_tree.pack(side="left", fill="both", expand=True, padx=(4,0), pady=4)
                 sb1.pack(side="right", fill="y", pady=4)
 
-                # 折扣 tag
+                # 折扣 tag (先注册)
                 for _tg in ["p0_20","p20_40","p40_60","p60_80","p80_100","no_data"]:
                     _bold = (_tg in ["p0_20","p20_40"])
                     _col = {"p0_20":"#E53935","p20_40":"#FB8C00","p40_60":"#FDD835",
                             "p60_80":"#4CAF50","p80_100":"#1565C0","no_data":"#999"}[_tg]
                     left_tree.tag_configure(_tg, foreground=_col, font=("",10,"bold") if _bold else ("",10))
+
+                # ✅ 板块颜色 tag (后注册 → 优先级更高!)
+                self._apply_stock_tag_config(left_tree)
 
                 # ── 中列: Notebook 4 tab ──
                 mid = tk.Frame(pw, bg="#FAFAFA"); pw.add(mid, weight=4)
@@ -5227,11 +5336,14 @@ class StockDetailMixin:
                     mid_tree.heading(c, text=t); mid_tree.column(c, width=w, anchor="center" if c != "name" else "w")
                 _sb_m = ttk.Scrollbar(t_mid1, orient="vertical", command=mid_tree.yview); mid_tree.configure(yscrollcommand=_sb_m.set)
                 _sb_m.pack(side="right", fill="y", padx=(0,2)); mid_tree.pack(side="left", fill="both", expand=True, padx=(4,0))
+                # 折扣 tag (先注册)
                 for _tg in ["p0_20","p20_40","p40_60","p60_80","p80_100","no_data"]:
                     _bold = (_tg in ["p0_20","p20_40"])
                     _col = {"p0_20":"#E53935","p20_40":"#FB8C00","p40_60":"#FDD835",
                             "p60_80":"#4CAF50","p80_100":"#1565C0","no_data":"#999"}[_tg]
                     mid_tree.tag_configure(_tg, foreground=_col, font=("",10,"bold") if _bold else ("",10))
+                # ✅ 板块颜色 tag (后注册 → 优先级更高!)
+                self._apply_stock_tag_config(mid_tree)
 
                 # ═══ Tab2: 📰 匹配资讯 ═══
                 t_mid2 = tk.Frame(mid_nb, bg="#FAFAFA"); mid_nb.add(t_mid2, text="📰 匹配资讯")
@@ -5462,10 +5574,13 @@ class StockDetailMixin:
                     for i in range(1,n): e12[i]=closes[i]*2/13+e12[i-1]*11/13; e26[i]=closes[i]*2/27+e26[i-1]*25/27
                     dif = float(e12[-1]-e26[-1]); dea = float(((e12-e26)*0.2+_np2.roll(e12-e26,1)*0.8)[-1])
                     macd_bar = round((dif-dea)*2,3)
-                    # KDJ
+                    # KDJ (标准递推 K/D/J)
                     hh = float(max(highs[-9:])); ll = float(min(lows[-9:]))
                     rsv = (closes[-1]-ll)/(hh-ll)*100 if hh>ll else 50
-                    k = round(rsv*1/3 + 50*2/3, 1); j = round(3*k - 2*50, 1)
+                    # 简化版 D: K * 1/3 + 50 * 2/3 (近似, 因为只有最后一天)
+                    k = round(rsv*1/3 + 50*2/3, 1)
+                    d = round(k*1/3 + 50*2/3, 1)   # ← 补 D!
+                    j = round(3*k - 2*d, 1)
                     # BOLL
                     mid_bb = float(_np2.mean(closes[-20:]))
                     std_bb = float(_np2.std(closes[-20:]))
@@ -5579,7 +5694,7 @@ class StockDetailMixin:
                         ("📈","MA趋势",  ma_trend,                       ma_ana,  "#2E7D32" if "多" in ma_trend else ("#C62828" if "空" in ma_trend else "#F57F17"), ma_help),
                         ("⚡","RSI14",   f"{rsi}  {'超买' if rsi>70 else ('超卖' if rsi<30 else '正常')}", rsi_ana, "#C2185B", rsi_help),
                         ("📊","MACD",    f"DIF:{dif:+.3f} {'金叉' if dif>dea else '死叉'}", macd_ana, "#1B5E20", macd_help),
-                        ("🎲","KDJ",     f"K:{k} D:{round((rsv*2/3 + 50*1/3),1)} J:{j}", kdj_ana, "#FF6F00", kdj_help),
+                        ("🎲","KDJ",     f"K:{k} D:{d} J:{j}", kdj_ana, "#FF6F00", kdj_help),
                         ("📏","BOLL",    f"{bb_pos:.0f}% {'上轨' if bb_pos>80 else ('下轨' if bb_pos<20 else '中轨')}", boll_ana, "#00695C", boll_help),
                         ("💧","量价",    vol_text,                        vol_ana, "#5D4037", vol_help),
                         ("🔵","MA值",    f"5:{ma5 or '—'} 20:{ma20 or '—'} 60:{ma60 or '—'}",
@@ -5655,7 +5770,7 @@ class StockDetailMixin:
                         f"📈 MA趋势: {ma_trend}\n    → {ma_ana}\n\n"
                         f"⚡ RSI14: {rsi}\n    → {rsi_ana}\n\n"
                         f"📊 MACD: DIF={dif:+.3f} DEA={dea:+.3f} MACD={macd_bar:+.3f}\n    → {macd_ana}\n\n"
-                        f"🎲 KDJ: K={k} D={round((rsv*2/3 + 50*1/3),1)} J={j}\n    → {kdj_ana}\n\n"
+                        f"🎲 KDJ: K={k} D={d} J={j}\n    → {kdj_ana}\n\n"
                         f"📏 BOLL位置: {bb_pos:.0f}%\n    → {boll_ana}\n\n"
                         f"💧 量价关系: {vol_text}\n    → {vol_ana}\n\n"
                         f"{'='*40}\n🏁 综合判断: {overall}\n📊 看多 {bull_count} 项 / 看空 {bear_count} 项\n⚠ 仅供参考, 不构成投资建议!"
@@ -5688,15 +5803,16 @@ class StockDetailMixin:
                         # 填回 Treeview
                         def _fill():
                             _iid = cfg["left_tree"].get_children()[idx]
+                            _s_tag = self._stock_color_tag(real["ts"])
                             if real["ok"]:
                                 cfg["left_tree"].item(_iid, values=(
                                     real["ts"][:6], real["name"],
                                     f"{real['now']:.2f}", f"{real['pct']:+.1f}%", real["discount"]))
-                                cfg["left_tree"].item(_iid, tags=(_pct_tag(real["pct"]),))
+                                cfg["left_tree"].item(_iid, tags=(_s_tag, _pct_tag(real["pct"])))
                             else:
                                 cfg["left_tree"].item(_iid, values=(
                                     real["ts"][:6], real["name"], "—", "无数据", "—"))
-                                cfg["left_tree"].item(_iid, tags=("no_data",))
+                                cfg["left_tree"].item(_iid, tags=(_s_tag, "no_data"))
                             # 刷新 label
                             valid = [x["pct"] for x in left_data[:idx+1] if x["ok"]]
                             if valid:
@@ -5717,10 +5833,11 @@ class StockDetailMixin:
                 cfg = _trees[_key]
                 sel = cfg["left_tree"].selection()
                 if not sel: return
-                idx = int(sel[0])
+                idx = cfg["left_tree"].index(sel[0])  # ✅ item ID → 行号
                 left_data = _all_data.get(_key, [])
                 if idx >= len(left_data): return
                 d = left_data[idx]
+                print(f"[DEBUG-sale] _on_left_select key={_key} idx={idx} sina={d.get('sina')} name={d.get('name')}", flush=True)
 
                 # 🆕 按需计算: 如果这只还没算过回撤, 后台算 + peers
                 if not d["ok"] and idx not in _calcing_rows:
@@ -5759,8 +5876,17 @@ class StockDetailMixin:
                 from matplotlib.figure import Figure
                 from matplotlib import gridspec as _gs
                 def _do_kline(cfg=cfg, d=d):
-                    _build_right_kline(cfg["right_nb"], d["sina"], d["name"],
-                                       _np, Figure, FigureCanvasTkAgg, _gs)
+                    print(f"[DEBUG-sale] _do_kline → _build_right_kline({d['sina']}, {d['name']})", flush=True)
+                    try:
+                        _build_right_kline(cfg["right_nb"], d["sina"], d["name"],
+                                           _np, Figure, FigureCanvasTkAgg, _gs)
+                        print(f"[DEBUG-sale] ✅ OK, tabs={cfg['right_nb'].tabs()}", flush=True)
+                    except Exception as _ex3:
+                        import traceback as _tb3; _tb3.print_exc()
+                        print(f"[DEBUG-sale] ❌ _build_right_kline 崩了: {_ex3}", flush=True)
+                        tk.Label(cfg["right_nb"], text=f"❌ 构建K线失败\n{_ex3}",
+                                 fg="#E53935", font=("",11)).pack(expand=True)
+                        cfg["right_nb"].add(tk.Frame(cfg["right_nb"]), text="📈 日K线")
                     _kline_bg.__setitem__(0, None)
                 if _kline_bg[0]:
                     try: cfg["right_nb"].after_cancel(_kline_bg[0])
@@ -5768,11 +5894,11 @@ class StockDetailMixin:
                 _kline_bg[0] = cfg["right_nb"].after(5, _do_kline)
 
             def _on_mid_select(evt=None, _key=None):
-                """中列选中 → 刷右列K线 + 刷资讯 + 同步左列 (🆕 永不吞点击!)"""
+                """中列选中 → 刷右列K线 + 刷资讯 + 同步左列"""
                 cfg = _trees[_key]
                 sel = cfg["mid_tree"].selection()
                 if not sel: return
-                idx = int(sel[0])
+                idx = cfg["mid_tree"].index(sel[0])  # ✅ item ID → 行号
                 mid_data = _mid_cache.get(_key, [])
                 if idx >= len(mid_data): return
                 d = mid_data[idx]
@@ -6303,10 +6429,16 @@ class StockDetailMixin:
             # Notebook
             nb = ttk.Notebook(right_frame); nb.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-            # tab1: 日K线 (蜡烛+MA+指标)
-            tab_kline = ttk.Frame(nb); nb.add(tab_kline, text="📈 日K线")
+            # tab1: 🏥 红绿背景图 (Regime → 代替日K放第一个)
+            tab_kline = ttk.Frame(nb); nb.add(tab_kline, text="🏥 红绿背景图")
             fig1 = Figure(figsize=(7, 7), dpi=100); ax1 = fig1.add_subplot(111)
             cv1 = FigureCanvasTkAgg(fig1, master=tab_kline); cv1.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            # ✅ 绑双击事件 → 显示红绿背景图算法说明 + 胜率
+            cv1.get_tk_widget().bind("<Double-1>",
+                lambda e: self._show_regime_legend_help(getattr(self, "_etf_current_closes", None)))
+            cv1.mpl_connect("button_press_event",
+                lambda e: self._show_regime_legend_help(getattr(self, "_etf_current_closes", None))
+                if e.dblclick else None)
 
             # tab2: K线蜡烛 (简洁版, 也带支撑压力)
             tab_candle = ttk.Frame(nb); nb.add(tab_candle, text="🕯️ 蜡烛")
@@ -6904,15 +7036,29 @@ class StockDetailMixin:
                 # 买卖点
                 sigs = _sig_local(closes) if chk_sig.get() else []
 
-                # ── tab1: 日K线 ──
+                # ── tab1: 🏥 红绿背景图 (Regime → 代替日K放第一个) ──
                 ax1.clear()
+                try:
+                    regime_arr, last_color, streak = self._compute_regime_on_closes(closes)
+                    color_str = {1:"🔴红(可买)", -1:"🟢绿(不可买)", 0:"⚪中"}.get(int(last_color), "?")
+                    cur_c = None; seg_i = 0
+                    for i in range(n):
+                        rc = int(regime_arr[i])
+                        if rc != cur_c or i == n - 1:
+                            if cur_c is not None:
+                                cmap_e = {1:("#FFCDD2",0.55), -1:("#C8E6C9",0.55), 0:("#ECEFF1",0.30)}
+                                bg_e, alpha_e = cmap_e.get(cur_c, ("#ECEFF1",0.30))
+                                ax1.axvspan(seg_i - 0.5, i - 0.5, facecolor=bg_e, alpha=alpha_e, zorder=0)
+                            cur_c = rc; seg_i = i
+                except: pass
                 for i in range(n):
                     col = up_c if closes[i] >= opens[i] else dn_c
                     ax1.plot([x[i],x[i]], [lows[i], highs[i]], color=col, lw=0.8)
                     ax1.bar(x[i], closes[i]-opens[i], bottom=opens[i], color=col, width=0.6)
+                # MA20/60 + 支撑压力 + 买卖点
                 for period, color, lbl in ma_on:
                     ma_v = pd.Series(closes).rolling(period).mean().values
-                    ax1.plot(x, ma_v, color=color, lw=1.1, label=lbl)
+                    ax1.plot(x, ma_v, color=color, lw=1.0, label=lbl)
                 for kind, price, color in sr_lines:
                     ax1.axhline(price, color=color, lw=0.9, ls="--", alpha=0.75)
                     ax1.text(n - 1, price, f"  {kind} {price:.2f}", va="center", fontsize=7, color=color,
@@ -6920,20 +7066,13 @@ class StockDetailMixin:
                 for sx, sp, stype in sigs:
                     if stype == "BUY":
                         ax1.scatter(sx, lows[sx] * 0.995, marker="^", color="#C62828", s=45, zorder=5)
-                        ax1.annotate(f"买 {sp:.2f}", (sx, lows[sx]), xytext=(0, -18),
-                                    textcoords="offset points", fontsize=7, color="#C62828",
-                                    ha="center", fontweight="bold")
                     else:
                         ax1.scatter(sx, highs[sx] * 1.005, marker="v", color="#2E7D32", s=45, zorder=5)
-                        ax1.annotate(f"卖 {sp:.2f}", (sx, highs[sx]), xytext=(0, 10),
-                                    textcoords="offset points", fontsize=7, color="#2E7D32",
-                                    ha="center", fontweight="bold")
-                title1 = f"📈 日K线 · {sname}  |  MA:{','.join(l for _,_,l in ma_on) if ma_on else '无'}"
-                if sr_lines: title1 += f"  |  S/R:{len(sr_lines)}"
-                if sigs: title1 += f"  |  买卖:{len(sigs)}"
+                title1 = f"🏥 红绿背景图 · {sname}  当前:{color_str} 连续{streak}根"
                 ax1.set_title(title1, fontsize=10, fontweight="bold")
                 if ma_on: ax1.legend(fontsize=6.5, loc="upper left", ncol=len(ma_on))
                 ax1.grid(True, alpha=0.2, lw=0.6)
+                self._etf_current_closes = closes  # ✅ 存 closes 供双击胜率回测
                 cv1.draw()
 
                 # ── tab2: 蜡烛 ──
@@ -7953,64 +8092,97 @@ class StockDetailMixin:
                             cycle_color = {"上行": "#E53935", "震荡": "#FB8C00", "下行": "#43A047"}.get(cycle_text, "#9E9E9E")
 
                             snap = getattr(self, "_last_sentiment_zone_snapshot", None)
-                            m = snap.get("metrics", {}) if snap else {}
-                            m2 = m.get("m2_market", {}) if isinstance(m, dict) else {}
-                            up_cnt = m2.get("up", "—") if isinstance(m2, dict) else "—"
-                            dn_cnt = m2.get("down", "—") if isinstance(m2, dict) else "—"
-                            flat_cnt = m2.get("flat", "—") if isinstance(m2, dict) else "—"
-                            m5_hs300_v = m.get("m5_hs300", {}).get("value") if isinstance(m.get("m5_hs300"), dict) else None
-                            m5_zz500_v = m.get("m5_zz500", {}).get("value") if isinstance(m.get("m5_zz500"), dict) else None
-
+                            # ── 🆕 数据有效性检查 ──
+                            _valid = snap and snap.get("data_valid", True)
+                            _src = snap.get("data_source", "") if snap else ""
+                            _is_history = "⚠️历史" in _src or "Tushare(" in _src
+                            from datetime import datetime as _dt
+                            _snap_time = snap.get("time", "") if snap else ""
+                            _is_today = False
                             try:
-                                total = int(up_cnt) + int(dn_cnt) + int(flat_cnt)
-                                emo_score = round(int(up_cnt) / total * 100, 1) if total > 0 else 50
+                                _is_today = (_dt.now().strftime("%Y-%m-%d") in _snap_time)
                             except Exception:
-                                emo_score = 50.0
+                                pass
 
-                            cycle_position = {"上行": 80, "震荡": 50, "下行": 20}.get(cycle_text, 50)
-                            temperature = round((cycle_position + emo_score) / 2)
-                            temp_color = "#E53935" if temperature >= 70 else ("#FB8C00" if temperature >= 40 else "#43A047")
-                            emo_label = "贪婪" if emo_score > 70 else ("中性" if emo_score > 40 else "恐惧")
-
-                            hs300_s = f"{m5_hs300_v:+.2f}%" if isinstance(m5_hs300_v, (int, float)) else "—"
-                            zz500_s = f"{m5_zz500_v:+.2f}%" if isinstance(m5_zz500_v, (int, float)) else "—"
-
-                            # 标题
+                            # 标题 (总是显示)
                             ax.text(0.02, 0.97, "🎯 情绪复盘", transform=ax.transAxes,
                                     fontsize=11, fontweight="bold", va="top", ha="left", color="#263238")
                             ax.plot([0.02, 0.98], [0.93, 0.93], color="#E0E0E0", lw=1, transform=ax.transAxes)
-                            # 主体文字块
-                            lines = [
-                                f"🕐 {snap.get('time','未刷新') if snap else '未刷新'}",
-                                f"🎯 周期: {cycle_text}",
-                                f"📈 涨跌: 上{up_cnt}  下{dn_cnt}  平{flat_cnt}",
-                                f"📊 沪深300: {hs300_s}",
-                                f"📊 中证500: {zz500_s}",
-                            ]
-                            ax.text(0.02, 0.90, "\n".join(lines), transform=ax.transAxes,
-                                    fontsize=9.5, va="top", ha="left", linespacing=1.45)
-                            # 情绪分数卡片
-                            score_bg = "#FFEBEE" if emo_score > 70 else ("#FFF3E0" if emo_score > 40 else "#E8F5E9")
-                            ax.text(0.02, 0.38, "情绪分数", transform=ax.transAxes,
-                                    fontsize=8, va="top", ha="left", color="#666")
-                            ax.text(0.02, 0.32, f"{emo_score:.0f} · {emo_label}",
-                                    transform=ax.transAxes, fontsize=15, fontweight="bold",
-                                    va="top", ha="left", color=temp_color,
-                                    bbox=dict(boxstyle="round,pad=0.25", fc=score_bg,
-                                              ec=temp_color, alpha=0.9, lw=1.2))
-                            # 仓位建议卡片
-                            ax.text(0.62, 0.38, "建议仓位", transform=ax.transAxes,
-                                    fontsize=8, va="top", ha="left", color="#666")
-                            ax.text(0.62, 0.32, f"{temperature}%", transform=ax.transAxes,
-                                    fontsize=15, fontweight="bold", va="top", ha="left",
-                                    color=temp_color,
-                                    bbox=dict(boxstyle="round,pad=0.25", fc=score_bg,
-                                              ec=temp_color, alpha=0.9, lw=1.2))
-                            # 底部总结
-                            ax.text(0.5, 0.06, f"💡 {cycle_text} · {emo_label}",
-                                    transform=ax.transAxes, fontsize=10, fontweight="bold",
-                                    ha="center", va="center", color=cycle_color,
-                                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=cycle_color, lw=1.5))
+
+                            # ── 🆕 无效 → 显示警告面板 (不要 continue! ax 已创建, 画完就好) ──
+                            if not snap or not _valid or _is_history or not _is_today:
+                                _warn_reason = ""
+                                if not snap: _warn_reason = "暂无数据 (未刷新)"
+                                elif not _valid: _warn_reason = "数据源异常 (东方财富/问财被墙)"
+                                elif _is_history: _warn_reason = f"历史数据 ({_src[:35]})"
+                                elif not _is_today: _warn_reason = f"数据过期 ({_snap_time[:10]})"
+                                ax.text(0.5, 0.55, "⚠️  未拿到有效收盘数据",
+                                        transform=ax.transAxes, fontsize=12, fontweight="bold",
+                                        va="center", ha="center", color="#D32F2F",
+                                        bbox=dict(boxstyle="round,pad=0.4", fc="#FFEBEE",
+                                                  ec="#D32F2F", alpha=0.95, lw=1.5))
+                                ax.text(0.5, 0.42, _warn_reason,
+                                        transform=ax.transAxes, fontsize=8.5,
+                                        va="center", ha="center", color="#666")
+                                ax.text(0.5, 0.25, "💡 刷新情绪复盘或稍后重试",
+                                        transform=ax.transAxes, fontsize=8,
+                                        va="center", ha="center", color="#888")
+                                # ⚠️ 不要 continue! ax 已经在循环外创建了, 画完就好
+                            else:
+                                # ── 有效数据 → 正常渲染 ──
+                                m = snap.get("metrics", {})
+                                m2 = m.get("m2_market", {}) if isinstance(m, dict) else {}
+                                up_cnt = m2.get("up", "—") if isinstance(m2, dict) else "—"
+                                dn_cnt = m2.get("down", "—") if isinstance(m2, dict) else "—"
+                                flat_cnt = m2.get("flat", "—") if isinstance(m2, dict) else "—"
+                                m5_hs300_v = m.get("m5_hs300", {}).get("value") if isinstance(m.get("m5_hs300"), dict) else None
+                                m5_zz500_v = m.get("m5_zz500", {}).get("value") if isinstance(m.get("m5_zz500"), dict) else None
+
+                                hs300_s = f"{m5_hs300_v:+.2f}%" if isinstance(m5_hs300_v, (int, float)) else "—"
+                                zz500_s = f"{m5_zz500_v:+.2f}%" if isinstance(m5_zz500_v, (int, float)) else "—"
+
+                                try:
+                                    total = int(up_cnt) + int(dn_cnt) + int(flat_cnt)
+                                    emo_score = round(int(up_cnt) / total * 100, 1) if total > 0 else 50
+                                except Exception:
+                                    emo_score = 50.0
+
+                                cycle_position = {"上行": 80, "震荡": 50, "下行": 20}.get(cycle_text, 50)
+                                temperature = round((cycle_position + emo_score) / 2)
+                                temp_color = "#E53935" if temperature >= 70 else ("#FB8C00" if temperature >= 40 else "#43A047")
+                                emo_label = "贪婪" if emo_score > 70 else ("中性" if emo_score > 40 else "恐惧")
+                                # 主体文字块
+                                lines = [
+                                    f"🕐 {snap.get('time','未刷新') if snap else '未刷新'}",
+                                    f"🎯 周期: {cycle_text}",
+                                    f"📈 涨跌: 上{up_cnt}  下{dn_cnt}  平{flat_cnt}",
+                                    f"📊 沪深300: {hs300_s}",
+                                    f"📊 中证500: {zz500_s}",
+                                ]
+                                ax.text(0.02, 0.90, "\n".join(lines), transform=ax.transAxes,
+                                        fontsize=9.5, va="top", ha="left", linespacing=1.45)
+                                # 情绪分数卡片
+                                score_bg = "#FFEBEE" if emo_score > 70 else ("#FFF3E0" if emo_score > 40 else "#E8F5E9")
+                                ax.text(0.02, 0.38, "情绪分数", transform=ax.transAxes,
+                                        fontsize=8, va="top", ha="left", color="#666")
+                                ax.text(0.02, 0.32, f"{emo_score:.0f} · {emo_label}",
+                                        transform=ax.transAxes, fontsize=15, fontweight="bold",
+                                        va="top", ha="left", color=temp_color,
+                                        bbox=dict(boxstyle="round,pad=0.25", fc=score_bg,
+                                                  ec=temp_color, alpha=0.9, lw=1.2))
+                                # 仓位建议卡片
+                                ax.text(0.62, 0.38, "建议仓位", transform=ax.transAxes,
+                                        fontsize=8, va="top", ha="left", color="#666")
+                                ax.text(0.62, 0.32, f"{temperature}%", transform=ax.transAxes,
+                                        fontsize=15, fontweight="bold", va="top", ha="left",
+                                        color=temp_color,
+                                        bbox=dict(boxstyle="round,pad=0.25", fc=score_bg,
+                                                  ec=temp_color, alpha=0.9, lw=1.2))
+                                # 底部总结
+                                ax.text(0.5, 0.06, f"💡 {cycle_text} · {emo_label}",
+                                        transform=ax.transAxes, fontsize=10, fontweight="bold",
+                                        ha="center", va="center", color=cycle_color,
+                                        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=cycle_color, lw=1.5))
 
                         elif k == "etf_rank":
                             # 📊 ETF 板块强弱 — 纯文字 TOP5/BOTTOM5 列表 (占一格, 与情绪并排)
@@ -8031,6 +8203,10 @@ class StockDetailMixin:
                                 import time as _time
                                 import tushare as ts
                                 from utils.config import TS_DEFAULT_TOKEN
+                                from datetime import datetime as _dt2, timedelta as _td2
+                                # 🆕 动态日期 (避免写死)
+                                _today = _dt2.now().strftime("%Y%m%d")
+                                _start = (_dt2.now() - _td2(days=70)).strftime("%Y%m%d")
                                 cache = getattr(self, "_etf_rank_cache", None)
                                 if cache and (_time.time() - cache[0]) < 1800:
                                     etf_results = cache[1]
@@ -8043,7 +8219,7 @@ class StockDetailMixin:
                                     for ecode, ename in ETF_LIST:
                                         try:
                                             edf = self._ts_pro.fund_daily(ts_code=ecode,
-                                                                          start_date="20260901", end_date="20261101")
+                                                                          start_date=_start, end_date=_today)
                                             if edf is None or len(edf) < 21: continue
                                             edf = edf.sort_values("trade_date").reset_index(drop=True)
                                             ecloses = edf["close"].astype(float).values
@@ -9163,6 +9339,18 @@ class StockDetailMixin:
         tb.winfo_children()[12].config(command=_import_preset)
         cat_var.trace_add("write", lambda *_: _refresh())
         _refresh()
+
+    # ✅ 委托方法: 让 StockDetailMixin 也能调用红绿背景图例弹窗 (DapanMixin 提供)
+    def _show_regime_legend_help(self, closes=None):
+        """代理到 DapanMixin._show_regime_legend_help — 多重继承链保证能找到"""
+        if hasattr(super(), '_show_regime_legend_help'):
+            return super()._show_regime_legend_help(closes)
+        # 兜底: 如果 MRO 找不到, 直接在 self.__class__ 里搜
+        for klass in self.__class__.__mro__:
+            if '_show_regime_legend_help' in klass.__dict__:
+                return klass._show_regime_legend_help(self, closes)
+        import tkinter.messagebox as _mb
+        _mb.showinfo("提示", "图例说明方法加载失败, 请重启 App")
 
 
 __all__ = ["StockDetailMixin"]

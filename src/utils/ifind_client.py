@@ -149,3 +149,102 @@ def parse_tables(raw_data: dict):
 INDEX_SYMBOLS_DEFAULT = "000001.SH,399001.SZ,399006.SZ,000688.SH"
 ETF_SYMBOLS_DEFAULT = "510300.SH,159915.SZ,510500.SH,588000.SH,513100.SH,513520.SH"
 TRENDING_SIZE_DEFAULT = 10
+
+
+# ── 🔥 新增高级功能封装 ──
+
+def search_securities(query: str) -> dict:
+    """智能选股 / 股票搜索 (自然语言条件)
+    
+    示例:
+      - "市值超500亿的白酒行业股票"
+      - "市盈率低于20倍的新能源股票"  
+      - "近1月涨幅超30%的半导体龙头"
+    """
+    return mcp_call("stock", "get_security_indicators", {
+        "market": "A股",
+        "query": query,
+    })
+
+
+def get_stock_summary(query: str) -> dict:
+    """股票摘要 (财务/估值/股东/行业地位 综合概览)
+    
+    示例:
+      - "贵州茅台财务状况、估值、股东"
+      - "比亚迪基本面分析"
+    """
+    return mcp_call("stock", "get_stock_summary", {"query": query})
+
+
+def fetch_edb(query: str) -> dict:
+    """宏观 / 行业经济指标数据查询 (时间序列)
+    
+    示例:
+      - "2024年GDP增速、CPI年度值、社融存量同比"
+      - "PMI制造业近12个月"
+      - "LPR1年期和5年期最新值"
+      - "进出口贸易额月度数据"
+    """
+    return mcp_call("edb", "fetch_edb", {"query": query})
+
+
+def search_edb(query: str) -> dict:
+    """宏观指标搜索 (先搜指标名, 再 fetch_edb)
+    
+    示例:
+      - "PMI制造业采购经理指数"
+      - "GDP实际增速季度值"
+    """
+    return mcp_call("edb", "search_edb", {"query": query})
+
+
+def search_notice(query: str, size: int = 10) -> dict:
+    """上市公司公告搜索
+    
+    示例:
+      - "今日A股公司重要公告"
+      - "贵州茅台最近公告"
+    """
+    from datetime import datetime, timedelta
+    end = datetime.now().strftime("%Y-%m-%d")
+    start = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+    return mcp_call("news", "search_notice", {
+        "query": query,
+        "time_start": start, "time_end": end, "size": size,
+    })
+
+
+def parse_markdown_table(md_text: str):
+    """
+    把 iFinD markdown table 转成 (headers: list, rows: list[list])
+    失败返回 ([], [])
+    """
+    if not md_text or not isinstance(md_text, str):
+        return ([], [])
+    lines = [l.strip() for l in md_text.splitlines() if l.strip()]
+    # 找表头行 (含 | 且不以 --- 开头)
+    headers = None
+    for i, line in enumerate(lines):
+        if "|" in line:
+            cells = [c.strip() for c in line.split("|") if c.strip()]
+            if cells and not all(set(c) <= {'-', ':', ' '} for c in cells):
+                if i + 1 < len(lines):
+                    nxt = lines[i+1]
+                    if "|" in nxt and all(set(c) <= {'-', ':', ' '} for c in [cc.strip() for cc in nxt.split("|") if cc.strip()]):
+                        headers = cells
+                        data_lines = lines[i+2:]
+                        break
+                if headers is None:
+                    headers = cells
+                    data_lines = lines[i+1:]
+                    break
+    if not headers:
+        return ([], [])
+    rows = []
+    for line in data_lines:
+        if "|" not in line: continue
+        cells = [c.strip() for c in line.split("|") if c.strip()]
+        if cells and not all(set(c) <= {'-', ':', ' '} for c in cells):
+            rows.append(cells)
+    return (headers, rows)

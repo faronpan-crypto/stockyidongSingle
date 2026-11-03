@@ -432,8 +432,15 @@ from ui.tab_rest import RestMixin
 from ui.tab_toplevel import ToplevelMixin
 from ui.tab_web import WebMixin
 from ui.tab_ifind import IfindMixin
+from ui.tab_ec import EventCalendarMixin
+from ui.tab_zhihu import ZhihuMixin
+from ui.tab_yingmi import YingmiMixin
+from ui.tab_choice import ChoiceMixin
+from ui.tab_tushare import TushareMixin
+from ui.tab_full_link import FullLinkMixin
+from ui.tab_akshare import AKShareMixin
 
-class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ConfigMixin, CrawlerMixin, ChouMaMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, ExportMixin, FileIoMixin, FinanceMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IfindMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, WarningMixin, WebMixin, WencaiMixin, WordcloudMixin, BetaAlphaMixin):
+class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ChoiceMixin, ChouMaMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, EventCalendarMixin, ExportMixin, FileIoMixin, FinanceMixin, FullLinkMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IfindMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, TushareMixin, WarningMixin, WebMixin, WencaiMixin, YingmiMixin, ZhihuMixin, WordcloudMixin, BetaAlphaMixin):
 
     def __init__(self, root):
         self.root = root
@@ -727,6 +734,26 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
                 ],
             )
             _style.configure("TLabel", foreground="#111827")
+            # ── 🆕 Treeview 全局加大加粗 + 板块颜色 tag ──
+            # macOS clam 主题下必须显式给 font=(), 否则用系统默认 11 号超小
+            # self.font_size 在 L6101 已初始化为 16
+            self.font_family = _ui_font[0]
+            self.font_size = getattr(self, 'font_size', 16)   # ← 默认 16 bold
+            self.row_height = 34
+            self.tv_bg = "#ffffff"   # Treeview 背景色 (可调节)
+            self.tv_bg_alt = "#f8fafc"  # 隔行背景色
+            _tv_font = (self.font_family, self.font_size, "bold")
+            _style.configure("Treeview",
+                font=_tv_font, rowheight=self.row_height,
+                background=self.tv_bg, fieldbackground=self.tv_bg)
+            _style.configure("Treeview.Heading",
+                font=(self.font_family, self.font_size, "bold"))
+            _style.configure("Treeview.Selection",
+                background="#e3f2fd", foreground="#111827")
+            try:
+                self.root.option_add("*Treeview*RowHeight", self.row_height)
+            except Exception:
+                pass
             # tk.Button 也统一黑色文字(部分窗口用了 tk.Button 而非 ttk.Button)
             self.root.option_add("*Button.Foreground", "#000000")
         except Exception:
@@ -4734,6 +4761,13 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             ("🎯机会", 7, self._show_jianlou),
             ("🎯高抛低吸", 8, self._show_high_low_swing),
             ("🔷同花顺", 9, self._show_ths_ifind_dialog),
+            ("📅财经日历", 9, self._show_event_calendar_dialog),
+            ("💬知乎", 7, self._show_zhihu_dialog),
+            ("💎盈米", 7, self._show_yingmi_dialog),
+            ("🎯Choice", 8, self._show_choice_dialog),
+            ("📊TuShare", 9, self._show_tushare_dialog),
+            ("🔗全链路", 9, self._show_full_link_dialog),
+            ("📈AKShare", 9, self._show_akshare_dialog),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW2):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
@@ -6048,6 +6082,47 @@ class StockKeywordAnalyzerGUI(AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersM
             self.update_sentiment_indicator("中性")
         except Exception:
             pass
+
+        # ── 🆕 🎨 UI 设置面板 (字号 + 背景色) ──
+        ui_container = ttk.LabelFrame(bottom_frame, text="🎨 UI设置", padding=6)
+        ui_container.pack(side=tk.LEFT, fill=tk.Y, padx=(6, 0))
+        # 字号调节
+        fs_row = ttk.Frame(ui_container); fs_row.pack(fill=tk.X)
+        ttk.Label(fs_row, text="字号", font=("",10)).pack(side=tk.LEFT, padx=(0, 4))
+        self._ui_fs_var = tk.IntVar(value=self.font_size)
+        def _fs_down():
+            n = max(10, self._ui_fs_var.get() - 1); self._ui_fs_var.set(n); self._apply_ui_font(size=n)
+        def _fs_up():
+            n = min(24, self._ui_fs_var.get() + 1); self._ui_fs_var.set(n); self._apply_ui_font(size=n)
+        ttk.Button(fs_row, text="A-", width=3, command=_fs_down).pack(side=tk.LEFT, padx=1)
+        ttk.Label(fs_row, textvariable=self._ui_fs_var, font=("",11,"bold"), width=3, anchor="center").pack(side=tk.LEFT)
+        ttk.Button(fs_row, text="A+", width=3, command=_fs_up).pack(side=tk.LEFT, padx=1)
+        # 背景色选择
+        bg_row = ttk.Frame(ui_container); bg_row.pack(fill=tk.X, pady=(4,0))
+        ttk.Label(bg_row, text="背景", font=("",10)).pack(side=tk.LEFT, padx=(0, 4))
+        _BG_PRESETS = [
+            ("白", "#ffffff"),
+            ("米", "#fdfbf7"),
+            ("米2", "#f8f5ec"),
+            ("淡蓝", "#f0f7ff"),
+            ("淡绿", "#f0fff4"),
+            ("淡粉", "#fff5f5"),
+        ]
+        self._ui_bg_var = tk.StringVar(value=self.tv_bg)
+        for _n, _c in _BG_PRESETS:
+            def _pick_bg(c=_c):
+                self._ui_bg_var.set(c); self._apply_ui_font(bg=c)
+            _btn = tk.Button(bg_row, text=_n, bg=_c, width=3, height=1,
+                            bd=1, relief=tk.RAISED, command=_pick_bg,
+                            font=("",8))
+            _btn.pack(side=tk.LEFT, padx=1)
+        # 重置按钮
+        reset_row = ttk.Frame(ui_container); reset_row.pack(fill=tk.X, pady=(4,0))
+        def _ui_reset():
+            self._ui_fs_var.set(16); self._ui_bg_var.set("#ffffff")
+            self._apply_ui_font(size=16, bg="#ffffff")
+        ttk.Button(reset_row, text="重置", command=_ui_reset).pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Label(reset_row, text=f"字体:{self.font_family}", font=("",8), foreground="#888").pack(side=tk.LEFT)
         # AI配置区域(右侧)
         ai_config_container = ttk.LabelFrame(bottom_frame, text="AI大模型配置", padding=10)
         ai_config_container.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))

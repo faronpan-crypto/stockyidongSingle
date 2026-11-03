@@ -1647,6 +1647,9 @@ class CrashRallyCalendarApp:
 
     def _render_calendar_b(self):
         try:
+            # ✅ 防御: 被提前调用时, _view_month_b 可能还没初始化
+            if not hasattr(self, "_view_month_b"):
+                self._view_month_b = _dt2.now().replace(day=1)
             for w in self.cal_frame_b.winfo_children():
                 w.destroy()
             ym = self._view_month_b
@@ -1714,10 +1717,12 @@ class CrashRallyCalendarApp:
 
                 # ---- 情绪周期行 (最顶部) ----
                 if emo:
-                    stage = emo.get("stage", "?")
-                    score = emo.get("emo_score", 0)
+                    stage = emo.get("stage") or "?"
+                    score = emo.get("emo_score")
+                    # ✅ 关键: emo_score 可能存在但值为 None
+                    score_val = score if score is not None else 0
                     emoji, emo_fg = EMO_STAGE_EMOJI.get(stage, ("❓", "#9E9E9E"))
-                    emo_text = f"{emoji}{stage}{score:.0f}"
+                    emo_text = f"{emoji}{stage}{score_val:.0f}"
                 else:
                     emo_text = "⏳待补"
                     emo_fg = "#616161"
@@ -1855,8 +1860,9 @@ class CrashRallyCalendarApp:
 
             # ============ 情绪周期区块 ============
             if emo:
-                stage = emo.get("stage", "?")
-                score = emo.get("emo_score", 0)
+                stage = emo.get("stage") or "?"
+                score = emo.get("emo_score")
+                score = score if score is not None else 0
                 emoji, _ = EMO_STAGE_EMOJI.get(stage, ("❓", "#9E9E9E"))
                 up_count = emo.get("up")
                 dn_count = emo.get("dn")

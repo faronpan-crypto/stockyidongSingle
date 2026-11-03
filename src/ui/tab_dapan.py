@@ -8373,6 +8373,8 @@ class DapanMixin:
             )
             ttk.Button(top_bar, text="刷新", command=self._refresh_sentiment_zone_tabs_async, width=8).pack(side=tk.RIGHT)
             ttk.Button(top_bar, text="历史记录", command=self._show_sentiment_history_dialog, width=8).pack(side=tk.RIGHT, padx=(0, 4))
+            # 🆕 🌐 全市场多空扫描按钮
+            ttk.Button(top_bar, text="🌐 多空扫描", command=self._open_regime_scanner, width=10).pack(side=tk.RIGHT, padx=(0, 4))
             self.sentiment_zone_status_var = tk.StringVar(value="准备就绪")
             ttk.Label(top_bar, textvariable=self.sentiment_zone_status_var, foreground="#666666").pack(side=tk.RIGHT, padx=(0, 8))
             notebook = ttk.Notebook(parent)
@@ -8957,7 +8959,10 @@ class DapanMixin:
 
 
     def _get_market_up_down_counts(self):
-        """市场上涨/下跌家数:优先 AKShare 全A快照,失败回退 Tushare。"""
+        """市场上涨/下跌家数:优先 AKShare 全A快照,失败→新浪实时分页→Tushare日线历史。"""
+        import urllib.request as _ur
+        import ssl as _ssl
+        # ── 路径1: AKShare 全A快照 (最快, 5秒内返回) ──
         try:
             if not AKSHARE_AVAILABLE:
                 raise RuntimeError("AKShare unavailable")
@@ -8968,8 +8973,7 @@ class DapanMixin:
             if pct_col is None:
                 for c in df.columns:
                     if "涨跌幅" in str(c):
-                        pct_col = c
-                        break
+                        pct_col = c; break
             if pct_col is None:
                 raise RuntimeError("AKShare pct column not found")
             p = pd.to_numeric(df[pct_col], errors="coerce")
@@ -8977,37 +8981,72 @@ class DapanMixin:
             down = int((p < 0).sum())
             flat = int((p == 0).sum())
             total = int(p.notna().sum())
+            print(f"[涨跌家数] AKShare: up={up} down={down} flat={flat}", flush=True)
             return {"up": up, "down": down, "flat": flat, "total": total, "source": "AKShare"}
-        except Exception:
-            # 回退 Tushare:按最近可交易日全市场日线统计涨跌家数
-            try:
-                if not TS_AVAILABLE or not (getattr(self, "ts_token", None) or TS_DEFAULT_TOKEN):
-                    return None
-                self._ensure_tushare_client(self.ts_token or TS_DEFAULT_TOKEN)
-                for back in range(8):
-                    td = (datetime.now() - timedelta(days=back)).strftime("%Y%m%d")
-                    try:
-                        df = self.ts_client.daily(trade_date=td)
-                    except Exception:
-                        continue
-                    if df is None or df.empty:
-                        continue
-                    if "pct_chg" in df.columns:
-                        p = pd.to_numeric(df["pct_chg"], errors="coerce")
-                    elif "close" in df.columns and "pre_close" in df.columns:
-                        c = pd.to_numeric(df["close"], errors="coerce")
-                        pc = pd.to_numeric(df["pre_close"], errors="coerce")
-                        p = (c / pc - 1.0) * 100.0
-                    else:
-                        continue
-                    up = int((p > 0).sum())
-                    down = int((p < 0).sum())
-                    flat = int((p == 0).sum())
-                    total = int(p.notna().sum())
-                    return {"up": up, "down": down, "flat": flat, "total": total, "source": f"Tushare({td})"}
-            except Exception:
-                pass
-            return None
+        except Exception as _e1:
+            print(f"[涨跌家数] AKShare 失败: {_e1}", flush=True)
+
+        # ── 路径2: 🆕 新浪实时分页 (盘中最准, 不依赖 AKShare) ──
+        try:
+            _ctx = _ssl.create_default_context()
+            _ctx.check_hostname = False
+            _ctx.verify_mode = _ssl.CERT_NONE
+            _hdr = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"}
+            up = down = flat = 0
+            for _pg in range(1, 60):
+                _url = (f"https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+                        f"Market_Center.getHQNodeData?page={_pg}&num=100&sort=symbol&asc=1&node=hs_a")
+                _req = _ur.Request(_url, headers=_hdr)
+                _resp = _ur.urlopen(_req, timeout=8, context=_ctx)
+                _data = json.loads(_resp.read().decode("utf-8"))
+                if not _data: break
+                for _r in _data:
+                    _pct = float(_r.get("changepercent", 0) or 0)
+                    if _pct > 0.01: up += 1
+                    elif _pct < -0.01: down += 1
+                    else: flat += 1
+                if len(_data) < 100: break
+                time.sleep(0.1)
+            total = up + down + flat
+            if total >= 3000:   # 至少 3000 只才可信
+                print(f"[涨跌家数] 新浪: up={up} down={down} flat={flat} total={total}", flush=True)
+                return {"up": up, "down": down, "flat": flat, "total": total, "source": "新浪实时"}
+        except Exception as _e2:
+            print(f"[涨跌家数] 新浪 失败: {_e2}", flush=True)
+
+        # ── 路径3: Tushare 日线历史 (收盘后数据, 标注日期) ──
+        try:
+            if not TS_AVAILABLE or not (getattr(self, "ts_token", None) or TS_DEFAULT_TOKEN):
+                return None
+            self._ensure_tushare_client(self.ts_token or TS_DEFAULT_TOKEN)
+            for back in range(8):
+                td = (datetime.now() - timedelta(days=back)).strftime("%Y%m%d")
+                try:
+                    df = self.ts_client.daily(trade_date=td)
+                except Exception:
+                    continue
+                if df is None or df.empty:
+                    continue
+                if "pct_chg" in df.columns:
+                    p = pd.to_numeric(df["pct_chg"], errors="coerce")
+                elif "close" in df.columns and "pre_close" in df.columns:
+                    c = pd.to_numeric(df["close"], errors="coerce")
+                    pc = pd.to_numeric(df["pre_close"], errors="coerce")
+                    p = (c / pc - 1.0) * 100.0
+                else:
+                    continue
+                up = int((p > 0).sum())
+                down = int((p < 0).sum())
+                flat = int((p == 0).sum())
+                total = int(p.notna().sum())
+                # ⚠️ 标注是历史数据!
+                print(f"[涨跌家数] Tushare({td}): up={up} down={down} flat={flat} ⚠️历史", flush=True)
+                return {"up": up, "down": down, "flat": flat, "total": total,
+                        "source": f"Tushare({td})⚠️历史"}
+        except Exception as _e3:
+            print(f"[涨跌家数] Tushare 也失败: {_e3}", flush=True)
+
+        return None
 
 
     def _get_ths_sentiment_change_today_yday(self):
@@ -9313,20 +9352,64 @@ class DapanMixin:
             traceback.print_exc()
 
 
+    def _fetch_index_pct_sina(self, sina_code):
+        """🆕 新浪hq直连指数涨跌幅 — 最准, 不依赖问财/AKShare。
+        sina_code: 如 'sh000300' (沪深300), 'sh000905' (中证500), 'sh000688' (科创50)
+        返回 dict: {value: float, source: str} 或 {value: None, source: str}"""
+        import urllib.request as _ur
+        import ssl as _ssl
+        try:
+            _ctx = _ssl.create_default_context()
+            _ctx.check_hostname = False; _ctx.verify_mode = _ssl.CERT_NONE
+            _hdr = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"}
+            _url = f"https://hq.sinajs.cn/list={sina_code}"
+            _req = _ur.Request(_url, headers=_hdr)
+            _resp = _ur.urlopen(_req, timeout=6, context=_ctx)
+            _raw = _resp.read().decode("gbk", errors="replace")
+            _parts = _raw.split('"')[1].split(",")
+            if len(_parts) < 4:
+                return {"value": None, "source": f"新浪({sina_code})格式错"}
+            _pre_close = float(_parts[2]); _last = float(_parts[3])
+            if _pre_close <= 0:
+                return {"value": None, "source": f"新浪({sina_code})昨收0"}
+            _pct = (_last / _pre_close - 1.0) * 100.0
+            return {"value": round(_pct, 2), "source": f"新浪hq:{sina_code}"}
+        except Exception as _e:
+            print(f"[指数] 新浪hq {sina_code} 失败: {_e}", flush=True)
+            return {"value": None, "source": f"新浪({sina_code})挂"}
+
     def _collect_sentiment_zone_snapshot(self):
-        """采集情绪区间页需要的全部指标(问财为主,Tushare 补缺)。"""
+        """采集情绪区间页指标: ⚠️ 全部用直连数据源, 问财只补缺。"""
+        import urllib.request as _ur
         snapshot = {"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         m1_pair = self._get_ths_sentiment_change_today_yday()
-        # 涨跌家数使用全市场快照统计(更接近用户期望的5000+总数)
+        # ── 涨跌家数: AKShare → 新浪分页 → Tushare历史(标注) ──
         m2_market = self._get_market_up_down_counts()
+
+        # ── 🆕 指数涨跌幅: 直接新浪hq直连 (最准, 不用问财!) ──
+        m5_hs300 = self._fetch_index_pct_sina("sh000300")   # 沪深300
+        m5_zz500 = self._fetch_index_pct_sina("sh000905")   # 中证500
+        m5_kc30  = self._fetch_index_pct_sina("sh000688")   # 科创50
+
+        # ── 问财: 只在新浪拿不到时补缺 (m3/m4 是技术指标, 问财才有) ──
         m3 = self._fetch_iwencai_metric("股价上穿60分钟周期 60日均线 且放量")
         m4 = self._fetch_iwencai_metric("15分钟 5日线 10日线 20日线 60日线 向上发散")
-        m5_hs300 = self._fetch_iwencai_metric("沪深300 涨跌幅", value_hints=["涨跌幅"])
-        m5_zz500 = self._fetch_iwencai_metric("中证500 涨跌幅", value_hints=["涨跌幅"])
-        m5_kc30 = self._fetch_iwencai_metric("科创30 涨跌幅", value_hints=["涨跌幅"])
+
+        # ── 计算指数平均 (过滤 None) ──
         vals = [m5_hs300.get("value"), m5_zz500.get("value"), m5_kc30.get("value")]
         vals = [v for v in vals if isinstance(v, (int, float))]
         avg5 = float(sum(vals) / len(vals)) if vals else None
+
+        # ── 数据有效性标记: 涨跌家数 + 指数都有才算有效 ──
+        has_valid_updown = (m2_market and m2_market.get("total", 0) >= 3000)
+        has_valid_index = (avg5 is not None and avg5 == avg5)  # avg5 非 None 非 NaN
+        snapshot["data_valid"] = has_valid_updown and has_valid_index
+        snapshot["data_source"] = (
+            (m2_market.get("source", "?") if m2_market else "无涨跌家数")
+            + " + "
+            + (m5_hs300.get("source", "?") if m5_hs300.get("value") is not None else "无指数")
+        )
+
         snapshot["metrics"] = {
             "m1_today": {"value": m1_pair.get("today")},
             "m1_yday": {"value": m1_pair.get("yday")},
@@ -9339,6 +9422,7 @@ class DapanMixin:
             "m5_avg": avg5,
         }
         self._enhance_sentiment_snapshot_with_tushare(snapshot)
+        print(f"[情绪快照] valid={snapshot['data_valid']}, source={snapshot['data_source']}", flush=True)
         return snapshot
 
 
@@ -9353,6 +9437,20 @@ class DapanMixin:
             w.config(state=tk.NORMAL)
             w.delete("1.0", tk.END)
             w.insert(tk.END, f"更新时间: {t}\n\n")
+            # ── 🆕 数据无效 → 只显示警告, 不渲染 (避免误导用户) ──
+            if not data.get("data_valid", True):
+                src = data.get("data_source", "未知数据源")
+                w.insert(tk.END, "⚠️  未拿到有效收盘数据! ⚠️\n", "warn_bold")
+                w.insert(tk.END, f"  数据源: {src}\n")
+                w.insert(tk.END, "  东方财富/问财被墙, 新浪也拿不到 → 请稍后再试\n")
+                w.insert(tk.END, "  (Tushare 日线是历史数据, 盘中不可用)\n\n")
+                try:
+                    w.tag_config("warn_bold", foreground="#D32F2F",
+                                 font=("PingFang SC", 14, "bold"))
+                except Exception:
+                    pass
+                w.config(state=tk.DISABLED)
+                return
             def _fmt_pct(v):
                 return f"{v:+.2f}%" if isinstance(v, (int, float)) else "未获取"
             def _fmt_num(v):
@@ -15126,7 +15224,8 @@ class DapanMixin:
             # ── Step 0: 爬淘韭文本, 提代码 + 股票名匹配 ──
             freq_counter = Counter()  # code → 提及次数
             source_map = {}           # code → 来源标签 ("淘韭爬取"/"预设"/"换手率"/"成交额")
-            article_hits = defaultdict(list)  # 🆕 code → [文章标题, ...]
+            article_hits = defaultdict(list)  # code → [{title, summary, time}]
+            _all_crawled = []         # 🆕 全部已爬文章索引 (给换手率反向搜索用)
             text_count = 0
 
             def _prefix(c):
@@ -15231,21 +15330,35 @@ class DapanMixin:
                             if divs: content_div = max(divs, key=lambda d: len(d.get_text(strip=True)))
                         text = (content_div.get_text(strip=True) if content_div else art['title'])[:4000]
                         full_text = art['title'] + " " + text
+                        # 🆕 从 HTML 提时间
+                        _time_str = ""
+                        try:
+                            _time_el = soup.find(class_=lambda c: c and any(k in str(c).lower() for k in ['time', 'date', 'publish', 'create']))
+                            if _time_el: _time_str = _time_el.get_text(strip=True)[:20]
+                        except: pass
+                        if not _time_str:
+                            import re as _re2
+                            _m = _re2.search(r'20[2-9]\d[-/年]\d{1,2}[-/月]\d{1,2}', r.text)
+                            if _m: _time_str = _m.group().replace('年','-').replace('月','-').replace('/','-')
+                        # 文章 dict (统一格式)
+                        _art_dict = {"title": art['title'][:80], "summary": text[:100], "time": _time_str}
                         # 正则提 6 位代码
                         for c in re.findall(r'\b([036]\d{5})\b', full_text):
                             p = _prefix(c)
                             if p:
                                 freq_counter[p] += 1
                                 source_map[p] = f"{scr}详情"
-                                if art['title'] and art['title'] not in article_hits[p]:
-                                    article_hits[p].append(art['title'][:60])
+                                if art['title'] and not any(a['title'] == art['title'][:80] for a in article_hits[p] if isinstance(a, dict)):
+                                    article_hits[p].append(_art_dict)
                         # 股票名匹配
                         for name, code in sorted(_NAME2CODE.items(), key=lambda x: -len(x[0])):
                             if name in full_text:
                                 freq_counter[code] += 1
                                 source_map[code] = f"{scr}详情"
-                                if art['title'] and art['title'] not in article_hits[code]:
-                                    article_hits[code].append(art['title'][:60])
+                                if art['title'] and not any(a['title'] == art['title'][:80] for a in article_hits[code] if isinstance(a, dict)):
+                                    article_hits[code].append(_art_dict)
+                        # 🆕 累计"已爬文章"索引 (给换手率反向搜索用)
+                        _all_crawled.append({"text": full_text, "title": art['title'][:80], "summary": text[:100], "time": _time_str})
                         text_count += 1
                         _time.sleep(0.15)
                     except: pass
@@ -15363,11 +15476,24 @@ class DapanMixin:
                 else:
                     freq = max(1, min(99, int(score / 0.5))) if score > 0 else 1
                     origin = src
+                # 🆕 articles: 优先 article_hits, 否则从 _all_crawled 反向搜
+                arts = list(article_hits.get(code, []))
+                if not arts and code not in freq_counter and _all_crawled:
+                    # 反向搜: 用 6 位代码 + 股票名
+                    _code6 = code[-6:]
+                    _name = info.get("name", "")
+                    for _ca in _all_crawled:
+                        _txt = _ca.get("text", "")
+                        if _code6 in _txt or (_name and len(_name) >= 2 and _name in _txt):
+                            _ad = {"title": _ca["title"], "summary": _ca.get("summary",""), "time": _ca.get("time","")}
+                            if not any(a.get("title") == _ad["title"] for a in arts if isinstance(a, dict)):
+                                arts.append(_ad)
+                        if len(arts) >= 3: break
                 rows.append({
                     "code": code, "name": info["name"],
                     "pct": info["pct"], "freq": freq,
                     "origin": origin,  # 来源标签 "韭研SSR"/"淘股吧详情"/"换手率"/"预设"
-                    "articles": list(article_hits.get(code, []))[:3],  # 🆕 匹配的文章标题 Top3
+                    "articles": arts[:3],  # [{title, summary, time}]
                 })
 
             # 爬取代码置顶 (按提及次数排), 热股池按 score 排
@@ -15386,7 +15512,12 @@ class DapanMixin:
                         if isinstance(v, (str, int, float, bool)) or v is None:
                             sr[k] = v
                         elif isinstance(v, list):
-                            sr[k] = [x for x in v if isinstance(x, (str, int, float, bool))]
+                            # 🆕 articles 是 dict 列表
+                            sr[k] = []
+                            for x in v:
+                                if isinstance(x, (str, int, float, bool)): sr[k].append(x)
+                                elif isinstance(x, dict):
+                                    sr[k].append({kk: vv for kk, vv in x.items() if isinstance(vv, (str, int, float, bool)) or vv is None})
                     _safe_rows.append(sr)
                 _os.makedirs(_os.path.dirname(_cache_path), exist_ok=True)
                 with open(_cache_path, "w", encoding="utf-8") as f:
@@ -15620,10 +15751,15 @@ class DapanMixin:
                     tk.Label(row, text="  ", bg=row_bg, width=5).pack(side=tk.LEFT, padx=2)
                 # 第5列: 板块逻辑 + 匹配状态
                 _stock_arts = item.get("articles", [])
+                # 🆕 兼容 str[] 和 dict[] 两种格式
+                def _art_title(a):
+                    if isinstance(a, dict): return a.get("title", "") or a.get("标题", "")
+                    return str(a) if a else ""
+                _first_art = _art_title(_stock_arts[0]) if _stock_arts else ""
                 _blk_logic = BLOCK_LOGIC.get(blk_name, "")[:32]
                 if _stock_arts:
                     # 有爬取文章 → 📰文章标题 | 板块逻辑
-                    _first = _stock_arts[0][:28]
+                    _first = _first_art[:28]
                     _show = f"📰 {_first}  |  {_blk_logic}"
                     tk.Label(row, text=_show, bg=row_bg, fg="#A5D6A7",
                              font=("", 9), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
@@ -64099,5 +64235,1943 @@ class DapanMixin:
             import tkinter.messagebox as _mb
             _mb.showinfo("提示", "量化架构 spec 文件未找到\n可在 ~/.qclaw/ 目录下搜索 *.md")
         except Exception: pass
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🌐 全市场多空扫描器 — 遍历所有持仓+ETF, 输出背景红/绿+板块分布
+    # ═══════════════════════════════════════════════════════════════════════════════
+
+    def _compute_regime_on_closes(self, closes):
+        """复用 tab_stock_detail.py 的 _compute_regime 逻辑, 但只接收 closes
+        返回 (regime_array, 最后一根的位置数, 最近连续根数)
+        regime[i]: +1=看多红, -1=看空绿, 0=中性"""
+        import numpy as np, pandas as pd
+        from datetime import datetime, timedelta
+        closes = np.array(closes, dtype=float)
+        n = len(closes)
+        if n < 30:
+            return np.zeros(n), 0, 0
+        def _ma(data, w):
+            return pd.Series(data).rolling(w).mean().values
+        def _macd(data):
+            s = pd.Series(data, dtype=float)
+            ema_f = s.ewm(span=12, adjust=False).mean()
+            ema_s = s.ewm(span=26, adjust=False).mean()
+            dif = ema_f - ema_s
+            dea = dif.ewm(span=9, adjust=False).mean()
+            return dif.values, dea.values, (dif - dea).values * 2
+
+        ma20 = _ma(closes, 20); ma60 = _ma(closes, 60)
+        dif, dea, _h = _macd(closes)
+        s = pd.Series(closes)
+        delta = s.diff(); gain = delta.clip(lower=0); loss = -delta.clip(upper=0)
+        rs = gain.rolling(14).mean() / loss.rolling(14).mean()
+        rsi = 100 - 100 / (1 + rs)
+        scores = np.zeros(n, dtype=float)
+        for i in range(n):
+            bull = bear = total = 0
+            if not np.isnan(ma20[i]):
+                total += 2; bull += 2 if closes[i] > ma20[i] else 0; bear += 2 if closes[i] <= ma20[i] else 0
+            if not np.isnan(ma20[i]) and not np.isnan(ma60[i]):
+                total += 2; bull += 2 if ma20[i] > ma60[i] else 0; bear += 2 if ma20[i] <= ma60[i] else 0
+            if not np.isnan(dif[i]) and not np.isnan(dea[i]):
+                total += 2; bull += 2 if dif[i] > dea[i] else 0; bear += 2 if dif[i] <= dea[i] else 0
+            if not np.isnan(rsi.iloc[i]):
+                total += 2
+                if rsi.iloc[i] > 55: bull += 2
+                elif rsi.iloc[i] < 45: bear += 2
+            if total > 0: scores[i] = (bull - bear) / total
+        smooth = pd.Series(scores).rolling(5, min_periods=1).mean().values
+        regime = np.zeros(n, dtype=int)
+        regime[smooth > 0.15] = 1
+        regime[smooth < -0.15] = -1
+        # 最后一根的 regime
+        last = int(regime[-1])
+        # 从最后往前数连续同色根数
+        streak = 0
+        for i in range(n-1, -1, -1):
+            if regime[i] == last: streak += 1
+            else: break
+        return regime, last, streak
+
+    def _scan_one_regime(self, code, name):
+        """扫描单只股票/ETF, 返回 {code, name, regime, score, streak, pct_chg, sector}"""
+        import tushare as ts, numpy as np, pandas as pd
+        from utils.config import TS_DEFAULT_TOKEN
+        try:
+            if not getattr(self, "_ts_pro_init", False):
+                ts.set_token(TS_DEFAULT_TOKEN)
+                self._ts_pro = ts.pro_api()
+                self._ts_pro_init = True
+            # 拉日线
+            if code.endswith(".SH") or code.endswith(".SZ"):
+                if code.split(".")[0].startswith(("51","52","56","58","15","16","18","19")):
+                    df = self._ts_pro.fund_daily(ts_code=code,
+                        start_date=(pd.Timestamp.now()-pd.Timedelta(days=200)).strftime("%Y%m%d"),
+                        end_date=pd.Timestamp.now().strftime("%Y%m%d"))
+                else:
+                    df = self._ts_pro.daily(ts_code=code,
+                        start_date=(pd.Timestamp.now()-pd.Timedelta(days=200)).strftime("%Y%m%d"),
+                        end_date=pd.Timestamp.now().strftime("%Y%m%d"))
+            else:
+                return None
+            if df is None or len(df) < 40:
+                return None
+            df = df.sort_values("trade_date").reset_index(drop=True)
+            closes = df["close"].astype(float).values
+            pct_arr = df["pct_chg"].astype(float).values if "pct_chg" in df.columns else np.zeros(len(closes))
+            regime, last_color, streak = self._compute_regime_on_closes(closes)
+            # 最近涨跌幅
+            pct_5 = float(pct_arr[-5:].sum()) if len(pct_arr) >= 5 else float(pct_arr[-1])
+            pct_20 = float(pct_arr[-20:].sum()) if len(pct_arr) >= 20 else float(pct_arr[-1])
+            score = float(regime[-1]) if len(regime) else 0
+            # 板块推断
+            sector = self._infer_sector(code, name)
+            return {
+                "code": code, "name": name, "sector": sector,
+                "regime": last_color,   # +1 红 / -1 绿 / 0 中性
+                "score": score,          # 平滑分数 -1~+1
+                "streak": streak,        # 连续同色根数
+                "pct_5d": round(pct_5, 2),
+                "pct_20d": round(pct_20, 2),
+                "price": float(closes[-1]),
+            }
+        except Exception as e:
+            print(f"[多空扫描] {code} {name} 失败: {e}", flush=True)
+            return None
+
+    def _infer_sector(self, code, name):
+        """粗分板块: 按 name/ETF code 关键词归类"""
+        name_upper = str(name).upper() + " " + str(code).upper()
+        if any(k in name_upper for k in ["证券","券商","512880","512000"]): return "金融"
+        if any(k in name_upper for k in ["银行","红利","512010","510880"]): return "金融"
+        if any(k in name_upper for k in ["科创","588000","688"]): return "硬科技"
+        if any(k in name_upper for k in ["半导体","芯片","512480"]): return "半导体"
+        if any(k in name_upper for k in ["新能源","光伏","515790","159875"]): return "新能源"
+        if any(k in name_upper for k in ["消费","白酒","酒","159928","512690"]): return "消费"
+        if any(k in name_upper for k in ["医药","512010"]): return "医药"
+        if any(k in name_upper for k in ["军工","512660"]): return "军工"
+        if any(k in name_upper for k in ["有色","煤炭","512400","515220"]): return "周期"
+        if any(k in name_upper for k in ["恒生","港股","恒生科技","513180"]): return "港股"
+        if any(k in name_upper for k in ["纳指","标普","日经","513100","513500","513520"]): return "海外"
+        if any(k in name_upper for k in ["创业板","159915"]): return "成长"
+        if any(k in name_upper for k in ["沪深300","510300","510050","上证50"]): return "宽基"
+        if any(k in name_upper for k in ["中证500","510500","中证1000","512100"]): return "宽基"
+        return "其他"
+
+    # 扫描池: ETF + 主界面持仓里能拿到的股票
+    REGIME_SCAN_ETF = [
+        ("510300.SH","沪深300"),("510500.SH","中证500"),("159915.SZ","创业板ETF"),
+        ("588000.SH","科创50"),("510050.SH","上证50"),("512100.SH","中证1000"),
+        ("512880.SH","证券ETF"),("512000.SH","银行ETF"),("512010.SH","医药ETF"),
+        ("510880.SH","红利ETF"),("159928.SZ","消费ETF"),("159875.SZ","新能源ETF"),
+        ("512480.SH","半导体ETF"),("512660.SH","军工ETF"),("515790.SH","光伏ETF"),
+        ("512400.SH","有色ETF"),("515220.SH","煤炭ETF"),("512690.SH","酒ETF"),
+        ("513100.SH","纳指ETF"),("513500.SH","标普ETF"),("513520.SH","日经ETF"),
+        ("513180.SH","恒生科技ETF"),
+    ]
+    REGIME_SCAN_STOCKS = [
+        ("600519.SH","贵州茅台"),("601318.SH","中国平安"),("600036.SH","招商银行"),
+        ("000858.SZ","五粮液"),("000333.SZ","美的集团"),("601888.SH","中国中免"),
+        ("300750.SZ","宁德时代"),("002594.SZ","比亚迪"),("601012.SH","隆基绿能"),
+        ("002475.SZ","立讯精密"),("600276.SH","恒瑞医药"),("000568.SZ","泸州老窖"),
+        ("300059.SZ","东方财富"),("600030.SH","中信证券"),("601398.SH","工商银行"),
+        ("688981.SH","中芯国际"),("300782.SZ","卓胜微"),("688012.SH","中微公司"),
+        ("002384.SZ","东山精密"),("300308.SZ","中际旭创"),("600438.SH","通威股份"),
+        ("002555.SZ","三七互娱"),("600900.SH","长江电力"),("601899.SH","紫金矿业"),
+    ]
+
+    def _normalize_code_for_regime(self, code):
+        """把纯代码 '600519' → '600519.SH', '000333' → '000333.SZ'"""
+        c = str(code or "").strip()
+        if not c: return ""
+        if "." in c: return c  # 已有后缀
+        # 纯 6 位
+        if len(c) == 6:
+            if c.startswith("6"): return c + ".SH"
+            if c.startswith(("0","2","3")): return c + ".SZ"
+            if c.startswith(("4","8")): return c + ".BJ"
+            if c.startswith("5"): return c + ".SH"  # ETF
+        return c  # 不识别就原样返回
+
+    # 扫描源常量 (供 UI Checkbutton 勾选)
+    REGIME_SOURCES = ["ETF", "持仓", "龙头股", "资讯股", "淘股吧", "韭研", "选股宝", "全市场"]
+
+    # 🆕 申万一级行业 (31 个, AKShare stock_board_industry_cons_em 可用)
+    REGIME_INDUSTRY_SECTORS = [
+        "农林牧渔","采掘","化工","钢铁","有色金属","电子","家用电器","食品饮料",
+        "纺织服装","轻工制造","医药生物","公用事业","交通运输","房地产","商业贸易",
+        "休闲服务","综合","建筑材料","建筑装饰","电气设备","国防军工","计算机",
+        "传媒","通信","银行","非银金融","汽车","机械设备","煤炭","石油石化","环保",
+    ]
+    # 🆕 热门概念板块 (东财概念, AKShare stock_board_concept_cons_em 可用)
+    REGIME_CONCEPT_SECTORS = [
+        # 科技
+        "半导体","芯片设计","AI算力","CPO","光模块","液冷服务器","PCB","消费电子",
+        "人工智能","信创","国产化","数字经济","大数据","云计算","数据要素","东数西算",
+        "机器人","人形机器人","工业母机","高端机床","自动驾驶","车联网","卫星互联网",
+        # 新能源/能源
+        "新能源车","锂电池","储能","光伏","风电","氢能","燃料电池","核电",
+        "特高压","电网设备","充电桩","动力电池","光伏设备","钙钛矿",
+        # 周期/资源
+        "黄金","稀土","钨","小金属","有色","煤炭","油气","油服","航运","港口",
+        # 医药消费
+        "创新药","医疗器械","中药","CXO","白酒","啤酒","食品加工","家电",
+        # 军工
+        "军工","航空发动机","军机","航天装备","国防信息化",
+        # 地产基建农业
+        "房地产","装修建材","基建","乡村振兴","农业","种业","供销社",
+        # 金融
+        "证券","保险","互联网金融","债转股",
+        # 其他热点
+        "央企改革","国企改革","中特估","一带一路","冬奥会","亚运会",
+    ]
+    # 板块名称 → 类型映射 (扫描时决定调用哪个 AKShare 接口)
+    def _regime_sector_type_map(self):
+        m = {}
+        for s in self.REGIME_INDUSTRY_SECTORS: m[s] = "industry"
+        for s in self.REGIME_CONCEPT_SECTORS: m[s] = "concept"
+        return m
+
+    def _regime_load_ak_sector_lists(self):
+        """🆕 后台一次性拉东财所有行业+概念板块名, 后续做模糊匹配"""
+        if getattr(self, "_regime_ak_sector_loaded", False): return
+        import time as _t
+        now = _t.time()
+        cache = getattr(self, "_regime_sector_cache", None) or {}
+        # 如果缓存已存在列表且 <6h, 直接用
+        if ("__ak_industries" in cache and now - cache.get("__ak_time", 0) < 21600):
+            self._regime_ak_industries = cache["__ak_industries"]
+            self._regime_ak_concepts = cache["__ak_concepts"]
+            self._regime_ak_sector_loaded = True; return
+        try:
+            import akshare as ak
+            ind = set()
+            try:
+                df = ak.stock_board_industry_name_em()
+                if df is not None and len(df) > 0:
+                    # 列名可能是 "板块名称" / "名称" / 行业
+                    for c in df.columns:
+                        if "名称" in str(c) or str(c) in ("industry","板块"):
+                            for v in df[c].dropna(): ind.add(str(v))
+                            break
+                print(f"[多空扫描] ✅ 东财行业板块名 {len(ind)} 个")
+            except Exception as e: print(f"[多空扫描] 行业板块名 fail: {e}")
+            cons = set()
+            try:
+                df = ak.stock_board_concept_name_em()
+                if df is not None and len(df) > 0:
+                    for c in df.columns:
+                        if "名称" in str(c) or str(c) in ("concept","板块"):
+                            for v in df[c].dropna(): cons.add(str(v))
+                            break
+                print(f"[多空扫描] ✅ 东财概念板块名 {len(cons)} 个")
+            except Exception as e: print(f"[多空扫描] 概念板块名 fail: {e}")
+
+            self._regime_ak_industries = ind
+            self._regime_ak_concepts = cons
+            self._regime_ak_sector_loaded = True
+            cache["__ak_industries"] = ind
+            cache["__ak_concepts"] = cons
+            cache["__ak_time"] = now
+            self._regime_sector_cache = cache
+        except Exception as e:
+            print(f"[多空扫描] ❌ AKShare 板块名列表加载失败: {e}")
+            self._regime_ak_industries = set()
+            self._regime_ak_concepts = set()
+            self._regime_ak_sector_loaded = True  # 标记已尝试, 不再重试
+
+    def _regime_resolve_sector_name(self, user_name):
+        """🆕 用户勾的板块名 → 东财实际板块名 (模糊匹配)
+        返回 (实际名, 类型) 或 (None, None) 表示找不到"""
+        self._regime_load_ak_sector_lists()
+        smap = self._regime_sector_type_map()
+        stype = smap.get(user_name, "industry")
+        pool = self._regime_ak_industries if stype == "industry" else self._regime_ak_concepts
+        pool_all = pool | (self._regime_ak_concepts if stype == "industry" else self._regime_ak_industries)
+
+        # 1) 精确匹配
+        if user_name in pool: return user_name, stype
+        if user_name in pool_all:
+            real_type = "industry" if user_name in self._regime_ak_industries else "concept"
+            return user_name, real_type
+
+        # 2) 用户名 ⊂ 东财名 → 找包含它的最短
+        matches = [n for n in pool if user_name in n]
+        if matches:
+            m = min(matches, key=len)
+            print(f"[多空扫描] ✨ 模糊匹配 '{user_name}' → '{m}' ({stype})")
+            return m, stype
+        matches_all = [n for n in pool_all if user_name in n]
+        if matches_all:
+            m = min(matches_all, key=len)
+            t = "industry" if m in self._regime_ak_industries else "concept"
+            print(f"[多空扫描] ✨ 跨类型模糊匹配 '{user_name}' → '{m}' ({t})")
+            return m, t
+
+        # 3) 东财名 ⊂ 用户名 → 找最长包含的
+        matches = [n for n in pool if n in user_name]
+        if matches:
+            m = max(matches, key=len)
+            print(f"[多空扫描] ✨ 反向匹配 '{user_name}' → '{m}' ({stype})")
+            return m, stype
+
+        # 4) 跨类型再试一次
+        matches_all = [n for n in pool_all if n in user_name]
+        if matches_all:
+            m = max(matches_all, key=len)
+            t = "industry" if m in self._regime_ak_industries else "concept"
+            print(f"[多空扫描] ✨ 跨类型反向匹配 '{user_name}' → '{m}' ({t})")
+            return m, t
+
+        print(f"[多空扫描] ⚠️ 用户板块名 '{user_name}' 在东财 {stype} 列表 {len(pool)} 个里找不到, 跳过")
+        return None, None
+
+    def _fetch_regime_sector_stocks(self, sector_name, resolved_name=None, stype=None):
+        """🆕 拉取一个板块的成分股 → set(ts_code)
+        用 AKShare, 结果缓存 1 小时到 self._regime_sector_cache"""
+        import time as _t
+        cache = getattr(self, "_regime_sector_cache", None)
+        if cache is None:
+            cache = {}; self._regime_sector_cache = cache
+        now = _t.time()
+
+        # 先解析板块名 (如果没给 resolved_name)
+        if resolved_name is None:
+            resolved_name, stype = self._regime_resolve_sector_name(sector_name)
+            if resolved_name is None: return set()
+
+        cache_key = f"{resolved_name}|{stype}"
+        if cache_key in cache and now - cache[cache_key]["t"] < 3600:
+            return cache[cache_key]["codes"]
+
+        codes = set()
+        try:
+            import akshare as ak
+            if stype == "industry":
+                df = ak.stock_board_industry_cons_em(symbol=resolved_name)
+            else:
+                df = ak.stock_board_concept_cons_em(symbol=resolved_name)
+
+            if df is None or len(df) == 0:
+                print(f"[多空扫描] 板块 '{resolved_name}'({stype}): 返回空 DataFrame")
+                cache[cache_key] = {"codes": codes, "t": now}; return codes
+
+            print(f"[多空扫描] 板块 '{resolved_name}'({stype}): {len(df)} 行, 列={list(df.columns)}")
+
+            # 列名匹配 — 扩展到所有可能
+            code_col = None
+            all_cols = [str(c) for c in df.columns]
+            for cand in ["股票代码","成分代码","代码","ts_code","TS代码","STOCK_CODE","stock_code","symbol"]:
+                if cand in all_cols: code_col = cand; break
+            if code_col is None:
+                for c in all_cols:
+                    if "股票代码" in c or "成分代码" in c or "TS代码" in c: code_col = c; break
+            if code_col is None:
+                for c in all_cols:
+                    if "代码" in c: code_col = c; break
+            if code_col is None:
+                for c in all_cols:
+                    cl = c.lower()
+                    if "code" in cl or "symbol" in cl: code_col = c; break
+
+            if code_col is None:
+                print(f"[多空扫描] ⚠️ 板块 '{resolved_name}': 找不到代码列, 所有列={all_cols}")
+            else:
+                for v in df[code_col].dropna():
+                    nc = self._normalize_code_for_regime(str(v))
+                    if nc: codes.add(nc)
+                print(f"[多空扫描] ✅ 板块 '{resolved_name}': 归一化后 {len(codes)} 只")
+        except Exception as e:
+            import traceback
+            print(f"[多空扫描] ❌ 板块 '{resolved_name}'({stype}) 失败: {type(e).__name__}: {e}")
+            traceback.print_exc()
+
+        cache[cache_key] = {"codes": codes, "t": now}
+        return codes
+
+    def _filter_pool_by_sectors(self, pool, selected_sectors):
+        """🆕 按板块白名单过滤扫描池 — 只要属于任一被选板块就保留
+        pool: [(code, name, src), ...]
+        selected_sectors: [板块名, ...] — 空或 None = 不筛选"""
+        if not selected_sectors: return pool
+        # 先拉所有选中板块的成分股, 合并成白名单
+        whitelist = set()
+        for s in selected_sectors:
+            whitelist |= self._fetch_regime_sector_stocks(s)
+        if not whitelist: return []  # 拉不到任何成分股 → 返回空
+        return [(c, n, s) for c, n, s in pool if c in whitelist]
+
+    def _collect_regime_scan_pool(self, source_filter=None):
+        """从多源动态收集扫描池 → 去重合并
+        source_filter: list[str] 要收集哪些源 (None=全部, 空=全部)"""
+        filter_set = set(source_filter or self.REGIME_SOURCES)
+        seen = set(); result = []
+        def _add(code, name, src=""):
+            c = self._normalize_code_for_regime(code)
+            if not c or c in seen: return
+            seen.add(c); result.append((c, str(name or c), src))
+
+        # 源1: ETF
+        if "ETF" in filter_set:
+            for c, n in self.REGIME_SCAN_ETF: _add(c, n, "ETF")
+        # 源2: 持仓热门
+        if "持仓" in filter_set:
+            for c, n in self.REGIME_SCAN_STOCKS: _add(c, n, "持仓")
+        # 源3: 龙头股 (自动导入过的)
+        if "龙头股" in filter_set:
+            try:
+                # 从自选/持仓标签拿
+                for attr in ("_leader_stock_list", "_auto_imported_leader_codes", "_top_pool"):
+                    for row in getattr(self, attr, []) or []:
+                        if isinstance(row, (list, tuple)) and len(row) >= 2:
+                            _add(row[0], row[1], "龙头股")
+                        elif isinstance(row, dict):
+                            _add(row.get("code",""), row.get("name",""), "龙头股")
+            except Exception: pass
+            # 从 DB 龙头池拿
+            try:
+                from utils.config import DB_PATH
+                import sqlite3
+                db = sqlite3.connect(DB_PATH)
+                cur = db.cursor()
+                for tbl in ("leader_stocks", "top_pool", "watchlist"):
+                    try:
+                        cur.execute(f"SELECT code, name FROM {tbl} LIMIT 50")
+                        for row in cur.fetchall(): _add(row[0], row[1] or row[0], "龙头股")
+                    except Exception: pass
+                db.close()
+            except Exception: pass
+        # 源4: 资讯股
+        if "资讯股" in filter_set:
+            try:
+                from utils.config import DB_PATH
+                import sqlite3
+                db = sqlite3.connect(DB_PATH)
+                cur = db.cursor()
+                try:
+                    cur.execute("""SELECT code, name, COUNT(*) cnt
+                        FROM news_stocks WHERE date >= date('now','-7 days')
+                        GROUP BY code, name ORDER BY cnt DESC LIMIT 80""")
+                    for row in cur.fetchall(): _add(row[0], row[1] or row[0], f"资讯({row[2]})")
+                except Exception: pass
+                db.close()
+            except Exception: pass
+        # 源5: 淘股吧
+        if "淘股吧" in filter_set:
+            try:
+                for row in getattr(self, "_taoguba_stamp_data", []) or []:
+                    if isinstance(row, dict): _add(row.get("code",""), row.get("name",""), "淘股吧")
+                    elif isinstance(row, (list, tuple)) and len(row) >= 2: _add(row[0], row[1], "淘股吧")
+            except Exception: pass
+        # 源6: 韭研
+        if "韭研" in filter_set:
+            try:
+                for row in getattr(self, "_jiuyan_stamp_data", []) or []:
+                    if isinstance(row, dict): _add(row.get("code",""), row.get("name",""), "韭研")
+                    elif isinstance(row, (list, tuple)) and len(row) >= 2: _add(row[0], row[1], "韭研")
+            except Exception: pass
+        # 源7: 选股宝 (从数据库)
+        if "选股宝" in filter_set:
+            try:
+                from utils.config import DB_PATH
+                import sqlite3
+                db = sqlite3.connect(DB_PATH)
+                cur = db.cursor()
+                for tbl in ("xuangubao_stocks", "choice_top", "hot_choice"):
+                    try:
+                        cur.execute(f"SELECT code, name FROM {tbl} ORDER BY rowid DESC LIMIT 50")
+                        for row in cur.fetchall(): _add(row[0], row[1] or row[0], "选股宝")
+                    except Exception: pass
+                db.close()
+            except Exception: pass
+            # 如果 tab_choice.py 爬取过
+            try:
+                for row in getattr(self, "_choice_scan_results", []) or []:
+                    if isinstance(row, dict): _add(row.get("code",""), row.get("name",""), "选股宝")
+                    elif isinstance(row, (list, tuple)) and len(row) >= 2: _add(row[0], row[1], "选股宝")
+            except Exception: pass
+        # 源8: 全市场 (A股 + ETF 全量, 用 AKShare/Tushare)
+        if "全市场" in filter_set:
+            try:
+                import akshare as ak
+                df = ak.stock_info_a_code_name()
+                if df is not None and len(df) > 0:
+                    for _, row in df.iterrows():
+                        code = str(row.get("code", ""))
+                        name = str(row.get("name", code))
+                        _add(code, name, "全市场")
+            except Exception as e:
+                print(f"[多空扫描] 全市场 AKShare 失败: {e}")
+                # 回退 Tushare
+                try:
+                    import tushare as ts
+                    ts.set_token(self.ts_token or TS_DEFAULT_TOKEN)
+                    pro = ts.pro_api()
+                    df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,name")
+                    if df is not None:
+                        for _, row in df.iterrows():
+                            _add(str(row["ts_code"]), str(row["name"]), "全市场")
+                except Exception as e2:
+                    print(f"[多空扫描] 全市场 Tushare 也失败: {e2}")
+
+        return result
+
+    def _open_regime_scanner(self):
+        """打开 🌐 多空扫描弹窗 — 可勾选源 + 异步扫描 + 双击 K 线"""
+        import threading
+        dlg = tk.Toplevel(self.root)
+        dlg.title("🌐 全市场多空扫描器")
+        dlg.geometry("1200x860")
+        dlg.minsize(1000, 720)  # 最小尺寸保证按钮栏可见
+        dlg.transient(self.root)
+        # ✅ 删掉 grab_set() — 会阻塞子弹窗的事件! 用户双击股票开 K 线弹窗时被吞事件 → 点不动
+        # dlg.grab_set()
+
+        # ── 顶部标题 ──
+        top = ttk.Frame(dlg); top.pack(fill=tk.X, padx=8, pady=(6, 2))
+        ttk.Label(top, text="🌐 多空扫描器", font=("", 14, "bold")).pack(side=tk.LEFT)
+        self._regime_scan_status = tk.StringVar(value="👉 选好数据源后点底部 [🔄 开始扫描]")
+        ttk.Label(top, textvariable=self._regime_scan_status, foreground="#c62828", font=("", 11, "bold")).pack(side=tk.RIGHT)
+
+        # ── 🆕 数据源筛选面板 (Checkbutton) ──
+        filter_frame = ttk.LabelFrame(dlg, text="📋 数据源选择", padding=(8, 4))
+        filter_frame.pack(fill=tk.X, padx=8, pady=(2, 6))
+
+        # 默认勾选: ETF + 持仓 + 资讯股 + 龙头股 (轻量组合, 不卡)
+        default_on = {"ETF", "持仓", "资讯股", "龙头股"}
+        self._regime_filter_vars = {}
+        # 第一行: 常规源
+        row1 = ttk.Frame(filter_frame); row1.pack(fill=tk.X)
+        for src in self.REGIME_SOURCES:
+            if src == "全市场": continue  # 全市场单独一行
+            var = tk.BooleanVar(value=(src in default_on))
+            self._regime_filter_vars[src] = var
+            ttk.Checkbutton(row1, text=f"  {src}  ", variable=var).pack(side=tk.LEFT, padx=2)
+        # 第二行: 全市场 + 全选/全不选按钮
+        row2 = ttk.Frame(filter_frame); row2.pack(fill=tk.X, pady=(4, 0))
+        var_all = tk.BooleanVar(value=False)
+        self._regime_filter_vars["全市场"] = var_all
+        cb_all = ttk.Checkbutton(row2, text="  全市场(5500+只, 重)  ", variable=var_all)
+        cb_all.pack(side=tk.LEFT, padx=2)
+        # 全选/全不选/轻量 按钮
+        def _set_all(v):
+            for s, var in self._regime_filter_vars.items(): var.set(v)
+        def _set_light():
+            for s, var in self._regime_filter_vars.items():
+                var.set(s in {"ETF", "持仓", "资讯股"})
+        def _set_default():
+            for s, var in self._regime_filter_vars.items():
+                var.set(s in default_on)
+        ttk.Button(row2, text="全选", width=6, command=lambda: _set_all(True)).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row2, text="全不选", width=6, command=lambda: _set_all(False)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(row2, text="轻量(ETF+持仓)", width=14, command=_set_light).pack(side=tk.LEFT, padx=2)
+        ttk.Button(row2, text="默认(+龙头+资讯)", width=16, command=_set_default).pack(side=tk.LEFT, padx=2)
+        # 🆕 抽样率下拉框 (只对"全市场"源生效)
+        sample_frame = ttk.Frame(filter_frame); sample_frame.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(sample_frame, text="📊 抽样率 (仅全市场源生效):", foreground="#555").pack(side=tk.LEFT)
+        self._regime_sample_var = tk.StringVar(value="20%")
+        sample_combo = ttk.Combobox(sample_frame, textvariable=self._regime_sample_var,
+                                     width=6, state="readonly",
+                                     values=[f"{p}%" for p in range(5, 101, 5)])
+        sample_combo.pack(side=tk.LEFT, padx=4)
+        ttk.Label(sample_frame, text="  (选 100% 即全量扫描)", foreground="#888").pack(side=tk.LEFT)
+        # 动态预览池大小
+        def _preview_pool(*args):
+            sel = [s for s, v in self._regime_filter_vars.items() if v.get()]
+            pool = self._collect_regime_scan_pool(sel) if sel else []
+            self._regime_scan_status.set(f"📋 已选 {len(sel)} 源 → 预估 {len(pool)} 只")
+        for v in self._regime_filter_vars.values(): v.trace_add("write", _preview_pool)
+        _preview_pool()
+
+        # ── 🆕 板块筛选面板 (可折叠, 行业+概念 双 Tab) ──
+        # ① 启动就后台预拉东财板块名 (不卡 UI, 用户点扫描时直接有数据)
+        import threading as _th
+        _th.Thread(target=self._regime_load_ak_sector_lists, daemon=True).start()
+
+        # ② 标题栏 (左侧文字 + 右侧折叠按钮)
+        sector_head = ttk.Frame(dlg); sector_head.pack(fill=tk.X, padx=8, pady=(2, 0))
+        ttk.Label(sector_head, text="🏷️ 板块筛选  ", font=("", 10, "bold")).pack(side=tk.LEFT)
+        ttk.Label(sector_head, text="(勾选=只扫描这些板块, 全不选=不筛选)",
+                  foreground="#888").pack(side=tk.LEFT)
+        self._regime_sec_selected_lbl = ttk.Label(sector_head, text="已选 0 个",
+                                                   foreground="#c62828")
+        self._regime_sec_selected_lbl.pack(side=tk.LEFT, padx=8)
+
+        # 折叠按钮 (点一下隐藏/显示下面的 Notebook)
+        self._regime_sec_collapsed = False
+        self._regime_sec_body = None  # 下面要装 Notebook + 按钮
+        def _toggle_sector():
+            if self._regime_sec_collapsed:
+                self._regime_sec_body.pack(fill=tk.X, padx=8, pady=(2, 4))
+                self._regime_sec_collapsed = False; self._regime_sec_toggle_btn.config(text="▼ 折叠")
+            else:
+                if self._regime_sec_body is not None: self._regime_sec_body.pack_forget()
+                self._regime_sec_collapsed = True; self._regime_sec_toggle_btn.config(text="▶ 展开")
+        self._regime_sec_toggle_btn = ttk.Button(sector_head, text="▼ 折叠", width=8,
+                                                  command=_toggle_sector)
+        self._regime_sec_toggle_btn.pack(side=tk.RIGHT)
+
+        # ③ 主体容器 (Notebook + 按钮行, 初始可见)
+        self._regime_sec_body = ttk.Frame(dlg)
+        self._regime_sec_body.pack(fill=tk.X, padx=8, pady=(2, 4))
+
+        self._regime_sector_vars = {}
+        sec_btn = ttk.Frame(self._regime_sec_body); sec_btn.pack(fill=tk.X)
+        def _sec_set(sector_list, val):
+            for s in sector_list:
+                if s in self._regime_sector_vars: self._regime_sector_vars[s].set(val)
+            _update_sec_count()
+        def _sec_set_default():
+            hot = {"电子","有色金属","医药生物","国防军工","计算机","电气设备",
+                   "半导体","人工智能","AI算力","CPO","新能源车","锂电池",
+                   "机器人","创新药","证券","光伏","储能","光模块"}
+            for s, var in self._regime_sector_vars.items():
+                var.set(s in hot)
+            _update_sec_count()
+        def _update_sec_count(*_):
+            n = sum(1 for v in self._regime_sector_vars.values() if v.get())
+            self._regime_sec_selected_lbl.config(text=f"已选 {n} 个")
+        # 按钮: 紧凑排列, 用 padx=1
+        for txt, cmd in [("选行业", lambda: _sec_set(self.REGIME_INDUSTRY_SECTORS, True)),
+                         ("清行业", lambda: _sec_set(self.REGIME_INDUSTRY_SECTORS, False)),
+                         ("选概念", lambda: _sec_set(self.REGIME_CONCEPT_SECTORS, True)),
+                         ("清概念", lambda: _sec_set(self.REGIME_CONCEPT_SECTORS, False)),
+                         ("全选",   lambda: _sec_set(self.REGIME_INDUSTRY_SECTORS + self.REGIME_CONCEPT_SECTORS, True)),
+                         ("全清",   lambda: _sec_set(self.REGIME_INDUSTRY_SECTORS + self.REGIME_CONCEPT_SECTORS, False)),
+                         ("⚡热门", _sec_set_default),
+                         ("展开全部→", lambda: None)]:
+            w = 8 if len(txt) <= 4 else None
+            ttk.Button(sec_btn, text=txt, width=w, command=cmd).pack(side=tk.LEFT, padx=1)
+
+        # Notebook: 行业 Tab + 概念 Tab
+        sec_nb = ttk.Notebook(self._regime_sec_body); sec_nb.pack(fill=tk.X, pady=(2, 0))
+
+        def _build_sector_tab(parent, sector_list, tab_label):
+            tab = ttk.Frame(parent); parent.add(tab, text=f"{tab_label} ({len(sector_list)})")
+            # Canvas + Scrollbar (滚动)
+            canvas = tk.Canvas(tab, height=110, highlightthickness=0, bd=0)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            sb = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
+            sb.pack(side=tk.RIGHT, fill=tk.Y)
+            canvas.configure(yscrollcommand=sb.set)
+            inner = ttk.Frame(canvas)
+            win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+            inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+            def _sync(e=None):
+                try: canvas.itemconfig(win_id, width=canvas.winfo_width())
+                except Exception: pass
+            canvas.bind("<Configure>", _sync)
+
+            # ✅ 密集化: 8 列, pady=1, padx=2, ipadx=2
+            cols = 8
+            for c in range(cols): inner.columnconfigure(c, weight=1)
+            for i, s in enumerate(sector_list):
+                var = tk.BooleanVar(value=False)
+                self._regime_sector_vars[s] = var
+                var.trace_add("write", _update_sec_count)
+                r, c = divmod(i, cols)
+                ttk.Checkbutton(inner, text=s, variable=var).grid(
+                    row=r, column=c, sticky="w", padx=2, pady=1, ipadx=2)
+            # 鼠标滚轮
+            def _wheel(e): canvas.yview_scroll(int(-e.delta/120), "units")
+            canvas.bind("<MouseWheel>", _wheel)
+            canvas.bind_all("<MouseWheel>", _wheel)
+            canvas.update_idletasks(); _sync()
+            return tab
+
+        _build_sector_tab(sec_nb, self.REGIME_INDUSTRY_SECTORS, "🏭 行业")
+        _build_sector_tab(sec_nb, self.REGIME_CONCEPT_SECTORS, "🔥 概念")
+        _update_sec_count()
+
+        # ── 底部按钮 (先 pack → 固定底部, Notebook 后 pack → 吃中间空间) ──
+        bot = ttk.Frame(dlg); bot.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(4, 8))
+        self._regime_start_btn = ttk.Button(bot, text="🔄 开始扫描",
+                                            command=lambda: self._run_regime_scan_async(dlg))
+        self._regime_start_btn.pack(side=tk.LEFT)
+        self._regime_pause_btn = ttk.Button(bot, text="⏸ 暂停", state="disabled",
+                                            command=self._toggle_regime_pause)
+        self._regime_pause_btn.pack(side=tk.LEFT, padx=4)
+        self._regime_stop_btn = ttk.Button(bot, text="⏹ 停止", state="disabled",
+                                            command=self._stop_regime_scan)
+        self._regime_stop_btn.pack(side=tk.LEFT)
+        self._regime_progress = ttk.Progressbar(bot, mode="determinate", length=180)
+        self._regime_progress.pack(side=tk.LEFT, padx=10)
+        ttk.Button(bot, text="📤 导出CSV", command=lambda: self._export_regime_csv()).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bot, text="💡 双击开K线", state="disabled").pack(side=tk.LEFT, padx=16)
+        ttk.Button(bot, text="关闭", command=dlg.destroy).pack(side=tk.RIGHT)
+
+        # ── Notebook 2 页 (中间区域, 后 pack 吃剩余空间) ──
+        nb = ttk.Notebook(dlg); nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 4))
+
+        # Tab 1: 汇总图表 (matplotlib)
+        chart_tab = ttk.Frame(nb); nb.add(chart_tab, text="📊 统计图表")
+        self._regime_fig = __import__("matplotlib.pyplot", fromlist=["figure"]).Figure(figsize=(10, 5))
+        self._regime_canvas = __import__("matplotlib.backends.backend_tkagg", fromlist=["FigureCanvasTkAgg"]).FigureCanvasTkAgg(self._regime_fig, master=chart_tab)
+        self._regime_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Tab 2: 清单表格 — 双击绑定 + 🆕 点击表头排序
+        list_tab = ttk.Frame(nb); nb.add(list_tab, text="📋 明细清单")
+        cols = ("code","name","sector","source","regime","streak","pct5","pct20","price")
+        tree = ttk.Treeview(list_tab, columns=cols, show="headings", height=25)
+        heads = {"code":"代码","name":"名称","sector":"板块","source":"来源","regime":"多空","streak":"连续根","pct5":"5日%","pct20":"20日%","price":"现价"}
+        widths = {"code":110,"name":90,"sector":70,"source":80,"regime":55,"streak":55,"pct5":60,"pct20":60,"price":65}
+        for c in cols:
+            tree.heading(c, text=heads[c], command=lambda _c=c: self._treeview_sort_column(tree, _c))
+            tree.column(c, width=widths[c], anchor="center")
+        tree.pack(fill=tk.BOTH, expand=True)
+        self._apply_stock_tag_config(tree)
+        tree.bind("<Double-1>", lambda e: self._on_regime_tree_double_click(tree))
+        self._regime_sort_col = None; self._regime_sort_rev = False
+
+        self._regime_tree = tree
+        self._regime_results = []
+        # 扫描状态标志
+        self._regime_scanning = False
+        self._regime_paused = False
+        self._regime_scan_abort = False
+        # 🆕 不自动开始, 等用户点 [🔄 开始扫描]
+        self._regime_scan_status.set("选择数据源后点 [🔄 开始扫描] 开始")
+
+    def _toggle_regime_pause(self):
+        """⏸/▶ 暂停/继续"""
+        if not getattr(self, "_regime_scanning", False): return
+        self._regime_paused = not self._regime_paused
+        self._regime_pause_btn.config(text=("▶ 继续" if self._regime_paused else "⏸ 暂停"))
+        self._regime_scan_status.set(("⏸ 已暂停 (点继续恢复)" if self._regime_paused else "▶ 继续扫描中..."))
+
+    def _stop_regime_scan(self):
+        """⏹ 停止扫描"""
+        self._regime_scan_abort = True
+        self._regime_paused = False
+        self._regime_scanning = False
+        self._regime_pause_btn.config(text="⏸ 暂停", state="disabled")
+        self._regime_stop_btn.config(state="disabled")
+        self._regime_start_btn.config(state="normal")
+        self._regime_scan_status.set("⏹ 已停止")
+
+    def _get_regime_selected_sources(self):
+        """从 Checkbutton 拿当前选中的源列表"""
+        return [s for s, v in getattr(self, "_regime_filter_vars", {}).items() if v.get()]
+
+    def _treeview_sort_column(self, tv, col):
+        """🆕 Treeview 点击表头排序 — 数字列用 float 排, 文本列用 str 排
+        支持连续点击切换升序/降序"""
+        # 上次点同一列 → 反转, 不同列 → 升序
+        if getattr(self, "_regime_sort_col", None) == col:
+            self._regime_sort_rev = not getattr(self, "_regime_sort_rev", False)
+        else:
+            self._regime_sort_rev = False
+        self._regime_sort_col = col
+
+        # 取出全部行
+        items = [(tv.set(k, col), k) for k in tv.get_children("")]
+        # 数字列 → 转 float 排
+        numeric_cols = {"streak", "pct5", "pct20", "price"}
+        if col in numeric_cols:
+            items.sort(key=lambda t: float(t[0] or 0), reverse=self._regime_sort_rev)
+        elif col == "regime":
+            # 多空列: 🔴红=+1, ⚪中=0, 🟢绿=-1 → 数字排
+            _regime_num = {"🔴 红": 1, "⚪ 中": 0, "🟢 绿": -1}
+            items.sort(key=lambda t: _regime_num.get(t[0], 0), reverse=self._regime_sort_rev)
+        else:
+            # 文本列: 忽略大小写字母序
+            items.sort(key=lambda t: t[0].lower(), reverse=self._regime_sort_rev)
+
+        # 按排好的顺序重排 Treeview children
+        for idx, (_, k) in enumerate(items):
+            tv.move(k, "", idx)
+
+        # 更新表头文字显示箭头 ▲▼
+        arrow = " ▼" if self._regime_sort_rev else " ▲"
+        heads = tv["columns"]
+        for _c in heads:
+            _orig = tv.heading(_c)["text"].rstrip(" ▲▼")
+            tv.heading(_c, text=_orig + (arrow if _c == col else ""))
+
+    def _run_regime_scan_async(self, dlg):
+        """异步跑扫描 — 暂停/停止/抽样"""
+        import threading, random
+        # 停止旧线程
+        if getattr(self, "_regime_scanning", False):
+            self._regime_scan_abort = True
+        self._regime_scanning = True
+        self._regime_paused = False
+        self._regime_scan_abort = False
+
+        selected = self._get_regime_selected_sources()
+        if not selected:
+            self._regime_scan_status.set("⚠️ 请至少勾选一个数据源!"); return
+
+        # 解析抽样率
+        try:
+            sample_str = getattr(self, "_regime_sample_var", tk.StringVar(value="20%")).get()
+            sample_pct = int(sample_str.rstrip("%")) / 100.0
+        except Exception: sample_pct = 1.0
+
+        def work():
+            # 收集池
+            all_items = self._collect_regime_scan_pool(selected)
+            # 🆕 抽样: 只对"全市场"源生效
+            if "全市场" in selected and sample_pct < 1.0:
+                # 分开处理: 全市场源抽样, 其他源全取
+                other = [(c, n, s) for c, n, s in all_items if s != "全市场"]
+                full_market = [(c, n, s) for c, n, s in all_items if s == "全市场"]
+                random.seed(42)  # 固定种子可复现
+                sampled = random.sample(full_market, max(1, int(len(full_market) * sample_pct)))
+                all_items = other + sampled
+                # 更新状态条 (主线程)
+                self.root.after(0, lambda: self._regime_scan_status.set(
+                    f"📊 抽样 {int(sample_pct*100)}%: 全市场 {len(full_market)}→{len(sampled)} | 其他 {len(other)} | 总 {len(all_items)}"))
+
+            # 🆕 板块筛选 (在子线程里拉成分股, 避免卡 UI)
+            selected_sectors = [s for s, v in getattr(self, "_regime_sector_vars", {}).items() if v.get()]
+            if selected_sectors:
+                self.root.after(0, lambda _n=len(selected_sectors): self._regime_scan_status.set(
+                    f"🏷️ 正在拉取 {_n} 个板块的成分股..."))
+                filtered = self._filter_pool_by_sectors(all_items, selected_sectors)
+                before_n = len(all_items); all_items = filtered
+                self.root.after(0, lambda _b=before_n, _a=len(all_items), _n=len(selected_sectors):
+                    self._regime_scan_status.set(
+                        f"🏷️ 板块筛选({_n}个): {_b} → {_a} 只 (如果太少, 试试加更多板块)"))
+                if not all_items:
+                    self._regime_scanning = False
+                    self.root.after(0, lambda: self._regime_scan_status.set(
+                        "⚠️ 板块筛选后为 0 只! 请勾选更多板块或清除板块筛选"))
+                    self.root.after(0, lambda: self._regime_start_btn.config(state="normal"))
+                    self.root.after(0, lambda: self._regime_pause_btn.config(text="⏸ 暂停", state="disabled"))
+                    self.root.after(0, lambda: self._regime_stop_btn.config(state="disabled"))
+                    return
+
+            results = []; total = len(all_items)
+            self.root.after(0, lambda: self._regime_start_btn.config(state="disabled"))
+            self.root.after(0, lambda: self._regime_pause_btn.config(state="normal"))
+            self.root.after(0, lambda: self._regime_stop_btn.config(state="normal"))
+            self.root.after(0, lambda: self._regime_progress.config(maximum=total, value=0))
+
+            for i, (code, name, src) in enumerate(all_items):
+                # 🆕 停止检查
+                if getattr(self, "_regime_scan_abort", False):
+                    break
+                # 🆕 暂停检查 — 忙等但不死锁
+                while getattr(self, "_regime_paused", False):
+                    if getattr(self, "_regime_scan_abort", False): break
+                    import time; time.sleep(0.1)
+                if getattr(self, "_regime_scan_abort", False): break
+
+                # 更新进度 (每 3 只更一次 UI, 减少 overhead)
+                if i % 3 == 0 or i == total - 1:
+                    pct = int((i+1) / total * 100)
+                    self.root.after(0, lambda _i=i, _n=name, _s=src: (
+                        self._regime_scan_status.set(f"扫描中 [{_i+1}/{total}] {_n} ({_s}) {pct}%"),
+                        self._regime_progress.config(value=_i+1)
+                    ))
+                try:
+                    r = self._scan_one_regime(code, name)
+                    if r: r["source"] = src; results.append(r)
+                except Exception: pass
+            self._regime_scanning = False
+            self.root.after(0, lambda: self._regime_pause_btn.config(text="⏸ 暂停", state="disabled"))
+            self.root.after(0, lambda: self._regime_stop_btn.config(state="disabled"))
+            self.root.after(0, lambda: self._regime_start_btn.config(state="normal"))
+            self.root.after(0, lambda: self._regime_scan_done(dlg, results))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_regime_tree_double_click(self, tree):
+        """双击明细行 → 弹出 K 线多图联动"""
+        sel = tree.selection()
+        if not sel: return
+        vals = tree.item(sel[0], "values")
+        self._open_regime_kline_dialog(str(vals[0]), str(vals[1]))
+
+    def _open_regime_kline_dialog(self, code, name):
+        """弹出 K 线 + regime 背景 + 技术指标的分析弹窗 — 🆕 指标可选择 + 输入框刷新!"""
+        import tushare as ts, matplotlib
+        matplotlib.use("TkAgg")
+        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        from utils.config import TS_DEFAULT_TOKEN
+        import numpy as np, pandas as pd
+
+        if not getattr(self, "_ts_pro_init", False):
+            ts.set_token(TS_DEFAULT_TOKEN)
+            self._ts_pro = ts.pro_api(); self._ts_pro_init = True
+
+        # ── 🆕 抽数据加载为闭包, 方便输入框换股 ──
+        def _load_and_compute(ts_code):
+            """返回 dict: df/closes/opens/highs/lows/vols/dates/regime_arr/last_color/streak + 所有指标"""
+            try:
+                df = (self._ts_pro.fund_daily if ts_code.split(".")[0].startswith(("51","52","56","58","15","16","18","19"))
+                      else self._ts_pro.daily)(ts_code=ts_code,
+                      start_date=(pd.Timestamp.now()-pd.Timedelta(days=500)).strftime("%Y%m%d"),
+                      end_date=pd.Timestamp.now().strftime("%Y%m%d"))
+            except Exception as e:
+                return None, f"数据加载失败: {e}"
+            if df is None or len(df) < 40:
+                return None, f"数据不足 (只有 {len(df) if df is not None else 0} 根)"
+            df = df.sort_values("trade_date").reset_index(drop=True)
+            closes = df["close"].astype(float).values
+            opens = df["open"].astype(float).values
+            highs = df["high"].astype(float).values
+            lows = df["low"].astype(float).values
+            vols = df["vol"].astype(float).values if "vol" in df.columns else np.zeros(len(closes))
+            dates = pd.to_datetime(df["trade_date"], format="%Y%m%d")
+            regime_arr, last_color, streak = self._compute_regime_on_closes(closes)
+            # 所有指标
+            ma5 = pd.Series(closes).rolling(5).mean().values
+            ma20 = pd.Series(closes).rolling(20).mean().values
+            ma60 = pd.Series(closes).rolling(60).mean().values
+            boll_mid = pd.Series(closes).rolling(20).mean().values
+            boll_std = pd.Series(closes).rolling(20).std().values
+            boll_upper = boll_mid + 2 * boll_std
+            boll_lower = boll_mid - 2 * boll_std
+            dif_all, dea_all, _ = self._macd_hist_func(closes)
+            macd_hist = (dif_all - dea_all) * 2
+            rsi_all = self._rsi_func(closes, 14)
+            kdjk, kdjd, kdjj = self._kdj_func(highs, lows, closes, 9, 3, 3)
+            obv_all = self._obv_func(closes, vols)
+            bias12 = self._bias_func(closes, 12)
+            sar_arr, sar_trend = self._sar_func(highs, lows)
+            tenkan, kijun, senkou_a, senkou_b, chikou = self._ichimoku_func(highs, lows, closes)
+
+            # ── 🆕 新指标预计算 ──
+            # 1) 支撑压力线 (枢轴点)
+            n = len(closes)
+            svr_support, svr_resistance = self._compute_support_resistance(highs, lows, closes)
+            # 2) VWAP 主力成本线 (累计成交额/累计成交量, 通达信算法)
+            typical = (opens + highs + lows + closes) / 4.0
+            cum_amount = np.cumsum(typical * vols)
+            cum_vol = np.cumsum(vols)
+            vwap_arr = np.where(cum_vol > 0, cum_amount / np.maximum(cum_vol, 1), closes).astype(float)
+            # 3) SuperTrend (经典 ATR 包络线)
+            supertrend_arr, supertrend_dir = self._compute_supertrend(highs, lows, closes, 10, 3)
+            # 4) TD序列 (Tom DeMark Setup/Perfection)
+            td_setup, td_countdown = self._compute_td_sequence(closes)
+            # 5) Camarilla (枢轴 + 8条水平支撑压力线)
+            camarilla = self._compute_camarilla(highs, lows, closes)
+
+            return dict(df=df, closes=closes, opens=opens, highs=highs, lows=lows, vols=vols,
+                        dates=dates, regime_arr=regime_arr, last_color=last_color, streak=streak,
+                        ma5=ma5, ma20=ma20, ma60=ma60,
+                        boll_mid=boll_mid, boll_std=boll_std, boll_upper=boll_upper, boll_lower=boll_lower,
+                        dif_all=dif_all, dea_all=dea_all, macd_hist=macd_hist,
+                        rsi_all=rsi_all, kdjk=kdjk, kdjd=kdjd, kdjj=kdjj,
+                        obv_all=obv_all, bias12=bias12,
+                        sar_arr=sar_arr, sar_trend=sar_trend,
+                        tenkan=tenkan, kijun=kijun, senkou_a=senkou_a, senkou_b=senkou_b, chikou=chikou,
+                        svr_support=svr_support, svr_resistance=svr_resistance,
+                        vwap_arr=vwap_arr,
+                        supertrend_arr=supertrend_arr, supertrend_dir=supertrend_dir,
+                        td_setup=td_setup, td_countdown=td_countdown,
+                        camarilla=camarilla,
+                        n=len(closes)), None
+
+        # 初始加载
+        stock_data, err = _load_and_compute(code)
+        if err:
+            import tkinter.messagebox as mb
+            mb.showerror("数据加载失败", f"{name} {code}\n{err}"); return
+
+        # ── 弹窗结构 ──
+        dlg = tk.Toplevel(self.root)
+        dlg.transient(self.root)
+
+        # 顶部标题
+        top = ttk.Frame(dlg); top.pack(fill=tk.X, padx=6, pady=(6, 2))
+
+        def _update_title_and_indicators(ts_code, sname, data):
+            """换股后更新标题 + 所有外部变量"""
+            color_name = {1:"🔴红(可买)", -1:"🟢绿(不可买)", 0:"⚪中"}.get(int(data["last_color"]), "?")
+            dlg.title(f"📈 {sname}({ts_code}) — 多空分析  当前:{color_name} 连续{data['streak']}根")
+            title_lbl.config(text=f"📈 {sname} ({ts_code})  当前:{color_name}  连续 {data['streak']} 根")
+
+        title_lbl = ttk.Label(top, text="📈 加载中...", font=("",13,"bold"))
+        title_lbl.pack(side=tk.LEFT)
+        # 图例按钮
+        ttk.Button(top, text="❓ 图例说明 (双击图表也可)", width=24,
+                   command=self._show_regime_legend_help).pack(side=tk.RIGHT)
+
+        # 🆕 股票输入框 — 超级智能 Combobox (多源 + 历史 + 模糊匹配)
+        input_row = ttk.Frame(dlg); input_row.pack(fill=tk.X, padx=6, pady=(2, 0))
+        ttk.Label(input_row, text="🔄 快速换股:", font=("",10,"bold")).pack(side=tk.LEFT)
+        search_var = tk.StringVar(value="")
+        history_file = os.path.expanduser("~/.stockyidong_recent_stocks.json")
+
+        def _build_combobox_values():
+            """从 8 源 + 历史 + 持仓 + ETF + 龙头 + 资讯 + 淘股 + 韭研 合并去重, 返回 [(label, ts_code), ...]"""
+            items = []  # [(label, ts_code)]
+            seen = set()
+
+            def _add(label, ts_code):
+                if not ts_code or ts_code in seen: return
+                seen.add(ts_code); items.append((label, ts_code))
+
+            # 源 A: 历史记录 (优先排前面)
+            try:
+                if os.path.exists(history_file):
+                    import json as _j
+                    hist = _j.load(open(history_file))
+                    for h in hist[-30:]:  # 最近30个
+                        if isinstance(h, dict) and "ts_code" in h:
+                            _add(f"🕐 {h.get('name','')} ({h['ts_code']})", h["ts_code"])
+                        elif isinstance(h, str) and h.startswith(("6", "0", "3", "5")):
+                            # 可能是纯代码
+                            _add(f"🕐 {h}", h + (".SH" if h[0] in "65" else ".SZ"))
+            except Exception: pass
+
+            # 源 B: 主力宽基 ETF (硬编码)
+            etf_hard = [
+                ("沪深300ETF", "510300.SH"), ("中证500ETF", "510500.SH"),
+                ("中证1000ETF", "512100.SH"), ("科创50ETF", "588000.SH"),
+                ("创业板ETF", "159915.SZ"), ("上证50ETF", "510050.SH"),
+                ("沪深300增强", "159919.SZ"), ("红利ETF", "510880.SH"),
+                ("纳指ETF", "513100.SH"), ("标普500ETF", "513500.SH"),
+                ("黄金ETF", "518880.SH"), ("国债ETF", "511010.SH"),
+                ("半导体ETF", "512760.SH"), ("芯片ETF", "159995.SZ"),
+                ("医药ETF", "512010.SH"), ("券商ETF", "512000.SH"),
+            ]
+            for name, code in etf_hard:
+                _add(f"📊ETF {name}", code)
+
+            # 源 C: 持仓 (从 DB)
+            try:
+                from utils.config import DB_PATH
+                import sqlite3 as _sq
+                db2 = _sq.connect(DB_PATH)
+                cur2 = db2.cursor()
+                cur2.execute("SELECT stock_code, stock_name FROM stock_holdings WHERE stock_code IS NOT NULL LIMIT 40")
+                for code, name in cur2.fetchall():
+                    if code and len(code) == 6:
+                        suffix = ".SH" if code[0] in "65" else ".SZ"
+                        _add(f"💼 {name}({code})", code + suffix)
+                db2.close()
+            except Exception: pass
+
+            # 源 D: 资讯股 (DB)
+            try:
+                from utils.config import DB_PATH
+                import sqlite3 as _sq2
+                db3 = _sq2.connect(DB_PATH)
+                cur3 = db3.cursor()
+                cur3.execute("SELECT stock_code, stock_name FROM batch_analysis_results WHERE stock_code IS NOT NULL LIMIT 50")
+                for code, name in cur3.fetchall():
+                    if code and len(code) == 6:
+                        suffix = ".SH" if code[0] in "65" else ".SZ"
+                        _add(f"📰 {name}({code})", code + suffix)
+                db3.close()
+            except Exception: pass
+
+            # 源 E/F: 淘股/韭研 (内存数据)
+            for data_attr, emoji in [("_taoguba_stamp_data", "🔥淘"), ("_jiuyan_stamp_data", "🔥韭")]:
+                data = getattr(self, data_attr, []) or []
+                try:
+                    for item in data:
+                        if isinstance(item, dict):
+                            code = item.get("code") or item.get("stock_code") or item.get("ts_code", "")
+                            name = item.get("name") or item.get("stock_name", "")
+                        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                            code, name = str(item[0]), str(item[1])
+                        else: continue
+                        if code:
+                            code = str(code).split(".")[0]  # 去后缀
+                            if len(code) == 6:
+                                suffix = ".SH" if code[0] in "65" else ".SZ"
+                                _add(f"{emoji} {name}({code})", code + suffix)
+                except Exception: pass
+
+            return items
+
+        # Combobox — 支持输入 + 下拉选择
+        _all_items = _build_combobox_values()  # [(label, ts_code)]
+        _label_to_code = {label: code for label, code in _all_items}  # 🆕 label→code 映射
+        combo_values = [label for label, _ in _all_items]
+        search_combo = ttk.Combobox(input_row, textvariable=search_var, width=32,
+                                     values=combo_values, state="normal")
+        search_combo.pack(side=tk.LEFT, padx=4)
+        ttk.Label(input_row, text="   ", width=2).pack(side=tk.LEFT)
+
+        # 模糊过滤: 输入时实时过滤下拉选项
+        def _get_all_items():
+            return _all_items
+
+        def _on_combo_input(_evt=None):
+            """输入时实时筛选 combobox 列表"""
+            kw = search_var.get().strip().lower()
+            if not kw:
+                search_combo["values"] = [label for label, _ in _all_items][:100]
+                return
+            # 模糊匹配: 名字包含 或 代码包含
+            matches = [(l, c) for l, c in _all_items
+                       if kw in l.lower() or kw in c.lower()]
+            if matches:
+                search_combo["values"] = [l for l, _ in matches][:50]
+
+        search_combo.bind("<KeyRelease>", _on_combo_input)
+
+        def _resolve_user_input(raw):
+            """🆕 用户输入 → (ts_code, name) 或 (None, 错误信息)
+            支持: 纯代码 6位, 带后缀 000858.SZ, 纯名称 → tushare stock_basic 反查
+            也支持 Combobox 完整标签 (如 '💼 白银有色(601212)')"""
+            import re as _re
+            raw = raw.strip()
+            if not raw: return None, "请输入股票名或代码"
+            # 🆕 优先查 label→code 映射 (下拉选的完整标签)
+            if raw in _label_to_code:
+                code = _label_to_code[raw]
+                # 从 label 里提取名字显示
+                name_match = _re.search(r'[\u4e00-\u9fa5A-Za-z]+', raw.split('(')[0])
+                return code, name_match.group() if name_match else code
+            # 从 label 里提取 6 位代码 (用户可能只输入部分标签)
+            m = _re.search(r'(\d{6})', raw)
+            if m:
+                code6 = m.group(1)
+                suffix = ".SH" if code6[0] in "65" else ".SZ"
+                return code6 + suffix, raw.split('(')[0].strip()
+            # 1) 已是 ts_code 格式 (6位 + 后缀)
+            if _re.match(r"^\d{6}\.(SH|SZ|BJ)$", raw.upper()):
+                return raw.upper(), None
+            # 2) 6位纯数字 → 自动加后缀
+            if _re.match(r"^\d{6}$", raw):
+                suffix = ".SH" if raw.startswith(("6","5")) else ".SZ" if raw.startswith(("0","3","2")) else ".BJ"
+                return raw + suffix, None
+            # 3) 名称 → tushare 反查
+            try:
+                basic = self._ts_pro.stock_basic(name=raw, list_status="L",
+                                                 fields="ts_code,name,industry")
+                if basic is not None and len(basic) > 0:
+                    row = basic.iloc[0]
+                    return str(row["ts_code"]), str(row["name"])
+                # 可能是 ETF
+                basic2 = self._ts_pro.fund_basic(market="E", name=raw,
+                                                 fields="ts_code,name")
+                if basic2 is not None and len(basic2) > 0:
+                    row = basic2.iloc[0]
+                    return str(row["ts_code"]), str(row["name"])
+            except Exception as e:
+                return None, f"名称反查失败: {e}"
+            return None, f"找不到股票: '{raw}' (支持 6位代码 / 000858.SZ / 名称)"
+
+        def _save_to_history(ts_code, name):
+            """换股成功 → 写 ~/.stockyidong_recent_stocks.json (最近50个, 去重)"""
+            try:
+                import json as _j
+                hist = []
+                if os.path.exists(history_file):
+                    hist = _j.load(open(history_file))
+                # 去重: 已有同 ts_code 的先移除
+                hist = [h for h in hist if (h.get("ts_code") != ts_code if isinstance(h, dict) else True)]
+                hist.insert(0, {"ts_code": ts_code, "name": name, "time": str(pd.Timestamp.now())})
+                hist = hist[:50]
+                _j.dump(hist, open(history_file, "w"), ensure_ascii=False, indent=2)
+                # 🆕 刷新 combobox 缓存: 重建 _all_items 和 _label_to_code
+                nonlocal _all_items, _label_to_code
+                _all_items = _build_combobox_values()
+                _label_to_code = {label: code for label, code in _all_items}
+                search_combo["values"] = [label for label, _ in _all_items][:100]
+            except Exception as e:
+                print(f"[历史记录] 保存失败: {e}")
+
+        def _do_refresh_from_input():
+            raw = search_var.get().strip()
+            if not raw: return
+            ts_code, name_or_err = _resolve_user_input(raw)
+            if ts_code is None:
+                import tkinter.messagebox as mb
+                mb.showwarning("换股失败", name_or_err); return
+            # 后台加载 + 更新
+            import threading as _th2
+            def _bg():
+                d2, err2 = _load_and_compute(ts_code)
+                if err2:
+                    import tkinter.messagebox as _mb
+                    self.root.after(0, lambda: _mb.showerror(
+                        "换股失败", f"{name_or_err} {ts_code}\n{err2}"))
+                    return
+                # 更新外部数据
+                nonlocal stock_data
+                stock_data = d2
+                # 更新标题 + 保存历史
+                self.root.after(0, lambda: _update_title_and_indicators(ts_code, name_or_err, d2))
+                self.root.after(0, lambda: _redraw())
+                _save_to_history(ts_code, name_or_err)
+            _th2.Thread(target=_bg, daemon=True).start()
+
+        ttk.Button(input_row, text="🔍 换股刷新", width=10,
+                   command=_do_refresh_from_input).pack(side=tk.LEFT, padx=4)
+        # 回车 + 下拉选择都能触发
+        search_combo.bind("<Return>", lambda e: _do_refresh_from_input())
+        search_combo.bind("<<ComboboxSelected>>", lambda e: _do_refresh_from_input())
+
+        # 🆕 指标选择面板
+        idx_frame = ttk.LabelFrame(dlg, text="🎛️ 指标选择", padding=(6, 2))
+        idx_frame.pack(fill=tk.X, padx=6, pady=(0, 4))
+
+        # 主图指标 — 用 tk.Checkbutton (macOS 上比 ttk 更可靠)
+        main_frame = tk.Frame(idx_frame, bg="#E8F5E9"); main_frame.pack(anchor="w", pady=1)
+        tk.Label(main_frame, text="🎛️ 主图指标:", font=("",10,"bold"), bg="#E8F5E9").pack(side=tk.LEFT, padx=(0,4))
+        main_vars = {}
+        def _mk_redraw():
+            """每次点 Checkbutton 都会进来 — 加诊断 log"""
+            try:
+                _redraw()
+            except Exception as e:
+                import traceback
+                print(f"[🎛️指标] ❌ _redraw 错: {e}")
+                traceback.print_exc()
+        main_items = [
+            ("MA均线","ma"),("BOLL布林","boll"),("一目均衡表","ichimoku"),
+            ("SAR抛物线","sar"),("Regime背景","regime"),
+            ("支撑压力线","svr"),("VWAP主力成本","vwap"),("SuperTrend","supertrend"),
+            ("TD序列","td"),("Camarilla","camarilla"),
+        ]
+        # 默认选中 Regime + MA + BOLL + SVR
+        default_on = {"ma","boll","regime","svr"}
+        for label, key in main_items:
+            var = tk.BooleanVar(value=(key in default_on))
+            main_vars[key] = var
+            cb = tk.Checkbutton(main_frame, text=label, variable=var, command=_mk_redraw,
+                           bg="#E8F5E9", activebackground="#C8E6C9", selectcolor="white",
+                           font=("",9), cursor="hand2")
+            cb.pack(side=tk.LEFT, padx=2)
+
+        # 附图指标
+        sub_frame = tk.Frame(idx_frame, bg="#E3F2FD"); sub_frame.pack(anchor="w", pady=(1,2))
+        tk.Label(sub_frame, text="📊 附图指标:", font=("",10,"bold"), bg="#E3F2FD").pack(side=tk.LEFT, padx=(0,4))
+        sub_vars = {}
+        for label, key in [("成交量","vol"),("MACD","macd"),("RSI(14)","rsi"),("KDJ(9,3,3)","kdj"),("OBV","obv"),("BIAS(12)","bias")]:
+            var = tk.BooleanVar(value=(key in {"vol","macd","rsi"}))
+            sub_vars[key] = var
+            cb = tk.Checkbutton(sub_frame, text=label, variable=var, command=_mk_redraw,
+                           bg="#E3F2FD", activebackground="#BBDEFB", selectcolor="white",
+                           font=("",9), cursor="hand2")
+            cb.pack(side=tk.LEFT, padx=3)
+
+        # Canvas 容器 (固定 pack, 内部 redraw 时重建 fig)
+        canvas_container = ttk.Frame(dlg); canvas_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
+
+        # ── 闭包: 动态绘制 ──
+        def _draw_ax_regime_bg(ax, data):
+            cur_c = None; seg = 0
+            n = data["n"]; regime_arr = data["regime_arr"]
+            for i in range(n):
+                rc = int(regime_arr[i])
+                if rc != cur_c or i == n - 1:
+                    if cur_c is not None:
+                        cmap = {1:("#FFCDD2",0.55), -1:("#C8E6C9",0.55), 0:("#ECEFF1",0.30)}
+                        color, alpha = cmap.get(cur_c, ("#ECEFF1",0.30))
+                        ax.axvspan(seg - 0.5, i - 0.5, facecolor=color, alpha=alpha, zorder=0)
+                    cur_c = rc; seg = i
+
+        def _redraw():
+            data = stock_data  # 用闭包里的最新数据
+            if data is None: return
+            n = data["n"]
+            closes, opens, highs, lows, vols = data["closes"], data["opens"], data["highs"], data["lows"], data["vols"]
+            x = np.arange(n); bar_w = 0.6
+
+            # 清掉旧 canvas
+            for w in canvas_container.winfo_children(): w.destroy()
+            # 收集要画的附图
+            sub_list = []
+            if sub_vars["vol"].get(): sub_list.append(("vol", "成交量", 1.0))
+            if sub_vars["macd"].get(): sub_list.append(("macd", "MACD", 1.2))
+            if sub_vars["rsi"].get(): sub_list.append(("rsi", "RSI(14)", 1.2))
+            if sub_vars["kdj"].get(): sub_list.append(("kdj", "KDJ(9,3,3)", 1.2))
+            if sub_vars["obv"].get(): sub_list.append(("obv", "OBV", 1.2))
+            if sub_vars["bias"].get(): sub_list.append(("bias", "BIAS(12)", 1.0))
+
+            rows = 1 + len(sub_list)
+            if rows == 1: rows = 2
+            ratios = [4.5] + [h for _, _, h in sub_list]
+            if len(sub_list) == 0: ratios.append(1.0)
+
+            fig = plt.figure(figsize=(12.8, 8.5))
+            gs = fig.add_gridspec(rows, 1, height_ratios=ratios, hspace=0.04)
+            ax_list = []
+
+            # ── 主图 (第 0 行) ──
+            ax0 = fig.add_subplot(gs[0])
+            ax0.set_xlim(-0.5, n - 0.5)
+            if main_vars["regime"].get(): _draw_ax_regime_bg(ax0, data)
+            for i in range(n):
+                up = closes[i] >= opens[i]
+                c = "#D32F2F" if up else "#388E3C"
+                ax0.plot([x[i], x[i]], [lows[i], highs[i]], color=c, lw=0.5, zorder=3)
+                ax0.bar(x[i], abs(closes[i] - opens[i]), bottom=min(closes[i], opens[i]),
+                        width=bar_w, color=c, edgecolor=c, zorder=3)
+            if main_vars["boll"].get():
+                ax0.fill_between(x, data["boll_upper"], data["boll_lower"], color="#03A9F4", alpha=0.10, zorder=1)
+                ax0.plot(x, data["boll_upper"], color="#03A9F4", lw=0.6, ls="--", label="BOLL上", zorder=1)
+                ax0.plot(x, data["boll_lower"], color="#03A9F4", lw=0.6, ls="--", label="BOLL下", zorder=1)
+                ax0.plot(x, data["boll_mid"], color="#03A9F4", lw=0.7, label="BOLL中", zorder=1)
+            if main_vars["ma"].get():
+                ax0.plot(x, data["ma5"], color="#9E9E9E", lw=0.7, label="MA5", zorder=4, alpha=0.7)
+                ax0.plot(x, data["ma20"], color="#FF9800", lw=1.0, label="MA20", zorder=4)
+                ax0.plot(x, data["ma60"], color="#2196F3", lw=1.0, label="MA60", zorder=4)
+            if main_vars["ichimoku"].get():
+                # 🆕 一目均衡云带 → 红绿语义 (和 Regime 背景一致)
+                # 先行A ≥ 先行B = 多头 Cloud → 红色偏多
+                # 先行A < 先行B = 空头 Cloud → 绿色偏空
+                ax0.fill_between(x, data["senkou_a"], data["senkou_b"], where=(data["senkou_a"] >= data["senkou_b"]),
+                                 color="#D32F2F", alpha=0.12, zorder=2, label="🔴多头云(A≥B)")
+                ax0.fill_between(x, data["senkou_a"], data["senkou_b"], where=(data["senkou_a"] < data["senkou_b"]),
+                                 color="#388E3C", alpha=0.12, zorder=2, label="🟢空头云(A<B)")
+                ax0.plot(x, data["tenkan"], color="#E91E63", lw=1.0, label="转换线(短)", zorder=4)
+                ax0.plot(x, data["kijun"], color="#FFC107", lw=1.0, label="基准线(中)", zorder=4)
+                ax0.plot(x, data["senkou_a"], color="#FF8A65", lw=0.6, ls="--", label="先行带A", zorder=4)
+                ax0.plot(x, data["senkou_b"], color="#81C784", lw=0.6, ls="--", label="先行带B", zorder=4)
+                ax0.plot(x, data["chikou"], color="#9C27B0", lw=0.7, ls=":", label="迟行带", zorder=4)
+                # 🆕 勾一目均衡时, 自动叠加 Regime 红绿背景 (如果 Regime 没勾)
+                if not main_vars["regime"].get():
+                    _draw_ax_regime_bg(ax0, data)
+            if main_vars["sar"].get():
+                sar_colors = ["#388E3C" if data["sar_trend"][i] == 1 else "#D32F2F" for i in range(n)]
+                ax0.scatter(x, data["sar_arr"], c=sar_colors, s=10, zorder=5, label="SAR")
+            # ── 🆕 新指标绘图 ──
+            if main_vars["svr"].get():
+                # 支撑压力线: 两条斜线 (趋势线)
+                svr_s = data.get("svr_support"); svr_r = data.get("svr_resistance")
+                if svr_s is not None:
+                    ax0.axhline(svr_s, color="#388E3C", lw=1.0, ls="--", zorder=4, label=f"支撑 {svr_s:.2f}")
+                if svr_r is not None:
+                    ax0.axhline(svr_r, color="#D32F2F", lw=1.0, ls="--", zorder=4, label=f"压力 {svr_r:.2f}")
+            if main_vars["vwap"].get():
+                ax0.plot(x, data["vwap_arr"], color="#FFD700", lw=1.1, label="VWAP主力成本", zorder=4)
+            if main_vars["supertrend"].get():
+                st = data["supertrend_arr"]; sd = data["supertrend_dir"]
+                st_colors = ["#D32F2F" if sd[i] == 1 else "#388E3C" for i in range(n)]
+                ax0.plot(x, st, color="#673AB7", lw=0.9, label="SuperTrend", zorder=4)
+                for i in range(n):
+                    ax0.scatter(x[i], st[i], c=st_colors[i], s=6, zorder=5)
+            if main_vars["td"].get():
+                td_s = data["td_setup"]; td_c = data["td_countdown"]
+                # Setup: 9/17 数字标记 (红绿)
+                for i in range(n):
+                    if td_s[i] is not None:
+                        ax0.text(x[i], highs[i]*1.01, str(td_s[i]),
+                                fontsize=7, ha="center", va="bottom",
+                                color="#D32F2F" if td_s[i] > 0 else "#388E3C", zorder=6)
+                    if td_c[i] is not None:
+                        ax0.text(x[i], lows[i]*0.99, str(td_c[i]),
+                                fontsize=7, ha="center", va="top",
+                                color="#E91E63", zorder=6)
+            if main_vars["camarilla"].get():
+                cam = data.get("camarilla", {})
+                cam_lines = [
+                    ("R4", cam.get("R4",0), "#FF5722", "-"),
+                    ("R3", cam.get("R3",0), "#FF9800", "-"),
+                    ("R2", cam.get("R2",0), "#FFC107", "--"),
+                    ("R1", cam.get("R1",0), "#FFD54F", "--"),
+                    ("PP", cam.get("PP",0), "#9E9E9E", ":"),
+                    ("S1", cam.get("S1",0), "#81C784", "--"),
+                    ("S2", cam.get("S2",0), "#66BB6A", "--"),
+                    ("S3", cam.get("S3",0), "#4CAF50", "-"),
+                    ("S4", cam.get("S4",0), "#2E7D32", "-"),
+                ]
+                for lbl, val, col, ls_ in cam_lines:
+                    if val and val > 0:
+                        ax0.axhline(val, color=col, lw=0.6, ls=ls_, alpha=0.7, zorder=3, label=f"Camarilla {lbl}={val:.2f}")
+
+            handles, labels = ax0.get_legend_handles_labels()
+            if handles:
+                ax0.legend(handles, labels, loc="upper left", fontsize=7, ncol=5, framealpha=0.9)
+            ax0.set_ylabel("价格")
+            ax0.grid(True, alpha=0.12)
+            ax_list.append(ax0)
+
+            # ── 附图 (逐个画) ──
+            for idx, (key, label, h_ratio) in enumerate(sub_list):
+                ax = fig.add_subplot(gs[1 + idx], sharex=ax0)
+                if key == "vol":
+                    vc = ["#D32F2F" if closes[i] >= opens[i] else "#388E3C" for i in range(n)]
+                    ax.bar(x, vols, width=bar_w, color=vc, alpha=0.75)
+                elif key == "macd":
+                    hc = ["#D32F2F" if v >= 0 else "#388E3C" for v in data["macd_hist"]]
+                    ax.bar(x, data["macd_hist"], width=bar_w, color=hc, alpha=0.75)
+                    ax.plot(x, data["dif_all"], color="#FF9800", lw=0.9, label="DIF")
+                    ax.plot(x, data["dea_all"], color="#2196F3", lw=0.9, label="DEA")
+                    ax.axhline(0, color="gray", lw=0.4); ax.legend(loc="upper left", fontsize=7)
+                elif key == "rsi":
+                    ax.plot(x, data["rsi_all"], color="#9C27B0", lw=0.9, label="RSI(14)")
+                    ax.axhline(70, color="#D32F2F", lw=0.5, ls="--")
+                    ax.axhline(30, color="#388E3C", lw=0.5, ls="--")
+                    ax.fill_between(x, 70, data["rsi_all"], where=(data["rsi_all"] >= 70), alpha=0.25, color="#D32F2F")
+                    ax.fill_between(x, 30, data["rsi_all"], where=(data["rsi_all"] <= 30), alpha=0.25, color="#388E3C")
+                    ax.set_ylim(0, 100); ax.legend(loc="upper left", fontsize=7)
+                elif key == "kdj":
+                    ax.plot(x, data["kdjk"], color="#FF9800", lw=0.9, label="K")
+                    ax.plot(x, data["kdjd"], color="#2196F3", lw=0.9, label="D")
+                    ax.plot(x, data["kdjj"], color="#E91E63", lw=0.9, label="J")
+                    ax.axhline(80, color="#D32F2F", lw=0.4, ls="--")
+                    ax.axhline(20, color="#388E3C", lw=0.4, ls="--")
+                    ax.set_ylim(-20, 120); ax.legend(loc="upper left", fontsize=7)
+                elif key == "obv":
+                    oc = ["#D32F2F" if closes[i] >= closes[i-1] else "#388E3C" for i in range(n)]
+                    ax.bar(x, data["obv_all"], width=bar_w, color=oc, alpha=0.7)
+                    ax.plot(x, pd.Series(data["obv_all"]).rolling(20).mean().values,
+                            color="#607D8B", lw=0.9, label="OBV_MA20")
+                    ax.legend(loc="upper left", fontsize=7)
+                elif key == "bias":
+                    ax.plot(x, data["bias12"], color="#FF9800", lw=0.9, label="BIAS(12)")
+                    ax.axhline(0, color="gray", lw=0.4)
+                    ax.axhline(10, color="#D32F2F", lw=0.5, ls="--")
+                    ax.axhline(-10, color="#388E3C", lw=0.5, ls="--")
+                    ax.legend(loc="upper left", fontsize=7)
+                ax.set_ylabel(label, fontsize=9)
+                ax.grid(True, alpha=0.12)
+                ax_list.append(ax)
+
+            # 隐藏中间 ax 的 x 标签
+            for ax in ax_list[:-1]: plt.setp(ax.get_xticklabels(), visible=False)
+            if ax_list:
+                last_ax = ax_list[-1]
+                step = max(1, n // 20)
+                last_ax.set_xticks(x[::step])
+                last_ax.set_xticklabels([d.strftime("%m-%d") for d in data["dates"][::step]],
+                                        rotation=30, fontsize=8)
+
+            fig.tight_layout(rect=[0, 0, 1, 0.97])
+
+            # Canvas
+            canvas = FigureCanvasTkAgg(fig, master=canvas_container)
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            try:
+                from matplotlib.backends.backend_tkagg import NavigationToolbar2TkAgg
+                nav = NavigationToolbar2TkAgg(canvas, canvas_container)
+            except ImportError:
+                nav = NavigationToolbar2Tk(canvas, canvas_container)
+            nav.update()
+            canvas.draw_idle()
+            canvas.get_tk_widget().bind("<Double-1>", lambda e: self._show_regime_legend_help())
+            canvas.mpl_connect("button_press_event",
+                                lambda e: self._show_regime_legend_help() if e.dblclick else None)
+
+        # 首次更新标题 + 渲染
+        _update_title_and_indicators(code, name, stock_data)
+        _redraw()
+
+    def _show_regime_legend_help(self, closes=None):
+        """📖 弹出红绿背景图完整说明 + 实时胜率回测
+        Args: closes=当前股票收盘价数组 (可空, 空则只显示算法说明)"""
+        help_win = tk.Toplevel(self.root)
+        help_win.title("📖 红绿背景图 · 算法说明 + 胜率统计")
+        help_win.geometry("680x780")
+        help_win.transient(self.root); help_win.grab_set()
+
+        # 顶部标题
+        tk.Label(help_win, text="🏥 红绿背景图 (Regime) 完整说明",
+                 font=("", 14, "bold"), fg="#1565C0",
+                 bg="#FAFAFA").pack(fill=tk.X, pady=(8, 4))
+
+        # Canvas 滚动
+        canvas = tk.Canvas(help_win, highlightthickness=0, bg="#FAFAFA")
+        vsb = ttk.Scrollbar(help_win, orient="vertical", command=canvas.yview)
+        frame = tk.Frame(canvas, bg="#FAFAFA")
+        frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=frame, anchor="nw", width=660)
+        canvas.configure(yscrollcommand=vsb.set, bg="#FAFAFA")
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def _section(parent, title, color):
+            lab = tk.Label(parent, text=title, font=("", 13, "bold"),
+                           fg="white", bg=color, anchor="w", padx=12, pady=6)
+            lab.pack(fill=tk.X, padx=8, pady=(10, 2))
+            return lab
+
+        def _formula(parent, text):
+            r = tk.Label(parent, text=text, bg="#FFF8E1", fg="#5D4037",
+                         font=("Menlo", 10), anchor="w", justify="left",
+                         padx=10, pady=6)
+            r.pack(fill=tk.X, padx=8, pady=2)
+
+        def _row(parent, icon, left, right, left_fg="#222"):
+            r = tk.Frame(parent, bg="#FAFAFA")
+            r.pack(fill=tk.X, padx=10, pady=1)
+            tk.Label(r, text=icon, width=2, anchor="center",
+                     bg="#FAFAFA", font=("", 12)).pack(side=tk.LEFT)
+            tk.Label(r, text=left, width=28, anchor="w",
+                     bg="#FAFAFA", fg=left_fg, font=("", 10, "bold")).pack(side=tk.LEFT)
+            tk.Label(r, text=right, bg="#FAFAFA", anchor="w",
+                     font=("", 10), fg="#555").pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # ═══ ① 算法核心公式 ═══
+        _section(frame, "① 红绿背景图算法 (4维度打分 → 平滑 → 阈值判定)", "#1565C0")
+
+        tk.Label(frame, text="每个交易日计算 4 个技术维度, 每个维度 2 分, 共 8 分:",
+                 bg="#FAFAFA", fg="#333", font=("", 10)).pack(anchor="w", padx=12, pady=(4, 2))
+
+        _formula(frame, """• 维度 1: MA20 多空 (权重 2/8)
+    close > MA20    → 看多 +2
+    close ≤ MA20    → 看空 -2
+
+• 维度 2: MA20 vs MA60 (权重 2/8)
+    MA20 > MA60    → 看多 +2 (多头排列)
+    MA20 ≤ MA60    → 看空 -2 (空头排列)
+
+• 维度 3: MACD (权重 2/8)
+    DIF > DEA      → 看多 +2 (金叉)
+    DIF ≤ DEA      → 看空 -2 (死叉)
+
+• 维度 4: RSI(14) (权重 2/8)
+    RSI > 55       → 看多 +2 (强势区)
+    RSI < 45       → 看空 -2 (弱势区)
+    45~55          → 中性 0""")
+
+        _formula(frame, """→ 综合得分 = (bull_sum - bear_sum) / total_score   范围 [-1.0, +1.0]
+→ 5日平滑 = rolling(5).mean()    避免单日跳变
+→ 阈值判定:
+    平滑得分 > +0.15  → 🟥 红底 (Regime=+1, 可买入)
+    平滑得分 < -0.15  → 🟩 绿底 (Regime=-1, 不可买)
+    中间区间          → ⚪ 浅灰底 (Regime=0, 观望中性)""")
+
+        # ═══ ② 颜色说明 ═══
+        _section(frame, "② 颜色图例", "#2E7D32")
+
+        _row(frame, "🟥", "淡红底 #FFCDD2", "看多区 (Regime=+1)")
+        _row(frame, "🟩", "淡绿底 #C8E6C9", "看空区 (Regime=-1)")
+        _row(frame, "⚪", "浅灰底 #ECEFF1", "中性过渡区")
+        tk.Label(frame, text="", bg="#FAFAFA").pack()
+        _row(frame, "🔴", "红K线 #D32F2F", "收盘 ≥ 开盘 (日涨)")
+        _row(frame, "🟢", "绿K线 #388E3C", "收盘 < 开盘 (日跌)")
+        _row(frame, "📊", "红/绿成交量", "红涨绿跌, 量能配合")
+
+        # ═══ ③ 注意事项 ═══
+        _section(frame, "③ 使用注意事项 & 典型陷阱", "#E65100")
+
+        _formula(frame, """⚠️ 连续红根数多 = 趋势强, 但也可能过热!
+• 连续 ≥ 10 根红底: 大概率主升浪, 但追高风险大
+• 从绿转红第一天: 最佳买点 (右侧确认)
+• 红转绿当天: 止盈/止损信号, 不宜抄底
+• 连续 ≥ 8 根绿底: 下跌通道, 耐心等待
+
+⚠️ 假信号识别:
+• 震荡市 (Regime频繁切换): 少做多看, 等待趋势明朗
+• 突发利好 (跳空红1天又绿): 是脉冲不是趋势, 别追
+• MACD底背离 + RSI 40以下: 红底初期, 胜率最高""")
+
+        # ═══ ④ 实时胜率回测 (如果有当前股票数据) ═══
+        _section(frame, "④ 🔬 当前股票历史胜率回测", "#6A1B9A")
+
+        if closes is not None and len(closes) >= 60:
+            import numpy as _np2, pandas as _pd2
+            try:
+                regime_arr, _, _ = self._compute_regime_on_closes(closes)
+                closes2 = _np2.array(closes, dtype=float)
+                n2 = len(closes2)
+
+                # 统计: 连续红/绿 3/5/10 根后, 持有 5/10/20 天的胜率
+                stats = {
+                    "red": {"3": {"5":[], "10":[], "20":[]},
+                            "5": {"5":[], "10":[], "20":[]},
+                            "10": {"5":[], "10":[], "20":[]}},
+                    "green": {"3": {"5":[], "10":[], "20":[]},
+                              "5": {"5":[], "10":[], "20":[]},
+                              "10": {"5":[], "10":[], "20":[]}},
+                }
+                # 遍历所有位置, 找到连续 N 根同色的起点
+                i = 0
+                while i < n2 - 25:
+                    cur_r = int(regime_arr[i])
+                    if cur_r not in (1, -1):
+                        i += 1; continue
+                    # 数连续同色根数
+                    j = i
+                    while j < n2 and int(regime_arr[j]) == cur_r: j += 1
+                    streak = j - i
+                    color_key = "red" if cur_r == 1 else "green"
+                    for N in [3, 5, 10]:
+                        if streak >= N and j + 20 < n2:
+                            buy_price = closes2[j - 1]  # 连续N根的最后一天收盘价
+                            for hold in [5, 10, 20]:
+                                if j - 1 + hold < n2:
+                                    ret = (closes2[j - 1 + hold] - buy_price) / buy_price * 100
+                                    stats[color_key][str(N)][str(hold)].append(ret)
+                    i = j  # 跳过已统计区间
+
+                def _print_stats(label, data):
+                    tk.Label(frame, text=label, font=("", 10, "bold"),
+                             bg="#FAFAFA", fg="#333").pack(anchor="w", padx=12, pady=(4, 0))
+                    header = tk.Frame(frame, bg="#FAFAFA")
+                    header.pack(fill=tk.X, padx=12)
+                    tk.Label(header, text="连红/绿 N 根", width=14, bg="#FAFAFA",
+                             font=("", 9, "bold")).pack(side=tk.LEFT)
+                    for h in ["5天胜率", "5天均益", "10天胜率", "10天均益", "20天胜率", "20天均益"]:
+                        tk.Label(header, text=h, width=10, bg="#FAFAFA",
+                                 font=("", 9, "bold"), fg="#555").pack(side=tk.LEFT)
+                    for N in ["3", "5", "10"]:
+                        vals = data[N]
+                        row = tk.Frame(frame, bg="#FAFAFA")
+                        row.pack(fill=tk.X, padx=12)
+                        tk.Label(row, text=f"≥{N} 根", width=14, bg="#FAFAFA",
+                                 font=("", 9)).pack(side=tk.LEFT)
+                        for hold in ["5", "10", "20"]:
+                            arr = vals[hold]
+                            if len(arr) >= 1:
+                                wr = sum(1 for r in arr if r > 0) / len(arr) * 100
+                                avg = sum(arr) / len(arr)
+                                wr_fg = "#2E7D32" if wr >= 55 else "#E53935"
+                                avg_fg = "#2E7D32" if avg > 0 else "#E53935"
+                                tk.Label(row, text=f"{wr:.0f}%", width=6, bg="#FAFAFA",
+                                         fg=wr_fg, font=("", 9, "bold")).pack(side=tk.LEFT)
+                                tk.Label(row, text=f"{avg:+.1f}%", width=6, bg="#FAFAFA",
+                                         fg=avg_fg, font=("", 9)).pack(side=tk.LEFT)
+                            else:
+                                tk.Label(row, text="—", width=6, bg="#FAFAFA",
+                                         fg="#999").pack(side=tk.LEFT)
+                                tk.Label(row, text="—", width=6, bg="#FAFAFA",
+                                         fg="#999").pack(side=tk.LEFT)
+
+                tk.Label(frame, text="🟥 红底期间买入后持有胜率 (基于这只股票历史)",
+                         font=("", 11, "bold"), bg="#FAFAFA", fg="#C62828").pack(anchor="w", padx=8, pady=(6, 2))
+                _print_stats("红底 (Regime=+1)", stats["red"])
+                tk.Label(frame, text="🟩 绿底期间买入后持有胜率 (基于这只股票历史)",
+                         font=("", 11, "bold"), bg="#FAFAFA", fg="#2E7D32").pack(anchor="w", padx=8, pady=(8, 2))
+                _print_stats("绿底 (Regime=-1)", stats["green"])
+
+            except Exception as _e:
+                tk.Label(frame, text=f"回测计算失败: {_e}", bg="#FAFAFA",
+                         fg="#E53935", font=("", 10)).pack(pady=8)
+        else:
+            tk.Label(frame, text="⚠️ 请先在红绿背景图上查看某只股票, 然后双击弹窗看该股票的历史胜率统计",
+                     bg="#FFF3E0", fg="#E65100", font=("", 10),
+                     padx=12, pady=10, wraplength=620, justify="left").pack(padx=10, pady=8)
+
+        # ═══ ⑤ SAR + 一目均衡 (红绿云带已与 Regime 语义统一) ═══
+        _section(frame, "⑤ SAR 抛物线 & 一目均衡云带 (与红绿背景统一语义)", "#6A1B9A")
+
+        _formula(frame, """🎯 一目均衡表 — 红绿云带 (和 Regime 背景完全一致的多空语义):
+
+🔴 红色云带 (先行A ≥ 先行B) = 多头 Cloud
+    → 价格在云带上方 = 强势看多, 可买入
+    → 云带本身 = 动态支撑, 跌破=趋势转弱信号
+
+🟢 绿色云带 (先行A < 先行B) = 空头 Cloud
+    → 价格在云带下方 = 弱势看空, 不宜操作
+    → 云带本身 = 动态压力, 突破=反转信号
+
+📐 一目均衡 5 条线:
+    转换线(粉) = 短周期趋势参考 (类似 MA9)
+    基准线(黄) = 中周期趋势参考 (类似 MA26)
+    先行带A    = (转换+基准)/2, 提前26日画的压力/支撑
+    先行带B    = 52日极值中值, 提前26日画
+    迟行带(紫) = 收盘后移26日, 确认趋势""")
+
+        tk.Label(frame, text="", bg="#FAFAFA").pack()
+        _row(frame, "●", "绿圆圈 SAR", "SAR在K线下沿 = 上升趋势确认, 价格 > SAR")
+        _row(frame, "●", "红圆圈 SAR", "SAR在K线上沿 = 下降趋势确认, 价格 < SAR")
+        tk.Label(frame, text="", bg="#FAFAFA").pack()
+        _row(frame, "🔴", "多头云带 (红)", "先行A≥先行B = 做多区, 价格在上方为强")
+        _row(frame, "🟢", "空头云带 (绿)", "先行A<先行B = 做空区, 价格在下方为弱")
+        _row(frame, "💡", "叠加效果", "勾一目均衡时自动叠加 Regime 红绿背景, 一眼多空")
+
+        # ═══ 底部 ═══
+        tk.Label(help_win, text="💡 双击红绿背景图 / 点 ❓ 按钮 → 随时打开此说明",
+                 font=("", 10), bg="#FAFAFA", fg="#888").pack(pady=(4, 8))
+
+    # ── 技术指标辅助函数 ──
+    def _macd_hist_func(self, closes):
+        """MACD (12,26,9)"""
+        s = pd.Series(closes, dtype=float)
+        ef = s.ewm(span=12, adjust=False).mean()
+        es = s.ewm(span=26, adjust=False).mean()
+        dif = (ef - es).values
+        dea = pd.Series(dif).ewm(span=9, adjust=False).mean().values
+        return dif, dea, None
+
+    def _rsi_func(self, closes, w=14):
+        """RSI"""
+        s = pd.Series(closes, dtype=float)
+        delta = s.diff(); gain = delta.clip(lower=0); loss = -delta.clip(upper=0)
+        rs = gain.rolling(w).mean() / loss.rolling(w).mean()
+        return (100 - 100 / (1 + rs)).values
+
+    def _kdj_func(self, highs, lows, closes, n=9, m1=3, m2=3):
+        """KDJ (n, m1, m2)"""
+        h = pd.Series(highs, dtype=float)
+        l = pd.Series(lows, dtype=float)
+        c = pd.Series(closes, dtype=float)
+        lowest_l = l.rolling(n).min()
+        highest_h = h.rolling(n).max()
+        rsv = (c - lowest_l) / (highest_h - lowest_l) * 100
+        rsv = rsv.fillna(50)
+        k = rsv.ewm(com=m1 - 1, adjust=False).mean()
+        d = k.ewm(com=m2 - 1, adjust=False).mean()
+        j = 3 * k - 2 * d
+        return k.values, d.values, j.values
+
+    def _obv_func(self, closes, vols):
+        """OBV"""
+        c = pd.Series(closes, dtype=float)
+        v = pd.Series(vols, dtype=float)
+        obv = pd.Series(np.zeros(len(c)), dtype=float)
+        for i in range(1, len(c)):
+            if c.iloc[i] > c.iloc[i - 1]:
+                obv.iloc[i] = obv.iloc[i - 1] + v.iloc[i]
+            elif c.iloc[i] < c.iloc[i - 1]:
+                obv.iloc[i] = obv.iloc[i - 1] - v.iloc[i]
+            else:
+                obv.iloc[i] = obv.iloc[i - 1]
+        return obv.values
+
+    # ── 🆕 新指标函数 ──
+    def _bias_func(self, closes, n=12):
+        """BIAS 乖离率: (C - MA(n)) / MA(n) * 100"""
+        import numpy as np
+        s = pd.Series(closes, dtype=float)
+        ma = s.rolling(n).mean()
+        return ((s - ma) / ma * 100).values
+
+    def _sar_func(self, highs, lows, af_start=0.02, af_step=0.02, af_max=0.2):
+        """SAR 抛物线 (Wilder) — 返回 sar 数组 + trend(1上/-1下)"""
+        import numpy as np
+        n = len(highs)
+        sar = np.zeros(n); trend = np.zeros(n); ep = np.zeros(n); af = np.zeros(n)
+        sar[0] = lows[0]; trend[0] = 1; ep[0] = highs[0]; af[0] = af_start
+        for i in range(1, n):
+            if trend[i-1] == 1:
+                sar[i] = sar[i-1] + af[i-1] * (ep[i-1] - sar[i-1])
+                sar[i] = max(sar[i], lows[i-1] if i > 1 else lows[i])
+                if highs[i] > ep[i-1]: ep[i] = highs[i]; af[i] = min(af[i-1] + af_step, af_max)
+                else: ep[i] = ep[i-1]; af[i] = af[i-1]
+                if lows[i] < sar[i]: trend[i] = -1; sar[i] = ep[i-1]; ep[i] = lows[i]; af[i] = af_start
+                else: trend[i] = 1
+            else:
+                sar[i] = sar[i-1] + af[i-1] * (ep[i-1] - sar[i-1])
+                sar[i] = min(sar[i], highs[i-1] if i > 1 else highs[i])
+                if lows[i] < ep[i-1]: ep[i] = lows[i]; af[i] = min(af[i-1] + af_step, af_max)
+                else: ep[i] = ep[i-1]; af[i] = af[i-1]
+                if highs[i] > sar[i]: trend[i] = 1; sar[i] = ep[i-1]; ep[i] = highs[i]; af[i] = af_start
+                else: trend[i] = -1
+        return sar, trend
+
+    def _ichimoku_func(self, highs, lows, closes):
+        """一目均衡表 — 返回 5 条线: 转换线,基准线,先行带A,先行带B,迟行带"""
+        h = pd.Series(highs, dtype=float)
+        l = pd.Series(lows, dtype=float)
+        tenkan = (h.rolling(9).max() + l.rolling(9).min()) / 2
+        kijun = (h.rolling(26).max() + l.rolling(26).min()) / 2
+        senkou_a = ((tenkan + kijun) / 2).shift(26)
+        senkou_b = ((h.rolling(52).max() + l.rolling(52).min()) / 2).shift(26)
+        chikou = pd.Series(closes, dtype=float).shift(-26)
+        return tenkan.values, kijun.values, senkou_a.values, senkou_b.values, chikou.values
+
+    # ── 🆕 新指标计算函数 ──
+
+    def _compute_support_resistance(self, highs, lows, closes):
+        """支撑压力线: 用前后各2根的Pivot点, 在MA趋势下画线
+        Returns: (support_price or None, resistance_price or None) — 最后一根K线处的水平价"""
+        try:
+            n = len(closes)
+            if n < 30: return None, None
+            h = np.asarray(highs, dtype=float)
+            l = np.asarray(lows, dtype=float)
+            c = np.asarray(closes, dtype=float)
+            # 简单枢轴: 前一日最高最低作为当日支撑压力
+            pivots = (h[:-1] + l[:-1] + c[:-1]) / 3.0
+            # 找最近的 pivot, 用最近10日高低点做支撑压力
+            hh = np.max(h[-10:]); ll = np.min(l[-10:])
+            sup = float(ll); res = float(hh)
+            return sup, res
+        except Exception:
+            return None, None
+
+    def _compute_supertrend(self, highs, lows, closes, atr_period=10, multiplier=3.0):
+        """SuperTrend — 基于ATR的趋势线, 方向=1上升(绿), -1下降(红)
+        Returns: (supertrend_arr, direction_arr)"""
+        try:
+            h = np.asarray(highs, dtype=float)
+            l = np.asarray(lows, dtype=float)
+            c = np.asarray(closes, dtype=float)
+            n = len(c)
+            tr = np.maximum(h - l, np.maximum(np.abs(h - np.roll(c,1)), np.abs(l - np.roll(c,1))))
+            tr[0] = h[0] - l[0]
+            atr = pd.Series(tr).rolling(atr_period, min_periods=1).mean().values
+            # 基础上轨/下轨
+            hl2 = (h + l) / 2.0
+            upper = hl2 + multiplier * atr
+            lower = hl2 - multiplier * atr
+            st = np.zeros(n); direction = np.zeros(n, dtype=int)
+            st[0] = lower[0]; direction[0] = -1
+            for i in range(1, n):
+                # 更新上轨: 当前upper比昨天小 或 昨天收盘>昨天upper
+                if upper[i] < st[i-1] or c[i-1] > st[i-1]:
+                    st[i] = lower[i] if direction[i-1] == -1 else upper[i]
+                else:
+                    if direction[i-1] == 1:  # 上升趋势
+                        st[i] = max(st[i-1], lower[i])
+                    else:  # 下降趋势
+                        st[i] = min(st[i-1], upper[i])
+                # 判断切换
+                if c[i] > st[i-1]:
+                    direction[i] = 1
+                    st[i] = lower[i] if direction[i-1] != 1 else st[i]
+                elif c[i] < st[i-1]:
+                    direction[i] = -1
+                    st[i] = upper[i] if direction[i-1] != -1 else st[i]
+                else:
+                    direction[i] = direction[i-1]
+            return st, direction
+        except Exception as e:
+            print(f"[SuperTrend] 计算失败: {e}")
+            return closes.copy(), np.zeros(len(closes), dtype=int)
+
+    def _compute_td_sequence(self, closes):
+        """TD序列 (Tom DeMark): 比较当前收盘 vs 4日前收盘
+        - Setup: 连续计数 (红>绿<)  9 = TD Setup
+        - Countdown: 13 = TD Countdown
+        Returns: (setup_arr, countdown_arr) — 值在1-9或1-17, None表示无"""
+        try:
+            c = np.asarray(closes, dtype=float)
+            n = len(c)
+            setup = np.full(n, None, dtype=object)
+            countdown = np.full(n, None, dtype=object)
+            # Setup: close > close[i-4] 红计数, close < close[i-4] 绿计数
+            up_count = 0; dn_count = 0
+            for i in range(4, n):
+                if c[i] > c[i-4]:
+                    up_count += 1; dn_count = 0
+                    setup[i] = up_count if up_count >= 6 else None
+                elif c[i] < c[i-4]:
+                    dn_count += 1; up_count = 0
+                    setup[i] = -dn_count if dn_count >= 6 else None
+                else:
+                    up_count = 0; dn_count = 0
+            # Countdown: 简化版, 9 Setup 后开始计数到 17
+            cd_count = 0; in_cd = False
+            for i in range(4, n):
+                if setup[i] is not None and abs(setup[i]) >= 9:
+                    in_cd = True; cd_count = 0
+                if in_cd:
+                    if c[i] < c[i-2]:  # countdown bar
+                        cd_count += 1
+                    if cd_count > 0 and cd_count <= 17:
+                        countdown[i] = cd_count
+                    if cd_count >= 17:
+                        in_cd = False
+            return setup, countdown
+        except Exception:
+            return np.full(len(closes), None, dtype=object), np.full(len(closes), None, dtype=object)
+
+    def _compute_camarilla(self, highs, lows, closes):
+        """Camarilla 枢轴点: R4-R1, PP, S1-S4 — 基于昨日高低收盘
+        Returns: dict with keys R4,R3,R2,R1,PP,S1,S2,S3,S4"""
+        try:
+            h = np.asarray(highs, dtype=float)
+            l = np.asarray(lows, dtype=float)
+            c = np.asarray(closes, dtype=float)
+            # 用最后一根K线的前一天数据
+            if len(h) < 2: return {}
+            h_prev = h[-2]; l_prev = l[-2]; c_prev = c[-2]
+            pp = (h_prev + l_prev + c_prev) / 3.0
+            r1 = pp + 1.1 * (h_prev - l_prev) / 12
+            s1 = pp - 1.1 * (h_prev - l_prev) / 12
+            r2 = pp + 1.1 * (h_prev - l_prev) / 6
+            s2 = pp - 1.1 * (h_prev - l_prev) / 6
+            r3 = pp + 1.1 * (h_prev - l_prev) / 4
+            s3 = pp - 1.1 * (h_prev - l_prev) / 4
+            r4 = pp + 1.1 * (h_prev - l_prev) / 2
+            s4 = pp - 1.1 * (h_prev - l_prev) / 2
+            return {"R4": r4, "R3": r3, "R2": r2, "R1": r1,
+                    "PP": pp,
+                    "S1": s1, "S2": s2, "S3": s3, "S4": s4}
+        except Exception:
+            return {}
+
+
+    # Python 后定义的方法覆盖先定义的 → 旧版曾导致全市场 5500 只无筛选 + 无法停止!
+
+    def _regime_scan_done(self, dlg, results):
+        """扫描完成 → 填 Treeview (含 source 列) + 画汇总图"""
+        import matplotlib.pyplot as plt
+        self._regime_results = results
+        self._regime_scan_status.set(f"✅ 扫描完成 {len(results)} 只")
+        tree = self._regime_tree
+        tree.delete(*tree.get_children())
+        for r in results:
+            regime_txt = {1:"🔴 红",-1:"🟢 绿",0:"⚪ 中"}.get(r["regime"],"?")
+            tags = self._stock_row_tags(r["code"]) if hasattr(self, "_stock_row_tags") else ()
+            tree.insert("", tk.END, values=(
+                r["code"], r["name"], r["sector"], r.get("source",""),
+                regime_txt, r["streak"], f"{r['pct_5d']:+.1f}", f"{r['pct_20d']:+.1f}", f"{r['price']:.1f}"
+            ), tags=tags)
+
+        # 画汇总图
+        fig = self._regime_fig; fig.clear()
+        # 图1: 红/绿/中 饼图
+        red_cnt = sum(1 for r in results if r["regime"] == 1)
+        green_cnt = sum(1 for r in results if r["regime"] == -1)
+        flat_cnt = sum(1 for r in results if r["regime"] == 0)
+        ax1 = fig.add_subplot(131)
+        labels = [f"🔴 红 {red_cnt}", f"⚪ 中 {flat_cnt}", f"🟢 绿 {green_cnt}"]
+        vals = [red_cnt, flat_cnt, green_cnt]
+        colors = ["#EF5350", "#B0BEC5", "#66BB6A"]
+        ax1.pie(vals, labels=labels, colors=colors, startangle=90,
+                autopct=lambda pct: f"{pct:.0f}%")
+        ax1.set_title(f"📊 多空分布 (共{len(results)}只)", fontsize=11, fontweight="bold")
+
+        # 图2: 板块红/绿条形图
+        ax2 = fig.add_subplot(132)
+        from collections import defaultdict
+        sector_stats = defaultdict(lambda: {"red":0,"green":0,"flat":0,"total":0})
+        for r in results:
+            s = r["sector"]; sector_stats[s]["total"] += 1
+            if r["regime"] == 1: sector_stats[s]["red"] += 1
+            elif r["regime"] == -1: sector_stats[s]["green"] += 1
+            else: sector_stats[s]["flat"] += 1
+        sectors = sorted(sector_stats.keys(), key=lambda x: -sector_stats[x]["total"])
+        x = range(len(sectors))
+        reds = [sector_stats[s]["red"] for s in sectors]
+        greens = [sector_stats[s]["green"] for s in sectors]
+        flats = [sector_stats[s]["flat"] for s in sectors]
+        ax2.bar(x, reds, color="#EF5350", label="🔴红")
+        ax2.bar(x, flats, bottom=reds, color="#B0BEC5", label="⚪中")
+        ax2.bar(x, greens, bottom=[r+f for r,f in zip(reds,flats)], color="#66BB6A", label="🟢绿")
+        ax2.set_xticks(list(x)); ax2.set_xticklabels(sectors, rotation=30, fontsize=8)
+        ax2.set_title("🏷️ 板块多空分布", fontsize=11, fontweight="bold")
+        ax2.legend(fontsize=8, loc="upper right")
+        for i, s in enumerate(sectors):
+            t = sector_stats[s]
+            total = t["total"]
+            r_pct = t["red"]/total*100 if total else 0
+            g_pct = t["green"]/total*100 if total else 0
+            ax2.text(i, total+0.2, f"红{r_pct:.0f}% 绿{g_pct:.0f}%", ha="center", fontsize=7, color="#333")
+
+        # 图3: 连续红/绿根数分布 (直方图)
+        ax3 = fig.add_subplot(133)
+        red_streaks = [r["streak"] for r in results if r["regime"] == 1]
+        green_streaks = [r["streak"] for r in results if r["regime"] == -1]
+        if red_streaks:
+            ax3.hist(red_streaks, bins=range(1, max(red_streaks)+2), alpha=0.7,
+                     color="#EF5350", label=f"🔴 红 (n={len(red_streaks)})", density=False)
+        if green_streaks:
+            ax3.hist(green_streaks, bins=range(1, max(green_streaks)+2), alpha=0.7,
+                     color="#66BB6A", label=f"🟢 绿 (n={len(green_streaks)})", density=False)
+        ax3.set_title("📏 连续红/绿根数", fontsize=11, fontweight="bold")
+        ax3.set_xlabel("连续同色K线根数")
+        ax3.set_ylabel("数量")
+        ax3.legend(fontsize=9)
+
+        fig.suptitle(f"🌐 全市场多空扫描 · {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                     fontsize=13, fontweight="bold")
+        fig.tight_layout(rect=[0,0,1,0.95])
+        self._regime_canvas.draw()
+
+    def _export_regime_csv(self):
+        if not self._regime_results: return
+        import csv, os, tkinter.filedialog as _fd
+        default = f"regime_scan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+        path = _fd.asksaveasfilename(defaultextension=".csv", initialfile=default,
+                                      filetypes=[("CSV","*.csv")])
+        if not path: return
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f)
+            w.writerow(["代码","名称","板块","多空","连续根","分数","5日涨跌%","20日涨跌%","现价"])
+            for r in self._regime_results:
+                w.writerow([r["code"], r["name"], r["sector"],
+                           {"1":"红","-1":"绿","0":"中"}.get(str(r["regime"]), "?"),
+                           r["streak"], round(r["score"],3),
+                           r["pct_5d"], r["pct_20d"], r["price"]])
+        self._regime_scan_status.set(f"✅ 已导出 {path}")
+
 
 __all__ = ["DapanMixin"]
