@@ -14773,32 +14773,45 @@ class DapanMixin:
                   foreground=[("selected","#FFFFFF"),("!selected","#FFFFFF")])
 
         def _make_tree(parent, cols, widths=None):
-            """📌 自画表头 (Frame+Label) — 绕过 macOS ttk heading 强制系统色覆盖"""
+            """📌 Canvas 自绘表头 — 动态同步 Treeview 列坐标, 100% 对齐"""
             f = tk.Frame(parent, bg="#121212")
             f.pack(fill=tk.BOTH, expand=True)
-
-            # ① 自画表头 Frame (黑底白字 Label)
-            hf = tk.Frame(f, bg="#000000", height=28)
-            hf.pack(fill=tk.X, side=tk.TOP)
-            hf.pack_propagate(False)
             if widths is None: widths = [120] * len(cols)
-            for i, (lbl, w) in enumerate(zip(cols, widths)):
-                tk.Label(hf, text=lbl, bg="#000000", fg="#FFFFFF",
-                         font=("Microsoft YaHei", 11, "bold"),
-                         anchor="center", bd=0, padx=2).grid(
-                    row=0, column=i, sticky="nsew", padx=1, pady=2)
-                hf.grid_columnconfigure(i, minsize=w)
+
+            # ① Canvas 表头 (黑底, 初始空, 等 Treeview 布局好后再画)
+            hdr = tk.Canvas(f, height=28, bg="#000000", highlightthickness=0,
+                            borderwidth=0, bd=0)
+            hdr.pack(fill=tk.X, side=tk.TOP)
 
             # ② Treeview show="" — 禁用系统默认 heading
             tree = ttk.Treeview(f, columns=cols, show="", height=10,
                                 style="Dark.Treeview")
             vs = ttk.Scrollbar(f, orient=tk.VERTICAL, command=tree.yview)
             tree.configure(yscrollcommand=vs.set)
-            tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=0)
             vs.pack(side=tk.RIGHT, fill=tk.Y)
-            # 列宽
             for i, w in enumerate(widths):
                 tree.column(cols[i], width=w, anchor="center", stretch=True)
+
+            # ③ 动态同步: Treeview 一布局/滚动就重绘 Canvas 表头
+            def _sync_header(*e):
+                hdr.delete("all")
+                hdr.configure(width=tree.winfo_width() + 2)
+                x = 0
+                for i, c in enumerate(cols):
+                    w = tree.column(c, "width")
+                    if not w or w < 5: continue
+                    lbl = cols[i]
+                    # 画分割线
+                    hdr.create_rectangle(x, 0, x+w, 28, fill="#000000", outline="#333333")
+                    hdr.create_text(x + w/2, 14, text=lbl, fill="#FFFFFF",
+                                    font=("Microsoft YaHei", 11, "bold"), anchor="center")
+                    x += w
+            # Treeview 内部水平滚动也会触发 (如果有 hscroll 的话)
+            tree.bind("<Configure>", _sync_header)
+            tree.bind("<<TreeviewOpen>>", lambda e: hdr.after(10, _sync_header))
+            hdr.after(50, _sync_header)  # 首次布局后画
+
             return tree
 
         # Tab 1: 融资余额 Top 排行
@@ -65467,24 +65480,16 @@ class DapanMixin:
         self._regime_canvas = __import__("matplotlib.backends.backend_tkagg", fromlist=["FigureCanvasTkAgg"]).FigureCanvasTkAgg(self._regime_fig, master=chart_tab)
         self._regime_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # Tab 2: 清单表格 — 自画表头 Frame+Label + 点击排序 + 双击 K线
+        # Tab 2: 清单表格 — Canvas 自绘表头 + 点击排序 + 双击 K线
         list_tab = ttk.Frame(nb); nb.add(list_tab, text="📋 明细清单")
         heads = {"code":"代码","name":"名称","sector":"板块","source":"来源","regime":"多空","streak":"连续根","pct5":"5日%","pct20":"20日%","price":"现价"}
         cols = list(heads.keys())
         widths = [110, 90, 70, 80, 55, 55, 60, 60, 65]
 
-        # 自画表头 (黑底白字 Label, 可点击排序)
-        hf = tk.Frame(list_tab, bg="#000000", height=28)
-        hf.pack(fill=tk.X, side=tk.TOP)
-        hf.pack_propagate(False)
-        for i, (c, lbl) in enumerate(heads.items()):
-            w = widths[i]
-            lb = tk.Label(hf, text=lbl, bg="#000000", fg="#FFFFFF",
-                          font=("Microsoft YaHei", 11, "bold"),
-                          anchor="center", cursor="hand2", bd=0, padx=2)
-            lb.grid(row=0, column=i, sticky="nsew", padx=1, pady=2)
-            hf.grid_columnconfigure(i, minsize=w)
-            lb.bind("<Button-1>", lambda e, _c=c: self._treeview_sort_column(tree, _c))
+        # Canvas 表头 (黑底白字, 动态同步 Treeview 列宽)
+        hdr = tk.Canvas(list_tab, height=28, bg="#000000",
+                        highlightthickness=0, borderwidth=0, bd=0)
+        hdr.pack(fill=tk.X, side=tk.TOP)
 
         tree = ttk.Treeview(list_tab, columns=cols, show="", height=25,
                             style="Dark.Treeview")
@@ -65494,6 +65499,27 @@ class DapanMixin:
         self._apply_stock_tag_config(tree)
         tree.bind("<Double-1>", lambda e: self._on_regime_tree_double_click(tree))
         self._regime_sort_col = None; self._regime_sort_rev = False
+
+        # 动态同步 Canvas 表头
+        def _sync_header(*e):
+            hdr.delete("all")
+            hdr.configure(width=tree.winfo_width() + 2)
+            x = 0
+            for i, c in enumerate(cols):
+                w = tree.column(c, "width")
+                if not w or w < 5: continue
+                lbl = heads[c]
+                hdr.create_rectangle(x, 0, x+w, 28, fill="#000000", outline="#333333")
+                hdr.create_text(x + w/2, 14, text=lbl, fill="#FFFFFF",
+                                font=("Microsoft YaHei", 11, "bold"),
+                                anchor="center", tags=(f"col_{i}",))
+                hdr.create_rectangle(x, 0, x+w, 28, outline="",
+                                     tags=(f"col_{i}",))  # 透明点击热区
+                hdr.tag_bind(f"col_{i}", "<Button-1>",
+                             lambda e, _c=c: self._treeview_sort_column(tree, _c))
+                x += w
+        tree.bind("<Configure>", _sync_header)
+        hdr.after(80, _sync_header)
 
         self._regime_tree = tree
         self._regime_results = []
