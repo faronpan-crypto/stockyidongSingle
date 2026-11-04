@@ -65367,6 +65367,34 @@ class DapanMixin:
         _build_sector_tab(sec_nb, self.REGIME_CONCEPT_SECTORS, "🔥 概念")
         _update_sec_count()
 
+        # ── 💎 深度筛选面板 (基金重仓 + 振幅) — 独立一键扫描 ──
+        deep_frame = ttk.LabelFrame(dlg, text="💎 深度筛选 (基金重仓 + 振幅)  —  与板块筛选叠加生效",
+                                     padding=(8, 4))
+        deep_frame.pack(fill=tk.X, padx=8, pady=(4, 4))
+
+        # 行 1: 基金重仓 Checkbutton + 振幅阈值
+        d1 = ttk.Frame(deep_frame); d1.pack(fill=tk.X)
+        self._regime_fund_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(d1, text="📦 仅基金重仓股 (东方财富 2025Q4 主力持仓)",
+                        variable=self._regime_fund_var).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Label(d1, text="20日最低振幅 ≥").pack(side=tk.LEFT)
+        self._regime_amp_var = tk.IntVar(value=40)
+        amp_scale = ttk.Scale(d1, from_=20, to=150, orient=tk.HORIZONTAL,
+                              variable=self._regime_amp_var, length=200, command=None)
+        amp_scale.pack(side=tk.LEFT, padx=6)
+        self._regime_amp_lbl = ttk.Label(d1, text="40%", width=6, foreground="#c62828", font=("",10,"bold"))
+        self._regime_amp_var.trace_add("write", lambda *_: self._regime_amp_lbl.config(text=f"{self._regime_amp_var.get()}%"))
+        self._regime_amp_lbl.pack(side=tk.LEFT)
+        ttk.Label(d1, text="  (炬芯科技20日振幅≈35%)", foreground="#888").pack(side=tk.LEFT, padx=6)
+
+        # 行 2: 独立一键扫描 + 提示
+        d2 = ttk.Frame(deep_frame); d2.pack(fill=tk.X, pady=(4, 0))
+        ttk.Button(d2, text="💎 一键深度扫描 (基金重仓+振幅)", width=30,
+                   command=lambda: self._run_fund_amp_scan(dlg)).pack(side=tk.LEFT)
+        self._regime_deep_status = ttk.Label(d2, text="👉 勾「基金重仓」+ 调振幅阈值 → 点一键扫描",
+                                             foreground="#555")
+        self._regime_deep_status.pack(side=tk.LEFT, padx=10)
+
         # ── 底部按钮 (先 pack → 固定底部, Notebook 后 pack → 吃中间空间) ──
         bot = ttk.Frame(dlg); bot.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(4, 8))
         self._regime_start_btn = ttk.Button(bot, text="🔄 开始扫描",
@@ -65471,6 +65499,181 @@ class DapanMixin:
         for _c in heads:
             _orig = tv.heading(_c)["text"].rstrip(" ▲▼")
             tv.heading(_c, text=_orig + (arrow if _c == col else ""))
+
+    def _run_fund_amp_scan(self, dlg):
+        """💎 一键深度扫描 — AKShare 基金重仓 + Tushare 振幅过滤, 直接写入结果区"""
+        import threading, traceback as _tb
+        import pandas as pd, numpy as np
+        from datetime import datetime, timedelta
+
+        amp_min = getattr(self, "_regime_amp_var", None).get() if getattr(self, "_regime_amp_var", None) else 40
+        fund_only = getattr(self, "_regime_fund_var", None).get() if getattr(self, "_regime_fund_var", None) else False
+
+        if not fund_only and amp_min <= 0:
+            self._regime_deep_status.config(
+                text="⚠️ 请至少勾「基金重仓」或设振幅阈值!", foreground="#c62828"); return
+
+        self._regime_deep_status.config(text="⏳ 启动深度扫描后台线程...", foreground="#1565C0")
+        self._regime_scan_status.set("⏳ 深度扫描中...")
+
+        def work():
+            try:
+                names = {}
+                industries = {}
+                amp_map = {}   # ts_code → 20日振幅
+                daily_amp = {} # ts_code → 日均振幅
+                closes = {}    # ts_code → 现价
+
+                # ── Step 1: 确定目标股票池 ──
+                if fund_only:
+                    self.root.after(0, lambda: self._regime_deep_status.config(
+                        text="⏳ Step 1/3: 拉基金重仓股 (东方财富)...", foreground="#1565C0"))
+                    import akshare as ak
+                    hold_list = []
+                    for q in ("20254", "20253", "20261"):
+                        try:
+                            df = ak.fund_portfolio_hold_em(date=q)
+                            if df is not None and len(df) > 10:
+                                for _, r in df.iterrows():
+                                    c = str(r.get('股票代码','')).strip()
+                                    n = str(r.get('股票名称','')).strip()
+                                    if len(c) == 6 and c.isdigit() and c not in [x[0] for x in hold_list]:
+                                        hold_list.append((c, n))
+                                break
+                        except Exception: continue
+                    target_codes = hold_list
+                    self.root.after(0, lambda _n=len(target_codes): self._regime_deep_status.config(
+                        text=f"✅ 基金重仓 {_n} 只 → 算振幅...", foreground="#2e7d32"))
+                else:
+                    # 不勾基金重仓 → 拉持仓/资讯/龙头股池
+                    selected = self._get_regime_selected_sources()
+                    if not selected: selected = ["持仓", "资讯股", "龙头股"]
+                    pool = self._collect_regime_scan_pool(selected)
+                    target_codes = [(c, n) for c, n, _ in pool if len(c) == 6]
+                    self.root.after(0, lambda _n=len(target_codes): self._regime_deep_status.config(
+                        text=f"✅ 扫描池 {_n} 只 → 算振幅...", foreground="#2e7d32"))
+
+                if not target_codes:
+                    self.root.after(0, lambda: self._regime_deep_status.config(
+                        text="❌ 股票池为空!", foreground="#c62828")); return
+
+                # ── Step 2: 取 Tushare 日线批量计算振幅 ──
+                self.root.after(0, lambda: self._regime_deep_status.config(
+                    text=f"⏳ Step 2/3: 拉 {len(target_codes)} 只日线算振幅...", foreground="#1565C0"))
+
+                from utils.config import TS_DEFAULT_TOKEN
+                import tushare as ts
+                ts.set_token(TS_DEFAULT_TOKEN)
+                pro = ts.pro_api()
+
+                ts_codes = []
+                for c6, nm in target_codes:
+                    suffix = ".SH" if c6[0] in "65" else ".SZ"
+                    ts_codes.append(c6 + suffix)
+                    names[c6 + suffix] = nm
+
+                end = datetime.now().strftime("%Y%m%d")
+                start = (datetime.now() - timedelta(days=150)).strftime("%Y%m%d")
+
+                all_data = []
+                for i in range(0, len(ts_codes), 25):
+                    batch = ts_codes[i:i+25]
+                    try:
+                        df = pro.daily(ts_code=','.join(batch), start_date=start, end_date=end)
+                        if df is not None and len(df) > 0: all_data.append(df)
+                    except Exception: continue
+
+                if not all_data:
+                    self.root.after(0, lambda: self._regime_deep_status.config(
+                        text="❌ Tushare 日线全失败", foreground="#c62828")); return
+
+                df_all = pd.concat(all_data, ignore_index=True)
+                self.root.after(0, lambda _n=df_all['ts_code'].nunique(): self._regime_deep_status.config(
+                    text=f"✅ {_n} 只有日线 → 算振幅...", foreground="#2e7d32"))
+
+                for tc, grp in df_all.groupby('ts_code'):
+                    grp = grp.sort_values('trade_date')
+                    if len(grp) < 20: continue
+                    h20 = grp['high'].tail(20).max()
+                    l20 = grp['low'].tail(20).min()
+                    amp20 = (h20 - l20) / l20 * 100 if l20 > 0 else 0
+                    daily = ((grp['high'] - grp['low']) / grp['pre_close']).tail(20).mean() * 100
+                    amp_map[tc] = round(amp20, 1)
+                    daily_amp[tc] = round(daily, 2)
+                    closes[tc] = round(grp['close'].iloc[-1], 2)
+
+                # ── Step 3: 行业映射 + 板块筛选 ──
+                self.root.after(0, lambda: self._regime_deep_status.config(
+                    text="⏳ Step 3/3: 补行业 + 板块筛选...", foreground="#1565C0"))
+                # 批量拿行业
+                all_ts = list(amp_map.keys())
+                for i in range(0, len(all_ts), 500):
+                    batch = all_ts[i:i+500]
+                    try:
+                        bs = pro.stock_basic(ts_code=','.join(batch),
+                                              fields='ts_code,industry,name')
+                        for _, r in bs.iterrows():
+                            industries[r['ts_code']] = r.get('industry','') or ''
+                            if r['ts_code'] not in names: names[r['ts_code']] = r['name']
+                    except Exception: continue
+
+                # 板块筛选叠加
+                selected_sectors = [s for s, v in getattr(self, "_regime_sector_vars", {}).items() if v.get()]
+
+                # ── Step 4: 组装结果 + 振幅阈值过滤 ──
+                results = []
+                for tc, amp20 in amp_map.items():
+                    if amp20 < amp_min: continue  # 振幅阈值过滤
+                    c6 = tc.split('.')[0]
+                    nm = names.get(tc, names.get(c6, '?'))
+                    ind = industries.get(tc, '')
+                    close = closes.get(tc, 0)
+                    d_amp = daily_amp.get(tc, 0)
+
+                    # 板块过滤
+                    if selected_sectors and ind not in selected_sectors: continue
+
+                    results.append({
+                        "code": c6, "name": nm,
+                        "sector": ind, "source": "💎深度",
+                        "regime": "振幅" + ("🔥" if amp20 > 80 else ("⭐" if amp20 > 50 else "📌")),
+                        "streak": f"{amp20}%",   # 复用 streak 列存振幅
+                        "pct5": d_amp,           # 复用 pct5 列存日均振幅
+                        "pct20": amp20,          # 复用 pct20 列存 20 日振幅
+                        "price": close,
+                    })
+
+                results.sort(key=lambda x: x.get("pct20", 0), reverse=True)
+
+                # ── Step 5: 写进 Treeview ──
+                def _update_ui():
+                    tree = getattr(self, "_regime_tree", None)
+                    if tree is None: return
+                    # 清空
+                    for item in tree.get_children(): tree.delete(item)
+                    for r in results:
+                        tree.insert("", tk.END, values=(
+                            r["code"], r["name"], r["sector"], r["source"],
+                            r["regime"], r["streak"], r["pct5"], r["pct20"], r["price"]))
+                    self._regime_results = results
+                    # 刷新统计图表
+                    try: self._regime_scan_done(dlg, results)
+                    except Exception: pass
+                    self._regime_scan_status.set(
+                        f"💎 深度扫描完成: {len(results)} 只 (振幅≥{amp_min}%{' +基金重仓' if fund_only else ''}{' +板块筛选' if selected_sectors else ''})")
+                    self._regime_deep_status.config(
+                        text=f"✅ {len(results)} 只 {'振幅≥'+str(amp_min)+'%'}{' +基金重仓' if fund_only else ''} 已填充!",
+                        foreground="#2e7d32")
+
+                self.root.after(0, _update_ui)
+
+            except Exception as e:
+                _tb.print_exc()
+                self.root.after(0, lambda: self._regime_deep_status.config(
+                    text=f"❌ 深度扫描失败: {str(e)[:60]}", foreground="#c62828"))
+                self.root.after(0, lambda: self._regime_scan_status.set(f"❌ 深度扫描失败: {str(e)[:60]}"))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _run_regime_scan_async(self, dlg):
         """异步跑扫描 — 暂停/停止/抽样"""
