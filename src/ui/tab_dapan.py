@@ -14758,13 +14758,19 @@ class DapanMixin:
 
         style = ttk.Style(); style.theme_use('clam')
         style.configure("Dark.Treeview",
-                        background="#1E1E1E", foreground="#E0E0E0",
-                        fieldbackground="#1E1E1E", rowheight=24,
+                        background="#121212", foreground="#FFFFFF",
+                        fieldbackground="#121212", rowheight=26,
                         font=("Microsoft YaHei", 10))
         style.configure("Dark.Treeview.Heading",
-                        background="#263238", foreground="#FFD54F",
-                        font=("Microsoft YaHei", 10, "bold"))
-        style.map("Dark.Treeview", background=[("selected","#1A237E")])
+                        background="#000000", foreground="#FFFFFF",
+                        font=("Microsoft YaHei", 11, "bold"))
+        # 强制覆盖 macOS 上系统默认的 heading 状态色
+        style.map("Dark.Treeview.Heading",
+                  background=[("active","#000000"),("pressed","#000000")],
+                  foreground=[("active","#FFFFFF"),("pressed","#FFFFFF")])
+        style.map("Dark.Treeview",
+                  background=[("selected","#1A237E"),("!selected","#121212")],
+                  foreground=[("selected","#FFFFFF"),("!selected","#FFFFFF")])
 
         def _make_tree(parent, cols):
             f = tk.Frame(parent, bg="#121212"); f.pack(fill=tk.BOTH, expand=True)
@@ -65162,6 +65168,24 @@ class DapanMixin:
     def _open_regime_scanner(self):
         """打开 🌐 多空扫描弹窗 — 可勾选源 + 异步扫描 + 双击 K 线"""
         import threading
+        # ⬇️ 全局定义 Dark.Treeview 样式 (白字黑底, 所有子 Tab 复用)
+        _tstyle = ttk.Style()
+        try: _tstyle.theme_use('clam')
+        except Exception: pass
+        _tstyle.configure("Dark.Treeview",
+                          background="#121212", foreground="#FFFFFF",
+                          fieldbackground="#121212", rowheight=26,
+                          font=("Microsoft YaHei", 10))
+        _tstyle.configure("Dark.Treeview.Heading",
+                          background="#000000", foreground="#FFFFFF",
+                          font=("Microsoft YaHei", 11, "bold"))
+        _tstyle.map("Dark.Treeview.Heading",
+                    background=[("active","#000000"),("pressed","#000000")],
+                    foreground=[("active","#FFFFFF"),("pressed","#FFFFFF")])
+        _tstyle.map("Dark.Treeview",
+                    background=[("selected","#1A237E"),("!selected","#121212")],
+                    foreground=[("selected","#FFFFFF"),("!selected","#FFFFFF")])
+
         dlg = tk.Toplevel(self.root)
         dlg.title("🌐 全市场多空扫描器")
         dlg.geometry("1200x860")
@@ -65424,7 +65448,8 @@ class DapanMixin:
         # Tab 2: 清单表格 — 双击绑定 + 🆕 点击表头排序
         list_tab = ttk.Frame(nb); nb.add(list_tab, text="📋 明细清单")
         cols = ("code","name","sector","source","regime","streak","pct5","pct20","price")
-        tree = ttk.Treeview(list_tab, columns=cols, show="headings", height=25)
+        tree = ttk.Treeview(list_tab, columns=cols, show="headings", height=25,
+                            style="Dark.Treeview")
         heads = {"code":"代码","name":"名称","sector":"板块","source":"来源","regime":"多空","streak":"连续根","pct5":"5日%","pct20":"20日%","price":"现价"}
         widths = {"code":110,"name":90,"sector":70,"source":80,"regime":55,"streak":55,"pct5":60,"pct20":60,"price":65}
         for c in cols:
