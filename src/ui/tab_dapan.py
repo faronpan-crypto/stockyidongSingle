@@ -14703,6 +14703,261 @@ class DapanMixin:
         except Exception as e:
             print(f"[🎯高抛低吸❌] {e}", flush=True); _tb.print_exc()
 
+    def _show_margin_dialog(self):
+        """📊 融资盘全景 — Tushare + AKShare, 3890只个股两融"""
+        import tkinter as tk
+        import tkinter.ttk as ttk
+        import threading as _th
+        import traceback as _tb
+        from datetime import datetime, timedelta
+        import pandas as pd
+
+        root = getattr(self, 'root', None) or getattr(self, '_root', None)
+        dlg = tk.Toplevel(root)
+        dlg.title("📊 融资盘全景 — Margin Trading Dashboard")
+        dlg.geometry("1100x780")
+        dlg.configure(bg="#121212")
+        dlg.transient(root)
+        dlg.minsize(1000, 700)
+
+        # ── 顶部信息栏 ──
+        header = tk.Frame(dlg, bg="#1E1E2E", height=55)
+        header.pack(fill=tk.X, side=tk.TOP)
+        header.pack_propagate(False)
+        tk.Label(header, text="📊 融资盘全景", bg="#1E1E2E", fg="#FFD54F",
+                 font=("Microsoft YaHei", 16, "bold")).pack(side=tk.LEFT, padx=15, pady=10)
+        status_lbl = tk.Label(header, text="⏳ 正在加载...", bg="#1E1E2E", fg="#90A4AE",
+                              font=("", 10))
+        status_lbl.pack(side=tk.RIGHT, padx=15)
+
+        # ── 汇总卡片区 ──
+        cards = tk.Frame(dlg, bg="#121212")
+        cards.pack(fill=tk.X, padx=12, pady=(10, 6))
+
+        def _card(parent, title, value, sub, color="#FFD54F"):
+            f = tk.Frame(parent, bg="#1E1E2E", highlightbackground="#37474F",
+                         highlightthickness=1)
+            f.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
+            tk.Label(f, text=title, bg="#1E1E2E", fg="#78909C",
+                     font=("", 9)).pack(anchor="w", padx=10, pady=(8, 0))
+            tk.Label(f, text=value, bg="#1E1E2E", fg=color,
+                     font=("Microsoft YaHei", 16, "bold")).pack(anchor="w", padx=10)
+            tk.Label(f, text=sub, bg="#1E1E2E", fg="#546E7A",
+                     font=("", 8)).pack(anchor="w", padx=10, pady=(0, 8))
+            return f
+
+        total_card = _card(cards, "融资余额合计", "-", "-", "#FFD54F")
+        delta_card = _card(cards, "较昨日变动", "-", "↑/↓ 亿",
+                           "#EF5350" if False else "#66BB6A")
+        count_card = _card(cards, "覆盖个股数", "-", "含 ETF", "#42A5F5")
+        limit_card = _card(cards, "高融资 Top 50", "-", "融资集中度", "#AB47BC")
+
+        # ── Notebook ──
+        nb = ttk.Notebook(dlg)
+        nb.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+
+        style = ttk.Style(); style.theme_use('clam')
+        style.configure("Dark.Treeview",
+                        background="#1E1E1E", foreground="#E0E0E0",
+                        fieldbackground="#1E1E1E", rowheight=24,
+                        font=("Microsoft YaHei", 10))
+        style.configure("Dark.Treeview.Heading",
+                        background="#263238", foreground="#FFD54F",
+                        font=("Microsoft YaHei", 10, "bold"))
+        style.map("Dark.Treeview", background=[("selected","#1A237E")])
+
+        def _make_tree(parent, cols):
+            f = tk.Frame(parent, bg="#121212"); f.pack(fill=tk.BOTH, expand=True)
+            tree = ttk.Treeview(f, columns=cols, show="headings",
+                                style="Dark.Treeview")
+            vs = ttk.Scrollbar(f, orient=tk.VERTICAL, command=tree.yview)
+            tree.configure(yscrollcommand=vs.set)
+            tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            vs.pack(side=tk.RIGHT, fill=tk.Y)
+            return tree
+
+        # Tab 1: 融资余额 Top 排行
+        tab1 = tk.Frame(nb, bg="#121212"); nb.add(tab1, text="🏆 融资余额排行")
+        t1_cols = ("排名","代码","名称","行业","融资余额(亿)","融资买入(亿)","融资偿还(亿)","净额(亿)","融资余额变动(亿)")
+        tree1 = _make_tree(tab1, t1_cols)
+
+        # Tab 2: 当日融资净买入 (买-还)
+        tab2 = tk.Frame(nb, bg="#121212"); nb.add(tab2, text="🔥 融资净买入榜")
+        t2_cols = ("排名","代码","名称","融资买入(亿)","融资偿还(亿)","净额(亿)","涨跌幅%")
+        tree2 = _make_tree(tab2, t2_cols)
+
+        # Tab 3: 行业分布
+        tab3 = tk.Frame(nb, bg="#121212"); nb.add(tab3, text="🏭 行业分布")
+        t3_cols = ("行业","个股数","融资合计(亿)","占比%","平均融资(亿)","Top个股")
+        tree3 = _make_tree(tab3, t3_cols)
+
+        # ── 后台加载 ──
+        def _load():
+            try:
+                from utils.config import TS_DEFAULT_TOKEN
+                import tushare as _ts
+                _ts.set_token(TS_DEFAULT_TOKEN)
+                _pro = _ts.pro_api()
+
+                end = datetime.now().strftime("%Y%m%d")
+                prev = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+                # 跳过周末
+                for _ in range(5):
+                    pd = datetime.strptime(prev, "%Y%m%d")
+                    if pd.weekday() < 5: break
+                    prev = (pd - timedelta(days=1)).strftime("%Y%m%d")
+
+                dlg.after(0, lambda: status_lbl.config(
+                    text=f"⏳ 拉取 Tushare 汇总 {end}..."))
+
+                # 汇总
+                margin = _pro.margin(trade_date=end)
+                margin_p = _pro.margin(trade_date=prev)
+                if len(margin) == 0:
+                    # 最新交易日
+                    df_all = _pro.margin(start_date=prev, end_date=end)
+                    if len(df_all) > 0:
+                        end = df_all['trade_date'].max()
+                        prev_dates = sorted(df_all['trade_date'].unique())
+                        prev = prev_dates[-2] if len(prev_dates) >= 2 else prev
+                        margin = _pro.margin(trade_date=end)
+                        margin_p = _pro.margin(trade_date=prev)
+
+                total_rzye = margin['rzye'].sum() / 1e8
+                delta_rzye = (margin['rzye'].sum() - (margin_p['rzye'].sum() if len(margin_p) > 0 else 0)) / 1e8
+                dlg.after(0, lambda: [
+                    total_card.winfo_children()[1].config(
+                        text=f"{total_rzye:,.0f} 亿"),
+                    delta_card.winfo_children()[1].config(
+                        text=f"{delta_rzye:+.1f} 亿",
+                        color="#EF5350" if delta_rzye < 0 else "#66BB6A"),
+                    delta_card.winfo_children()[2].config(
+                        text=f"较 {prev[:4]}-{prev[4:6]}-{prev[6:]}"),
+                    status_lbl.config(text="⏳ 拉取个股明细..."),
+                ])
+
+                # 个股明细
+                detail = _pro.margin_detail(trade_date=end)
+                detail_p = _pro.margin_detail(trade_date=prev)
+                d = detail[detail['trade_date']==end].copy()
+                dp = detail_p[detail_p['trade_date']==prev].copy() if len(detail_p) > 0 else pd.DataFrame()
+
+                count_card.winfo_children()[1].config(text=f"{len(d):,}")
+
+                # 名称映射
+                dlg.after(0, lambda: status_lbl.config(text="⏳ 拉取股票名称..."))
+                all_codes = d['ts_code'].unique().tolist()
+                name_map = {}; ind_map = {}
+                for i in range(0, len(all_codes), 500):
+                    batch = all_codes[i:i+500]
+                    try:
+                        bs = _pro.stock_basic(ts_code=','.join(batch),
+                                              fields='ts_code,name,industry,list_date')
+                        for _, r in bs.iterrows():
+                            name_map[r['ts_code']] = r['name']
+                            ind_map[r['ts_code']] = r.get('industry','') or ''
+                    except Exception: pass
+
+                d['name'] = d['ts_code'].map(name_map).fillna('?')
+                d['industry'] = d['ts_code'].map(ind_map).fillna('其它')
+                d['rzye_亿'] = d['rzye'] / 1e8
+                d['rzmre_亿'] = d['rzmre'] / 1e8
+                d['rzche_亿'] = d['rzche'] / 1e8
+                d['net_亿'] = (d['rzmre'] - d['rzche']) / 1e8
+
+                # 融资余额变动 (今日 vs 昨日)
+                if len(dp) > 0:
+                    dp2 = dp[['ts_code','rzye']].rename(columns={'rzye':'rzye_prev'})
+                    d = d.merge(dp2, on='ts_code', how='left')
+                    d['rzye_delta_亿'] = (d['rzye'] - d['rzye_prev'].fillna(0)) / 1e8
+                else:
+                    d['rzye_delta_亿'] = 0
+
+                # Tab1: 融资余额 Top
+                dlg.after(0, lambda: status_lbl.config(text="⏳ 渲染融资余额排行..."))
+                top = d.nlargest(100, 'rzye')
+                for rank, (_, r) in enumerate(top.iterrows(), 1):
+                    tree1.insert("", tk.END, values=(
+                        rank, r['ts_code'], r['name'], r['industry'],
+                        f"{r['rzye_亿']:,.1f}",
+                        f"{r['rzmre_亿']:.2f}",
+                        f"{r['rzche_亿']:.2f}",
+                        f"{r['net_亿']:+.2f}",
+                        f"{r['rzye_delta_亿']:+.1f}",
+                    ))
+                # 列宽
+                for i, w in enumerate((55,110,80,80,100,100,100,90,110)):
+                    tree1.column(t1_cols[i], width=w, anchor="center")
+
+                # Tab2: 净买入榜 (买>还 正榜, 还>买 负榜)
+                dlg.after(0, lambda: status_lbl.config(text="⏳ 渲染净买入榜..."))
+                buy_top = d.nlargest(50, 'net_亿')
+                sell_top = d.nsmallest(50, 'net_亿')
+                # 拉当日涨跌
+                try:
+                    daily = _pro.daily(ts_code=','.join(buy_top['ts_code'].head(30).tolist() +
+                                                       sell_top['ts_code'].head(30).tolist()),
+                                       trade_date=end,
+                                       fields='ts_code,pct_chg')
+                    pct_map = dict(zip(daily['ts_code'], daily['pct_chg']))
+                except Exception: pct_map = {}
+
+                for rank, (_, r) in enumerate(buy_top.iterrows(), 1):
+                    tree2.insert("", tk.END, values=(
+                        f"🟢{rank}", r['ts_code'], r['name'],
+                        f"{r['rzmre_亿']:.2f}", f"{r['rzche_亿']:.2f}",
+                        f"{r['net_亿']:+.2f}",
+                        f"{pct_map.get(r['ts_code'], 0):+.2f}",
+                    ))
+                for rank, (_, r) in enumerate(sell_top.iterrows(), 1):
+                    tree2.insert("", tk.END, values=(
+                        f"🔴{rank}", r['ts_code'], r['name'],
+                        f"{r['rzmre_亿']:.2f}", f"{r['rzche_亿']:.2f}",
+                        f"{r['net_亿']:+.2f}",
+                        f"{pct_map.get(r['ts_code'], 0):+.2f}",
+                    ))
+                for i, w in enumerate((55,110,80,100,100,90,90)):
+                    tree2.column(t2_cols[i], width=w, anchor="center")
+
+                # Tab3: 行业聚合
+                dlg.after(0, lambda: status_lbl.config(text="⏳ 聚合行业分布..."))
+                ind = d.groupby('industry').agg(
+                    个股数=('ts_code','count'),
+                    融资合计=('rzye_亿','sum'),
+                    平均融资=('rzye_亿','mean'),
+                ).reset_index().sort_values('融资合计', ascending=False)
+                total_ind = ind['融资合计'].sum()
+                # 各行业 Top 1 个股
+                top_per_ind = d.groupby('industry').apply(
+                    lambda x: x.nlargest(1,'rzye_亿').iloc[0]['name']).to_dict()
+                for _, r in ind.head(25).iterrows():
+                    ind_name = r['industry'] if r['industry'] else '其它'
+                    top_stk = top_per_ind.get(ind_name, '?')
+                    tree3.insert("", tk.END, values=(
+                        ind_name, r['个股数'],
+                        f"{r['融资合计']:,.0f}",
+                        f"{r['融资合计']/total_ind*100:.1f}%",
+                        f"{r['平均融资']:.1f}",
+                        top_stk,
+                    ))
+                for i, w in enumerate((100,80,100,80,100,80)):
+                    tree3.column(t3_cols[i], width=w, anchor="center")
+
+                limit_card.winfo_children()[1].config(
+                    text=f"{d['rzye_亿'].sum()*0.6/1e4:.2f}万亿")
+                limit_card.winfo_children()[2].config(
+                    text=f"Top50 占 {d.nlargest(50,'rzye_亿')['rzye_亿'].sum()/d['rzye_亿'].sum()*100:.1f}%")
+
+                dlg.after(0, lambda: status_lbl.config(
+                    text=f"✅ {end} 三市场 {len(d):,} 只 · 融资余额 {total_rzye:,.0f}亿 · 较昨日 {delta_rzye:+.1f}亿"))
+
+            except Exception as e:
+                _tb.print_exc()
+                dlg.after(0, lambda: status_lbl.config(text=f"❌ 加载失败: {str(e)[:60]}"))
+
+        _th.Thread(target=_load, daemon=True).start()
+        print("📊融资盘] 弹窗已打开", flush=True)
+
     def _show_1min_kline_dialog(self):
         """📈 1min K线图 — 复用高抛低吸里的 _show_minute_kline_dialog"""
         import traceback as _tb
