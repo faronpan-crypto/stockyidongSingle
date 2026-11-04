@@ -4086,17 +4086,30 @@ class DapanMixin:
                     "m1_today, m5_hs300, m5_zz500, m5_kc30, m5_avg "
                     "FROM sentiment_history ORDER BY snapshot_date DESC")
                 for _row in _cue.fetchall():
-                    _d = str(_row[0]).replace("-", "")
-                    if len(_d) == 8 and _d not in hist_dict:
-                        # 统一成 JSON 风格 "20261027" (8 字符, 跟 hist_dict 原 key 一致)
-                        hist_dict[_d] = {
-                            "date": _d,
-                            "m2_up": _row[1] or 0, "m2_down": _row[2] or 0,
-                            "m2_total": _row[3] or 0, "m3_count": _row[4],
-                            "m1_today": _row[5], "m5_hs300": _row[6],
-                            "m5_zz500": _row[7], "m5_kc30": _row[8],
-                            "m5_avg": _row[9], "source": "db",
+                    _d_db = str(_row[0])           # DB: "2026-11-03"
+                    _d8 = _d_db.replace("-", "")    # 8位: "20261103"
+                    # ① 统一渲染用的 key: 带横线 "2026-11-03" (跟渲染 ds 格式一致)
+                    if _d_db not in hist_dict:
+                        _m2u, _m2d, _m2t = _row[1] or 0, _row[2] or 0, _row[3] or 0
+                        _m1t = _row[5]       # m1_today (上证当日涨跌幅)
+                        _m5avg = _row[9]     # m5_avg (五指数平均)
+                        _pct = (_m1t if _m1t is not None else _m5avg)
+                        _pct_round = round(_pct, 2) if _pct is not None else None
+                        hist_dict[_d_db] = {
+                            "date": _d_db,
+                            "up": _m2u, "dn": _m2d,
+                            "pnl": "赚钱" if _pct_round and _pct_round > 0 else (
+                                   "亏钱" if _pct_round and _pct_round < 0 else "平盘"),
+                            "ths": "向上" if _pct_round and _pct_round > 0 else (
+                                   "向下" if _pct_round and _pct_round < 0 else "?"),
+                            "pct": _pct_round,
+                            "emo_score": None,
+                            "m2_up": _m2u, "m2_down": _m2d, "m2_total": _m2t,
+                            "m5_avg": _m5avg, "source": "db",
                         }
+                    # ② 8位 key 也补一份 (兼容历史可能有代码在用)
+                    if _d8 not in hist_dict:
+                        hist_dict[_d8] = dict(hist_dict[_d_db])
                 _ce.close()
                 # 自动回写 JSON
                 try:
@@ -27200,17 +27213,30 @@ class DapanMixin:
                     "m1_today, m5_hs300, m5_zz500, m5_kc30, m5_avg "
                     "FROM sentiment_history ORDER BY snapshot_date DESC")
                 for _row in _cue.fetchall():
-                    _d = str(_row[0]).replace("-", "")
-                    if len(_d) == 8 and _d not in hist_dict:
-                        # 统一成 JSON 风格 "20261027" (8 字符, 跟 hist_dict 原 key 一致)
-                        hist_dict[_d] = {
-                            "date": _d,
-                            "m2_up": _row[1] or 0, "m2_down": _row[2] or 0,
-                            "m2_total": _row[3] or 0, "m3_count": _row[4],
-                            "m1_today": _row[5], "m5_hs300": _row[6],
-                            "m5_zz500": _row[7], "m5_kc30": _row[8],
-                            "m5_avg": _row[9], "source": "db",
+                    _d_db = str(_row[0])           # DB: "2026-11-03"
+                    _d8 = _d_db.replace("-", "")    # 8位: "20261103"
+                    # ① 统一渲染用的 key: 带横线 "2026-11-03" (跟渲染 ds 格式一致)
+                    if _d_db not in hist_dict:
+                        _m2u, _m2d, _m2t = _row[1] or 0, _row[2] or 0, _row[3] or 0
+                        _m1t = _row[5]       # m1_today (上证当日涨跌幅)
+                        _m5avg = _row[9]     # m5_avg (五指数平均)
+                        _pct = (_m1t if _m1t is not None else _m5avg)
+                        _pct_round = round(_pct, 2) if _pct is not None else None
+                        hist_dict[_d_db] = {
+                            "date": _d_db,
+                            "up": _m2u, "dn": _m2d,
+                            "pnl": "赚钱" if _pct_round and _pct_round > 0 else (
+                                   "亏钱" if _pct_round and _pct_round < 0 else "平盘"),
+                            "ths": "向上" if _pct_round and _pct_round > 0 else (
+                                   "向下" if _pct_round and _pct_round < 0 else "?"),
+                            "pct": _pct_round,
+                            "emo_score": None,
+                            "m2_up": _m2u, "m2_down": _m2d, "m2_total": _m2t,
+                            "m5_avg": _m5avg, "source": "db",
                         }
+                    # ② 8位 key 也补一份 (兼容历史可能有代码在用)
+                    if _d8 not in hist_dict:
+                        hist_dict[_d8] = dict(hist_dict[_d_db])
                 _ce.close()
                 # 自动回写 JSON
                 try:
