@@ -64614,9 +64614,29 @@ class DapanMixin:
         # 源1: ETF
         if "ETF" in filter_set:
             for c, n in self.REGIME_SCAN_ETF: _add(c, n, "ETF")
-        # 源2: 持仓热门
+        # 源2: 持仓热门 (真实持仓股 + 硬编码蓝筹)
         if "持仓" in filter_set:
-            for c, n in self.REGIME_SCAN_STOCKS: _add(c, n, "持仓")
+            # 2a: 用户真实持仓 (holding_stocks / holding_stocks_2..14)
+            try:
+                for _gi in [1] + list(range(2, 15)):
+                    _attr = f"holding_stocks_{_gi}" if _gi > 1 else "holding_stocks"
+                    _lst = getattr(self, _attr, []) or []
+                    for _h in _lst:
+                        if not _h: continue
+                        try:
+                            if isinstance(_h, (list, tuple)) and len(_h) >= 2:
+                                _nm, _c6 = str(_h[0] or ""), str(_h[1] or "")
+                            elif isinstance(_h, dict):
+                                _c6 = str(_h.get("code", _h.get("stock_code", "")))
+                                _nm = str(_h.get("name", _h.get("stock_name", "")))
+                            else: continue
+                            _c6 = _c6.split(".")[0]
+                            if len(_c6) == 6:
+                                _add(_c6, _nm, "💼真实持仓")
+                        except Exception: continue
+            except Exception: pass
+            # 2b: 硬编码蓝筹兜底
+            for c, n in self.REGIME_SCAN_STOCKS: _add(c, n, "蓝筹")
         # 源3: 龙头股 (自动导入过的)
         if "龙头股" in filter_set:
             try:
@@ -64753,19 +64773,31 @@ class DapanMixin:
         for name, code in etf_hard:
             _add(f"📊ETF {name}", code)
 
-        # 源 C: 持仓 (从 DB)
+        # 源 C: 真实持仓股 (从内存 holding_stocks / holding_stocks_2..14)
         try:
-            from utils.config import DB_PATH
-            import sqlite3 as _sq
-            db2 = _sq.connect(DB_PATH)
-            cur2 = db2.cursor()
-            cur2.execute("SELECT stock_code, stock_name FROM stock_holdings WHERE stock_code IS NOT NULL LIMIT 40")
-            for code, name in cur2.fetchall():
-                if code and len(code) == 6:
-                    suffix = ".SH" if code[0] in "65" else ".SZ"
-                    _add(f"💼 {name}({code})", code + suffix)
-            db2.close()
+            for _gi in [1] + list(range(2, 15)):
+                _attr = f"holding_stocks_{_gi}" if _gi > 1 else "holding_stocks"
+                _lst = getattr(self, _attr, []) or []
+                for _h in _lst:
+                    if not _h: continue
+                    try:
+                        if isinstance(_h, (list, tuple)) and len(_h) >= 2:
+                            _nm, _c6 = str(_h[0] or "").strip(), str(_h[1] or "").strip()
+                        elif isinstance(_h, dict):
+                            _c6 = str(_h.get("code", _h.get("stock_code", ""))).strip()
+                            _nm = str(_h.get("name", _h.get("stock_name", ""))).strip()
+                        else: continue
+                        if not _c6: continue
+                        _c6 = _c6.split(".")[0]  # 去后缀
+                        if len(_c6) == 6:
+                            _suffix = ".SH" if _c6.startswith(("6", "5")) else ".SZ" if _c6.startswith(("0", "3", "2")) else ".BJ"
+                            _label = f"💼 {_nm}({_c6})" if _nm else f"💼 {_c6}"
+                            _add(_label, _c6 + _suffix)
+                    except Exception: continue
         except Exception: pass
+        # 源 C2: 硬编码蓝筹 (REGIME_SCAN_STOCKS, 兜底)
+        for code, name in getattr(self, "REGIME_SCAN_STOCKS", []):
+            _add(f"🏛️ {name}({code.split('.')[0]})", code)
 
         # 源 D: 资讯股 (DB)
         try:
