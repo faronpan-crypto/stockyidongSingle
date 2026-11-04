@@ -14772,30 +14772,52 @@ class DapanMixin:
                   background=[("selected","#1A237E"),("!selected","#121212")],
                   foreground=[("selected","#FFFFFF"),("!selected","#FFFFFF")])
 
-        def _make_tree(parent, cols):
-            f = tk.Frame(parent, bg="#121212"); f.pack(fill=tk.BOTH, expand=True)
-            tree = ttk.Treeview(f, columns=cols, show="headings",
+        def _make_tree(parent, cols, widths=None):
+            """📌 自画表头 (Frame+Label) — 绕过 macOS ttk heading 强制系统色覆盖"""
+            f = tk.Frame(parent, bg="#121212")
+            f.pack(fill=tk.BOTH, expand=True)
+
+            # ① 自画表头 Frame (黑底白字 Label)
+            hf = tk.Frame(f, bg="#000000", height=28)
+            hf.pack(fill=tk.X, side=tk.TOP)
+            hf.pack_propagate(False)
+            if widths is None: widths = [120] * len(cols)
+            for i, (lbl, w) in enumerate(zip(cols, widths)):
+                tk.Label(hf, text=lbl, bg="#000000", fg="#FFFFFF",
+                         font=("Microsoft YaHei", 11, "bold"),
+                         anchor="center", bd=0, padx=2).grid(
+                    row=0, column=i, sticky="nsew", padx=1, pady=2)
+                hf.grid_columnconfigure(i, minsize=w)
+
+            # ② Treeview show="" — 禁用系统默认 heading
+            tree = ttk.Treeview(f, columns=cols, show="", height=10,
                                 style="Dark.Treeview")
             vs = ttk.Scrollbar(f, orient=tk.VERTICAL, command=tree.yview)
             tree.configure(yscrollcommand=vs.set)
             tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             vs.pack(side=tk.RIGHT, fill=tk.Y)
+            # 列宽
+            for i, w in enumerate(widths):
+                tree.column(cols[i], width=w, anchor="center", stretch=True)
             return tree
 
         # Tab 1: 融资余额 Top 排行
         tab1 = tk.Frame(nb, bg="#121212"); nb.add(tab1, text="🏆 融资余额排行")
         t1_cols = ("排名","代码","名称","行业","融资余额(亿)","融资买入(亿)","融资偿还(亿)","净额(亿)","融资余额变动(亿)")
-        tree1 = _make_tree(tab1, t1_cols)
+        t1_w = [48, 110, 80, 70, 100, 90, 90, 80, 110]
+        tree1 = _make_tree(tab1, t1_cols, widths=t1_w)
 
         # Tab 2: 当日融资净买入 (买-还)
         tab2 = tk.Frame(nb, bg="#121212"); nb.add(tab2, text="🔥 融资净买入榜")
         t2_cols = ("排名","代码","名称","融资买入(亿)","融资偿还(亿)","净额(亿)","涨跌幅%")
-        tree2 = _make_tree(tab2, t2_cols)
+        t2_w = [55, 110, 80, 110, 110, 100, 90]
+        tree2 = _make_tree(tab2, t2_cols, widths=t2_w)
 
         # Tab 3: 行业分布
         tab3 = tk.Frame(nb, bg="#121212"); nb.add(tab3, text="🏭 行业分布")
         t3_cols = ("行业","个股数","融资合计(亿)","占比%","平均融资(亿)","Top个股")
-        tree3 = _make_tree(tab3, t3_cols)
+        t3_w = [100, 80, 110, 80, 100, 100]
+        tree3 = _make_tree(tab3, t3_cols, widths=t3_w)
 
         # ── 后台加载 ──
         def _load():
@@ -65445,17 +65467,30 @@ class DapanMixin:
         self._regime_canvas = __import__("matplotlib.backends.backend_tkagg", fromlist=["FigureCanvasTkAgg"]).FigureCanvasTkAgg(self._regime_fig, master=chart_tab)
         self._regime_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # Tab 2: 清单表格 — 双击绑定 + 🆕 点击表头排序
+        # Tab 2: 清单表格 — 自画表头 Frame+Label + 点击排序 + 双击 K线
         list_tab = ttk.Frame(nb); nb.add(list_tab, text="📋 明细清单")
-        cols = ("code","name","sector","source","regime","streak","pct5","pct20","price")
-        tree = ttk.Treeview(list_tab, columns=cols, show="headings", height=25,
-                            style="Dark.Treeview")
         heads = {"code":"代码","name":"名称","sector":"板块","source":"来源","regime":"多空","streak":"连续根","pct5":"5日%","pct20":"20日%","price":"现价"}
-        widths = {"code":110,"name":90,"sector":70,"source":80,"regime":55,"streak":55,"pct5":60,"pct20":60,"price":65}
-        for c in cols:
-            tree.heading(c, text=heads[c], command=lambda _c=c: self._treeview_sort_column(tree, _c))
-            tree.column(c, width=widths[c], anchor="center")
-        tree.pack(fill=tk.BOTH, expand=True)
+        cols = list(heads.keys())
+        widths = [110, 90, 70, 80, 55, 55, 60, 60, 65]
+
+        # 自画表头 (黑底白字 Label, 可点击排序)
+        hf = tk.Frame(list_tab, bg="#000000", height=28)
+        hf.pack(fill=tk.X, side=tk.TOP)
+        hf.pack_propagate(False)
+        for i, (c, lbl) in enumerate(heads.items()):
+            w = widths[i]
+            lb = tk.Label(hf, text=lbl, bg="#000000", fg="#FFFFFF",
+                          font=("Microsoft YaHei", 11, "bold"),
+                          anchor="center", cursor="hand2", bd=0, padx=2)
+            lb.grid(row=0, column=i, sticky="nsew", padx=1, pady=2)
+            hf.grid_columnconfigure(i, minsize=w)
+            lb.bind("<Button-1>", lambda e, _c=c: self._treeview_sort_column(tree, _c))
+
+        tree = ttk.Treeview(list_tab, columns=cols, show="", height=25,
+                            style="Dark.Treeview")
+        for i, c in enumerate(cols):
+            tree.column(c, width=widths[i], anchor="center")
+        tree.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
         self._apply_stock_tag_config(tree)
         tree.bind("<Double-1>", lambda e: self._on_regime_tree_double_click(tree))
         self._regime_sort_col = None; self._regime_sort_rev = False
