@@ -725,13 +725,13 @@ def _compute_block_pct_from_cache():
                 sub = merged[mask].copy()
                 mean_pct = float(sub["pct_chg"].mean())
                 n = int(mask.sum())
-                # Top3 龙头: 按成交额取前3 (成交额=amount, 单位千元)
+                # Top5 龙头: 按成交额取前5 (成交额=amount, 单位千元)
                 if "amount" in sub.columns:
-                    top3 = sub.sort_values("amount", ascending=False).head(3)
+                    top5 = sub.sort_values("amount", ascending=False).head(5)
                 else:
-                    top3 = sub.sort_values("pct_chg", ascending=False).head(3)
-                top3_list = [(str(r["name"]), float(r["pct_chg"])) for _, r in top3.iterrows()]
-                result[fix_name] = (mean_pct, n, top3_list)
+                    top5 = sub.sort_values("pct_chg", ascending=False).head(5)
+                top5_list = [(str(r["name"]), float(r["pct_chg"])) for _, r in top5.iterrows()]
+                result[fix_name] = (mean_pct, n, top5_list)
             else:
                 result[fix_name] = None
 
@@ -1130,7 +1130,7 @@ def _build_block_grid(parent, win, col=0):
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     parent.grid_rowconfigure(0, weight=1)
-    _add_title_row(frm, "① 板块九宫格 (点击展开/长按详情/⚠️异动>3%)",
+    _add_title_row(frm, "① 板块十六宫格 (16板块·4×4·⚠️异动>3%)",
                    "#FFA726", BLOCK_GRID_KNOWLEDGE)
 
     # 9 格 Canvas (4×4), 增大
@@ -1308,21 +1308,24 @@ def _draw_block_grid(win):
             c.create_text(x2 - 7, y1 + 20, text=f"n={n_stocks}", fill="#9E9E9E",
                           font=("", 10), tags=f"cell_{idx}")
 
-        # Top3 龙头 (下半部分, 3 行小字号)
-        top3 = meta[6] if len(meta) > 6 else []
-        if top3:
-            for ti, (sname, spct) in enumerate(top3[:3]):
-                sy = y1 + ch - 22 + ti * 10
-                short = sname[:4] if len(sname) > 4 else sname
+        # Top5 龙头 (下半部分, 紧凑 5 行 9pt)
+        top5 = meta[6] if len(meta) > 6 else []
+        if top5:
+            # 下半区域: y1+36 ~ y2-2, 共 ch-38 高, 分 5 行
+            area_top = y1 + 36
+            area_h = ch - 38
+            row_h = max(8, min(12, area_h // max(1, len(top5[:5]))))
+            for ti, (sname, spct) in enumerate(top5[:5]):
+                sy = area_top + 2 + ti * row_h
+                short = sname[:5] if len(sname) > 5 else sname
                 sfg = "#FF8A80" if spct >= 0 else "#69F0AE"
                 ssign = "+" if spct >= 0 else ""
-                # 🆕 给每只股票加独立 tag, 双击时识别
                 stock_tag = f"stock_{idx}_{ti}"
                 c.create_text(x1 + 6, sy, text=f"{short}",
-                              fill="#BDBDBD", font=("", 11), anchor=tk.W,
+                              fill="#BDBDBD", font=("", 9), anchor=tk.W,
                               tags=(f"cell_{idx}", stock_tag))
                 c.create_text(x2 - 6, sy, text=f"{ssign}{spct:.1f}%",
-                              fill=sfg, font=("", 11), anchor=tk.E,
+                              fill=sfg, font=("", 9), anchor=tk.E,
                               tags=(f"cell_{idx}", stock_tag, f"pct_{idx}_{ti}"))
 
         # ❓ 板块分析按钮 (左上角, 蓝色下划线)
@@ -1361,19 +1364,19 @@ def _draw_block_grid(win):
                     kd = BLOCK_KNOWLEDGE.get(name, {"definition": "(暂无)"})
                     _show_knowledge_popup(win, name, kd)
                     return
-                top3 = win._block_meta[idx][6] if len(win._block_meta[idx]) > 6 else []
+                top5 = win._block_meta[idx][6] if len(win._block_meta[idx]) > 6 else []
                 hit_name = None
-                for ti, (sname, _pct) in enumerate(top3[:3]):
+                for ti, (sname, _pct) in enumerate(top5[:5]):
                     if f"stock_{idx}_{ti}" in tags:
                         hit_name = sname; break
                 if hit_name:
                     sina, sname2 = _lookup_stock_code_by_name(hit_name)
                     if sina:
-                        _show_stock_daily_kline(win, sina, sname2 or hit_name)
+                        _show_stock_ichimoku(win, sina, sname2 or hit_name)
                         return
                 sina, sname = _get_first_stock_sina(win, idx)
                 if sina:
-                    _show_stock_daily_kline(win, sina, sname)
+                    _show_stock_ichimoku(win, sina, sname)
                 else:
                     messagebox.showinfo("提示", f"无法获取 {win._block_meta[idx][0]} 成分股代码")
                 return
@@ -1395,19 +1398,19 @@ def _draw_block_grid(win):
                 # 如果两次点击间隔 < 300ms 且同一格 → 双击
                 if (now - _click_state["time"]) < 300 and _click_state["idx"] == idx:
                     _click_state["time"] = 0  # reset
-                    top3 = win._block_meta[idx][6] if len(win._block_meta[idx]) > 6 else []
+                    top5 = win._block_meta[idx][6] if len(win._block_meta[idx]) > 6 else []
                     hit_name = None
-                    for ti, (sname, _pct) in enumerate(top3[:3]):
+                    for ti, (sname, _pct) in enumerate(top5[:5]):
                         if f"stock_{idx}_{ti}" in tags:
                             hit_name = sname; break
                     if hit_name:
                         sina, sname2 = _lookup_stock_code_by_name(hit_name)
                         if sina:
-                            _show_stock_daily_kline(win, sina, sname2 or hit_name)
+                            _show_stock_ichimoku(win, sina, sname2 or hit_name)
                             return
                     sina, sname = _get_first_stock_sina(win, idx)
                     if sina:
-                        _show_stock_daily_kline(win, sina, sname)
+                        _show_stock_ichimoku(win, sina, sname)
                     else:
                         messagebox.showinfo("提示", f"无法获取 {win._block_meta[idx][0]} 成分股代码")
                 else:
@@ -2530,6 +2533,209 @@ def _show_stock_daily_kline(win, sina_code, stock_name=""):
     threading.Thread(target=_bg, daemon=True).start()
 
 
+def _calc_ichimoku(highs, lows, closes):
+    """简化版一目均衡图 5 条线 (numpy)"""
+    import numpy as np
+    h = np.asarray(highs, dtype=float)
+    l = np.asarray(lows, dtype=float)
+    c = np.asarray(closes, dtype=float)
+    n = len(c)
+
+    def _ph(arr, p):
+        out = np.full(n, np.nan)
+        for i in range(n):
+            s = max(0, i - p + 1)
+            out[i] = np.max(arr[s:i + 1])
+        return out
+
+    def _pl(arr, p):
+        out = np.full(n, np.nan)
+        for i in range(n):
+            s = max(0, i - p + 1)
+            out[i] = np.min(arr[s:i + 1])
+        return out
+
+    tenkan = (_ph(h, 9) + _pl(l, 9)) / 2.0       # 转换线 9
+    kijun = (_ph(h, 26) + _pl(l, 26)) / 2.0      # 基准线 26
+    senkou_a = (tenkan + kijun) / 2.0            # 先行A (然后前移26)
+    senkou_a = np.concatenate([np.full(26, np.nan), senkou_a[:-26]]) if n > 26 else senkou_a
+    senkou_b_raw = (_ph(h, 52) + _pl(l, 52)) / 2.0
+    senkou_b = np.concatenate([np.full(26, np.nan), senkou_b_raw[:-26]]) if n > 26 else senkou_b
+    chikou = c.copy()                             # 迟行带 (后移26绘制)
+    chikou[:26] = np.nan
+
+    return {"tenkan": tenkan, "kijun": kijun, "senkou_a": senkou_a,
+            "senkou_b": senkou_b, "chikou": chikou}
+
+
+def _fetch_daily_ohlcv(sina_code):
+    """拉日K线 (300日), 优先 sina, 回退 tushare"""
+    import pandas as pd
+    # 1️⃣ Sina
+    try:
+        import requests as rq
+        secid = sina_code  # 如 sz000001
+        url = f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={secid}&scale=240&ma=no&datalen=300"
+        resp = rq.get(url, timeout=8)
+        if resp.status_code == 200 and resp.text.strip() and resp.text != "null":
+            import json
+            data = json.loads(resp.text)
+            if data and isinstance(data, list):
+                df = pd.DataFrame(data)
+                df.columns = ["date", "open", "high", "low", "close", "volume"]
+                for col in ["open", "high", "low", "close", "volume"]:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                df["date"] = pd.to_datetime(df["date"])
+                df = df.dropna().reset_index(drop=True)
+                return df.tail(260)  # 留够 26+52 窗口
+    except Exception: pass
+
+    # 2️⃣ Tushare fallback
+    try:
+        import tushare as ts
+        token = os.environ.get("TUSHARE_TOKEN")
+        if token:
+            pro = ts.pro_api(token)
+            code = sina_code.replace("sz", "").replace("sh", "")
+            df = pro.daily(ts_code=f"{code}.SZ" if sina_code.startswith("sz") else f"{code}.SH",
+                           start_date="20250101")
+            if df is not None and len(df) > 20:
+                df = df.rename(columns={"trade_date": "date"})
+                df["date"] = pd.to_datetime(df["date"])
+                df = df.sort_values("date").reset_index(drop=True)
+                df = df[["date", "open", "high", "low", "close", "vol"]].rename(columns={"vol": "volume"})
+                return df.tail(260)
+    except Exception: pass
+    return None
+
+
+def _show_stock_ichimoku(win, sina_code, stock_name=""):
+    """双击股票 → 一目均衡图 (Ichimoku Kinko Hyo)"""
+    import tkinter as tk
+    from tkinter import ttk
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    import matplotlib
+    matplotlib.use("TkAgg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+
+    dlg = tk.Toplevel(win)
+    dlg.title(f"📈 一目均衡图 | {stock_name} ({sina_code})")
+    dlg.geometry("1100x720")
+    dlg.configure(bg="#0D0D0D")
+    try: dlg.state("zoomed")
+    except Exception: pass
+
+    # Banner
+    banner = tk.Frame(dlg, bg="#1565C0", height=42); banner.pack(fill=tk.X)
+    tk.Label(banner, text=f"📈 一目均衡表 · {stock_name} ({sina_code})",
+             bg="#1565C0", fg="white", font=("", 13, "bold")).pack(side=tk.LEFT, padx=12, pady=6)
+    status_var = tk.StringVar(value="⏳ 加载中...")
+    tk.Label(banner, textvariable=status_var, bg="#1565C0", fg="#BBDEFB",
+             font=("", 10)).pack(side=tk.RIGHT, padx=10)
+
+    fig_frame = tk.Frame(dlg, bg="#0D0D0D"); fig_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+    def _do_plot():
+        df = _fetch_daily_ohlcv(sina_code)
+        if df is None or len(df) < 60:
+            dlg.after(0, lambda: status_var.set("❌ 数据不足 (需 ≥ 60 根K)"))
+            return
+
+        highs = df["high"].values
+        lows = df["low"].values
+        closes = df["close"].values
+        dates = df["date"].values
+
+        ichi = _calc_ichimoku(highs, lows, closes)
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8),
+                                        gridspec_kw={"height_ratios": [3, 1]},
+                                        facecolor="#0D0D0D")
+        fig.subplots_adjust(hspace=0.05)
+
+        # 主图 K 线
+        n = len(closes)
+        x = np.arange(n)
+        width = 0.7
+        colors = ["#EF5350" if closes[i] >= df["open"].values[i] else "#66BB6A" for i in range(n)]
+        ax1.bar(x, closes - df["open"].values[i], bottom=df["open"].values[i],
+                width=width, color=colors, edgecolor=colors, linewidth=0.5)
+        ax1.vlines(x, lows, highs, colors=colors, linewidth=0.5)
+
+        # 一目均衡 5 条线
+        ax1.plot(x, ichi["tenkan"], color="#FFB300", linewidth=1.2, label="转换线(9)")
+        ax1.plot(x, ichi["kijun"], color="#1E88E5", linewidth=1.5, label="基准线(26)")
+        ax1.plot(x, ichi["chikou"], color="#E040FB", linewidth=1, linestyle="--", label="迟行带(26)")
+
+        # 先行带云 (填充)
+        mask = ~np.isnan(ichi["senkou_a"]) & ~np.isnan(ichi["senkou_b"])
+        if mask.any():
+            ax1.fill_between(x, ichi["senkou_a"], ichi["senkou_b"],
+                             where=(ichi["senkou_a"] >= ichi["senkou_b"]) & mask,
+                             color="#1B5E20", alpha=0.4, label="先行A≥B(看涨云)")
+            ax1.fill_between(x, ichi["senkou_a"], ichi["senkou_b"],
+                             where=(ichi["senkou_a"] < ichi["senkou_b"]) & mask,
+                             color="#B71C1C", alpha=0.4, label="先行A<B(看跌云)")
+
+        # 背景风格
+        ax1.set_facecolor("#121212")
+        ax1.tick_params(colors="#BDBDBD")
+        for spine in ax1.spines.values(): spine.set_color("#424242")
+        ax1.set_title(f"{stock_name} 一目均衡表", color="white", fontsize=13, fontweight="bold", pad=8)
+        ax1.legend(loc="upper left", fontsize=8, facecolor="#1E1E1E", edgecolor="#424242",
+                   labelcolor="#E0E0E0", ncol=3)
+        ax1.grid(True, alpha=0.2, color="#616161")
+        # x 轴日期
+        tick_idx = np.linspace(0, n - 1, min(10, n), dtype=int)
+        ax1.set_xticks(tick_idx)
+        ax1.set_xticklabels([pd.Timestamp(dates[i]).strftime("%m-%d") for i in tick_idx],
+                             color="#BDBDBD", fontsize=8, rotation=30)
+
+        # 成交量副图
+        vols = df["volume"].values
+        ax2.bar(x, vols, color=colors, width=width, alpha=0.7)
+        ax2.set_facecolor("#121212")
+        ax2.tick_params(colors="#BDBDBD")
+        for spine in ax2.spines.values(): spine.set_color("#424242")
+        ax2.grid(True, alpha=0.2, color="#616161")
+        ax2.set_xticks(tick_idx)
+        ax2.set_xticklabels([pd.Timestamp(dates[i]).strftime("%m-%d") for i in tick_idx],
+                             color="#BDBDBD", fontsize=8, rotation=30)
+
+        # 买卖信号
+        # 金叉: 转换线上穿基准线
+        for i in range(1, n):
+            if not np.isnan(ichi["tenkan"][i]) and not np.isnan(ichi["kijun"][i]):
+                if ichi["tenkan"][i-1] < ichi["kijun"][i-1] and ichi["tenkan"][i] >= ichi["kijun"][i]:
+                    ax1.annotate("金", xy=(i, lows[i]), fontsize=9, color="#EF5350",
+                                 fontweight="bold", ha="center", va="top")
+                elif ichi["tenkan"][i-1] > ichi["kijun"][i-1] and ichi["tenkan"][i] <= ichi["kijun"][i]:
+                    ax1.annotate("死", xy=(i, highs[i]), fontsize=9, color="#66BB6A",
+                                 fontweight="bold", ha="center", va="bottom")
+
+        # 云之上/云之下标记
+        latest_c = closes[-1]
+        latest_a = ichi["senkou_a"][-1] if not np.isnan(ichi["senkou_a"][-1]) else None
+        latest_b = ichi["senkou_b"][-1] if not np.isnan(ichi["senkou_b"][-1]) else None
+        signal = ""
+        if latest_a and latest_b:
+            cloud_top = max(latest_a, latest_b)
+            cloud_bot = min(latest_a, latest_b)
+            if latest_c > cloud_top: signal = "📈 价格在云之上 (看涨)"
+            elif latest_c < cloud_bot: signal = "📉 价格在云之下 (看跌)"
+            else: signal = "⚖️ 价格在云内部 (震荡)"
+        dlg.after(0, lambda: status_var.set(f"📌 {signal} | {n}根K线"))
+
+        canvas = FigureCanvasTkAgg(fig, master=fig_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    import threading
+    threading.Thread(target=_do_plot, daemon=True).start()
+
+
 def _get_first_stock_sina(win, idx):
     """Get first constituent stock's sina code from a block"""
     try:
@@ -2663,11 +2869,14 @@ def _build_futures_grid(parent, win, col=0):
     _add_title_row(frm, "④ 股指期货 (IH/IF/IC/IM)",
                    "#FF8A65", FUTURES_KNOWLEDGE)
 
-    grid = tk.Frame(frm, bg="#1E1E1E"); grid.pack(fill=tk.BOTH, expand=True)
+    # 高度 60%: 固定约 160px, pack_propagate(False) 让子控件不撑大
+    grid = tk.Frame(frm, bg="#1E1E1E", height=160)
+    grid.pack(fill=tk.X, expand=False)
+    grid.pack_propagate(False)
     win._fut_cells = []
     for i in range(4):
         r, c = i // 2, i % 2
-        cell = tk.Frame(grid, bg="#2A2A2A", padx=3, pady=3,
+        cell = tk.Frame(grid, bg="#2A2A2A", padx=2, pady=1,
                         highlightthickness=2)
         cell.grid(row=r, column=c, sticky="nsew", padx=2, pady=2)
         grid.grid_rowconfigure(r, weight=1); grid.grid_columnconfigure(c, weight=1)
@@ -2677,14 +2886,14 @@ def _build_futures_grid(parent, win, col=0):
         cell.config(highlightbackground=hc, highlightcolor=hc)
 
         tk.Label(cell, text=name, bg="#2A2A2A", fg="#FFD54F",
-                 font=("", 16, "bold")).pack()
+                 font=("", 14, "bold")).pack()
         tk.Label(cell, text=full_name, bg="#2A2A2A", fg="#9E9E9E",
-                 font=("", 9)).pack()
+                 font=("", 8)).pack()
         price_lbl = tk.Label(cell, text="—", bg="#2A2A2A", fg="#FFFFFF",
-                             font=("Menlo", 13, "bold"))
-        price_lbl.pack(pady=(2, 0))
+                             font=("Menlo", 12, "bold"))
+        price_lbl.pack(pady=(1, 0))
         basis_lbl = tk.Label(cell, text="加载中...", bg="#2A2A2A", fg="#81C784",
-                             font=("", 10))
+                             font=("", 9))
         basis_lbl.pack()
 
         win._fut_cells.append((name, full_name, _ts_code, cell, price_lbl, basis_lbl))
