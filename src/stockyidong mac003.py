@@ -4739,50 +4739,35 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         tp = 2
 
         # ── Row 1: 🌏 大盘 / 宏观 / 周期 (big picture first) ──
+        # ═══════════════════════════════════════════════════════════
+        # 🗂️ 按钮分类排序 (按使用频率 + 功能分区)
+        # ═══════════════════════════════════════════════════════════
+        # Row1: 🌍 全球宏观 / 大盘看盘 (最高频)
         _ROW1 = [
             ("全", 3, self.show_market_situation),
             ("👁️游资看盘", 7, self._show_speculator_watch),
             ("📺看盘", 7, self._show_realtime_market_dialog),
             ("🏛️美联储", 9, self._show_fed_analysis_dialog),
             ("🌏纳指套利", 10, self._show_etf_holiday_dialog),
-            ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
-            ("📊ETF联动", 10, self._show_etf_link_dialog),
+            ("🌍全球资产", 8, self._show_global_assets_dialog),
             ("🔧基础信息", 10, self._show_base_info_dialog),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW1):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
-            if "📱" in txt or "🦅" in txt:
-                import traceback as _tb_r1
-                def _wrap(_c=cmd, _t=txt):
-                    print(f"[🎯工具栏] 点击 '{_t}'", flush=True)
-                    try: _c()
-                    except Exception as _e:
-                        print(f"[🎯工具栏❌] '{_t}': {_e}", flush=True); _tb_r1.print_exc()
-                ttk.Button(toolbar_row1, text=txt, width=w, command=_wrap).pack(**_pad)
-            else:
-                ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(**_pad)
+            ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(**_pad)
 
-        # ── Row 2: 🎯 选股 / 量化 / 机会 (actionable) — 精简到 7 个 ──
+        # Row2: 🎯 选股 / 机会 / ETF周期 (actionable)
         try:
             _ROW2 = [
-                ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
-                ("🤖量化总览", 9, self._show_quant_dialog),
-                ("🎯量化预测", 10, self._show_quant_forecast_dialog),
-                ("🪙筹码", 7, self._show_chouma),
+                ("🎯超跌", 8, self._show_oversold_dialog),
                 ("🎯机会", 7, self._show_jianlou),
                 ("🎯高抛低吸", 8, self._show_high_low_swing),
+                ("🪙筹码", 7, self._show_chouma),
                 ("📊融资盘", 8, self._show_margin_dialog),
-                ("🎯超跌", 8, self._show_oversold_dialog),
-                # 📺看盘已整合进 Row1 📺看盘按钮
-                ("🌍全球资产", 8, self._show_global_assets_dialog),
-                ("🔷同花顺", 9, self._show_ths_ifind_dialog),
-                ("📅财经日历", 9, self._show_event_calendar_dialog),
-                ("💬知乎", 7, self._show_zhihu_dialog),
-                ("💎盈米", 7, self._show_yingmi_dialog),
-                ("🎯Choice", 8, self._show_choice_dialog),
-                ("📊TuShare", 9, self._show_tushare_dialog),
-                ("🔗全链路", 9, self._show_full_link_dialog),
-                ("📈AKShare", 9, self._show_akshare_dialog),
+                ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
+                ("📊ETF联动", 10, self._show_etf_link_dialog),
+                ("🎯量化预测", 10, self._show_quant_forecast_dialog),
+                ("🤖量化总览", 9, self._show_quant_dialog),
             ]
         except Exception as _e:
             print(f"[🎯Row2❌] 按钮定义炸了: {_e}", flush=True)
@@ -4798,24 +4783,25 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                     import traceback; traceback.print_exc()
             ttk.Button(toolbar_row2, text=txt, width=w, command=_wrap2).pack(**_pad)
 
-        # ── Row 3: 🔥 主线 / 大盘分析 + K线 / 个股分析 (合并, 精简 width!) ──
+        # Row3: 🔥 主力资金 / 个股分析 (深度)
         _ROW3 = [
             ("🔥主线·资金", 10, self._show_mainline_capital_dialog),
-            ("📊大盘分析", 9, self._show_market_analyst_dialog),
             ("💡主力趋势", 8, self._show_main_trend_dialog),
-            ("⭐五星跟随", 8, self.show_five_star_follow_dialog),
+            ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
             ("📊K线", 6, self.show_kline_dialog),
+            ("📊深度技术", 8, self._show_stock_analysis_dialog),
+            ("📐β-α", 6, self._show_beta_alpha),
             ("📈一目均衡", 7, self._show_ichimoku_kline_dialog),
             ("📈1minK", 7, self._show_1min_kline_dialog),
-            ("📊深度技术", 8, self._show_stock_analysis_dialog),
-            ("📊板块个股分析", 10, self._show_stock_compare_dialog),
-            ("🔍多股同列", 7, self._show_multi_compare_dialog),
-            ("📐β-α", 6, self._show_beta_alpha),
+            ("⭐五星跟随", 8, self.show_five_star_follow_dialog),
             ("🎁打折促销", 9, self._show_discount_dialog),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW3):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
             ttk.Button(toolbar_row3, text=txt, width=w, command=cmd).pack(**_pad)
+
+        # Row4: 📰 资讯 / 外部数据源 (最低频, 可选)
+        # — 合并进 Row2/Row3 末尾, 不单独占一行 (太挤) —
 
 
         # 快速爬取/文本控制标签页控件框(共用一块区域,可以切换)
