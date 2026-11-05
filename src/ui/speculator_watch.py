@@ -952,43 +952,37 @@ def show_speculator_watch(root=None, app=None):
     left_pane.grid_columnconfigure(0, weight=1)
     left_pane.grid_columnconfigure(1, weight=1)
 
-    # 🗂️ 模块按游资看盘优先度排序 (全球→方向→板块→资金→期货→周期→判定→捡漏)
-    # ── row_top (row=0, 权重3): 3 列全是核心判断层 ──
-    # col=0: 🌍全球五资产联动 → 外部宏观入口 (最优先)
-    # col=1: 🎯信号决策面板 → 大盘方向判定 (次优先)
-    # col=2: ①板块九宫格 → 热门板块定位 (再优先)
+    # 🗂️ 模块按用户要求重排
+    # ── row_top (row=0): 3全球五资产 × 1板块九宫格 (2列等宽) ──
     row_top = tk.Frame(left_pane, bg="#121212"); row_top.grid(row=0, column=0, columnspan=2, sticky="nsew")
-    row_top.grid_columnconfigure(0, weight=1, uniform="topcols")
-    row_top.grid_columnconfigure(1, weight=1, uniform="topcols")
-    row_top.grid_columnconfigure(2, weight=1, uniform="topcols")
+    row_top.grid_columnconfigure(0, weight=1, uniform="r1")
+    row_top.grid_columnconfigure(1, weight=1, uniform="r1")
 
-    # 先挪全球五资产联动到 row_top col=0 (从 row_leak 上来)
-    _build_orderbook(row_top, win, 0)
-    # 信号决策 col=1 (wrapper)
-    sign_wrapper = tk.Frame(row_top, bg="#121212"); sign_wrapper.grid(row=0, column=1, sticky="nsew", padx=3, pady=3)
-    _build_sign_decision_panel(sign_wrapper, win)
-    # 板块九宫格 col=2
-    _build_block_grid(row_top, win, 2)
+    _build_orderbook(row_top, win, 0)    # 3=🌍全球五资产
+    _build_block_grid(row_top, win, 1)   # 1=①板块九宫格
 
-    # ── row_bot (row=1, 权重3): 3 列是确认层 ──
-    # col=0: ③量能 (资金确认)
-    # col=1: ④股指期货 (主力合约状态)
-    # col=2: ⑤周期阶段 (情绪位置)
+    # ── row_bot (row=1): 4量能 × 5股指期货 × 6周期阶段 (3列) ──
     row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, columnspan=2, sticky="nsew")
-    _build_volume_panel(row_bot, win, 0)
-    _build_futures_grid(row_bot, win, 1)
-    _build_cycle_panel(row_bot, win, 2)
+    row_bot.grid_columnconfigure(0, weight=1, uniform="r2")
+    row_bot.grid_columnconfigure(1, weight=1, uniform="r2")
+    row_bot.grid_columnconfigure(2, weight=1, uniform="r2")
 
-    # ── row_leak (row=2, 固定200px): 只保留状态判定 (去掉捡漏) ──
+    _build_volume_panel(row_bot, win, 0)     # 4=量能
+    _build_futures_grid(row_bot, win, 1)      # 5=股指期货
+    _build_cycle_panel(row_bot, win, 2)       # 6=周期阶段
+
+    # ── row_leak (row=2, 固定200px): 2信号决策 × 7状态判定 ──
     row_leak = tk.Frame(left_pane, bg="#121212", height=200)
     row_leak.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(2, 0))
     row_leak.pack_propagate(False)
+    row_leak.grid_columnconfigure(0, weight=1, uniform="r3")
+    row_leak.grid_columnconfigure(1, weight=1, uniform="r3")
 
-    _build_status_panel(row_leak, win, 0)
+    sign_w = tk.Frame(row_leak, bg="#121212"); sign_w.grid(row=0, column=0, sticky="nsew", padx=3, pady=3)
+    _build_sign_decision_panel(sign_w, win)   # 2=🎯信号决策
 
-    # 信号决策面板原来是 grid col=1 跨 1 行, 现在 pack 到 row_top — 需要调整其内部布局
-    # 让它在 row_top 三列中正确占位
-    # (build_sign_decision_panel 内部用 pack fill=BOTH expand, 父 Frame 是 grid col=1, 应该没问题)
+    stat_w = tk.Frame(row_leak, bg="#121212"); stat_w.grid(row=0, column=1, sticky="nsew", padx=3, pady=3)
+    _build_status_panel(stat_w, win, 0)       # 7=状态判定
 
     # 右侧: 游资看盘思路分析
     _build_watch_analysis(right_pane, win)
