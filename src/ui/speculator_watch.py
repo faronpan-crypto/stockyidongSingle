@@ -5642,12 +5642,14 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
     result_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
 
-def _add_article_btn(parent_top, win, ctx=None, focus_layer=None, padx=(0, 4), pady=4):
-    """通用: 在弹窗顶栏右侧加 📝 文章生成按钮"""
-    return tk.Button(parent_top, text="📝 文章", font=("", 10, "bold"),
-                     bg="#B71C1C", fg="white", padx=10, pady=2, cursor="hand2",
-                     command=lambda: _article_output_dialog(win, ctx=ctx, focus_layer=focus_layer)
-                     ).pack(side=tk.RIGHT, padx=padx, pady=pady)
+def _add_article_btn(parent_top, win, ctx=None, focus_layer=None, padx=0, pady=0):
+    """通用: 在弹窗顶栏正中间加 📝 红色文章生成按钮"""
+    btn = tk.Button(parent_top, text="📝 文章生成", font=("", 10, "bold"),
+                     bg="#B71C1C", fg="white", padx=12, pady=2, cursor="hand2",
+                     command=lambda: _article_output_dialog(win, ctx=ctx, focus_layer=focus_layer))
+    # place 绝对居中: relx=0.5 rely=0.5 精确顶栏中央
+    btn.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+    return btn
 
 
 def _article_fallback(prompt, author, mode, plat, length):
