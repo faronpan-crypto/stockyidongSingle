@@ -3239,14 +3239,25 @@ def _build_watch_analysis(parent, win):
     tk.Button(top, text="🤖 AI分析", command=lambda: _ai_popup(win),
               bg="#3949AB", fg="#ECEFF1", font=("", 10, "bold")).pack(side=tk.RIGHT, padx=4)
 
-    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0, width=260)
+    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0)
     sb = tk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
     body = tk.Frame(canvas, bg="#121212")
     body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.create_window((0, 0), window=body, anchor="nw", width=260)
+    body_id = canvas.create_window((0, 0), window=body, anchor="nw")
     canvas.configure(yscrollcommand=sb.set)
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+    # 🎯 响应式: Canvas/parent 宽度变化时同步 body 宽度 + 更新 wraplength
+    def _on_parent_configure(e):
+        # 让 body 跟随 canvas 宽度
+        canvas.itemconfigure(body_id, width=canvas.winfo_width())
+        # 让结论区文字也跟随
+        if hasattr(win, "_wa_conclusion"):
+            win._wa_conclusion.config(wraplength=max(200, canvas.winfo_width() - 32))
+    parent.bind("<Configure>", _on_parent_configure)
+    # 初始配置
+    win.after(50, lambda: _on_parent_configure(type("E", (), {"width": 400})()))
 
     def _mw(e): canvas.yview_scroll(int(-e.delta / 120), "units")
     canvas.bind_all("<MouseWheel>", _mw)
