@@ -1903,6 +1903,7 @@ def _show_zt_rank_dialog(parent):
              bg="#1E1E1E", fg="#FF6D00", font=("", 11, "bold")).pack(side=tk.LEFT)
     date_lbl = tk.Label(top, text="⏳ 加载中...", bg="#1E1E1E", fg="#BDBDBD", font=("", 12))
     date_lbl.pack(side=tk.LEFT, padx=10)
+    _add_article_btn(top, parent, focus_layer="📊 涨停强弱排名")
 
     # Treeview: 嵌套板块分组
     cols = ("rank", "name", "logic", "score", "time", "lb", "zb", "hand", "ind", "help")
@@ -2321,6 +2322,7 @@ def _show_daily_kline_dialog(parent, title, data, sina_code=None):
     top = tk.Frame(dlg, bg="#1E1E1E"); top.pack(fill=tk.X)
     tk.Label(top, text=f"📊 {title}",
              bg="#1E1E1E", fg="#FFD54F", font=("", 12, "bold")).pack(side=tk.LEFT, padx=12, pady=6)
+    _add_article_btn(top, parent, focus_layer=f"📊 K线: {title}")
 
     PERIODS = [("60分钟", 60), ("日线", 240), ("周线", "week"), ("月线", "month")]
     _period_var = tk.StringVar(value="日线")
@@ -3030,6 +3032,7 @@ def _show_knowledge_popup(parent, title, data):
     title_lbl = tk.Label(top, text=f"📚 {title}", bg="#121212", fg="#FFD54F",
                          font=("", KN_TITLE_FS[0], "bold"))
     title_lbl.pack(side=tk.LEFT, padx=10, pady=8)
+    _add_article_btn(top, parent, focus_layer=f"📚 周期论: {title}")
 
     # 字体调节
     def _fs_label(): return f"🔤 {KN_FS[0]}pt"
@@ -5081,7 +5084,7 @@ def _get_block_canvas_data():
 # ── Treemap 绘制 ──
 
 def _draw_block_treemap(win):
-    """绘制板块画布 Treemap"""
+    """绘制板块画布 Treemap — 可点击, 点击弹出该板块文章生成"""
     canvas = getattr(win, "_block_canvas", None)
     if canvas is None:
         return
@@ -5102,7 +5105,8 @@ def _draw_block_treemap(win):
     items = [(b["name"], b["weight"], b["pct"], b) for b in blocks]
     rects = _layout_treemap(items, 4, 4, W - 8, H - 8)
 
-    # 计算前面积占比 → 前排显示详细
+    # 存点击映射: tag → block dict
+    tag_map = {}
     total_area = sum((r[2] - r[1]) * (r[4] - r[3]) for r in rects)
     cum_area = 0
 
@@ -5116,13 +5120,21 @@ def _draw_block_treemap(win):
 
         area = w * h
         cum_area += area
-        is_front = cum_area <= total_area * 0.70  # 前 70% 面积的格子显示详细
+        is_front = cum_area <= total_area * 0.70
 
         bg = _pct_to_color(pct)
         fg = _pct_to_fg(pct)
 
+        # 可点击矩形 (outline 更亮, cursor 手型)
+        tag = f"block_{rank}"
         canvas.create_rectangle(x1, y1, x2, y2, fill=bg, outline="#555",
-                               width=1, tags=f"rect_{rank}")
+                               width=1, tags=tag, activeoutline="#FFD54F",
+                               activewidth=2)
+        tag_map[tag] = extra
+
+        # 让所有元素共用同一 tag 方便点击命中
+        canvas.create_text((x1+x2)//2, (y1+y2)//2, text="", tags=tag)  # 占位
+        canvas.create_text((x1+x2)//2, 0, text="", tags=(tag, "_skip"))  # 占位
 
         min_side = min(w, h)
         if min_side > 120:
@@ -5142,13 +5154,13 @@ def _draw_block_treemap(win):
 
         canvas.create_text(cx, cy - max(8, h // 6), text=name,
                           fill="#FFFFFF", font=("", name_fs, name_fw),
-                          tags=f"rect_{rank}")
+                          tags=[tag])
 
         sign = "+" if pct >= 0 else ""
         canvas.create_text(cx, cy + max(4, h // 8),
                           text=f"{sign}{pct:.2f}%",
                           fill=fg, font=("", pct_fs, pct_fw),
-                          tags=f"rect_{rank}")
+                          tags=[tag])
 
         # 详细信息: n=xx ↑xx ↓xx + top3 龙头
         if is_front and extra:
@@ -5167,7 +5179,7 @@ def _draw_block_treemap(win):
                 canvas.create_text(cx, y2 - info_fs - 4,
                                   text=" ".join(info_parts),
                                   fill="#BDBDBD", font=("", info_fs),
-                                  tags=f"rect_{rank}")
+                                  tags=[tag])
             # Top3 龙头 (底部, 缩小字体)
             if top3 and h > 100:
                 top3_fs = max(8, info_fs - 1)
@@ -5179,19 +5191,54 @@ def _draw_block_treemap(win):
                     ty_line = ty - ti * (top3_fs + 2)
                     canvas.create_text(x1 + 8, ty_line, text=f"{short}",
                                       fill="#E0E0E0", font=("", top3_fs),
-                                      anchor=tk.W, tags=f"rect_{rank}")
+                                      anchor=tk.W, tags=[tag])
                     canvas.create_text(x2 - 8, ty_line, text=f"{ssign}{spct:.1f}%",
                                       fill=sfg, font=("", top3_fs),
-                                      anchor=tk.E, tags=f"rect_{rank}")
+                                      anchor=tk.E, tags=[tag])
 
         # 前 3 名角标
         if rank <= 3 and is_front:
             medals = {1: "🥇", 2: "🥈", 3: "🥉"}
             canvas.create_text(x1 + 14, y1 + 10, text=medals[rank],
-                              font=("", 14), tags=f"rect_{rank}")
+                              font=("", 14), tags=[tag])
+
+    # 保存 tag 映射, 绑定点击
+    win._block_tag_map = tag_map
+    canvas.config(cursor="hand2")
+    canvas.bind("<Button-1>", lambda e: _on_treemap_click(win, e))
 
     # 统计
     _update_block_canvas_stat(win, blocks)
+
+
+def _on_treemap_click(win, event):
+    """点击 Treemap 格子 → 弹出该板块文章生成"""
+    canvas = getattr(win, "_block_canvas", None)
+    tag_map = getattr(win, "_block_tag_map", {})
+    if canvas is None or not tag_map:
+        return
+    try:
+        item = canvas.find_closest(event.x, event.y)[0]
+        tags = canvas.gettags(item)
+        # tags 形如 ("block_3",) 或 ("block_3", "_skip")
+        block_tag = None
+        for t in tags:
+            if t.startswith("block_") and t in tag_map:
+                block_tag = t; break
+        if block_tag is None:
+            return
+        block = tag_map[block_tag]
+        name = block.get("name", "")
+        pct = block.get("pct", 0)
+        ctx = {
+            "focus_sector": name,
+            "sector_pct": f"{pct:+.2f}%",
+            "n_stocks": block.get("n"),
+            "top3": [(s, f"{p:+.2f}%") for s, p in block.get("top3", [])],
+        }
+        _article_output_dialog(win, ctx=ctx, focus_layer=f"🗂️ 板块: {name}")
+    except Exception as ex:
+        print(f"[🗂️画布] click err: {ex}")
 
 
 # ── UI 面板 ──
@@ -5206,6 +5253,7 @@ def _build_block_canvas_panel(parent, win):
                                       font=("", 11))
     win._block_canvas_stat.pack(side=tk.LEFT, padx=10)
 
+    _add_article_btn(top, win, focus_layer="🗂️ 板块画布")
     tk.Button(top, text="🔄 刷新", bg="#3949AB", fg="#ECEFF1",
               font=("", 10, "bold"),
               command=lambda: _refresh_block_canvas(win)).pack(side=tk.RIGHT, padx=4)
@@ -5583,6 +5631,14 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
         padx=12, pady=10, spacing3=4,
     )
     result_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+
+def _add_article_btn(parent_top, win, ctx=None, focus_layer=None, padx=(0, 4), pady=4):
+    """通用: 在弹窗顶栏右侧加 📝 文章生成按钮"""
+    return tk.Button(parent_top, text="📝 文章", font=("", 10, "bold"),
+                     bg="#B71C1C", fg="white", padx=10, pady=2, cursor="hand2",
+                     command=lambda: _article_output_dialog(win, ctx=ctx, focus_layer=focus_layer)
+                     ).pack(side=tk.RIGHT, padx=padx, pady=pady)
 
 
 def _article_fallback(prompt, author, mode, plat, length):
