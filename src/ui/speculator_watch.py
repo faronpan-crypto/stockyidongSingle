@@ -773,8 +773,8 @@ def show_speculator_watch(root=None, app=None):
     print(f"[👁️看盘] 被调用, app={'有' if app else '无'}", flush=True)
     win = tk.Toplevel(root) if root else tk.Tk()
     win.title("👁️ 游资看盘界面 — 2×3 六区")
-    win.geometry("2400x1050")
-    win.minsize(2100, 950)
+    win.geometry("2100x1050")
+    win.minsize(1800, 950)
     win._app = app
     win._running = True
 
@@ -821,10 +821,11 @@ def show_speculator_watch(root=None, app=None):
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
     # 右面板加宽 (340 → 420)
-    # 右面板 2 倍加宽 (520 → 1040)
-    left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    right_pane = tk.Frame(outer, bg="#121212", width=1040); right_pane.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
-    right_pane.pack_propagate(False)
+    # 左右面板固定最小宽度, 不会互相挤压
+    # 左: 九宫格+五资产+股指期货等 8 个模块 (min 1500px)
+    # 右: 游资看盘思路分析 (min 500px, 不设太宽)
+    left_pane = tk.Frame(outer, bg="#121212", width=1500); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    right_pane = tk.Frame(outer, bg="#121212", width=500); right_pane.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
     # left_pane grid 配置 (2 列 × 3 行)
     left_pane.grid_rowconfigure(0, weight=3)
