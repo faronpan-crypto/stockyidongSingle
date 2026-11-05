@@ -821,38 +821,54 @@ def show_speculator_watch(root=None, app=None):
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
     # 右面板加宽 (340 → 420)
+    # 右面板充满 (width=520, pack_propagate=False 保留最小宽度)
     left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    right_pane = tk.Frame(outer, bg="#121212", width=420); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+    right_pane = tk.Frame(outer, bg="#121212", width=520); right_pane.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
     right_pane.pack_propagate(False)
 
-    # 左面板 grid: 2列 × 3行, row_top/row_bot 跨两列全宽, row_leak 只占 column 0 (一半宽)
+    # left_pane grid 配置 (2 列 × 3 行)
     left_pane.grid_rowconfigure(0, weight=3)
     left_pane.grid_rowconfigure(1, weight=3)
-    left_pane.grid_rowconfigure(2, weight=0)  # 捡漏: 固定 200px 高度
-    left_pane.grid_columnconfigure(0, weight=1, uniform="half")
-    left_pane.grid_columnconfigure(1, weight=1, uniform="half")
+    left_pane.grid_rowconfigure(2, weight=0)
+    left_pane.grid_columnconfigure(0, weight=1)
+    left_pane.grid_columnconfigure(1, weight=1)
 
+    # 🗂️ 模块按游资看盘优先度排序 (全球→方向→板块→资金→期货→周期→判定→捡漏)
+    # ── row_top (row=0, 权重3): 3 列全是核心判断层 ──
+    # col=0: 🌍全球五资产联动 → 外部宏观入口 (最优先)
+    # col=1: 🎯信号决策面板 → 大盘方向判定 (次优先)
+    # col=2: ①板块九宫格 → 热门板块定位 (再优先)
     row_top = tk.Frame(left_pane, bg="#121212"); row_top.grid(row=0, column=0, columnspan=2, sticky="nsew")
-    row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, columnspan=2, sticky="nsew")
-    _build_block_grid(row_top, win, 0)
-    # 信号决策面板 — 包一个 wrapper Frame grid 到 row_top col=1 (和其他面板统一)
-    sign_wrapper = tk.Frame(row_top, bg="#121212"); sign_wrapper.grid(row=0, column=1, sticky="nsew", padx=3, pady=3)
+    row_top.grid_columnconfigure(0, weight=1, uniform="topcols")
     row_top.grid_columnconfigure(1, weight=1, uniform="topcols")
-    _build_sign_decision_panel(sign_wrapper, win)  # ← 从 row_leak 挪上来
-    _build_volume_panel(row_top, win, 2)
-    _build_futures_grid(row_bot, win, 0)
-    _build_cycle_panel(row_bot, win, 1)
-    _build_status_panel(row_bot, win, 2)
+    row_top.grid_columnconfigure(2, weight=1, uniform="topcols")
 
-    # 底部 row_leak 跨两列, 内部左右分栏: 左=捡漏(黑底), 右=观察窗口(盘口)
-    row_leak = tk.Frame(left_pane, bg="#121212", height=230); row_leak.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(2, 0))
+    # 先挪全球五资产联动到 row_top col=0 (从 row_leak 上来)
+    _build_orderbook(row_top, win, 0)
+    # 信号决策 col=1 (wrapper)
+    sign_wrapper = tk.Frame(row_top, bg="#121212"); sign_wrapper.grid(row=0, column=1, sticky="nsew", padx=3, pady=3)
+    _build_sign_decision_panel(sign_wrapper, win)
+    # 板块九宫格 col=2
+    _build_block_grid(row_top, win, 2)
+
+    # ── row_bot (row=1, 权重3): 3 列是确认层 ──
+    # col=0: ③量能 (资金确认)
+    # col=1: ④股指期货 (主力合约状态)
+    # col=2: ⑤周期阶段 (情绪位置)
+    row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, columnspan=2, sticky="nsew")
+    _build_volume_panel(row_bot, win, 0)
+    _build_futures_grid(row_bot, win, 1)
+    _build_cycle_panel(row_bot, win, 2)
+
+    # ── row_leak (row=2, 固定200px): 2 列操作层 ──
+    # 左: ⑥状态判定 (综合判断)
+    # 右: ⑦捡漏 (操作入口)
+    row_leak = tk.Frame(left_pane, bg="#121212", height=200)
+    row_leak.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(2, 0))
     row_leak.pack_propagate(False)
 
-    leak_half = tk.Frame(row_leak, bg="#000000"); leak_half.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    ob_half = tk.Frame(row_leak, bg="#1E1E1E"); ob_half.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
-
-    _build_leak_panel(leak_half, win)
-    _build_orderbook(ob_half, win, 0)  # ← 从 row_top 挪下来
+    _build_status_panel(row_leak, win, 0)
+    _build_leak_panel(row_leak, win)
 
     # 信号决策面板原来是 grid col=1 跨 1 行, 现在 pack 到 row_top — 需要调整其内部布局
     # 让它在 row_top 三列中正确占位
@@ -1126,7 +1142,7 @@ def _draw_block_grid(win):
             # 脉冲异常标 ⚠️
             if abs(pct) >= 3.0:
                 c.create_text(x2 - 7, y1 + 7, text="⚠️", fill="#FFD54F",
-                              font=("", 9, "bold"), tags=f"cell_{idx}")
+                              font=("", 12, "bold"), tags=f"cell_{idx}")
 
         if pct is None:
             c.create_rectangle(x1, y1, x2, y2, fill=bg, outline="#555",
@@ -1146,7 +1162,7 @@ def _draw_block_grid(win):
         n_stocks = meta[5]
         if n_stocks:
             c.create_text(x2 - 7, y1 + 20, text=f"n={n_stocks}", fill="#9E9E9E",
-                          font=("", 7), tags=f"cell_{idx}")
+                          font=("", 10), tags=f"cell_{idx}")
 
         # Top3 龙头 (下半部分, 3 行小字号)
         top3 = meta[6] if len(meta) > 6 else []
@@ -1159,10 +1175,10 @@ def _draw_block_grid(win):
                 # 🆕 给每只股票加独立 tag, 双击时识别
                 stock_tag = f"stock_{idx}_{ti}"
                 c.create_text(x1 + 6, sy, text=f"{short}",
-                              fill="#BDBDBD", font=("", 8), anchor=tk.W,
+                              fill="#BDBDBD", font=("", 11), anchor=tk.W,
                               tags=(f"cell_{idx}", stock_tag))
                 c.create_text(x2 - 6, sy, text=f"{ssign}{spct:.1f}%",
-                              fill=sfg, font=("", 8), anchor=tk.E,
+                              fill=sfg, font=("", 11), anchor=tk.E,
                               tags=(f"cell_{idx}", stock_tag, f"pct_{idx}_{ti}"))
 
         # ❓ 板块分析按钮 (左上角, 蓝色下划线)
@@ -1539,7 +1555,7 @@ def _show_zt_logic_popup(parent, row, score, reasons, zt_logic, winrate):
     tk.Label(dlg, text=f"📘 {name}({code})", bg="#1E1E1E", fg="#FFD54F",
              font=("", 14, "bold")).pack(pady=(10, 2))
     tk.Label(dlg, text=f"所属行业: {row.get('所属行业', '—')}  |  连板数: {row.get('连板数', 1)}板  |  涨停统计: {row.get('涨停统计', '1/1')}",
-             bg="#1E1E1E", fg="#90A4AE", font=("", 9)).pack()
+             bg="#1E1E1E", fg="#90A4AE", font=("", 12)).pack()
 
     # 分数大字
     score_frame = tk.Frame(dlg, bg="#1E1E1E"); score_frame.pack(fill=tk.X, pady=10)
@@ -1577,7 +1593,7 @@ def _show_zt_logic_popup(parent, row, score, reasons, zt_logic, winrate):
     else:
         desc = f"首板异动, 次日方向看板块是否有持续消息催化 + 大盘情绪配合。历史首板次日溢价 {winrate:.0f}%。"
     tk.Label(card3, text=desc, bg="#263238", fg="#BDBDBD",
-             font=("", 9), wraplength=480, justify=tk.LEFT).pack(anchor="w", pady=(4, 0))
+             font=("", 12), wraplength=480, justify=tk.LEFT).pack(anchor="w", pady=(4, 0))
 
     # 操作建议
     card4 = tk.Frame(dlg, bg="#1E1E1E", padx=10, pady=8); card4.pack(fill=tk.X, padx=10, pady=8)
@@ -1630,7 +1646,7 @@ def _build_orderbook(parent, win, col=1):
                            font=("", 10))
         pct_lbl.pack(anchor=tk.W)
         tk.Label(card, text=f"⚡{link_suggest}", bg="#263238", fg="#BDBDBD",
-                 font=("", 9), wraplength=100, justify=tk.LEFT).pack(anchor=tk.W, pady=(3, 0))
+                 font=("", 12), wraplength=100, justify=tk.LEFT).pack(anchor=tk.W, pady=(3, 0))
 
         win._asset_cards[name] = {
             "price": price_lbl, "pct": pct_lbl,
@@ -1751,7 +1767,7 @@ def _show_zt_rank_dialog(parent):
     top = tk.Frame(dlg, bg="#1E1E1E"); top.pack(fill=tk.X, padx=6, pady=4)
     tk.Label(top, text="📊 涨停强弱排名  |  游资多维度算法 · 板块分组",
              bg="#1E1E1E", fg="#FF6D00", font=("", 11, "bold")).pack(side=tk.LEFT)
-    date_lbl = tk.Label(top, text="⏳ 加载中...", bg="#1E1E1E", fg="#BDBDBD", font=("", 9))
+    date_lbl = tk.Label(top, text="⏳ 加载中...", bg="#1E1E1E", fg="#BDBDBD", font=("", 12))
     date_lbl.pack(side=tk.LEFT, padx=10)
 
     # Treeview: 嵌套板块分组
@@ -1764,11 +1780,11 @@ def _show_zt_rank_dialog(parent):
         tv.heading(c, text=headings[0][i])
         tv.column(c, width=widths[i], anchor="center", stretch=False)
     tv.column("logic", anchor="w", stretch=True)
-    tv.tag_configure("high", foreground="#66BB6A", font=("", 8))
-    tv.tag_configure("mid", foreground="#FFA726", font=("", 8))
-    tv.tag_configure("low", foreground="#EF5350", font=("", 8))
-    tv.tag_configure("rank1", foreground="#FFD54F", font=("", 8, "bold"))
-    tv.tag_configure("sector", foreground="#FF6D00", font=("", 9, "bold"), background="#263238")
+    tv.tag_configure("high", foreground="#66BB6A", font=("", 11))
+    tv.tag_configure("mid", foreground="#FFA726", font=("", 11))
+    tv.tag_configure("low", foreground="#EF5350", font=("", 11))
+    tv.tag_configure("rank1", foreground="#FFD54F", font=("", 11, "bold"))
+    tv.tag_configure("sector", foreground="#FF6D00", font=("", 12, "bold"), background="#263238")
     tv.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
 
     # 存映射
@@ -1813,7 +1829,7 @@ def _show_zt_rank_dialog(parent):
     tv.bind("<ButtonRelease-1>", _on_single_click)
 
     tk.Label(dlg, text="💡 双击股票 → 日K线  |  双击板块 → 展开/收起  |  点❓ → 涨停详解",
-             bg="#1E1E1E", fg="#78909C", font=("", 8)).pack(anchor="w", padx=6, pady=(0, 4))
+             bg="#1E1E1E", fg="#78909C", font=("", 11)).pack(anchor="w", padx=6, pady=(0, 4))
 
     # 后台加载
     def _bg():
@@ -2305,7 +2321,7 @@ def _show_daily_kline_dialog(parent, title, data, sina_code=None):
             return
         _redraw(data2)
 
-    info_lbl = tk.Label(top, text=f"", bg="#1E1E1E", fg="#A5D6A7", font=("", 9))
+    info_lbl = tk.Label(top, text=f"", bg="#1E1E1E", fg="#A5D6A7", font=("", 12))
     info_lbl.pack(side=tk.RIGHT, padx=10)
 
     canvas_frame = tk.Frame(dlg, bg="#121212"); canvas_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
@@ -2415,15 +2431,15 @@ def _refresh_volume(win):
     # 涨 (红)
     up_px = int(H * 0.8 * min(up, 5000) / 5000)
     c.create_rectangle(20, H - up_px - 10, 20 + bar_w, H - 10, fill="#EF5350", outline="")
-    c.create_text(20 + bar_w//2, H - 4, text=f"涨{up}", fill="#FFF", font=("", 8, "bold"))
+    c.create_text(20 + bar_w//2, H - 4, text=f"涨{up}", fill="#FFF", font=("", 11, "bold"))
     # 跌 (绿)
     down_px = int(H * 0.8 * min(down, 5000) / 5000)
     c.create_rectangle(20 + bar_w + gap, H - down_px - 10, 20 + bar_w*2 + gap, H - 10, fill="#66BB6A", outline="")
-    c.create_text(20 + bar_w*1.5 + gap, H - 4, text=f"跌{down}", fill="#FFF", font=("", 8, "bold"))
+    c.create_text(20 + bar_w*1.5 + gap, H - 4, text=f"跌{down}", fill="#FFF", font=("", 11, "bold"))
     # 平 (灰)
     flat_px = int(H * 0.8 * min(flat, 500) / 500)
     c.create_rectangle(20 + bar_w*2 + gap*2, H - flat_px - 10, 20 + bar_w*3 + gap*2, H - 10, fill="#78909C", outline="")
-    c.create_text(20 + bar_w*2.5 + gap*2, H - 4, text=f"平{flat}", fill="#FFF", font=("", 8, "bold"))
+    c.create_text(20 + bar_w*2.5 + gap*2, H - 4, text=f"平{flat}", fill="#FFF", font=("", 11, "bold"))
     # 今日情绪指数 (大字)
     c.create_text(W - 60, 20, text=f"情绪 {m1_today:+.1f}%",
                   fill="#EF5350" if m1_today >= 0 else "#66BB6A", font=("", 11, "bold"))
@@ -2438,11 +2454,11 @@ def _refresh_volume(win):
     hs_px = int(W2 * hs_pct); kc_px = W2 - hs_px
     c2.create_rectangle(0, 10, hs_px, 50, fill="#64B5F6", outline="")
     c2.create_rectangle(hs_px, 10, W2, 50, fill="#CE93D8", outline="")
-    c2.create_text(hs_px // 2, 28, text=f"沪深300 {hs300:+.2f}%", fill="#FFF", font=("", 9, "bold"))
-    c2.create_text(hs_px + kc_px // 2, 28, text=f"科创50 {kc30:+.2f}%", fill="#FFF", font=("", 9, "bold"))
+    c2.create_text(hs_px // 2, 28, text=f"沪深300 {hs300:+.2f}%", fill="#FFF", font=("", 12, "bold"))
+    c2.create_text(hs_px + kc_px // 2, 28, text=f"科创50 {kc30:+.2f}%", fill="#FFF", font=("", 12, "bold"))
     # 状态字
     status = "💡 创业板领跌" if kc30 < hs300 else "💡 沪深300领跌"
-    c2.create_text(W2 // 2, 52, text=status, fill="#FFD54F", font=("", 8))
+    c2.create_text(W2 // 2, 52, text=status, fill="#FFD54F", font=("", 11))
 
     # —— 板块增量榜 Treeview ——
     try:
@@ -2518,12 +2534,12 @@ def _build_futures_grid(parent, win, col=0):
         tk.Label(cell, text=name, bg="#2A2A2A", fg="#FFD54F",
                  font=("", 20, "bold")).pack()
         tk.Label(cell, text=full_name, bg="#2A2A2A", fg="#9E9E9E",
-                 font=("", 9)).pack()
+                 font=("", 12)).pack()
         price_lbl = tk.Label(cell, text="—", bg="#2A2A2A", fg="#FFFFFF",
                              font=("Menlo", 16, "bold"))
         price_lbl.pack(pady=(4, 0))
         basis_lbl = tk.Label(cell, text="加载中...", bg="#2A2A2A", fg="#81C784",
-                             font=("", 9))
+                             font=("", 12))
         basis_lbl.pack()
 
         win._fut_cells.append((name, full_name, _ts_code, cell, price_lbl, basis_lbl))
@@ -2650,7 +2666,7 @@ def _build_cycle_panel(parent, win, col=1):
         dot = tk.Label(col_f, text="●", fg=inact, bg="#1E1E1E", font=("", 22))
         dot.pack(anchor=tk.CENTER)
         lbl = tk.Label(col_f, text=name.split(" ")[1], bg="#1E1E1E",
-                       fg=inact, font=("", 8))
+                       fg=inact, font=("", 11))
         lbl.pack(anchor=tk.CENTER)
         win._stage_dots.append((dot, lbl, act))
 
@@ -2667,7 +2683,7 @@ def _build_cycle_panel(parent, win, col=1):
 
     # 阶段说明 (P1-P5)
     tk.Label(frm, text="P1冰点→P2启动→P3发酵→P4高潮→P5退潮 — 仓位: 0-15%→30-40%→50-70%→止盈→空仓",
-             bg="#1E1E1E", fg="#757575", font=("", 8)).pack(anchor=tk.W, padx=4)
+             bg="#1E1E1E", fg="#757575", font=("", 11)).pack(anchor=tk.W, padx=4)
 
 
 def _refresh_cycle(win):
@@ -2712,10 +2728,10 @@ def _refresh_cycle(win):
     for i, (dot, lbl, act) in enumerate(win._stage_dots):
         if i == stage_idx:
             dot.config(fg=act, font=("", 22, "bold"))
-            lbl.config(fg=act, font=("", 9, "bold"))
+            lbl.config(fg=act, font=("", 12, "bold"))
         else:
             dot.config(fg="#424242", font=("", 20))
-            lbl.config(fg="#616161", font=("", 8))
+            lbl.config(fg="#616161", font=("", 11))
 
     win._cycle_stats.config(
         text=f"📊 30日 {ret30:+.1f}% | 15日 {ret15:+.1f}% | 5日 {ret5:+.1f}%")
@@ -2754,29 +2770,29 @@ def _build_status_panel(parent, win, col=2):
         light = tk.Label(head, text="⚫", fg="#757575", bg="#2A2A2A", font=("", 12))
         light.pack(side=tk.LEFT)
         tk.Label(head, text=title, bg="#2A2A2A", fg=color,
-                 font=("", 9, "bold")).pack(side=tk.LEFT, padx=6)
+                 font=("", 12, "bold")).pack(side=tk.LEFT, padx=6)
         lbl = tk.Label(card, text=desc, bg="#2A2A2A", fg="#BDBDBD",
-                       font=("", 8), wraplength=420, justify=tk.LEFT)
+                       font=("", 11), wraplength=420, justify=tk.LEFT)
         lbl.pack(anchor=tk.W)
         win._status_cards.append((light, card, title))
 
     # —— 红圈判定区 (参考图方案) ——
     sep1 = tk.Frame(frm, bg="#424242", height=1); sep1.pack(fill=tk.X, pady=(6, 2))
     tk.Label(frm, text="⭕ 红圈判定 (形态/结构)", bg="#1E1E1E", fg="#EF5350",
-             font=("", 9, "bold")).pack(anchor=tk.W, padx=4)
+             font=("", 12, "bold")).pack(anchor=tk.W, padx=4)
 
     red_frame = tk.Frame(frm, bg="#1E1E1E"); red_frame.pack(fill=tk.X, padx=4, pady=2)
     win._red_break_lbl = tk.Label(red_frame, text="  🟢 形态破位信号: ——",
-                                  bg="#1E1E1E", fg="#66BB6A", font=("", 9))
+                                  bg="#1E1E1E", fg="#66BB6A", font=("", 12))
     win._red_break_lbl.pack(anchor=tk.W)
     win._red_trend_lbl = tk.Label(red_frame, text="  🟢 红圈确认: ——",
-                                  bg="#1E1E1E", fg="#66BB6A", font=("", 9))
+                                  bg="#1E1E1E", fg="#66BB6A", font=("", 12))
     win._red_trend_lbl.pack(anchor=tk.W)
 
     # —— 主控股推荐 ——
     sep2 = tk.Frame(frm, bg="#424242", height=1); sep2.pack(fill=tk.X, pady=(4, 2))
     tk.Label(frm, text="🏆 主控股推荐", bg="#1E1E1E", fg="#FFD54F",
-             font=("", 9, "bold")).pack(anchor=tk.W, padx=4)
+             font=("", 12, "bold")).pack(anchor=tk.W, padx=4)
     win._leader_lbl = tk.Label(frm, text="——", bg="#2A2A2A", fg="#81C784",
                                font=("", 10, "bold"), wraplength=420,
                                justify=tk.LEFT, padx=8, pady=4)
@@ -2785,7 +2801,7 @@ def _build_status_panel(parent, win, col=2):
     # —— 底部综合建议 ——
     sep3 = tk.Frame(frm, bg="#424242", height=1); sep3.pack(fill=tk.X, pady=(4, 2))
     win._status_msg = tk.Label(frm, text="💡 实时刷新中...", bg="#1E1E1E",
-                                fg="#E0E0E0", font=("", 9, "italic"),
+                                fg="#E0E0E0", font=("", 12, "italic"),
                                 wraplength=420, justify=tk.LEFT)
     win._status_msg.pack(fill=tk.X, padx=4, pady=(0, 4))
 
@@ -2893,11 +2909,11 @@ def _show_knowledge_popup(parent, title, data):
     fs_frame = tk.Frame(top, bg="#121212")
     fs_frame.pack(side=tk.RIGHT, padx=10)
     tk.Label(fs_frame, text=_fs_label(), bg="#121212", fg="#90CAF9",
-             font=("", 9)).pack(side=tk.LEFT, padx=(0, 4))
+             font=("", 12)).pack(side=tk.LEFT, padx=(0, 4))
     tk.Button(fs_frame, text="A-", width=3, command=lambda: _change_fs(-1),
-              bg="#37474F", fg="#ECEFF1", font=("", 8)).pack(side=tk.LEFT, padx=1)
+              bg="#37474F", fg="#ECEFF1", font=("", 11)).pack(side=tk.LEFT, padx=1)
     tk.Button(fs_frame, text="A+", width=3, command=lambda: _change_fs(+1),
-              bg="#37474F", fg="#ECEFF1", font=("", 8)).pack(side=tk.LEFT, padx=1)
+              bg="#37474F", fg="#ECEFF1", font=("", 11)).pack(side=tk.LEFT, padx=1)
 
     # —— 可滚动内容区 ——
     canvas = tk.Canvas(dlg, bg="#1E1E1E", highlightthickness=0)
@@ -2952,7 +2968,7 @@ def _show_knowledge_popup(parent, title, data):
 
     # —— 底栏关闭 ——
     tk.Button(dlg, text="关闭", width=10, command=dlg.destroy,
-              bg="#37474F", fg="#ECEFF1", font=("", 9)).pack(pady=8)
+              bg="#37474F", fg="#ECEFF1", font=("", 12)).pack(pady=8)
 
 
 # —— 辅助: 创建带❓的 LabelFrame 标题 ——
@@ -3215,9 +3231,9 @@ def _build_watch_analysis(parent, win):
     fs_box = tk.Frame(top, bg="#121212"); fs_box.pack(side=tk.RIGHT, padx=6)
     fs_lbl = tk.Label(fs_box, text=_fs_lbl(), bg="#121212", fg="#90CAF9", font=("", 10))
     fs_lbl.pack(side=tk.LEFT, padx=(0, 2))
-    tk.Button(fs_box, text="A-", width=3, bg="#37474F", fg="#ECEFF1", font=("", 9),
+    tk.Button(fs_box, text="A-", width=3, bg="#37474F", fg="#ECEFF1", font=("", 12),
               command=lambda: _change_fs(-1)).pack(side=tk.LEFT, padx=1)
-    tk.Button(fs_box, text="A+", width=3, bg="#37474F", fg="#ECEFF1", font=("", 9),
+    tk.Button(fs_box, text="A+", width=3, bg="#37474F", fg="#ECEFF1", font=("", 12),
               command=lambda: _change_fs(+1)).pack(side=tk.LEFT, padx=1)
 
     # AI 一键分析
@@ -3256,7 +3272,7 @@ def _build_watch_analysis(parent, win):
         # 层顶部: 问题 + ❓ + 🤖
         hdr = tk.Frame(lf, bg="#121212"); hdr.pack(fill=tk.X, padx=6, pady=(4, 0))
         tk.Label(hdr, text=f"💬 {question}", bg="#121212", fg="#9E9E9E",
-                 font=("", 9)).pack(side=tk.LEFT)
+                 font=("", 12)).pack(side=tk.LEFT)
         # ❓ 判断逻辑
         q_btn = tk.Label(hdr, text="❓", bg="#121212", fg="#64B5F6",
                          font=("", 10, "bold underline"), cursor="hand2")
@@ -3763,14 +3779,14 @@ def _build_leak_panel(parent, win):
     style = ttk.Style(); style.theme_use("clam")
     style.configure("Leak.TNotebook", background="#000000", borderwidth=0)
     style.configure("Leak.TNotebook.Tab", background="#1A1A1A", foreground="#BDBDBD",
-                    padding=(12, 3), font=("", 8))
+                    padding=(12, 3), font=("", 11))
     style.map("Leak.TNotebook.Tab", background=[("selected", "#000000")],
               foreground=[("selected", "#FFD54F")])
     # Treeview 黑底样式
     style.configure("Leak.Treeview", background="#000000", foreground="#E0E0E0",
-                    fieldbackground="#000000", rowheight=22, font=("", 9))
+                    fieldbackground="#000000", rowheight=22, font=("", 12))
     style.configure("Leak.Treeview.Heading", background="#1A1A1A", foreground="#FFD54F",
-                    font=("", 9, "bold"))
+                    font=("", 12, "bold"))
     style.map("Leak.Treeview", background=[("selected", "#1565C0")],
               foreground=[("selected", "#FFFFFF")])
     nb.configure(style="Leak.TNotebook")
@@ -4100,22 +4116,22 @@ def _build_sign_decision_panel(parent, win):
     right_list = tk.Frame(lists, bg="#1E1E1E"); right_list.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
     tk.Label(left_list, text="🔴 危险信号", bg="#1E1E1E", fg="#EF5350",
-             font=("", 9, "bold")).pack(anchor="w")
+             font=("", 12, "bold")).pack(anchor="w")
     danger_lbls = []
     for _i in range(3):
-        lbl = tk.Label(left_list, text="○ —", bg="#1E1E1E", fg="#546E7A", font=("", 8), anchor="w")
+        lbl = tk.Label(left_list, text="○ —", bg="#1E1E1E", fg="#546E7A", font=("", 11), anchor="w")
         lbl.pack(anchor="w"); danger_lbls.append(lbl)
 
     tk.Label(right_list, text="🟢 乐观信号", bg="#1E1E1E", fg="#66BB6A",
-             font=("", 9, "bold")).pack(anchor="w")
+             font=("", 12, "bold")).pack(anchor="w")
     opt_lbls = []
     for _i in range(3):
-        lbl = tk.Label(right_list, text="○ —", bg="#1E1E1E", fg="#546E7A", font=("", 8), anchor="w")
+        lbl = tk.Label(right_list, text="○ —", bg="#1E1E1E", fg="#546E7A", font=("", 11), anchor="w")
         lbl.pack(anchor="w"); opt_lbls.append(lbl)
 
     sum_frame = tk.Frame(parent, bg="#1A237E"); sum_frame.pack(fill=tk.X, padx=4, pady=(4, 2))
     sum_lbl = tk.Label(sum_frame, text="...", bg="#1A237E", fg="#FFD54F",
-                       font=("", 9, "bold"))
+                       font=("", 12, "bold"))
     sum_lbl.pack(padx=6, pady=4, anchor="w")
 
     # ── 📣 大字信号预警 + 建议仓位 (夸张大字体) ──
@@ -4128,7 +4144,7 @@ def _build_sign_decision_panel(parent, win):
                               font=("Arial", 22, "bold"), anchor="w")
     big_signal_lbl.pack(anchor="w", padx=10, pady=(6, 0))
     big_sub_lbl = tk.Label(big_left, text="等待大盘信号...", bg="#1E1E1E", fg="#BDBDBD",
-                           font=("", 9), anchor="w")
+                           font=("", 12), anchor="w")
     big_sub_lbl.pack(anchor="w", padx=10, pady=(0, 6))
     # 右侧: 大字百分比仓位 (类似 24号 20%)
     big_right = tk.Frame(big_frame, bg="#1E1E1E"); big_right.pack(side=tk.RIGHT, padx=10, pady=6)
@@ -4136,24 +4152,24 @@ def _build_sign_decision_panel(parent, win):
                            font=("Arial", 32, "bold"))
     big_pct_lbl.pack()
     big_pct_sub = tk.Label(big_right, text="建议仓位", bg="#1E1E1E", fg="#78909C",
-                           font=("", 8))
+                           font=("", 11))
     big_pct_sub.pack()
 
     quant = tk.Frame(parent, bg="#121212"); quant.pack(fill=tk.X, padx=4, pady=2)
     tk.Label(quant, text="量化决策: 等待 VS 入场", bg="#121212", fg="#90A4AE",
-             font=("", 8)).pack(anchor="w")
+             font=("", 11)).pack(anchor="w")
     row = tk.Frame(quant, bg="#121212"); row.pack(fill=tk.X, pady=1)
     act_lbl = tk.Label(row, text="...", bg="#121212", fg="#FFD54F", font=("", 14, "bold"))
     act_lbl.pack(side=tk.LEFT)
-    pct_lbl = tk.Label(row, text="建议仓位: —", bg="#121212", fg="#CE93D8", font=("", 9))
+    pct_lbl = tk.Label(row, text="建议仓位: —", bg="#121212", fg="#CE93D8", font=("", 12))
     pct_lbl.pack(side=tk.RIGHT)
 
     ma_row = tk.Frame(parent, bg="#121212"); ma_row.pack(fill=tk.X, padx=4, pady=(0, 2))
     ma_lbl = tk.Label(ma_row, text="MA5=— MA10=— MA15=— MA60=—",
-                      bg="#121212", fg="#78909C", font=("", 8))
+                      bg="#121212", fg="#78909C", font=("", 11))
     ma_lbl.pack(side=tk.LEFT)
     close_lbl = tk.Label(ma_row, text="📊 上证收盘 —", bg="#121212", fg="#FFD54F",
-                         font=("", 9, "bold"))
+                         font=("", 12, "bold"))
     close_lbl.pack(side=tk.RIGHT)
 
     # 保存 label 引用 → 后台刷新用
