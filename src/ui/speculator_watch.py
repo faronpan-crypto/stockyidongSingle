@@ -822,18 +822,20 @@ def show_speculator_watch(root=None, app=None):
 
     left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-    # 右面板: 屏幕宽度的 30% (动态, 绑定 Configure 事件)
+    # 右面板: 主窗口宽度的 30% (动态, 绑定 Configure 事件)
     right_pane = tk.Frame(outer, bg="#121212")
     right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+    right_pane.pack_propagate(False)
 
     def _resize_right(_e=None):
-        # 屏幕宽 30%, 最小 480, 最大 800
         w = win.winfo_width()
-        target = max(480, min(800, int(w * 0.30)))
+        if w < 600: return  # 窗口还没显示, 跳过
+        # 主窗口 30%, 最小 560, 最大 900
+        target = max(560, min(900, int(w * 0.30)))
         right_pane.configure(width=target)
-        right_pane.pack_propagate(False)
     win.bind("<Configure>", _resize_right, add="+")
-    win.after(50, _resize_right)  # 初始化一次
+    win.after(300, _resize_right)   # 窗口显示后触发
+    win.after(800, _resize_right)   # 再触发一次
 
     # left_pane grid 配置 (2 列 × 3 行)
     left_pane.grid_rowconfigure(0, weight=3)
