@@ -15932,6 +15932,48 @@ class DapanMixin:
 
             tk.Button(btn_frame, text="📷 截图识别", bg="#546E7A", fg="white", font=_font,
                       relief=tk.FLAT, padx=10, command=_do_ocr).pack(side=tk.LEFT, padx=3)
+
+            def _pull_top50():
+                """一键拉全市场回撤TOP50"""
+                import akshare as ak
+                import concurrent.futures as _cf
+                status_lbl.configure(text="⏳ 拉取市场回撤TOP50... 先拉A股活跃股, 并行算回撤", fg="#FFD54F")
+                root.update()
+                try:
+                    df = ak.stock_zh_a_spot_em()
+                    amt_col = [c for c in df.columns if "成交额" in c]
+                    if amt_col:
+                        df[amt_col[0]] = df[amt_col[0]].astype(float, errors="coerce")
+                        df_top = df.nlargest(150, amt_col[0])
+                    else:
+                        df_top = df.head(150)
+                    code_col = [c for c in df.columns if "代码" in c][0]
+                    codes = df_top[code_col].tolist()
+
+                    def _calc(c):
+                        try:
+                            d = ak.stock_zh_a_hist(symbol=c, period="daily", start_date="20250101", adjust="qfq")
+                            if d is None or len(d) < 60: return None
+                            d = d.sort_values("日期").reset_index(drop=True)
+                            h60 = d["最高"].tail(60).max()
+                            retrace = (d["收盘"].iloc[-1] - h60) / h60 * 100
+                            return (c, retrace)
+                        except: return None
+
+                    results = []
+                    with _cf.ThreadPoolExecutor(10) as ex:
+                        for r in ex.map(_calc, codes):
+                            if r: results.append(r)
+                    results.sort(key=lambda x: x[1])
+                    top50 = [c for c, _ in results[:50]]
+                    entry.delete("1.0", tk.END)
+                    entry.insert("1.0", ", ".join(top50))
+                    status_lbl.configure(text=f"✅ 填入回撤TOP50 ({len(top50)}只) — 点🔍开始分析", fg="#66BB6A")
+                except Exception as e:
+                    status_lbl.configure(text=f"❌ 拉取失败: {str(e)[:30]}", fg="#F44336")
+
+            tk.Button(btn_frame, text="📸回撤TOP50", bg="#FF6F00", fg="white", font=_font,
+                      relief=tk.FLAT, padx=10, command=_pull_top50).pack(side=tk.LEFT, padx=3)
             tk.Button(btn_frame, text="🔍 开始分析", bg="#2E7D32", fg="white", font=_font,
                       relief=tk.FLAT, padx=12, command=lambda: _do_all()).pack(side=tk.LEFT, padx=3)
 
