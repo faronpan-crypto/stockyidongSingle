@@ -55,6 +55,7 @@ class _HSplitter(tk.Frame):
         self.min_left = min_left
         self.min_right = min_right
         self._drag = False
+        self._reflowing = False  # 防递归
 
         # 读默认值
         self._left_w = _load_splitter(key, _SPLITTER_DEFAULTS.get(key, 950))
@@ -69,15 +70,19 @@ class _HSplitter(tk.Frame):
         self.bind("<ButtonRelease-1>", self._end)
 
     def _on_outer_resize(self, e):
-        if e.widget is self.master:
+        if e.widget is self.master and not self._drag:
             self._reflow()
 
     def _reflow(self):
         """按当前 self._left_w 重新 place 三个控件"""
+        if self._reflowing:
+            return
         try:
+            self._reflowing = True
             W = self.master.winfo_width()
             H = self.master.winfo_height()
             if W < 50 or H < 50:
+                self._reflowing = False
                 return  # 还没显示
             # 边界
             max_left = W - self.splitter_w - self.min_right
@@ -90,6 +95,8 @@ class _HSplitter(tk.Frame):
             self.right.place(x=right_x, y=0, width=right_w, height=H)
         except Exception as ex:
             print(f"[splitter] reflow err: {ex}", flush=True)
+        finally:
+            self._reflowing = False
 
     def _start(self, e):
         self._drag = True
@@ -933,6 +940,10 @@ def show_speculator_watch(root=None, app=None):
     splitter = _HSplitter(outer, left_pane, right_pane, key="watch_main",
                           min_left=400, min_right=380)
     # 注意: left_pane / right_pane 都不 pack, 由 splitter._reflow() 统一 place
+    # 多次 reflow 保险: Toplevel 首次显示时 winfo_width 可能还没到位
+    outer.after(100, splitter._reflow)
+    outer.after(300, splitter._reflow)
+    outer.after(800, splitter._reflow)
 
     # left_pane grid 配置 (2 列 × 3 行)
     left_pane.grid_rowconfigure(0, weight=3)
