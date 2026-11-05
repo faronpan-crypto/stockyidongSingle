@@ -773,34 +773,33 @@ def show_speculator_watch(root=None, app=None):
     print(f"[👁️看盘] 被调用, app={'有' if app else '无'}", flush=True)
     win = tk.Toplevel(root) if root else tk.Tk()
     win.title("👁️ 游资看盘界面 — 2×3 六区")
-    win.geometry("1700x960")
-    win.minsize(1520, 860)
+    win.geometry("1850x1000")
+    win.minsize(1600, 900)
     win._app = app
     win._running = True
 
     # —— 主窗口顶栏: 标题 + 字体调节 ——
-    _WATCH_FS = [11]  # 内容字号基准, 可全局调节
+    _WATCH_FS = [12]  # 内容字号基准, 默认 +1pt 更大
     win._WATCH_FS = _WATCH_FS  # 存到 win 供各模块读
 
     header = tk.Frame(win, bg="#121212"); header.pack(fill=tk.X)
     tk.Label(header, text="👁️ 游资看盘界面", bg="#121212", fg="#FFD54F",
-             font=("", 16, "bold")).pack(side=tk.LEFT, padx=14, pady=10)
+             font=("", 18, "bold")).pack(side=tk.LEFT, padx=14, pady=10)
     tk.Label(header, text="2×3 六区 | 所有❓按钮点知识弹窗", bg="#121212", fg="#90CAF9",
-             font=("", 9)).pack(side=tk.LEFT, pady=10)
+             font=("", 11)).pack(side=tk.LEFT, pady=10)
     win._data_date_lbl = tk.Label(header, text="⏳ 加载中...",
-                                  bg="#121212", fg="#BDBDBD", font=("", 9))
+                                  bg="#121212", fg="#BDBDBD", font=("", 11))
     win._data_date_lbl.pack(side=tk.LEFT, padx=10, pady=10)
 
     fs_box = tk.Frame(header, bg="#121212"); fs_box.pack(side=tk.RIGHT, padx=14)
-    tk.Label(fs_box, text="🔤 字体:", bg="#121212", fg="#E0E0E0", font=("", 9)).pack(side=tk.LEFT)
+    tk.Label(fs_box, text="🔤 字体:", bg="#121212", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT)
     fs_lbl = tk.Label(fs_box, text=f"{_WATCH_FS[0]}pt", bg="#121212", fg="#FFD54F",
-                     font=("", 9, "bold"))
+                     font=("", 11, "bold"))
     fs_lbl.pack(side=tk.LEFT, padx=4)
 
     def _change_main_fs(delta):
-        _WATCH_FS[0] = max(8, min(18, _WATCH_FS[0] + delta))
+        _WATCH_FS[0] = max(8, min(20, _WATCH_FS[0] + delta))
         fs_lbl.config(text=f"{_WATCH_FS[0]}pt")
-        # 递归更新所有 widget 的 font (跳过 Canvas/Menu)
         def _walk(w):
             try:
                 conf = w.configure()
@@ -808,26 +807,22 @@ def show_speculator_watch(root=None, app=None):
                     cur = w.cget("font")
                     try:
                         sz = int(cur[1])
-                        # 保持 style, 只改 size
                         w.config(font=(cur[0], _WATCH_FS[0], *cur[2:]) if len(cur) > 2 else (cur[0], _WATCH_FS[0]))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            for c in w.winfo_children():
-                _walk(c)
+                    except Exception: pass
+            except Exception: pass
+            for c in w.winfo_children(): _walk(c)
         _walk(win)
 
     tk.Button(fs_box, text="A-", width=3, bg="#37474F", fg="#ECEFF1",
-              font=("", 8), command=lambda: _change_main_fs(-1)).pack(side=tk.LEFT, padx=2)
+              font=("", 10), command=lambda: _change_main_fs(-1)).pack(side=tk.LEFT, padx=2)
     tk.Button(fs_box, text="A+", width=3, bg="#37474F", fg="#ECEFF1",
-              font=("", 8), command=lambda: _change_main_fs(+1)).pack(side=tk.LEFT, padx=2)
+              font=("", 10), command=lambda: _change_main_fs(+1)).pack(side=tk.LEFT, padx=2)
 
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
-    # 左: 3行 (九宫格/盘口/量能 顶跨2列 | 期货/周期/状态 中跨2列 | 捡漏 底左半) | 右: 游资看盘思路分析 (宽度减半)
+    # 右面板加宽 (340 → 420)
     left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    right_pane = tk.Frame(outer, bg="#121212", width=340); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+    right_pane = tk.Frame(outer, bg="#121212", width=420); right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
     right_pane.pack_propagate(False)
 
     # 左面板 grid: 2列 × 3行, row_top/row_bot 跨两列全宽, row_leak 只占 column 0 (一半宽)
@@ -981,30 +976,27 @@ def _load_limitup_dropdown(win):
 
 def _build_block_grid(parent, win, col=0):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FFA726",
-                        font=("", 10, "bold"), padx=4, pady=4)
+                        font=("", 12, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     parent.grid_rowconfigure(0, weight=1)
-    _add_title_row(frm, "① 板块十六宫格 (点击展开/长按详情/⚠️异动>3%)",
+    _add_title_row(frm, "① 板块九宫格 (点击展开/长按详情/⚠️异动>3%)",
                    "#FFA726", BLOCK_GRID_KNOWLEDGE)
 
-    # 16 格 Canvas (4×4)
-    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=340)
+    # 9 格 Canvas (3×3), 增大
+    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=380)
     canvas.pack(fill=tk.BOTH, expand=True)
     win._block_canvas = canvas
 
-    # 每格元数据: [板块名, 涨跌幅, 净流入, 是否锁定, 是否脉冲中, 匹配个股数, top3龙头[(name,pct),...]]
     win._block_meta = [[name, None, None, True, False, None, []] for name in FIXED_BLOCKS]
-    win._block_cells = []  # [(x1,y1,x2,y2), 板块名]
+    win._block_cells = []
 
-    # 下方矛盾描述
     win._block_conflict_lbl = tk.Label(frm, text="正在加载板块数据...",
                                        bg="#1E1E1E", fg="#E0E0E0",
-                                       font=("", 9), wraplength=500, justify=tk.LEFT)
+                                       font=("", 11), wraplength=600, justify=tk.LEFT)
     win._block_conflict_lbl.pack(fill=tk.X, pady=(2, 0))
 
-    # 脉冲定时器
-    win._pulse_cells = {}  # idx -> next_trigger_time
+    win._pulse_cells = {}
 
 
 def _refresh_all_blocks(win):
@@ -1604,88 +1596,146 @@ def _show_zt_logic_popup(parent, row, score, reasons, zt_logic, winrate):
 
 
 def _build_orderbook(parent, win, col=1):
-    """② 观察盘口 — 恢复原版 (搜索+五档盘口+涨停排队+特定数量) + 新涨停强弱按钮"""
-    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#64B5F6",
-                        font=("", 10, "bold"), padx=4, pady=4)
+    """② 🌍全球五资产联动 — 替代原观察盘口 (黄金/美元/美债/纳指/原油)"""
+    frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FFD54F",
+                        font=("", 12, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
-    _add_title_row(frm, "② 观察盘口 (涨停/特定数量/盘口档位)",
-                   "#64B5F6", ORDERBOOK_KNOWLEDGE)
 
-    # 顶部: 搜索 + 档位 + 📊涨停强弱 按钮
-    top = tk.Frame(frm, bg="#1E1E1E"); top.pack(fill=tk.X, pady=(2, 4))
-    tk.Label(top, text="🔍", bg="#1E1E1E", fg="#E0E0E0", font=("", 9)).pack(side=tk.LEFT)
-    win._ob_codes = tk.StringVar()
-    win._ob_cb = ttk.Combobox(top, textvariable=win._ob_codes, width=18,
-                              values=[], state="normal")
-    win._ob_cb.pack(side=tk.LEFT, padx=2)
-    win._ob_cb.bind("<<ComboboxSelected>>", lambda _e: _load_orderbook(win))
-    win._ob_cb.bind("<Return>", lambda _e: _load_orderbook(win))
-    tk.Button(top, text="查", command=lambda: _load_orderbook(win)).pack(side=tk.LEFT)
+    _add_title_row(frm, "② 🌍全球五资产联动 (金/美/债/指/油) — 影响A股主线",
+                   "#FFD54F", ORDERBOOK_KNOWLEDGE)
 
-    win._ob_level = tk.StringVar(value="5档")
-    ttk.Combobox(top, textvariable=win._ob_level, values=["1档", "5档", "10档", "全息"],
-                 width=6, state="readonly").pack(side=tk.LEFT, padx=4)
+    # 5 资产卡片 (一行) — 紧凑布局
+    ASSETS = [
+        ("💎黄金", "#FFD700", "贵金属/有色/军工", "金涨→避险+商品"),
+        ("💵美元", "#2196F3", "银行/保险/周期", "美强→外资压力+周期强"),
+        ("🏦美债", "#FF9800", "银行息差/地产估值", "债↑→息差好;债↓→估值修复"),
+        ("📈纳指", "#4CAF50", "半导体/软件/科创", "纳指反弹→科技共振"),
+        ("🛢️原油", "#E91E63", "石油/煤炭/新能源", "油涨→周期+通胀+新能替代"),
+    ]
 
-    # 新按钮: 📊涨停强弱排名 (独立弹窗)
-    tk.Button(top, text="📊涨停强弱",
-              command=lambda: _show_zt_rank_dialog(win),
-              bg="#FF6D00", fg="white", font=("", 8, "bold"),
-              padx=4).pack(side=tk.RIGHT, padx=2)
+    cards_row = tk.Frame(frm, bg="#1E1E1E"); cards_row.pack(fill=tk.X, pady=2)
+    win._asset_cards = {}
+    for i, (name, color, link_sector, link_suggest) in enumerate(ASSETS):
+        card = tk.Frame(cards_row, bg="#263238", padx=6, pady=4, relief=tk.RIDGE, bd=1)
+        card.grid(row=0, column=i, sticky="nsew", padx=2)
+        cards_row.grid_columnconfigure(i, weight=1)
 
-    # 涨停板排队单
-    tk.Label(frm, text="📌 涨停板排队单 (封单变化)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(4, 2))
-    tv1 = ttk.Treeview(frm, columns=("代码", "名称", "封单(万手)", "换手率%"),
-                       show="headings", height=5)
-    for c in ("代码", "名称", "封单(万手)", "换手率%"):
-        tv1.heading(c, text=c); tv1.column(c, width=90)
-    tv1.pack(fill=tk.X, padx=2)
-    win._ob_limit_up_tv = tv1
-    # 双击 → 日K线
-    def _on_tv1_double(_e):
-        sel = tv1.selection()
-        if not sel: return
-        try:
-            vals = tv1.item(sel[0], "values")
-            code = str(vals[0]) if vals else ""
-            name = str(vals[1]) if len(vals) > 1 else code
-            if code.startswith(("6", "9")): sina = "sh" + code
-            elif code.startswith(("0", "3")): sina = "sz" + code
-            elif code.startswith(("4", "8")): sina = "bj" + code
-            else: sina = "sh" + code
-            _show_stock_daily_kline(win, sina, name)
-        except Exception as _e2:
-            print(f"[涨停排队双击] {_e2}")
-    tv1.bind("<Double-1>", _on_tv1_double)
+        tk.Label(card, text=name, bg="#263238", fg=color,
+                 font=("", 13, "bold")).pack(anchor=tk.W)
+        price_lbl = tk.Label(card, text="—", bg="#263238", fg="#FFFFFF",
+                             font=("", 15, "bold"))
+        price_lbl.pack(anchor=tk.W, pady=(0, 2))
+        pct_lbl = tk.Label(card, text="今日 —  5日 —", bg="#263238", fg="#9E9E9E",
+                           font=("", 10))
+        pct_lbl.pack(anchor=tk.W)
+        tk.Label(card, text=f"⚡{link_suggest}", bg="#263238", fg="#BDBDBD",
+                 font=("", 9), wraplength=100, justify=tk.LEFT).pack(anchor=tk.W, pady=(3, 0))
 
-    # 盘口五档
-    top_row = tk.Frame(frm, bg="#1E1E1E"); top_row.pack(fill=tk.X, pady=(6, 2))
-    tk.Label(top_row, text="📌 买卖盘口 (实时)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(side=tk.LEFT)
-    win._ob_cur_label = tk.Label(top_row, text="(等加载...)", bg="#1E1E1E",
-                                  fg="#BDBDBD", font=("", 9, "bold"))
-    win._ob_cur_label.pack(side=tk.RIGHT)
-    order_frame = tk.Frame(frm, bg="#1E1E1E"); order_frame.pack(fill=tk.X, padx=2)
-    ask_frame = tk.Frame(order_frame, bg="#1E1E1E"); ask_frame.pack(side=tk.RIGHT)
-    win._ob_ask_labels = []
-    for i in range(5):
-        lbl = tk.Label(ask_frame, text="卖5 -", fg="#EF5350", bg="#1E1E1E",
-                       font=("Menlo", 9), anchor="e", width=18)
-        lbl.pack(anchor="e"); win._ob_ask_labels.append(lbl)
-    bid_frame = tk.Frame(order_frame, bg="#1E1E1E"); bid_frame.pack(side=tk.LEFT)
-    win._ob_bid_labels = []
-    for i in range(5):
-        lbl = tk.Label(bid_frame, text="买5 -", fg="#66BB6A", bg="#1E1E1E",
-                       font=("Menlo", 9), anchor="w", width=18)
-        lbl.pack(anchor="w"); win._ob_bid_labels.append(lbl)
+        win._asset_cards[name] = {
+            "price": price_lbl, "pct": pct_lbl,
+            "sector": link_sector, "suggest": link_suggest
+        }
 
-    # 特定数量识别
-    tk.Label(frm, text="📌 特定数量规律 (50/500/5000手)",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 9, "bold")).pack(anchor=tk.W, pady=(6, 2))
-    win._ob_pattern_text = tk.Label(frm, text="(等加载...)", bg="#1E1E1E",
-                                    fg="#CE93D8", font=("", 9), wraplength=350, justify=tk.LEFT)
-    win._ob_pattern_text.pack(fill=tk.X, padx=2)
+    # 刷新按钮
+    btn_row = tk.Frame(frm, bg="#1E1E1E"); btn_row.pack(fill=tk.X, pady=(4, 0))
+    refresh_btn = tk.Button(btn_row, text="🔄 刷新全球资产", bg="#FF6D00", fg="white",
+                            font=("", 10, "bold"), padx=8, command=lambda: _refresh_global_assets(win))
+    refresh_btn.pack(side=tk.RIGHT, padx=2)
+
+    # 操作建议区
+    win._asset_suggestion = tk.Label(frm, text="⏳ 等待加载全球资产数据...",
+                                     bg="#1E1E1E", fg="#E0E0E0",
+                                     font=("", 11), wraplength=600, justify=tk.LEFT,
+                                     anchor="w")
+    win._asset_suggestion.pack(fill=tk.X, pady=(6, 2))
+
+    # 异步加载 (后台线程拉数据, 主线程 configure)
+    def _auto_load():
+        import threading
+        threading.Thread(target=lambda: _refresh_global_assets(win), daemon=True).start()
+    frm.after(200, _auto_load)
+
+
+def _refresh_global_assets(win):
+    """🌍 拉全球 5 资产实时数据 (ThreadPool 并行)"""
+    win._asset_suggestion.configure(text="⏳ 正在拉全球资产数据...", fg="#FFD54F")
+    try:
+        import concurrent.futures as cf
+        import akshare as ak
+
+        results = {}
+
+        def _fetch(name, func):
+            try: return name, func()
+            except Exception as e: return name, None
+
+        def _gold():
+            d = ak.futures_foreign_hist("XAU")
+            return (d["收盘"].iloc[-1],
+                    (d["收盘"].iloc[-1] - d["收盘"].iloc[-2]) / d["收盘"].iloc[-2] * 100,
+                    (d["收盘"].iloc[-1] - d["收盘"].iloc[-6]) / d["收盘"].iloc[-6] * 100 if len(d) > 5 else 0)
+
+        def _dxy():
+            try:
+                d = ak.index_zh_a_hist(symbol="513100", period="daily", start_date="20260101", adjust="qfq")
+                return (d["收盘"].iloc[-1],
+                        (d["收盘"].iloc[-1] - d["收盘"].iloc[-2]) / d["收盘"].iloc[-2] * 100,
+                        (d["收盘"].iloc[-1] - d["收盘"].iloc[-6]) / d["收盘"].iloc[-6] * 100 if len(d) > 5 else 0)
+            except: return (None, 0, 0)  # DXY 用纳指代理
+
+        def _bond():
+            try:
+                d = ak.bond_zh_us_rate()
+                col = [c for c in d.columns if "美国国债收益率10年" in c or "美债" in c]
+                val = float(d[col[0]].iloc[-1]) if col else float(d.iloc[-1, -1])
+                return (val, 0, 0)
+            except: return (None, 0, 0)
+
+        def _ixic():
+            d = ak.index_us_stock_sina(".IXIC")
+            return (d["close"].iloc[-1],
+                    (d["close"].iloc[-1] - d["close"].iloc[-2]) / d["close"].iloc[-2] * 100,
+                    (d["close"].iloc[-1] - d["close"].iloc[-6]) / d["close"].iloc[-6] * 100 if len(d) > 5 else 0)
+
+        def _oil():
+            d = ak.futures_foreign_hist("CL")
+            return (d["收盘"].iloc[-1],
+                    (d["收盘"].iloc[-1] - d["收盘"].iloc[-2]) / d["收盘"].iloc[-2] * 100,
+                    (d["收盘"].iloc[-1] - d["收盘"].iloc[-6]) / d["收盘"].iloc[-6] * 100 if len(d) > 5 else 0)
+
+        with cf.ThreadPoolExecutor(5) as ex:
+            for name, fn in [("💎黄金", _gold), ("💵美元", _dxy),
+                             ("🏦美债", _bond), ("📈纳指", _ixic), ("🛢️原油", _oil)]:
+                ex.submit(lambda n=name, f=fn: results.update({n: f}))
+
+        # 渲染 (主线程)
+        def _render():
+            highlights = []
+            for name, card in win._asset_cards.items():
+                if name not in results or results[name] is None:
+                    card["price"].configure(text="—")
+                    card["pct"].configure(text="接口超时")
+                    continue
+                price, pct1d, pct5d = results[name]
+                if price is None:
+                    card["price"].configure(text="—"); continue
+                fmt_price = f"${price:,.2f}" if price > 100 else f"{price:.2f}%" if name == "🏦美债" else f"{price:,.2f}"
+                card["price"].configure(text=fmt_price)
+                pct_color = "#EF5350" if pct1d > 0 else "#66BB6A" if pct1d < 0 else "#9E9E9E"
+                card["pct"].configure(text=f"今日 {pct1d:+.2f}%  5日 {pct5d:+.2f}%", fg=pct_color)
+                if abs(pct1d) > 1.5 or abs(pct5d) > 3:
+                    highlights.append(f"⚡ {name}{'📈' if pct1d > 0 else '📉'} {pct1d:+.1f}% → {card['suggest']}")
+
+            sug_text = "🎯 今日关注:\n" + "\n".join(highlights) if highlights else "✅ 全球资产已加载, 无显著联动信号"
+            win._asset_suggestion.configure(text=sug_text, fg="#E0E0E0")
+
+        try: win.after(0, _render)
+        except: pass
+
+    except Exception as e:
+        try: win.after(0, lambda: win._asset_suggestion.configure(text=f"❌ 加载失败: {e}", fg="#F44336"))
+        except: pass
 
 
 def _show_zt_rank_dialog(parent):
