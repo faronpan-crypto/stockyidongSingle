@@ -15688,6 +15688,88 @@ class DapanMixin:
             idea_txt.tag_configure("w", foreground="#FFD54F", font=("Helvetica", 12, "bold"))
             idea_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 13, "bold"))
 
+            # ═══════ 游资看盘模块嵌入 ═══════
+            try:
+                from ui.speculator_watch import (
+                    _seed_fill_all, _build_orderbook,
+                    _build_block_canvas, _build_volume_panel,
+                    _build_futures_grid, _build_cycle_panel,
+                    _build_sign_decision_panel, _build_status_panel,
+                    _build_watch_analysis,
+                )
+                # 给 dlg 挂载游资看盘必须的属性
+                dlg._app = self
+                dlg._running = True
+                dlg._WATCH_FS = [15]
+
+                # 游资看盘 Tab1: 🗂️ 板块热力图
+                t_blk = tk.Frame(nb, bg="#121212")
+                nb.add(t_blk, text=" 🗂️ 板块热力图 ")
+                _build_block_canvas(t_blk, dlg, 0)
+                # 让 LabelFrame 占满 tab
+                t_blk.grid_rowconfigure(0, weight=1)
+                t_blk.grid_columnconfigure(0, weight=1)
+
+                # 游资看盘 Tab2: 🏋️ 量能·期指·周期 (合并 4,5,6)
+                t_mid = tk.Frame(nb, bg="#121212")
+                nb.add(t_mid, text=" 🏋️ 量能 · 期指 · 周期 ")
+                t_mid.grid_rowconfigure(0, weight=1)
+                t_mid.grid_columnconfigure(0, weight=1, uniform="mid")
+                t_mid.grid_columnconfigure(1, weight=1, uniform="mid")
+                t_mid.grid_columnconfigure(2, weight=1, uniform="mid")
+                _build_volume_panel(t_mid, dlg, 0)
+                _build_futures_grid(t_mid, dlg, 1)
+                _build_cycle_panel(t_mid, dlg, 2)
+
+                # 游资看盘 Tab3: 🎯 信号决策·状态判定 (合并 2,7)
+                t_sig = tk.Frame(nb, bg="#121212")
+                nb.add(t_sig, text=" 🎯 信号决策 · 状态 ")
+                t_sig.grid_rowconfigure(0, weight=1)
+                t_sig.grid_columnconfigure(0, weight=1, uniform="sig")
+                t_sig.grid_columnconfigure(1, weight=1, uniform="sig")
+                _build_sign_decision_panel(t_sig, dlg)
+                _build_status_panel(t_sig, dlg, 1)
+
+                # 游资看盘 Tab4: 🧠 看盘思路 (右面板 7 层)
+                t_idea = tk.Frame(nb, bg="#121212")
+                nb.add(t_idea, text=" 🧠 看盘思路 ")
+                _build_watch_analysis(t_idea, dlg)
+
+                # 初始化种子 + 后台刷新 (异步, 不阻塞 UI)
+                def _sw_seed_and_refresh():
+                    try:
+                        _seed_fill_all(dlg)
+                    except Exception as _e:
+                        print(f"[📺游资看盘] seed err: {_e}")
+                    def _real_fill():
+                        import time as _t
+                        _t.sleep(0.5)
+                        try:
+                            from ui.speculator_watch import (
+                                _refresh_sign_decision, _refresh_all_blocks,
+                                _refresh_global_assets, _refresh_volume,
+                                _refresh_futures, _refresh_cycle,
+                                _refresh_status, _refresh_watch_analysis,
+                            )
+                            _refresh_sign_decision(dlg)
+                            _refresh_all_blocks(dlg)
+                            _refresh_global_assets(dlg)
+                            _refresh_volume(dlg)
+                            _refresh_futures(dlg)
+                            _refresh_cycle(dlg)
+                            _refresh_status(dlg)
+                            _refresh_watch_analysis(dlg)
+                        except Exception as _e:
+                            print(f"[📺游资看盘] refresh err: {_e}")
+                    import threading as _th2
+                    _th2.Thread(target=_real_fill, daemon=True).start()
+                dlg.after(200, _sw_seed_and_refresh)
+                print("[📺游资看盘] ✅ 模块已嵌入实时看盘 Notebook (4 tabs)")
+            except Exception as _e:
+                import traceback as _tb2
+                print(f"[📺游资看盘❌] {_e}")
+                _tb2.print_exc()
+
             # ══════════════════════════════════════════════════════
             # 数据 Fetch (并行)
             # ══════════════════════════════════════════════════════
