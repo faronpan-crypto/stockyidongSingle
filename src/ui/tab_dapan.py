@@ -15179,124 +15179,114 @@ class DapanMixin:
         logic_text.insert("1.0", LOGIC_CONTENT.strip())
         logic_text.configure(state="disabled")
 
-        # ── 后台加载数据 + 渲染 (极简版: 先出数值, matplotlib 主线程画) ──
+        # ── 后台只 fetch (不碰 Tk), 一个 dlg.after 统一更新 UI ──
         def _load():
+            print("[🌍资产] _load 后台线程启动", flush=True)
             import concurrent.futures as cf
-            try:
-                import akshare as ak
-            except Exception: return
-            try:
-                from utils.config import TS_DEFAULT_TOKEN
-                import tushare as ts
-                ts.set_token(TS_DEFAULT_TOKEN)
-                pro = ts.pro_api()
-            except Exception: pro = None
+            import akshare as ak
+            from utils.config import TS_DEFAULT_TOKEN
+            import tushare as ts
+            ts.set_token(TS_DEFAULT_TOKEN)
+            pro = ts.pro_api()
 
-            dlg.after(0, lambda: status_lbl.configure(text="⏳ 并行拉取 5 资产..."))
-
-            # 每个源独立 fetch
+            # 5 个纯 fetch 函数 (不碰 Tk)
             def _fg():
                 try:
                     df = ak.futures_foreign_hist(symbol="XAU"); df['date'] = pd.to_datetime(df['date'])
                     return df.sort_values('date').reset_index(drop=True)
-                except Exception:
-                    try:
-                        df = ak.spot_golden_benchmark_sge(); df['date'] = pd.to_datetime(df['交易时间'])
-                        df = df.rename(columns={'晚盘价':'close','早盘价':'open'})
-                        return df[['date','open','close']].sort_values('date').reset_index(drop=True)
-                    except Exception: return None
+                except Exception as e: print(f"[gold] {e}", flush=True); return None
             def _fb():
                 try:
                     df = ak.bond_zh_us_rate(); df['日期'] = pd.to_datetime(df['日期'])
                     return df.sort_values('日期').reset_index(drop=True)
-                except Exception: return None
+                except Exception as e: print(f"[bond] {e}", flush=True); return None
             def _feq():
                 try:
                     df = ak.index_us_stock_sina(symbol=".IXIC"); df['date'] = pd.to_datetime(df['date'])
                     return df.sort_values('date').reset_index(drop=True)
-                except Exception: return None
+                except Exception as e: print(f"[eq] {e}", flush=True); return None
             def _fo():
                 try:
                     df = ak.futures_foreign_hist(symbol="CL"); df['date'] = pd.to_datetime(df['date'])
                     return df.sort_values('date').reset_index(drop=True)
-                except Exception: return None
+                except Exception as e: print(f"[oil] {e}", flush=True); return None
             def _fdxy():
-                if pro is not None:
-                    try:
-                        df = pro.index_global(ts_code="DXY.NYME",
-                                              start_date=(datetime.now()-timedelta(days=180)).strftime("%Y%m%d"),
-                                              end_date=datetime.now().strftime("%Y%m%d"))
-                        if df is not None and len(df) > 5: return df
-                    except Exception: pass
-                return None
+                try:
+                    df = pro.index_global(ts_code="DXY.NYME",
+                                          start_date=(datetime.now()-timedelta(days=180)).strftime("%Y%m%d"),
+                                          end_date=datetime.now().strftime("%Y%m%d"))
+                    return df if df is not None and len(df) > 5 else None
+                except Exception: return None
 
+            # 并行 fetch (后台线程, 完全不碰 Tk)
+            r = {}
             with cf.ThreadPoolExecutor(max_workers=5) as ex:
-                r = {}
                 for k, fn in [("gold",_fg),("bond",_fb),("eq",_feq),("oil",_fo),("dxy",_fdxy)]:
                     try: r[k] = ex.submit(fn).result(timeout=25)
-                    except Exception as e: print(f"[{k}] fail: {e}"); r[k] = None
+                    except Exception as e: print(f"[{k}] fail: {e}", flush=True); r[k] = None
 
-            dlg.after(0, lambda: status_lbl.configure(text="⏳ 更新 5 张卡片..."))
-            df_g, df_b, df_dxy, df_eq, df_o = r["gold"], r["bond"], r["dxy"], r["eq"], r["oil"]
+            print(f"[🌍资产] fetch 完成: gold={r['gold'] is not None}, bond={r['bond'] is not None}, "
+                  f"eq={r['eq'] is not None}, oil={r['oil'] is not None}, dxy={r['dxy'] is not None}", flush=True)
 
-            def _upd_card(val_lbl, chg_lbl, df, fmt):
+            # ⭐ 唯一的 UI 调度点 — 一个 dlg.after 调所有 UI 更新 (保证单线程访问 Tk)
+            dlg.after(0, lambda: _do_all_ui(r["gold"], r["bond"], r["eq"], r["oil"], r["dxy"]))
+
+        # ── 主线程运行 (100% 单线程访问 Tk) ──
+        def _do_all_ui(df_g, df_b, df_eq, df_o, df_dxy):
+            print("[🌍资产] _do_all_ui 主线程开始", flush=True)
+            status_lbl.configure(text="⏳ 更新 UI...")
+
+            # 1. 更新 5 张卡片 (纯 Tk Label)
+            def _upd(val_lbl, chg_lbl, df, fmt):
                 if df is not None and len(df) > 1:
                     try:
                         c = float(df['close'].iloc[-1])
-                        p = (c / float(df['close'].iloc[-2]) - 1) * 100
+                        p = (c/float(df['close'].iloc[-2])-1)*100
                         val_lbl.configure(text=fmt.format(c))
-                        chg_lbl.configure(
-                            text=f"{'▲' if p>0 else '▼'} {abs(p):.2f}%",
-                            fg="#66BB6A" if p>0 else "#EF5350")
-                    except Exception:
-                        val_lbl.configure(text="—"); chg_lbl.configure(text="⚠️", fg="#888")
-                else:
-                    val_lbl.configure(text="—"); chg_lbl.configure(text="⚠️无数据", fg="#888")
+                        chg_lbl.configure(text=f"{'▲' if p>0 else '▼'} {abs(p):.2f}%",
+                                          fg="#66BB6A" if p>0 else "#EF5350")
+                    except Exception: val_lbl.configure(text="—"); chg_lbl.configure(text="⚠️", fg="#888")
+                else: val_lbl.configure(text="—"); chg_lbl.configure(text="⚠️无数据", fg="#888")
 
-            dlg.after(0, lambda: _upd_card(val_gold, chg_gold, df_g, "${:,.2f}"))
-            dlg.after(0, lambda: _upd_card(val_eq, chg_eq, df_eq, "{:,.0f}"))
-            dlg.after(0, lambda: _upd_card(val_oil, chg_oil, df_o, "${:.2f}"))
+            _upd(val_gold, chg_gold, df_g, "${:,.2f}")
+            _upd(val_eq, chg_eq, df_eq, "{:,.0f}")
+            _upd(val_oil, chg_oil, df_o, "${:.2f}")
 
-            # 美债特殊处理
+            # 美债
             if df_b is not None and len(df_b) > 2:
                 try:
                     y10 = float(df_b['美国国债收益率10年'].iloc[-1])
                     y2 = float(df_b['美国国债收益率2年'].iloc[-1])
                     sp = y10 - y2; ch = y10 - float(df_b['美国国债收益率10年'].iloc[-2])
-                    dlg.after(0, lambda: val_bond.configure(text=f"{y10:.2f}%"))
-                    dlg.after(0, lambda: chg_bond.configure(
-                        text=f"{'▲' if ch>0 else '▼'} {abs(ch):.2f}pp  利差={sp:.2f}pp",
-                        fg="#EF5350" if ch>0 else "#66BB6A"))
+                    val_bond.configure(text=f"{y10:.2f}%")
+                    chg_bond.configure(text=f"{'▲' if ch>0 else '▼'} {abs(ch):.2f}pp  利差={sp:.2f}pp",
+                                       fg="#EF5350" if ch>0 else "#66BB6A")
                 except Exception: pass
-
             # DXY
             if df_dxy is not None and len(df_dxy) > 1:
                 try:
                     c = float(df_dxy.iloc[-1]['close'])
                     p = (float(df_dxy.iloc[-1]['close'])/float(df_dxy.iloc[-2]['close'])-1)*100
-                    dlg.after(0, lambda: val_dxy.configure(text=f"{c:.2f}"))
-                    dlg.after(0, lambda: chg_dxy.configure(
-                        text=f"{'▲' if p>0 else '▼'} {abs(p):.2f}%  DXY",
-                        fg="#66BB6A" if p>0 else "#EF5350"))
+                    val_dxy.configure(text=f"{c:.2f}")
+                    chg_dxy.configure(text=f"{'▲' if p>0 else '▼'} {abs(p):.2f}%  DXY",
+                                      fg="#66BB6A" if p>0 else "#EF5350")
                 except Exception: pass
             elif df_b is not None:
-                # 美债代理
                 try:
                     y10 = float(df_b['美国国债收益率10年'].iloc[-1])
-                    dlg.after(0, lambda: val_dxy.configure(text=f"代理 {y10*14:.1f}"))
-                    dlg.after(0, lambda: chg_dxy.configure(text="⚠️DXY缺失,美债代理", fg="#888"))
+                    val_dxy.configure(text=f"代理 {y10*14:.1f}")
+                    chg_dxy.configure(text="⚠️DXY缺失,美债代理", fg="#888")
                 except Exception: pass
 
-            status_lbl.configure(text="⏳ 渲染 K线 + 技术信号...")
+            print("[🌍资产] 卡片更新完, 开始画 K线", flush=True)
 
-            # ⭐ 所有 matplotlib Canvas draw 移到主线程 (dlg.after), 不碰后台线程
+            # matplotlib — 必须在主线程
             def _ma(s, w): return s.rolling(w).mean()
             def _rsi(s, w=14):
                 d = s.diff(); g = d.where(d>0,0); l = -d.where(d<0,0)
                 return 100 - 100/(1 + g.rolling(w).mean()/l.rolling(w).mean())
 
             def _draw_asset(tab, df, color, nm):
-                """必须在主线程调用 (dlg.after)"""
                 try:
                     ax = tab._ax; ax.clear(); ax.set_facecolor("#1E1E1E")
                     closes = df['close'].tail(120).values
@@ -15309,64 +15299,52 @@ class DapanMixin:
                     ax.grid(True, alpha=0.15, color="#455A64")
                     ax.set_ylabel("价格", color="#90A4AE", fontsize=8)
                     tab._canvas.draw()
-                    # 技术信号
                     c = df['close'].iloc[-1]; m20v = _ma(df['close'],20).iloc[-1]
                     m60v = _ma(df['close'],60).iloc[-1]; r = _rsi(df['close']).iloc[-1]
-                    pct5 = (c/df['close'].iloc[-6]-1)*100
-                    pct20 = (c/df['close'].iloc[-21]-1)*100
+                    pct5 = (c/df['close'].iloc[-6]-1)*100; pct20 = (c/df['close'].iloc[-21]-1)*100
                     sig = [f"📍 现价: {c:,.2f}", f"📊 MA20={m20v:,.2f} | MA60={m60v:,.2f}",
                            f"📉 5日={pct5:+.2f}% | 20日={pct20:+.2f}%"]
                     if not np.isnan(r): sig.append(f"RSI(14)={r:.1f} {'🔥超买' if r>70 else '❄️超卖' if r<30 else '⚖️中性'}")
                     sig.append("🟢 MA多头排列" if c>m20v>m60v else "🔴 MA空头排列" if c<m20v<m60v else "🟡 MA交织")
                     tab._sig_text.configure(state="normal"); tab._sig_text.delete("1.0", tk.END)
                     tab._sig_text.insert("1.0", "\n".join(sig)); tab._sig_text.configure(state="disabled")
-                except Exception as e: print(f"draw {nm}: {e}")
+                except Exception as e: print(f"draw {nm}: {e}", flush=True)
 
-            # 主线程渲染所有 K线
-            if df_g is not None: dlg.after(10, lambda: _draw_asset(tab_gold, df_g, "#FFD54F", "黄金"))
-            if df_eq is not None: dlg.after(20, lambda: _draw_asset(tab_eq, df_eq, "#66BB6A", "纳指"))
-            if df_o is not None: dlg.after(30, lambda: _draw_asset(tab_oil, df_o, "#EF5350", "原油"))
-
-            # 美债 K线 + 信号
+            if df_g is not None: _draw_asset(tab_gold, df_g, "#FFD54F", "黄金")
+            if df_eq is not None: _draw_asset(tab_eq, df_eq, "#66BB6A", "纳指")
+            if df_o is not None: _draw_asset(tab_oil, df_o, "#EF5350", "原油")
             if df_b is not None and len(df_b) > 2:
-                def _draw_bond():
-                    try:
-                        ax = tab_bond._ax; ax.clear(); ax.set_facecolor("#1E1E1E")
-                        b10 = df_b['美国国债收益率10年'].tail(120).values
-                        ax.plot(range(len(b10)), b10, color="#AB47BC", lw=1.2, label="美债10Y")
-                        ax.plot(range(len(b10)), df_b['美国国债收益率2年'].tail(120).values,
-                                color="#42A5F5", lw=1, alpha=0.7, label="美债2Y")
-                        ax.legend(fontsize=7, labelcolor="#E0E0E0", facecolor="#1E1E1E", edgecolor="#37474F")
-                        ax.grid(True, alpha=0.15, color="#455A64")
-                        ax.set_ylabel("收益率%", color="#90A4AE", fontsize=8)
-                        tab_bond._canvas.draw()
-                        y10 = float(df_b['美国国债收益率10年'].iloc[-1])
-                        y2 = float(df_b['美国国债收益率2年'].iloc[-1])
-                        sp = y10 - y2; ch = y10 - float(df_b['美国国债收益率10年'].iloc[-2])
-                        tab_bond._sig_text.configure(state="normal"); tab_bond._sig_text.delete("1.0", tk.END)
-                        tab_bond._sig_text.insert("1.0", f"📍 10Y:{y10:.2f}% | 2Y:{y2:.2f}%\n📊 利差:{sp:.2f}pp {'🔴倒挂' if sp<0 else '🟢正差'}\n📉 10Y:{ch:+.2f}pp\n🔮 {'收益率上行→美股承压/黄金利空' if ch>0 else '收益率下行→美股支撑/黄金利好'}")
-                        tab_bond._sig_text.configure(state="disabled")
-                    except Exception as e: print(f"bond draw: {e}")
-                dlg.after(40, _draw_bond)
-
-            # DXY K线
-            if df_dxy is not None and len(df_dxy) > 10:
-                def _draw_dxy():
-                    try:
-                        ax = tab_dxy._ax; ax.clear(); ax.set_facecolor("#1E1E1E")
-                        ax.plot(range(len(df_dxy.tail(120))), df_dxy.tail(120)['close'].values,
-                                color="#42A5F5", lw=1.2)
-                        ax.set_ylabel("DXY", color="#90A4AE", fontsize=8); ax.grid(True, alpha=0.15)
-                        tab_dxy._canvas.draw()
-                    except Exception as e: print(f"dxy draw: {e}")
-                dlg.after(50, _draw_dxy)
-
-            # 相关性热力图 (最后)
-            def _do_corr():
                 try:
-                    avail = {k: v for k, v in [("黄金",df_g),("纳指",df_eq),("原油",df_o),("美债10Y",df_b)]
-                             if v is not None and len(v) > 30}
-                    if len(avail) < 3: return
+                    ax = tab_bond._ax; ax.clear(); ax.set_facecolor("#1E1E1E")
+                    b10 = df_b['美国国债收益率10年'].tail(120).values
+                    ax.plot(range(len(b10)), b10, color="#AB47BC", lw=1.2, label="美债10Y")
+                    ax.plot(range(len(b10)), df_b['美国国债收益率2年'].tail(120).values,
+                            color="#42A5F5", lw=1, alpha=0.7, label="美债2Y")
+                    ax.legend(fontsize=7, labelcolor="#E0E0E0", facecolor="#1E1E1E", edgecolor="#37474F")
+                    ax.grid(True, alpha=0.15, color="#455A64")
+                    ax.set_ylabel("收益率%", color="#90A4AE", fontsize=8)
+                    tab_bond._canvas.draw()
+                    y10 = float(df_b['美国国债收益率10年'].iloc[-1])
+                    y2 = float(df_b['美国国债收益率2年'].iloc[-1])
+                    sp = y10 - y2; ch = y10 - float(df_b['美国国债收益率10年'].iloc[-2])
+                    tab_bond._sig_text.configure(state="normal"); tab_bond._sig_text.delete("1.0", tk.END)
+                    tab_bond._sig_text.insert("1.0", f"📍 10Y:{y10:.2f}% | 2Y:{y2:.2f}%\n📊 利差:{sp:.2f}pp {'🔴倒挂' if sp<0 else '🟢正差'}\n📉 10Y:{ch:+.2f}pp\n🔮 {'收益率上行→美股承压/黄金利空' if ch>0 else '收益率下行→美股支撑/黄金利好'}")
+                    tab_bond._sig_text.configure(state="disabled")
+                except Exception as e: print(f"bond draw: {e}", flush=True)
+            if df_dxy is not None and len(df_dxy) > 10:
+                try:
+                    ax = tab_dxy._ax; ax.clear(); ax.set_facecolor("#1E1E1E")
+                    ax.plot(range(len(df_dxy.tail(120))), df_dxy.tail(120)['close'].values,
+                            color="#42A5F5", lw=1.2)
+                    ax.set_ylabel("DXY", color="#90A4AE", fontsize=8); ax.grid(True, alpha=0.15)
+                    tab_dxy._canvas.draw()
+                except Exception as e: print(f"dxy draw: {e}", flush=True)
+
+            # 相关性热力图
+            try:
+                avail = {k: v for k, v in [("黄金",df_g),("纳指",df_eq),("原油",df_o),("美债10Y",df_b)]
+                         if v is not None and len(v) > 30}
+                if len(avail) >= 3:
                     cd = {}
                     for k, v in avail.items():
                         col = 'close' if k!='美债10Y' else '美国国债收益率10年'
@@ -15375,7 +15353,7 @@ class DapanMixin:
                         cd[k] = s.diff() if k=='美债10Y' else s.pct_change()
                     cdf = pd.DataFrame(cd).dropna(); cm = cdf.corr()
                     cax = corr_fig.add_subplot(111); cax.clear()
-                    im = cax.imshow(cm.values, cmap="RdBu_r", vmin=-1, vmax=1)
+                    cax.imshow(cm.values, cmap="RdBu_r", vmin=-1, vmax=1)
                     cax.set_xticks(range(len(cm.columns))); cax.set_yticks(range(len(cm.columns)))
                     cax.set_xticklabels(cm.columns, fontsize=9, color="#E0E0E0")
                     cax.set_yticklabels(cm.columns, fontsize=9, color="#E0E0E0")
@@ -15388,9 +15366,10 @@ class DapanMixin:
                     cax.set_title(f"近60日 Pearson相关 ({len(avail)}资产)", color="#FFD54F", fontsize=10)
                     corr_fig.patch.set_facecolor("#121212"); cax.set_facecolor("#1E1E1E")
                     corr_canvas.draw()
-                    status_lbl.configure(text="✅ 全部加载完成")
-                except Exception as e: print(f"corr: {e}")
-            dlg.after(100, _do_corr)
+            except Exception as e: print(f"corr: {e}", flush=True)
+
+            status_lbl.configure(text="✅ 全部加载完成")
+            print("[🌍资产] UI 更新完成!", flush=True)
 
         _th.Thread(target=_load, daemon=True).start()
         print("🌍全球资产] 弹窗已打开", flush=True)
