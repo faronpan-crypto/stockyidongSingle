@@ -948,7 +948,7 @@ def show_speculator_watch(root=None, app=None):
     # left_pane grid 配置 (2 列 × 3 行)
     left_pane.grid_rowconfigure(0, weight=3)
     left_pane.grid_rowconfigure(1, weight=3)
-    left_pane.grid_rowconfigure(2, weight=0)
+    left_pane.grid_rowconfigure(2, weight=1)
     left_pane.grid_columnconfigure(0, weight=1)
     left_pane.grid_columnconfigure(1, weight=1)
 
@@ -971,10 +971,10 @@ def show_speculator_watch(root=None, app=None):
     _build_futures_grid(row_bot, win, 1)      # 5=股指期货
     _build_cycle_panel(row_bot, win, 2)       # 6=周期阶段
 
-    # ── row_leak (row=2, 固定200px): 2信号决策 × 7状态判定 ──
-    row_leak = tk.Frame(left_pane, bg="#121212", height=200)
+    # ── row_leak (row=2, 比例分配): 2信号决策 × 7状态判定 ──
+    row_leak = tk.Frame(left_pane, bg="#121212")
     row_leak.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(2, 0))
-    row_leak.pack_propagate(False)
+    row_leak.grid_rowconfigure(0, weight=1)
     row_leak.grid_columnconfigure(0, weight=1, uniform="r3")
     row_leak.grid_columnconfigure(1, weight=1, uniform="r3")
 
@@ -2860,9 +2860,10 @@ def _refresh_cycle(win):
 
 def _build_status_panel(parent, win, col=2):
     """⑥ 状态判定三状态灯 — 盘中机会/状态机会/主升期 + 红圈判定 + 主控股推荐"""
+    parent.grid_rowconfigure(0, weight=1)
+    parent.grid_columnconfigure(col, weight=1)
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#90CAF9", font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
-    parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "⑥ 状态判定 (盘中机会/红圈判定/主控股推荐)",
                    "#90CAF9", STATUS_KNOWLEDGE)
 
@@ -3350,12 +3351,12 @@ def _build_watch_analysis(parent, win):
     tk.Button(top, text="🤖 AI分析", command=lambda: _ai_popup(win),
               bg="#3949AB", fg="#ECEFF1", font=("", 10, "bold")).pack(side=tk.RIGHT, padx=4)
 
-    # Canvas 加宽 + body grid 2 列
-    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0, width=420)
+    # Canvas 自适应: 不加固定 width, body 跟随父窗口宽度
+    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0)
     sb = tk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
     body = tk.Frame(canvas, bg="#121212")
     body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.create_window((0, 0), window=body, anchor="nw", width=420)
+    canvas.create_window((0, 0), window=body, anchor="nw")
     canvas.configure(yscrollcommand=sb.set)
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     sb.pack(side=tk.RIGHT, fill=tk.Y)
@@ -3363,9 +3364,16 @@ def _build_watch_analysis(parent, win):
     def _mw(e): canvas.yview_scroll(int(-e.delta / 120), "units")
     canvas.bind_all("<MouseWheel>", _mw)
 
-    # body grid: 2 列等宽, 自动换行
+    # Canvas <Configure> → body 跟随宽度
+    def _on_canvas_cfg(e):
+        canvas.itemconfigure("all", width=e.width)
+    canvas.bind("<Configure>", _on_canvas_cfg)
+
+    # body grid: 2 列等宽, 自动换行, 每行高度平均
     body.grid_columnconfigure(0, weight=1, uniform="wa")
     body.grid_columnconfigure(1, weight=1, uniform="wa")
+    for _r in range(5):
+        body.grid_rowconfigure(_r, weight=1)
 
     # 结论区 (特大字体, 跨 2 列)
     concl_lf = tk.LabelFrame(body, text="🎯 今日结论",
@@ -4224,11 +4232,15 @@ def _build_sign_decision_panel(parent, win):
     """🎯 信号决策面板 — 显示加载中, 后台直接拉真实 closes (不再用种子)"""
     import numpy as np
 
-    title = tk.Label(parent, text="🎯 信号决策 (大盘综合) · ⏳加载中...",
+    # 根容器 — 垂直撑满 parent wrapper
+    root = tk.Frame(parent, bg="#1E1E1E")
+    root.pack(fill=tk.BOTH, expand=True)
+
+    title = tk.Label(root, text="🎯 信号决策 (大盘综合) · ⏳加载中...",
                      bg="#1E1E1E", fg="#FFD54F", font=("", 10, "bold"))
     title.pack(anchor="w", padx=6, pady=(4, 2))
 
-    lists = tk.Frame(parent, bg="#1E1E1E"); lists.pack(fill=tk.X, padx=4, pady=1)
+    lists = tk.Frame(root, bg="#1E1E1E"); lists.pack(fill=tk.X, padx=4, pady=1)
     left_list = tk.Frame(lists, bg="#1E1E1E"); left_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     right_list = tk.Frame(lists, bg="#1E1E1E"); right_list.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
@@ -4246,15 +4258,15 @@ def _build_sign_decision_panel(parent, win):
         lbl = tk.Label(right_list, text="○ —", bg="#1E1E1E", fg="#546E7A", font=("", 11), anchor="w")
         lbl.pack(anchor="w"); opt_lbls.append(lbl)
 
-    sum_frame = tk.Frame(parent, bg="#1A237E"); sum_frame.pack(fill=tk.X, padx=4, pady=(4, 2))
+    sum_frame = tk.Frame(root, bg="#1A237E"); sum_frame.pack(fill=tk.X, padx=4, pady=(4, 2))
     sum_lbl = tk.Label(sum_frame, text="...", bg="#1A237E", fg="#FFD54F",
                        font=("", 12, "bold"))
     sum_lbl.pack(padx=6, pady=4, anchor="w")
 
-    # ── 📣 大字信号预警 + 建议仓位 (夸张大字体) ──
-    big_frame = tk.Frame(parent, bg="#1E1E1E", highlightbackground="#FF6D00",
+    # ── 📣 大字信号预警 + 建议仓位 (夸张大字体) — 垂直撑满剩余空间 ──
+    big_frame = tk.Frame(root, bg="#1E1E1E", highlightbackground="#FF6D00",
                           highlightthickness=2)
-    big_frame.pack(fill=tk.X, padx=4, pady=(4, 2))
+    big_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=(4, 2))
     # 左侧: 大字状态
     big_left = tk.Frame(big_frame, bg="#1E1E1E"); big_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     big_signal_lbl = tk.Label(big_left, text="⏳", bg="#1E1E1E", fg="#FFD54F",
@@ -4272,7 +4284,7 @@ def _build_sign_decision_panel(parent, win):
                            font=("", 11))
     big_pct_sub.pack()
 
-    quant = tk.Frame(parent, bg="#121212"); quant.pack(fill=tk.X, padx=4, pady=2)
+    quant = tk.Frame(root, bg="#121212"); quant.pack(fill=tk.X, padx=4, pady=2)
     tk.Label(quant, text="量化决策: 等待 VS 入场", bg="#121212", fg="#90A4AE",
              font=("", 11)).pack(anchor="w")
     row = tk.Frame(quant, bg="#121212"); row.pack(fill=tk.X, pady=1)
@@ -4281,7 +4293,7 @@ def _build_sign_decision_panel(parent, win):
     pct_lbl = tk.Label(row, text="建议仓位: —", bg="#121212", fg="#CE93D8", font=("", 12))
     pct_lbl.pack(side=tk.RIGHT)
 
-    ma_row = tk.Frame(parent, bg="#121212"); ma_row.pack(fill=tk.X, padx=4, pady=(0, 2))
+    ma_row = tk.Frame(root, bg="#121212"); ma_row.pack(fill=tk.X, padx=4, pady=(0, 2))
     ma_lbl = tk.Label(ma_row, text="MA5=— MA10=— MA15=— MA60=—",
                       bg="#121212", fg="#78909C", font=("", 11))
     ma_lbl.pack(side=tk.LEFT)
