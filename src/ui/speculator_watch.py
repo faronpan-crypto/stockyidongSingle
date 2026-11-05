@@ -820,11 +820,20 @@ def show_speculator_watch(root=None, app=None):
 
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
-    # 右面板加宽 (340 → 420)
-    # 右面板充满 (width=520, pack_propagate=False 保留最小宽度)
     left_pane = tk.Frame(outer, bg="#121212"); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    right_pane = tk.Frame(outer, bg="#121212", width=520); right_pane.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
-    right_pane.pack_propagate(False)
+
+    # 右面板: 屏幕宽度的 30% (动态, 绑定 Configure 事件)
+    right_pane = tk.Frame(outer, bg="#121212")
+    right_pane.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+
+    def _resize_right(_e=None):
+        # 屏幕宽 30%, 最小 480, 最大 800
+        w = win.winfo_width()
+        target = max(480, min(800, int(w * 0.30)))
+        right_pane.configure(width=target)
+        right_pane.pack_propagate(False)
+    win.bind("<Configure>", _resize_right, add="+")
+    win.after(50, _resize_right)  # 初始化一次
 
     # left_pane grid 配置 (2 列 × 3 行)
     left_pane.grid_rowconfigure(0, weight=3)
