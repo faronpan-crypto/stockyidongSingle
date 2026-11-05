@@ -15012,9 +15012,10 @@ class DapanMixin:
             import matplotlib
             matplotlib.use("TkAgg")
             import matplotlib.pyplot as _mp
+            import matplotlib.font_manager as _fm
             # 中文字体
             for _fn in ["PingFang SC", "Heiti SC", "Arial Unicode MS", "STHeiti", "SimHei"]:
-                if _fn in _mp.font_manager.get_names():
+                if _fn in [f.name for f in _fm.fontManager.ttflist]:
                     _mp.rcParams["font.sans-serif"] = [_fn]
                     break
             _mp.rcParams["axes.unicode_minus"] = False

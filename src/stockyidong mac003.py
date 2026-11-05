@@ -4753,27 +4753,38 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(**_pad)
 
         # ── Row 2: 🎯 选股 / 量化 / 机会 (actionable) — 精简到 7 个 ──
-        _ROW2 = [
-            ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
-            ("🤖量化总览", 9, self._show_quant_dialog),
-            ("🎯量化预测", 10, self._show_quant_forecast_dialog),
-            ("🪙筹码", 7, self._show_chouma),
-            ("🎯机会", 7, self._show_jianlou),
-            ("🎯高抛低吸", 8, self._show_high_low_swing),
-            ("📊融资盘", 8, self._show_margin_dialog),
-            ("🌍全球资产", 8, self._show_global_assets_dialog),
-            ("🔷同花顺", 9, self._show_ths_ifind_dialog),
-            ("📅财经日历", 9, self._show_event_calendar_dialog),
-            ("💬知乎", 7, self._show_zhihu_dialog),
-            ("💎盈米", 7, self._show_yingmi_dialog),
-            ("🎯Choice", 8, self._show_choice_dialog),
-            ("📊TuShare", 9, self._show_tushare_dialog),
-            ("🔗全链路", 9, self._show_full_link_dialog),
-            ("📈AKShare", 9, self._show_akshare_dialog),
-        ]
+        try:
+            _ROW2 = [
+                ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
+                ("🤖量化总览", 9, self._show_quant_dialog),
+                ("🎯量化预测", 10, self._show_quant_forecast_dialog),
+                ("🪙筹码", 7, self._show_chouma),
+                ("🎯机会", 7, self._show_jianlou),
+                ("🎯高抛低吸", 8, self._show_high_low_swing),
+                ("📊融资盘", 8, self._show_margin_dialog),
+                ("🌍全球资产", 8, self._show_global_assets_dialog),
+                ("🔷同花顺", 9, self._show_ths_ifind_dialog),
+                ("📅财经日历", 9, self._show_event_calendar_dialog),
+                ("💬知乎", 7, self._show_zhihu_dialog),
+                ("💎盈米", 7, self._show_yingmi_dialog),
+                ("🎯Choice", 8, self._show_choice_dialog),
+                ("📊TuShare", 9, self._show_tushare_dialog),
+                ("🔗全链路", 9, self._show_full_link_dialog),
+                ("📈AKShare", 9, self._show_akshare_dialog),
+            ]
+        except Exception as _e:
+            print(f"[🎯Row2❌] 按钮定义炸了: {_e}", flush=True)
+            import traceback; traceback.print_exc()
+            _ROW2 = []
         for _idx, (txt, w, cmd) in enumerate(_ROW2):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
-            ttk.Button(toolbar_row2, text=txt, width=w, command=cmd).pack(**_pad)
+            def _wrap2(_c=cmd, _t=txt):
+                print(f"[🎯Row2] 点击 '{_t}'", flush=True)
+                try: _c()
+                except Exception as _e:
+                    print(f"[🎯Row2❌] '{_t}': {_e}", flush=True)
+                    import traceback; traceback.print_exc()
+            ttk.Button(toolbar_row2, text=txt, width=w, command=_wrap2).pack(**_pad)
 
         # ── Row 3: 🔥 主线 / 大盘分析 + K线 / 个股分析 (合并, 精简 width!) ──
         _ROW3 = [
