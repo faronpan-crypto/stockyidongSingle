@@ -223,14 +223,36 @@ class ZhihuMixin:
         right_frame = ttk.Frame(pw, width=420)
         pw.add(right_frame, weight=2)
 
-        ttk.Label(right_frame, text="📖 详情预览",
-                  font=("", 11, "bold")).pack(anchor="w", padx=6, pady=4)
+        # 标题 + 字体调节控件
+        right_header = ttk.Frame(right_frame)
+        right_header.pack(fill=tk.X, padx=6, pady=4)
+        ttk.Label(right_header, text="📖 详情预览",
+                  font=("", 11, "bold")).pack(side=tk.LEFT)
+
+        # 字体调节 (默认 12, 放大 2 码)
+        self._zhihu_font_size = tk.IntVar(value=12)
+        def _font_zoom(delta):
+            new = max(8, min(24, self._zhihu_font_size.get() + delta))
+            self._zhihu_font_size.set(new)
+            self._zhihu_detail_text.configure(font=("TkDefaultFont", new))
+        ttk.Button(right_header, text="A-", width=3,
+                   command=lambda: _font_zoom(-1)).pack(side=tk.RIGHT, padx=1)
+        self._zhihu_font_lbl = ttk.Label(right_header, text="12", width=3, anchor="center")
+        self._zhihu_font_lbl.pack(side=tk.RIGHT)
+        ttk.Button(right_header, text="A+", width=3,
+                   command=lambda: _font_zoom(1)).pack(side=tk.RIGHT, padx=1)
 
         self._zhihu_detail_text = tk.Text(right_frame, wrap=tk.WORD,
-                                           font=("TkDefaultFont", 10),
+                                           font=("TkDefaultFont", 12),
                                            background="#fafafa", height=30)
         self._zhihu_detail_text.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
         self._zhihu_detail_text.configure(state=tk.DISABLED)
+
+        # 字体变化时更新 label
+        def _update_font_lbl(*_):
+            self._zhihu_font_lbl.configure(text=str(self._zhihu_font_size.get()))
+            self._zhihu_detail_text.configure(font=("TkDefaultFont", self._zhihu_font_size.get()))
+        self._zhihu_font_size.trace_add("write", _update_font_lbl)
 
         # 初始化: 自动加载热榜
         dlg.after(100, lambda: (
