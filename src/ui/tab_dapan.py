@@ -15004,350 +15004,370 @@ class DapanMixin:
         import tkinter as tk
         import tkinter.ttk as ttk
         import threading as _th
-        import traceback as _tb
         from datetime import datetime, timedelta
         import pandas as pd, numpy as np
-
-        root = getattr(self, 'root', None) or getattr(self, '_root', None)
-        dlg = tk.Toplevel(root)
-        dlg.title("🌍 全球五巨头资产全景 — Global Macro Dashboard")
-        dlg.geometry("1200x820")
-        dlg.configure(bg="#121212")
-        dlg.transient(root)
-        dlg.minsize(1100, 750)
-
-        # ── 全局字体调节 ──
-        font_size = tk.IntVar(value=10)
-        def _refresh_fonts():
-            s = font_size.get()
-            for key, lbl in font_refs.items():
-                try: lbl.configure(font=("Microsoft YaHei", s if "11" not in key else s+1, "bold" if "bold" in key else ""))
-                except Exception: pass
-        def _adjust_font(delta):
-            font_size.set(max(8, min(18, font_size.get() + delta)))
-            _refresh_fonts()
-
-        # ── 顶部标题栏 ──
-        header = tk.Frame(dlg, bg="#1E1E2E", height=50)
-        header.pack(fill=tk.X, side=tk.TOP)
-        header.pack_propagate(False)
-        font_refs = {}
-        tk.Label(header, text="🌍 全球五巨头资产全景", bg="#1E1E2E", fg="#FFD54F",
-                 font=("Microsoft YaHei", 15, "bold")).pack(side=tk.LEFT, padx=15, pady=8)
-        tk.Button(header, text="A-", width=3, command=lambda: _adjust_font(-1),
-                  bg="#37474F", fg="#FFF", relief="flat").pack(side=tk.RIGHT, padx=(0,3))
-        tk.Label(header, text="字体", bg="#1E1E2E", fg="#90A4AE").pack(side=tk.RIGHT, padx=3)
-        tk.Button(header, text="A+", width=3, command=lambda: _adjust_font(1),
-                  bg="#37474F", fg="#FFF", relief="flat").pack(side=tk.RIGHT, padx=(0,3))
-        status_lbl = tk.Label(header, text="⏳ 加载中...", bg="#1E1E2E", fg="#90A4AE")
-        status_lbl.pack(side=tk.RIGHT, padx=10)
-        font_refs["status"] = status_lbl
-
-        # ── 5 张资产实时卡片 ──
-        cards = tk.Frame(dlg, bg="#121212")
-        cards.pack(fill=tk.X, padx=10, pady=(10, 6))
-
-        def _asset_card(parent, icon, name, color):
-            f = tk.Frame(parent, bg="#1E1E2E", highlightbackground=color, highlightthickness=1)
-            f.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-            tk.Label(f, text=icon, bg="#1E1E2E", fg=color,
-                     font=("", 18)).pack(anchor="w", padx=8, pady=(6, 0))
-            tk.Label(f, text=name, bg="#1E1E2E", fg="#E0E0E0",
-                     font=("Microsoft YaHei", 10)).pack(anchor="w", padx=8)
-            val_lbl = tk.Label(f, text="—", bg="#1E1E2E", fg=color,
-                               font=("Microsoft YaHei", 14, "bold"))
-            val_lbl.pack(anchor="w", padx=8, pady=(2, 0))
-            chg_lbl = tk.Label(f, text="—", bg="#1E1E2E", fg="#90A4AE",
-                               font=("Microsoft YaHei", 9))
-            chg_lbl.pack(anchor="w", padx=8, pady=(0, 6))
-            return f, val_lbl, chg_lbl
-
-        card_gold, val_gold, chg_gold = _asset_card(cards, "💎", "黄金 (GOLD)", "#FFD54F")
-        card_dxy, val_dxy, chg_dxy = _asset_card(cards, "💵", "美元指数 (DXY)", "#42A5F5")
-        card_bond, val_bond, chg_bond = _asset_card(cards, "🏦", "美债10Y收益率", "#AB47BC")
-        card_equity, val_eq, chg_eq = _asset_card(cards, "📈", "美股纳指", "#66BB6A")
-        card_oil, val_oil, chg_oil = _asset_card(cards, "🛢️", "原油 WTI", "#EF5350")
-
-        # ── Notebook (5 资产 + 联动) ──
-        nb = ttk.Notebook(dlg); nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
-
-        # 创建一个通用 Tab 函数: 行情 + 迷你K线 + 技术信号 + 联动影响
-        def _build_asset_tab(tab, title, icon, color, code, name, data_getter_fn):
-            """通用资产 Tab — 迷你 matplot K线 + 技术指标 + 联动关系"""
-            import matplotlib; matplotlib.use("TkAgg")
+        import traceback as _tb
+        print("[🌍资产] _show_global_assets_dialog 被调用!", flush=True)
+        try:
+            import matplotlib
+            matplotlib.use("TkAgg")
+            import matplotlib.pyplot as _mp
+            # 中文字体
+            for _fn in ["PingFang SC", "Heiti SC", "Arial Unicode MS", "STHeiti", "SimHei"]:
+                if _fn in _mp.font_manager.get_names():
+                    _mp.rcParams["font.sans-serif"] = [_fn]
+                    break
+            _mp.rcParams["axes.unicode_minus"] = False
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            dlg = tk.Toplevel(root)
+            dlg.title("🌍 全球五巨头资产全景 — Global Macro Dashboard")
+            dlg.geometry("1200x820")
+            dlg.configure(bg="#121212")
+            dlg.transient(root)
+            dlg.minsize(1100, 750)
 
-            # ① 迷你 K 线 + MA20/60
-            fig = Figure(figsize=(6, 2.5), dpi=100, facecolor="#121212")
-            ax = fig.add_subplot(111, facecolor="#1E1E1E")
-            ax.tick_params(colors="#90A4AE", labelsize=8)
-            for spine in ax.spines.values(): spine.set_color("#37474F")
-            canvas_fig = FigureCanvasTkAgg(fig, master=tab)
-            canvas_fig.get_tk_widget().pack(fill=tk.X, padx=6, pady=(4, 4))
+            # ── 全局字体调节 ──
+            font_size = tk.IntVar(value=10)
+            def _refresh_fonts():
+                s = font_size.get()
+                for key, lbl in font_refs.items():
+                    try: lbl.configure(font=("Microsoft YaHei", s if "11" not in key else s+1, "bold" if "bold" in key else ""))
+                    except Exception: pass
+            def _adjust_font(delta):
+                font_size.set(max(8, min(18, font_size.get() + delta)))
+                _refresh_fonts()
 
-            # ② 技术信号面板
-            sig_frame = tk.Frame(tab, bg="#1E1E1E"); sig_frame.pack(fill=tk.X, padx=6, pady=4)
-            tk.Label(sig_frame, text="🔬 技术信号", bg="#1E1E1E", fg="#FFD54F",
-                     font=("Microsoft YaHei", 10, "bold")).pack(anchor="w", padx=8)
-            sig_text = tk.Text(sig_frame, height=6, bg="#121212", fg="#E0E0E0",
-                               font=("Microsoft YaHei", 9), relief="flat", wrap="word")
-            sig_text.pack(fill=tk.X, padx=6, pady=4)
-            sig_text.insert("1.0", "⏳ 数据加载中...")
-            sig_text.configure(state="disabled")
+            # ── 顶部标题栏 ──
+            header = tk.Frame(dlg, bg="#1E1E2E", height=50)
+            header.pack(fill=tk.X, side=tk.TOP)
+            header.pack_propagate(False)
+            font_refs = {}
+            tk.Label(header, text="🌍 全球五巨头资产全景", bg="#1E1E2E", fg="#FFD54F",
+                     font=("Microsoft YaHei", 15, "bold")).pack(side=tk.LEFT, padx=15, pady=8)
+            tk.Button(header, text="A-", width=3, command=lambda: _adjust_font(-1),
+                      bg="#37474F", fg="#FFF", relief="flat").pack(side=tk.RIGHT, padx=(0,3))
+            tk.Label(header, text="字体", bg="#1E1E2E", fg="#90A4AE").pack(side=tk.RIGHT, padx=3)
+            tk.Button(header, text="A+", width=3, command=lambda: _adjust_font(1),
+                      bg="#37474F", fg="#FFF", relief="flat").pack(side=tk.RIGHT, padx=(0,3))
+            status_lbl = tk.Label(header, text="⏳ 加载中...", bg="#1E1E2E", fg="#90A4AE")
+            status_lbl.pack(side=tk.RIGHT, padx=10)
+            font_refs["status"] = status_lbl
 
-            # ③ 联动影响面板
-            link_frame = tk.Frame(tab, bg="#1E1E1E"); link_frame.pack(fill=tk.X, padx=6, pady=4)
-            tk.Label(link_frame, text="🔗 对其他资产的联动影响", bg="#1E1E1E", fg="#42A5F5",
-                     font=("Microsoft YaHei", 10, "bold")).pack(anchor="w", padx=8)
-            link_text = tk.Text(link_frame, height=5, bg="#121212", fg="#E0E0E0",
-                                font=("Microsoft YaHei", 9), relief="flat", wrap="word")
-            link_text.pack(fill=tk.X, padx=6, pady=4)
-            link_text.insert("1.0", "⏳ 等待数据...")
-            link_text.configure(state="disabled")
+            # ── 5 张资产实时卡片 ──
+            cards = tk.Frame(dlg, bg="#121212")
+            cards.pack(fill=tk.X, padx=10, pady=(10, 6))
 
-            # 存引用
-            tab._fig = fig; tab._ax = ax; tab._canvas = canvas_fig
-            tab._sig_text = sig_text; tab._link_text = link_text
-            return tab
+            def _asset_card(parent, icon, name, color):
+                f = tk.Frame(parent, bg="#1E1E2E", highlightbackground=color, highlightthickness=1)
+                f.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+                tk.Label(f, text=icon, bg="#1E1E2E", fg=color,
+                         font=("", 18)).pack(anchor="w", padx=8, pady=(6, 0))
+                tk.Label(f, text=name, bg="#1E1E2E", fg="#E0E0E0",
+                         font=("Microsoft YaHei", 10)).pack(anchor="w", padx=8)
+                val_lbl = tk.Label(f, text="—", bg="#1E1E2E", fg=color,
+                                   font=("Microsoft YaHei", 14, "bold"))
+                val_lbl.pack(anchor="w", padx=8, pady=(2, 0))
+                chg_lbl = tk.Label(f, text="—", bg="#1E1E2E", fg="#90A4AE",
+                                   font=("Microsoft YaHei", 9))
+                chg_lbl.pack(anchor="w", padx=8, pady=(0, 6))
+                return f, val_lbl, chg_lbl
 
-        tab_gold = tk.Frame(nb, bg="#121212"); nb.add(tab_gold, text="💎 黄金")
-        tab_dxy = tk.Frame(nb, bg="#121212"); nb.add(tab_dxy, text="💵 美元")
-        tab_bond = tk.Frame(nb, bg="#121212"); nb.add(tab_bond, text="🏦 美债")
-        tab_eq = tk.Frame(nb, bg="#121212"); nb.add(tab_eq, text="📈 美股")
-        tab_oil = tk.Frame(nb, bg="#121212"); nb.add(tab_oil, text="🛢️ 原油")
+            card_gold, val_gold, chg_gold = _asset_card(cards, "💎", "黄金 (GOLD)", "#FFD54F")
+            card_dxy, val_dxy, chg_dxy = _asset_card(cards, "💵", "美元指数 (DXY)", "#42A5F5")
+            card_bond, val_bond, chg_bond = _asset_card(cards, "🏦", "美债10Y收益率", "#AB47BC")
+            card_equity, val_eq, chg_eq = _asset_card(cards, "📈", "美股纳指", "#66BB6A")
+            card_oil, val_oil, chg_oil = _asset_card(cards, "🛢️", "原油 WTI", "#EF5350")
 
-        _build_asset_tab(tab_gold, "黄金", "💎", "#FFD54F", "XAU", "COMEX黄金", None)
-        _build_asset_tab(tab_dxy, "美元", "💵", "#42A5F5", "DXY", "美元指数", None)
-        _build_asset_tab(tab_bond, "美债", "🏦", "#AB47BC", "US10Y", "美债10Y收益率", None)
-        _build_asset_tab(tab_eq, "美股", "📈", "#66BB6A", ".IXIC", "纳指100", None)
-        _build_asset_tab(tab_oil, "原油", "🛢️", "#EF5350", "CL", "WTI原油", None)
+            # ── Notebook (5 资产 + 联动) ──
+            nb = ttk.Notebook(dlg); nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
 
-        # Tab 6: 联动全景 (核心！)
-        tab_corr = tk.Frame(nb, bg="#121212"); nb.add(tab_corr, text="🔗 联动全景")
-        corr_title = tk.Label(tab_corr, text="📊 资产间相关性矩阵 (近60日收益率 Pearson)",
-                               bg="#121212", fg="#FFD54F",
-                               font=("Microsoft YaHei", 11, "bold"))
-        corr_title.pack(anchor="w", padx=10, pady=(10, 4))
+            # 创建一个通用 Tab 函数: 行情 + 迷你K线 + 技术信号 + 联动影响
+            def _build_asset_tab(tab, title, icon, color, code, name, data_getter_fn):
+                """通用资产 Tab — 迷你 matplot K线 + 技术指标 + 联动关系"""
+                import matplotlib; matplotlib.use("TkAgg")
+                from matplotlib.figure import Figure
+                from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-        corr_fig = Figure(figsize=(8, 4), dpi=100, facecolor="#121212")
-        corr_canvas = FigureCanvasTkAgg(corr_fig, master=tab_corr)
-        corr_canvas.get_tk_widget().pack(fill=tk.X, padx=6, pady=4)
+                # ① 迷你 K 线 + MA20/60
+                fig = Figure(figsize=(6, 2.5), dpi=100, facecolor="#121212")
+                ax = fig.add_subplot(111, facecolor="#1E1E1E")
+                ax.tick_params(colors="#90A4AE", labelsize=8)
+                for spine in ax.spines.values(): spine.set_color("#37474F")
+                canvas_fig = FigureCanvasTkAgg(fig, master=tab)
+                canvas_fig.get_tk_widget().pack(fill=tk.X, padx=6, pady=(4, 4))
 
-        # 传导概率解释区
-        tk.Label(tab_corr, text="🎯 A股/美股个股联动传导概率参考", bg="#121212",
-                 fg="#42A5F5", font=("Microsoft YaHei", 11, "bold")).pack(anchor="w", padx=10, pady=(8,4))
-        linkage_text = tk.Text(tab_corr, height=8, bg="#1E1E1E", fg="#E0E0E0",
-                               font=("Microsoft YaHei", 10), relief="flat", wrap="word")
-        linkage_text.pack(fill=tk.X, padx=8, pady=4)
-        linkage_text.configure(state="disabled")
+                # ② 技术信号面板
+                sig_frame = tk.Frame(tab, bg="#1E1E1E"); sig_frame.pack(fill=tk.X, padx=6, pady=4)
+                tk.Label(sig_frame, text="🔬 技术信号", bg="#1E1E1E", fg="#FFD54F",
+                         font=("Microsoft YaHei", 10, "bold")).pack(anchor="w", padx=8)
+                sig_text = tk.Text(sig_frame, height=6, bg="#121212", fg="#E0E0E0",
+                                   font=("Microsoft YaHei", 9), relief="flat", wrap="word")
+                sig_text.pack(fill=tk.X, padx=6, pady=4)
+                sig_text.insert("1.0", "⏳ 数据加载中...")
+                sig_text.configure(state="disabled")
 
-        # Tab 7: 底层逻辑
-        tab_logic = tk.Frame(nb, bg="#121212"); nb.add(tab_logic, text="📚 底层逻辑")
-        logic_text = tk.Text(tab_logic, bg="#121212", fg="#E0E0E0",
-                              font=("Microsoft YaHei", 10), relief="flat", wrap="word")
-        logic_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-        LOGIC_CONTENT = """
-═ 🌍 全球五巨头资产联动框架 ═
+                # ③ 联动影响面板
+                link_frame = tk.Frame(tab, bg="#1E1E1E"); link_frame.pack(fill=tk.X, padx=6, pady=4)
+                tk.Label(link_frame, text="🔗 对其他资产的联动影响", bg="#1E1E1E", fg="#42A5F5",
+                         font=("Microsoft YaHei", 10, "bold")).pack(anchor="w", padx=8)
+                link_text = tk.Text(link_frame, height=5, bg="#121212", fg="#E0E0E0",
+                                    font=("Microsoft YaHei", 9), relief="flat", wrap="word")
+                link_text.pack(fill=tk.X, padx=6, pady=4)
+                link_text.insert("1.0", "⏳ 等待数据...")
+                link_text.configure(state="disabled")
 
-【一、五大资产本质】
-💎 黄金：无主权背书的"终极货币"，抗信用风险，是美元信用"照妖镜"和金融体系"保险栓"
-💵 美元：全球贸易/储备核心（"商场通用购物卡"），霸权根基是"石油美元"
-🏦 美债：美国"无风险白条"，收益率是全球资产定价锚
-📈 美股：全球风险偏好"晴雨表"（涨=乐观、跌=避险），美国经济"放大器"
-🛢️ 石油：工业"血液"+通胀"发动机"，绑定美元需求
+                # 存引用
+                tab._fig = fig; tab._ax = ax; tab._canvas = canvas_fig
+                tab._sig_text = sig_text; tab._link_text = link_text
+                return tab
 
-【二、核心联动关系】
-💎↔💵 黄金↔美元：长期负相关（美元强黄金弱），危机时同涨（双避险属性）
-💵↔🏦 美元↔美债：一体两面（加息→美债收益率涨→美元升值）
-🏦↔📈 美债↔美股："股债跷跷板"（收益率涨→股票估值跌），经济复苏时失灵
-💵↔🛢️ 美元↔石油：负相关（美元升值压制需求），供给冲击可独立上涨
-💎↔🏦 黄金↔美债：核心对手盘（实际利率高→黄金持有成本升→金价跌）
-🛢️↔📈 石油↔美股：双刃剑（需求驱动涨利好，供给冲击涨利空）
+            tab_gold = tk.Frame(nb, bg="#121212"); nb.add(tab_gold, text="💎 黄金")
+            tab_dxy = tk.Frame(nb, bg="#121212"); nb.add(tab_dxy, text="💵 美元")
+            tab_bond = tk.Frame(nb, bg="#121212"); nb.add(tab_bond, text="🏦 美债")
+            tab_eq = tk.Frame(nb, bg="#121212"); nb.add(tab_eq, text="📈 美股")
+            tab_oil = tk.Frame(nb, bg="#121212"); nb.add(tab_oil, text="🛢️ 原油")
 
-【三、历史周期验证】
-· 70年代：美元脱钩黄金+石油危机→滞胀→黄金暴涨、美股横盘
-· 2008年：流动性危机"三杀"→QE后美元贬值、黄金反弹
-· 2022年：美联储加息→美元强、黄金/美股熊市
+            _build_asset_tab(tab_gold, "黄金", "💎", "#FFD54F", "XAU", "COMEX黄金", None)
+            _build_asset_tab(tab_dxy, "美元", "💵", "#42A5F5", "DXY", "美元指数", None)
+            _build_asset_tab(tab_bond, "美债", "🏦", "#AB47BC", "US10Y", "美债10Y收益率", None)
+            _build_asset_tab(tab_eq, "美股", "📈", "#66BB6A", ".IXIC", "纳指100", None)
+            _build_asset_tab(tab_oil, "原油", "🛢️", "#EF5350", "CL", "WTI原油", None)
 
-【四、底层逻辑：美元循环】
-美国通过贸易逆差撒美元→全球用美元买石油/美债美股回流→支撑美国经济/军事→强化美元信用。
-矛盾：逆差需持续输出美元，长期债务（34万亿）侵蚀信用，"去美元化"与黄金储备上升是当前挑战。
+            # Tab 6: 联动全景 (核心！)
+            tab_corr = tk.Frame(nb, bg="#121212"); nb.add(tab_corr, text="🔗 联动全景")
+            corr_title = tk.Label(tab_corr, text="📊 资产间相关性矩阵 (近60日收益率 Pearson)",
+                                   bg="#121212", fg="#FFD54F",
+                                   font=("Microsoft YaHei", 11, "bold"))
+            corr_title.pack(anchor="w", padx=10, pady=(10, 4))
 
-🎯 五资产是美元霸权体系的"环节"，看懂联动即看懂全球经济周期、大国博弈与财富逻辑。
-        """
-        logic_text.insert("1.0", LOGIC_CONTENT.strip())
-        logic_text.configure(state="disabled")
+            corr_fig = Figure(figsize=(8, 4), dpi=100, facecolor="#121212")
+            corr_canvas = FigureCanvasTkAgg(corr_fig, master=tab_corr)
+            corr_canvas.get_tk_widget().pack(fill=tk.X, padx=6, pady=4)
 
-        # ── 极简同步方案: 直接在主线程 fetch + 渲染 (不用线程/after) ──
-        def _do_all():
-            print("[🌍资产] 开始同步 fetch + 渲染", flush=True)
-            status_lbl.configure(text="⏳ 加载中...")
-            root.update()  # 让 Tk 刷新一下状态文字
+            # 传导概率解释区
+            tk.Label(tab_corr, text="🎯 A股/美股个股联动传导概率参考", bg="#121212",
+                     fg="#42A5F5", font=("Microsoft YaHei", 11, "bold")).pack(anchor="w", padx=10, pady=(8,4))
+            linkage_text = tk.Text(tab_corr, height=8, bg="#1E1E1E", fg="#E0E0E0",
+                                   font=("Microsoft YaHei", 10), relief="flat", wrap="word")
+            linkage_text.pack(fill=tk.X, padx=8, pady=4)
+            linkage_text.configure(state="disabled")
 
-            import akshare as ak
-            from utils.config import TS_DEFAULT_TOKEN
-            import tushare as ts
-            ts.set_token(TS_DEFAULT_TOKEN)
-            pro = ts.pro_api()
-            import time as _t
-            _t0 = _t.time()
+            # Tab 7: 底层逻辑
+            tab_logic = tk.Frame(nb, bg="#121212"); nb.add(tab_logic, text="📚 底层逻辑")
+            logic_text = tk.Text(tab_logic, bg="#121212", fg="#E0E0E0",
+                                  font=("Microsoft YaHei", 10), relief="flat", wrap="word")
+            logic_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+            LOGIC_CONTENT = """
+    ═ 🌍 全球五巨头资产联动框架 ═
 
-            # 5 源并行 fetch (但结果同步等)
-            import concurrent.futures as cf
-            r = {}
-            def _fg():
-                try:
-                    df = ak.futures_foreign_hist(symbol="XAU"); df['date'] = pd.to_datetime(df['date'])
-                    return df.sort_values('date').reset_index(drop=True)
-                except Exception: return None
-            def _fb():
-                try:
-                    df = ak.bond_zh_us_rate(); df['日期'] = pd.to_datetime(df['日期'])
-                    return df.sort_values('日期').reset_index(drop=True)
-                except Exception: return None
-            def _feq():
-                try:
-                    df = ak.index_us_stock_sina(symbol=".IXIC"); df['date'] = pd.to_datetime(df['date'])
-                    return df.sort_values('date').reset_index(drop=True)
-                except Exception: return None
-            def _fo():
-                try:
-                    df = ak.futures_foreign_hist(symbol="CL"); df['date'] = pd.to_datetime(df['date'])
-                    return df.sort_values('date').reset_index(drop=True)
-                except Exception: return None
-            def _fdxy():
-                try:
-                    df = pro.index_global(ts_code="DXY.NYME",
-                                          start_date=(datetime.now()-timedelta(days=180)).strftime("%Y%m%d"),
-                                          end_date=datetime.now().strftime("%Y%m%d"))
-                    return df if df is not None and len(df) > 5 else None
-                except Exception: return None
+    【一、五大资产本质】
+    💎 黄金：无主权背书的"终极货币"，抗信用风险，是美元信用"照妖镜"和金融体系"保险栓"
+    💵 美元：全球贸易/储备核心（"商场通用购物卡"），霸权根基是"石油美元"
+    🏦 美债：美国"无风险白条"，收益率是全球资产定价锚
+    📈 美股：全球风险偏好"晴雨表"（涨=乐观、跌=避险），美国经济"放大器"
+    🛢️ 石油：工业"血液"+通胀"发动机"，绑定美元需求
 
-            with cf.ThreadPoolExecutor(max_workers=5) as ex:
-                for k, fn in [("gold",_fg),("bond",_fb),("eq",_feq),("oil",_fo),("dxy",_fdxy)]:
-                    try: r[k] = ex.submit(fn).result(timeout=25)
-                    except Exception: r[k] = None
+    【二、核心联动关系】
+    💎↔💵 黄金↔美元：长期负相关（美元强黄金弱），危机时同涨（双避险属性）
+    💵↔🏦 美元↔美债：一体两面（加息→美债收益率涨→美元升值）
+    🏦↔📈 美债↔美股："股债跷跷板"（收益率涨→股票估值跌），经济复苏时失灵
+    💵↔🛢️ 美元↔石油：负相关（美元升值压制需求），供给冲击可独立上涨
+    💎↔🏦 黄金↔美债：核心对手盘（实际利率高→黄金持有成本升→金价跌）
+    🛢️↔📈 石油↔美股：双刃剑（需求驱动涨利好，供给冲击涨利空）
 
-            print(f"[🌍资产] fetch 完成, 耗时 {_t.time()-_t0:.1f}s", flush=True)
+    【三、历史周期验证】
+    · 70年代：美元脱钩黄金+石油危机→滞胀→黄金暴涨、美股横盘
+    · 2008年：流动性危机"三杀"→QE后美元贬值、黄金反弹
+    · 2022年：美联储加息→美元强、黄金/美股熊市
 
-            df_g, df_b, df_eq, df_o, df_dxy = r["gold"], r["bond"], r["eq"], r["oil"], r["dxy"]
+    【四、底层逻辑：美元循环】
+    美国通过贸易逆差撒美元→全球用美元买石油/美债美股回流→支撑美国经济/军事→强化美元信用。
+    矛盾：逆差需持续输出美元，长期债务（34万亿）侵蚀信用，"去美元化"与黄金储备上升是当前挑战。
 
-            # ── 直接渲染 (主线程, 无需 dlg.after) ──
-            def _upd_card(val_lbl, chg_lbl, df, fmt):
-                if df is not None and len(df) > 1:
-                    c = float(df['close'].iloc[-1])
-                    p = (c/float(df['close'].iloc[-2])-1)*100
-                    val_lbl.configure(text=fmt.format(c))
-                    chg_lbl.configure(text=f"{'▲' if p>0 else '▼'} {abs(p):.2f}%",
-                                      fg="#66BB6A" if p>0 else "#EF5350")
+    🎯 五资产是美元霸权体系的"环节"，看懂联动即看懂全球经济周期、大国博弈与财富逻辑。
+            """
+            logic_text.insert("1.0", LOGIC_CONTENT.strip())
+            logic_text.configure(state="disabled")
 
-            _upd_card(val_gold, chg_gold, df_g, "${:,.2f}")
-            _upd_card(val_eq, chg_eq, df_eq, "{:,.0f}")
-            _upd_card(val_oil, chg_oil, df_o, "${:.2f}")
-            if df_b is not None and len(df_b) > 2:
-                y10 = float(df_b['美国国债收益率10年'].iloc[-1])
-                y2 = float(df_b['美国国债收益率2年'].iloc[-1])
-                sp = y10 - y2; ch = y10 - float(df_b['美国国债收益率10年'].iloc[-2])
-                val_bond.configure(text=f"{y10:.2f}%")
-                chg_bond.configure(text=f"{'▲' if ch>0 else '▼'} {abs(ch):.2f}pp  利差={sp:.2f}pp",
-                                   fg="#EF5350" if ch>0 else "#66BB6A")
-            if df_dxy is not None and len(df_dxy) > 1:
-                c = float(df_dxy.iloc[-1]['close'])
-                p = (float(df_dxy.iloc[-1]['close'])/float(df_dxy.iloc[-2]['close'])-1)*100
-                val_dxy.configure(text=f"{c:.2f}")
-                chg_dxy.configure(text=f"{'▲' if p>0 else '▼'} {abs(p):.2f}%  DXY",
-                                   fg="#66BB6A" if p>0 else "#EF5350")
-            elif df_b is not None:
-                val_dxy.configure(text=f"代理 {float(df_b['美国国债收益率10年'].iloc[-1])*14:.1f}")
-                chg_dxy.configure(text="⚠️DXY缺失,美债代理", fg="#888")
+            # ── 极简同步方案: 直接在主线程 fetch + 渲染 (不用线程/after) ──
+            def _do_all():
+                print("[🌍资产] 开始同步 fetch + 渲染", flush=True)
+                status_lbl.configure(text="⏳ 加载中...")
+                root.update()  # 让 Tk 刷新一下状态文字
 
-            print("[🌍资产] 卡片更新完, 开始画 K线", flush=True)
-            status_lbl.configure(text="⏳ 渲染图表..."); root.update()
+                import akshare as ak
+                from utils.config import TS_DEFAULT_TOKEN
+                import tushare as ts
+                ts.set_token(TS_DEFAULT_TOKEN)
+                pro = ts.pro_api()
+                import time as _t
+                _t0 = _t.time()
 
-            # matplotlib draw — 主线程直接调
-            def _ma(s, w): return s.rolling(w).mean()
-            def _rsi(s, w=14):
-                d = s.diff(); g = d.where(d>0,0); l = -d.where(d<0,0)
-                return 100 - 100/(1 + g.rolling(w).mean()/l.rolling(w).mean())
+                # 5 源并行 fetch (但结果同步等)
+                import concurrent.futures as cf
+                r = {}
+                def _fg():
+                    try:
+                        df = ak.futures_foreign_hist(symbol="XAU"); df['date'] = pd.to_datetime(df['date'])
+                        return df.sort_values('date').reset_index(drop=True)
+                    except Exception: return None
+                def _fb():
+                    try:
+                        df = ak.bond_zh_us_rate(); df['日期'] = pd.to_datetime(df['日期'])
+                        return df.sort_values('日期').reset_index(drop=True)
+                    except Exception: return None
+                def _feq():
+                    try:
+                        df = ak.index_us_stock_sina(symbol=".IXIC"); df['date'] = pd.to_datetime(df['date'])
+                        return df.sort_values('date').reset_index(drop=True)
+                    except Exception: return None
+                def _fo():
+                    try:
+                        df = ak.futures_foreign_hist(symbol="CL"); df['date'] = pd.to_datetime(df['date'])
+                        return df.sort_values('date').reset_index(drop=True)
+                    except Exception: return None
+                def _fdxy():
+                    try:
+                        df = pro.index_global(ts_code="DXY.NYME",
+                                              start_date=(datetime.now()-timedelta(days=180)).strftime("%Y%m%d"),
+                                              end_date=datetime.now().strftime("%Y%m%d"))
+                        return df if df is not None and len(df) > 5 else None
+                    except Exception: return None
 
-            def _draw_asset(tab, df, color, nm):
-                if df is None or len(df) < 10: return
-                ax = tab._ax; ax.clear(); ax.set_facecolor("#1E1E1E")
-                closes = df['close'].tail(120).values
-                ax.plot(range(len(closes)), closes, color=color, lw=1.2, label=nm)
-                m20 = _ma(df['close'],20).tail(120).values
-                m60 = _ma(df['close'],60).tail(120).values
-                ax.plot(range(len(m20)), m20, color="#FFD54F", lw=0.8, alpha=0.7, label="MA20")
-                ax.plot(range(len(m60)), m60, color="#80DEEA", lw=0.8, alpha=0.7, label="MA60")
-                ax.legend(fontsize=7, labelcolor="#E0E0E0", facecolor="#1E1E1E", edgecolor="#37474F")
-                ax.grid(True, alpha=0.15, color="#455A64")
-                ax.set_ylabel("价格", color="#90A4AE", fontsize=8)
-                tab._canvas.draw()
-                c = df['close'].iloc[-1]; m20v = _ma(df['close'],20).iloc[-1]
-                m60v = _ma(df['close'],60).iloc[-1]; r = _rsi(df['close']).iloc[-1]
-                pct5 = (c/df['close'].iloc[-6]-1)*100; pct20 = (c/df['close'].iloc[-21]-1)*100
-                sig = [f"📍 现价: {c:,.2f}", f"📊 MA20={m20v:,.2f} | MA60={m60v:,.2f}",
-                       f"📉 5日={pct5:+.2f}% | 20日={pct20:+.2f}%"]
-                if not np.isnan(r): sig.append(f"RSI(14)={r:.1f} {'🔥超买' if r>70 else '❄️超卖' if r<30 else '⚖️中性'}")
-                sig.append("🟢 MA多头排列" if c>m20v>m60v else "🔴 MA空头排列" if c<m20v<m60v else "🟡 MA交织")
-                tab._sig_text.configure(state="normal"); tab._sig_text.delete("1.0", tk.END)
-                tab._sig_text.insert("1.0", "\n".join(sig)); tab._sig_text.configure(state="disabled")
+                with cf.ThreadPoolExecutor(max_workers=5) as ex:
+                    for k, fn in [("gold",_fg),("bond",_fb),("eq",_feq),("oil",_fo),("dxy",_fdxy)]:
+                        try: r[k] = ex.submit(fn).result(timeout=25)
+                        except Exception: r[k] = None
 
-            _draw_asset(tab_gold, df_g, "#FFD54F", "黄金")
-            _draw_asset(tab_eq, df_eq, "#66BB6A", "纳指")
-            _draw_asset(tab_oil, df_o, "#EF5350", "原油")
-            if df_b is not None and len(df_b) > 2:
-                ax = tab_bond._ax; ax.clear(); ax.set_facecolor("#1E1E1E")
-                b10 = df_b['美国国债收益率10年'].tail(120).values
-                ax.plot(range(len(b10)), b10, color="#AB47BC", lw=1.2, label="美债10Y")
-                ax.plot(range(len(b10)), df_b['美国国债收益率2年'].tail(120).values,
-                        color="#42A5F5", lw=1, alpha=0.7, label="美债2Y")
-                ax.legend(fontsize=7, labelcolor="#E0E0E0", facecolor="#1E1E1E", edgecolor="#37474F")
-                ax.grid(True, alpha=0.15, color="#455A64"); ax.set_ylabel("收益率%", color="#90A4AE", fontsize=8)
-                tab_bond._canvas.draw()
-                y10 = float(df_b['美国国债收益率10年'].iloc[-1]); y2 = float(df_b['美国国债收益率2年'].iloc[-1])
-                sp = y10 - y2; ch = y10 - float(df_b['美国国债收益率10年'].iloc[-2])
-                tab_bond._sig_text.configure(state="normal"); tab_bond._sig_text.delete("1.0", tk.END)
-                tab_bond._sig_text.insert("1.0", f"📍 10Y:{y10:.2f}% | 2Y:{y2:.2f}%\n📊 利差:{sp:.2f}pp {'🔴倒挂' if sp<0 else '🟢正差'}\n📉 10Y:{ch:+.2f}pp")
-                tab_bond._sig_text.configure(state="disabled")
-            if df_dxy is not None and len(df_dxy) > 10:
-                ax = tab_dxy._ax; ax.clear(); ax.set_facecolor("#1E1E1E")
-                ax.plot(range(len(df_dxy.tail(120))), df_dxy.tail(120)['close'].values, color="#42A5F5", lw=1.2)
-                ax.set_ylabel("DXY", color="#90A4AE", fontsize=8); ax.grid(True, alpha=0.15)
-                tab_dxy._canvas.draw()
+                print(f"[🌍资产] fetch 完成, 耗时 {_t.time()-_t0:.1f}s", flush=True)
 
-            # 相关性
-            avail = {k: v for k, v in [("黄金",df_g),("纳指",df_eq),("原油",df_o),("美债10Y",df_b)]
-                     if v is not None and len(v) > 30}
-            if len(avail) >= 3:
-                cd = {}
-                for k, v in avail.items():
-                    col = 'close' if k!='美债10Y' else '美国国债收益率10年'
-                    ic = 'date' if k!='美债10Y' else '日期'
-                    s = v.set_index(ic)[col]; s.index.name='date'
-                    cd[k] = s.diff() if k=='美债10Y' else s.pct_change()
-                cdf = pd.DataFrame(cd).dropna(); cm = cdf.corr()
-                cax = corr_fig.add_subplot(111); cax.clear()
-                cax.imshow(cm.values, cmap="RdBu_r", vmin=-1, vmax=1)
-                cax.set_xticks(range(len(cm.columns))); cax.set_yticks(range(len(cm.columns)))
-                cax.set_xticklabels(cm.columns, fontsize=9, color="#E0E0E0")
-                cax.set_yticklabels(cm.columns, fontsize=9, color="#E0E0E0")
-                for t in cax.get_xticklabels(): t.set_rotation(30)
-                for i in range(len(cm)):
-                    for j in range(len(cm)):
-                        v = cm.values[i,j]
-                        cax.text(j, i, f"{v:.2f}", ha="center", va="center",
-                                 fontsize=9, color="#000000" if abs(v)>0.4 else "#E0E0E0")
-                cax.set_title(f"近60日 Pearson相关 ({len(avail)}资产)", color="#FFD54F", fontsize=10)
-                corr_fig.patch.set_facecolor("#121212"); cax.set_facecolor("#1E1E1E")
-                corr_canvas.draw()
+                df_g, df_b, df_eq, df_o, df_dxy = r["gold"], r["bond"], r["eq"], r["oil"], r["dxy"]
 
-            status_lbl.configure(text="✅ 加载完成")
-            print(f"[🌍资产] 全部完成, 总耗时 {_t.time()-_t0:.1f}s", flush=True)
+                # ── 直接渲染 (主线程, 无需 dlg.after) ──
+                def _upd_card(val_lbl, chg_lbl, df, fmt):
+                    if df is not None and len(df) > 1:
+                        c = float(df['close'].iloc[-1])
+                        p = (c/float(df['close'].iloc[-2])-1)*100
+                        val_lbl.configure(text=fmt.format(c))
+                        chg_lbl.configure(text=f"{'▲' if p>0 else '▼'} {abs(p):.2f}%",
+                                          fg="#66BB6A" if p>0 else "#EF5350")
 
-        # ⭐ 同步调用 — 不启动任何线程, 直接在当前函数里跑完
-        _do_all()
+                _upd_card(val_gold, chg_gold, df_g, "${:,.2f}")
+                _upd_card(val_eq, chg_eq, df_eq, "{:,.0f}")
+                _upd_card(val_oil, chg_oil, df_o, "${:.2f}")
+                if df_b is not None and len(df_b) > 2:
+                    y10 = float(df_b['美国国债收益率10年'].iloc[-1])
+                    y2 = float(df_b['美国国债收益率2年'].iloc[-1])
+                    sp = y10 - y2; ch = y10 - float(df_b['美国国债收益率10年'].iloc[-2])
+                    val_bond.configure(text=f"{y10:.2f}%")
+                    chg_bond.configure(text=f"{'▲' if ch>0 else '▼'} {abs(ch):.2f}pp  利差={sp:.2f}pp",
+                                       fg="#EF5350" if ch>0 else "#66BB6A")
+                if df_dxy is not None and len(df_dxy) > 1:
+                    c = float(df_dxy.iloc[-1]['close'])
+                    p = (float(df_dxy.iloc[-1]['close'])/float(df_dxy.iloc[-2]['close'])-1)*100
+                    val_dxy.configure(text=f"{c:.2f}")
+                    chg_dxy.configure(text=f"{'▲' if p>0 else '▼'} {abs(p):.2f}%  DXY",
+                                       fg="#66BB6A" if p>0 else "#EF5350")
+                elif df_b is not None:
+                    val_dxy.configure(text=f"代理 {float(df_b['美国国债收益率10年'].iloc[-1])*14:.1f}")
+                    chg_dxy.configure(text="⚠️DXY缺失,美债代理", fg="#888")
+
+                print("[🌍资产] 卡片更新完, 开始画 K线", flush=True)
+                status_lbl.configure(text="⏳ 渲染图表..."); root.update()
+
+                # matplotlib draw — 主线程直接调
+                def _ma(s, w): return s.rolling(w).mean()
+                def _rsi(s, w=14):
+                    d = s.diff(); g = d.where(d>0,0); l = -d.where(d<0,0)
+                    return 100 - 100/(1 + g.rolling(w).mean()/l.rolling(w).mean())
+
+                def _draw_asset(tab, df, color, nm):
+                    if df is None or len(df) < 10: return
+                    ax = tab._ax; ax.clear(); ax.set_facecolor("#1E1E1E")
+                    closes = df['close'].tail(120).values
+                    ax.plot(range(len(closes)), closes, color=color, lw=1.2, label=nm)
+                    m20 = _ma(df['close'],20).tail(120).values
+                    m60 = _ma(df['close'],60).tail(120).values
+                    ax.plot(range(len(m20)), m20, color="#FFD54F", lw=0.8, alpha=0.7, label="MA20")
+                    ax.plot(range(len(m60)), m60, color="#80DEEA", lw=0.8, alpha=0.7, label="MA60")
+                    ax.legend(fontsize=7, labelcolor="#E0E0E0", facecolor="#1E1E1E", edgecolor="#37474F")
+                    ax.grid(True, alpha=0.15, color="#455A64")
+                    ax.set_ylabel("价格", color="#90A4AE", fontsize=8)
+                    tab._canvas.draw()
+                    c = df['close'].iloc[-1]; m20v = _ma(df['close'],20).iloc[-1]
+                    m60v = _ma(df['close'],60).iloc[-1]; r = _rsi(df['close']).iloc[-1]
+                    pct5 = (c/df['close'].iloc[-6]-1)*100; pct20 = (c/df['close'].iloc[-21]-1)*100
+                    sig = [f"📍 现价: {c:,.2f}", f"📊 MA20={m20v:,.2f} | MA60={m60v:,.2f}",
+                           f"📉 5日={pct5:+.2f}% | 20日={pct20:+.2f}%"]
+                    if not np.isnan(r): sig.append(f"RSI(14)={r:.1f} {'🔥超买' if r>70 else '❄️超卖' if r<30 else '⚖️中性'}")
+                    sig.append("🟢 MA多头排列" if c>m20v>m60v else "🔴 MA空头排列" if c<m20v<m60v else "🟡 MA交织")
+                    tab._sig_text.configure(state="normal"); tab._sig_text.delete("1.0", tk.END)
+                    tab._sig_text.insert("1.0", "\n".join(sig)); tab._sig_text.configure(state="disabled")
+
+                _draw_asset(tab_gold, df_g, "#FFD54F", "黄金")
+                _draw_asset(tab_eq, df_eq, "#66BB6A", "纳指")
+                _draw_asset(tab_oil, df_o, "#EF5350", "原油")
+                if df_b is not None and len(df_b) > 2:
+                    ax = tab_bond._ax; ax.clear(); ax.set_facecolor("#1E1E1E")
+                    b10 = df_b['美国国债收益率10年'].tail(120).values
+                    ax.plot(range(len(b10)), b10, color="#AB47BC", lw=1.2, label="美债10Y")
+                    ax.plot(range(len(b10)), df_b['美国国债收益率2年'].tail(120).values,
+                            color="#42A5F5", lw=1, alpha=0.7, label="美债2Y")
+                    ax.legend(fontsize=7, labelcolor="#E0E0E0", facecolor="#1E1E1E", edgecolor="#37474F")
+                    ax.grid(True, alpha=0.15, color="#455A64"); ax.set_ylabel("收益率%", color="#90A4AE", fontsize=8)
+                    tab_bond._canvas.draw()
+                    y10 = float(df_b['美国国债收益率10年'].iloc[-1]); y2 = float(df_b['美国国债收益率2年'].iloc[-1])
+                    sp = y10 - y2; ch = y10 - float(df_b['美国国债收益率10年'].iloc[-2])
+                    tab_bond._sig_text.configure(state="normal"); tab_bond._sig_text.delete("1.0", tk.END)
+                    tab_bond._sig_text.insert("1.0", f"📍 10Y:{y10:.2f}% | 2Y:{y2:.2f}%\n📊 利差:{sp:.2f}pp {'🔴倒挂' if sp<0 else '🟢正差'}\n📉 10Y:{ch:+.2f}pp")
+                    tab_bond._sig_text.configure(state="disabled")
+                if df_dxy is not None and len(df_dxy) > 10:
+                    ax = tab_dxy._ax; ax.clear(); ax.set_facecolor("#1E1E1E")
+                    ax.plot(range(len(df_dxy.tail(120))), df_dxy.tail(120)['close'].values, color="#42A5F5", lw=1.2)
+                    ax.set_ylabel("DXY", color="#90A4AE", fontsize=8); ax.grid(True, alpha=0.15)
+                    tab_dxy._canvas.draw()
+
+                # 相关性
+                avail = {k: v for k, v in [("黄金",df_g),("纳指",df_eq),("原油",df_o),("美债10Y",df_b)]
+                         if v is not None and len(v) > 30}
+                if len(avail) >= 3:
+                    cd = {}
+                    for k, v in avail.items():
+                        col = 'close' if k!='美债10Y' else '美国国债收益率10年'
+                        ic = 'date' if k!='美债10Y' else '日期'
+                        s = v.set_index(ic)[col]; s.index.name='date'
+                        cd[k] = s.diff() if k=='美债10Y' else s.pct_change()
+                    cdf = pd.DataFrame(cd).dropna(); cm = cdf.corr()
+                    cax = corr_fig.add_subplot(111); cax.clear()
+                    cax.imshow(cm.values, cmap="RdBu_r", vmin=-1, vmax=1)
+                    cax.set_xticks(range(len(cm.columns))); cax.set_yticks(range(len(cm.columns)))
+                    cax.set_xticklabels(cm.columns, fontsize=9, color="#E0E0E0")
+                    cax.set_yticklabels(cm.columns, fontsize=9, color="#E0E0E0")
+                    for t in cax.get_xticklabels(): t.set_rotation(30)
+                    for i in range(len(cm)):
+                        for j in range(len(cm)):
+                            v = cm.values[i,j]
+                            cax.text(j, i, f"{v:.2f}", ha="center", va="center",
+                                     fontsize=9, color="#000000" if abs(v)>0.4 else "#E0E0E0")
+                    cax.set_title(f"近60日 Pearson相关 ({len(avail)}资产)", color="#FFD54F", fontsize=10)
+                    corr_fig.patch.set_facecolor("#121212"); cax.set_facecolor("#1E1E1E")
+                    corr_canvas.draw()
+
+                status_lbl.configure(text="✅ 加载完成")
+                print(f"[🌍资产] 全部完成, 总耗时 {_t.time()-_t0:.1f}s", flush=True)
+
+            # ⭐ 同步调用 — 不启动任何线程, 直接在当前函数里跑完
+            _do_all()
+    
+
+        except Exception as e:
+            print(f"[🌍资产] ❌ 异常: {e}", flush=True)
+            _tb.print_exc()
+        except Exception as e:
+            print(f"[🌍资产] ❌ 异常: {e}", flush=True)
+            _tb.print_exc()
 
     def _show_1min_kline_dialog(self):
         """📈 1min K线图 — 复用高抛低吸里的 _show_minute_kline_dialog"""
