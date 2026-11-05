@@ -4755,6 +4755,15 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         for _idx, (txt, w, cmd) in enumerate(_ROW1):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
             ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(**_pad)
+        # Row1 末尾: 📝文章生成
+        try:
+            from ui.speculator_watch import _article_output_dialog as _aod1
+            _ROW1_ART = tk.Button(toolbar_row1, text="📝文章", font=("", 9, "bold"),
+                                  bg="#B71C1C", fg="white", padx=8, pady=0, cursor="hand2",
+                                  command=lambda: _aod1(self.winfo_toplevel(),
+                                       focus_layer="🌏 全球宏观·大盘看盘 (Row1)"))
+            _ROW1_ART.pack(side=tk.RIGHT, padx=(4, 0))
+        except Exception as _ea1: pass
 
         # Row2: 🎯 选股 / 机会 / ETF周期 (actionable)
         try:
@@ -4782,6 +4791,15 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                     print(f"[🎯Row2❌] '{_t}': {_e}", flush=True)
                     import traceback; traceback.print_exc()
             ttk.Button(toolbar_row2, text=txt, width=w, command=_wrap2).pack(**_pad)
+        # Row2 末尾: 📝文章生成
+        try:
+            from ui.speculator_watch import _article_output_dialog as _aod2
+            _ROW2_ART = tk.Button(toolbar_row2, text="📝文章", font=("", 9, "bold"),
+                                  bg="#B71C1C", fg="white", padx=8, pady=0, cursor="hand2",
+                                  command=lambda: _aod2(self.winfo_toplevel(),
+                                       focus_layer="🎯 选股·机会·ETF周期 (Row2)"))
+            _ROW2_ART.pack(side=tk.RIGHT, padx=(4, 0))
+        except Exception as _ea2: pass
 
         # Row3: 🔥 主力资金 / 个股分析 (深度)
         _ROW3 = [
@@ -4799,6 +4817,15 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         for _idx, (txt, w, cmd) in enumerate(_ROW3):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
             ttk.Button(toolbar_row3, text=txt, width=w, command=cmd).pack(**_pad)
+        # Row3 末尾: 📝文章生成
+        try:
+            from ui.speculator_watch import _article_output_dialog as _aod3
+            _ROW3_ART = tk.Button(toolbar_row3, text="📝文章", font=("", 9, "bold"),
+                                  bg="#B71C1C", fg="white", padx=8, pady=0, cursor="hand2",
+                                  command=lambda: _aod3(self.winfo_toplevel(),
+                                       focus_layer="🔥 主力资金·个股分析 (Row3)"))
+            _ROW3_ART.pack(side=tk.RIGHT, padx=(4, 0))
+        except Exception as _ea3: pass
 
         # Row4: 📰 资讯 / 外部数据源 (最低频, 可选)
         # — 合并进 Row2/Row3 末尾, 不单独占一行 (太挤) —
