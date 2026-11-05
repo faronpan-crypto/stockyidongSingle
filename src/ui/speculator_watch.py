@@ -779,7 +779,7 @@ def show_speculator_watch(root=None, app=None):
     win._running = True
 
     # —— 主窗口顶栏: 标题 + 字体调节 ——
-    _WATCH_FS = [12]  # 内容字号基准, 默认 +1pt 更大
+    _WATCH_FS = [15]  # 内容字号基准, 默认 +3pt 大字号
     win._WATCH_FS = _WATCH_FS  # 存到 win 供各模块读
 
     header = tk.Frame(win, bg="#121212"); header.pack(fill=tk.X)
@@ -798,7 +798,7 @@ def show_speculator_watch(root=None, app=None):
     fs_lbl.pack(side=tk.LEFT, padx=4)
 
     def _change_main_fs(delta):
-        _WATCH_FS[0] = max(8, min(20, _WATCH_FS[0] + delta))
+        _WATCH_FS[0] = max(10, min(24, _WATCH_FS[0] + delta))
         fs_lbl.config(text=f"{_WATCH_FS[0]}pt")
         def _walk(w):
             try:
