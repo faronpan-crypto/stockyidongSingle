@@ -821,10 +821,8 @@ def show_speculator_watch(root=None, app=None):
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
     # 右面板加宽 (340 → 420)
-    # 左右面板固定最小宽度, 不会互相挤压
-    # 左: 九宫格+五资产+股指期货等 8 个模块 (min 1500px)
-    # 右: 游资看盘思路分析 (min 500px, 不设太宽)
-    left_pane = tk.Frame(outer, bg="#121212", width=1500); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    # 左1100 / 右500 (左减30%, 右保底500, 窗口2100时各占合理空间)
+    left_pane = tk.Frame(outer, bg="#121212", width=1100); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     right_pane = tk.Frame(outer, bg="#121212", width=500); right_pane.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
     # left_pane grid 配置 (2 列 × 3 行)
@@ -1000,8 +998,8 @@ def _build_block_grid(parent, win, col=0):
     _add_title_row(frm, "① 板块九宫格 (点击展开/长按详情/⚠️异动>3%)",
                    "#FFA726", BLOCK_GRID_KNOWLEDGE)
 
-    # 9 格 Canvas (3×3 正方形, 高宽固定)
-    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=420)
+    # 9 格 Canvas (3×3 正方形, 减30%高度)
+    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=294)
     canvas.pack(fill=tk.X, expand=False)
     win._block_canvas = canvas
 
