@@ -834,39 +834,30 @@ def show_speculator_watch(root=None, app=None):
     left_pane.grid_columnconfigure(1, weight=1)
 
     # 🗂️ 模块按游资看盘优先度排序 (全球→方向→板块→资金→期货→周期→判定→捡漏)
-    # ── row_top (row=0, 权重3): 3 列全是核心判断层 ──
-    # col=0: 🌍全球五资产联动 → 外部宏观入口 (最优先)
-    # col=1: 🎯信号决策面板 → 大盘方向判定 (次优先)
-    # col=2: ①板块九宫格 → 热门板块定位 (再优先)
+    # ── row_top (row=0, 权重3): 3 列核心判断层, 最右列 1.5x ──
     row_top = tk.Frame(left_pane, bg="#121212"); row_top.grid(row=0, column=0, columnspan=2, sticky="nsew")
-    row_top.grid_columnconfigure(0, weight=1, uniform="topcols")
-    row_top.grid_columnconfigure(1, weight=1, uniform="topcols")
-    row_top.grid_columnconfigure(2, weight=1, uniform="topcols")
+    row_top.grid_columnconfigure(0, weight=1)       # 🌍全球
+    row_top.grid_columnconfigure(1, weight=1)       # 🎯信号
+    row_top.grid_columnconfigure(2, weight=2)       # 板块九宫格 (1.5x)
 
-    # 先挪全球五资产联动到 row_top col=0 (从 row_leak 上来)
     _build_orderbook(row_top, win, 0)
-    # 信号决策 col=1 (wrapper)
     sign_wrapper = tk.Frame(row_top, bg="#121212"); sign_wrapper.grid(row=0, column=1, sticky="nsew", padx=3, pady=3)
     _build_sign_decision_panel(sign_wrapper, win)
-    # 板块九宫格 col=2
     _build_block_grid(row_top, win, 2)
 
-    # ── row_bot (row=1, 权重3): 3 列是确认层 ──
-    # col=0: ③量能 (资金确认)
-    # col=1: ④股指期货 (主力合约状态)
-    # col=2: ⑤周期阶段 (情绪位置)
+    # ── row_bot (row=1, 权重3): 3 列确认层 ──
     row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, columnspan=2, sticky="nsew")
+    row_bot.grid_columnconfigure(0, weight=1)
+    row_bot.grid_columnconfigure(1, weight=1)
+    row_bot.grid_columnconfigure(2, weight=1)
     _build_volume_panel(row_bot, win, 0)
     _build_futures_grid(row_bot, win, 1)
     _build_cycle_panel(row_bot, win, 2)
 
-    # ── row_leak (row=2, 固定200px): 2 列操作层 ──
-    # 左: ⑥状态判定 (综合判断)
-    # 右: ⑦捡漏 (操作入口)
-    row_leak = tk.Frame(left_pane, bg="#121212", height=200)
+    # ── row_leak (row=2, 固定120px): 操作层, 高度减半 ──
+    row_leak = tk.Frame(left_pane, bg="#121212", height=120)
     row_leak.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(2, 0))
     row_leak.pack_propagate(False)
-
     _build_status_panel(row_leak, win, 0)
     _build_leak_panel(row_leak, win)
 
@@ -999,8 +990,8 @@ def _build_block_grid(parent, win, col=0):
     _add_title_row(frm, "① 板块九宫格 (点击展开/长按详情/⚠️异动>3%)",
                    "#FFA726", BLOCK_GRID_KNOWLEDGE)
 
-    # 9 格 Canvas (3×3), 增大
-    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=380)
+    # 九宫格 Canvas (正方形 3×3, 自适应)
+    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0)
     canvas.pack(fill=tk.BOTH, expand=True)
     win._block_canvas = canvas
 
@@ -1094,7 +1085,7 @@ def _refresh_all_blocks(win):
 
 
 def _draw_block_grid(win):
-    """Canvas 画 4×4 十六宫格"""
+    """Canvas 画 3×3 九宫格 (正方形格子)"""
     c = win._block_canvas
     c.delete("all")
     win._block_cells = []
@@ -1102,18 +1093,23 @@ def _draw_block_grid(win):
     W = c.winfo_width() or 500
     H = c.winfo_height() or 340
     pad = 2
-    cw = (W - pad * 5) // 4
-    ch = (H - pad * 5) // 4
+    n = 3  # 3×3 九宫格
+    # 取正方形格子: min(width_per_cell, height_per_cell)
+    cell_size = min((W - pad * (n + 1)) // n, (H - pad * (n + 1)) // n)
+    if cell_size < 10: cell_size = 10
+    # 居中 (按宽度)
+    total_w = cell_size * n + pad * (n + 1)
+    offset_x = (W - total_w) // 2 if W > total_w else 0
+    offset_y = (H - (cell_size * n + pad * (n + 1))) // 2 if H > (cell_size * n + pad * (n + 1)) else 0
 
-    # 脉动闪烁状态 (用 win 时间戳模拟)
     now_ms = time.time() * 1000
 
     for idx in range(len(FIXED_BLOCKS)):
-        row = idx // 4; col = idx % 4
-        x1 = pad + col * (cw + pad)
-        y1 = pad + row * (ch + pad)
-        x2 = x1 + cw
-        y2 = y1 + ch
+        row = idx // n; col = idx % n
+        x1 = offset_x + pad + col * (cell_size + pad)
+        y1 = offset_y + pad + row * (cell_size + pad)
+        x2 = x1 + cell_size
+        y2 = y1 + cell_size
 
         meta = win._block_meta[idx]
         name, pct = meta[0], meta[1]
@@ -2663,27 +2659,27 @@ def _build_cycle_panel(parent, win, col=1):
     win._stage_dots = []
     for i, (name, inact, act) in enumerate(stages_def):
         col_f = tk.Frame(row, bg="#1E1E1E"); col_f.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
-        dot = tk.Label(col_f, text="●", fg=inact, bg="#1E1E1E", font=("", 22))
+        dot = tk.Label(col_f, text="●", fg=inact, bg="#1E1E1E", font=("", 26))
         dot.pack(anchor=tk.CENTER)
         lbl = tk.Label(col_f, text=name.split(" ")[1], bg="#1E1E1E",
-                       fg=inact, font=("", 11))
+                       fg=inact, font=("", 14, "bold"))
         lbl.pack(anchor=tk.CENTER)
         win._stage_dots.append((dot, lbl, act))
 
-    # 30 日 / 15 日 涨幅统计
+    # 30 日 / 15 日 涨幅统计 (+3pt)
     win._cycle_stats = tk.Label(frm, text="📊 30日 --% | 15日 --% | 5日 --%",
-                                bg="#1E1E1E", fg="#90CAF9", font=("Menlo", 9))
+                                bg="#1E1E1E", fg="#90CAF9", font=("Menlo", 14))
     win._cycle_stats.pack(anchor=tk.W, padx=4, pady=(4, 0))
 
-    # 周期判定文字
+    # 周期判定文字 (+3pt)
     win._cycle_text = tk.Label(frm, text="📌 正在判断当前周期阶段...",
-                               bg="#1E1E1E", fg="#E0E0E0", font=("", 10),
-                               wraplength=420, justify=tk.LEFT)
+                               bg="#1E1E1E", fg="#E0E0E0", font=("", 14),
+                               wraplength=520, justify=tk.LEFT)
     win._cycle_text.pack(fill=tk.X, pady=4, padx=4)
 
-    # 阶段说明 (P1-P5)
+    # 阶段说明 (+3pt)
     tk.Label(frm, text="P1冰点→P2启动→P3发酵→P4高潮→P5退潮 — 仓位: 0-15%→30-40%→50-70%→止盈→空仓",
-             bg="#1E1E1E", fg="#757575", font=("", 11)).pack(anchor=tk.W, padx=4)
+             bg="#1E1E1E", fg="#757575", font=("", 14)).pack(anchor=tk.W, padx=4)
 
 
 def _refresh_cycle(win):
