@@ -631,7 +631,7 @@ def _get_sina_realtime():
 def _get_tushare_daily_today():
     """tushare 今日全市场行情 (daily 接口) — 纯本地 + 联网一次"""
     now = time.time()
-    if _TUSHARE_DAILY_CACHE["data"] and (now - _TUSHARE_DAILY_CACHE["time"] < 3600):
+    if _TUSHARE_DAILY_CACHE["data"] is not None and (now - _TUSHARE_DAILY_CACHE["time"] < 3600):
         return _TUSHARE_DAILY_CACHE["data"]
     try:
         import tushare as ts
@@ -660,7 +660,7 @@ def _get_tushare_daily_today():
 def _get_tushare_stock_basic():
     """tushare stock_basic — name+industry, 日级缓存"""
     now = time.time()
-    if _TUSHARE_SB_CACHE["data"] and (now - _TUSHARE_SB_CACHE["time"] < 86400):
+    if _TUSHARE_SB_CACHE["data"] is not None and (now - _TUSHARE_SB_CACHE["time"] < 86400):
         return _TUSHARE_SB_CACHE["data"]
     try:
         import tushare as ts
@@ -702,7 +702,7 @@ BLOCK_KEYWORDS = {
 def _compute_block_pct_from_cache():
     """用已缓存的 daily + stock_basic 做板块聚合, 结果再缓存 10 分钟"""
     now = time.time()
-    if _BLOCK_PCT_CACHE["data"] and (now - _BLOCK_PCT_CACHE["time"] < 600):
+    if _BLOCK_PCT_CACHE["data"] is not None and (now - _BLOCK_PCT_CACHE["time"] < 600):
         return _BLOCK_PCT_CACHE["data"]
 
     daily = _get_tushare_daily_today()
@@ -850,7 +850,7 @@ def _get_tushare_block_meta():
 def _get_ak_spot():
     """全市场实时行情 — 缓存 30 秒"""
     now = time.time()
-    if _AK_SPOT_CACHE["data"] and (now - _AK_SPOT_CACHE["time"] < 30):
+    if _AK_SPOT_CACHE["data"] is not None and (now - _AK_SPOT_CACHE["time"] < 30):
         return _AK_SPOT_CACHE["data"]
     try:
         import akshare as ak
@@ -866,7 +866,7 @@ def _get_ak_spot():
 def _get_ak_blocks():
     """概念板块实时排行 — 缓存 60 秒 — 失败时用种子数据"""
     now = time.time()
-    if _AK_BLOCK_CACHE["data"] and (now - _AK_BLOCK_CACHE["time"] < 60):
+    if _AK_BLOCK_CACHE["data"] is not None and (now - _AK_BLOCK_CACHE["time"] < 60):
         return _AK_BLOCK_CACHE["data"]
     try:
         import akshare as ak
@@ -2682,7 +2682,7 @@ def _build_futures_grid(parent, win, col=0):
 def _get_spot_index_cache():
     """从 tushare index_daily 拉四大现货指数 (IH/IF/IC/IM 对应) — 日级缓存"""
     now = time.time()
-    if _SPOT_INDEX_CACHE["data"] and (now - _SPOT_INDEX_CACHE["time"] < 300):
+    if _SPOT_INDEX_CACHE["data"] is not None and (now - _SPOT_INDEX_CACHE["time"] < 300):
         return _SPOT_INDEX_CACHE["data"]
     try:
         import tushare as ts
@@ -5061,7 +5061,7 @@ def _get_block_canvas_data():
         weight = max(0.5, abs(pct)) * max(1, math.log(n_eff + 1))
         # top3 龙头: 优先从 tushare 缓存拿 (FIXED_BLOCKS 能精确匹配)
         top3 = []
-        if tushare_blocks and name in tushare_blocks:
+        if tushare_blocks and name in tushare_blocks and tushare_blocks[name]:
             _tp, _nn, _top3 = tushare_blocks[name]
             if _top3: top3 = _top3[:3]
             if not n: n = _nn
