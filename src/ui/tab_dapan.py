@@ -16121,29 +16121,155 @@ class DapanMixin:
             btn_frame.pack(side=tk.RIGHT)
 
             def _do_ocr():
+                """📷 OCR 识别截图里的股票代码 (多引擎 fallback)"""
                 import tkinter.filedialog as fd
-                path = fd.askopenfilename(title="选择超跌股票截图",
+                path = fd.askopenfilename(title="选择股票截图",
                     filetypes=[("图片", "*.png *.jpg *.jpeg *.gif *.bmp"), ("全部", "*.*")])
                 if not path: return
                 try:
                     status_lbl.configure(text=f"⏳ OCR 识别中...", fg="#FFD54F")
                     root.update()
-                    import ddddocr
-                    ocr = ddddocr.DdddOcr(show_ad=False)
-                    with open(path, "rb") as f:
-                        txt = ocr.classification(f.read())
+                    import re, io, numpy as np
+                    from PIL import Image, ImageEnhance
+
+                    # 预处理: 放大 4x + 对比度 + 锐化
+                    from PIL import ImageOps
+                    img = Image.open(path).convert("RGB")
+                    w, h = img.size
+                    gray_arr = np.array(img.convert("L"))
+                    mean_brightness = gray_arr.mean()
+                    print(f"[📷OCR] 图片亮度={mean_brightness:.0f} ({'暗色主题' if mean_brightness < 120 else '亮色主题'})")
+
+                    # 自动反色 (暗色主题 → 白底黑字)
+                    work_img = ImageOps.invert(img) if mean_brightness < 120 else img
+
+                    big = work_img.resize((w*4, h*4), Image.LANCZOS)
+                    big = ImageEnhance.Contrast(big).enhance(3.0)
+                    big = ImageEnhance.Sharpness(big).enhance(2.0)
+
+                    all_text = ""
+
+                    # ── 引擎 1: ddddocr detect 模式 (多框检测) ──
+                    try:
+                        import ddddocr
+                        det = ddddocr.DdddOcr(det=True, show_ad=False)
+                        ocr = ddddocr.DdddOcr(show_ad=False)
+
+                        buf = io.BytesIO(); big.save(buf, format="PNG")
+                        bboxes = det.detection(buf.getvalue())
+
+                        if len(bboxes) >= 2:
+                            results = []
+                            for bbox in bboxes:
+                                left, top, right, bottom = bbox
+                                crop = big.crop((left, top, right, bottom))
+                                buf2 = io.BytesIO(); crop.save(buf2, format="PNG")
+                                try:
+                                    txt = ocr.classification(buf2.getvalue())
+                                    if txt.strip():
+                                        results.append((top, txt.strip()))
+                                except: pass
+                            results.sort(key=lambda x: x[0])
+                            all_text = "\n".join(t for _, t in results)
+                            print(f"[📷OCR] detect: {len(bboxes)}框 → {len(results)}行")
+                    except ImportError:
+                        pass
+                    except Exception as _de:
+                        print(f"[📷OCR] detect失败: {_de}")
+
+                    # ── 引擎 2: 逐行扫描 (numpy 找文字行) ──
+                    if not all_text or len(re.findall(r"\b[036]\d{5}\b", all_text)) == 0:
+                        try:
+                            import ddddocr
+                            ocr2 = ddddocr.DdddOcr(show_ad=False)
+                            gray = big.convert("L")
+                            arr = np.array(gray)
+                            # 暗行检测 (白底图: 暗字行)
+                            dark_mask = arr.mean(axis=1) < 180  # 反色后白底, 字行暗
+                            dark_indices = np.where(dark_mask)[0]
+
+                            segments = []
+                            if len(dark_indices) > 0:
+                                seg_start = dark_indices[0]
+                                for i in range(1, len(dark_indices)):
+                                    if dark_indices[i] - dark_indices[i-1] > 15:
+                                        segments.append((seg_start, dark_indices[i-1]))
+                                        seg_start = dark_indices[i]
+                                segments.append((seg_start, dark_indices[-1]))
+
+                            row_texts = []
+                            for s, e in segments:
+                                if e - s < 15 or e - s > 2000: continue
+                                mid_y = (s + e) // 2
+                                row_h = max(15, (e - s) // 2)
+                                # 切整行 (全宽)
+                                crop = gray.crop((0, max(0, mid_y - row_h), w*4, min(h*4, mid_y + row_h)))
+                                buf3 = io.BytesIO(); crop.save(buf3, format="PNG")
+                                try:
+                                    txt = ocr2.classification(buf3.getvalue())
+                                    if txt.strip():
+                                        row_texts.append(txt.strip())
+                                except: pass
+
+                            if row_texts:
+                                if all_text: all_text += "\n"
+                                all_text += "\n".join(row_texts)
+                                print(f"[📷OCR] 逐行扫描: {len(row_texts)}行")
+                        except Exception as _e:
+                            print(f"[📷OCR] 逐行扫描失败: {_e}")
+
+                    # ── 引擎 3: 原图也试一遍 (不反色) ──
+                    if not all_text or len(re.findall(r"\b[036]\d{5}\b", all_text)) == 0:
+                        try:
+                            import ddddocr
+                            ocr3 = ddddocr.DdddOcr(show_ad=False)
+                            # 原图放大, 逐行
+                            big2 = img.resize((w*4, h*4), Image.LANCZOS)
+                            big2 = ImageEnhance.Contrast(big2).enhance(2.0)
+                            gray2 = big2.convert("L")
+                            arr2 = np.array(gray2)
+                            dark_mask2 = arr2.mean(axis=1) > 30  # 原图暗字行 (均值>30 = 非白行)
+                            dark2 = np.where(dark_mask2)[0]
+                            segs2 = []
+                            if len(dark2) > 0:
+                                ss = dark2[0]
+                                for i in range(1, len(dark2)):
+                                    if dark2[i] - dark2[i-1] > 15:
+                                        segs2.append((ss, dark2[i-1])); ss = dark2[i]
+                                segs2.append((ss, dark2[-1]))
+                            for s, e in segs2:
+                                if e - s < 15 or e - s > 2000: continue
+                                mi = (s+e)//2; rh = max(15, (e-s)//2)
+                                cr = gray2.crop((0, max(0,mi-rh), w*4, min(h*4, mi+rh)))
+                                b3 = io.BytesIO(); cr.save(b3, format="PNG")
+                                try:
+                                    txt = ocr3.classification(b3.getvalue())
+                                    if txt.strip() and not all_text:
+                                        all_text += txt.strip() + "\n"
+                                except: pass
+                            if all_text: print(f"[📷OCR] 原图兜底: OK")
+                        except Exception as _e:
+                            print(f"[📷OCR] 原图兜底失败: {_e}")
+
+                    # ── 解析股票代码 (6 位, 0/3/6 开头) ──
+                    codes = re.findall(r"\b[036]\d{5}\b", all_text)
+                    # 去重 + 保留顺序
+                    seen = set()
+                    codes = [c for c in codes if not (c in seen or seen.add(c))]
+
                     entry.delete("1.0", tk.END)
-                    entry.insert("1.0", txt)
-                    # 解析股票代码
-                    import re
-                    codes = re.findall(r"\b\d{6}\b", txt)
-                    entry.delete("1.0", tk.END)
-                    entry.insert("1.0", ", ".join(codes))
-                    status_lbl.configure(text=f"✅ OCR 识别出 {len(codes)} 个代码", fg="#66BB6A")
-                except ImportError:
-                    status_lbl.configure(text="❌ ddddocr 未安装", fg="#F44336")
+                    if codes:
+                        entry.insert("1.0", ", ".join(codes))
+                        status_lbl.configure(text=f"✅ OCR 识别出 {len(codes)} 个代码", fg="#66BB6A")
+                    else:
+                        entry.insert("1.0", all_text[:500] if all_text else "(OCR 未识别到文字)")
+                        status_lbl.configure(text="⚠️ OCR 识别 0 个代码, 试试 📸回撤TOP50 或 🖼️图片TOP50", fg="#FFD54F")
+
+                except ImportError as _e:
+                    status_lbl.configure(text=f"❌ 缺少 OCR 库: {_e}", fg="#F44336")
                 except Exception as e:
-                    status_lbl.configure(text=f"❌ OCR 失败: {str(e)[:30]}", fg="#F44336")
+                    status_lbl.configure(text=f"❌ OCR 失败: {str(e)[:40]}", fg="#F44336")
+                    import traceback; traceback.print_exc()
 
             tk.Button(btn_frame, text="📷 截图识别", bg="#546E7A", fg="white", font=_font,
                       relief=tk.FLAT, padx=10, command=_do_ocr).pack(side=tk.LEFT, padx=3)
