@@ -3499,9 +3499,9 @@ def _ai_popup(win):
 
 
 def _run_ai_popup(win, ctx, focus_layer=None):
-    """统一 AI 弹窗: 先秒出本地模板, 后台调用 AI 替换"""
+    """统一 AI 弹窗: 先秒出本地模板, 后台调用 AI 替换 + 📝 生成文章按钮"""
     dlg = tk.Toplevel(win); dlg.configure(bg="#1E1E1E")
-    dlg.geometry("680x620"); dlg.grab_set()
+    dlg.geometry("680x680"); dlg.grab_set()
 
     canvas = tk.Canvas(dlg, bg="#1E1E1E", highlightthickness=0)
     sb = tk.Scrollbar(dlg, orient=tk.VERTICAL, command=canvas.yview)
@@ -3520,6 +3520,13 @@ def _run_ai_popup(win, ctx, focus_layer=None):
     top = tk.Frame(body, bg="#121212"); top.pack(fill=tk.X)
     tk.Label(top, text=top_txt, bg="#121212", fg="#81D4FA",
              font=("", 14, "bold")).pack(side=tk.LEFT, padx=10, pady=8)
+
+    # 📝 生成文章按钮 (右侧, 醒目红色)
+    article_btn = tk.Button(top, text="📝 生成文章", font=("", 11, "bold"),
+                            bg="#B71C1C", fg="white", padx=12, pady=2,
+                            cursor="hand2",
+                            command=lambda: _article_output_dialog(win, ctx, focus_layer))
+    article_btn.pack(side=tk.RIGHT, padx=10, pady=8)
 
     status_lbl = tk.Label(body, text="⏳ AI 分析中... (已秒出本地模板)", bg="#1E1E1E", fg="#FFD54F",
                           font=("", 11))
@@ -5205,3 +5212,368 @@ def _update_block_canvas_stat(win, data):
         text=f"共 {len(data)} 板块 | 涨 {up_count} / 跌 {dn_count} | "
              f"均值 {avg_pct:+.2f}% | 🔥 {top_names}",
         fg=color)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 📝 文章生成弹窗 — 财经博主 × 多平台 × 多风格
+# ═══════════════════════════════════════════════════════════════════
+
+# ── 维度配置 (参考短剧弹窗风格) ──
+
+ARTICLE_AUTHORS = [
+    ("但斌/葛卫东", "价值投资教父, 长期主义, 看好中国核心资产, 金句频出但数据扎实"),
+    ("淘股吧游资", "短线龙头战法, 情绪周期, 打板接力, 江湖黑话, 日内操作铁口直断"),
+    ("韭研公社主力", "主力追踪, 资金流向, 带血筹码, 机构视角, 逻辑推演清晰"),
+    ("华尔街见闻", "专业快讯风, 快准狠, 数据先行, 无情绪不煽情, 5秒读完全文"),
+    ("叶檀观察", "女性财经视角, 犀利辛辣, 关注民生, 从数据到社会问题"),
+    ("李大霄调侃", "大霄哥嘴炮风, 金句段子满天飞, 娱乐财经, 信口开河但有料"),
+    ("量化理性派", "纯数据说话, 因子模型, 回测结论, 无情无义无情绪"),
+    ("雪球深度复盘", "长文干货, 代码表格, 逻辑链完整, 适合学习收藏"),
+    ("券商分析师", "正规研报风, 客观中立, 有数据有结论, 但缺乏个人风格"),
+    ("独立自媒体", "口语化, 像和朋友聊天, 不装不端, 有温度有态度"),
+]
+
+ARTICLE_MODES = [
+    ("大盘日记", "每日快评, 一句话说清今天发生了什么"),
+    ("板块解读", "热点板块深度分析, 为什么涨/跌, 还能不能追"),
+    ("个股分析", "牛股/熊股逻辑拆解, 基本面+技术面+资金面"),
+    ("复盘总结", "今日复盘, 情绪+板块+龙头, 系统性回顾"),
+    ("明日预判", "推演明日走势, 剧本A/B/C, 明确触发条件"),
+    ("策略建议", "操作指导, 仓位+方向+止损止盈, 给具体数字"),
+    ("情绪点评", "情绪周期分析, 冰点/高潮/回暖, 结合历史对照"),
+    ("龙虎榜解读", "游资动向, 机构买卖, 带血筹码, 主力行为学"),
+]
+
+ARTICLE_PLATFORMS = [
+    ("微信公众号", "Markdown+小标题+emoji+分割线, 适合长文深度阅读"),
+    ("微博短文", "200字内, 话题标签, @提及, 口语化快节奏"),
+    ("小红书种草", "活泼有趣, 干货清单, emoji密集, tag丰富, 像和闺蜜分享"),
+    ("雪球长文", "深度分析, 代码表格, 逻辑清晰, 适合学习和讨论"),
+    ("正规研报", "客观中立, 专业术语, 数据翔实, 无个人情绪"),
+    ("幽默段子", "段子+梗+调侃, 寓教于乐, 大霄哥最爱"),
+    ("抖音短评", "口语化, 快节奏, 金句开头, 话题标签, 适合短视频文案"),
+    ("知乎回答", "先问是不是再问为什么, 理性分析, 引用数据, 长文深度"),
+]
+
+ARTICLE_LENGTHS = [
+    ("200字快评", "一句话+两三句点评, 适合微博/抖音"),
+    ("800字短文", "2-3段, 适合小红书/知乎/雪球"),
+    ("1500字标准", "4-5段, 适合公众号/雪球/研报"),
+    ("3000字深度", "多章节, 完整逻辑链, 适合公众号深度长文"),
+]
+
+
+def _article_output_dialog(win, ctx=None, focus_layer=None):
+    """📝 文章生成弹窗 — 参考短剧弹窗风格, 多维度选择"""
+    import tkinter as tk
+    from tkinter import scrolledtext
+
+    dlg = tk.Toplevel(win); dlg.configure(bg="#121212")
+    dlg.title("📝 文章生成器 · 财经博主多平台输出")
+    dlg.geometry("1080x820")
+    dlg.minsize(960, 720)
+
+    # ════════════════════════════════════════════
+    # Banner (参考短剧弹窗红色 Banner)
+    # ════════════════════════════════════════════
+    banner = tk.Frame(dlg, bg="#B71C1C", height=52)
+    banner.pack(fill=tk.X)
+    tk.Label(banner, text="📝 文章生成器", bg="#B71C1C", fg="white",
+             font=("", 16, "bold")).pack(side=tk.LEFT, padx=16, pady=10)
+    sub = "财经博主风格 × 多平台 × 多模式 — "
+    if focus_layer:
+        sub += f"📌 聚焦: {focus_layer}"
+    else:
+        sub += "🎯 基于游资看盘全量数据"
+    tk.Label(banner, text=sub, bg="#B71C1C", fg="#FFCDD2",
+             font=("", 11)).pack(side=tk.LEFT, pady=14)
+
+    # ════════════════════════════════════════════
+    # 维度 1: 作者风格 (单选 Radio)
+    # ════════════════════════════════════════════
+    author_frame = tk.LabelFrame(dlg, text="✍️ 作者风格 (单选)",
+                                  font=("", 11, "bold"), fg="#B71C1C")
+    author_frame.pack(fill=tk.X, padx=10, pady=(10, 4))
+    selected_author = tk.StringVar(value="但斌/葛卫东")
+    a_inner = tk.Frame(author_frame, bg="#121212"); a_inner.pack(fill=tk.X, padx=8, pady=6)
+    for i, (name, _desc) in enumerate(ARTICLE_AUTHORS):
+        r = i // 5; c = i % 5
+        tk.Radiobutton(a_inner, text=name, variable=selected_author, value=name,
+                       bg="#121212", fg="#E0E0E0", activebackground="#121212",
+                       activeforeground="#FFCDD2", selectcolor="#4A1C1C",
+                       font=("", 10, "bold"), anchor="w",
+                       indicatoron=True).grid(row=r, column=c, padx=6, pady=3, sticky="w")
+
+    # ════════════════════════════════════════════
+    # 维度 2: 文章模式 (单选 Radio)
+    # ════════════════════════════════════════════
+    mode_frame = tk.LabelFrame(dlg, text="📚 文章模式 (单选)",
+                                font=("", 11, "bold"), fg="#B71C1C")
+    mode_frame.pack(fill=tk.X, padx=10, pady=4)
+    selected_mode = tk.StringVar(value="大盘日记")
+    m_inner = tk.Frame(mode_frame, bg="#121212"); m_inner.pack(fill=tk.X, padx=8, pady=6)
+    for i, (name, _desc) in enumerate(ARTICLE_MODES):
+        r = i // 4; c = i % 4
+        tk.Radiobutton(m_inner, text=name, variable=selected_mode, value=name,
+                       bg="#121212", fg="#E0E0E0", activebackground="#121212",
+                       activeforeground="#FFCDD2", selectcolor="#4A1C1C",
+                       font=("", 10), anchor="w",
+                       indicatoron=True).grid(row=r, column=c, padx=6, pady=3, sticky="w")
+
+    # ════════════════════════════════════════════
+    # 维度 3: 平台风格 (单选 Radio)
+    # ════════════════════════════════════════════
+    plat_frame = tk.LabelFrame(dlg, text="📱 平台风格 (单选)",
+                                font=("", 11, "bold"), fg="#B71C1C")
+    plat_frame.pack(fill=tk.X, padx=10, pady=4)
+    selected_plat = tk.StringVar(value="微信公众号")
+    p_inner = tk.Frame(plat_frame, bg="#121212"); p_inner.pack(fill=tk.X, padx=8, pady=6)
+    for i, (name, _desc) in enumerate(ARTICLE_PLATFORMS):
+        r = i // 4; c = i % 4
+        tk.Radiobutton(p_inner, text=name, variable=selected_plat, value=name,
+                       bg="#121212", fg="#E0E0E0", activebackground="#121212",
+                       activeforeground="#FFCDD2", selectcolor="#4A1C1C",
+                       font=("", 10), anchor="w",
+                       indicatoron=True).grid(row=r, column=c, padx=6, pady=3, sticky="w")
+
+    # ════════════════════════════════════════════
+    # 维度 4: 字数 (单选 Radio)
+    # ════════════════════════════════════════════
+    len_frame = tk.LabelFrame(dlg, text="📏 字数 (单选)",
+                               font=("", 11, "bold"), fg="#B71C1C")
+    len_frame.pack(fill=tk.X, padx=10, pady=4)
+    selected_len = tk.StringVar(value="1500字标准")
+    l_inner = tk.Frame(len_frame, bg="#121212"); l_inner.pack(fill=tk.X, padx=8, pady=6)
+    for i, (name, _desc) in enumerate(ARTICLE_LENGTHS):
+        tk.Radiobutton(l_inner, text=name, variable=selected_len, value=name,
+                       bg="#121212", fg="#E0E0E0", activebackground="#121212",
+                       activeforeground="#FFCDD2", selectcolor="#4A1C1C",
+                       font=("", 10, "bold"), anchor="w",
+                       indicatoron=True).grid(row=0, column=i, padx=12, pady=2, sticky="w")
+
+    # ════════════════════════════════════════════
+    # 自定义主题 (可选输入)
+    # ════════════════════════════════════════════
+    custom_frame = tk.LabelFrame(dlg, text="💡 自定义主题 (可选, 不填则用游资看盘数据自动生成)",
+                                 font=("", 10), fg="#FFA726")
+    custom_frame.pack(fill=tk.X, padx=10, pady=4)
+    custom_txt = scrolledtext.ScrolledText(custom_frame, height=2, font=("", 11),
+                                            wrap=tk.WORD, bg="#1E1E1E", fg="#E0E0E0",
+                                            insertbackground="white",
+                                            highlightbackground="#424242",
+                                            highlightthickness=1)
+    custom_txt.pack(fill=tk.X, padx=6, pady=6)
+    custom_txt.insert("1.0", "")
+
+    # ════════════════════════════════════════════
+    # 按钮区 (参考短剧弹窗按钮)
+    # ════════════════════════════════════════════
+    btn_frame = tk.Frame(dlg, bg="#121212"); btn_frame.pack(fill=tk.X, padx=10, pady=6)
+    status_var = tk.StringVar(value="")
+
+    busy = [False]
+
+    def _build_prompt():
+        """根据选择构造 AI prompt"""
+        import json
+        author_name = selected_author.get()
+        author_desc = dict(ARTICLE_AUTHORS).get(author_name, "")
+        mode_name = selected_mode.get()
+        mode_desc = dict(ARTICLE_MODES).get(mode_name, "")
+        plat_name = selected_plat.get()
+        plat_desc = dict(ARTICLE_PLATFORMS).get(plat_name, "")
+        len_name = selected_len.get()
+        custom = custom_txt.get("1.0", tk.END).strip()
+
+        # 上下文
+        ctx_summary = {}
+        if ctx:
+            ctx_summary = {k: v for k, v in ctx.items()
+                           if k not in ("spot",) and v is not None}
+
+        prompt = f"""请写一篇 A 股财经分析文章。
+
+【作者风格】{author_name}
+{author_desc}
+
+【文章模式】{mode_name}
+{mode_desc}
+
+【平台风格】{plat_name}
+{plat_desc}
+
+【字数要求】{len_name}
+
+【数据上下文】
+{json.dumps(ctx_summary, ensure_ascii=False, default=str, indent=2)[:2000]}
+"""
+        if custom:
+            prompt += f"\n【自定义主题/重点】\n{custom}\n"
+        if focus_layer:
+            prompt += f"\n【聚焦层级】{focus_layer}\n"
+        prompt += """
+【要求】
+1. 标题抓眼球 (带 emoji, 20字内, 符合平台调性)
+2. 严格按【平台风格】的输出格式
+3. 严格模仿【作者风格】的语言习惯
+4. 严格控制【字数要求】
+5. 结论明确, 不模棱两可
+6. 所有数据和观点基于上文【数据上下文】"""
+        return prompt, author_name, plat_name, mode_name
+
+    def _build_system(author_name):
+        """system prompt — 深度模仿作者"""
+        author_map = {
+            "但斌/葛卫东": "你是中国巴菲特, 长期价值投资者, 看好茅台、腾讯、招商银行, 金句如'时间是玫瑰', 数据扎实但有情怀, 不做波段, 只谈持有。",
+            "淘股吧游资": "你是淘股吧顶级游资, 龙头战法, 情绪周期大师, 江湖黑话: '核按钮'、'天地板'、'吃面'、'打板接力', 日内操作铁口直断, 不装不端。",
+            "韭研公社主力": "你是韭研公社的主力追踪者, 擅长从带血筹码、龙虎榜、资金流向推断主力意图, 逻辑严密, 数据说话。",
+            "华尔街见闻": "你是华尔街见闻快讯编辑, 快准狠, 5秒读完, 数据先行, 无情绪, 不煽情, 标题党但有料。",
+            "叶檀观察": "你是叶檀, 女性财经观察家, 犀利辛辣, 关注民生, 从财经数据看到社会问题, 敢说敢骂。",
+            "李大霄调侃": "你是李大霄, 大霄哥, 爱说'婴儿底'、'钻石底', 金句段子满天飞, 娱乐财经第一人, 信口开河但有料。",
+            "量化理性派": "你是量化分析师, 只看数据和回测, 因子说话, 无情无义, 结论用数字, 情绪靠边站。",
+            "雪球深度复盘": "你是雪球大V, 长文干货, 喜欢贴代码和表格, 逻辑链完整, 适合学习收藏, 结尾必有总结。",
+            "券商分析师": "你是券商首席分析师, 客观中立, 专业术语, 数据翔实, 结论明确, 但不表达个人情绪。",
+            "独立自媒体": "你是独立自媒体人, 口语化, 像和朋友聊天, 不装不端, 有温度, 敢说真话。",
+        }
+        return author_map.get(author_name, "你是顶级 A 股财经分析师, 专业、犀利、有料。")
+
+    def _start_gen():
+        nonlocal busy
+        if busy[0]:
+            status_var.set("⚠️ AI 正在创作中...")
+            return
+        busy[0] = True
+        gen_btn.config(state=tk.DISABLED)
+        prompt, author, plat, mode = _build_prompt()
+        sys_prompt = _build_system(author)
+        status_var.set(f"⏳ AI 正在创作《{mode}》· {author}风 · {plat} (约20-40秒)...")
+        result_txt.delete("1.0", tk.END)
+        result_txt.insert("1.0", f"⏳ 正在以【{author}】的风格创作...\n📝 模式: {mode}\n📱 平台: {plat}\n\n请稍候 20-40 秒...")
+
+        # 根据字数估算 max_tokens
+        len_map = {"200字快评": 500, "800字短文": 1500,
+                   "1500字标准": 2500, "3000字深度": 4500}
+        max_tokens = len_map.get(selected_len.get(), 2500)
+
+        def _work():
+            try:
+                try:
+                    from src.ui.tab_dapan import call_ai_model
+                    result = call_ai_model(prompt, system_prompt=sys_prompt, max_tokens=max_tokens)
+                except Exception:
+                    try:
+                        result = win._app.call_ai_model(prompt, system_prompt=sys_prompt,
+                                                       max_tokens=max_tokens)
+                    except Exception:
+                        result = _article_fallback(prompt, author, mode, plat, len_name)
+                dlg.after(0, lambda: _show_result(result))
+            except Exception as e:
+                import traceback
+                err = f"❌ 创作失败：{e}\n\n{traceback.format_exc()}"
+                dlg.after(0, lambda: _show_result(err))
+            finally:
+                busy[0] = False
+                dlg.after(0, lambda: gen_btn.config(state=tk.NORMAL))
+
+        import threading
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _show_result(text):
+        result_txt.delete("1.0", tk.END)
+        result_txt.insert("1.0", text or "（AI 没有返回内容）")
+        result_txt.see("1.0")
+        author = selected_author.get()
+        plat = selected_plat.get()
+        status_var.set(f"✅ 创作完成！【{author}】· 【{plat}】")
+
+    def _copy():
+        text = result_txt.get("1.0", tk.END).strip()
+        if not text:
+            tk.messagebox.showinfo("提示", "没有可复制的内容")
+            return
+        dlg.clipboard_clear(); dlg.clipboard_append(text)
+        status_var.set("✅ 已复制到剪贴板")
+
+    def _save():
+        text = result_txt.get("1.0", tk.END).strip()
+        if not text:
+            tk.messagebox.showinfo("提示", "没有可保存的内容")
+            return
+        from tkinter import filedialog
+        fname = f"财经文章_{datetime.now().strftime('%Y%m%d_%H%M')}_{selected_author.get()}_{selected_plat.get()}.md"
+        path = filedialog.asksaveasfilename(
+            defaultextension=".md",
+            initialfile=fname,
+            filetypes=[("Markdown", "*.md"), ("文本", "*.txt"), ("所有文件", "*.*")],
+            title="保存文章")
+        if path:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            status_var.set(f"✅ 已保存: {path}")
+
+    def _reset():
+        selected_author.set("但斌/葛卫东")
+        selected_mode.set("大盘日记")
+        selected_plat.set("微信公众号")
+        selected_len.set("1500字标准")
+        custom_txt.delete("1.0", tk.END)
+        result_txt.delete("1.0", tk.END)
+        status_var.set("🧹 已清空恢复默认")
+
+    gen_btn = tk.Button(btn_frame, text="📝 生成文章", font=("", 12, "bold"),
+                        bg="#B71C1C", fg="white", padx=22, pady=4,
+                        cursor="hand2", command=_start_gen)
+    gen_btn.pack(side=tk.LEFT, padx=(0, 10))
+    tk.Button(btn_frame, text="📋 复制全文", font=("", 11), padx=12,
+              command=_copy, cursor="hand2").pack(side=tk.LEFT, padx=5)
+    tk.Button(btn_frame, text="💾 保存为MD", font=("", 11), padx=12,
+              command=_save, cursor="hand2").pack(side=tk.LEFT, padx=5)
+    tk.Button(btn_frame, text="🗑️ 清空重置", font=("", 11), padx=12,
+              command=_reset, cursor="hand2").pack(side=tk.LEFT, padx=5)
+    status_lbl = tk.Label(btn_frame, textvariable=status_var, bg="#121212",
+                          fg="#FFD54F", font=("", 11))
+    status_lbl.pack(side=tk.RIGHT, padx=6)
+
+    # ════════════════════════════════════════════
+    # 结果区 (ScrolledText, 深色背景)
+    # ════════════════════════════════════════════
+    result_frame = tk.LabelFrame(dlg, text="📄 文章正文", font=("", 10, "bold"),
+                                  fg="#FFD54F", bg="#121212")
+    result_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(4, 10))
+    result_txt = scrolledtext.ScrolledText(
+        result_frame, font=("", 12), wrap=tk.WORD,
+        bg="#1E1E1E", fg="#E0E0E0", insertbackground="white",
+        highlightbackground="#424242", highlightthickness=1,
+        padx=12, pady=10, spacing3=4,
+    )
+    result_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+
+def _article_fallback(prompt, author, mode, plat, length):
+    """AI 不可用时的文章兜底 — 用本地模板生成简洁版"""
+    from datetime import datetime
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    return f"""⏳ AI 大模型不可用 — 以下为本地模板兜底文章
+（请在「🔧 AI配置」里配置 DeepSeek/豆包/Ollama, 即可获得完整 AI 生成）
+
+═══ 📝 文章输出 ═══
+📌 作者风格: {author}
+📚 文章模式: {mode}
+📱 平台风格: {plat}
+📏 字数要求: {length}
+🕐 生成时间: {now}
+
+【标题】
+⚠️ AI 不可用, 本地模板兜底输出 (配置 AI 后可生成完整文章)
+
+【提示】
+请点击主界面「🔧 AI配置」按钮, 配置你的大模型提供商:
+- DeepSeek (推荐, 性价比高)
+- 豆包 (国内稳定)
+- Ollama (本地部署)
+
+配置完成后, 回到此处重新点击「📝 生成文章」即可获得:
+✅ 符合 {author} 风格的专业文章
+✅ 适配 {plat} 平台格式
+✅ {mode} 完整分析内容
+"""
