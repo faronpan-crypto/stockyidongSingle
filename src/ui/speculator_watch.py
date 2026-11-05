@@ -135,7 +135,7 @@ BLOCK_KEYWORDS = {
     "航天": ["航天", "卫星", "火箭", "北斗"],
     "风电": ["风电", "风力", "风机", "塔筒"],
     "光伏": ["光伏", "太阳能", "硅片", "组件"],
-    "机器人": ["机器人", "自动化", "减速器", "伺服"],
+    "机器人": ["机器人", "自动化", "减速器", "伺服", "人形", "专用机械"],
     "白酒": ["白酒", "茅台", "五粮液", "酒厂"],
     "黄金": ["黄金", "金业", "山东黄金", "中金黄金"],
 }
@@ -693,7 +693,7 @@ BLOCK_KEYWORDS = {
     "航天": ["航天", "卫星", "火箭", "北斗"],
     "风电": ["风电", "风力", "风机", "塔筒"],
     "光伏": ["光伏", "太阳能", "硅片", "组件"],
-    "机器人": ["机器人", "自动化", "减速器", "伺服"],
+    "机器人": ["机器人", "自动化", "减速器", "伺服", "人形", "专用机械"],
     "白酒": ["白酒", "茅台", "五粮液", "酒厂"],
     "黄金": ["黄金", "金业", "山东黄金", "中金黄金"],
 }
@@ -721,7 +721,7 @@ def _compute_block_pct_from_cache():
                 idx = merged["name"].astype(str).str.contains(pat, na=False) | \
                       merged["industry"].astype(str).str.contains(pat, na=False)
                 mask = idx if mask is None else (mask | idx)
-            if mask is not None and mask.sum() >= 2:
+            if mask is not None and mask.sum() >= 1:
                 sub = merged[mask].copy()
                 mean_pct = float(sub["pct_chg"].mean())
                 n = int(mask.sum())
@@ -2647,35 +2647,34 @@ def _refresh_volume(win):
 
 def _build_futures_grid(parent, win, col=0):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FF8A65",
-                        font=("", 10, "bold"), padx=4, pady=4)
+                        font=("", 10, "bold"), padx=3, pady=3)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
-    _add_title_row(frm, "④ 股指期货四宫格 (IH/IF/IC/IM — IM 主做高亮)",
+    _add_title_row(frm, "④ 股指期货 (IH/IF/IC/IM)",
                    "#FF8A65", FUTURES_KNOWLEDGE)
 
     grid = tk.Frame(frm, bg="#1E1E1E"); grid.pack(fill=tk.BOTH, expand=True)
     win._fut_cells = []
     for i in range(4):
         r, c = i // 2, i % 2
-        cell = tk.Frame(grid, bg="#2A2A2A", padx=6, pady=6,
+        cell = tk.Frame(grid, bg="#2A2A2A", padx=3, pady=3,
                         highlightthickness=2)
-        cell.grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
+        cell.grid(row=r, column=c, sticky="nsew", padx=2, pady=2)
         grid.grid_rowconfigure(r, weight=1); grid.grid_columnconfigure(c, weight=1)
 
         name, full_name, _ts_code = FUT_NAMES[i]
-        # IM 默认高亮
         hc = "#FF6D00" if name == "IM" else "#424242"
         cell.config(highlightbackground=hc, highlightcolor=hc)
 
         tk.Label(cell, text=name, bg="#2A2A2A", fg="#FFD54F",
-                 font=("", 20, "bold")).pack()
+                 font=("", 16, "bold")).pack()
         tk.Label(cell, text=full_name, bg="#2A2A2A", fg="#9E9E9E",
-                 font=("", 12)).pack()
+                 font=("", 9)).pack()
         price_lbl = tk.Label(cell, text="—", bg="#2A2A2A", fg="#FFFFFF",
-                             font=("Menlo", 16, "bold"))
-        price_lbl.pack(pady=(4, 0))
+                             font=("Menlo", 13, "bold"))
+        price_lbl.pack(pady=(2, 0))
         basis_lbl = tk.Label(cell, text="加载中...", bg="#2A2A2A", fg="#81C784",
-                             font=("", 12))
+                             font=("", 10))
         basis_lbl.pack()
 
         win._fut_cells.append((name, full_name, _ts_code, cell, price_lbl, basis_lbl))
