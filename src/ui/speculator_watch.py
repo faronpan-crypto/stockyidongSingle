@@ -120,6 +120,80 @@ class _HSplitter(tk.Frame):
             _save_splitter(self.key, int(self._left_w))
             print(f"[splitter] saved {self.key}={self._left_w}", flush=True)
 
+
+class _VSplitter(tk.Frame):
+    """垂直分割线 — place 绝对定位, 同 _HSplitter 结构"""
+
+    def __init__(self, master, top_pane, bot_pane, height=6, color="#37474F",
+                 key="watch_v1", min_top=120, min_bot=80):
+        super().__init__(master, bg=color, width=height, cursor="sb_v_double_arrow")
+        self.master = master
+        self.top = top_pane
+        self.bot = bot_pane
+        self.splitter_h = height
+        self.key = key
+        self.min_top = min_top
+        self.min_bot = min_bot
+        self._drag = False
+        self._reflowing = False
+
+        self._top_h = _load_splitter(key, _SPLITTER_DEFAULTS.get(key, 300))
+        self._reflow()
+        master.bind("<Configure>", self._on_outer_resize, add="+")
+
+        self.bind("<Button-1>", self._start)
+        self.bind("<B1-Motion>", self._drag_move)
+        self.bind("<ButtonRelease-1>", self._end)
+
+    def _on_outer_resize(self, e):
+        if e.widget is self.master and not self._drag:
+            self._reflow()
+
+    def _reflow(self):
+        if self._reflowing:
+            return
+        try:
+            self._reflowing = True
+            W = self.master.winfo_width()
+            H = self.master.winfo_height()
+            if W < 50 or H < 50:
+                self._reflowing = False
+                return
+            max_top = H - self.splitter_h - self.min_bot
+            self._top_h = max(self.min_top, min(self._top_h, max_top))
+            bot_y = self._top_h + self.splitter_h
+            bot_h = H - bot_y
+
+            self.top.place(x=0, y=0, width=W, height=self._top_h)
+            self.place(x=0, y=self._top_h, width=W, height=self.splitter_h)
+            self.bot.place(x=0, y=bot_y, width=W, height=bot_h)
+        except Exception as ex:
+            print(f"[vsplitter] reflow err: {ex}", flush=True)
+        finally:
+            self._reflowing = False
+
+    def _start(self, e):
+        self._drag = True
+        self._start_y = e.y_root
+
+    def _drag_move(self, e):
+        if not self._drag:
+            return
+        dy = e.y_root - self._start_y
+        self._top_h = self._top_h + dy
+        H = self.master.winfo_height()
+        max_top = H - self.splitter_h - self.min_bot
+        self._top_h = max(self.min_top, min(self._top_h, max_top))
+        self._reflow()
+        self._start_y = e.y_root
+
+    def _end(self, e):
+        if self._drag:
+            self._drag = False
+            _save_splitter(self.key, int(self._top_h))
+            print(f"[vsplitter] saved {self.key}={self._top_h}", flush=True)
+
+
 # —— 板块关键词 → 行业映射 (用于 daily 接口聚合) ——
 BLOCK_KEYWORDS = {
     "券商": ["证券", "券商", "投行"],
@@ -700,7 +774,9 @@ BLOCK_KEYWORDS = {
 
 
 def _compute_block_pct_from_cache():
-    """用已缓存的 daily + stock_basic 做板块聚合, 结果再缓存 10 分钟"""
+    """用已缓存的 daily + stock_basic 做板块聚合, 结果再缓存 10 分钟
+    返回 dict: fix_name → (mean_pct, n, top5_list, up_count, down_count)
+    """
     now = time.time()
     if _BLOCK_PCT_CACHE["data"] and (now - _BLOCK_PCT_CACHE["time"] < 600):
         return _BLOCK_PCT_CACHE["data"]
@@ -725,13 +801,16 @@ def _compute_block_pct_from_cache():
                 sub = merged[mask].copy()
                 mean_pct = float(sub["pct_chg"].mean())
                 n = int(mask.sum())
-                # Top3 龙头: 按成交额取前3 (成交额=amount, 单位千元)
+                up_count = int((sub["pct_chg"] > 0).sum())
+                down_count = int((sub["pct_chg"] < 0).sum())
+                # Top5 龙头: 按成交额取前5 (成交额=amount, 单位千元)
                 if "amount" in sub.columns:
-                    top3 = sub.sort_values("amount", ascending=False).head(3)
+                    top5 = sub.sort_values("amount", ascending=False).head(5)
                 else:
-                    top3 = sub.sort_values("pct_chg", ascending=False).head(3)
-                top3_list = [(str(r["name"]), float(r["pct_chg"])) for _, r in top3.iterrows()]
-                result[fix_name] = (mean_pct, n, top3_list)
+                    top5 = sub.sort_values("pct_chg", ascending=False).head(5)
+                top5_list = [(str(r["name"]), float(r["pct_chg"])) for _, r in top5.iterrows()]
+                # 返回 (mean_pct, n, top5, up, down) — 兼容旧索引
+                result[fix_name] = (mean_pct, n, top5_list, up_count, down_count)
             else:
                 result[fix_name] = None
 
@@ -945,44 +1024,52 @@ def show_speculator_watch(root=None, app=None):
     outer.after(300, splitter._reflow)
     outer.after(800, splitter._reflow)
 
-    # left_pane grid 配置 (2 列 × 3 行)
-    left_pane.grid_rowconfigure(0, weight=3)
-    left_pane.grid_rowconfigure(1, weight=3)
-    left_pane.grid_rowconfigure(2, weight=1)
-    left_pane.grid_columnconfigure(0, weight=1)
-    left_pane.grid_columnconfigure(1, weight=1)
+    # ── 左面板内部: VSplitter 垂直拖拽 (上: 全球+板块+量能+期货+周期 / 下: 信号+状态) ──
+    top_paned = tk.Frame(left_pane, bg="#121212")
+    bot_paned = tk.Frame(left_pane, bg="#121212")
+    vsplit = _VSplitter(left_pane, top_paned, bot_paned, key="watch_v1",
+                        min_top=200, min_bot=120)
+    # 多次 reflow 保险
+    left_pane.after(100, vsplit._reflow)
+    left_pane.after(300, vsplit._reflow)
+    left_pane.after(800, vsplit._reflow)
 
-    # 🗂️ 模块按用户要求重排
-    # ── row_top (row=0): 3全球五资产 × 1板块九宫格 (2列等宽) ──
-    row_top = tk.Frame(left_pane, bg="#121212"); row_top.grid(row=0, column=0, columnspan=2, sticky="nsew")
+    # top_paned 内部: grid 2 行 × 3 列
+    top_paned.grid_rowconfigure(0, weight=1)
+    top_paned.grid_rowconfigure(1, weight=1)
+    top_paned.grid_columnconfigure(0, weight=1)
+    top_paned.grid_columnconfigure(1, weight=1)
+    top_paned.grid_columnconfigure(2, weight=1)
+
+    # 🗂️ 模块重排
+    # ── row_top (row=0): 🌍全球五资产 × ①板块画布 (2列) ──
+    row_top = tk.Frame(top_paned, bg="#121212"); row_top.grid(row=0, column=0, columnspan=3, sticky="nsew")
     row_top.grid_columnconfigure(0, weight=1, uniform="r1")
-    row_top.grid_columnconfigure(1, weight=1, uniform="r1")
+    row_top.grid_columnconfigure(1, weight=2, uniform="r1")  # 板块画布更宽
 
-    _build_orderbook(row_top, win, 0)    # 3=🌍全球五资产
-    _build_block_grid(row_top, win, 1)   # 1=①板块九宫格
+    _build_orderbook(row_top, win, 0)              # 🌍全球五资产
+    _build_block_canvas(row_top, win, 1)            # ①板块画布 (新)
 
-    # ── row_bot (row=1): 4量能 × 5股指期货 × 6周期阶段 (3列) ──
-    row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, columnspan=2, sticky="nsew")
+    # ── row_bot (row=1): 量能 × 股指期货 × 周期阶段 (3列) ──
+    row_bot = tk.Frame(top_paned, bg="#121212"); row_bot.grid(row=1, column=0, columnspan=3, sticky="nsew")
     row_bot.grid_columnconfigure(0, weight=1, uniform="r2")
     row_bot.grid_columnconfigure(1, weight=1, uniform="r2")
     row_bot.grid_columnconfigure(2, weight=1, uniform="r2")
 
-    _build_volume_panel(row_bot, win, 0)     # 4=量能
-    _build_futures_grid(row_bot, win, 1)      # 5=股指期货
-    _build_cycle_panel(row_bot, win, 2)       # 6=周期阶段
+    _build_volume_panel(row_bot, win, 0)     # 量能
+    _build_futures_grid(row_bot, win, 1)      # 股指期货
+    _build_cycle_panel(row_bot, win, 2)       # 周期阶段
 
-    # ── row_leak (row=2, 比例分配): 2信号决策 × 7状态判定 ──
-    row_leak = tk.Frame(left_pane, bg="#121212")
-    row_leak.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(2, 0))
-    row_leak.grid_rowconfigure(0, weight=1)
-    row_leak.grid_columnconfigure(0, weight=1, uniform="r3")
-    row_leak.grid_columnconfigure(1, weight=1, uniform="r3")
+    # bot_paned 内部: 信号决策 × 状态判定 (2列)
+    bot_paned.grid_rowconfigure(0, weight=1)
+    bot_paned.grid_columnconfigure(0, weight=1, uniform="r3")
+    bot_paned.grid_columnconfigure(1, weight=1, uniform="r3")
 
-    sign_w = tk.Frame(row_leak, bg="#121212"); sign_w.grid(row=0, column=0, sticky="nsew", padx=3, pady=3)
-    _build_sign_decision_panel(sign_w, win)   # 2=🎯信号决策
+    sign_w = tk.Frame(bot_paned, bg="#121212"); sign_w.grid(row=0, column=0, sticky="nsew", padx=3, pady=3)
+    _build_sign_decision_panel(sign_w, win)   # 🎯信号决策
 
-    stat_w = tk.Frame(row_leak, bg="#121212"); stat_w.grid(row=0, column=1, sticky="nsew", padx=3, pady=3)
-    _build_status_panel(stat_w, win, 0)       # 7=状态判定
+    stat_w = tk.Frame(bot_paned, bg="#121212"); stat_w.grid(row=0, column=1, sticky="nsew", padx=3, pady=3)
+    _build_status_panel(stat_w, win, 0)       # 状态判定
 
     # 右侧: 游资看盘思路分析
     _build_watch_analysis(right_pane, win)
@@ -1100,37 +1187,292 @@ def _load_limitup_dropdown(win):
         win._ob_cb["values"] = []
 
 
-def _build_block_grid(parent, win, col=0):
+def _build_block_canvas(parent, win, col=0):
+    """① 板块热力图 — 涨跌幅排序 + 格子大小渐变 + 红涨绿跌配色"""
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FFA726",
                         font=("", 12, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
-    parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
+    parent.grid_columnconfigure(col, weight=2 if hasattr(parent, '_block_weight_set') else 1, uniform="watchrow")
     parent.grid_rowconfigure(0, weight=1)
-    _add_title_row(frm, "① 板块九宫格 (点击展开/长按详情/⚠️异动>3%)",
+    _add_title_row(frm, "① 板块热力图 (按涨跌幅排序 · 红涨绿跌)",
                    "#FFA726", BLOCK_GRID_KNOWLEDGE)
 
-    # 9 格 Canvas (3×3), 增大
-    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=380)
+    canvas = tk.Canvas(frm, bg="#121212", highlightthickness=0)
     canvas.pack(fill=tk.BOTH, expand=True)
     win._block_canvas = canvas
 
-    win._block_meta = [[name, None, None, True, False, None, []] for name in FIXED_BLOCKS]
+    win._block_meta = [[name, None, None, True, False, None, [], 0, 0]
+                       for name in FIXED_BLOCKS]
+    # meta[7] = up_count, meta[8] = down_count
+
     win._block_cells = []
 
-    win._block_conflict_lbl = tk.Label(frm, text="正在加载板块数据...",
+    win._block_conflict_lbl = tk.Label(frm, text="⏳ 正在加载板块数据...",
                                        bg="#1E1E1E", fg="#E0E0E0",
-                                       font=("", 11), wraplength=600, justify=tk.LEFT)
+                                       font=("", 11), wraplength=800, justify=tk.LEFT)
     win._block_conflict_lbl.pack(fill=tk.X, pady=(2, 0))
+
+    # Configure 事件: 窗口尺寸变化时重绘
+    def _on_cfg(e):
+        if e.width > 50 and e.height > 50:
+            _draw_block_canvas(win)
+    canvas.bind("<Configure>", _on_cfg)
 
     win._pulse_cells = {}
 
 
+# —— HEX 颜色工具 ——
+def _hsl_to_hex(h, s, l):
+    """HSL (0-360, 0-100, 0-100) → #RRGGBB"""
+    s /= 100.0; l /= 100.0
+    c = (1 - abs(2 * l - 1)) * s
+    x = c * (1 - abs((h / 60.0) % 2 - 1))
+    m = l - c / 2
+    if h < 60: r, g, b = c, x, 0
+    elif h < 120: r, g, b = x, c, 0
+    elif h < 180: r, g, b = 0, c, x
+    elif h < 240: r, g, b = 0, x, c
+    elif h < 300: r, g, b = x, 0, c
+    else: r, g, b = c, 0, x
+    return "#{:02X}{:02X}{:02X}".format(
+        int((r + m) * 255), int((g + m) * 255), int((b + m) * 255))
+
+
+def _pct_to_color(pct):
+    """涨跌幅 → (背景色, 前景色)
+    正: 红色系 (0-30°, 饱和度随 abs(pct) 增)
+    负: 绿色系 (100-140°, 饱和度随 abs(pct) 增)
+    0: 中性灰
+    """
+    if pct is None:
+        return "#2A2A2A", "#9E9E9E"
+    # 归一化: abs(pct) 0-5 映射到饱和/亮度变化
+    a = min(abs(pct), 5.0) / 5.0
+    if pct >= 0:
+        h = 5 + 25 * (1 - a)      # 5° 红 → 30° 橙, 越涨越红
+        s = 30 + 55 * a            # 饱和度 30% → 85%
+        l = 18 + 6 * a             # 亮度 18% → 24% (暗色底)
+        bg = _hsl_to_hex(h, s, l)
+        fg = "#FFFFFF"
+    else:
+        h = 120 - 20 * (1 - a)     # 100° 青 → 120° 绿, 越跌越绿
+        s = 30 + 55 * a
+        l = 18 + 6 * a
+        bg = _hsl_to_hex(h, s, l)
+        fg = "#FFFFFF"
+    return bg, fg
+
+
+def _draw_block_canvas(win):
+    """新画布模式 — 按涨跌幅排序 + 格子大小渐变 + 红涨绿跌"""
+    c = win._block_canvas
+    c.delete("all")
+    win._block_cells = []
+
+    W = c.winfo_width() or 600
+    H = c.winfo_height() or 400
+    if W < 50 or H < 50:
+        return
+
+    # ① 把 meta 转成 [(idx, name, pct, n, up, down, topN)], 按 pct 降序
+    items = []
+    for i, meta in enumerate(win._block_meta):
+        name = meta[0]
+        pct = meta[1] if meta[1] is not None else -999.0
+        n = meta[5] or 0
+        topN = meta[6] if len(meta) > 6 else []
+        up = meta[7] if len(meta) > 7 else 0
+        down = meta[8] if len(meta) > 8 else 0
+        items.append((i, name, pct, n, up, down, topN))
+    items.sort(key=lambda x: x[2], reverse=True)
+    # 把 pct=-999 (无数据) 放到末尾
+    have = [it for it in items if it[2] > -999]
+    nodata = [it for it in items if it[2] <= -999]
+    items = have + nodata
+
+    n_total = len(items)  # 16
+
+    # ② 分配格子大小: 前 2 大 (2x1), 3-5 中 (1x1.2), 6-8 正常 (1x1), 9+ 紧凑
+    # 用多列网格, 列数根据 W 自适应
+    if W >= 1000:
+        cols = 5
+    elif W >= 750:
+        cols = 4
+    elif W >= 500:
+        cols = 3
+    else:
+        cols = 2
+
+    # 基础 cell 尺寸 + padding
+    pad = 3
+    avail_w = W - pad * (cols + 1)
+    base_cw = avail_w // cols
+
+    # 计算行高 (行数向上取整)
+    rows = (n_total + cols - 1) // cols
+    avail_h = H - pad * (rows + 1)
+    base_ch = avail_h // max(rows, 1)
+
+    now_ms = time.time() * 1000
+
+    # ③ 逐格绘制
+    for rank, (orig_idx, name, pct, n, up, down, topN) in enumerate(items):
+        # 位置
+        row = rank // cols
+        col = rank % cols
+
+        # 排名越靠前, 格子越大 (通过字体大小体现, 格子本身用统一尺寸)
+        # 但前 2 名跨列显示
+        if rank < 2 and cols >= 3:
+            # 前 2 名占 2 列宽度
+            cell_cols = 2
+            cw = base_cw * 2 + pad
+        else:
+            cell_cols = 1
+            cw = base_cw
+
+        ch = base_ch
+
+        x1 = pad + col * (base_cw + pad)
+        y1 = pad + row * (base_ch + pad)
+        x2 = x1 + cw
+        y2 = y1 + ch
+
+        # 颜色
+        bg, fg = _pct_to_color(pct if pct > -999 else None)
+
+        # 边框: 脉冲 + 排名前高亮
+        outline = "#555"
+        ow = 1
+        if rank < 3:
+            outline = "#FFD54F"
+            ow = 2
+        if pct > -999 and abs(pct) >= 3.0 and (now_ms // 600) % 2 == 0:
+            outline = "#FFD54F"
+            ow = 2
+
+        c.create_rectangle(x1, y1, x2, y2, fill=bg, outline=outline, width=ow,
+                           tags=f"cell_{orig_idx}")
+
+        # 排名标 (左上角)
+        rank_fg = "#FFD54F" if rank < 3 else "#78909C"
+        c.create_text(x1 + 10, y1 + 10, text=f"#{rank+1}",
+                      fill=rank_fg, font=("", 9, "bold"), anchor="nw",
+                      tags=f"cell_{orig_idx}")
+
+        # 板块名 (居中, 字体大小根据排名)
+        name_fs = 14 if rank < 3 else (12 if rank < 6 else 11)
+        name_font = ("", name_fs, "bold") if rank < 6 else ("", name_fs)
+        c.create_text((x1 + x2) // 2, y1 + ch // 2 - 8,
+                      text=name, fill="#FFFFFF", font=name_font,
+                      tags=f"cell_{orig_idx}")
+
+        # 涨跌幅 (板块名下方)
+        if pct > -999:
+            sign = "+" if pct >= 0 else ""
+            pct_fs = 16 if rank < 3 else (14 if rank < 6 else 12)
+            c.create_text((x1 + x2) // 2, y1 + ch // 2 + 12,
+                          text=f"{sign}{pct:.2f}%", fill=fg,
+                          font=("", pct_fs, "bold"),
+                          tags=f"cell_{orig_idx}")
+
+        # 底部信息栏 (股票数 + 涨跌分布)
+        info_y = y2 - 14
+        info_parts = []
+        if n:
+            info_parts.append(f"n={n}")
+        if up > 0:
+            info_parts.append(f"▲{up}")
+        if down > 0:
+            info_parts.append(f"▼{down}")
+        if info_parts:
+            c.create_text(x2 - 8, info_y, text="  ".join(info_parts),
+                          fill="#BDBDBD", font=("", 9), anchor="se",
+                          tags=f"cell_{orig_idx}")
+
+        # Top 股票明细 (前排多显示, 后排少显示)
+        if topN:
+            if rank < 3:
+                show = topN[:5]      # 前 3 名: 显示 top5
+            elif rank < 7:
+                show = topN[:3]      # 中间: 显示 top3
+            else:
+                show = []            # 后排: 不显示明细
+
+            if show:
+                n_lines = len(show)
+                line_h = 11
+                start_y = y1 + ch - 14 - n_lines * line_h - 4
+                for ti, (sname, spct) in enumerate(show):
+                    sy = start_y + ti * line_h
+                    short = sname[:5] if len(sname) > 5 else sname
+                    sfg = "#FFAB91" if spct >= 0 else "#A5D6A7"
+                    ssign = "+" if spct >= 0 else ""
+                    stock_tag = f"stock_{orig_idx}_{ti}"
+                    c.create_text(x1 + 8, sy, text=f"{short}",
+                                  fill="#E0E0E0", font=("", 9), anchor="w",
+                                  tags=(f"cell_{orig_idx}", stock_tag))
+                    c.create_text(x2 - 8, sy, text=f"{ssign}{spct:.1f}%",
+                                  fill=sfg, font=("", 9), anchor="e",
+                                  tags=(f"cell_{orig_idx}", stock_tag, f"pct_{orig_idx}_{ti}"))
+
+        # ❓ 知识按钮
+        c.create_text(x2 - 16, y1 + 10, text="❓", fill="#90CAF9",
+                      font=("", 9, "bold underline"), anchor="ne",
+                      tags=(f"cell_{orig_idx}", f"q_{orig_idx}"))
+
+        win._block_cells.append(((x1, y1, x2, y2), orig_idx))
+
+    # 点击绑定 (复用旧逻辑)
+    def _on_single_click(event):
+        for (x1, y1, x2, y2), idx in win._block_cells:
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                tags = c.gettags(event.x, event.y)
+                if f"q_{idx}" in tags:
+                    name = win._block_meta[idx][0]
+                    kd = BLOCK_KNOWLEDGE.get(name, {"definition": "(暂无)"})
+                    _show_knowledge_popup(win, name, kd)
+                else:
+                    _show_block_daily_kline(win, idx)
+                return
+
+    def _on_double_click(event):
+        for (x1, y1, x2, y2), idx in win._block_cells:
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                tags = c.gettags(event.x, event.y)
+                if f"q_{idx}" in tags:
+                    name = win._block_meta[idx][0]
+                    kd = BLOCK_KNOWLEDGE.get(name, {"definition": "(暂无)"})
+                    _show_knowledge_popup(win, name, kd)
+                    return
+                topN = win._block_meta[idx][6] if len(win._block_meta[idx]) > 6 else []
+                hit_name = None
+                for ti, (sname, _pct) in enumerate(topN[:5]):
+                    if f"stock_{idx}_{ti}" in tags:
+                        hit_name = sname; break
+                if hit_name:
+                    sina, sname2 = _lookup_stock_code_by_name(hit_name)
+                    if sina:
+                        _show_stock_daily_kline(win, sina, sname2 or hit_name)
+                        return
+                sina, sname = _get_first_stock_sina(win, idx)
+                if sina:
+                    _show_stock_daily_kline(win, sina, sname)
+                return
+
+    # 解绑旧事件 + 绑定新事件
+    c.unbind("<Button-1>")
+    c.unbind("<Double-Button-1>")
+    c.bind("<Button-1>", _on_single_click)
+    c.bind("<Double-Button-1>", _on_double_click)
+
+
 def _refresh_all_blocks(win):
-    """刷新十六宫格 — 盘中新浪实时全覆盖 (16板块), 盘后 tushare 聚合"""
+    """刷新板块热力图 — 盘中新浪实时全覆盖, 盘后 tushare 聚合"""
     matched_any = False
 
     if _is_trading_hours():
-        # 🟢 盘中: 新浪实时全覆盖 (已补全新浪行业映射 16 板块)
+        # 🟢 盘中: 新浪实时全覆盖 (只返回板块平均涨跌幅, 无个股明细)
         realtime = _get_sina_realtime()
         sectors = realtime.get("sectors", {}) if realtime else {}
         if sectors:
@@ -1138,33 +1480,41 @@ def _refresh_all_blocks(win):
                 val = sectors.get(fix_name)
                 if val is not None:
                     win._block_meta[i][1] = val
+                    win._block_meta[i][5] = None   # 盘中无 n
+                    win._block_meta[i][6] = []     # 盘中无 topN
+                    win._block_meta[i][7] = 0      # 盘中无 up/down
+                    win._block_meta[i][8] = 0
                     matched_any = True
-                # 盘中不再回退到 tushare daily — 盘中拿不到今日收盘数据,
-                # 回退会取到上一个交易日旧数据 (用户反馈黄金 -3.54% 就是旧数据)
             print(f"[👁️看盘] ✅ 盘中新浪实时 ({len([v for v in sectors if v])}/16 板块)")
 
     if not matched_any:
-        # 📅 收盘: tushare daily+stock_basic 关键词聚合
+        # 📅 收盘: tushare daily+stock_basic 关键词聚合 (含 up/down 分布)
         result = _compute_block_pct_from_cache()
         if result:
             for i, fix_name in enumerate(FIXED_BLOCKS):
                 val = result.get(fix_name)
                 if val and val[0] is not None:
                     win._block_meta[i][1] = val[0]
-                    win._block_meta[i][5] = val[1]
-                    win._block_meta[i][6] = val[2] if len(val) > 2 else []
+                    win._block_meta[i][5] = val[1]            # n
+                    win._block_meta[i][6] = val[2] if len(val) > 2 else []  # topN
+                    win._block_meta[i][7] = val[3] if len(val) > 3 else 0   # up
+                    win._block_meta[i][8] = val[4] if len(val) > 4 else 0   # down
                     matched_any = True
                 else:
                     win._block_meta[i][1] = None
             if matched_any:
-                print(f"[👁️看盘] ✅ 十六宫格 tushare 收盘数据")
+                print(f"[👁️看盘] ✅ 热力图 tushare 收盘数据")
 
     # ③ 种子兜底
     if not matched_any:
-        print(f"[👁️看盘] 🌱 九宫格走种子兜底")
+        print(f"[👁️看盘] 🌱 热力图走种子兜底")
         for i, fix_name in enumerate(FIXED_BLOCKS):
             if fix_name in SEED_BLOCK_META:
                 win._block_meta[i][1] = SEED_BLOCK_META[fix_name]["pct"]
+                win._block_meta[i][5] = 0
+                win._block_meta[i][6] = []
+                win._block_meta[i][7] = 0
+                win._block_meta[i][8] = 0
             else:
                 win._block_meta[i][1] = None
 
@@ -1189,18 +1539,20 @@ def _refresh_all_blocks(win):
                 text=f"📅 {latest} | 收盘均值 {pct_mean:+.2f}% | 涨 {(dc['pct_chg']>0).sum()}/{len(dc)}",
                 fg="#66BB6A" if pct_mean >= 0 else "#EF5350")
 
-    # 脉冲 + 矛盾描述
+    # 脉冲 + 矛盾描述 (按涨跌幅排序后取前/后)
     for idx, meta in enumerate(win._block_meta):
         meta[4] = (meta[1] is not None and abs(meta[1]) >= 3.0)
 
     pcts_only = [(FIXED_BLOCKS[i], win._block_meta[i][1] or 0) for i in range(len(FIXED_BLOCKS))]
     pcts_only.sort(key=lambda x: x[1], reverse=True)
-    top2, bot2 = pcts_only[:2], pcts_only[-2:]
-    conflict = f"🔥 主线板块: {' / '.join([x[0] for x in top2])} ({top2[0][1]:+.2f}% {top2[1][1]:+.2f}%)"
-    conflict += f"  |  ⬇️ 压力: {' / '.join([x[0] for x in bot2])} ({bot2[0][1]:+.2f}% {bot2[1][1]:+.2f}%)"
+    top3 = pcts_only[:3]
+    bot3 = pcts_only[-3:] if len(pcts_only) >= 6 else []
+    conflict = f"🔥 领涨: {' / '.join([x[0] for x in top3])} ({top3[0][1]:+.2f}% {top3[1][1]:+.2f}% {top3[2][1]:+.2f}%)"
+    if bot3:
+        conflict += f"  |  ⬇️ 领跌: {' / '.join([x[0] for x in bot3])} ({bot3[0][1]:+.2f}% {bot3[1][1]:+.2f}% {bot3[2][1]:+.2f}%)"
     win._block_conflict_lbl.config(text=conflict)
 
-    _draw_block_grid(win)
+    _draw_block_canvas(win)
 
 
 def _draw_block_grid(win):
