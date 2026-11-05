@@ -41,62 +41,77 @@ def _save_splitter(key, value):
 
 
 class _HSplitter(tk.Frame):
-    """水平分割线 — 鼠标拖动改变左面板宽度, 松开自动保存"""
+    """水平分割线 — place 绝对定位, 无 propagate 问题, 松开自动保存"""
 
-    def __init__(self, master, left_pane, right_pane, width=4, color="#37474F",
+    def __init__(self, master, left_pane, right_pane, width=6, color="#37474F",
                  key="watch_main", min_left=300, min_right=300):
+        # 注意: splitter 自己也用 place, 不 pack
         super().__init__(master, bg=color, width=width, cursor="sb_h_double_arrow")
+        self.master = master
         self.left = left_pane
         self.right = right_pane
-        self.master = master
+        self.splitter_w = width
         self.key = key
         self.min_left = min_left
         self.min_right = min_right
         self._drag = False
 
         # 读默认值
-        default_w = _load_splitter(key, _SPLITTER_DEFAULTS.get(key, 950))
-        try:
-            self.left.configure(width=int(default_w))
-            self.left.pack_propagate(False)
-        except Exception:
-            pass
+        self._left_w = _load_splitter(key, _SPLITTER_DEFAULTS.get(key, 950))
+
+        # 三控件 place: left (0, h) → splitter (left_w, h) → right (left_w+splitter_w, h)
+        self._reflow()
+        # outer resize 时重新分配
+        master.bind("<Configure>", self._on_outer_resize, add="+")
 
         self.bind("<Button-1>", self._start)
         self.bind("<B1-Motion>", self._drag_move)
         self.bind("<ButtonRelease-1>", self._end)
 
+    def _on_outer_resize(self, e):
+        if e.widget is self.master:
+            self._reflow()
+
+    def _reflow(self):
+        """按当前 self._left_w 重新 place 三个控件"""
+        try:
+            W = self.master.winfo_width()
+            H = self.master.winfo_height()
+            if W < 50 or H < 50:
+                return  # 还没显示
+            # 边界
+            max_left = W - self.splitter_w - self.min_right
+            self._left_w = max(self.min_left, min(self._left_w, max_left))
+            right_x = self._left_w + self.splitter_w
+            right_w = W - right_x
+
+            self.left.place(x=0, y=0, width=self._left_w, height=H)
+            self.place(x=self._left_w, y=0, width=self.splitter_w, height=H)
+            self.right.place(x=right_x, y=0, width=right_w, height=H)
+        except Exception as ex:
+            print(f"[splitter] reflow err: {ex}", flush=True)
+
     def _start(self, e):
         self._drag = True
         self._start_x = e.x_root
-        try:
-            self._start_w = self.left.winfo_width()
-        except Exception:
-            self._start_w = 950
 
     def _drag_move(self, e):
         if not self._drag:
             return
         dx = e.x_root - self._start_x
-        new_w = self._start_w + dx
-        win_w = self.master.winfo_width()
+        self._left_w = self._left_w + dx
         # 边界检查
-        max_left = win_w - self.min_right - 8
-        new_w = max(self.min_left, min(new_w, max_left))
-        try:
-            self.left.configure(width=int(new_w))
-            self.left.pack_propagate(False)
-        except Exception:
-            pass
+        W = self.master.winfo_width()
+        max_left = W - self.splitter_w - self.min_right
+        self._left_w = max(self.min_left, min(self._left_w, max_left))
+        self._reflow()
+        self._start_x = e.x_root  # 累积拖动
 
     def _end(self, e):
         if self._drag:
             self._drag = False
-            try:
-                w = self.left.winfo_width()
-                _save_splitter(self.key, int(w))
-            except Exception:
-                pass
+            _save_splitter(self.key, int(self._left_w))
+            print(f"[splitter] saved {self.key}={self._left_w}", flush=True)
 
 # —— 板块关键词 → 行业映射 (用于 daily 接口聚合) ——
 BLOCK_KEYWORDS = {
@@ -912,20 +927,12 @@ def show_speculator_watch(root=None, app=None):
 
     # 右面板加宽 (340 → 420)
     # 右面板充满 (width=520, pack_propagate=False 保留最小宽度)
-    # ── 可拖拽分割器布局 ──
-    # outer: LEFT → left_pane (固定宽度, 可拖改) → splitter (4px) → right_pane (expand)
+    # ── 可拖拽分割器布局 (全部用 place, splitter 统一控制位置) ──
     left_pane = tk.Frame(outer, bg="#121212")
     right_pane = tk.Frame(outer, bg="#121212")
-    left_pane.pack(side=tk.LEFT, fill=tk.Y)  # 先 pack, 后面 splitter 会改 width
     splitter = _HSplitter(outer, left_pane, right_pane, key="watch_main",
                           min_left=400, min_right=380)
-    splitter.pack(side=tk.LEFT, fill=tk.Y)
-    right_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-    # left_pane 初始化宽度 (从 JSON 读)
-    init_w = _load_splitter("watch_main", _SPLITTER_DEFAULTS["watch_main"])
-    left_pane.configure(width=init_w)
-    left_pane.pack_propagate(False)
+    # 注意: left_pane / right_pane 都不 pack, 由 splitter._reflow() 统一 place
 
     # left_pane grid 配置 (2 列 × 3 行)
     left_pane.grid_rowconfigure(0, weight=3)
