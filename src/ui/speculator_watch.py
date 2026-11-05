@@ -3616,23 +3616,22 @@ def _call_ai_for_layers(ctx, focus_layer):
 - ④ 决策层必须给出具体仓位建议 (α β 分配)
 - 用 emoji + 简洁文字, 不要废话
 """
-    # 懒加载 AI 接口
+    # 懒加载 AI 接口 (用 robust fallback)
     try:
-        from src.ui.tab_dapan import call_ai_model  # 尝试主程序 AI
-        result = call_ai_model(prompt, max_tokens=1500)
-        # 尝试解析 JSON
-        import re
-        m = re.search(r'\{[\s\S]*\}', result)
-        if m:
-            try:
-                return json.loads(m.group())
-            except Exception:
-                pass
-        return result  # 纯文本
+        result = _robust_ai_call(prompt, max_tokens=1500)
+        if result:
+            import re
+            m = re.search(r'\{[\s\S]*\}', result)
+            if m:
+                try:
+                    return json.loads(m.group())
+                except Exception:
+                    pass
+            return result
     except Exception as e:
         print(f"[👁️看盘] call_ai 失败: {e}")
-        # 回退: 根据数据直接生成增强版
-        return _ai_fallback(ctx, focus_layer)
+    # 回退: 根据数据直接生成增强版
+    return _ai_fallback(ctx, focus_layer)
 
 
 def _ai_fallback(ctx, focus_layer):
@@ -5356,6 +5355,90 @@ ARTICLE_LENGTHS = [
 ]
 
 
+def _robust_ai_call(prompt, system_prompt="", max_tokens=1500, win=None):
+    """AI 自动 fallback — 主 provider 失败循环尝试所有可用 provider"""
+    import json as _j
+    import requests as _req
+    import os as _os
+
+    # 1️⃣ 先试主程序的 call_ai_model (用 active_provider)
+    callers = []
+    try:
+        from src.ui.tab_dapan import call_ai_model as _cai1; callers.append(_cai1)
+    except Exception: pass
+    if win is not None and hasattr(win, "_app") and getattr(win._app, "call_ai_model", None):
+        callers.append(win._app.call_ai_model)
+
+    for fn in callers:
+        try:
+            r = fn(prompt, system_prompt=system_prompt, max_tokens=max_tokens)
+            if r and isinstance(r, str) and len(r.strip()) > 20:
+                bad_words = ["402", "余额", "不足", "rate limit", "overloaded", "Error", "error"]
+                if not any(b in r[:100] for b in bad_words):
+                    return r  # ✅ 成功
+                print(f"[🤖AI] 主 provider 返回错误内容, 尝试 fallback...")
+        except Exception as e:
+            print(f"[🤖AI] 主 provider 异常: {e}")
+
+    # 2️⃣ 循环 ai_config.json 里所有 providers
+    cfg_path = _os.path.join(_os.path.dirname(__file__), "..", "config", "ai_config.json")
+    cfg_path = _os.path.abspath(cfg_path)
+    providers_order = ["deepseek", "doubao", "ollama"]
+    try:
+        with open(cfg_path, "r") as _f:
+            cfg = _j.load(_f)
+        cfg_providers = cfg.get("providers", {})
+    except Exception as e:
+        print(f"[🤖AI] 无法读 ai_config.json: {e}")
+        return None
+
+    for pname in providers_order:
+        p = cfg_providers.get(pname)
+        if not p: continue
+        api_key = (p.get("api_key") or "").strip()
+        # ollama 不需要 key
+        if not api_key and pname != "ollama": continue
+        if pname == "ollama":
+            try:
+                _req.get("http://localhost:11434/api/tags", timeout=2)
+            except Exception:
+                continue  # ollama 没跑, 跳过
+
+        base = p["base_url"].rstrip("/")
+        ep = p.get("endpoint", "/chat/completions")
+        model = p["model"]
+        url = f"{base}{ep}"
+        headers = {"Content-Type": "application/json"}
+        if api_key: headers["Authorization"] = f"Bearer {api_key}"
+
+        messages = []
+        if system_prompt: messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        body = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": p.get("temperature", 0.3),
+            "stream": False,
+        }
+        try:
+            resp = _req.post(url, headers=headers, json=body, timeout=p.get("timeout", 45))
+            if resp.status_code == 200:
+                data = resp.json()
+                text = data["choices"][0]["message"]["content"]
+                if text and len(text.strip()) > 10:
+                    print(f"[🤖AI] ✅ {pname}/{model} fallback 成功!")
+                    return text
+            else:
+                print(f"[🤖AI] {pname} 返回 {resp.status_code}: {resp.text[:80]}")
+        except Exception as e:
+            print(f"[🤖AI] {pname} 失败: {e}")
+
+    print("[🤖AI] 所有 provider 都失败")
+    return None
+
+
 def _article_output_dialog(win, ctx=None, focus_layer=None):
     """📝 文章生成弹窗 — 参考短剧弹窗风格, 多维度选择"""
     import tkinter as tk
@@ -5550,15 +5633,11 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
 
         def _work():
             try:
-                try:
-                    from src.ui.tab_dapan import call_ai_model
-                    result = call_ai_model(prompt, system_prompt=sys_prompt, max_tokens=max_tokens)
-                except Exception:
-                    try:
-                        result = win._app.call_ai_model(prompt, system_prompt=sys_prompt,
-                                                       max_tokens=max_tokens)
-                    except Exception:
-                        result = _article_fallback(prompt, author, mode, plat, len_name)
+                # 用 robust wrapper 自动 fallback 所有 provider
+                result = _robust_ai_call(prompt, system_prompt=sys_prompt,
+                                          max_tokens=max_tokens, win=win)
+                if not result:
+                    result = _article_fallback(prompt, author, mode, plat, len_name)
                 dlg.after(0, lambda: _show_result(result))
             except Exception as e:
                 import traceback
@@ -5989,11 +6068,8 @@ def _vv_ai_extract(raw_text, call_fn=None, max_tokens=2000):
 
     if call_fn is None:
         def call_fn(prompt, system_prompt="", max_tokens=1500):
-            try:
-                from src.ui.tab_dapan import call_ai_model as _cai
-                return _cai(prompt, system_prompt=system_prompt, max_tokens=max_tokens)
-            except Exception:
-                return None
+            return _robust_ai_call(prompt, system_prompt=system_prompt,
+                                    max_tokens=max_tokens)
 
     prompt = f"""请从以下财经文章中提取结构化信息, 严格按 JSON 格式输出:
 
@@ -6079,11 +6155,12 @@ def _vv_style_analysis(author, market_ctx, call_fn=None):
                 pass
 
     if call_fn is None:
-        try:
-            from src.ui.tab_dapan import call_ai_model as _cai
-            call_fn = _cai
-        except Exception:
-            return "❌ AI 未配置, 无法进行风格分析"
+        def call_fn(prompt, system_prompt="", max_tokens=2500):
+            return _robust_ai_call(prompt, system_prompt=system_prompt,
+                                    max_tokens=max_tokens)
+        # 如果 robust 返回 None, 提前返回
+        if _robust_ai_call("test", max_tokens=100) is None:
+            return "❌ 所有 AI provider 都不可用 (deepseek余额不足, doubao未填key, ollama未启动)\n\n请在 config/ai_config.json 配置豆包 API key, 或安装 ollama 本地运行 qwen2.5"
 
     prompt = f"""请模仿【{author}】的分析风格和逻辑, 基于当前市场数据给出分析。
 
