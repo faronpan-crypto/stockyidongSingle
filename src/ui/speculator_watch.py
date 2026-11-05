@@ -979,15 +979,12 @@ def show_speculator_watch(root=None, app=None):
     _build_futures_grid(row_bot, win, 1)
     _build_cycle_panel(row_bot, win, 2)
 
-    # ── row_leak (row=2, 固定200px): 2 列操作层 ──
-    # 左: ⑥状态判定 (综合判断)
-    # 右: ⑦捡漏 (操作入口)
+    # ── row_leak (row=2, 固定200px): 只保留状态判定 (去掉捡漏) ──
     row_leak = tk.Frame(left_pane, bg="#121212", height=200)
     row_leak.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(2, 0))
     row_leak.pack_propagate(False)
 
     _build_status_panel(row_leak, win, 0)
-    _build_leak_panel(row_leak, win)
 
     # 信号决策面板原来是 grid col=1 跨 1 行, 现在 pack 到 row_top — 需要调整其内部布局
     # 让它在 row_top 三列中正确占位
@@ -3359,11 +3356,12 @@ def _build_watch_analysis(parent, win):
     tk.Button(top, text="🤖 AI分析", command=lambda: _ai_popup(win),
               bg="#3949AB", fg="#ECEFF1", font=("", 10, "bold")).pack(side=tk.RIGHT, padx=4)
 
-    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0, width=260)
+    # Canvas 加宽 + body grid 2 列
+    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0, width=420)
     sb = tk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
     body = tk.Frame(canvas, bg="#121212")
     body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.create_window((0, 0), window=body, anchor="nw", width=260)
+    canvas.create_window((0, 0), window=body, anchor="nw", width=420)
     canvas.configure(yscrollcommand=sb.set)
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     sb.pack(side=tk.RIGHT, fill=tk.Y)
@@ -3371,21 +3369,27 @@ def _build_watch_analysis(parent, win):
     def _mw(e): canvas.yview_scroll(int(-e.delta / 120), "units")
     canvas.bind_all("<MouseWheel>", _mw)
 
-    # 结论区 (特大字体, 独立)
+    # body grid: 2 列等宽, 自动换行
+    body.grid_columnconfigure(0, weight=1, uniform="wa")
+    body.grid_columnconfigure(1, weight=1, uniform="wa")
+
+    # 结论区 (特大字体, 跨 2 列)
     concl_lf = tk.LabelFrame(body, text="🎯 今日结论",
                              bg="#121212", fg="#FFD54F", font=("", 11, "bold"))
-    concl_lf.pack(fill=tk.X, padx=8, pady=(6, 8))
+    concl_lf.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=8, pady=(6, 8))
     win._wa_conclusion = tk.Label(concl_lf, text="⏳ 加载中...",
                                  bg="#121212", fg="#FFFFFF", font=("", _CONCL[0], "bold"),
-                                 wraplength=240, justify=tk.LEFT, padx=8, pady=6)
+                                 wraplength=400, justify=tk.LEFT, padx=8, pady=6)
     win._wa_conclusion.pack(fill=tk.X)
 
-    # 7 层 — 每层加 ❓🤖 按钮
+    # 7 层 — 2 列 grid 排列
     win._wa_layers = {}   # title → content label
     win._wa_lfs = {}      # title → LabelFrame
-    for title, question, color in WATCH_ANALYSIS_LAYERS:
+    for i, (title, question, color) in enumerate(WATCH_ANALYSIS_LAYERS):
+        r = 1 + i // 2  # row 从 1 开始, 每 2 个一行
+        c = i % 2       # col 0 或 1
         lf = tk.LabelFrame(body, text=title, bg="#121212", fg=color, font=("", _LF[0], "bold"))
-        lf.pack(fill=tk.X, padx=8, pady=5)
+        lf.grid(row=r, column=c, sticky="nsew", padx=6, pady=5)
         win._wa_lfs[title] = lf
 
         # 层顶部: 问题 + ❓ + 🤖
@@ -3405,10 +3409,10 @@ def _build_watch_analysis(parent, win):
         ai_btn.bind("<Button-1>", lambda _e, t=title: _ai_layer_popup(win, t))
         ai_btn.bind("<Double-Button-1>", lambda _e, t=title: _ai_layer_popup(win, t))
 
-        # 内容
+        # 内容 (wraplength 加宽到 190 适合 2 列)
         lbl = tk.Label(lf, text="⏳ 加载中...", bg="#121212", fg="#E0E0E0",
-                       font=("", _F[0]), wraplength=240, justify=tk.LEFT,
-                       padx=8, pady=6)
+                       font=("", _F[0]), wraplength=190, justify=tk.LEFT,
+                       padx=6, pady=4)
         lbl.pack(fill=tk.X)
         win._wa_layers[title] = lbl
 
