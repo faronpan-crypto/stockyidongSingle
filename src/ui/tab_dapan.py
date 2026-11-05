@@ -15859,6 +15859,424 @@ class DapanMixin:
             print(f"[📺看盘] ❌ 异常: {e}", flush=True)
             _tb.print_exc()
 
+    def _show_oversold_dialog(self):
+        """🎯 超跌分析 — 个股超跌评分 + 板块联动 + 全球资产机会"""
+        import tkinter as tk
+        import tkinter.ttk as ttk
+        import threading as _th
+        from datetime import datetime, timedelta
+        import pandas as pd, numpy as np
+        import traceback as _tb
+        print("[🎯超跌] 被调用!", flush=True)
+        try:
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            dlg = tk.Toplevel(root)
+            dlg.title("🎯 超跌分析 — Oversold Stock Analyzer")
+            dlg.geometry("1250x880")
+            dlg.configure(bg="#121212")
+            dlg.transient(root)
+            dlg.minsize(1000, 700)
+
+            _font = ("Helvetica", 11)
+            _big = ("Helvetica", 22, "bold")
+            _mid = ("Helvetica", 13, "bold")
+            _sm = ("Helvetica", 10)
+            _mono = ("Menlo", 11)
+
+            # ═══════ 顶部输入区 ═══════
+            top = tk.Frame(dlg, bg="#121212")
+            top.pack(fill=tk.X, padx=12, pady=(10, 4))
+            tk.Label(top, text="🎯 超跌分析", fg="#FFD54F", bg="#121212", font=_mid).pack(side=tk.LEFT)
+            tk.Label(top, text="输入股票 (代码/名称, 空格/逗号/换行分隔) 或 上传截图自动识别",
+                     fg="#888", bg="#121212", font=_sm).pack(side=tk.LEFT, padx=14)
+
+            status_lbl = tk.Label(top, text="", fg="#4FC3F7", bg="#121212", font=_sm)
+            status_lbl.pack(side=tk.RIGHT)
+
+            # ═══════ 输入框 + 按钮 ═══════
+            input_f = tk.Frame(dlg, bg="#121212")
+            input_f.pack(fill=tk.X, padx=12, pady=4)
+
+            entry = tk.Text(input_f, height=2, bg="#1E1E1E", fg="#FFF", font=_font, relief=tk.FLAT,
+                            borderwidth=0, padx=10, pady=6, insertbackground="#4FC3F7")
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+            entry.insert("1.0", "300139, 601899, 002460\n晓程科技, 紫金矿业, 赣锋锂业")
+
+            btn_frame = tk.Frame(input_f, bg="#121212")
+            btn_frame.pack(side=tk.RIGHT)
+
+            def _do_ocr():
+                import tkinter.filedialog as fd
+                path = fd.askopenfilename(title="选择超跌股票截图",
+                    filetypes=[("图片", "*.png *.jpg *.jpeg *.gif *.bmp"), ("全部", "*.*")])
+                if not path: return
+                try:
+                    status_lbl.configure(text=f"⏳ OCR 识别中...", fg="#FFD54F")
+                    root.update()
+                    import ddddocr
+                    ocr = ddddocr.DdddOcr(show_ad=False)
+                    with open(path, "rb") as f:
+                        txt = ocr.classification(f.read())
+                    entry.delete("1.0", tk.END)
+                    entry.insert("1.0", txt)
+                    # 解析股票代码
+                    import re
+                    codes = re.findall(r"\b\d{6}\b", txt)
+                    entry.delete("1.0", tk.END)
+                    entry.insert("1.0", ", ".join(codes))
+                    status_lbl.configure(text=f"✅ OCR 识别出 {len(codes)} 个代码", fg="#66BB6A")
+                except ImportError:
+                    status_lbl.configure(text="❌ ddddocr 未安装", fg="#F44336")
+                except Exception as e:
+                    status_lbl.configure(text=f"❌ OCR 失败: {str(e)[:30]}", fg="#F44336")
+
+            tk.Button(btn_frame, text="📷 截图识别", bg="#546E7A", fg="white", font=_font,
+                      relief=tk.FLAT, padx=10, command=_do_ocr).pack(side=tk.LEFT, padx=3)
+            tk.Button(btn_frame, text="🔍 开始分析", bg="#2E7D32", fg="white", font=_font,
+                      relief=tk.FLAT, padx=12, command=lambda: _do_all()).pack(side=tk.LEFT, padx=3)
+
+            # ═══════ Notebook 深度分析 ═══════
+            nb = ttk.Notebook(dlg)
+            nb.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
+
+            # Tab1: 个股超跌评分表
+            tab1 = tk.Frame(nb, bg="#121212")
+            nb.add(tab1, text=" 📋 超跌个股评分 ")
+            result_txt = tk.Text(tab1, bg="#1E1E1E", fg="#DDD", font=_mono, wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=12, pady=10)
+            result_txt.pack(fill=tk.BOTH, expand=True)
+            result_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 11, "bold"))
+            result_txt.tag_configure("g", foreground="#EF5350", font=("Helvetica", 11, "bold"))
+            result_txt.tag_configure("b", foreground="#66BB6A", font=("Helvetica", 11, "bold"))
+            result_txt.tag_configure("w", foreground="#FFD54F")
+            result_txt.tag_configure("r", foreground="#F44336")
+            result_txt.tag_configure("m", foreground="#4FC3F7")
+
+            # Tab2: 板块联动 + 全球资产
+            tab2 = tk.Frame(nb, bg="#121212")
+            nb.add(tab2, text=" 🌐 板块→全球资产联动 ")
+            link_txt = tk.Text(tab2, bg="#1E1E1E", fg="#DDD", font=_font, wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=12, pady=10)
+            link_txt.pack(fill=tk.BOTH, expand=True)
+            link_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 12, "bold"))
+            link_txt.tag_configure("g", foreground="#EF5350", font=("Helvetica", 11, "bold"))
+            link_txt.tag_configure("b", foreground="#66BB6A", font=("Helvetica", 11, "bold"))
+            link_txt.tag_configure("w", foreground="#FFD54F")
+            link_txt.tag_configure("m", foreground="#4FC3F7", font=("Helvetica", 11, "bold"))
+            link_txt.tag_configure("r", foreground="#F44336")
+
+            # Tab3: 机会发现
+            tab3 = tk.Frame(nb, bg="#121212")
+            nb.add(tab3, text=" 💡 机会发现 ")
+            idea_txt = tk.Text(tab3, bg="#1E1E1E", fg="#EEE", font=_font, wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=12, pady=10)
+            idea_txt.pack(fill=tk.BOTH, expand=True)
+            idea_txt.tag_configure("g", foreground="#EF5350", font=("Helvetica", 12, "bold"))
+            idea_txt.tag_configure("b", foreground="#66BB6A", font=("Helvetica", 12, "bold"))
+            idea_txt.tag_configure("w", foreground="#FFD54F", font=("Helvetica", 12, "bold"))
+            idea_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 14, "bold"))
+            idea_txt.tag_configure("m", foreground="#4FC3F7", font=("Helvetica", 11, "bold"))
+
+            # ══════════════════════════════════════════════════════
+            # 板块→全球资产 映射表
+            # ══════════════════════════════════════════════════════
+            SECTOR_GLOBAL_MAP = {
+                "贵金属": [("💎黄金", "正相关 (避险+商品)", "买入黄金股/避险")],
+                "黄金": [("💎黄金", "正相关 (直接)", "黄金涨→买入黄金股")],
+                "有色金属": [("💎黄金", "正相关 (金属周期)", "关注铜铝锌")],
+                "钢铁": [("🛢️原油", "正相关 (工业周期)", "PPI上行受益")],
+                "煤炭": [("🛢️原油", "正相关 (能源替代)", "油价涨→煤炭强")],
+                "石油": [("🛢️原油", "正相关 (直接)", "油价↑→石油股↑")],
+                "化工": [("🛢️原油", "正相关 (原料)", "油价↑→化工成本涨")],
+                "半导体": [("📈纳指", "正相关 (科技共振)", "美股科技强→A股跟")],
+                "软件服务": [("📈纳指", "正相关", "科技共振")],
+                "互联网": [("📈纳指", "正相关", "科技共振")],
+                "通信设备": [("📈纳指", "正相关", "科技共振")],
+                "元器件": [("📈纳指", "正相关", "科技共振")],
+                "银行": [("🏦美债", "正相关 (息差)", "利率↑银行受益")],
+                "保险": [("🏦美债", "正相关 (投资收益)", "利率↑保险受益")],
+                "房地产": [("🏦美债", "负相关 (利率↑压制)", "降息→地产强")],
+                "光伏": [("🏦美债", "负相关 (成长股)", "利率↓利好")],
+                "锂电": [("🛢️原油", "正相关 (替代能源)", "油价↑→锂电有空间")],
+                "新能源车": [("🛢️原油", "正相关 (替代)", "油价↑→新能源车有空间")],
+                "军工": [("💎黄金", "正相关 (地缘避险)", "地缘紧张→军工+黄金")],
+                "农业": [("🛢️原油", "正相关 (化肥/运输)", "油价↑→农业成本")],
+                "医药": [("📈纳指", "间接 (biotech)", "美股biotech联动")],
+                "白酒": [("💵美元", "汇率影响进口成本", "人民币贬值→进口贵")],
+            }
+
+            # ══════════════════════════════════════════════════════
+            # 数据获取函数
+            # ══════════════════════════════════════════════════════
+            import concurrent.futures as cf
+            import re as _re
+
+            def _parse_symbols(text):
+                """解析文本框里的股票"""
+                import akshare as ak
+                raw = _re.sub(r"[，,、\s\n]+", " ", text.strip()).split()
+                codes = []
+                for item in raw:
+                    item = item.strip()
+                    if not item: continue
+                    # 6位代码
+                    if _re.match(r"^\d{6}$", item):
+                        codes.append(item)
+                    else:
+                        # 名称 → 代码 (ak.stock_info_a_code_name)
+                        try:
+                            infos = ak.stock_info_a_code_name()
+                            row = infos[infos["name"] == item]
+                            if len(row) > 0:
+                                codes.append(row.iloc[0]["code"])
+                            else:
+                                # 模糊匹配
+                                row2 = infos[infos["name"].str.contains(item[:2])]
+                                if len(row2) > 0:
+                                    codes.append(row2.iloc[0]["code"])
+                        except Exception: pass
+                return codes
+
+            def _analyze_stock(code):
+                """单只股票超跌分析"""
+                import akshare as ak
+                res = {"code": code}
+                try:
+                    # ① 基本信息
+                    try:
+                        info = ak.stock_individual_info_em(symbol=code)
+                        res["name"] = info["value"].iloc[2]
+                        res["industry"] = info["value"].iloc[7]  # 行业
+                        res["mcap"] = info["value"].iloc[5]
+                    except Exception as e:
+                        res["name"] = "?"
+                        res["industry"] = "未知"
+
+                    # ② 日线 + 超跌指标
+                    try:
+                        df = ak.stock_zh_a_hist(symbol=code, period="daily",
+                            start_date="20250101", adjust="qfq")
+                        if df is None or len(df) < 20:
+                            res["err"] = "日线数据不足"
+                            return res
+                        df = df.sort_values("日期").reset_index(drop=True)
+                        df["ma5"] = df["收盘"].rolling(5).mean()
+                        df["ma15"] = df["收盘"].rolling(15).mean()
+                        df["ma60"] = df["收盘"].rolling(60).mean()
+                        df["high20"] = df["最高"].rolling(20).max()
+                        df["high60"] = df["最高"].rolling(60).max()
+
+                        last = df.iloc[-1]
+                        res["close"] = last["收盘"]
+                        res["pct_1d"] = (last["收盘"] - df["收盘"].iloc[-2]) / df["收盘"].iloc[-2] * 100
+                        res["pct_5d"] = (last["收盘"] - df["收盘"].iloc[-6]) / df["收盘"].iloc[-6] * 100
+                        res["pct_10d"] = (last["收盘"] - df["收盘"].iloc[-11]) / df["收盘"].iloc[-11] * 100
+                        res["pct_from_high20"] = (last["收盘"] - df["high20"].iloc[-1]) / df["high20"].iloc[-1] * 100
+                        res["pct_from_high60"] = (last["收盘"] - df["high60"].iloc[-1]) / df["high60"].iloc[-1] * 100
+                        res["below_ma15"] = (last["收盘"] - df["ma15"].iloc[-1]) / df["ma15"].iloc[-1] * 100 if df["ma15"].iloc[-1] else 0
+                        res["below_ma60"] = (last["收盘"] - df["ma60"].iloc[-1]) / df["ma60"].iloc[-1] * 100 if df["ma60"].iloc[-1] else 0
+
+                        # ③ 超跌评分 (0-10)
+                        score = 0
+                        tags = []
+                        if res["pct_from_high20"] < -15: score += 3; tags.append(("r", "🆘 距20日高点暴跌>15%"))
+                        elif res["pct_from_high20"] < -10: score += 2; tags.append(("g", "📉 距20日高点超跌>10%"))
+                        elif res["pct_from_high20"] < -5: score += 1; tags.append(("w", "📉 距20日高点超跌5-10%"))
+                        if res["pct_from_high60"] < -30: score += 3; tags.append(("r", "🆘 距60日高点暴跌>30%"))
+                        elif res["pct_from_high60"] < -20: score += 2; tags.append(("g", "📉 距60日高点超跌>20%"))
+                        elif res["pct_from_high60"] < -10: score += 1; tags.append(("w", "📉 距60日高点超跌10-20%"))
+                        if res["pct_5d"] < -8: score += 2; tags.append(("r", "🆘 5日暴跌>8%"))
+                        elif res["pct_5d"] < -3: score += 1; tags.append(("g", "📉 5日下跌3-8%"))
+                        if res["pct_10d"] < -10: score += 1; tags.append(("g", "📉 10日跌>10%"))
+                        if res["below_ma15"] < -5: score += 1; tags.append(("w", "↘️ 远低于MA15 (>5%)"))
+                        if res["below_ma60"] < -10: score += 1; tags.append(("w", "↘️ 远低于MA60 (>10%)"))
+
+                        res["score"] = min(score, 10)
+                        res["tags"] = tags
+                        res["oversold"] = score >= 3
+
+                    except Exception as e:
+                        res["err"] = f"日线异常: {str(e)[:40]}"
+
+                except Exception as e:
+                    res["err"] = f"分析失败: {str(e)[:40]}"
+                return res
+
+            def _fetch_global_assets():
+                """全球资产最新价 + 近5日涨跌"""
+                import akshare as ak
+                assets = {}
+                def fetch(n, fn, **kw):
+                    try:
+                        df = getattr(ak, fn)(**kw)
+                        if df is None or len(df) < 2: return
+                        c = "close" if "close" in df.columns else "收盘"
+                        price = float(df[c].iloc[-1])
+                        pct_5 = (float(df[c].iloc[-1]) - float(df[c].iloc[-6])) / float(df[c].iloc[-6]) * 100 if len(df) >= 6 else 0
+                        assets[n] = {"price": price, "pct_5d": pct_5}
+                    except Exception: pass
+
+                with cf.ThreadPoolExecutor(4) as ex:
+                    ex.submit(fetch, "💎黄金", "futures_foreign_hist", symbol="XAU")
+                    ex.submit(fetch, "🛢️原油", "futures_foreign_hist", symbol="CL")
+                    ex.submit(fetch, "📈纳指", "index_us_stock_sina", symbol=".IXIC")
+                    ex.submit(fetch, "🏦美债", "bond_zh_us_rate")
+                return assets
+
+            # ══════════════════════════════════════════════════════
+            # 渲染
+            # ══════════════════════════════════════════════════════
+            def _do_all():
+                _t0 = datetime.now()
+                root.update()
+                result_txt.delete("1.0", tk.END)
+                link_txt.delete("1.0", tk.END)
+                idea_txt.delete("1.0", tk.END)
+
+                text = entry.get("1.0", tk.END)
+                codes = _parse_symbols(text)
+                if not codes:
+                    status_lbl.configure(text="❌ 没识别到股票代码", fg="#F44336")
+                    return
+                status_lbl.configure(text=f"⏳ 分析 {len(codes)} 只股票 + 全球资产...", fg="#FFD54F")
+
+                # 并行: 个股分析 + 全球资产
+                with cf.ThreadPoolExecutor(min(len(codes)+1, 8)) as ex:
+                    futs = [ex.submit(_analyze_stock, c) for c in codes]
+                    fut_global = ex.submit(_fetch_global_assets)
+                    results = [f.result(timeout=25) for f in futs]
+                    global_assets = fut_global.result(timeout=15)
+
+                # ── Tab1: 超跌评分表 ──
+                result_txt.insert(tk.END, f"📋 超跌个股分析 ({len(results)} 只)\n", "hdr")
+                result_txt.insert(tk.END, f"{'代码':8s} {'名称':10s} {'行业':10s} {'收盘':>8s} {'20日高点%':>10s} {'60日高点%':>10s} {'5日%':>7s} {'超跌分':>6s}\n", "hdr")
+                result_txt.insert(tk.END, "─" * 80 + "\n", "w")
+
+                oversold_list = []
+                for r in results:
+                    if "err" in r:
+                        result_txt.insert(tk.END, f"{r['code']:8s} ❌ {r['err']}\n", "r")
+                        continue
+                    pct20 = f"{r.get('pct_from_high20',0):+.2f}%" if "pct_from_high20" in r else "?"
+                    pct60 = f"{r.get('pct_from_high60',0):+.2f}%" if "pct_from_high60" in r else "?"
+                    pct5 = f"{r.get('pct_5d',0):+.2f}%" if "pct_5d" in r else "?"
+                    score = r.get("score", 0)
+                    score_str = f"{score}/10"
+                    tag = "g" if score >= 6 else "w" if score >= 3 else "b"
+                    line = f"{r['code']:8s} {r.get('name','?'):10s} {r.get('industry','?'):10s} {r.get('close',0):>8.2f} {pct20:>10s} {pct60:>10s} {pct5:>7s} {score_str:>6s}\n"
+                    result_txt.insert(tk.END, line, tag)
+                    if score >= 3: oversold_list.append(r)
+
+                # 超跌标签详情
+                result_txt.insert(tk.END, f"\n📌 超跌信号详情:\n", "hdr")
+                for r in oversold_list:
+                    result_txt.insert(tk.END, f"\n  {r['name']}({r['code']}) [超跌 {r.get('score',0)}/10]\n", "m")
+                    for t, txt in r.get("tags", []):
+                        result_txt.insert(tk.END, f"    {txt}\n", t)
+
+                # ── Tab2: 板块联动 + 全球资产 ──
+                link_txt.insert(tk.END, "🌐 板块 → 全球资产 联动分析\n\n", "hdr")
+
+                link_txt.insert(tk.END, "━━━ 全球资产最新 ━━━\n", "w")
+                for name, info in global_assets.items():
+                    price_str = f"${info['price']:,.0f}" if info["price"] > 1000 else f"{info['price']:.2f}"
+                    pct_str = f"{info['pct_5d']:+.2f}%"
+                    tag = "b" if info["pct_5d"] > 0.5 else "g" if info["pct_5d"] < -0.5 else "w"
+                    link_txt.insert(tk.END, f"  {name:8s} {price_str:>10s}  5日 {pct_str}\n", tag)
+                link_txt.insert(tk.END, "\n")
+
+                # 每只股票的联动
+                seen_industries = set()
+                for r in results:
+                    if "err" in r: continue
+                    ind = r.get("industry", "")
+                    if ind in seen_industries: continue
+                    seen_industries.add(ind)
+                    links = SECTOR_GLOBAL_MAP.get(ind, [])
+                    if not links: continue
+
+                    link_txt.insert(tk.END, f"━━━ {r['name']}({r['code']}) — 行业: {ind} ━━━\n", "hdr")
+                    link_txt.insert(tk.END, f"  超跌评分: {r.get('score',0)}/10  |  距20日高点 {r.get('pct_from_high20',0):+.2f}%  |  距60日高点 {r.get('pct_from_high60',0):+.2f}%\n", "m")
+                    link_txt.insert(tk.END, f"  全球资产联动:\n", "w")
+
+                    for asset_name, relation, action in links:
+                        asset = global_assets.get(asset_name, {})
+                        price = asset.get("price", "?")
+                        pct5d = asset.get("pct_5d", 0)
+                        price_str = f"${price:,.0f}" if isinstance(price, (int,float)) and price > 1000 else str(price)
+                        if pct5d > 1:
+                            trend = "📈 近5日上涨"
+                            trend_tag = "b"
+                        elif pct5d < -1:
+                            trend = "📉 近5日下跌"
+                            trend_tag = "g"
+                        else:
+                            trend = "➡️ 近5日平稳"
+                            trend_tag = "w"
+
+                        link_txt.insert(tk.END, f"    → {asset_name} = {price_str} ({trend})\n", trend_tag)
+                        link_txt.insert(tk.END, f"      关系: {relation}\n")
+                        link_txt.insert(tk.END, f"      ⚡ 操作: {action}\n\n", "m")
+
+                # ── Tab3: 机会发现 ──
+                idea_txt.insert(tk.END, "💡 超跌机会发现\n\n", "hdr")
+                ideas = []
+
+                # 1. 超跌严重的股票 → 反弹机会
+                for r in oversold_list:
+                    score = r.get("score", 0)
+                    links = SECTOR_GLOBAL_MAP.get(r.get("industry", ""), [])
+                    if score >= 6:
+                        tag = "g"
+                        txt = f"🆘 {r['name']}({r['code']}) 超跌{score}/10 → 严重超跌, 关注反弹机会"
+                    elif score >= 4:
+                        tag = "w"
+                        txt = f"📉 {r['name']}({r['code']}) 超跌{score}/10 → 中度超跌, 等企稳信号"
+                    else:
+                        continue
+                    # 叠加全球资产利好
+                    for asset_name, rel, act in links:
+                        a = global_assets.get(asset_name, {})
+                        if a.get("pct_5d", 0) > 2:
+                            txt += f"  ✅ {asset_name}近5日涨{a['pct_5d']:.1f}% → {act}"
+                            tag = "b" if "正相关" in rel else tag
+                    ideas.append((tag, txt))
+
+                # 2. 板块共振机会: 全球资产上涨 + 对应板块有超跌股
+                for r in oversold_list:
+                    ind = r.get("industry", "")
+                    links = SECTOR_GLOBAL_MAP.get(ind, [])
+                    for asset_name, rel, act in links:
+                        a = global_assets.get(asset_name, {})
+                        if a.get("pct_5d", 0) > 3 and "正相关" in rel:
+                            ideas.append(("b", f"🎯 板块共振: {ind} 属{r['name']} + {asset_name}近5日大涨{a['pct_5d']:.1f}% → {act}"))
+
+                # 3. 行业整体超跌机会
+                from collections import defaultdict
+                ind_count = defaultdict(list)
+                for r in oversold_list:
+                    ind_count[r.get("industry", "?")].append(r)
+                for ind, stocks in ind_count.items():
+                    if len(stocks) >= 2:
+                        ideas.append(("w", f"📊 行业{ind}有{len(stocks)}只超跌 → 板块性机会, 关注龙头股"))
+
+                # 渲染
+                if ideas:
+                    for tag, text in ideas:
+                        idea_txt.insert(tk.END, text + "\n\n", tag)
+                else:
+                    idea_txt.insert(tk.END, "当前没有明显的超跌机会信号\n", "w")
+
+                # 总结
+                idea_txt.insert(tk.END, f"⏰ 更新 {datetime.now().strftime('%H:%M:%S')}  |  数据源: AKShare + 东方财富\n", "w")
+
+                dt = (datetime.now() - _t0).total_seconds()
+                status_lbl.configure(text=f"✅ 完成 ({dt:.1f}s)  |  超跌 {len(oversold_list)}/{len(results)} 只", fg="#66BB6A")
+                nb.select(tab1)
+
+            _do_all()
+
+        except Exception as e:
+            print(f"[🎯超跌] ❌ 异常: {e}", flush=True)
+            _tb.print_exc()
+
     def _show_1min_kline_dialog(self):
         """📈 1min K线图 — 复用高抛低吸里的 _show_minute_kline_dialog"""
         import traceback as _tb
