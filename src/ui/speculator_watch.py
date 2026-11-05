@@ -821,9 +821,9 @@ def show_speculator_watch(root=None, app=None):
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
     # 右面板加宽 (340 → 420)
-    # 左1100 / 右500 (左减30%, 右保底500, 窗口2100时各占合理空间)
-    left_pane = tk.Frame(outer, bg="#121212", width=1100); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    right_pane = tk.Frame(outer, bg="#121212", width=500); right_pane.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
+    # 左65% / 右35% (用 expand 权重控制比例)
+    left_pane = tk.Frame(outer, bg="#121212", width=800); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=65)
+    right_pane = tk.Frame(outer, bg="#121212", width=400); right_pane.pack(side=tk.RIGHT, fill=tk.BOTH, expand=35, padx=(4, 0))
 
     # left_pane grid 配置 (2 列 × 3 行)
     left_pane.grid_rowconfigure(0, weight=3)
@@ -862,7 +862,7 @@ def show_speculator_watch(root=None, app=None):
     # ── row_leak (row=2, 固定200px): 2 列操作层 ──
     # 左: ⑥状态判定 (综合判断)
     # 右: ⑦捡漏 (操作入口)
-    row_leak = tk.Frame(left_pane, bg="#121212", height=200)
+    row_leak = tk.Frame(left_pane, bg="#121212", height=120)
     row_leak.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(2, 0))
     row_leak.pack_propagate(False)
 
