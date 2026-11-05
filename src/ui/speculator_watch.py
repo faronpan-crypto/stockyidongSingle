@@ -930,6 +930,16 @@ def show_speculator_watch(root=None, app=None):
     tk.Button(fs_box, text="A+", width=3, bg="#37474F", fg="#ECEFF1",
               font=("", 10), command=lambda: _change_main_fs(+1)).pack(side=tk.LEFT, padx=2)
 
+    # ── 📚 财经大V风格学习 (加在右侧字体调节左边) ──
+    def _open_vv():
+        _show_vv_from_speculator(win)
+    _vv_count = len(_vv_list_authors())
+    vv_btn_text = f"📚 大V风格库 ({_vv_count})"
+    vv_btn = tk.Button(header, text=vv_btn_text, font=("", 10, "bold"),
+                        bg="#1565C0", fg="#FFFFFF", padx=10, pady=4,
+                        cursor="hand2", command=_open_vv)
+    vv_btn.pack(side=tk.RIGHT, padx=(0, 14), pady=10)
+
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
     # 右面板加宽 (340 → 420)
@@ -5668,3 +5678,816 @@ def _article_fallback(prompt, author, mode, plat, length):
 ✅ 适配 {plat} 平台格式
 ✅ {mode} 完整分析内容
 """
+
+# ═══════════════════════════════════════════════════════════════════
+# 📚 财经大V风格学习系统 — author_articles DB + AI 提取 + TF-IDF 匹配
+# 追加到 speculator_watch.py 末尾
+# ═══════════════════════════════════════════════════════════════════
+
+# ── DB 层 ──
+
+_VV_DB_PATH = os.path.expanduser("~/.qclaw/vv_authors.db")
+
+def _vv_get_conn():
+    """打开/创建大V文章数据库"""
+    os.makedirs(os.path.dirname(_VV_DB_PATH), exist_ok=True)
+    import sqlite3
+    conn = sqlite3.connect(_VV_DB_PATH, timeout=10, isolation_level=None)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.row_factory = sqlite3.Row
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS author_articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            author TEXT NOT NULL,
+            source TEXT DEFAULT '',
+            pub_date TEXT DEFAULT '',
+            raw_content TEXT,
+            extracted_json TEXT,          -- AI 提取的 JSON
+            style_summary TEXT DEFAULT '', -- 一句话风格总结
+            logic_patterns TEXT DEFAULT '', -- 逻辑模式数组 JSON
+            tags TEXT DEFAULT '',         -- 关键词逗号分隔
+            market_tags TEXT DEFAULT '',  -- 板块/个股逗号分隔
+            embedding TEXT DEFAULT '',    -- TF-IDF {word: weight} JSON
+            created_at TEXT
+        )""")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS author_profiles (
+            author TEXT PRIMARY KEY,
+            article_count INTEGER DEFAULT 0,
+            style_summary TEXT DEFAULT '', -- 综合风格
+            typical_patterns TEXT DEFAULT '', -- 典型逻辑模式 JSON
+            keywords TEXT DEFAULT '',     -- 高频关键词权重 JSON
+            common_market_tags TEXT DEFAULT '', -- 常见关注板块
+            updated_at TEXT
+        )""")
+    return conn
+
+
+def _vv_insert(author, source, pub_date, raw_content, extracted_json=None,
+               style_summary="", logic_patterns="", tags="", market_tags="", embedding=""):
+    """插入一篇文章"""
+    import json as _j
+    from datetime import datetime
+    conn = _vv_get_conn()
+    try:
+        conn.execute("""INSERT INTO author_articles
+            (author, source, pub_date, raw_content, extracted_json,
+             style_summary, logic_patterns, tags, market_tags, embedding, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (author, source, pub_date, raw_content,
+             extracted_json if isinstance(extracted_json, str) else _j.dumps(extracted_json or {}, ensure_ascii=False),
+             style_summary,
+             logic_patterns if isinstance(logic_patterns, str) else _j.dumps(logic_patterns or [], ensure_ascii=False),
+             tags, market_tags,
+             embedding if isinstance(embedding, str) else _j.dumps(embedding or {}, ensure_ascii=False),
+             datetime.now().isoformat()))
+        conn.commit()
+        aid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        # 更新 author_profiles
+        _vv_update_profile(author, conn)
+        return aid
+    finally:
+        conn.close()
+
+
+def _vv_list_authors():
+    """列所有作者 (文章数倒序)"""
+    conn = _vv_get_conn()
+    try:
+        rows = conn.execute("""SELECT author, COUNT(*) as cnt,
+            GROUP_CONCAT(DISTINCT style_summary) as styles
+            FROM author_articles GROUP BY author ORDER BY cnt DESC""").fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def _vv_list_articles(author=None, limit=200):
+    """列文章 (可按作者筛选)"""
+    conn = _vv_get_conn()
+    try:
+        if author:
+            rows = conn.execute(
+                "SELECT id, author, source, pub_date, style_summary, tags, created_at "
+                "FROM author_articles WHERE author=? ORDER BY created_at DESC LIMIT ?",
+                (author, limit)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, author, source, pub_date, style_summary, tags, created_at "
+                "FROM author_articles ORDER BY created_at DESC LIMIT ?",
+                (limit,)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def _vv_get_article(aid):
+    """取文章详情"""
+    conn = _vv_get_conn()
+    try:
+        r = conn.execute("SELECT * FROM author_articles WHERE id=?", (aid,)).fetchone()
+        return dict(r) if r else None
+    finally:
+        conn.close()
+
+
+def _vv_delete(aid):
+    conn = _vv_get_conn()
+    try:
+        row = conn.execute("SELECT author FROM author_articles WHERE id=?", (aid,)).fetchone()
+        conn.execute("DELETE FROM author_articles WHERE id=?", (aid,))
+        conn.commit()
+        if row:
+            _vv_update_profile(row["author"], conn)
+    finally:
+        conn.close()
+
+
+def _vv_update_profile(author, conn=None):
+    """基于所有文章更新该作者风格画像"""
+    import json as _j
+    from datetime import datetime
+    own_conn = conn is None
+    if own_conn:
+        conn = _vv_get_conn()
+    try:
+        rows = conn.execute("""SELECT style_summary, logic_patterns, tags,
+            market_tags, embedding, author FROM author_articles
+            WHERE author=?""", (author,)).fetchall()
+        if not rows: return
+
+        # 综合风格: 取最近一篇的 style_summary
+        last_style = rows[-1]["style_summary"] or ""
+
+        # 合并关键词 embedding (平均权重)
+        merged_emb = {}
+        n_patterns = []
+        tag_counter = {}
+        market_counter = {}
+        for r in rows:
+            emb = _j.loads(r["embedding"] or "{}")
+            for w, v in emb.items():
+                merged_emb[w] = merged_emb.get(w, 0) + v
+            pat = _j.loads(r["logic_patterns"] or "[]")
+            n_patterns.extend(pat)
+            for t in (r["tags"] or "").split(","):
+                if t.strip(): tag_counter[t.strip()] = tag_counter.get(t.strip(), 0) + 1
+            for t in (r["market_tags"] or "").split(","):
+                if t.strip(): market_counter[t.strip()] = market_counter.get(t.strip(), 0) + 1
+
+        top_keywords = sorted(merged_emb.items(), key=lambda x: -x[1])[:30]
+        top_market = sorted(market_counter.items(), key=lambda x: -x[1])[:20]
+
+        conn.execute("""INSERT OR REPLACE INTO author_profiles
+            (author, article_count, style_summary, typical_patterns,
+             keywords, common_market_tags, updated_at)
+            VALUES (?,?,?,?,?,?,?)""",
+            (author, len(rows), last_style,
+             _j.dumps(list(dict.fromkeys(n_patterns))[:15], ensure_ascii=False),
+             _j.dumps(top_keywords, ensure_ascii=False),
+             ",".join(t for t, _ in top_market),
+             datetime.now().isoformat()))
+        conn.commit()
+    finally:
+        if own_conn: conn.close()
+
+
+def _vv_get_profile(author):
+    conn = _vv_get_conn()
+    try:
+        r = conn.execute("SELECT * FROM author_profiles WHERE author=?", (author,)).fetchone()
+        return dict(r) if r else None
+    finally:
+        conn.close()
+
+
+# ── TF-IDF 简化版 Embedding ──
+
+def _vv_tokenize(text):
+    """jieba 分词 + 过滤停用词"""
+    import jieba
+    # 自定义金融领域词典
+    jieba.add_word("涨停"); jieba.add_word("跌停"); jieba.add_word("连板")
+    jieba.add_word("主线"); jieba.add_word("题材"); jieba.add_word("龙头")
+    jieba.add_word("游资"); jieba.add_word("机构"); jieba.add_word("北向")
+    jieba.add_word("情绪周期"); jieba.add_word("冰点"); jieba.add_word("高潮")
+    jieba.add_word("共振"); jieba.add_word("轮动"); jieba.add_word("超跌")
+    jieba.add_word("修复"); jieba.add_word("反包"); jieba.add_word("炸板")
+    stopwords = set("的 了 在 是 我 有 和 就 不 人 都 一 一个 上 也 很 到 说 要 去 你 会 着 没有 看 好 自己 这".split())
+    tokens = [w for w in jieba.cut(text) if len(w.strip()) > 1 and w.strip() not in stopwords]
+    return tokens
+
+
+def _vv_tfidf_embed(text):
+    """把文本转成 {word: tfidf_weight}"""
+    import math
+    tokens = _vv_tokenize(text)
+    if not tokens: return {}
+    # TF
+    tf = {}
+    for t in tokens:
+        tf[t] = tf.get(t, 0) + 1
+    # 简单 IDF 近似: 高频词降权, 金融关键词提权
+    emb = {}
+    boost_words = {"涨停", "跌停", "连板", "主线", "题材", "龙头", "游资",
+                   "情绪", "共振", "轮动", "修复", "反包", "炸板", "机构",
+                   "北向", "价值", "长期", "业绩", "逻辑", "催化", "预期",
+                   "周期", "冰点", "高潮", "风险", "机会", "反弹", "新高"}
+    total = len(tokens)
+    for w, c in tf.items():
+        tfidf = (c / total) * math.log(1 + 1000 / (c + 1))
+        if w in boost_words: tfidf *= 2.0  # 金融关键词提权
+        emb[w] = round(tfidf, 4)
+    # Top 40
+    return dict(sorted(emb.items(), key=lambda x: -x[1])[:40])
+
+
+def _vv_cosine_sim(a, b):
+    """两个 {word: weight} 字典的余弦相似度"""
+    if not a or not b: return 0.0
+    common = set(a.keys()) & set(b.keys())
+    if not common: return 0.0
+    dot = sum(a[w] * b[w] for w in common)
+    na = sum(v * v for v in a.values()) ** 0.5
+    nb = sum(v * v for v in b.values()) ** 0.5
+    if na == 0 or nb == 0: return 0.0
+    return dot / (na * nb)
+
+
+def _vv_match_authors(query_text, top_k=5):
+    """输入一段文字 → 匹配最相似的作者, 返回 [(author, score), ...]"""
+    import json as _j
+    q_emb = _vv_tfidf_embed(query_text)
+    conn = _vv_get_conn()
+    try:
+        rows = conn.execute("SELECT author, embedding FROM author_articles").fetchall()
+        scores = {}
+        for r in rows:
+            e = _j.loads(r["embedding"] or "{}")
+            s = _vv_cosine_sim(q_emb, e)
+            scores[r["author"]] = scores.get(r["author"], 0) + s
+        # 归一化 + 文章数加权
+        art_count = {}
+        for r in rows:
+            art_count[r["author"]] = art_count.get(r["author"], 0) + 1
+        scored = [(a, round(s / max(1, art_count.get(a, 1) ** 0.3), 4))
+                  for a, s in scores.items()]
+        scored.sort(key=lambda x: -x[1])
+        return scored[:top_k]
+    finally:
+        conn.close()
+
+
+def _vv_match_articles(query_text, author=None, top_k=10):
+    """匹配最相似的历史文章"""
+    import json as _j
+    q_emb = _vv_tfidf_embed(query_text)
+    conn = _vv_get_conn()
+    try:
+        if author:
+            rows = conn.execute(
+                "SELECT id, author, pub_date, style_summary, embedding FROM author_articles WHERE author=?",
+                (author,)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, author, pub_date, style_summary, embedding FROM author_articles").fetchall()
+        results = []
+        for r in rows:
+            e = _j.loads(r["embedding"] or "{}")
+            s = _vv_cosine_sim(q_emb, e)
+            if s > 0.01:
+                results.append((dict(r), s))
+        results.sort(key=lambda x: -x[1])
+        return results[:top_k]
+    finally:
+        conn.close()
+
+
+# ── AI 提取层 ──
+
+_VV_EXTRACT_SYSTEM = """你是金融分析师 + 数据科学家。用户会给你一篇财经文章原文, 请从中提取结构化信息。
+严格输出 JSON, 字段如下:
+{
+  "viewpoints": ["观点1", "观点2", ...],          // 作者的核心观点 (2-6条)
+  "logic_chain": ["逻辑节点1", "逻辑节点2", ...],  // 从因到果的推理链 (3-8步)
+  "data_points": [{"指标": "数值/范围", "来源": ""}], // 文章里提到的关键数据
+  "conclusions": ["结论1", ...],                   // 作者最终结论/判断
+  "style_summary": "一句话总结作者的分析风格 (如: 价值投资者, 关注ROE和现金流, 不做波段, 长期持有)",
+  "logic_patterns": ["pattern1", ...],             // 作者常用的逻辑模式模板 (如: "先大盘后板块", "看ROE+PB组合", "从资金流向反推主力意图")
+  "tags": ["tag1", ...],                           // 文章关键词标签
+  "market_tags": ["板块名", "个股名", ...]         // 提到的板块/个股
+}"""
+
+
+def _vv_ai_extract(raw_text, call_fn=None, max_tokens=2000):
+    """AI 提取文章结构化信息 + embedding"""
+    import json as _j
+    # 先本地 TF-IDF embedding (不管 AI 成败)
+    emb = _vv_tfidf_embed(raw_text[:5000])
+
+    if call_fn is None:
+        def call_fn(prompt, system_prompt="", max_tokens=1500):
+            try:
+                from src.ui.tab_dapan import call_ai_model as _cai
+                return _cai(prompt, system_prompt=system_prompt, max_tokens=max_tokens)
+            except Exception:
+                return None
+
+    prompt = f"""请从以下财经文章中提取结构化信息, 严格按 JSON 格式输出:
+
+【原文】
+{raw_text[:6000]}
+
+⚠️ 只输出 JSON, 不要额外解释。"""
+
+    try:
+        result = call_fn(prompt, system_prompt=_VV_EXTRACT_SYSTEM, max_tokens=max_tokens)
+        if not result:
+            return _vv_extract_fallback(emb)
+        # 尝试解析 (可能有 markdown 包裹)
+        result = result.strip()
+        if result.startswith("```"):
+            result = result.split("```")[1]
+            if result.startswith("json"): result = result[4:]
+        result = result.strip()
+        data = _j.loads(result)
+        data["embedding"] = emb
+        return data
+    except Exception as e:
+        print(f"[📚大V] AI extract 失败, 走本地 fallback: {e}")
+        fb = _vv_extract_fallback(emb)
+        fb["extract_error"] = str(e)
+        return fb
+
+
+def _vv_extract_fallback(emb):
+    """AI 不可用时的本地 fallback"""
+    import json as _j
+    top_words = list(emb.keys())[:10] if emb else []
+    return {
+        "viewpoints": [],
+        "logic_chain": [],
+        "data_points": [],
+        "conclusions": [],
+        "style_summary": "(AI 未配置, 未提取 — 建议在 🔧 AI配置 里配置大模型后重新提取)",
+        "logic_patterns": [],
+        "tags": top_words,
+        "market_tags": [],
+        "embedding": emb,
+    }
+
+
+# ── 风格迁移分析 ──
+
+def _vv_style_analysis(author, market_ctx, call_fn=None):
+    """用某大V的风格 + 历史逻辑链, 分析当前市场"""
+    import json as _j
+    profile = _vv_get_profile(author)
+    articles = _vv_list_articles(author, limit=50)
+
+    # 构造风格上下文
+    if profile:
+        style = profile.get("style_summary", "")
+        patterns = _j.loads(profile.get("typical_patterns") or "[]")
+    else:
+        style = "未知"
+        patterns = []
+
+    # 匹配最相关的 3 篇历史文章
+    similar = _vv_match_articles(market_ctx if isinstance(market_ctx, str) else str(market_ctx),
+                                  author=author, top_k=3)
+
+    history_prompts = ""
+    for art, score in similar[:3]:
+        history_prompts += f"""
+--- 历史参考文章 (相似度 {score:.0%}) ---
+日期: {art.get('pub_date', '')}
+风格: {art.get('style_summary', '')}
+"""
+        if art.get("extracted_json"):
+            try:
+                ej = _j.loads(art["extracted_json"])
+                if ej.get("viewpoints"):
+                    history_prompts += f"观点: {ej['viewpoints'][:3]}\n"
+                if ej.get("logic_chain"):
+                    history_prompts += f"逻辑链: {' → '.join(ej['logic_chain'][:5])}\n"
+                if ej.get("conclusions"):
+                    history_prompts += f"结论: {ej['conclusions'][:2]}\n"
+            except Exception:
+                pass
+
+    if call_fn is None:
+        try:
+            from src.ui.tab_dapan import call_ai_model as _cai
+            call_fn = _cai
+        except Exception:
+            return "❌ AI 未配置, 无法进行风格分析"
+
+    prompt = f"""请模仿【{author}】的分析风格和逻辑, 基于当前市场数据给出分析。
+
+【作者风格画像】
+{style}
+
+【典型逻辑模式】
+{chr(10).join(f"- {p}" for p in patterns[:8]) if patterns else "(暂无)"}
+
+{history_prompts}
+
+【当前市场数据】
+{market_ctx if isinstance(market_ctx, str) else _j.dumps(market_ctx, ensure_ascii=False, default=str)}
+
+【要求】
+1. 严格模仿 {author} 的语言风格、逻辑习惯、数据偏好
+2. 先给核心判断, 再展开逻辑链, 最后给操作建议
+3. 结论明确, 不模棱两可
+4. 用 {author} 常用的金句/口头禅 (如果有的话)"""
+
+    try:
+        system = f"你正在模仿顶级财经博主【{author}】进行市场分析。始终保持他/她的人设、语气、逻辑习惯和金句。"
+        return call_fn(prompt, system_prompt=system, max_tokens=2500)
+    except Exception as e:
+        return f"❌ 分析失败: {e}"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 📚 主界面 UI — Notebook 3 Tab
+# ═══════════════════════════════════════════════════════════════════
+
+def _show_vv_main(win):
+    """📚财经大V 主窗口"""
+    import tkinter as tk
+    from tkinter import scrolledtext, filedialog, messagebox
+    import ttk
+
+    dlg = tk.Toplevel(win); dlg.configure(bg="#121212")
+    dlg.title("📚 财经大V风格学习库")
+    dlg.geometry("1080x780")
+    dlg.minsize(900, 680)
+
+    # Banner
+    banner = tk.Frame(dlg, bg="#1565C0", height=48)
+    banner.pack(fill=tk.X)
+    tk.Label(banner, text="📚 财经大V风格学习库", bg="#1565C0", fg="white",
+             font=("", 14, "bold")).pack(side=tk.LEFT, padx=14, pady=10)
+    tk.Label(banner, text="文章采集 → 结构化提取 → 风格画像 → 迁移分析",
+             bg="#1565C0", fg="#BBDEFB", font=("", 10)).pack(side=tk.LEFT, padx=4)
+    tk.Label(banner, text=f"💾 {_VV_DB_PATH}", bg="#1565C0", fg="#90CAF9",
+             font=("", 9)).pack(side=tk.RIGHT, padx=10)
+
+    nb = ttk.Notebook(dlg)
+    nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+    # ═══════════════ Tab 1: 📥 文章采集 ═══════════════
+    tab_in = tk.Frame(nb, bg="#121212"); nb.add(tab_in, text=" 📥 文章采集 ")
+
+    form = tk.Frame(tab_in, bg="#121212"); form.pack(fill=tk.X, padx=10, pady=6)
+    tk.Label(form, text="作者:", bg="#121212", fg="#E0E0E0", font=("", 11)).grid(row=0, column=0, sticky="e", padx=4)
+    author_ent = tk.Entry(form, font=("", 12), width=18, bg="#1E1E1E", fg="#FFFFFF",
+                          insertbackground="white")
+    author_ent.grid(row=0, column=1, padx=4)
+
+    # 作者下拉历史
+    existing_authors = [a["author"] for a in _vv_list_authors()]
+    if existing_authors:
+        import tkinter as _tk
+        author_ent.configure(values=existing_authors)
+        # 用 ttk Combobox 更好
+        cb_val = _tk.StringVar()
+        cb_val.set(existing_authors[0])
+        author_cb = ttk.Combobox(form, values=existing_authors, textvariable=cb_val,
+                                  font=("", 12), width=16)
+        author_cb.grid(row=0, column=1, padx=4)
+        author_ent = cb_val  # 替换
+
+    tk.Label(form, text="来源:", bg="#121212", fg="#E0E0E0", font=("", 11)).grid(row=0, column=2, sticky="e", padx=4)
+    source_cb = ttk.Combobox(form, values=["微信公众号", "微博", "雪球", "小红书", "知乎", "东方财富", "同花顺", "其他"],
+                              font=("", 11), width=12)
+    source_cb.current(0); source_cb.grid(row=0, column=3, padx=4)
+
+    tk.Label(form, text="日期:", bg="#121212", fg="#E0E0E0", font=("", 11)).grid(row=0, column=4, sticky="e", padx=4)
+    from datetime import datetime
+    date_ent = tk.Entry(form, font=("", 11), width=12, bg="#1E1E1E", fg="#FFFFFF")
+    date_ent.insert(0, datetime.now().strftime("%Y-%m-%d"))
+    date_ent.grid(row=0, column=5, padx=4)
+
+    # 原文输入区
+    tk.Label(tab_in, text="📝 粘贴/输入大V文章原文:", bg="#121212", fg="#FFD54F",
+             font=("", 11, "bold")).pack(anchor="w", padx=10, pady=(6, 0))
+    raw_txt = scrolledtext.ScrolledText(tab_in, height=14, font=("", 11), wrap=tk.WORD,
+                                         bg="#1E1E1E", fg="#E0E0E0", insertbackground="white",
+                                         highlightbackground="#424242", padx=10, pady=8)
+    raw_txt.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+
+    # 提取结果预览
+    tk.Label(tab_in, text="🧠 AI 结构化提取结果:", bg="#121212", fg="#81D4FA",
+             font=("", 11, "bold")).pack(anchor="w", padx=10, pady=(6, 0))
+    extract_txt = scrolledtext.ScrolledText(tab_in, height=8, font=("", 11), wrap=tk.WORD,
+                                             bg="#0D1B2A", fg="#A5D6A7", insertbackground="white",
+                                             highlightbackground="#1B3A5C", padx=10, pady=6)
+    extract_txt.pack(fill=tk.BOTH, expand=False, padx=10, pady=4)
+
+    # 按钮
+    btn_frame = tk.Frame(tab_in, bg="#121212"); btn_frame.pack(fill=tk.X, padx=10, pady=8)
+    status_var = tk.StringVar(value="")
+
+    def _do_extract():
+        author = author_cb.get().strip() if existing_authors else author_ent.get().strip()
+        raw = raw_txt.get("1.0", tk.END).strip()
+        if not author: messagebox.showwarning("提示", "请填写作者名"); return
+        if len(raw) < 50: messagebox.showwarning("提示", "请粘贴至少 50 字的文章"); return
+        status_var.set("⏳ AI 正在提取结构化信息...")
+        extract_txt.delete("1.0", tk.END)
+        extract_txt.insert("1.0", "⏳ 正在调用 AI 分析文章结构...")
+
+        def _bg():
+            import json as _j
+            try:
+                data = _vv_ai_extract(raw)
+                result = f"""📌 文章风格: {data.get('style_summary', '(未提取)')}
+
+💡 核心观点:
+{chr(10).join(f"  • {v}" for v in (data.get('viewpoints') or [])[:5])}
+
+🔗 逻辑链:
+{chr(10).join(f"  {i+1}. {p}" for i, p in enumerate(data.get('logic_chain') or []) if i < 8)}
+
+🎯 结论判断:
+{chr(10).join(f"  → {c}" for c in (data.get('conclusions') or [])[:3])}
+
+🏷️ 标签: {', '.join((data.get('tags') or [])[:15])}
+📈 市场关注: {', '.join((data.get('market_tags') or [])[:10])}
+
+🧠 逻辑模式模板:
+{chr(10).join(f"  - {p}" for p in (data.get('logic_patterns') or [])[:8])}"""
+                dlg.after(0, lambda: extract_txt.delete("1.0", tk.END))
+                dlg.after(0, lambda: extract_txt.insert("1.0", result))
+                dlg.after(0, lambda: status_var.set("✅ 提取完成, 点击入库保存"))
+
+                # 临时存
+                _vv_last_extract = data
+                dlg._vv_last_extract = data
+            except Exception as e:
+                dlg.after(0, lambda: status_var.set(f"❌ 提取失败: {e}"))
+                dlg.after(0, lambda: extract_txt.delete("1.0", tk.END))
+                dlg.after(0, lambda: extract_txt.insert("1.0", f"❌ {e}"))
+
+        import threading; threading.Thread(target=_bg, daemon=True).start()
+
+    def _do_save():
+        author = author_cb.get().strip() if existing_authors else author_ent.get().strip()
+        raw = raw_txt.get("1.0", tk.END).strip()
+        if not raw: messagebox.showwarning("提示", "没有原文"); return
+        data = getattr(dlg, "_vv_last_extract", None)
+        if data is None:
+            # 没提也存, 先本地 tfidf embedding
+            data = _vv_extract_fallback(_vv_tfidf_embed(raw[:5000]))
+
+        aid = _vv_insert(
+            author=author,
+            source=source_cb.get(),
+            pub_date=date_ent.get(),
+            raw_content=raw,
+            extracted_json=data,
+            style_summary=data.get("style_summary", ""),
+            logic_patterns=data.get("logic_patterns", []),
+            tags=",".join(data.get("tags", [])) if isinstance(data.get("tags"), list) else (data.get("tags") or ""),
+            market_tags=",".join(data.get("market_tags", [])) if isinstance(data.get("market_tags"), list) else (data.get("market_tags") or ""),
+            embedding=data.get("embedding", {})
+        )
+        status_var.set(f"✅ 入库成功 ID={aid} | 作者={author} 现在有 {len(_vv_list_articles(author))} 篇文章")
+
+    tk.Button(btn_frame, text="🧠 AI提取", font=("", 11, "bold"),
+              bg="#1565C0", fg="white", padx=14, pady=4, cursor="hand2",
+              command=_do_extract).pack(side=tk.LEFT, padx=4)
+    tk.Button(btn_frame, text="💾 入库保存", font=("", 11, "bold"),
+              bg="#2E7D32", fg="white", padx=14, pady=4, cursor="hand2",
+              command=_do_save).pack(side=tk.LEFT, padx=4)
+    tk.Button(btn_frame, text="🗑️ 清空", font=("", 11),
+              padx=10, pady=4, cursor="hand2",
+              command=lambda: [raw_txt.delete("1.0", tk.END),
+                              extract_txt.delete("1.0", tk.END),
+                              setattr(dlg, "_vv_last_extract", None),
+                              status_var.set("")]).pack(side=tk.LEFT, padx=4)
+    status_lbl = tk.Label(btn_frame, textvariable=status_var, bg="#121212",
+                          fg="#FFD54F", font=("", 11))
+    status_lbl.pack(side=tk.RIGHT, padx=8)
+
+    # ═══════════════ Tab 2: 🎯 风格库 ═══════════════
+    tab_lib = tk.Frame(nb, bg="#121212"); nb.add(tab_lib, text=" 🎯 风格库 ")
+
+    # 左: 作者列表
+    left_f = tk.Frame(tab_lib, bg="#121212"); left_f.pack(side=tk.LEFT, fill=tk.Y, padx=(10, 5), pady=6)
+    tk.Label(left_f, text="👤 作者画像", bg="#121212", fg="#FFD54F",
+             font=("", 11, "bold")).pack(anchor="w", pady=(0, 4))
+    cols = ("author", "cnt", "style")
+    tv = ttk.Treeview(left_f, columns=cols, show="headings", height=16)
+    tv.heading("author", text="作者"); tv.heading("cnt", text="数")
+    tv.heading("style", text="风格")
+    tv.column("author", width=110, anchor="w")
+    tv.column("cnt", width=40, anchor="center")
+    tv.column("style", width=180, anchor="w")
+    tv.pack(fill=tk.Y)
+
+    # 右: 文章详情
+    right_f = tk.Frame(tab_lib, bg="#121212"); right_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 10), pady=6)
+    tk.Label(right_f, text="📄 文章详情", bg="#121212", fg="#81D4FA",
+             font=("", 11, "bold")).pack(anchor="w", pady=(0, 4))
+    art_txt = scrolledtext.ScrolledText(right_f, font=("", 11), wrap=tk.WORD,
+                                         bg="#1E1E1E", fg="#E0E0E0", padx=10, pady=8)
+    art_txt.pack(fill=tk.BOTH, expand=True)
+
+    def _refill_authors():
+        for i in tv.get_children(): tv.delete(i)
+        for a in _vv_list_authors():
+            tv.insert("", tk.END, values=(a["author"], a["cnt"], (a.get("styles") or "")[:30]))
+
+    def _on_author_sel(e):
+        sel = tv.selection()
+        if not sel: return
+        vals = tv.item(sel[0], "values")
+        author = vals[0]
+        # 更新右侧文章列表
+        arts = _vv_list_articles(author, limit=20)
+        art_txt.delete("1.0", tk.END)
+        # 画像
+        p = _vv_get_profile(author)
+        if p:
+            import json as _j
+            top_kws = _j.loads(p.get("keywords") or "[]")
+            patterns = _j.loads(p.get("typical_patterns") or "[]")
+            art_txt.insert(tk.END, f"══════ 📊 {author} 风格画像 ══════\n\n")
+            art_txt.insert(tk.END, f"📌 综合风格: {p.get('style_summary', '—')}\n\n")
+            art_txt.insert(tk.END, f"🧠 典型逻辑模式:\n")
+            for ptn in patterns[:10]:
+                art_txt.insert(tk.END, f"  • {ptn}\n")
+            art_txt.insert(tk.END, f"\n🏷️ 高频关键词: {' · '.join(k for k,_ in top_kws[:15])}\n\n")
+        art_txt.insert(tk.END, f"══════ 历史文章 ({len(arts)} 篇) ══════\n\n")
+        for art in arts:
+            art_txt.insert(tk.END, f"[{art.get('pub_date', '')}] {art.get('source', '')}\n")
+            art_txt.insert(tk.END, f"  📌 {art.get('style_summary', '')[:80]}\n")
+            art_txt.insert(tk.END, f"  🏷️  {art.get('tags', '')[:60]}\n\n")
+
+    tv.bind("<<TreeviewSelect>>", _on_author_sel)
+    _refill_authors()
+
+    lib_btn_f = tk.Frame(tab_lib, bg="#121212"); lib_btn_f.pack(fill=tk.X, padx=10, pady=4)
+    tk.Button(lib_btn_f, text="🔄 刷新", font=("", 10), padx=10,
+              command=_refill_authors).pack(side=tk.LEFT, padx=4)
+    tk.Button(lib_btn_f, text="🗑️ 清空整库", font=("", 10), bg="#4A1C1C", fg="white", padx=10,
+              command=lambda: (messagebox.showwarning("⚠️", "此功能暂不开放, 请手工删除 DB 文件") if
+                               not messagebox.askyesno("确认", "确定清空所有大V文章? 无法恢复!")
+                               else None)).pack(side=tk.RIGHT)
+
+    # ═══════════════ Tab 3: 🔮 风格分析 ═══════════════
+    tab_ana = tk.Frame(nb, bg="#121212"); nb.add(tab_ana, text=" 🔮 风格分析 ")
+
+    top_a = tk.Frame(tab_ana, bg="#121212"); top_a.pack(fill=tk.X, padx=10, pady=6)
+    tk.Label(top_a, text="分析作者:", bg="#121212", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT, padx=4)
+    authors_all = [a["author"] for a in _vv_list_authors()]
+    ana_author_cb = ttk.Combobox(top_a, values=authors_all, font=("", 11), width=14)
+    ana_author_cb.pack(side=tk.LEFT, padx=4)
+
+    # 市场数据来源选择
+    tk.Label(top_a, text="数据源:", bg="#121212", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT, padx=(20, 4))
+    data_src_cb = ttk.Combobox(top_a, values=["📌 游资看盘实时", "📅 手工输入", "💾 读取大V数据库"],
+                                font=("", 11), width=16)
+    data_src_cb.current(0); data_src_cb.pack(side=tk.LEFT, padx=4)
+
+    # 市场观察输入
+    tk.Label(tab_ana, text="👁️ 市场观察 / 你想让他分析什么:", bg="#121212", fg="#FFD54F",
+             font=("", 11, "bold")).pack(anchor="w", padx=10, pady=(4, 0))
+    obs_txt = scrolledtext.ScrolledText(tab_ana, height=5, font=("", 11), wrap=tk.WORD,
+                                         bg="#1E1E1E", fg="#E0E0E0", insertbackground="white",
+                                         highlightbackground="#424242", padx=8, pady=6)
+    obs_txt.pack(fill=tk.X, padx=10, pady=4)
+    obs_txt.insert("1.0", "今天大盘跌了, 但创业板强, AI主线持续, 但白酒反弹弱。\n如果你是淘股吧游资, 怎么看明天的机会?")
+
+    # 输出
+    tk.Label(tab_ana, text="🤖 AI 风格迁移分析:", bg="#121212", fg="#81D4FA",
+             font=("", 11, "bold")).pack(anchor="w", padx=10, pady=(6, 0))
+    ana_out = scrolledtext.ScrolledText(tab_ana, font=("", 12), wrap=tk.WORD,
+                                         bg="#0D1B2A", fg="#E0E0E0", padx=12, pady=10)
+    ana_out.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+
+    def _do_analyze():
+        author = ana_author_cb.get().strip()
+        if not author: messagebox.showwarning("提示", "请选择要模仿的作者"); return
+        obs = obs_txt.get("1.0", tk.END).strip()
+
+        # 拉游资看盘上下文
+        ctx_str = ""
+        if data_src_cb.get() == "📌 游资看盘实时":
+            try:
+                ctx = _gather_analysis_context(win)
+                import json as _j
+                ctx_str = _j.dumps(ctx, ensure_ascii=False, default=str)[:1500]
+            except Exception as e:
+                ctx_str = f"(游资看盘上下文获取失败: {e})"
+        elif data_src_cb.get() == "💾 读取大V数据库":
+            # 用该作者历史文章的风格匹配当前观察
+            matches = _vv_match_articles(obs, author=author, top_k=5)
+            if matches:
+                ctx_str = f"与当前观察相似度最高的 {len(matches)} 篇 {author} 历史文章:\n"
+                for art, s in matches:
+                    ctx_str += f"  [{art.get('pub_date','')}] (相似度 {s:.0%}) {art.get('style_summary','')[:60]}\n"
+            else:
+                ctx_str = "(无相似历史文章, 用纯风格画像分析)"
+
+        market_ctx = f"【市场观察】\n{obs}\n\n【数据上下文】\n{ctx_str}"
+        ana_out.delete("1.0", tk.END)
+        ana_out.insert("1.0", f"⏳ 正在让 {author} 分析当前市场...")
+        status_var.set(f"⏳ {author} 正在思考... (约 20-40s)")
+
+        def _bg():
+            result = _vv_style_analysis(author, market_ctx)
+            dlg.after(0, lambda: ana_out.delete("1.0", tk.END))
+            dlg.after(0, lambda: ana_out.insert("1.0", result or "(无输出)"))
+            dlg.after(0, lambda: status_var.set(f"✅ {author} 分析完成"))
+
+        import threading; threading.Thread(target=_bg, daemon=True).start()
+
+    ana_btn_f = tk.Frame(tab_ana, bg="#121212"); ana_btn_f.pack(fill=tk.X, padx=10, pady=6)
+    tk.Button(ana_btn_f, text="🔍 开始分析", font=("", 12, "bold"),
+              bg="#B71C1C", fg="white", padx=18, pady=4, cursor="hand2",
+              command=_do_analyze).pack(side=tk.LEFT, padx=4)
+    tk.Button(ana_btn_f, text="📋 复制", font=("", 11), padx=10,
+              command=lambda: (dlg.clipboard_clear(),
+                               dlg.clipboard_append(ana_out.get("1.0", tk.END)),
+                               status_var.set("✅ 已复制"))).pack(side=tk.LEFT, padx=4)
+
+    # 作者切换时刷新
+    def _on_author_change(*_):
+        ana_out.delete("1.0", tk.END)
+        a = ana_author_cb.get()
+        if a:
+            p = _vv_get_profile(a)
+            if p and p.get("style_summary"):
+                ana_out.insert("1.0", f"📌 已选 {a}, 风格画像: {p['style_summary']}\n"
+                                     f"  (选好市场观察后点【开始分析】)")
+    ana_author_cb.bind("<<ComboboxSelected>>", _on_author_change)
+
+    dlg._vv_last_extract = None
+    return dlg
+
+
+def _show_vv_from_speculator(win):
+    """从游资看盘打开大V窗口 — 自动带当前市场数据"""
+    dlg = _show_vv_main(win)
+    # 自动游资看盘上下文预填
+    try:
+        ctx = _gather_analysis_context(win)
+        import json as _j
+        obs_preview = (
+            f"游资看盘实时数据预览:\n"
+            f"  大盘: {ctx.get('market_pct', '—')}\n"
+            f"  领涨板块: {ctx.get('top_sectors', '—')}\n"
+            f"  领跌板块: {ctx.get('bottom_sectors', '—')}\n"
+            f"  涨跌家数: {ctx.get('up_count', '—')} / {ctx.get('down_count', '—')}\n"
+            f"  周期位置: {ctx.get('cycle_pos', '—')}\n"
+            f"  信号决策: {ctx.get('signal_decision', '—')}"
+        )
+        # 跳到分析 Tab
+        from tkinter import ttk as _ttk
+        for w in dlg.winfo_children():
+            if isinstance(w, _ttk.Notebook):
+                w.select(2); break
+    except Exception:
+        pass
+
+
+def _gather_analysis_context(win):
+    """从游资看盘界面收集当前市场状态 → 供风格分析使用"""
+    ctx = {}
+    # 1. 大盘涨跌幅 (从 seed light)
+    up_lbl = getattr(win, "_up_count_lbl", None)
+    if up_lbl:
+        try: ctx["up_count"] = up_lbl.cget("text")
+        except Exception: pass
+    down_lbl = getattr(win, "_down_count_lbl", None)
+    if down_lbl:
+        try: ctx["down_count"] = down_lbl.cget("text")
+        except Exception: pass
+    # 2. 板块九宫格 meta
+    meta = getattr(win, "_block_meta", None)
+    if meta:
+        tops = sorted([m for m in meta if m and m[1] is not None],
+                      key=lambda x: -(x[1] or 0))
+        bots = sorted([m for m in meta if m and m[1] is not None],
+                      key=lambda x: (x[1] or 0))
+        ctx["top_sectors"] = [f"{m[0]}({m[1]:+.2f}%)" for m in tops[:5]]
+        ctx["bottom_sectors"] = [f"{m[0]}({m[1]:+.2f}%)" for m in bots[:5]]
+    # 3. 股指期货
+    fut_cells = getattr(win, "_fut_cells", None)
+    if fut_cells:
+        ctx["futures"] = [(c[0], c[4].cget("text") if c[4] else "—") for c in fut_cells]
+    # 4. 周期 / 信号 (从右面板 Text)
+    try:
+        for attr in ["_cycle_text", "_sign_decision_text", "_status_text"]:
+            w = getattr(win, attr, None)
+            if w and hasattr(w, "get"):
+                ctx[attr.replace("_", "", 1)] = w.get("1.0", "end-1c")[:200]
+    except Exception: pass
+    return ctx
+
+
+print("✅ 📚财经大V风格学习系统 已加载", flush=True)
