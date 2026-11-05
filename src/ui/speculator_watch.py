@@ -1029,10 +1029,10 @@ def show_speculator_watch(root=None, app=None):
     bot_paned = tk.Frame(left_pane, bg="#121212")
     vsplit = _VSplitter(left_pane, top_paned, bot_paned, key="watch_v1",
                         min_top=200, min_bot=120)
-    # 多次 reflow 保险
-    left_pane.after(100, vsplit._reflow)
-    left_pane.after(300, vsplit._reflow)
-    left_pane.after(800, vsplit._reflow)
+    # 🔑 关键: VSplitter 等 HSplitter 先 place 好 left_pane 再 reflow (HSplitter 用 outer 的 after)
+    outer.after(200, vsplit._reflow)
+    outer.after(500, vsplit._reflow)
+    outer.after(1000, vsplit._reflow)
 
     # top_paned 内部: grid 2 行 × 3 列
     top_paned.grid_rowconfigure(0, weight=1)
