@@ -1538,15 +1538,24 @@ def build_fund_holdings_tab(parent, root=None):
             except Exception as e:
                 print(f"[基金择时] 缓存读取失败: {e}", flush=True)
 
-        # 2) 后台线程联网计算
-        status.configure(text="🤖 择时计算中... (拉宏观数据)", foreground=_FG_GOLD)
+        # 2) 主线程先拉宏观数据 (mini_racer 在后台线程里调用会导致 C++ address_pool_manager 崩溃)
+        status.configure(text="🤖 择时计算中... (主线程拉宏观数据)", foreground=_FG_GOLD)
         print("[基金择时] 开始拉宏观数据...", flush=True)
+
+        try:
+            macro = _fetch_macro_data()
+            print(f"[基金择时] 宏观数据拉完: {list(macro.keys())}", flush=True)
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            print(f"[基金择时] 宏观数据拉取失败: {e}", flush=True)
+            macro = {}
+
+        # 3) 后台线程只做纯 Python 的 assess_timing 循环 (不碰 JS 引擎)
+        status.configure(text="🤖 择时计算中... (算择时)", foreground=_FG_GOLD)
 
         def _bg():
             nonlocal _fund_timing_cache
             try:
-                macro = _fetch_macro_data()
-                print(f"[基金择时] 宏观数据拉完: {list(macro.keys())}", flush=True)
                 results = {}
                 for cat in _FUND_GUIDE:
                     for f in cat["funds"]:
