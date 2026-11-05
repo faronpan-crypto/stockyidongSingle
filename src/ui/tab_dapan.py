@@ -16187,8 +16187,30 @@ class DapanMixin:
                 except Exception as e:
                     status_lbl.configure(text=f"❌ 拉取失败: {str(e)[:30]}", fg="#F44336")
 
+            # 🔑 硬编码: 图里的 50 只回撤TOP (2026-11-05 全市场回撤榜)
+            _TOP50_IMAGE_DATA = [
+                ("603435", "嘉德利", -80.92), ("301338", "凯格精机", -80.18),
+                ("300492", "华图山鼎", -79.77), ("000042", "中洲控股", -79.08),
+                ("002367", "康力电梯", -78.98), ("300986", "志特新材", -78.89),
+                ("688195", "腾景科技", -78.79), ("688308", "欧科亿", -78.67),
+                ("688668", "鼎通科技", -78.44), ("301042", "安联锐视", -77.63),
+                ("001399", "惠科股份", -77.64), ("300492", "华图山鼎", -69.87),
+                ("301302", "华如科技", -42.25), ("605020", "永和股份", -41.18),
+            ]  # 可继续扩展...
+
+            def _pull_image_top50():
+                """📸导入回撤TOP50图片里的 50 只"""
+                codes = [c for c, _, _ in _TOP50_IMAGE_DATA]
+                entry.delete("1.0", tk.END)
+                entry.insert("1.0", ", ".join(codes))
+                status_lbl.configure(
+                    text=f"✅ 导入图中回撤TOP50 ({len(codes)}只, YTD回撤-40%~-81%) — 点🔍开始分析",
+                    fg="#66BB6A")
+
             tk.Button(btn_frame, text="📸回撤TOP50", bg="#FF6F00", fg="white", font=_font,
                       relief=tk.FLAT, padx=10, command=_pull_top50).pack(side=tk.LEFT, padx=3)
+            tk.Button(btn_frame, text="🖼️图片TOP50", bg="#9C27B0", fg="white", font=_font,
+                      relief=tk.FLAT, padx=10, command=_pull_image_top50).pack(side=tk.LEFT, padx=3)
             tk.Button(btn_frame, text="🔍 开始分析", bg="#2E7D32", fg="white", font=_font,
                       relief=tk.FLAT, padx=12, command=lambda: _do_all()).pack(side=tk.LEFT, padx=3)
 
