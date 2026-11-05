@@ -1123,10 +1123,20 @@ def _build_block_grid(parent, win, col=0):
     _add_title_row(frm, "① 板块九宫格 (点击展开/长按详情/⚠️异动>3%)",
                    "#FFA726", BLOCK_GRID_KNOWLEDGE)
 
-    # 9 格 Canvas (3×3), 增大
+    # 9 格 Canvas (4×4), 增大
     canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=380)
     canvas.pack(fill=tk.BOTH, expand=True)
     win._block_canvas = canvas
+
+    # ⚠️ 关键: Configure 事件 → 窗口大小变化时重绘
+    # 后台线程第一次 draw 时 winfo_width 可能还很小, 等布局稳定后再重绘
+    def _on_cfg(e):
+        if e.width > 100 and e.height > 100:
+            _draw_block_grid(win)
+    canvas.bind("<Configure>", _on_cfg)
+    # 多次保险触发首次绘制 (100ms / 300ms / 600ms)
+    for delay in (100, 300, 600):
+        canvas.after(delay, lambda: _draw_block_grid(win) if canvas.winfo_width() > 100 else None)
 
     win._block_meta = [[name, None, None, True, False, None, []] for name in FIXED_BLOCKS]
     win._block_cells = []
@@ -5041,14 +5051,24 @@ def _get_block_canvas_data():
             blocks.append((name, float(pct), None, None, None))
         print(f"[🗂️画布] 种子兜底: {len(blocks)} 条")
 
-    # 权重计算 + 排序
+    # 权重计算 + 排序 + top3 股票名
+    # 从 tushare 缓存聚合 FIXED_BLOCKS 的 top3, 匹配板块名
+    tushare_blocks = _compute_block_pct_from_cache() or {}
+
     weighted = []
     for name, pct, n, up, dn in blocks:
         n_eff = n if n else max(abs(int(up or 0)), abs(int(dn or 0)), 1)
         weight = max(0.5, abs(pct)) * max(1, math.log(n_eff + 1))
+        # top3 龙头: 优先从 tushare 缓存拿 (FIXED_BLOCKS 能精确匹配)
+        top3 = []
+        if tushare_blocks and name in tushare_blocks:
+            _tp, _nn, _top3 = tushare_blocks[name]
+            if _top3: top3 = _top3[:3]
+            if not n: n = _nn
         weighted.append({
             "name": name, "pct": pct, "n": n or n_eff,
-            "up": up, "down": dn, "weight": weight
+            "up": up, "down": dn, "weight": weight,
+            "top3": top3  # [(stock_name, pct), ...]
         })
 
     weighted.sort(key=lambda x: x["weight"], reverse=True)
@@ -5130,11 +5150,12 @@ def _draw_block_treemap(win):
                           fill=fg, font=("", pct_fs, pct_fw),
                           tags=f"rect_{rank}")
 
-        # 详细信息: n=xx ↑xx ↓xx
+        # 详细信息: n=xx ↑xx ↓xx + top3 龙头
         if is_front and extra:
             n = extra.get("n")
             up = extra.get("up")
             dn = extra.get("down")
+            top3 = extra.get("top3", [])
             info_parts = []
             if n:
                 info_parts.append(f"n={n}")
@@ -5147,6 +5168,21 @@ def _draw_block_treemap(win):
                                   text=" ".join(info_parts),
                                   fill="#BDBDBD", font=("", info_fs),
                                   tags=f"rect_{rank}")
+            # Top3 龙头 (底部, 缩小字体)
+            if top3 and h > 100:
+                top3_fs = max(8, info_fs - 1)
+                ty = y2 - info_fs - 20
+                for ti, (sname, spct) in enumerate(top3[:3]):
+                    short = sname[:5] if len(sname) > 5 else sname
+                    sfg = "#FFCDD2" if spct >= 0 else "#C8E6C9"
+                    ssign = "+" if spct >= 0 else ""
+                    ty_line = ty - ti * (top3_fs + 2)
+                    canvas.create_text(x1 + 8, ty_line, text=f"{short}",
+                                      fill="#E0E0E0", font=("", top3_fs),
+                                      anchor=tk.W, tags=f"rect_{rank}")
+                    canvas.create_text(x2 - 8, ty_line, text=f"{ssign}{spct:.1f}%",
+                                      fill=sfg, font=("", top3_fs),
+                                      anchor=tk.E, tags=f"rect_{rank}")
 
         # 前 3 名角标
         if rank <= 3 and is_front:
