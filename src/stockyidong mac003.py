@@ -4734,10 +4734,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("🌏纳指套利", 10, self._show_etf_holiday_dialog),
             ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
             ("📊ETF联动", 10, self._show_etf_link_dialog),
-            ("🏷️标签库", 9, self._show_tag_manager_dialog),
-            ("📚文章库", 9, self._show_article_library_dialog),
-            ("📱日报", 7, self._show_wechat_dialog),
-            ("🖼️图像分析", 9, self._show_image_analysis_dialog),
+            ("🔧基础信息", 10, self._show_base_info_dialog),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW1):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
@@ -4807,14 +4804,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
             ttk.Button(toolbar_row3, text=txt, width=w, command=cmd).pack(**_pad)
 
-        # 黄色批量爬取按钮 (单独 pack 到 Row3 末尾, 保持醒目)
-        batch_crawl_news_btn = tk.Button(
-            toolbar_row3, text="批量爬取资讯", width=10,
-            command=self.batch_crawl_news, bg="yellow", fg="black",
-            font=("TkDefaultFont", 10)
-        )
-        batch_crawl_news_btn.pack(side=tk.LEFT, padx=(tp, 0))
-        self.batch_crawl_news_btn = batch_crawl_news_btn
+
         # 快速爬取/文本控制标签页控件框(共用一块区域,可以切换)
         crawler_control_notebook = ttk.Notebook(left_frame)
         crawler_control_notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 0))

@@ -15366,6 +15366,215 @@ class DapanMixin:
             print(f"[🌍资产] ❌ 异常: {e}", flush=True)
             _tb.print_exc()
 
+
+    def _show_base_info_dialog(self):
+        """🔧 基础信息 — 文章库/标签库/日报/图像分析/爬取 整合入口"""
+        import tkinter as tk
+        import tkinter.ttk as ttk
+        import traceback as _tb
+        print("[🔧基础信息] 被调用!", flush=True)
+        try:
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            dlg = tk.Toplevel(root)
+            dlg.title("🔧 基础信息 & 维护工具")
+            dlg.geometry("900x650")
+            dlg.configure(bg="#121212")
+            dlg.transient(root)
+            dlg.minsize(800, 550)
+
+            _font = ("Helvetica", 11)
+            _mid = ("Helvetica", 13, "bold")
+            _big = ("Helvetica", 20, "bold")
+
+            # 顶部标题
+            tk.Label(dlg, text="🔧 基础信息 & 维护工具", fg="#FFD54F", bg="#121212", font=_mid).pack(pady=(12, 6))
+
+            # 说明
+            tk.Label(dlg, text="整合了: 文章库 · 标签库 · 日报 · 图像分析 · 批量爬取 · 数据库/缓存维护",
+                     fg="#888", bg="#121212", font=("Helvetica", 10)).pack(pady=(0, 10))
+
+            # 功能区 (网格卡片)
+            grid = tk.Frame(dlg, bg="#121212")
+            grid.pack(fill=tk.BOTH, expand=True, padx=16, pady=6)
+
+            def _make_card(parent, row, col, emoji, title, desc, color, cmd):
+                card = tk.Frame(parent, bg="#1E1E1E", highlightthickness=1,
+                                highlightbackground="#333", padx=14, pady=14, cursor="hand2")
+                card.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
+                parent.grid_columnconfigure(col, weight=1)
+                parent.grid_rowconfigure(row, weight=1)
+
+                tk.Label(card, text=emoji, fg=color, bg="#1E1E1E", font=("Helvetica", 28)).pack()
+                tk.Label(card, text=title, fg="#FFF", bg="#1E1E1E", font=("Helvetica", 12, "bold")).pack(pady=(4, 2))
+                tk.Label(card, text=desc, fg="#888", bg="#1E1E1E", font=("Helvetica", 9),
+                         wraplength=220, justify="center").pack()
+
+                def _on_click(_e=None):
+                    try:
+                        real_cmd = cmd if callable(cmd) else None
+                        if real_cmd:
+                            real_cmd()
+                        else:
+                            print(f"[🔧基础信息] {title} 暂不可用 (未找到方法)", flush=True)
+                    except Exception as _e:
+                        print(f"[🔧基础信息❌] {title}: {_e}", flush=True)
+                        _tb.print_exc()
+
+                for w in [card] + list(card.winfo_children()):
+                    w.bind("<Button-1>", _on_click)
+                return card
+
+            # 第一行
+            _make_card(grid, 0, 0, "📚", "文章库", "研报/分析/笔记\n搜索 · 分类 · 标签", "#FFD54F",
+                       getattr(self, '_show_article_library_dialog', None))
+            _make_card(grid, 0, 1, "🏷️", "标签库", "股票/板块/概念标签\n管理 · 筛选 · 批量打标", "#4FC3F7",
+                       getattr(self, '_show_tag_manager_dialog', None))
+            _make_card(grid, 0, 2, "📱", "日报/微信", "每日复盘报告\n自动生成 · 发送", "#AED581",
+                       getattr(self, '_show_wechat_dialog', None))
+
+            # 第二行
+            _make_card(grid, 1, 0, "🖼️", "图像分析", "截图/OCR/图表识别\n上传 → 自动解析", "#BA68C8",
+                       getattr(self, '_show_image_analysis_dialog', None))
+            _make_card(grid, 1, 1, "📰", "批量爬取资讯", "一键抓最新新闻\n新浪/东方财富/雪球", "#FF8A65",
+                       getattr(self, 'batch_crawl_news', None))
+            _make_card(grid, 1, 2, "🗄️", "数据库维护", "缓存清理 · 数据重置\nDB 管理工具", "#90A4AE",
+                       getattr(self, '_show_db_maintenance_dialog', None))
+
+            # 底部: 关闭按钮
+            btn_f = tk.Frame(dlg, bg="#121212")
+            btn_f.pack(fill=tk.X, padx=16, pady=(6, 12))
+            tk.Button(btn_f, text="关闭", command=dlg.destroy,
+                      bg="#37474F", fg="white", font=_font, relief=tk.FLAT, padx=16).pack(side=tk.RIGHT)
+
+        except Exception as e:
+            print(f"[🔧基础信息] ❌ 异常: {e}", flush=True)
+            _tb.print_exc()
+
+    def _show_db_maintenance_dialog(self):
+        """🗄️ 数据库/缓存维护 (基础信息内置, 不需要单独按钮)"""
+        import tkinter as tk
+        import tkinter.ttk as ttk
+        import traceback as _tb
+        print("[🗄️DB维护] 被调用!", flush=True)
+        try:
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            dlg = tk.Toplevel(root)
+            dlg.title("🗄️ 数据库 & 缓存维护")
+            dlg.geometry("600x500")
+            dlg.configure(bg="#121212")
+            dlg.transient(root)
+
+            _font = ("Helvetica", 11)
+
+            tk.Label(dlg, text="🗄️ 数据库 & 缓存维护", fg="#FFD54F", bg="#121212",
+                     font=("Helvetica", 14, "bold")).pack(pady=(14, 10))
+
+            # 状态显示
+            status = tk.Label(dlg, text="", fg="#4FC3F7", bg="#121212", font=_font, wraplength=550, justify="left")
+            status.pack(fill=tk.X, padx=20, pady=(0, 8))
+
+            def _update_status():
+                import os, sqlite3
+                parts = []
+                try:
+                    from utils.config import DB_PATH, DATA_DIR
+                    if os.path.exists(DB_PATH):
+                        size = os.path.getsize(DB_PATH) / 1024 / 1024
+                        conn = sqlite3.connect(DB_PATH)
+                        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+                        conn.close()
+                        parts.append(f"📦 数据库: {DB_PATH}")
+                        parts.append(f"   大小: {size:.1f} MB, {len(tables)} 张表")
+                    else:
+                        parts.append("📦 数据库: 不存在")
+                    # 缓存文件
+                    cache_dirs = ["cache", "__pycache__"]
+                    total_cache = 0
+                    for d in cache_dirs:
+                        p = os.path.join(DATA_DIR, d) if 'DATA_DIR' in dir() else d
+                        if os.path.exists(p):
+                            for root2, dirs, files in os.walk(p):
+                                for f in files:
+                                    total_cache += os.path.getsize(os.path.join(root2, f))
+                    parts.append(f"💾 缓存: {total_cache/1024/1024:.1f} MB")
+                except Exception as e:
+                    parts.append(f"❌ 状态获取失败: {e}")
+                status.configure(text="\n".join(parts))
+
+            _update_status()
+
+            # 按钮区
+            btn_frame = tk.Frame(dlg, bg="#121212")
+            btn_frame.pack(fill=tk.X, padx=20, pady=8)
+
+            def _clear_cache():
+                import os, glob
+                cache_dirs = []
+                try:
+                    from utils.config import DATA_DIR
+                    cache_dirs.extend(glob.glob(os.path.join(DATA_DIR, "cache", "*")))
+                except Exception: pass
+                # __pycache__
+                try:
+                    for root2, dirs, files in os.walk(os.getcwd()):
+                        for d in dirs:
+                            if d == "__pycache__":
+                                cache_dirs.append(os.path.join(root2, d))
+                except Exception: pass
+                removed = 0
+                for p in cache_dirs:
+                    try:
+                        if os.path.isdir(p):
+                            for f in os.listdir(p):
+                                os.remove(os.path.join(p, f))
+                            os.rmdir(p)
+                            removed += 1
+                        elif os.path.isfile(p):
+                            os.remove(p)
+                            removed += 1
+                    except Exception: pass
+                status.configure(text=f"✅ 清理了 {removed} 个缓存项")
+                _update_status()
+
+            def _rebuild_db():
+                import os, sqlite3
+                try:
+                    from utils.config import DB_PATH
+                    if os.path.exists(DB_PATH):
+                        os.remove(DB_PATH)
+                        status.configure(text=f"✅ 已删除 {DB_PATH}\n重启 App 会自动重建")
+                except Exception as e:
+                    status.configure(text=f"❌ 重置失败: {e}")
+
+            def _refresh_snapshot():
+                try:
+                    if hasattr(self, 'save_dapan_snapshot'):
+                        self.save_dapan_snapshot()
+                        status.configure(text="✅ 大盘快照已更新")
+                    else:
+                        status.configure(text="❌ 找不到 save_dapan_snapshot 方法")
+                except Exception as e:
+                    status.configure(text=f"❌ 刷新失败: {e}")
+
+            row1 = tk.Frame(btn_frame, bg="#121212"); row1.pack(fill=tk.X, pady=4)
+            tk.Button(row1, text="🧹 清理缓存", command=_clear_cache,
+                      bg="#FF8A65", fg="white", font=_font, relief=tk.FLAT, padx=14, pady=6).pack(side=tk.LEFT, padx=4)
+            tk.Button(row1, text="🗑️ 重置数据库", command=_rebuild_db,
+                      bg="#F44336", fg="white", font=_font, relief=tk.FLAT, padx=14, pady=6).pack(side=tk.LEFT, padx=4)
+            tk.Button(row1, text="📸 刷新大盘快照", command=_refresh_snapshot,
+                      bg="#42A5F5", fg="white", font=_font, relief=tk.FLAT, padx=14, pady=6).pack(side=tk.LEFT, padx=4)
+
+            row2 = tk.Frame(btn_frame, bg="#121212"); row2.pack(fill=tk.X, pady=4)
+            tk.Button(row2, text="🔄 刷新状态", command=_update_status,
+                      bg="#37474F", fg="white", font=_font, relief=tk.FLAT, padx=14, pady=6).pack(side=tk.LEFT, padx=4)
+            tk.Button(row2, text="关闭", command=dlg.destroy,
+                      bg="#37474F", fg="white", font=_font, relief=tk.FLAT, padx=14, pady=6).pack(side=tk.RIGHT, padx=4)
+
+        except Exception as e:
+            print(f"[🗄️DB维护] ❌ {e}", flush=True)
+            _tb.print_exc()
+
+
     def _show_realtime_market_dialog(self):
         """📺 实时看盘 — A股盘中 + 全球资产 + 量化深度分析"""
         import tkinter as tk
@@ -16362,7 +16571,7 @@ class DapanMixin:
         ttk.Button(top, text="📯淘股吧联动", width=11,
                    command=lambda: self._show_source_link_dialog("taoguba")).pack(side=tk.RIGHT, padx=(0, 4))
         ttk.Button(top, text="📚文章库", width=9,
-                   command=lambda: self._show_article_library_dialog()).pack(side=tk.RIGHT, padx=(0, 4))
+                   command=lambda: getattr(self, '_show_article_library_dialog', None)()).pack(side=tk.RIGHT, padx=(0, 4))
         ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.RIGHT, fill=tk.Y, padx=6)
         # 均线检测按钮
         ttk.Button(top, text="📈均线检测", width=10,
@@ -16399,7 +16608,7 @@ class DapanMixin:
         ttk.Button(top, text="🧭韭研联动", width=10,
                    command=lambda: self._show_source_link_dialog("jiuyan")).pack(side=tk.RIGHT, padx=(0, 4))
         ttk.Button(top, text="📚文章库", width=9,
-                   command=lambda: self._show_article_library_dialog()).pack(side=tk.RIGHT, padx=(0, 4))
+                   command=lambda: getattr(self, '_show_article_library_dialog', None)()).pack(side=tk.RIGHT, padx=(0, 4))
         ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.RIGHT, fill=tk.Y, padx=6)
         # 均线检测按钮
         ttk.Button(top, text="📈均线检测", width=10,
@@ -56179,7 +56388,7 @@ class DapanMixin:
                         time.sleep(3)
                 # 6. 执行黄色按钮:批量爬取资讯
                 print("[自动化采集] 执行批量爬取资讯...")
-                self.root.after(0, self.batch_crawl_news)
+                self.root.after(0, getattr(self, 'batch_crawl_news', None))
                 time.sleep(5)
                 # 7. 执行黄色按钮:一键操作
                 print("[自动化采集] 执行一键操作...")
