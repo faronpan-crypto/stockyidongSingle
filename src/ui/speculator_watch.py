@@ -8,6 +8,96 @@ from tkinter import ttk, messagebox
 import threading, time, os, json, traceback, random
 from datetime import datetime, timedelta
 
+# ── Splitter 持久化 ──
+_SPLITTER_JSON = os.path.expanduser("~/.stockyidong/splitter.json")
+_SPLITTER_DEFAULTS = {"watch_main": 950}  # 左面板默认宽度
+
+
+def _load_splitter(key, default):
+    try:
+        if os.path.exists(_SPLITTER_JSON):
+            with open(_SPLITTER_JSON, "r") as f:
+                return json.load(f).get(key, default)
+    except Exception:
+        pass
+    return default
+
+
+def _save_splitter(key, value):
+    try:
+        os.makedirs(os.path.dirname(_SPLITTER_JSON), exist_ok=True)
+        data = {}
+        if os.path.exists(_SPLITTER_JSON):
+            try:
+                with open(_SPLITTER_JSON, "r") as f:
+                    data = json.load(f)
+            except Exception:
+                pass
+        data[key] = value
+        with open(_SPLITTER_JSON, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+class _HSplitter(tk.Frame):
+    """水平分割线 — 鼠标拖动改变左面板宽度, 松开自动保存"""
+
+    def __init__(self, master, left_pane, right_pane, width=4, color="#37474F",
+                 key="watch_main", min_left=300, min_right=300):
+        super().__init__(master, bg=color, width=width, cursor="sb_h_double_arrow")
+        self.left = left_pane
+        self.right = right_pane
+        self.master = master
+        self.key = key
+        self.min_left = min_left
+        self.min_right = min_right
+        self._drag = False
+
+        # 读默认值
+        default_w = _load_splitter(key, _SPLITTER_DEFAULTS.get(key, 950))
+        try:
+            self.left.configure(width=int(default_w))
+            self.left.pack_propagate(False)
+        except Exception:
+            pass
+
+        self.bind("<Button-1>", self._start)
+        self.bind("<B1-Motion>", self._drag_move)
+        self.bind("<ButtonRelease-1>", self._end)
+
+    def _start(self, e):
+        self._drag = True
+        self._start_x = e.x_root
+        try:
+            self._start_w = self.left.winfo_width()
+        except Exception:
+            self._start_w = 950
+
+    def _drag_move(self, e):
+        if not self._drag:
+            return
+        dx = e.x_root - self._start_x
+        new_w = self._start_w + dx
+        win_w = self.master.winfo_width()
+        # 边界检查
+        max_left = win_w - self.min_right - 8
+        new_w = max(self.min_left, min(new_w, max_left))
+        try:
+            self.left.configure(width=int(new_w))
+            self.left.pack_propagate(False)
+        except Exception:
+            pass
+
+    def _end(self, e):
+        if self._drag:
+            self._drag = False
+            try:
+                w = self.left.winfo_width()
+                _save_splitter(self.key, int(w))
+            except Exception:
+                pass
+
 # —— 板块关键词 → 行业映射 (用于 daily 接口聚合) ——
 BLOCK_KEYWORDS = {
     "券商": ["证券", "券商", "投行"],
@@ -773,8 +863,8 @@ def show_speculator_watch(root=None, app=None):
     print(f"[👁️看盘] 被调用, app={'有' if app else '无'}", flush=True)
     win = tk.Toplevel(root) if root else tk.Tk()
     win.title("👁️ 游资看盘界面 — 2×3 六区")
-    win.geometry("2100x1050")
-    win.minsize(1800, 950)
+    win.geometry("1850x1000")
+    win.minsize(1600, 900)
     win._app = app
     win._running = True
 
@@ -820,44 +910,73 @@ def show_speculator_watch(root=None, app=None):
 
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
-    # 🗂️ 单一大 grid (4列 × 3行), 看盘思路作为 row_top col=1 (第二列)
-    outer.grid_rowconfigure(0, weight=3)
-    outer.grid_rowconfigure(1, weight=3)
-    outer.grid_rowconfigure(2, weight=0)
-    outer.grid_columnconfigure(0, weight=1, uniform="cols")
-    outer.grid_columnconfigure(1, weight=1, uniform="cols")
-    outer.grid_columnconfigure(2, weight=1, uniform="cols")
-    outer.grid_columnconfigure(3, weight=1, uniform="cols")
+    # 右面板加宽 (340 → 420)
+    # 右面板充满 (width=520, pack_propagate=False 保留最小宽度)
+    # ── 可拖拽分割器布局 ──
+    # outer: LEFT → left_pane (固定宽度, 可拖改) → splitter (4px) → right_pane (expand)
+    left_pane = tk.Frame(outer, bg="#121212")
+    right_pane = tk.Frame(outer, bg="#121212")
+    left_pane.pack(side=tk.LEFT, fill=tk.Y)  # 先 pack, 后面 splitter 会改 width
+    splitter = _HSplitter(outer, left_pane, right_pane, key="watch_main",
+                          min_left=400, min_right=380)
+    splitter.pack(side=tk.LEFT, fill=tk.Y)
+    right_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-    # ── row_top (row=0): 4 列核心层 ──
-    # col=0: 🌍全球五资产 → 外部宏观入口 (最优先)
-    # col=1: 🧠看盘思路 → 核心分析 (放第二列!)
-    # col=2: 🎯信号决策 → 大盘方向判定
-    # col=3: ①板块九宫格 → 热门板块定位
-    _build_orderbook(outer, win, 0)
-    _build_watch_analysis_col(outer, win, 1)  # 🧠看盘思路!
-    sign_wrapper = tk.Frame(outer, bg="#121212"); sign_wrapper.grid(row=0, column=2, sticky="nsew", padx=3, pady=3)
+    # left_pane 初始化宽度 (从 JSON 读)
+    init_w = _load_splitter("watch_main", _SPLITTER_DEFAULTS["watch_main"])
+    left_pane.configure(width=init_w)
+    left_pane.pack_propagate(False)
+
+    # left_pane grid 配置 (2 列 × 3 行)
+    left_pane.grid_rowconfigure(0, weight=3)
+    left_pane.grid_rowconfigure(1, weight=3)
+    left_pane.grid_rowconfigure(2, weight=0)
+    left_pane.grid_columnconfigure(0, weight=1)
+    left_pane.grid_columnconfigure(1, weight=1)
+
+    # 🗂️ 模块按游资看盘优先度排序 (全球→方向→板块→资金→期货→周期→判定→捡漏)
+    # ── row_top (row=0, 权重3): 3 列全是核心判断层 ──
+    # col=0: 🌍全球五资产联动 → 外部宏观入口 (最优先)
+    # col=1: 🎯信号决策面板 → 大盘方向判定 (次优先)
+    # col=2: ①板块九宫格 → 热门板块定位 (再优先)
+    row_top = tk.Frame(left_pane, bg="#121212"); row_top.grid(row=0, column=0, columnspan=2, sticky="nsew")
+    row_top.grid_columnconfigure(0, weight=1, uniform="topcols")
+    row_top.grid_columnconfigure(1, weight=1, uniform="topcols")
+    row_top.grid_columnconfigure(2, weight=1, uniform="topcols")
+
+    # 先挪全球五资产联动到 row_top col=0 (从 row_leak 上来)
+    _build_orderbook(row_top, win, 0)
+    # 信号决策 col=1 (wrapper)
+    sign_wrapper = tk.Frame(row_top, bg="#121212"); sign_wrapper.grid(row=0, column=1, sticky="nsew", padx=3, pady=3)
     _build_sign_decision_panel(sign_wrapper, win)
-    _build_block_grid(outer, win, 3)
+    # 板块九宫格 col=2
+    _build_block_grid(row_top, win, 2)
 
-    # ── row_bot (row=1): 4 列确认层 ──
-    # col=0: ④量能 (资金确认)
-    # col=1: ⑤股指期货 (主力合约状态)
-    # col=2: ⑥周期阶段 (情绪位置)
-    # col=3: 状态判定+捡漏 (操作)
-    _build_volume_panel(outer, win, 0)
-    _build_futures_grid(outer, win, 1)
-    _build_cycle_panel(outer, win, 2)
+    # ── row_bot (row=1, 权重3): 3 列是确认层 ──
+    # col=0: ③量能 (资金确认)
+    # col=1: ④股指期货 (主力合约状态)
+    # col=2: ⑤周期阶段 (情绪位置)
+    row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, columnspan=2, sticky="nsew")
+    _build_volume_panel(row_bot, win, 0)
+    _build_futures_grid(row_bot, win, 1)
+    _build_cycle_panel(row_bot, win, 2)
 
-    # row=1 col=3: 状态判定 + 捡漏 (各占一半高度)
-    stk_frame = tk.Frame(outer, bg="#121212"); stk_frame.grid(row=1, column=3, sticky="nsew", padx=3, pady=3)
-    stk_frame.grid_rowconfigure(0, weight=1)
-    stk_frame.grid_rowconfigure(1, weight=1)
-    stk_frame.grid_columnconfigure(0, weight=1)
-    _build_status_panel(stk_frame, win, 0)
-    _build_leak_panel(stk_frame, win)
+    # ── row_leak (row=2, 固定200px): 2 列操作层 ──
+    # 左: ⑥状态判定 (综合判断)
+    # 右: ⑦捡漏 (操作入口)
+    row_leak = tk.Frame(left_pane, bg="#121212", height=200)
+    row_leak.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(2, 0))
+    row_leak.pack_propagate(False)
 
-    # 删除旧的 right_pane 调用 — 已整合到 row_top col=1
+    _build_status_panel(row_leak, win, 0)
+    _build_leak_panel(row_leak, win)
+
+    # 信号决策面板原来是 grid col=1 跨 1 行, 现在 pack 到 row_top — 需要调整其内部布局
+    # 让它在 row_top 三列中正确占位
+    # (build_sign_decision_panel 内部用 pack fill=BOTH expand, 父 Frame 是 grid col=1, 应该没问题)
+
+    # 右侧: 游资看盘思路分析
+    _build_watch_analysis(right_pane, win)
 
     win.protocol("WM_DELETE_WINDOW", lambda: (setattr(win, "_running", False), win.destroy()))
 
@@ -981,9 +1100,9 @@ def _build_block_grid(parent, win, col=0):
     _add_title_row(frm, "① 板块九宫格 (点击展开/长按详情/⚠️异动>3%)",
                    "#FFA726", BLOCK_GRID_KNOWLEDGE)
 
-    # 9 格 Canvas (3×3 正方形, 减30%高度)
-    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=294)
-    canvas.pack(fill=tk.X, expand=False)
+    # 9 格 Canvas (3×3), 增大
+    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=380)
+    canvas.pack(fill=tk.BOTH, expand=True)
     win._block_canvas = canvas
 
     win._block_meta = [[name, None, None, True, False, None, []] for name in FIXED_BLOCKS]
@@ -2627,16 +2746,16 @@ def _refresh_futures(win):
 
 def _build_cycle_panel(parent, win, col=1):
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#BA68C8",
-                        font=("", 15, "bold"), padx=4, pady=4)
+                        font=("", 10, "bold"), padx=4, pady=4)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     _add_title_row(frm, "⑤ 周期阶段 (P1-P5 — 周期论绑定)",
                    "#BA68C8", CYCLE_KNOWLEDGE)
 
-    # —— P1-P5 五阶段可视化圆点 ——
+    # —— P1-P5 五阶段可视化圆点 (参考图方案) ——
     row = tk.Frame(frm, bg="#1E1E1E"); row.pack(pady=(6, 2))
     stages_def = [
-        ("P1 冰点", "#424242", "#66BB6A"),
+        ("P1 冰点", "#424242", "#66BB6A"),   # 灰底 = 未激活, 激活=绿色
         ("P2 启动", "#424242", "#FFD54F"),
         ("P3 发酵", "#424242", "#FF8F00"),
         ("P4 高潮", "#424242", "#EF5350"),
@@ -2645,27 +2764,27 @@ def _build_cycle_panel(parent, win, col=1):
     win._stage_dots = []
     for i, (name, inact, act) in enumerate(stages_def):
         col_f = tk.Frame(row, bg="#1E1E1E"); col_f.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
-        dot = tk.Label(col_f, text="●", fg=inact, bg="#1E1E1E", font=("", 30))
+        dot = tk.Label(col_f, text="●", fg=inact, bg="#1E1E1E", font=("", 22))
         dot.pack(anchor=tk.CENTER)
         lbl = tk.Label(col_f, text=name.split(" ")[1], bg="#1E1E1E",
-                       fg=inact, font=("", 14, "bold"))
+                       fg=inact, font=("", 11))
         lbl.pack(anchor=tk.CENTER)
         win._stage_dots.append((dot, lbl, act))
 
-    # 30 日 / 15 日 涨幅统计 (字体加大)
+    # 30 日 / 15 日 涨幅统计
     win._cycle_stats = tk.Label(frm, text="📊 30日 --% | 15日 --% | 5日 --%",
-                                bg="#1E1E1E", fg="#90CAF9", font=("Menlo", 14))
+                                bg="#1E1E1E", fg="#90CAF9", font=("Menlo", 9))
     win._cycle_stats.pack(anchor=tk.W, padx=4, pady=(4, 0))
 
-    # 周期判定文字 (加大)
+    # 周期判定文字
     win._cycle_text = tk.Label(frm, text="📌 正在判断当前周期阶段...",
-                               bg="#1E1E1E", fg="#E0E0E0", font=("", 14, "bold"),
+                               bg="#1E1E1E", fg="#E0E0E0", font=("", 10),
                                wraplength=420, justify=tk.LEFT)
     win._cycle_text.pack(fill=tk.X, pady=4, padx=4)
 
-    # 阶段说明 (加大)
+    # 阶段说明 (P1-P5)
     tk.Label(frm, text="P1冰点→P2启动→P3发酵→P4高潮→P5退潮 — 仓位: 0-15%→30-40%→50-70%→止盈→空仓",
-             bg="#1E1E1E", fg="#757575", font=("", 14)).pack(anchor=tk.W, padx=4)
+             bg="#1E1E1E", fg="#757575", font=("", 11)).pack(anchor=tk.W, padx=4)
 
 
 def _refresh_cycle(win):
@@ -3185,12 +3304,6 @@ WATCH_ANALYSIS_KNOWLEDGE = {
 }
 
 
-def _build_watch_analysis_col(parent, win, col=1):
-    """🧠 看盘思路 — row_top 第二列 (grid 布局, 填满单元格)"""
-    wrapper = tk.Frame(parent, bg="#121212"); wrapper.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
-    parent.grid_columnconfigure(col, weight=1, uniform="cols")
-    _build_watch_analysis(wrapper, win)
-
 def _build_watch_analysis(parent, win):
     """构建右侧 7 层分析面板 — 大字体 + 每层 ❓🤖 + 独立字体调节"""
     # 闭包变量 (供字体调节使用)
@@ -3228,25 +3341,14 @@ def _build_watch_analysis(parent, win):
     tk.Button(top, text="🤖 AI分析", command=lambda: _ai_popup(win),
               bg="#3949AB", fg="#ECEFF1", font=("", 10, "bold")).pack(side=tk.RIGHT, padx=4)
 
-    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0)
+    canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0, width=260)
     sb = tk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
     body = tk.Frame(canvas, bg="#121212")
     body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    body_id = canvas.create_window((0, 0), window=body, anchor="nw")
+    canvas.create_window((0, 0), window=body, anchor="nw", width=260)
     canvas.configure(yscrollcommand=sb.set)
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     sb.pack(side=tk.RIGHT, fill=tk.Y)
-
-    # 🎯 响应式: Canvas/parent 宽度变化时同步 body 宽度 + 更新 wraplength
-    def _on_parent_configure(e):
-        # 让 body 跟随 canvas 宽度
-        canvas.itemconfigure(body_id, width=canvas.winfo_width())
-        # 让结论区文字也跟随
-        if hasattr(win, "_wa_conclusion"):
-            win._wa_conclusion.config(wraplength=max(200, canvas.winfo_width() - 32))
-    parent.bind("<Configure>", _on_parent_configure)
-    # 初始配置
-    win.after(50, lambda: _on_parent_configure(type("E", (), {"width": 400})()))
 
     def _mw(e): canvas.yview_scroll(int(-e.delta / 120), "units")
     canvas.bind_all("<MouseWheel>", _mw)
