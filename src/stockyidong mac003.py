@@ -441,6 +441,18 @@ from ui.tab_full_link import FullLinkMixin
 from ui.tab_akshare import AKShareMixin
 
 class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ChoiceMixin, ChouMaMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, EventCalendarMixin, ExportMixin, FileIoMixin, FinanceMixin, FullLinkMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IfindMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, TushareMixin, WarningMixin, WebMixin, WencaiMixin, YingmiMixin, ZhihuMixin, WordcloudMixin, BetaAlphaMixin):
+    def _show_speculator_watch(self):
+        """👁️ 游资看盘 — 6 区布局 (板块九宫格/盘口/量能/期指/周期/状态)"""
+        print("[👁️游资看盘] 启动...", flush=True)
+        try:
+            from ui.speculator_watch import show_speculator_watch
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            show_speculator_watch(root=root, app=self)
+        except Exception as e:
+            import traceback as _tb
+            print(f"[👁️游资看盘❌] {e}", flush=True)
+            _tb.print_exc()
+
 
     def __init__(self, root):
         self.root = root
@@ -4729,7 +4741,8 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         # ── Row 1: 🌏 大盘 / 宏观 / 周期 (big picture first) ──
         _ROW1 = [
             ("全", 3, self.show_market_situation),
-            ("📺看盘", 10, self._show_realtime_market_dialog),
+            ("👁️游资看盘", 7, self._show_speculator_watch),
+            ("📺看盘", 7, self._show_realtime_market_dialog),
             ("🏛️美联储", 9, self._show_fed_analysis_dialog),
             ("🌏纳指套利", 10, self._show_etf_holiday_dialog),
             ("🌀ETF周期", 9, self._show_etf_cycle_dialog),

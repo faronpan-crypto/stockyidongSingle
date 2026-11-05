@@ -13171,11 +13171,17 @@ class DapanMixin:
                                  bg="#0D1B2A", fg="#B0BEC5",
                                  font=("", 9)).pack(anchor="w")
 
-                rev_frame.after(0, _render)
+                try:
+                    rev_frame.after(0, _render)
+                except Exception:
+                    pass
             except Exception as e:
                 _tb_ab.print_exc()
                 def _err(): diag_status.configure(text=f"诊断失败: {str(e)[:30]}")
-                rev_frame.after(0, _err)
+                try:
+                    rev_frame.after(0, _err)
+                except Exception:
+                    pass
 
         _th_ab.Thread(target=_alpha_beta_diag, daemon=True).start()
 
@@ -28987,11 +28993,17 @@ class DapanMixin:
                                  bg="#0D1B2A", fg="#B0BEC5",
                                  font=("", 9)).pack(anchor="w")
 
-                rev_frame.after(0, _render)
+                try:
+                    rev_frame.after(0, _render)
+                except Exception:
+                    pass
             except Exception as e:
                 _tb_ab.print_exc()
                 def _err(): diag_status.configure(text=f"诊断失败: {str(e)[:30]}")
-                rev_frame.after(0, _err)
+                try:
+                    rev_frame.after(0, _err)
+                except Exception:
+                    pass
 
         _th_ab.Thread(target=_alpha_beta_diag, daemon=True).start()
         # 固定高度, 让滚动条能正确工作
