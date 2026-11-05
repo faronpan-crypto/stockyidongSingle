@@ -820,61 +820,44 @@ def show_speculator_watch(root=None, app=None):
 
     outer = tk.Frame(win, bg="#121212"); outer.pack(fill=tk.BOTH, expand=True)
 
-    # 右面板加宽 (340 → 420)
-    # 左65% / 右35% (用 expand 权重控制比例)
-    left_pane = tk.Frame(outer, bg="#121212", width=800); left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=65)
-    right_pane = tk.Frame(outer, bg="#121212", width=400); right_pane.pack(side=tk.RIGHT, fill=tk.BOTH, expand=35, padx=(4, 0))
+    # 🗂️ 单一大 grid (4列 × 3行), 看盘思路作为 row_top col=1 (第二列)
+    outer.grid_rowconfigure(0, weight=3)
+    outer.grid_rowconfigure(1, weight=3)
+    outer.grid_rowconfigure(2, weight=0)
+    outer.grid_columnconfigure(0, weight=1, uniform="cols")
+    outer.grid_columnconfigure(1, weight=1, uniform="cols")
+    outer.grid_columnconfigure(2, weight=1, uniform="cols")
+    outer.grid_columnconfigure(3, weight=1, uniform="cols")
 
-    # left_pane grid 配置 (2 列 × 3 行)
-    left_pane.grid_rowconfigure(0, weight=3)
-    left_pane.grid_rowconfigure(1, weight=3)
-    left_pane.grid_rowconfigure(2, weight=0)
-    left_pane.grid_columnconfigure(0, weight=1)
-    left_pane.grid_columnconfigure(1, weight=1)
-
-    # 🗂️ 模块按游资看盘优先度排序 (全球→方向→板块→资金→期货→周期→判定→捡漏)
-    # ── row_top (row=0, 权重3): 3 列全是核心判断层 ──
-    # col=0: 🌍全球五资产联动 → 外部宏观入口 (最优先)
-    # col=1: 🎯信号决策面板 → 大盘方向判定 (次优先)
-    # col=2: ①板块九宫格 → 热门板块定位 (再优先)
-    row_top = tk.Frame(left_pane, bg="#121212"); row_top.grid(row=0, column=0, columnspan=2, sticky="nsew")
-    row_top.grid_columnconfigure(0, weight=1, uniform="topcols")
-    row_top.grid_columnconfigure(1, weight=1, uniform="topcols")
-    row_top.grid_columnconfigure(2, weight=1, uniform="topcols")
-
-    # 先挪全球五资产联动到 row_top col=0 (从 row_leak 上来)
-    _build_orderbook(row_top, win, 0)
-    # 信号决策 col=1 (wrapper)
-    sign_wrapper = tk.Frame(row_top, bg="#121212"); sign_wrapper.grid(row=0, column=1, sticky="nsew", padx=3, pady=3)
+    # ── row_top (row=0): 4 列核心层 ──
+    # col=0: 🌍全球五资产 → 外部宏观入口 (最优先)
+    # col=1: 🧠看盘思路 → 核心分析 (放第二列!)
+    # col=2: 🎯信号决策 → 大盘方向判定
+    # col=3: ①板块九宫格 → 热门板块定位
+    _build_orderbook(outer, win, 0)
+    _build_watch_analysis_col(outer, win, 1)  # 🧠看盘思路!
+    sign_wrapper = tk.Frame(outer, bg="#121212"); sign_wrapper.grid(row=0, column=2, sticky="nsew", padx=3, pady=3)
     _build_sign_decision_panel(sign_wrapper, win)
-    # 板块九宫格 col=2
-    _build_block_grid(row_top, win, 2)
+    _build_block_grid(outer, win, 3)
 
-    # ── row_bot (row=1, 权重3): 3 列是确认层 ──
-    # col=0: ③量能 (资金确认)
-    # col=1: ④股指期货 (主力合约状态)
-    # col=2: ⑤周期阶段 (情绪位置)
-    row_bot = tk.Frame(left_pane, bg="#121212"); row_bot.grid(row=1, column=0, columnspan=2, sticky="nsew")
-    _build_volume_panel(row_bot, win, 0)
-    _build_futures_grid(row_bot, win, 1)
-    _build_cycle_panel(row_bot, win, 2)
+    # ── row_bot (row=1): 4 列确认层 ──
+    # col=0: ④量能 (资金确认)
+    # col=1: ⑤股指期货 (主力合约状态)
+    # col=2: ⑥周期阶段 (情绪位置)
+    # col=3: 状态判定+捡漏 (操作)
+    _build_volume_panel(outer, win, 0)
+    _build_futures_grid(outer, win, 1)
+    _build_cycle_panel(outer, win, 2)
 
-    # ── row_leak (row=2, 固定200px): 2 列操作层 ──
-    # 左: ⑥状态判定 (综合判断)
-    # 右: ⑦捡漏 (操作入口)
-    row_leak = tk.Frame(left_pane, bg="#121212", height=120)
-    row_leak.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(2, 0))
-    row_leak.pack_propagate(False)
+    # row=1 col=3: 状态判定 + 捡漏 (各占一半高度)
+    stk_frame = tk.Frame(outer, bg="#121212"); stk_frame.grid(row=1, column=3, sticky="nsew", padx=3, pady=3)
+    stk_frame.grid_rowconfigure(0, weight=1)
+    stk_frame.grid_rowconfigure(1, weight=1)
+    stk_frame.grid_columnconfigure(0, weight=1)
+    _build_status_panel(stk_frame, win, 0)
+    _build_leak_panel(stk_frame, win)
 
-    _build_status_panel(row_leak, win, 0)
-    _build_leak_panel(row_leak, win)
-
-    # 信号决策面板原来是 grid col=1 跨 1 行, 现在 pack 到 row_top — 需要调整其内部布局
-    # 让它在 row_top 三列中正确占位
-    # (build_sign_decision_panel 内部用 pack fill=BOTH expand, 父 Frame 是 grid col=1, 应该没问题)
-
-    # 右侧: 游资看盘思路分析
-    _build_watch_analysis(right_pane, win)
+    # 删除旧的 right_pane 调用 — 已整合到 row_top col=1
 
     win.protocol("WM_DELETE_WINDOW", lambda: (setattr(win, "_running", False), win.destroy()))
 
@@ -3201,6 +3184,12 @@ WATCH_ANALYSIS_KNOWLEDGE = {
     },
 }
 
+
+def _build_watch_analysis_col(parent, win, col=1):
+    """🧠 看盘思路 — row_top 第二列 (grid 布局, 填满单元格)"""
+    wrapper = tk.Frame(parent, bg="#121212"); wrapper.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
+    parent.grid_columnconfigure(col, weight=1, uniform="cols")
+    _build_watch_analysis(wrapper, win)
 
 def _build_watch_analysis(parent, win):
     """构建右侧 7 层分析面板 — 大字体 + 每层 ❓🤖 + 独立字体调节"""
