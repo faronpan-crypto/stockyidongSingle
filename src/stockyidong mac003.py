@@ -4729,7 +4729,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         # ── Row 1: 🌏 大盘 / 宏观 / 周期 (big picture first) ──
         _ROW1 = [
             ("全", 3, self.show_market_situation),
-            ("📺看盘", 10, self._show_market_dashboard),
+            ("📺看盘", 10, self._show_realtime_market_dialog),
             ("🏛️美联储", 9, self._show_fed_analysis_dialog),
             ("🌏纳指套利", 10, self._show_etf_holiday_dialog),
             ("🌀ETF周期", 9, self._show_etf_cycle_dialog),

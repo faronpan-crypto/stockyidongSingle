@@ -15575,59 +15575,42 @@ class DapanMixin:
             _tb.print_exc()
 
 
-    def _show_market_dashboard(self):
-        """📺 看盘整合入口 — A股实时 + 游资看盘 + 全球资产"""
+    def _show_realtime_market_dialog(self):
+        """📺 实时看盘 — A股盘中 + 全球资产 + 量化深度分析"""
         import tkinter as tk
         import tkinter.ttk as ttk
+        import threading as _th
+        from datetime import datetime, timedelta
+        import pandas as pd, numpy as np
         import traceback as _tb
-        print("[📺看盘整合] 被调用!", flush=True)
+        print("[📺看盘] 被调用!", flush=True)
         try:
             root = getattr(self, 'root', None) or getattr(self, '_root', None)
             dlg = tk.Toplevel(root)
-            dlg.title("📺 看盘中心 — Market Dashboard")
-            dlg.geometry("1250x880")
+            dlg.title("📺 实时看盘 — Realtime Market Dashboard")
+            dlg.geometry("1200x860")
             dlg.configure(bg="#121212")
             dlg.transient(root)
             dlg.minsize(1000, 700)
 
             _font = ("Helvetica", 11)
-            _mid = ("Helvetica", 13, "bold")
             _big = ("Helvetica", 22, "bold")
+            _mid = ("Helvetica", 13, "bold")
             _sm = ("Helvetica", 10)
 
-            # 顶部标题
+            # ═══════ 顶部 ═══════
             top = tk.Frame(dlg, bg="#121212")
             top.pack(fill=tk.X, padx=12, pady=(10, 4))
-            tk.Label(top, text="📺 看盘中心", fg="#FFD54F", bg="#121212", font=_mid).pack(side=tk.LEFT)
-            tk.Label(top, text="A股实时 · 游资动向 · 全球资产", fg="#888", bg="#121212", font=_sm).pack(side=tk.LEFT, padx=14)
+            tk.Label(top, text="📺 A股实时看盘 · 量化深度分析", fg="#FFD54F", bg="#121212", font=_mid).pack(side=tk.LEFT)
+            status_lbl = tk.Label(top, text="⏳ 拉取数据中...", fg="#888", bg="#121212", font=_font)
+            status_lbl.pack(side=tk.LEFT, padx=18)
 
-            nb = ttk.Notebook(dlg)
-            nb.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
-
-            # ═══════════ Tab1: A股实时看盘 ═══════════
-            tab1 = tk.Frame(nb, bg="#121212")
-            nb.add(tab1, text=" 📊 A股实时看盘 ")
-
-            # 操作栏
-            bar1 = tk.Frame(tab1, bg="#121212")
-            bar1.pack(fill=tk.X, padx=12, pady=8)
-            status1 = tk.Label(bar1, text="", fg="#4FC3F7", bg="#121212", font=_sm)
-            status1.pack(side=tk.LEFT)
-
-            def _open_full_realtime():
-                try:
-                    fn = getattr(self, '_show_realtime_market_dialog', None)
-                    if fn: fn()
-                except Exception as e:
-                    print(f"[📺] 打开完整版看盘: {e}")
-            tk.Button(bar1, text="📈 打开完整版 (含3个深度Tab)", command=_open_full_realtime,
-                      bg="#2E7D32", fg="white", font=_font, relief=tk.FLAT, padx=14).pack(side=tk.RIGHT)
-
-            # 5大指数卡片 (嵌入)
-            idx_frame = tk.Frame(tab1, bg="#121212")
+            # ═══════ ① 实时指数卡片 (5只) ═══════
+            idx_frame = tk.Frame(dlg, bg="#121212")
             idx_frame.pack(fill=tk.X, padx=12, pady=4)
             idx_cards = {}
-            for i, name in enumerate(["上证指数","深证成指","创业板指","科创50","沪深300"]):
+            idx_names = ["上证指数", "深证成指", "创业板指", "科创50", "沪深300"]
+            for i, name in enumerate(idx_names):
                 card = tk.Frame(idx_frame, bg="#1E1E1E", highlightthickness=1,
                                 highlightbackground="#333", padx=10, pady=6)
                 card.grid(row=0, column=i, padx=3, sticky="nsew")
@@ -15639,124 +15622,85 @@ class DapanMixin:
                 pct.pack()
                 idx_cards[name] = {"val": val, "pct": pct}
 
-            # 中部: 板块 + 北向 + 全球 (嵌入简化版)
-            mid1 = tk.Frame(tab1, bg="#121212")
-            mid1.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
+            # ═══════ 中部: 板块+北向+全球 ═══════
+            mid = tk.Frame(dlg, bg="#121212")
+            mid.pack(fill=tk.X, padx=12, pady=4)
 
-            board_f = tk.LabelFrame(mid1, text=" 📊 行业板块涨跌 ", fg="#FFD54F", bg="#121212", font=_font, padx=8, pady=6)
-            board_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
-            board_txt = tk.Text(board_f, height=10, bg="#1E1E1E", fg="#DDD", font=_font, wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=8, pady=6)
-            board_txt.pack(fill=tk.BOTH, expand=True)
+            board_f = tk.LabelFrame(mid, text=" 📊 行业板块涨跌 (新浪) ", fg="#FFD54F", bg="#121212", font=_font, padx=8, pady=6)
+            board_f.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+            board_txt = tk.Text(board_f, height=8, bg="#1E1E1E", fg="#DDD", font=_font, wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=8, pady=4)
+            board_txt.pack(fill=tk.X)
             board_txt.tag_configure("up", foreground="#EF5350")
             board_txt.tag_configure("dn", foreground="#66BB6A")
             board_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 10, "bold"))
 
-            right1 = tk.Frame(mid1, bg="#121212")
-            right1.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(6, 0))
+            right = tk.Frame(mid, bg="#121212")
+            right.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(6, 0))
 
-            north_f = tk.LabelFrame(right1, text=" 🌐 北向近5日 ", fg="#FFD54F", bg="#121212", font=_font, padx=8, pady=4)
-            north_f.pack(fill=tk.BOTH, expand=True)
+            north_f = tk.LabelFrame(right, text=" 🌐 北向近5日 ", fg="#FFD54F", bg="#121212", font=_font, padx=8, pady=4)
+            north_f.pack(fill=tk.X)
             north_txt = tk.Text(north_f, height=4, bg="#1E1E1E", fg="#DDD", font=_font, wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=8, pady=4)
-            north_txt.pack(fill=tk.BOTH, expand=True)
+            north_txt.pack(fill=tk.X)
 
-            global_f = tk.LabelFrame(right1, text=" 💎 全球五巨头 ", fg="#FFD54F", bg="#121212", font=_font, padx=8, pady=4)
-            global_f.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+            global_f = tk.LabelFrame(right, text=" 💎 全球五巨头 ", fg="#FFD54F", bg="#121212", font=_font, padx=8, pady=4)
+            global_f.pack(fill=tk.X, pady=(4, 0))
             global_txt = tk.Text(global_f, height=4, bg="#1E1E1E", fg="#DDD", font=_font, wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=8, pady=4)
-            global_txt.pack(fill=tk.BOTH, expand=True)
+            global_txt.pack(fill=tk.X)
 
-            # ═══════════ Tab2: 游资看盘 ═══════════
+            # ═══════ ② Notebook 深度分析 ═══════
+            nb = ttk.Notebook(dlg)
+            nb.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
+
+            # Tab1: 宽基指数强弱
+            tab1 = tk.Frame(nb, bg="#121212")
+            nb.add(tab1, text=" 📊 宽基指数强弱 ")
+            bench_txt = tk.Text(tab1, bg="#1E1E1E", fg="#DDD", font=("Menlo", 11), wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=12, pady=10)
+            bench_txt.pack(fill=tk.BOTH, expand=True)
+            bench_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 11, "bold"))
+            bench_txt.tag_configure("g", foreground="#EF5350", font=("Helvetica", 11, "bold"))
+            bench_txt.tag_configure("b", foreground="#66BB6A", font=("Helvetica", 11, "bold"))
+            bench_txt.tag_configure("w", foreground="#FFD54F")
+            bench_txt.tag_configure("m", foreground="#4FC3F7")
+
+            # Tab2: 资金变化 + 涨跌中位数
             tab2 = tk.Frame(nb, bg="#121212")
-            nb.add(tab2, text=" 👁️ 游资看盘 ")
+            nb.add(tab2, text=" 💰 资金变化 + 涨跌结构 ")
+            fund_txt = tk.Text(tab2, bg="#1E1E1E", fg="#DDD", font=_font, wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=12, pady=10)
+            fund_txt.pack(fill=tk.BOTH, expand=True)
+            fund_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 11, "bold"))
+            fund_txt.tag_configure("g", foreground="#EF5350", font=("Helvetica", 11, "bold"))
+            fund_txt.tag_configure("b", foreground="#66BB6A", font=("Helvetica", 11, "bold"))
+            fund_txt.tag_configure("w", foreground="#FFD54F")
 
-            bar2 = tk.Frame(tab2, bg="#121212")
-            bar2.pack(fill=tk.X, padx=12, pady=8)
-            tk.Label(bar2, text="游资动向 · 热门板块 · 资金流向 (2×3六区完整版)",
-                     fg="#888", bg="#121212", font=_sm).pack(side=tk.LEFT)
-
-            def _open_full_watch():
-                try:
-                    from ui.speculator_watch import show_speculator_watch
-                    show_speculator_watch(root, app=self)
-                except Exception as e:
-                    print(f"[👁️游资] 打开完整版: {e}"); _tb.print_exc()
-            tk.Button(bar2, text="🔍 打开完整游资看盘 (1700×960)", command=_open_full_watch,
-                      bg="#42A5F5", fg="white", font=_font, relief=tk.FLAT, padx=14).pack(side=tk.RIGHT)
-
-            # 嵌入: 直接调 speculator_watch, 但把它的 Toplevel 父改成 tab2
-            # 方式: monkey-patch 让 show_speculator_watch 创建的 win = tab2
-            import sys as _sys
-            try:
-                from ui.speculator_watch import show_speculator_watch as _sw_orig
-                # 把 tab2 临时伪装成 Toplevel
-                # 但 speculator_watch 内部会调 geometry/minsize 等, Frame 没有
-                # 所以改为: 嵌入一个子 Toplevel 的内容太复杂
-                # 简化: Tab 里放摘要 + 按钮开完整版
-            except Exception as e:
-                print(f"[👁️游资] import 失败: {e}")
-
-            # 游资摘要面板
-            sum_f = tk.LabelFrame(tab2, text=" 📋 游资速览 (快速模式)", fg="#FFD54F", bg="#121212", font=_mid, padx=10, pady=8)
-            sum_f.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
-            sum_txt = tk.Text(sum_f, bg="#1E1E1E", fg="#DDD", font=_font, wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=10, pady=8)
-            sum_txt.pack(fill=tk.BOTH, expand=True)
-            sum_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 11, "bold"))
-            sum_txt.tag_configure("b", foreground="#EF5350", font=("Helvetica", 11, "bold"))
-            sum_txt.tag_configure("g", foreground="#66BB6A", font=("Helvetica", 11, "bold"))
-            sum_txt.tag_configure("w", foreground="#FFD54F")
-
-            sum_txt.insert(tk.END, "👁️ 游资看盘 — 完整 2×3 六区界面\n\n", "hdr")
-            sum_txt.insert(tk.END, "点击右上 🔍按钮 打开完整游资看盘窗口\n", "w")
-            sum_txt.insert(tk.END, "\n完整版包含:\n")
-            sum_txt.insert(tk.END, "  🔥 热门板块排行        📈 涨停板追踪\n")
-            sum_txt.insert(tk.END, "  💰 主力资金流向        📊 板块资金净流入\n")
-            sum_txt.insert(tk.END, "  📋 游资龙虎榜          🏃 异动个股监控\n", "g")
-            sum_txt.insert(tk.END, "\n数据源: AKShare + Tushare + 东方财富\n", "w")
-
-            # ═══════════ Tab3: 全球五巨头 ═══════════
+            # Tab3: 主线概括 + 操作建议
             tab3 = tk.Frame(nb, bg="#121212")
-            nb.add(tab3, text=" 🌍 全球资产 ")
-
-            bar3 = tk.Frame(tab3, bg="#121212")
-            bar3.pack(fill=tk.X, padx=12, pady=8)
-            def _open_full_global():
-                try:
-                    fn = getattr(self, '_show_global_assets_dialog', None)
-                    if fn: fn()
-                except Exception as e:
-                    print(f"[🌍] 打开全球资产: {e}")
-            tk.Button(bar3, text="🌍 打开完整版全球资产弹窗", command=_open_full_global,
-                      bg="#7E57C2", fg="white", font=_font, relief=tk.FLAT, padx=14).pack(side=tk.RIGHT)
-
-            # 复用 _show_global_assets_dialog 的内容逻辑, 简化版
-            global_detail_f = tk.LabelFrame(tab3, text=" 💎 全球五巨头资产全景 ", fg="#FFD54F", bg="#121212", font=_mid, padx=10, pady=8)
-            global_detail_f.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
-            global_detail_txt = tk.Text(global_detail_f, bg="#1E1E1E", fg="#DDD", font=_font, wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=10, pady=8)
-            global_detail_txt.pack(fill=tk.BOTH, expand=True)
-            global_detail_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 11, "bold"))
-            global_detail_txt.tag_configure("w", foreground="#4FC3F7")
-
-            global_detail_txt.insert(tk.END, "💎 全球五巨头 (简化版)\n\n", "hdr")
-            global_detail_txt.insert(tk.END, "点击右上 🌍按钮 打开完整版 (含迷你K线 + MA20/60 + 相关性热力图)\n", "w")
+            nb.add(tab3, text=" 🔥 主线概括 + 操作建议 ")
+            idea_txt = tk.Text(tab3, bg="#1E1E1E", fg="#EEE", font=_font, wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=12, pady=10)
+            idea_txt.pack(fill=tk.BOTH, expand=True)
+            idea_txt.tag_configure("g", foreground="#EF5350", font=("Helvetica", 12, "bold"))
+            idea_txt.tag_configure("b", foreground="#66BB6A", font=("Helvetica", 12, "bold"))
+            idea_txt.tag_configure("w", foreground="#FFD54F", font=("Helvetica", 12, "bold"))
+            idea_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 13, "bold"))
 
             # ══════════════════════════════════════════════════════
-            # 统一数据 fetch + 渲染 (后台并行)
+            # 数据 Fetch (并行)
             # ══════════════════════════════════════════════════════
             import concurrent.futures as cf
             import requests as _req
             HEADERS = {"Referer": "https://quote.eastmoney.com/", "User-Agent": "Mozilla/5.0"}
 
             def _fetch_indices():
-                out = {}
                 idx_map = {"1.000001":"上证指数","0.399001":"深证成指","0.399006":"创业板指","1.000688":"科创50","1.000300":"沪深300"}
+                out = {}
                 for secid, name in idx_map.items():
                     try:
                         r = _req.get(f"https://push2.eastmoney.com/api/qt/stock/get",
-                            params={"secid":secid,"fields":"f43,f170"}, timeout=5, headers=HEADERS)
+                            params={"secid":secid,"fields":"f43,f170,f46"}, timeout=5, headers=HEADERS)
                         j = r.json().get("data", {})
                         if j:
                             out[name] = {"price": j.get("f43",0)/100, "pct": (j.get("f170",0) or 0)/100, "ok": True}
                         else: out[name] = {"ok": False}
-                    except Exception: out[name] = {"ok": False}
+                    except Exception as e: out[name] = {"ok": False, "err": str(e)[:30]}
                 return out
 
             def _fetch_boards():
@@ -15765,51 +15709,104 @@ class DapanMixin:
                     df = ak.stock_sector_spot()
                     df["涨跌幅"] = df["涨跌幅"].astype(float)
                     df = df.sort_values("涨跌幅", ascending=False)
-                    return {"ok": True, "top": df.head(5), "bot": df.tail(5).iloc[::-1], "avg": df["涨跌幅"].mean()}
+                    return {"ok": True, "top": df.head(5), "bot": df.tail(5).iloc[::-1], "avg": df["涨跌幅"].mean(), "df": df}
                 except Exception as e: return {"ok": False, "err": str(e)[:40]}
 
             def _fetch_north():
                 try:
                     import akshare as ak
                     df = ak.stock_hsgt_hist_em(symbol="北向资金")
-                    return {"ok": True, "latest": df.tail(5)}
+                    return {"ok": True, "df": df.tail(30)}
                 except Exception as e: return {"ok": False, "err": str(e)[:40]}
 
             def _fetch_global():
-                assets = {}
-                def fetch(n, fn, **kw):
+                results = {}
+                try:
+                    import akshare as ak
+                    for sym, key, pat in [("XAU","💎黄金","${:,.0f}"),("CL","🛢️原油","${:.2f}")]:
+                        try:
+                            h = ak.futures_foreign_hist(symbol=sym)
+                            if len(h)>0: results[key] = pat.format(float(h["收盘"].iloc[-1]))
+                        except Exception: pass
                     try:
-                        import akshare as ak
-                        df = getattr(ak, fn)(**kw)
-                        if df is None or len(df) < 2: return
-                        c = "close" if "close" in df.columns else "收盘"
-                        price = float(df[c].iloc[-1])
-                        assets[n] = price
+                        b = ak.bond_zh_us_rate()
+                        if len(b)>0: results["🏦美债10Y"] = f"{float(b['收盘价'].iloc[-1]):.2f}%"
                     except Exception: pass
-                with cf.ThreadPoolExecutor(4) as ex:
-                    ex.submit(fetch, "💎黄金", "futures_foreign_hist", symbol="XAU")
-                    ex.submit(fetch, "🛢️原油", "futures_foreign_hist", symbol="CL")
-                    ex.submit(fetch, "📈纳指", "index_us_stock_sina", symbol=".IXIC")
-                    ex.submit(fetch, "🏦美债", "bond_zh_us_rate")
-                return assets
+                    try:
+                        n = ak.index_us_stock_sina(symbol=".IXIC")
+                        if len(n)>0: results["📈纳指"] = f"{float(n['close'].iloc[-1]):,.0f}"
+                    except Exception: pass
+                except Exception as e: results["__err__"] = str(e)[:40]
+                return results
 
+            def _fetch_benchmarks():
+                """宽基指数日线 + MA15/MA60 + 斜率 + 上穿"""
+                import akshare as ak
+                benchmarks = [
+                    ("沪深300", "sh000300"),
+                    ("中证500", "sh000905"),
+                    ("中证1000", "sh000852"),
+                    ("国证2000", "sz399303"),
+                    ("科创50", "sh000688"),
+                    ("创业板指", "sz399006"),
+                ]
+                out = []
+                for name, code in benchmarks:
+                    try:
+                        df = ak.stock_zh_index_daily_em(symbol=code)
+                        if df is None or len(df) < 20: continue
+                        df = df.sort_values("date").reset_index(drop=True)
+                        df["ma5"] = df["close"].rolling(5).mean()
+                        df["ma15"] = df["close"].rolling(15).mean()
+                        df["ma60"] = df["close"].rolling(60).mean()
+                        last = df.iloc[-1]
+                        ma15_slope5 = (df["ma15"].iloc[-1] - df["ma15"].iloc[-6]) / df["ma15"].iloc[-6] * 100
+                        ma15_slope10 = (df["ma15"].iloc[-1] - df["ma15"].iloc[-11]) / df["ma15"].iloc[-11] * 100
+                        cross_up = (last["close"] > df["ma15"].iloc[-1]) and (df["close"].iloc[-2] <= df["ma15"].iloc[-2])
+                        cross_dn = (last["close"] < df["ma15"].iloc[-1]) and (df["close"].iloc[-2] >= df["ma15"].iloc[-2])
+                        ma15_flat = abs(ma15_slope5) < 0.3
+                        above_ma15 = last["close"] > df["ma15"].iloc[-1]
+                        above_ma60 = last["close"] > df["ma60"].iloc[-1]
+                        pct_1d = (last["close"] - df["close"].iloc[-2]) / df["close"].iloc[-2] * 100
+                        pct_5d = (last["close"] - df["close"].iloc[-6]) / df["close"].iloc[-6] * 100
+                        vol_5d = df["volume"].iloc[-5:].mean()
+                        vol_20d = df["volume"].iloc[-20:].mean()
+                        vol_ratio = vol_5d / vol_20d if vol_20d > 0 else 1
+                        out.append({
+                            "name": name, "close": last["close"],
+                            "ma15": df["ma15"].iloc[-1], "ma60": df["ma60"].iloc[-1],
+                            "pct_1d": pct_1d, "pct_5d": pct_5d,
+                            "slope5": ma15_slope5, "slope10": ma15_slope10,
+                            "cross_up": cross_up, "cross_dn": cross_dn,
+                            "flat": ma15_flat,
+                            "above_ma15": above_ma15, "above_ma60": above_ma60,
+                            "vol_ratio": vol_ratio,
+                        })
+                    except Exception as e:
+                        out.append({"name": name, "ok": False, "err": str(e)[:40]})
+                return out
+
+            # ══════════════════════════════════════════════════════
+            # 渲染主函数
+            # ══════════════════════════════════════════════════════
             def _do_all():
-                from datetime import datetime
                 _t0 = datetime.now()
                 root.update()
-                status1.configure(text="⏳ 并行拉数据...", fg="#FFD54F")
+                status_lbl.configure(text="⏳ 后台并行拉取 6 路数据...")
 
-                with cf.ThreadPoolExecutor(4) as ex:
+                with cf.ThreadPoolExecutor(6) as ex:
                     f_idx = ex.submit(_fetch_indices)
                     f_board = ex.submit(_fetch_boards)
                     f_north = ex.submit(_fetch_north)
                     f_global = ex.submit(_fetch_global)
+                    f_bench = ex.submit(_fetch_benchmarks)
                     r_idx = f_idx.result(timeout=15)
                     r_board = f_board.result(timeout=20)
                     r_north = f_north.result(timeout=15)
                     r_global = f_global.result(timeout=20)
+                    r_bench = f_bench.result(timeout=30)
 
-                # 渲染指数
+                # ── ① 实时指数 ──
                 for name, info in r_idx.items():
                     card = idx_cards.get(name)
                     if not card: continue
@@ -15819,8 +15816,11 @@ class DapanMixin:
                         arrow = "↑" if pct > 0 else "↓" if pct < 0 else "→"
                         card["val"].configure(text=f"{info['price']:.2f}", fg=color)
                         card["pct"].configure(text=f"{arrow} {pct:+.2f}%", fg=color)
+                    else:
+                        card["val"].configure(text="—")
+                        card["pct"].configure(text="不可用", fg="#F44336")
 
-                # 渲染板块
+                # ── 板块 ──
                 board_txt.delete("1.0", tk.END)
                 if r_board.get("ok"):
                     board_txt.insert(tk.END, "🔥 领涨\n", "hdr")
@@ -15830,35 +15830,243 @@ class DapanMixin:
                     for _, r in r_board["bot"].iterrows():
                         board_txt.insert(tk.END, f"  {r['板块']:8s} {r['涨跌幅']:+.2f}%\n", "dn")
                     board_txt.insert(tk.END, f"板块平均 {r_board['avg']:+.2f}%", "hdr")
+                else:
+                    board_txt.insert(tk.END, f"板块不可用: {r_board.get('err','?')}")
 
-                # 北向
+                # ── 北向 ──
                 north_txt.delete("1.0", tk.END)
                 if r_north.get("ok"):
-                    for _, row in r_north["latest"].iloc[::-1].iterrows():
+                    ndf = r_north["df"]
+                    for _, row in ndf.iloc[::-1].head(5).iterrows():
                         north_txt.insert(tk.END, f"📅 {row.get('日期','?')}  领涨: {row.get('领涨股','')} ({row.get('领涨股-涨跌幅',0):.1f}%)\n")
+                else:
+                    north_txt.insert(tk.END, f"北向不可用: {r_north.get('err','?')}")
 
-                # 全球
+                # ── 全球 ──
                 global_txt.delete("1.0", tk.END)
                 for k, v in r_global.items():
-                    price_str = f"${v:,.0f}" if isinstance(v, (int,float)) and v > 1000 else f"{v:.2f}" if isinstance(v, (int,float)) else str(v)
-                    global_txt.insert(tk.END, f"  {k}: {price_str}\n")
+                    if not k.startswith("__"):
+                        global_txt.insert(tk.END, f"  {k}: {v}\n")
+                if not r_global: global_txt.insert(tk.END, "全球数据拉取失败")
 
-                # 全球详细
-                global_detail_txt.delete("1.0", tk.END)
-                global_detail_txt.insert(tk.END, "💎 全球五巨头实时价\n\n", "hdr")
-                for k, v in r_global.items():
-                    price_str = f"${v:,.0f}" if isinstance(v, (int,float)) and v > 1000 else f"{v:.2f}" if isinstance(v, (int,float)) else str(v)
-                    global_detail_txt.insert(tk.END, f"  {k}: {price_str}\n", "w")
+                # ══════════════════════════════════════════════════════
+                # Tab1: 宽基指数强弱
+                # ══════════════════════════════════════════════════════
+                bench_txt.delete("1.0", tk.END)
+                bench_txt.insert(tk.END, "📊 宽基指数强弱对比 (MA15斜率 + 上穿 + 量能)\n\n", "hdr")
+                bench_txt.insert(tk.END, f"{'指数':8s} {'收盘':>8s} {'1日%':>7s} {'5日%':>7s} {'MA15斜率5D':>10s} {'上穿MA15':>9s} {'MA15走平':>9s} {'>MA60':>7s} {'量比':>6s}\n", "hdr")
+                bench_txt.insert(tk.END, "─" * 85 + "\n", "w")
+
+                valid_bench = []
+                for b in r_bench:
+                    if not b.get("ok", True): continue
+                    valid_bench.append(b)
+                    slope_str = f"{b['slope5']:+.2f}%"
+                    up = "✅" if b["cross_up"] else "—"
+                    flat = "✅" if b["flat"] else "—"
+                    above60 = "✅" if b["above_ma60"] else "—"
+                    vr = f"{b['vol_ratio']:.2f}"
+                    line = f"{b['name']:8s} {b['close']:>8.0f} {b['pct_1d']:>+7.2f} {b['pct_5d']:>+7.2f} {slope_str:>10s} {up:>9s} {flat:>9s} {above60:>7s} {vr:>6s}\n"
+                    tag = "b" if b["slope5"] > 0.5 else "g" if b["slope5"] < -0.5 else "w"
+                    bench_txt.insert(tk.END, line, tag)
+
+                # 强弱排序 (按 5日涨幅)
+                if valid_bench:
+                    sorted_b = sorted(valid_bench, key=lambda x: x["pct_5d"], reverse=True)
+                    bench_txt.insert(tk.END, "\n🏆 5日强弱排名:\n", "hdr")
+                    for i, b in enumerate(sorted_b):
+                        tag = "b" if i < 2 else "g" if i >= len(sorted_b)-2 else "w"
+                        sign = "🥇" if i==0 else "🥈" if i==1 else "🥉" if i==2 else "  "
+                        bench_txt.insert(tk.END, f"  {sign} {b['name']:8s} 5日 {b['pct_5d']:+.2f}%\n", tag)
+
+                    # 上穿/走平统计
+                    cross_list = [b for b in valid_bench if b["cross_up"]]
+                    flat_list = [b for b in valid_bench if b["flat"]]
+                    bench_txt.insert(tk.END, f"\n📈 MA15上穿: {len(cross_list)} 只 ({', '.join(b['name'] for b in cross_list)})\n", "w")
+                    bench_txt.insert(tk.END, f"➡️ MA15走平: {len(flat_list)} 只 ({', '.join(b['name'] for b in flat_list)})\n", "w")
+
+                    # 风格判断
+                    if sorted_b[0]["pct_5d"] > 0 and sorted_b[-1]["pct_5d"] < 0:
+                        large = next((b for b in valid_bench if "300" in b["name"] or "500" in b["name"]), None)
+                        small = next((b for b in valid_bench if "2000" in b["name"] or "1000" in b["name"] or "科创" in b["name"]), None)
+                        if large and small and small["pct_5d"] > large["pct_5d"]:
+                            bench_txt.insert(tk.END, "\n🎯 风格: 小盘/成长 > 大盘/价值 (风险偏好回升)\n", "b")
+                        elif large and small and large["pct_5d"] > small["pct_5d"]:
+                            bench_txt.insert(tk.END, "\n🎯 风格: 大盘/价值 > 小盘/成长 (防御偏好)\n", "g")
+
+                # ══════════════════════════════════════════════════════
+                # Tab2: 资金变化 + 涨跌中位数
+                # ══════════════════════════════════════════════════════
+                fund_txt.delete("1.0", tk.END)
+                fund_txt.insert(tk.END, "💰 资金变化 + 涨跌结构\n\n", "hdr")
+
+                # 北向资金
+                if r_north.get("ok"):
+                    ndf = r_north["df"]
+                    fund_txt.insert(tk.END, "🌐 北向资金 (近10日)\n", "hdr")
+                    for col in ["当日成交净买额", "当日资金流入", "历史累计净买额"]:
+                        if col in ndf.columns:
+                            vals = ndf[col].tail(10).dropna().values
+                            if len(vals) >= 3:
+                                today = vals[-1]
+                                avg5 = np.mean(vals[-5:])
+                                avg10 = np.mean(vals)
+                                # 转亿
+                                def _yi(v):
+                                    if abs(v) > 1e6: return v / 1e8
+                                    if abs(v) > 1e3: return v / 1e4
+                                    return v
+                                unit = "亿" if abs(today) > 1e6 else "万"
+                                fund_txt.insert(tk.END, f"  {col}:\n")
+                                fund_txt.insert(tk.END, f"    今日 {_yi(today):.1f}{unit}  |  5日均 {_yi(avg5):.1f}{unit}  |  10日均 {_yi(avg10):.1f}{unit}\n")
+                                # 趋势
+                                if today > avg5 > avg10:
+                                    fund_txt.insert(tk.END, "    📈 趋势: 流入加速 (外资看多)\n", "b")
+                                elif today < avg5 < avg10:
+                                    fund_txt.insert(tk.END, "    📉 趋势: 流出加速 (外资看空)\n", "g")
+                                else:
+                                    fund_txt.insert(tk.END, "    ➡️ 趋势: 波动/震荡\n", "w")
+
+                # 板块涨跌分布 → 涨跌结构代理
+                if r_board.get("ok"):
+                    fund_txt.insert(tk.END, "\n📊 涨跌结构 (板块涨跌分布)\n", "hdr")
+                    df = r_board["df"]
+                    vals = df["涨跌幅"].values
+                    med = np.median(vals)
+                    mean = np.mean(vals)
+                    pos = (vals > 0).sum()
+                    neg = (vals < 0).sum()
+                    pct_pos = pos / len(vals) * 100
+                    fund_txt.insert(tk.END, f"  中位数 {med:+.2f}%  |  均值 {mean:+.2f}%\n")
+                    fund_txt.insert(tk.END, f"  涨 {pos} ({pct_pos:.0f}%)  |  跌 {neg}\n")
+
+                    # 普涨/普跌/分化
+                    if med > 0.5 and mean > 0.3 and pct_pos > 60:
+                        regime = "🟢 普涨 (宽基共振向上, 赚钱效应扩散)"
+                        tag = "b"
+                    elif med < -0.5 and mean < -0.3 and pct_pos < 40:
+                        regime = "🔴 普跌 (恐慌性抛售, 注意系统性风险)"
+                        tag = "g"
+                    elif med > 0 and mean < 0:
+                        regime = "🟡 分化 (少数权重/龙头领涨, 多数不涨)"
+                        tag = "w"
+                    elif med < 0 and mean > 0:
+                        regime = "🟡 分化 (少数权重护盘, 多数下跌)"
+                        tag = "w"
+                    else:
+                        regime = "⚪ 震荡 (多空均衡, 无明显方向)"
+                        tag = "w"
+                    fund_txt.insert(tk.END, f"  → {regime}\n", tag)
+
+                # 宽基指数涨跌结构 (大中小盘分化)
+                if valid_bench:
+                    fund_txt.insert(tk.END, "\n📊 宽基涨跌结构 (大中小盘)\n", "hdr")
+                    large = next((b for b in valid_bench if "沪深300" in b["name"]), None)
+                    mid = next((b for b in valid_bench if "中证500" in b["name"]), None)
+                    small = next((b for b in valid_bench if "中证1000" in b["name"] or "2000" in b["name"]), None)
+                    tech = next((b for b in valid_bench if "科创" in b["name"]), None)
+                    for label, b in [("大盘价值", large), ("中盘", mid), ("小盘", small), ("科技成长", tech)]:
+                        if b:
+                            tag = "b" if b["pct_5d"] > 1 else "g" if b["pct_5d"] < -1 else "w"
+                            fund_txt.insert(tk.END, f"  {label:6s}: 5日 {b['pct_5d']:+.2f}%  1日 {b['pct_1d']:+.2f}%\n", tag)
+
+                # ══════════════════════════════════════════════════════
+                # Tab3: 主线概括 + 操作建议
+                # ══════════════════════════════════════════════════════
+                idea_txt.delete("1.0", tk.END)
+                ideas = []
+
+                # 1. 大盘定性
+                sh = r_idx.get("上证指数", {})
+                if sh.get("ok"):
+                    pct = sh["pct"]
+                    if pct > 1.5:
+                        ideas.append(("b", f"✅ 大盘强势拉升 (上证 {pct:+.2f}%) → 持股待涨, 避免追高"))
+                    elif pct > 0.3:
+                        ideas.append(("b", f"🟡 大盘温和上涨 ({pct:+.2f}%) → 板块轮动中, 盯住主线不放"))
+                    elif pct > -0.3:
+                        ideas.append(("w", f"⚪ 大盘窄幅震荡 ({pct:+.2f}%) → 精选个股, 降低仓位"))
+                    elif pct > -1.5:
+                        ideas.append(("g", f"🟠 大盘回调 ({pct:+.2f}%) → 控制仓位, 低吸优先蓝筹/高股息"))
+                    else:
+                        ideas.append(("g", f"🔴 大盘明显下跌 ({pct:+.2f}%) → 仓位降到5成以下, 关注错杀机会"))
+
+                # 2. 宽基强弱 → 风格建议
+                if valid_bench:
+                    sorted_b = sorted(valid_bench, key=lambda x: x["pct_5d"], reverse=True)
+                    top3 = [b["name"] for b in sorted_b[:3]]
+                    bot3 = [b["name"] for b in sorted_b[-3:]]
+                    ideas.append(("w", f"🏆 近5日最强: {', '.join(top3)}"))
+                    ideas.append(("w", f"📉 近5日最弱: {', '.join(bot3)}"))
+
+                    # 风格判断
+                    large_b = next((b for b in valid_bench if "300" in b["name"]), None)
+                    small_b = next((b for b in valid_bench if "2000" in b["name"] or "1000" in b["name"]), None)
+                    tech_b = next((b for b in valid_bench if "科创" in b["name"] or "创业" in b["name"]), None)
+                    if small_b and large_b:
+                        if small_b["pct_5d"] > large_b["pct_5d"] + 2:
+                            ideas.append(("b", "🎯 小盘风格明显占优 → 关注中证1000/2000成分股, 弹性更大"))
+                        elif large_b["pct_5d"] > small_b["pct_5d"] + 2:
+                            ideas.append(("g", "🛡️ 大盘风格占优 → 关注沪深300蓝筹, 防御+稳健"))
+                    if tech_b and tech_b["pct_5d"] > 1:
+                        ideas.append(("b", "🚀 科技成长走强 → 风险偏好回升, 可关注科创50/创业板"))
+
+                    # MA15 上穿统计 → 启动信号
+                    cross_list = [b for b in valid_bench if b["cross_up"]]
+                    if len(cross_list) >= 2:
+                        ideas.append(("b", f"📈 多指数同时上穿MA15 ({', '.join(b['name'] for b in cross_list)}) → 可能是短期启动信号"))
+
+                    flat_list = [b for b in valid_bench if b["flat"]]
+                    if len(flat_list) >= 2:
+                        ideas.append(("w", f"➡️ 多指数MA15走平 ({', '.join(b['name'] for b in flat_list)}) → 变盘前兆, 等方向选择"))
+
+                # 3. 板块主线
+                if r_board.get("ok"):
+                    df = r_board["df"]
+                    top3 = df.head(3)["板块"].tolist()
+                    bot3 = df.tail(3)["板块"].iloc[::-1].tolist()
+                    avg = r_board["avg"]
+                    if avg > 1:
+                        ideas.append(("b", f"🔥 主线板块: {', '.join(top3)} → 情绪偏暖, 领涨板块有望延续"))
+                    elif avg < -1:
+                        ideas.append(("g", f"🧊 领跌板块: {', '.join(bot3)} → 情绪偏弱, 回避弱势板块"))
+
+                    # 资源 vs 科技
+                    res_s = ["有色金属","钢铁行业","煤炭行业","石油行业","房地产"]
+                    tech_s = ["半导体","软件服务","互联网","通信设备","元器件"]
+                    res_p = df[df["板块"].isin(res_s)]["涨跌幅"].mean() if any(s in df["板块"].values for s in res_s) else None
+                    tech_p = df[df["板块"].isin(tech_s)]["涨跌幅"].mean() if any(s in df["板块"].values for s in tech_s) else None
+                    if res_p is not None and tech_p is not None:
+                        if res_p > 1 and tech_p < 0:
+                            ideas.append(("b", "⛏️ 周期资源领涨 → 关注商品价格/通胀预期传导, 利好有色/煤炭/化工"))
+                        elif tech_p > 1 and res_p < 0:
+                            ideas.append(("b", "💻 科技成长领涨 → 风险偏好回升, 关注AI/半导体/软件"))
+                        elif res_p > 0.5 and tech_p > 0.5:
+                            ideas.append(("b", "🎯 普涨格局 (周期+科技共振) → 持仓为主, 别频繁换股"))
+
+                # 4. 全球传导
+                if r_global:
+                    gv = {k:v for k,v in r_global.items() if not k.startswith("__")}
+                    if any("黄金" in k and "$4" in str(v) for k,v in gv.items()):
+                        ideas.append(("g", "⚠️ 黄金$4000+ 高位 → 避险情绪升温, 压制成长股估值, 利好黄金股"))
+                    if any("美债" in k and "4." in str(v) for k,v in gv.items()):
+                        ideas.append(("g", "⚠️ 美债收益率4%+ → 全球流动性偏紧, 外资流入承压, 注意汇率"))
+                    nq = next((v for k,v in gv.items() if "纳指" in k), None)
+                    if nq: ideas.append(("w", f"📈 纳指 {nq} → 关注美股收盘方向对A股次日情绪的影响"))
+
+                # 渲染
+                idea_txt.insert(tk.END, f"⏰ 更新 {datetime.now().strftime('%H:%M:%S')}  |  数据源: 东方财富+新浪+AKShare\n\n")
+                for tag, text in ideas:
+                    idea_txt.insert(tk.END, text + "\n\n", tag)
 
                 dt = (datetime.now() - _t0).total_seconds()
-                status1.configure(text=f"✅ 加载完成 ({dt:.1f}s)", fg="#66BB6A")
+                status_lbl.configure(text=f"✅ 加载完成 ({dt:.1f}s)  |  切到其他 Tab 看深度分析")
 
             _do_all()
 
         except Exception as e:
-            print(f"[📺看盘整合] ❌ 异常: {e}", flush=True)
+            print(f"[📺看盘] ❌ 异常: {e}", flush=True)
             _tb.print_exc()
-
 
     def _show_oversold_dialog(self):
         """🎯 超跌分析 — 个股超跌评分 + 板块联动 + 全球资产机会"""
