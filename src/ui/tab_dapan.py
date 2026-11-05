@@ -15361,13 +15361,264 @@ class DapanMixin:
 
             # ⭐ 同步调用 — 不启动任何线程, 直接在当前函数里跑完
             _do_all()
-    
 
         except Exception as e:
             print(f"[🌍资产] ❌ 异常: {e}", flush=True)
             _tb.print_exc()
+
+    def _show_realtime_market_dialog(self):
+        """📺 实时看盘 — A股盘中 + 全球资产联动 + 建议"""
+        import tkinter as tk
+        import tkinter.ttk as ttk
+        import threading as _th
+        from datetime import datetime, timedelta
+        import pandas as pd, numpy as np
+        import traceback as _tb
+        print("[📺看盘] 被调用!", flush=True)
+        try:
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            dlg = tk.Toplevel(root)
+            dlg.title("📺 实时看盘 — Realtime Market Dashboard")
+            dlg.geometry("1100x780")
+            dlg.configure(bg="#121212")
+            dlg.transient(root)
+            dlg.minsize(900, 650)
+
+            _font = ("Helvetica", 11)
+            _big = ("Helvetica", 20, "bold")
+            _mid = ("Helvetica", 13, "bold")
+
+            top_bar = tk.Frame(dlg, bg="#121212")
+            top_bar.pack(fill=tk.X, padx=12, pady=(10, 6))
+            tk.Label(top_bar, text="📺 A股实时看盘", fg="#FFD54F", bg="#121212", font=_mid).pack(side=tk.LEFT)
+            status_lbl = tk.Label(top_bar, text="⏳ 拉取实时数据中...", fg="#888", bg="#121212", font=_font)
+            status_lbl.pack(side=tk.LEFT, padx=20)
+
+            idx_frame = tk.Frame(dlg, bg="#121212")
+            idx_frame.pack(fill=tk.X, padx=12, pady=6)
+            idx_cards = {}
+            idx_names = ["上证指数", "深证成指", "创业板指", "科创50", "沪深300"]
+            for i, name in enumerate(idx_names):
+                card = tk.Frame(idx_frame, bg="#1E1E1E", highlightthickness=1,
+                                highlightbackground="#333", padx=10, pady=8)
+                card.grid(row=0, column=i, padx=4, sticky="nsew")
+                idx_frame.grid_columnconfigure(i, weight=1)
+                tk.Label(card, text=name, fg="#AAA", bg="#1E1E1E", font=_font).pack()
+                val = tk.Label(card, text="—", fg="#FFF", bg="#1E1E1E", font=_big)
+                val.pack()
+                pct = tk.Label(card, text="—", fg="#888", bg="#1E1E1E", font=_font)
+                pct.pack()
+                idx_cards[name] = {"val": val, "pct": pct}
+
+            mid = tk.Frame(dlg, bg="#121212")
+            mid.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
+
+            board_frame = tk.LabelFrame(mid, text=" 📊 行业板块涨跌 ", fg="#FFD54F", bg="#121212",
+                                         font=_font, padx=8, pady=6)
+            board_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
+            board_txt = tk.Text(board_frame, height=12, bg="#1E1E1E", fg="#DDD", font=_font,
+                                wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=8, pady=6)
+            board_txt.pack(fill=tk.BOTH, expand=True)
+            board_txt.tag_configure("up", foreground="#EF5350")
+            board_txt.tag_configure("dn", foreground="#66BB6A")
+            board_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 10, "bold"))
+
+            right = tk.Frame(mid, bg="#121212")
+            right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(6, 0))
+
+            north_frame = tk.LabelFrame(right, text=" 🌐 北向资金 (近5日) ", fg="#FFD54F", bg="#121212",
+                                        font=_font, padx=8, pady=6)
+            north_frame.pack(fill=tk.BOTH, expand=True)
+            north_txt = tk.Text(north_frame, height=6, bg="#1E1E1E", fg="#DDD", font=_font,
+                                wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=8, pady=6)
+            north_txt.pack(fill=tk.BOTH, expand=True)
+
+            global_frame = tk.LabelFrame(right, text=" 💎 全球五巨头 (最新价) ", fg="#FFD54F", bg="#121212",
+                                          font=_font, padx=8, pady=6)
+            global_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+            global_txt = tk.Text(global_frame, height=6, bg="#1E1E1E", fg="#DDD", font=_font,
+                                  wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=8, pady=6)
+            global_txt.pack(fill=tk.BOTH, expand=True)
+
+            idea_frame = tk.LabelFrame(dlg, text=" 💡 盘面诊断 & 操作建议 ", fg="#FFD54F", bg="#121212",
+                                        font=_mid, padx=10, pady=8)
+            idea_frame.pack(fill=tk.X, padx=12, pady=(6, 12))
+            idea_txt = tk.Text(idea_frame, height=6, bg="#1E1E1E", fg="#EEE", font=_font,
+                                wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=10, pady=8)
+            idea_txt.pack(fill=tk.X)
+            idea_txt.tag_configure("g", foreground="#EF5350", font=("Helvetica", 11, "bold"))
+            idea_txt.tag_configure("b", foreground="#66BB6A", font=("Helvetica", 11, "bold"))
+            idea_txt.tag_configure("w", foreground="#FFD54F", font=("Helvetica", 11, "bold"))
+
+            import concurrent.futures as cf
+            import requests
+            HEADERS = {"Referer": "https://quote.eastmoney.com/", "User-Agent": "Mozilla/5.0"}
+
+            def _fetch_indices():
+                idx_map = {
+                    "1.000001": "上证指数", "0.399001": "深证成指",
+                    "0.399006": "创业板指", "1.000688": "科创50",
+                    "1.000300": "沪深300",
+                }
+                out = {}
+                for secid, name in idx_map.items():
+                    try:
+                        r = requests.get(f"https://push2.eastmoney.com/api/qt/stock/get",
+                            params={"secid": secid, "fields": "f43,f170,f46"},
+                            timeout=5, headers=HEADERS)
+                        j = r.json().get("data", {})
+                        if j:
+                            out[name] = {"price": j.get("f43", 0) / 100,
+                                         "pct": (j.get("f170", 0) or 0) / 100, "ok": True}
+                        else:
+                            out[name] = {"ok": False}
+                    except Exception as e:
+                        out[name] = {"ok": False, "err": str(e)[:30]}
+                return out
+
+            def _fetch_boards():
+                try:
+                    import akshare as ak
+                    df = ak.stock_sector_spot()
+                    df["涨跌幅"] = df["涨跌幅"].astype(float)
+                    df = df.sort_values("涨跌幅", ascending=False)
+                    return {"ok": True, "top": df.head(5), "bot": df.tail(5).iloc[::-1],
+                            "avg": df["涨跌幅"].mean(), "df": df}
+                except Exception as e:
+                    return {"ok": False, "err": str(e)[:40]}
+
+            def _fetch_north():
+                try:
+                    import akshare as ak
+                    df = ak.stock_hsgt_hist_em(symbol="北向资金")
+                    return {"ok": True, "latest": df.tail(5)}
+                except Exception as e:
+                    return {"ok": False, "err": str(e)[:40]}
+
+            def _fetch_global():
+                results = {}
+                try:
+                    import akshare as ak
+                    for sym, key, pat in [("XAU","💎黄金","${:,.0f}"), ("CL","🛢️原油","${:.2f}")]:
+                        try:
+                            h = ak.futures_foreign_hist(symbol=sym)
+                            if len(h) > 0: results[key] = pat.format(float(h["收盘"].iloc[-1]))
+                        except Exception: pass
+                    try:
+                        b = ak.bond_zh_us_rate()
+                        if len(b) > 0: results["🏦美债10Y"] = f"{float(b['收盘价'].iloc[-1]):.2f}%"
+                    except Exception: pass
+                    try:
+                        n = ak.index_us_stock_sina(symbol=".IXIC")
+                        if len(n) > 0: results["📈纳指"] = f"{float(n['close'].iloc[-1]):,.0f}"
+                    except Exception: pass
+                except Exception as e:
+                    results["__err__"] = str(e)[:40]
+                return results
+
+            def _do_all():
+                _t0 = datetime.now()
+                root.update()
+                status_lbl.configure(text="⏳ 后台拉数据 (指数+板块+北向+全球)...")
+
+                with cf.ThreadPoolExecutor(4) as ex:
+                    f_idx = ex.submit(_fetch_indices)
+                    f_board = ex.submit(_fetch_boards)
+                    f_north = ex.submit(_fetch_north)
+                    f_global = ex.submit(_fetch_global)
+                    r_idx = f_idx.result(timeout=15)
+                    r_board = f_board.result(timeout=20)
+                    r_north = f_north.result(timeout=15)
+                    r_global = f_global.result(timeout=20)
+
+                for name, info in r_idx.items():
+                    card = idx_cards.get(name)
+                    if not card: continue
+                    if info.get("ok"):
+                        pct = info["pct"]
+                        color = "#EF5350" if pct > 0 else "#66BB6A" if pct < 0 else "#AAA"
+                        arrow = "↑" if pct > 0 else "↓" if pct < 0 else "→"
+                        card["val"].configure(text=f"{info['price']:.2f}", fg=color)
+                        card["pct"].configure(text=f"{arrow} {pct:+.2f}%", fg=color)
+                    else:
+                        card["val"].configure(text="—")
+                        card["pct"].configure(text="接口不可用", fg="#F44336")
+
+                board_txt.delete("1.0", tk.END)
+                if r_board.get("ok"):
+                    board_txt.insert(tk.END, "🔥 领涨 5 板块\n", "hdr")
+                    for _, r in r_board["top"].iterrows():
+                        board_txt.insert(tk.END, f"  {r['板块']:8s}  {r['涨跌幅']:+.2f}%\n", "up")
+                    board_txt.insert(tk.END, "\n🧊 领跌 5 板块\n", "hdr")
+                    for _, r in r_board["bot"].iterrows():
+                        board_txt.insert(tk.END, f"  {r['板块']:8s}  {r['涨跌幅']:+.2f}%\n", "dn")
+                    board_txt.insert(tk.END, f"\n板块平均 {r_board['avg']:+.2f}%", "hdr")
+                else:
+                    board_txt.insert(tk.END, f"板块不可用: {r_board.get('err','?')}")
+
+                north_txt.delete("1.0", tk.END)
+                if r_north.get("ok"):
+                    for _, row in r_north["latest"].iloc[::-1].iterrows():
+                        d = row.get("日期", "?")
+                        lgs = row.get("领涨股", "")
+                        lgp = row.get("领涨股-涨跌幅", 0)
+                        north_txt.insert(tk.END, f"📅 {d}  领涨: {lgs} ({lgp}%)\n")
+                else:
+                    north_txt.insert(tk.END, f"北向不可用: {r_north.get('err','?')}")
+
+                global_txt.delete("1.0", tk.END)
+                if r_global:
+                    for k, v in r_global.items():
+                        if not k.startswith("__"):
+                            global_txt.insert(tk.END, f"  {k}: {v}\n")
+                else:
+                    global_txt.insert(tk.END, "全球数据失败")
+
+                idea_txt.delete("1.0", tk.END)
+                ideas = []
+                sh = r_idx.get("上证指数", {})
+                if sh.get("ok"):
+                    pct = sh["pct"]
+                    if pct > 1.5: ideas.append(("b", f"✅ 大盘强势 ({pct:+.2f}%), 持股待涨, 别追高"))
+                    elif pct > 0: ideas.append(("b", f"🟡 大盘微红 ({pct:+.2f}%), 板块轮动, 盯主线"))
+                    elif pct > -1.5: ideas.append(("g", f"🟠 大盘微绿 ({pct:+.2f}%), 注意防守, 低吸蓝筹"))
+                    else: ideas.append(("g", f"🔴 大盘下跌 ({pct:+.2f}%), 控仓, 盯错杀机会"))
+
+                if r_board.get("ok"):
+                    avg = r_board["avg"]
+                    if avg > 1.0: ideas.append(("w", f"板块平均 {avg:+.2f}% — 情绪偏暖, 领涨延续"))
+                    elif avg < -1.0: ideas.append(("g", f"板块平均 {avg:+.2f}% — 情绪偏弱, 防扩散"))
+                    else: ideas.append(("w", f"板块平均 {avg:+.2f}% — 中性, 精选个股"))
+
+                    df = r_board["df"]
+                    res_s = ["有色金属","钢铁行业","煤炭行业","石油行业","房地产"]
+                    tech_s = ["半导体","软件服务","互联网","通信设备"]
+                    res_p = df[df["板块"].isin(res_s)]["涨跌幅"].mean() if any(s in df["板块"].values for s in res_s) else None
+                    tech_p = df[df["板块"].isin(tech_s)]["涨跌幅"].mean() if any(s in df["板块"].values for s in tech_s) else None
+                    if res_p is not None and tech_p is not None:
+                        if res_p > 1 and tech_p < 0: ideas.append(("b", "🎯 周期领涨, 商品/通胀"))
+                        elif tech_p > 1 and res_p < 0: ideas.append(("b", "🎯 科技领涨, 风险偏好"))
+
+                if r_global:
+                    gv = {k: v for k, v in r_global.items() if not k.startswith("__")}
+                    if any("黄金" in k and "$4" in str(v) for k, v in gv.items()):
+                        ideas.append(("g", "⚠️ 黄金$4000+ — 避险升温, 压成长估值"))
+                    if any("美债" in k and "4." in str(v) for k, v in gv.items()):
+                        ideas.append(("g", "⚠️ 美债4%+ — 全球流动性偏紧"))
+                    nq = next((v for k,v in gv.items() if "纳指" in k), None)
+                    if nq: ideas.append(("w", f"📈 纳指 {nq} — 美股收影响A股次日"))
+
+                idea_txt.insert(tk.END, f"⏰ {datetime.now().strftime('%H:%M:%S')}  (东方财富+新浪+AKShare)\n\n")
+                for tag, text in ideas:
+                    idea_txt.insert(tk.END, text + "\n", tag)
+
+                dt = (datetime.now() - _t0).total_seconds()
+                status_lbl.configure(text=f"✅ 加载完成 ({dt:.1f}s)")
+
+            _do_all()
+
         except Exception as e:
-            print(f"[🌍资产] ❌ 异常: {e}", flush=True)
+            print(f"[📺看盘] ❌ 异常: {e}", flush=True)
             _tb.print_exc()
 
     def _show_1min_kline_dialog(self):

@@ -4762,6 +4762,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 ("🎯机会", 7, self._show_jianlou),
                 ("🎯高抛低吸", 8, self._show_high_low_swing),
                 ("📊融资盘", 8, self._show_margin_dialog),
+                ("📺看盘", 8, self._show_realtime_market_dialog),
                 ("🌍全球资产", 8, self._show_global_assets_dialog),
                 ("🔷同花顺", 9, self._show_ths_ifind_dialog),
                 ("📅财经日历", 9, self._show_event_calendar_dialog),
