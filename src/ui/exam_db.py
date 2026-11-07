@@ -262,20 +262,52 @@ def _row_to_dict(row) -> Dict:
 # 🎲 随机组卷
 # ═══════════════════════════════════════════════
 
+def _diff_range(difficulty: str) -> Tuple[int, int]:
+    """UI 难度代号 → (最低难度, 最高难度)"""
+    return {
+        "easy":    (1, 2),
+        "medium":  (2, 3),
+        "hard":    (3, 4),
+        "expert":  (4, 5),
+        "easy_mix": (1, 3),
+        "hard_mix": (2, 5),
+        "mixed":   (1, 5),
+    }.get(difficulty, (1, 5))
+
+
 def pick_random_questions(grade: str, subject: str, topics: List[str],
-                          num: int, exclude_ids=None) -> List[Dict]:
-    """从 DB 随机抽题 — 支持 topic 名模糊匹配 (UI名 vs DB名差异)"""
+                          num: int, exclude_ids=None,
+                          difficulty: str = "mixed") -> List[Dict]:
+    """
+    🎲 随机组卷 — 支持难度等级
+    difficulty: "easy"(1-2) / "medium"(3) / "hard"(4) / "expert"(5) / "mixed"(不限)
+    """
     exclude_ids = exclude_ids or []
     conn = _conn()
 
-    # 清洗 topics: None/"全部"/空字符串 都视为"不限"
     real_topics = [t.strip() for t in (topics or []) if t and t != "全部" and t.strip()]
 
     sql = "SELECT * FROM questions WHERE grade=? AND subject=?"
     params = [grade, subject]
 
+    # ── 难度过滤 ──
+    diff_map = {
+        "easy":    (1, 2),
+        "medium":  (2, 3),
+        "hard":    (3, 4),
+        "expert":  (4, 5),
+    }
+    if difficulty in diff_map:
+        lo, hi = diff_map[difficulty]
+        sql += " AND difficulty BETWEEN ? AND ?"
+        params.extend([lo, hi])
+    elif difficulty == "easy_mix":   # 简单为主 + 少量中等
+        sql += " AND difficulty BETWEEN 1 AND 3"
+    elif difficulty == "hard_mix":   # 中等为主 + 少量难
+        sql += " AND difficulty BETWEEN 2 AND 5"
+    # "mixed" / 其他 → 不限难度
+
     if real_topics:
-        # 用 LIKE %topic% 模糊匹配 — 兼容 UI "运算定律" vs DB "运算定律与简便计算"
         like_clauses = []
         for t in real_topics:
             like_clauses.append("topic LIKE ?")
@@ -290,6 +322,21 @@ def pick_random_questions(grade: str, subject: str, topics: List[str],
     sql += " ORDER BY RANDOM() LIMIT ?"
     params.append(num)
     rows = conn.execute(sql, params).fetchall()
+
+    # 如果按难度筛选后不够，降级重试
+    if len(rows) < num and difficulty != "mixed":
+        params2 = [grade, subject]
+        sql2 = "SELECT * FROM questions WHERE grade=? AND subject=?"
+        if real_topics:
+            like_clauses = []
+            for t in real_topics:
+                like_clauses.append("topic LIKE ?")
+                params2.append(f"%{t}%")
+            sql2 += " AND (" + " OR ".join(like_clauses) + ")"
+        sql2 += " ORDER BY RANDOM() LIMIT ?"
+        params2.append(num)
+        rows = conn.execute(sql2, params2).fetchall()
+
     conn.close()
     return [_row_to_dict(r) for r in rows]
 

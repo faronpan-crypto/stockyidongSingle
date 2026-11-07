@@ -5,6 +5,7 @@
 import base64
 import json
 import os
+import re
 import ssl
 import mimetypes
 import urllib.request
@@ -79,6 +80,150 @@ def call_deepseek(system_prompt: str, user_prompt: str,
     except Exception as e:
         print(f"[AI] Error: {e}")
         return None
+
+
+def _robust_json_extract(text: str) -> Optional[Dict]:
+    """
+    🛡️ 从 AI 返回中健壮地提取 JSON
+    优先级:
+    1. ```json ... ``` 代码块
+    2. ``` ... ``` 代码块
+    3. 首个 { 到末个 } 之间 (花括号匹配)
+    4. 正则捕获 "per_question" 存在性后再找
+    返回解析后的 dict，失败返回 None
+    """
+    if not text:
+        return None
+    text = text.strip()
+
+    # 1. ```json ... ```
+    if "```json" in text.lower():
+        m = re.search(r"```json\s*\n?(.*?)```", text, re.DOTALL | re.IGNORECASE)
+        if m:
+            try:
+                return json.loads(m.group(1).strip())
+            except Exception:
+                text = m.group(1).strip()  # 继续 fallback
+
+    # 2. ``` ... ```
+    if "```" in text:
+        m = re.search(r"```\s*\n?(.*?)```", text, re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group(1).strip())
+            except Exception:
+                text = m.group(1).strip()
+
+    # 3. 从首个 { 到末个 }
+    open_idx = text.find("{")
+    close_idx = text.rfind("}")
+    if open_idx >= 0 and close_idx > open_idx:
+        candidate = text[open_idx:close_idx + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
+
+    # 4. 找第一个包含 "per_question" 的 JSON 对象
+    pq_pos = text.find("\"per_question\"")
+    if pq_pos >= 0:
+        # 往前找 {
+        brace_start = text.rfind("{", 0, pq_pos)
+        brace_end = text.find("}", pq_pos)
+        # 找到匹配的闭合 } — 简单做法: 从 pq_pos 往后找最后一个 }
+        last_brace = text.rfind("}")
+        if brace_start >= 0 and last_brace > brace_start:
+            candidate = text[brace_start:last_brace + 1]
+            try:
+                return json.loads(candidate)
+            except Exception:
+                pass
+
+    return None
+
+
+def _sanitize_ai_result(result: Dict) -> Dict:
+    """
+    🧼 AI 返回的 JSON 清洗 — 把空字符串、None、缺失值都修成安全类型
+    避免 UI 里做算术运算时崩掉
+    """
+    if not isinstance(result, dict):
+        return result
+
+    # 顶层字段
+    result["total_score"] = int(result.get("total_score") or 0)
+    result["max_total"] = int(result.get("max_total") or 0)
+    result["accuracy_rate"] = int(result.get("accuracy_rate") or 0)
+    result.setdefault("weak_topics", [])
+    result.setdefault("teacher_summary", "")
+    result.setdefault("next_step_suggestion", "")
+
+    # 每题
+    pq = result.get("per_question", [])
+    for p in pq:
+        if not isinstance(p, dict):
+            continue
+        p["no"] = int(p.get("no") or 0)
+        # max_score / score 可能是 "" 空字符串
+        try:
+            p["score"] = int(float(p.get("score") or 0))
+        except (ValueError, TypeError):
+            p["score"] = 0
+        try:
+            ms = p.get("max_score")
+            if ms in ("", None, 0):
+                p["max_score"] = p["score"] if p["score"] > 0 else 5
+            else:
+                p["max_score"] = int(float(ms))
+        except (ValueError, TypeError):
+            p["max_score"] = 5
+        # correct 可能是字符串
+        cor = p.get("correct")
+        if isinstance(cor, str):
+            p["correct"] = cor.lower() in ("true", "对", "yes")
+        elif cor is None:
+            p["correct"] = p["score"] > 0
+        # 字符串字段确保有值
+        for k in ["content", "student_answer", "std_answer",
+                  "why_wrong", "knowledge_point", "easy_trap", "teacher_tip", "type"]:
+            p.setdefault(k, "")
+            if p[k] is None:
+                p[k] = ""
+
+    # 重算总分 (防止 AI 算错)
+    if pq:
+        actual_total = sum(p.get("score", 0) for p in pq)
+        actual_max = sum(p.get("max_score", 0) for p in pq)
+        result["total_score"] = actual_total
+        result["max_total"] = actual_max
+        if actual_max > 0:
+            result["accuracy_rate"] = round(actual_total / actual_max * 100)
+
+    return result
+
+
+def _looks_like_refusal(text: str) -> bool:
+    """
+    检测 AI 是否返回了自然语言拒绝/闲聊而不是 JSON
+    典型信号: "没看到", "无法", "请你", "我来帮你" 等
+    """
+    if not text:
+        return True
+    lower = text.lower()
+    # 已经是 JSON 的肯定不是 refusal
+    if text.strip().startswith("{") and text.strip().endswith("}"):
+        return False
+    signals = [
+        "没看到", "未看到", "没有看到", "没收到",
+        "无法辨认", "看不清", "无法识别",
+        "请你", "请重新", "请上传", "请告诉我",
+        "我来帮你", "我会帮你", "我可以帮",
+        "暂时无法", "目前还没有",
+    ]
+    hit = sum(1 for s in signals if s in text)
+    # 同时检测 JSON 关键字是否存在
+    json_kw = sum(1 for kw in ["per_question", "total_score", "max_total"] if kw in lower)
+    return hit >= 2 or (hit >= 1 and json_kw == 0)
 
 
 def _image_to_base64(image_path: str) -> str:
@@ -219,21 +364,32 @@ def grade_exam_from_images(image_paths: List[str],
 如果一张图有多个题, 请按顺序对应到题号。"""
 
     result_text = None
+    used_fallback = False
 
-    # 优先用多模态 (直接看图)
+    # 优先用多模态 (直接看图) — flash 不行自动换 chat
     if use_vision and image_paths:
-        result_text = call_deepseek_vision(
-            system_prompt=system,
-            user_prompt=user_prompt,
-            image_paths=image_paths,
-            model="deepseek-flash",
-            max_tokens=3500,
-        )
-        if not result_text:
-            # 降级到纯文字模式 (AI 不看图片，需要手动输入答案)
+        for try_model in ["deepseek-flash", "deepseek-chat"]:
+            result_text = call_deepseek_vision(
+                system_prompt=system,
+                user_prompt=user_prompt,
+                image_paths=image_paths,
+                model=try_model,
+                max_tokens=3500,
+            )
+            if result_text and not _looks_like_refusal(result_text):
+                break
+            used_fallback = True
+            if result_text and _looks_like_refusal(result_text):
+                print(f"[VISION] {try_model} refusal, 换模型")
+            else:
+                print(f"[VISION] {try_model} None, 换模型")
+
+        # 还是不行 → 降级到纯文字 (假设答案空白)
+        if not result_text or _looks_like_refusal(result_text):
+            used_fallback = True
             result_text = call_deepseek(
                 system_prompt=system,
-                user_prompt=user_prompt + "\n\n(注意: 当前是纯文字模式, 我还需要把学生答案告诉你)",
+                user_prompt=user_prompt + "\n\n(注意: 当前是纯文字模式, 请假设学生答案都是空白)",
                 temperature=0.5,
                 max_tokens=3500,
             )
@@ -243,17 +399,148 @@ def grade_exam_from_images(image_paths: List[str],
     if not result_text:
         return {"error": "AI 调用失败 (检查 API key 余额或网络)"}
 
-    # 解析 JSON
-    try:
-        if "```json" in result_text:
-            json_str = result_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in result_text:
-            json_str = result_text.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = result_text
-        return json.loads(json_str)
-    except json.JSONDecodeError as e:
-        return {"error": f"AI 返回不是合法 JSON: {e}", "raw_text": result_text}
+    # 用健壮提取器
+    parsed = _robust_json_extract(result_text)
+    if parsed:
+        if used_fallback:
+            parsed["_note"] = "AI 视觉未能识别图片, 已降级处理"
+        return _sanitize_ai_result(parsed)
+
+    # 二次 retry: 让 AI 重新输出纯 JSON, 不允许任何自然语言
+    retry_prompt = (
+        "你刚才的回复不是纯 JSON 格式, 我无法解析。"
+        "请忽略所有闲聊文字, 严格只输出一个 JSON 对象,"
+        "用 ```json 和 ``` 包裹, 不要有任何其他文字。"
+        f"\n\n你的上一轮回复是: {result_text[:300]}"
+    )
+    retry_text = call_deepseek(system, retry_prompt, temperature=0.3, max_tokens=3500)
+    if retry_text:
+        parsed = _robust_json_extract(retry_text)
+        if parsed:
+            if used_fallback:
+                parsed["_note"] = "AI 视觉未能识别图片, 已降级处理"
+            return _sanitize_ai_result(parsed)
+
+    # 彻底失败 — 返回原始文本让用户看到
+    return {"error": f"AI 返回不是合法 JSON", "raw_text": result_text}
+
+
+def grade_pure_from_images(image_paths: List[str],
+                           grade_hint: str = "",
+                           subject_hint: str = "",
+                           style: str = "encourage") -> Dict:
+    """
+    📷📷📷 纯图片批改 — 不依赖出题器试卷
+    AI 自己从图片里识别题目、学生手写答案，并给出标准答案 + 评分
+    适用于: 直接拍了一张练习册/试卷/作业本照片就想批改
+    """
+    cfg = _get_ai_config()
+    if not cfg.get("api_key"):
+        return {"error": "未配置 deepseek API key"}
+
+    teacher = TEACHER_STYLES.get(style, TEACHER_STYLES["encourage"])
+
+    system = f"""{teacher['system']}
+
+# ⛔⛔⛔ 核心原则 — 必须看图片，不能瞎编 ⛔⛔⛔
+1. 你**必须**直接读取我上传的答题纸照片中的内容，**严禁编造图片中不存在的题目或答案**
+2. 如果图片中的内容你看不清楚，请在 student_answer 里写"???"，绝对不要瞎编
+3. 图片已经通过 API 上传给你了，不需要让我重新发
+
+现在开始批改任务:
+- 从图片中识别每一道题的**原始题干** (content)，一字不差照抄图片里的
+- 识别学生的**手写答案** (student_answer)，包括潦草字、圈选、打钩等所有标记
+- 作为老师给出**标准答案** (std_answer)
+- 比对打分 (score/max_score)
+
+**JSON 输出格式 (必须严格遵守，每个字段都不能省):**
+```json
+{{
+  "per_question": [
+    {{
+      "no": 1,
+      "content": "图片里真实存在的题干原文，绝对不能编",
+      "type": "fill 或 choice 或 calc 或 essay",
+      "student_answer": "图片里学生写的答案，看不清就写???",
+      "std_answer": "你给出的正确标准答案",
+      "correct": true 或 false 或 "partial",
+      "score": 5,
+      "max_score": 5,
+      "why_wrong": "错因，答对了就写空字符串",
+      "knowledge_point": "关联知识点",
+      "easy_trap": "易踩陷阱",
+      "teacher_tip": "名师一句话"
+    }}
+  ],
+  "total_score": 42,
+  "max_total": 50,
+  "accuracy_rate": 84,
+  "weak_topics": ["知识点1", "知识点2"],
+  "teacher_summary": "80-150字总体评价",
+  "next_step_suggestion": "下一步建议"
+}}
+```"""
+
+    grade_hint_line = f"(学生大概是 {grade_hint} {subject_hint} 水平)" if (grade_hint or subject_hint) else ""
+    user_prompt = f"""我上传了 {len(image_paths)} 张答题纸/练习册照片 {grade_hint_line}。
+
+⚠️ 最后提醒: 图片里有什么就识别什么，不要编口诀、不要编教材知识!
+如果图片里只有第8题到第15题，就只返回这几题!
+
+开始批改吧。"""
+
+    # 先试 deepseek-flash，不行再用 deepseek-chat
+    result_text = None
+    for try_model in ["deepseek-flash", "deepseek-chat"]:
+        result_text = call_deepseek_vision(
+            system_prompt=system,
+            user_prompt=user_prompt,
+            image_paths=image_paths,
+            model=try_model,
+            max_tokens=4000,
+        )
+        if result_text and not _looks_like_refusal(result_text):
+            break
+        if result_text and _looks_like_refusal(result_text):
+            print(f"[PURE_GRADE] {try_model} 返回 refusal, 换模型重试")
+            continue
+        print(f"[PURE_GRADE] {try_model} 返回 None, 换模型")
+
+    if not result_text:
+        return {"error": "AI 调用失败 — 两个模型都没返回结果"}
+
+    # 检测 refusal
+    if _looks_like_refusal(result_text):
+        # retry 一次，用更强硬的 prompt
+        retry_system = system + "\n\n**再次强调: 图片已经上传到本次对话中了! 你必须自己看图片，不要让我再发一次!**"
+        result_text = call_deepseek_vision(
+            system_prompt=retry_system,
+            user_prompt=user_prompt + "\n\n(请直接看图，不要再让我重新上传!)",
+            image_paths=image_paths,
+            model="deepseek-flash",
+            max_tokens=4000,
+        )
+
+    if not result_text:
+        return {"error": "AI 调用失败"}
+
+    parsed = _robust_json_extract(result_text)
+    if parsed:
+        return _sanitize_ai_result(parsed)
+
+    # 文字 retry
+    retry_prompt = (
+        "你刚才的回复不是纯 JSON 格式。"
+        "请忽略所有闲聊文字，严格只输出一个 JSON 对象，"
+        "用 ```json 和 ``` 包裹，不要有任何其他文字。"
+    )
+    retry_text = call_deepseek(system, retry_prompt, temperature=0.3, max_tokens=4000)
+    if retry_text:
+        parsed = _robust_json_extract(retry_text)
+        if parsed:
+            return _sanitize_ai_result(parsed)
+
+    return {"error": "AI 返回不是合法 JSON", "raw_text": result_text}
 
 
 # ═══════════════════════════════════════════════
@@ -353,23 +640,25 @@ def grade_exam_with_ai(questions: List[Dict],
     if not result_text:
         return {"error": "AI 调用失败 (检查网络或API key)"}
 
-    # 解析 JSON
-    try:
-        # 提取 ```json ... ``` 块
-        if "```json" in result_text:
-            json_str = result_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in result_text:
-            json_str = result_text.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = result_text
+    # 用健壮提取器
+    parsed = _robust_json_extract(result_text)
+    if parsed:
+        return _sanitize_ai_result(parsed)
 
-        return json.loads(json_str)
-    except json.JSONDecodeError as e:
-        # JSON 解析失败，返回原始文本让用户自己看
-        return {
-            "error": f"AI 返回不是合法 JSON ({e})",
-            "raw_text": result_text,
-        }
+    # 二次 retry
+    retry_prompt = (
+        "你刚才的回复不是纯 JSON 格式, 我无法解析。"
+        "请忽略所有闲聊文字, 严格只输出一个 JSON 对象,"
+        "用 ```json 和 ``` 包裹, 不要有任何其他文字。"
+        f"\n\n你的上一轮回复是: {result_text[:300]}"
+    )
+    retry_text = call_deepseek(teacher["system"], retry_prompt, temperature=0.3, max_tokens=3000)
+    if retry_text:
+        parsed = _robust_json_extract(retry_text)
+        if parsed:
+            return _sanitize_ai_result(parsed)
+
+    return {"error": f"AI 返回不是合法 JSON", "raw_text": result_text}
 
 
 def generate_knowledge_explanation(topic_name: str, grade: str = "", subject: str = "") -> str:
