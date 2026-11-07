@@ -69,6 +69,15 @@ def generate_exam_word(questions: List[Dict], meta: Dict,
     doc = Document()
     _add_cn_font(doc)
 
+    # 🖨️ A4 纸张 + 页边距 (解决国内打印机纸张不匹配!)
+    section = doc.sections[0]
+    section.page_width = Cm(21.0)    # A4 宽 210mm
+    section.page_height = Cm(29.7)   # A4 高 297mm
+    section.left_margin = Cm(2.5)
+    section.right_margin = Cm(2.5)
+    section.top_margin = Cm(2.0)
+    section.bottom_margin = Cm(2.0)
+
     # ── 标题 ──
     grade = meta.get("grade", "")
     subject = meta.get("subject", "")
