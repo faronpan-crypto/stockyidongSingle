@@ -13,6 +13,22 @@ import random
 import tempfile
 from datetime import datetime
 
+# 📚 知识点库 + 🤖 AI评分 (新模块)
+try:
+    from ui.knowledge_base import (KNOWLEDGE, STAGES, GRADE_SIMPLE, SUBJECTS_BY_STAGE,
+                                   get_topics, get_topic_names, get_subjects as _kb_subjects,
+                                   search_topic, stats as _kb_stats)
+    HAS_KB = True
+except Exception:
+    HAS_KB = False
+
+try:
+    from ui.exam_ai import (call_deepseek, grade_exam_with_ai, TEACHER_STYLES,
+                            grade_exam_from_images)
+    HAS_AI = True
+except Exception:
+    HAS_AI = False
+
 # 可选依赖 — 缺失时优雅降级
 try:
     from PIL import Image
@@ -1593,16 +1609,46 @@ def _show_tutor_helper(root):
     _show_sol_text(txt, "数学逻辑")  # 默认显示
 
     # ═══════════════════════════════════════
-    # Tab 4: 📝 题库
+    # Tab 4: 📝 题库 (可选中 → 加入"我的试卷" → 出题器用)
     # ═══════════════════════════════════════
     tab_questions = tk.Frame(nb, bg=PALETTE["bg"])
     nb.add(tab_questions, text="📝 题库")
 
-    q_title = tk.Label(tab_questions, text="📝 上海小学真题精选 (语数英科)",
+    q_title = tk.Label(tab_questions, text="📝 上海小学真题精选 · 看到好题 ➕ 选入试卷",
                        font=PALETTE["title_font"],
                        bg=PALETTE["bg"], fg=PALETTE["mint_dark"])
-    q_title.pack(pady=(14, 4))
+    q_title.pack(pady=(14, 2))
     _reg_font(q_title, PALETTE["title_font"])
+
+    # "我的试卷" 状态条
+    my_paper_frame = tk.Frame(tab_questions, bg=PALETTE["bg"]); my_paper_frame.pack(fill=tk.X, padx=20, pady=2)
+    tk.Label(my_paper_frame, text="🎯 我的试卷:",
+             font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["pink_dark"]).pack(side=tk.LEFT)
+    my_paper_count = tk.Label(my_paper_frame, text="0 题",
+                              font=PALETTE["body_bold"],
+                              bg=PALETTE["bg"], fg=PALETTE["mint_dark"])
+    my_paper_count.pack(side=tk.LEFT, padx=4)
+    _reg_font(my_paper_count, PALETTE["body_bold"])
+
+    MY_PAPER = []  # [{"q":..., "a":..., "tip":..., "subject":...}, ...]
+
+    def _update_my_paper_count():
+        my_paper_count.config(text=f"{len(MY_PAPER)} 题",
+                              fg=PALETTE["pink_dark"] if MY_PAPER else PALETTE["text_light"])
+
+    _mk_color_button(my_paper_frame, "🗑️ 清空", PALETTE["white"],
+                     lambda: (MY_PAPER.clear(), _update_my_paper_count()),
+                     width=8).pack(side=tk.LEFT, padx=4)
+    _mk_color_button(my_paper_frame, "📋 去出题器组卷", PALETTE["mint"],
+                     lambda: (
+                         exam_tabs.select(0),
+                         lambda: None  # 不自动填题，让出题器用 DB 抽
+                     )[0],
+                     width=16).pack(side=tk.RIGHT)
+    tk.Label(my_paper_frame, text="💡 选中的题可以加到 SQLite 题库数据库里，出题器会自动抽到!",
+             font=("Arial", 11),
+             bg=PALETTE["bg"], fg=PALETTE["text_light"]).pack(side=tk.RIGHT, padx=8)
 
     q_body = tk.Frame(tab_questions, bg=PALETTE["bg"]); q_body.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
 
@@ -1611,18 +1657,20 @@ def _show_tutor_helper(root):
 
     for subject, questions in QUESTION_BANK.items():
         sub_tab = tk.Frame(q_tabs, bg=PALETTE["bg"])
-        q_tabs.add(sub_tab, text=f"   {subject}   ")
+        q_tabs.add(sub_tab, text=f"   {subject} ({len(questions)}题)  ")
+
         for i, q in enumerate(questions):
             card = tk.Frame(sub_tab, bg=PALETTE["white"], bd=0,
                             highlightthickness=2, highlightbackground=PALETTE["mint"])
             card.pack(fill=tk.X, padx=6, pady=6)
 
             q_frame = tk.Frame(card, bg=PALETTE["white"]); q_frame.pack(fill=tk.X, padx=12, pady=(10, 4))
-            q_num = tk.Label(q_frame, text=f"❓ 第 {i+1} 题",
+            q_num = tk.Label(q_frame, text=f"❓ 第 {i+1} 题 [{subject}]",
                              font=PALETTE["body_bold"],
                              bg=PALETTE["white"], fg=PALETTE["mint_dark"])
             q_num.pack(side=tk.LEFT)
             _reg_font(q_num, PALETTE["body_bold"])
+
             q_lbl = tk.Label(q_frame, text=q["q"],
                              font=PALETTE["body_font"],
                              bg=PALETTE["white"], fg=PALETTE["text"],
@@ -1630,35 +1678,279 @@ def _show_tutor_helper(root):
             q_lbl.pack(anchor="w", padx=4, pady=2)
             _reg_font(q_lbl, PALETTE["body_font"])
 
-            ans_frame = tk.Frame(card, bg=PALETTE["mint"]); ans_frame.pack(fill=tk.X, padx=6, pady=(0, 8))
-            ans_text = tk.Label(ans_frame, text="",
-                                font=PALETTE["body_font"],
-                                bg=PALETTE["mint"], fg=PALETTE["mint_dark"],
-                                wraplength=940, justify="left")
-            ans_text.pack(anchor="w", padx=10, pady=6)
-            _reg_font(ans_text, PALETTE["body_font"])
+            btn_row = tk.Frame(card, bg=PALETTE["white"]); btn_row.pack(fill=tk.X, padx=12, pady=(4, 10))
 
-            tip_text = tk.Label(ans_frame, text="",
-                                font=PALETTE["small_font"],
-                                bg=PALETTE["mint"], fg=PALETTE["pink_dark"],
-                                wraplength=940, justify="left")
-            tip_text.pack(anchor="w", padx=10, pady=(0, 6))
-            _reg_font(tip_text, PALETTE["small_font"])
+            def _add_to_my_paper(subj=subject, qq=q):
+                # 加入内存列表
+                item = {"q": qq["q"], "a": qq["a"], "tip": qq.get("tip", ""), "subject": subj}
+                MY_PAPER.append(item)
+                _update_my_paper_count()
+                # 同时写入 SQLite 题库数据库
+                try:
+                    from ui.exam_db import add_question
+                    add_question(
+                        grade="四年级下",
+                        subject=subj if subj in ["语文","数学","英语","科学"] else "数学",
+                        topic=f"{subj}精选",
+                        q_type="fill" if "=" in qq["q"] or "计算" in qq["q"] else "fill",
+                        content=qq["q"],
+                        answer=qq["a"],
+                        score=5,
+                        analysis=qq.get("tip", ""),
+                    )
+                except Exception:
+                    pass
+                messagebox.showinfo("✅ 已加入",
+                                   f"这道题已加入「我的试卷」!\n\n"
+                                   f"当前共 {len(MY_PAPER)} 题\n\n"
+                                   f"💡 点顶部「🎯智能试卷」→ 「📋出题器」\n"
+                                   f"  → 选好年级学科 → 🎲生成\n"
+                                   f"  出题器会从题库数据库自动抽到这道题~")
 
-            btn_row = tk.Frame(card, bg=PALETTE["white"]); btn_row.pack(fill=tk.X, padx=12, pady=(0, 10))
-            show_btn = _mk_color_button(btn_row, "👀 看答案", PALETTE["sun"],
-                                        lambda a=q["a"], t=q["tip"]: (
-                                            ans_text.config(text="✅ 答案:\n" + a),
-                                            tip_text.config(text="❓ 小贴士: " + t)
-                                        ), width=12)
-            show_btn.pack(side=tk.LEFT)
-            hide_btn = _mk_color_button(btn_row, "🙈 藏起来", PALETTE["white"],
-                                        lambda: (ans_text.config(text=""), tip_text.config(text="")),
-                                        width=12)
-            hide_btn.pack(side=tk.LEFT, padx=6)
+            def _ai_explain_this_one(qq=q, subj=subject):
+                if not HAS_AI:
+                    # 没有 AI 就显示答案 + 提示
+                    messagebox.showinfo(f"📖 {subj} 第{i+1}题",
+                                       f"❓ 题目: {qq['q']}\n\n"
+                                       f"✅ 答案: {qq['a']}\n\n"
+                                       f"💡 提示: {qq.get('tip', '仔细读题，注意单位和符号')}\n\n"
+                                       f"🤖 开启 deepseek AI 后可以获得名师讲解~")
+                    return
+                # 有 AI 调用
+                from ui.exam_ai import call_deepseek
+                result = call_deepseek(
+                    system_prompt="你是小学" + subj + "名师，用小学生能懂的语言讲解。",
+                    user_prompt=f"给小学生讲解这道{qq.get('type','填')}题:\n\n题目: {qq['q']}\n答案: {qq['a']}\n\n要求:\n1. 用通俗语言说题意\n2. 一步步怎么做\n3. 容易错在哪里\n4. 一个类似的小练习题",
+                    temperature=0.6, max_tokens=800
+                )
+                if result:
+                    messagebox.showinfo(f"👨‍🏫 AI讲{q_num.cget('text')}", result)
+                else:
+                    # AI 失败降级
+                    messagebox.showinfo(f"📖 第{i+1}题",
+                                       f"❓ {qq['q']}\n\n✅ {qq['a']}\n\n💡 {qq.get('tip','仔细读题~')}")
+
+            _mk_color_button(btn_row, "➕ 选入试卷", PALETTE["mint"],
+                            _add_to_my_paper, width=12).pack(side=tk.LEFT, padx=2)
+            _mk_color_button(btn_row, "👀 看答案", PALETTE["sun"],
+                            lambda a=q["a"], t=q.get("tip",""):
+                                messagebox.showinfo("✅ 答案",
+                                                  f"答案: {a}\n\n💡 提示: {t}"),
+                            width=10).pack(side=tk.LEFT, padx=2)
+            _mk_color_button(btn_row, "🤖 AI讲解", PALETTE["pink"],
+                            _ai_explain_this_one, width=12).pack(side=tk.LEFT, padx=2)
 
     # ═══════════════════════════════════════
-    # Tab 8: 🎯 智能试卷
+    # Tab 5: 📚 全学科知识点库 (20年级/278主题/913子点)
+    # ═══════════════════════════════════════
+    tab_knowledge = tk.Frame(nb, bg=PALETTE["bg"])
+    nb.add(tab_knowledge, text="📚 知识点")
+
+    _kb_title = tk.Label(tab_knowledge, text="📚 12年级全学科知识点库",
+                         font=PALETTE["title_font"],
+                         bg=PALETTE["bg"], fg=PALETTE["lavender_dark"])
+    _kb_title.pack(pady=(14, 2))
+    _kb_hint = tk.Label(tab_knowledge,
+                        text="选学段 → 年级 → 学科 → 点击知识点查看详细内容  🔗 联动出题器",
+                        font=PALETTE["body_font"],
+                        bg=PALETTE["bg"], fg=PALETTE["text_light"])
+    _kb_hint.pack()
+    _reg_font(_kb_hint, PALETTE["body_font"])
+
+    if HAS_KB:
+        _kb_stats_data = _kb_stats()
+        _kb_stat_label = tk.Label(tab_knowledge,
+                                  text=f"📊 20年级 · {_kb_stats_data['total_topics']}主题 · {_kb_stats_data['total_children']}子知识点",
+                                  font=PALETTE["body_bold"],
+                                  bg=PALETTE["bg"], fg=PALETTE["pink_dark"])
+        _kb_stat_label.pack(pady=(2, 6))
+        _reg_font(_kb_stat_label, PALETTE["body_bold"])
+
+    # 三列布局: 学段 | 年级 | 学科 + 搜索 + 内容详情
+    _kb_main = tk.Frame(tab_knowledge, bg=PALETTE["bg"]); _kb_main.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
+
+    # 左列: 学段 + 年级 + 学科 选择
+    _kb_left = tk.Frame(_kb_main, bg=PALETTE["bg"], width=200); _kb_left.pack(side=tk.LEFT, fill=tk.Y)
+    _kb_left.pack_propagate(False)
+
+    # 搜索框
+    tk.Label(_kb_left, text="🔍 搜索知识点:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w", pady=(0, 2))
+    _kb_search_var = tk.StringVar()
+    _kb_search_entry = tk.Entry(_kb_left, textvariable=_kb_search_var,
+                                font=PALETTE["body_font"], width=22)
+    _kb_search_entry.pack(fill=tk.X, pady=(0, 10))
+
+    # 学段选择
+    tk.Label(_kb_left, text="🎓 学段:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w")
+    _kb_stage_var = tk.StringVar(value="小学")
+    _kb_stage_cb = ttk.Combobox(_kb_left, textvariable=_kb_stage_var, state="readonly",
+                                values=["小学", "初中", "高中"], width=18,
+                                font=PALETTE["body_font"])
+    _kb_stage_cb.pack(fill=tk.X, pady=2)
+
+    # 年级选择
+    tk.Label(_kb_left, text="📅 年级:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w", pady=(8, 0))
+    _kb_grade_var = tk.StringVar()
+    _kb_grade_cb = ttk.Combobox(_kb_left, textvariable=_kb_grade_var, state="readonly",
+                                width=18, font=PALETTE["body_font"])
+    _kb_grade_cb.pack(fill=tk.X, pady=2)
+
+    # 学科选择
+    tk.Label(_kb_left, text="📚 学科:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w", pady=(8, 0))
+    _kb_subj_var = tk.StringVar()
+    _kb_subj_cb = ttk.Combobox(_kb_left, textvariable=_kb_subj_var, state="readonly",
+                               width=18, font=PALETTE["body_font"])
+    _kb_subj_cb.pack(fill=tk.X, pady=2)
+
+    # 联动更新
+    def _kb_update_grades(*_):
+        stage = _kb_stage_var.get()
+        grades = STAGES.get(stage, [])
+        _kb_grade_cb["values"] = grades
+        if grades:
+            _kb_grade_var.set(grades[0])
+            _kb_update_subjects()
+
+    def _kb_update_subjects(*_):
+        grade = _kb_grade_var.get()
+        subjects = _kb_subjects(grade) if HAS_KB else ["语文", "数学", "英语"]
+        _kb_subj_cb["values"] = subjects
+        if subjects:
+            _kb_subj_var.set(subjects[0])
+            _kb_refresh_tree()
+
+    _kb_stage_cb.bind("<<ComboboxSelected>>", _kb_update_grades)
+    _kb_grade_cb.bind("<<ComboboxSelected>>", _kb_update_subjects)
+    _kb_subj_cb.bind("<<ComboboxSelected>>", lambda _e: _kb_refresh_tree())
+    _kb_search_entry.bind("<KeyRelease>", lambda _e: _kb_refresh_tree())
+
+    # 中列: Treeview 树形知识点
+    _kb_mid = tk.Frame(_kb_main, bg=PALETTE["bg"]); _kb_mid.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=8)
+
+    _kb_tree = ttk.Treeview(_kb_mid, columns=("count",), show="tree headings", height=20)
+    _kb_tree.heading("#0", text="📚 知识点主题 (点击展开)")
+    _kb_tree.heading("count", text="子点")
+    _kb_tree.column("#0", width=400)
+    _kb_tree.column("count", width=60, anchor="center")
+    _kb_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    _kb_tree_sb = ttk.Scrollbar(_kb_mid, orient="vertical", command=_kb_tree.yview)
+    _kb_tree_sb.pack(side=tk.RIGHT, fill=tk.Y)
+    _kb_tree.configure(yscrollcommand=_kb_tree_sb.set)
+
+    # 右列: 详情面板
+    _kb_right = tk.Frame(_kb_main, bg=PALETTE["bg"], width=340); _kb_right.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+    _kb_right.pack_propagate(False)
+    tk.Label(_kb_right, text="📖 知识点详情", font=PALETTE["title_font"],
+             bg=PALETTE["bg"], fg=PALETTE["lavender_dark"]).pack(anchor="w", pady=(0, 4))
+
+    _kb_detail = scrolledtext.ScrolledText(_kb_right, height=18, wrap=tk.WORD,
+                                           font=PALETTE["body_font"],
+                                           bg=PALETTE["white"], fg=PALETTE["text"],
+                                           relief=tk.FLAT, padx=8, pady=6)
+    _kb_detail.pack(fill=tk.BOTH, expand=True)
+    _reg_font(_kb_detail, PALETTE["body_font"])
+
+    # 操作按钮
+    _kb_btn_row = tk.Frame(_kb_right, bg=PALETTE["bg"]); _kb_btn_row.pack(fill=tk.X, pady=6)
+
+    def _kb_make_exam():
+        sel = _kb_tree.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先选择一个知识点主题!\n然后点 📋出题器 Tab → 选好年级学科 → 🎲 生成试卷")
+            return
+        topic_name = _kb_tree.item(sel[0], "text")
+        # 切到出题器 Tab
+        exam_tabs.select(0)
+        gen_topic_var.set(topic_name)
+        # 如果学科匹配则保持，不匹配时提示
+        messagebox.showinfo("跳转", f"已把知识点 '{topic_name}' 填入出题器!\n点 🎲 生成试卷 即可组卷~")
+
+    _mk_color_button(_kb_btn_row, "🎲 用此知识点出题", PALETTE["pink"], _kb_make_exam, width=18).pack(fill=tk.X, pady=2)
+
+    def _kb_ai_explain():
+        if not HAS_AI:
+            messagebox.showwarning("AI 不可用", "未配置 deepseek API 或网络不可用。\n请在主程序 config/ai_config.json 中设置。")
+            return
+        sel = _kb_tree.selection()
+        if not sel:
+            return
+        topic_name = _kb_tree.item(sel[0], "text")
+        grade = _kb_grade_var.get()
+        subject = _kb_subj_var.get()
+        _kb_detail.delete("1.0", tk.END)
+        _kb_detail.insert(tk.END, f"⏳ AI 名师正在讲解「{topic_name}」...\n(首次调用较慢，请稍候)\n")
+        _kb_detail.update()
+
+        def _do_ai():
+            from ui.exam_ai import generate_knowledge_explanation
+            result = generate_knowledge_explanation(topic_name, grade, subject)
+            _kb_detail.delete("1.0", tk.END)
+            _kb_detail.insert(tk.END, f"👨‍🏫 AI 名师讲解 — {topic_name}\n{'='*40}\n\n{result}")
+
+        import threading
+        threading.Thread(target=_do_ai, daemon=True).start()
+
+    _ai_btn = _mk_color_button(_kb_btn_row, "🤖 AI深度讲解", PALETTE["sky"], _kb_ai_explain, width=18)
+    _ai_btn.pack(fill=tk.X, pady=2)
+    if not HAS_AI:
+        _ai_btn.config(state=tk.DISABLED)
+
+    def _kb_show_detail(_e):
+        sel = _kb_tree.selection()
+        if not sel:
+            return
+        item_id = sel[0]
+        topic_name = _kb_tree.item(item_id, "text")
+        # 如果是子节点
+        parent = _kb_tree.parent(item_id)
+        _kb_detail.delete("1.0", tk.END)
+        if parent:
+            _kb_detail.insert(tk.END, f"📌 {topic_name}\n\n(点击父节点查看完整主题)\n")
+        else:
+            grade = _kb_grade_var.get()
+            subject = _kb_subj_var.get()
+            _kb_detail.insert(tk.END, f"📖 {grade} · {subject}\n🎯 {topic_name}\n\n")
+            # 找子节点
+            children = _kb_tree.get_children(item_id)
+            if children:
+                _kb_detail.insert(tk.END, f"📋 包含 {len(children)} 个子知识点:\n")
+                for c in children:
+                    _kb_detail.insert(tk.END, f"  • {_kb_tree.item(c, 'text')}\n")
+                _kb_detail.insert(tk.END, f"\n💡 可以点 🎲 出题器按钮用此主题组卷\n   或 🤖 AI深度讲解 让名师详细讲一遍")
+
+    _kb_tree.bind("<<TreeviewSelect>>", _kb_show_detail)
+
+    def _kb_refresh_tree():
+        for iid in _kb_tree.get_children():
+            _kb_tree.delete(iid)
+        if not HAS_KB:
+            _kb_tree.insert("", tk.END, text="(知识点库未加载)", values=("0",))
+            return
+        grade = _kb_grade_var.get()
+        subject = _kb_subj_var.get()
+        kw = _kb_search_var.get().strip()
+        topics_data = get_topics(grade, subject)
+        for t in topics_data:
+            tname = t["name"]
+            if kw and kw.lower() not in tname.lower() and \
+               not any(kw.lower() in c.lower() for c in t.get("children", [])):
+                continue
+            parent = _kb_tree.insert("", tk.END, text=tname, values=(len(t["children"]),))
+            for child in t.get("children", []):
+                if kw and kw.lower() not in child.lower():
+                    continue
+                _kb_tree.insert(parent, tk.END, text=child, values=(""))
+
+    # 初始化
+    _kb_update_grades()
+
+    # ═══════════════════════════════════════
+    # Tab 6: 📖 语文 / Tab 7: 🧮 数学 / Tab 9: 🔤 英语
+    # Tab 10: 🎯 智能试卷
     # ═══════════════════════════════════════
     tab_exam = tk.Frame(nb, bg=PALETTE["bg"])
     nb.add(tab_exam, text="🎯 智能试卷")
@@ -1705,17 +1997,17 @@ def _show_tutor_helper(root):
     form_frame = tk.Frame(tab_gen, bg=PALETTE["bg"])
     form_frame.pack(fill=tk.X, padx=30, pady=10)
 
-    # 年级选择
+    # 年级选择 — 用 GRADE_SIMPLE (20个年级全齐)
     row1 = tk.Frame(form_frame, bg=PALETTE["bg"]); row1.pack(fill=tk.X, pady=6)
     tk.Label(row1, text="🎓 年级:", font=PALETTE["body_bold"],
              bg=PALETTE["bg"], fg=PALETTE["text"], width=14, anchor="w").pack(side=tk.LEFT)
-    grade_var = tk.StringVar(value=list(EXAM_BANK.keys())[0])
+    grade_var = tk.StringVar(value="四年级下")  # 默认四年级下
     grade_cb = ttk.Combobox(row1, textvariable=grade_var, state="readonly",
-                            values=list(EXAM_BANK.keys()), width=14,
+                            values=GRADE_SIMPLE, width=14,
                             font=PALETTE["body_font"])
     grade_cb.pack(side=tk.LEFT, padx=6)
 
-    # 学科选择
+    # 学科选择 — 从 knowledge_base 动态获取
     tk.Label(row1, text="  📚 学科:", font=PALETTE["body_bold"],
              bg=PALETTE["bg"], fg=PALETTE["text"], anchor="w").pack(side=tk.LEFT, padx=(20, 0))
     subject_var = tk.StringVar()
@@ -1723,7 +2015,7 @@ def _show_tutor_helper(root):
                               width=10, font=PALETTE["body_font"])
     subject_cb.pack(side=tk.LEFT, padx=6)
 
-    # 知识点选择
+    # 知识点选择 — 从 knowledge_base 动态获取
     row2 = tk.Frame(form_frame, bg=PALETTE["bg"]); row2.pack(fill=tk.X, pady=6)
     tk.Label(row2, text="🧩 知识点:", font=PALETTE["body_bold"],
              bg=PALETTE["bg"], fg=PALETTE["text"], width=14, anchor="w").pack(side=tk.LEFT)
@@ -1754,21 +2046,31 @@ def _show_tutor_helper(root):
              bg=PALETTE["bg"], fg=PALETTE["text"]).pack(side=tk.LEFT)
 
     def _on_grade_change(*_):
+        """年级变 → 学科变 → 知识点变 (全联动)"""
         g = grade_var.get()
-        subjects = list(EXAM_BANK.get(g, {}).keys())
+        if HAS_KB:
+            subjects = _kb_subjects(g)
+        else:
+            subjects = list(EXAM_BANK.get(g, {}).keys())
+        if not subjects:
+            subjects = ["语文", "数学", "英语"]
         subject_cb["values"] = subjects
-        subject_var.set(subjects[0] if subjects else "")
+        subject_var.set(subjects[0])
         _on_subject_change()
 
     def _on_subject_change(*_):
+        """学科变 → 知识点变"""
         g, s = grade_var.get(), subject_var.get()
-        topics = ["全部"] + list(EXAM_BANK.get(g, {}).get(s, {}).keys())
-        topic_cb["values"] = topics
+        if HAS_KB:
+            topics = get_topic_names(g, s)
+        else:
+            topics = list(EXAM_BANK.get(g, {}).get(s, {}).keys())
+        topic_cb["values"] = ["全部"] + topics
         topic_var.set("全部")
 
-    grade_var.trace_add("write", _on_grade_change)
-    subject_var.trace_add("write", _on_subject_change)
-    _on_grade_change()
+    grade_cb.bind("<<ComboboxSelected>>", _on_grade_change)
+    subject_cb.bind("<<ComboboxSelected>>", _on_subject_change)
+    _on_grade_change()  # 初始化联动一遍
 
     # 试卷预览区
     preview_frame = tk.LabelFrame(tab_gen, text="📄 试卷预览",
@@ -1904,6 +2206,218 @@ def _show_tutor_helper(root):
     _mk_color_button(btn_frame_gen, "🎲 随机出题", PALETTE["mint"], _generate_exam, width=16).pack(side=tk.LEFT, padx=6)
     _mk_color_button(btn_frame_gen, "📄 导出Word", PALETTE["lavender"], _export_word, width=16).pack(side=tk.LEFT, padx=6)
     _mk_color_button(btn_frame_gen, "🖨️ 打开打印", PALETTE["sky"], _print_exam, width=16).pack(side=tk.LEFT, padx=6)
+
+    # ═══════════════════════════════════════
+    # 子 Tab 1.5: 📜 历史试卷存档
+    # ═══════════════════════════════════════
+    tab_history = tk.Frame(exam_tabs, bg=PALETTE["bg"])
+    exam_tabs.add(tab_history, text="📜 历史试卷")
+
+    tk.Label(tab_history, text="📜 历史试卷存档 · 批卷时直接调用答案",
+             font=PALETTE["title_font"],
+             bg=PALETTE["bg"], fg=PALETTE["sky_dark"]).pack(pady=(14, 2))
+
+    # 工具条
+    hist_toolbar = tk.Frame(tab_history, bg=PALETTE["bg"]); hist_toolbar.pack(fill=tk.X, padx=10, pady=4)
+
+    hist_filter_var = tk.StringVar(value="全部")
+    tk.Label(hist_toolbar, text="年级:", font=PALETTE["body_font"],
+             bg=PALETTE["bg"]).pack(side=tk.LEFT)
+    hist_filter_cb = ttk.Combobox(hist_toolbar, textvariable=hist_filter_var,
+                                  state="readonly", width=12,
+                                  values=["全部"] + GRADE_SIMPLE[:8],
+                                  font=PALETTE["body_font"])
+    hist_filter_cb.pack(side=tk.LEFT, padx=4)
+
+    hist_filter_subj = tk.StringVar(value="全部")
+    tk.Label(hist_toolbar, text="学科:", font=PALETTE["body_font"],
+             bg=PALETTE["bg"]).pack(side=tk.LEFT, padx=(10, 0))
+    hist_subj_cb = ttk.Combobox(hist_toolbar, textvariable=hist_filter_subj,
+                                state="readonly", width=10,
+                                values=["全部", "语文", "数学", "英语", "科学"],
+                                font=PALETTE["body_font"])
+    hist_subj_cb.pack(side=tk.LEFT, padx=4)
+
+    hist_count_lbl = tk.Label(hist_toolbar, text="",
+                              font=PALETTE["body_bold"],
+                              bg=PALETTE["bg"], fg=PALETTE["pink_dark"])
+    hist_count_lbl.pack(side=tk.RIGHT)
+
+    # 历史试卷列表 (Treeview)
+    hist_cols = ("name", "grade", "subject", "num", "total", "time", "created")
+    hist_tree = ttk.Treeview(tab_history, columns=hist_cols, show="headings", height=16)
+    hist_tree.heading("name", text="📄 试卷名称")
+    hist_tree.heading("grade", text="🎓 年级")
+    hist_tree.heading("subject", text="📚 学科")
+    hist_tree.heading("num", text="📝 题数")
+    hist_tree.heading("total", text="⭐ 满分")
+    hist_tree.heading("time", text="⏱️ 时长")
+    hist_tree.heading("created", text="🕐 生成时间")
+    hist_tree.column("name", width=180)
+    hist_tree.column("grade", width=80)
+    hist_tree.column("subject", width=60)
+    hist_tree.column("num", width=50, anchor="center")
+    hist_tree.column("total", width=60, anchor="center")
+    hist_tree.column("time", width=60, anchor="center")
+    hist_tree.column("created", width=150)
+    hist_tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
+
+    hist_files = []  # [(display_name, filepath), ...]
+
+    def _refresh_history():
+        nonlocal hist_files
+        # 扫描 JSON 存档目录
+        if not os.path.exists(PROGRESS_DIR):
+            os.makedirs(PROGRESS_DIR, exist_ok=True)
+        hist_files = []
+        for f in sorted(os.listdir(PROGRESS_DIR), reverse=True):
+            if f.startswith("exam_") and f.endswith(".json"):
+                fp = os.path.join(PROGRESS_DIR, f)
+                try:
+                    with open(fp, encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    meta = data.get("meta", {})
+                    questions = data.get("questions", [])
+                    display_name = f"{meta.get('grade','?')}_{meta.get('subject','?')}"
+                    if meta.get("topic"):
+                        display_name += f"_{meta['topic'][:8]}"
+                    hist_files.append((display_name, fp))
+                except Exception:
+                    pass
+
+        # 清空 + 填充
+        for iid in hist_tree.get_children():
+            hist_tree.delete(iid)
+
+        grade_f = hist_filter_var.get()
+        subj_f = hist_filter_subj.get()
+        shown = 0
+        for display_name, fp in hist_files:
+            try:
+                with open(fp, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                meta = data.get("meta", {})
+                questions = data.get("questions", [])
+                g = meta.get("grade", "")
+                s = meta.get("subject", "")
+                if grade_f != "全部" and g != grade_f:
+                    continue
+                if subj_f != "全部" and s != subj_f:
+                    continue
+                created = meta.get("created_at", "")
+                try:
+                    created_dt = datetime.fromisoformat(created)
+                    created_str = created_dt.strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    created_str = created[:16]
+                hist_tree.insert("", tk.END, iid=str(shown),
+                                 values=(
+                                     display_name,
+                                     g, s,
+                                     len(questions),
+                                     meta.get("total_score", 0),
+                                     f"{meta.get('time_limit', 30)}分",
+                                     created_str,
+                                 ))
+                hist_tree.item(str(shown), tags=(fp,))
+                shown += 1
+            except Exception:
+                pass
+
+        hist_count_lbl.config(text=f"📊 共 {shown} 份试卷 ({len(hist_files)}总存档)")
+
+    _refresh_history()
+    hist_filter_cb.bind("<<ComboboxSelected>>", lambda _e: _refresh_history())
+    hist_subj_cb.bind("<<ComboboxSelected>>", lambda _e: _refresh_history())
+
+    # 历史试卷操作
+    def _load_selected_history():
+        """选中历史试卷 → 载入为当前试卷 → 可直接去批卷"""
+        sel = hist_tree.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先点选一份历史试卷~")
+            return
+        fp = hist_tree.item(sel[0], "tags")[0]
+        try:
+            with open(fp, encoding="utf-8") as fh:
+                data = json.load(fh)
+            generated_exam["questions"] = data.get("questions", [])
+            generated_exam["meta"] = data.get("meta", {})
+            n = len(generated_exam["questions"])
+            messagebox.showinfo("✅ 已载入",
+                               f"📄 {generated_exam['meta'].get('grade','')} "
+                               f"{generated_exam['meta'].get('subject','')}\n"
+                               f"📝 {n} 道题, 满分 {generated_exam['meta'].get('total_score',0)}\n\n"
+                               f"接下来可以:\n"
+                               f"  → 📷 拍照批改 (用这份试卷的答案核对)\n"
+                               f"  → ✍️ 在线答题\n"
+                               f"  → 📄 导出Word再打印")
+            # 切到拍照批改 Tab (子 Tab index 3) 并刷新答题卡片
+            exam_tabs.select(3)
+            try:
+                _build_answer_cards()
+            except Exception:
+                pass
+        except Exception as e:
+            messagebox.showerror("加载失败", str(e))
+
+    def _preview_selected():
+        """预览试卷内容 (不载入, 只读)"""
+        sel = hist_tree.selection()
+        if not sel:
+            return
+        fp = hist_tree.item(sel[0], "tags")[0]
+        try:
+            with open(fp, encoding="utf-8") as fh:
+                data = json.load(fh)
+            meta = data.get("meta", {})
+            qs = data.get("questions", [])
+            preview_dlg = tk.Toplevel(tab_history); preview_dlg.title("📖 试卷预览")
+            preview_dlg.geometry("700x560"); preview_dlg.configure(bg=PALETTE["bg"])
+            txt = scrolledtext.ScrolledText(preview_dlg, font=PALETTE["body_font"],
+                                             bg=PALETTE["white"], wrap="word",
+                                             padx=10, pady=8)
+            txt.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            txt.insert("1.0",
+                      f"📄 {meta.get('grade','')} {meta.get('subject','')} 试卷\n"
+                      f"📝 {len(qs)} 题 · 满分 {meta.get('total_score',0)} · {meta.get('time_limit',30)}分钟\n"
+                      f"🕐 生成于 {meta.get('created_at','')}\n{'═'*50}\n\n")
+            for i, q in enumerate(qs):
+                txt.insert("end",
+                          f"【第{i+1}题】{q.get('type','fill')} {q.get('score',5)}分\n"
+                          f"  {q.get('content','')}\n")
+                if q.get("options"):
+                    txt.insert("end", f"  选项: {q['options']}\n")
+                txt.insert("end", f"  ✅ {q.get('answer','')}")
+                if q.get("topic"):
+                    txt.insert("end", f"  📚{q['topic']}")
+                txt.insert("end", "\n\n")
+        except Exception as e:
+            messagebox.showerror("预览失败", str(e))
+
+    def _delete_history():
+        sel = hist_tree.selection()
+        if not sel:
+            return
+        if not messagebox.askyesno("确认", "确定删除这份历史试卷?\n删了就找不回来咯~"):
+            return
+        for s in sel:
+            fp = hist_tree.item(s, "tags")[0]
+            try:
+                os.remove(fp)
+            except Exception:
+                pass
+        _refresh_history()
+        messagebox.showinfo("✅", "已删除")
+
+    hist_btns = tk.Frame(tab_history, bg=PALETTE["bg"]); hist_btns.pack(fill=tk.X, padx=10, pady=6)
+    _mk_color_button(hist_btns, "📖 预览", PALETTE["white"], _preview_selected, width=10).pack(side=tk.LEFT, padx=2)
+    _mk_color_button(hist_btns, "📂 载入并批卷", PALETTE["mint"], _load_selected_history, width=16).pack(side=tk.LEFT, padx=2)
+    _mk_color_button(hist_btns, "📄 导出Word", PALETTE["lavender"],
+                     lambda: (_load_selected_history(), _export_word()),
+                     width=12).pack(side=tk.LEFT, padx=2)
+    _mk_color_button(hist_btns, "🔄 刷新列表", PALETTE["sky"], _refresh_history, width=10).pack(side=tk.LEFT, padx=2)
+    _mk_color_button(hist_btns, "🗑️ 删除", PALETTE["pink"], _delete_history, width=8).pack(side=tk.RIGHT, padx=2)
 
     # ═══════════════════════════════════════
     # 子 Tab 2: ✍️ 在线答题
@@ -2135,7 +2649,7 @@ def _show_tutor_helper(root):
 
         btn_row = tk.Frame(win, bg=PALETTE["bg"]); btn_row.pack(pady=10)
         _mk_color_button(btn_row, "📊 薄弱点分析", PALETTE["lavender"],
-                        lambda: (win.destroy(), exam_tabs.select(3)), width=16).pack(side=tk.LEFT, padx=6)
+                        lambda: (win.destroy(), exam_tabs.select(5))[1], width=16).pack(side=tk.LEFT, padx=6)
         _mk_color_button(btn_row, "🆗 关闭", PALETTE["white"], win.destroy, width=12).pack(side=tk.LEFT, padx=6)
 
     # 在线答题按钮
@@ -2150,107 +2664,302 @@ def _show_tutor_helper(root):
                     _submit_exam, width=12).pack(side=tk.LEFT, padx=6)
 
     # ═══════════════════════════════════════
-    # 子 Tab 3: 📷 拍照批改
+    # 子 Tab 3: 📷 拍照批改 (左多图 + 右答案对比)
     # ═══════════════════════════════════════
     tab_ocr = tk.Frame(exam_tabs, bg=PALETTE["bg"])
     exam_tabs.add(tab_ocr, text="📷 拍照批改")
 
-    tk.Label(tab_ocr, text="📷 OCR拍照批改 / 手动录入批改",
+    tk.Label(tab_ocr, text="📷 拍照批改 · 多图浏览 · AI名师评分",
              font=PALETTE["title_font"],
              bg=PALETTE["bg"], fg=PALETTE["sky_dark"]).pack(pady=(14, 4))
 
-    ocr_hint_text = "✅ 选择图片 → (可选OCR识别) → 对比答案 → 出分!\n"
-    if HAS_TESSERACT and HAS_PIL:
-        ocr_hint_text += "✨ 已检测到 Tesseract OCR, 自动识别手写答案!"
-    else:
-        ocr_hint_text += "💡 未检测到 Tesseract OCR, 请手动录入答案批改\n"
-        ocr_hint_text += "   安装方法: brew install tesseract && pip install pytesseract pillow"
-    ocr_hint = tk.Label(tab_ocr, text=ocr_hint_text,
+    ocr_hint = tk.Label(tab_ocr,
+                        text="🖼️ 左侧可批量选多张答题纸照片 → 📖 右侧显示标准答案 → ✏️ 录入学生答案 → 🤖 AI名师评分",
                         font=PALETTE["body_font"],
-                        bg=PALETTE["bg"], fg=PALETTE["text_light"],
-                        justify="left")
-    ocr_hint.pack(pady=(0, 10))
+                        bg=PALETTE["bg"], fg=PALETTE["text_light"], wraplength=900)
+    ocr_hint.pack(pady=(0, 6))
     _reg_font(ocr_hint, PALETTE["body_font"])
 
-    ocr_body = tk.Frame(tab_ocr, bg=PALETTE["bg"]); ocr_body.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+    ocr_body = tk.Frame(tab_ocr, bg=PALETTE["bg"]); ocr_body.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
 
-    # 左侧: 图片预览
-    left_col = tk.Frame(ocr_body, bg=PALETTE["bg"]); left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
-    tk.Label(left_col, text="📷 答题纸图片",
+    # ═══ 左栏: 多图列表 + 大图预览 ═══
+    left_col = tk.Frame(ocr_body, bg=PALETTE["bg"]); left_col.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 8))
+
+    # 多图缩略图列表
+    list_row = tk.Frame(left_col, bg=PALETTE["bg"]); list_row.pack(fill=tk.X)
+    tk.Label(list_row, text="🖼️ 图片列表 (点击切换)",
              font=PALETTE["body_bold"],
-             bg=PALETTE["bg"], fg=PALETTE["sky_dark"]).pack()
+             bg=PALETTE["bg"], fg=PALETTE["sky_dark"]).pack(side=tk.LEFT)
 
-    img_preview = tk.Label(left_col, text="(图片预览区)\n\n点击下方按钮选择图片",
+    ocr_imgs_frame = tk.Frame(left_col, bg=PALETTE["white"], height=90)
+    ocr_imgs_frame.pack(fill=tk.X, pady=(4, 6))
+    ocr_imgs_frame.pack_propagate(False)
+
+    img_canvas = tk.Canvas(ocr_imgs_frame, bg=PALETTE["white"], highlightthickness=0)
+    img_scroll = ttk.Scrollbar(ocr_imgs_frame, orient="horizontal", command=img_canvas.xview)
+    img_inner = tk.Frame(img_canvas, bg=PALETTE["white"])
+    img_inner.bind("<Configure>", lambda e: img_canvas.configure(scrollregion=img_canvas.bbox("all")))
+    img_canvas.create_window((0, 0), window=img_inner, anchor="nw")
+    img_canvas.configure(xscrollcommand=img_scroll.set)
+    img_canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+    img_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+
+    # 大图预览
+    tk.Label(left_col, text="📷 当前图片预览",
+             font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["sky_dark"]).pack(pady=(4, 2))
+    img_preview = tk.Label(left_col, text="(点击下方按钮添加图片)\n\n可多张一起选!",
                            font=PALETTE["body_font"],
                            bg=PALETTE["white"], fg=PALETTE["text_light"],
-                           width=40, height=16, relief="flat", bd=0)
-    img_preview.pack(fill=tk.BOTH, expand=True, pady=6)
+                           width=38, height=14, relief="flat", bd=0)
+    img_preview.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
     _reg_font(img_preview, PALETTE["body_font"])
 
-    # 右侧: 手动/自动答案录入
-    right_col = tk.Frame(ocr_body, bg=PALETTE["bg"]); right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0))
-    tk.Label(right_col, text="✏️ 答案录入 (每行一个答案, 按题号顺序)",
-             font=PALETTE["body_bold"],
-             bg=PALETTE["bg"], fg=PALETTE["sky_dark"]).pack()
+    # ═══ 右栏: 🎯 逐题答题界面 ═══
+    right_col = tk.Frame(ocr_body, bg=PALETTE["bg"]); right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0))
 
-    ocr_text = scrolledtext.ScrolledText(right_col, font=PALETTE["body_font"],
-                                         bg=PALETTE["white"], fg=PALETTE["text"],
-                                         relief="flat", bd=0, wrap="word",
-                                         padx=10, pady=10, height=16)
-    _reg_font(ocr_text, PALETTE["body_font"])
-    ocr_text.pack(fill=tk.BOTH, expand=True, pady=6)
-    ocr_text.insert("1.0", "# 第1题答案\n# 第2题答案\n# 第3题答案\n...\n(每行一个, 支持 # 开头注释)")
+    tk.Label(right_col, text="🎯 学生在线答题 (每题一个输入框)",
+             font=("Comic Sans MS", 16, "bold"),
+             bg=PALETTE["bg"], fg=PALETTE["pink_dark"]).pack(pady=(0, 4))
 
-    current_img_path = tk.StringVar(value="")
+    # 滚动容器
+    q_canvas = tk.Canvas(right_col, bg=PALETTE["bg"], highlightthickness=0)
+    q_scroll = ttk.Scrollbar(right_col, orient="vertical", command=q_canvas.yview)
+    q_inner = tk.Frame(q_canvas, bg=PALETTE["bg"])
+    q_inner.bind("<Configure>", lambda e: q_canvas.configure(scrollregion=q_canvas.bbox("all")))
+    q_canvas.create_window((0, 0), window=q_inner, anchor="nw")
+    q_canvas.configure(yscrollcommand=q_scroll.set)
+    q_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    q_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-    def _select_and_ocr():
-        path = filedialog.askopenfilename(
-            title="选择答题纸照片",
-            filetypes=[("图片", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff")])
-        if not path:
+    # 每题的答题输入控件列表
+    answer_inputs = []  # [(q_idx, input_widget, type), ...]  type: "fill" 或 "choice"
+
+    def _build_answer_cards():
+        """根据 generated_exam 动态创建逐题答题卡片"""
+        # 清空旧卡片
+        for w in q_inner.winfo_children():
+            w.destroy()
+        answer_inputs.clear()
+
+        qs = generated_exam.get("questions", [])
+        if not qs:
+            tk.Label(q_inner,
+                     text="⚠️ 还没有生成试卷!\n\n请先到「📋出题器」\n选好年级/学科 → 🎲生成试卷\n\n回来就能在这里答题啦~",
+                     font=PALETTE["body_font"],
+                     bg=PALETTE["bg"], fg=PALETTE["text_light"],
+                     justify="center").pack(expand=True, pady=40)
             return
-        current_img_path.set(path)
-        # 预览图片
+
+        for i, q in enumerate(qs):
+            # 每题卡片
+            card = tk.Frame(q_inner, bg=PALETTE["white"], bd=0,
+                            highlightbackground=PALETTE["lavender"],
+                            highlightthickness=2)
+            card.pack(fill=tk.X, padx=8, pady=6)
+
+            # 题干标题
+            header = tk.Frame(card, bg=PALETTE["white"]); header.pack(fill=tk.X, padx=10, pady=(8, 4))
+            type_label = "📝填空" if q["type"] == "fill" else "☑️选择"
+            tk.Label(header, text=f"第{i+1}题 [{type_label}]",
+                     font=("Comic Sans MS", 14, "bold"),
+                     bg=PALETTE["white"], fg=PALETTE["lavender_dark"]).pack(side=tk.LEFT)
+            tk.Label(header, text=f"  ⭐ {q['score']}分",
+                     font=("Arial", 12),
+                     bg=PALETTE["white"], fg=PALETTE["pink_dark"]).pack(side=tk.LEFT)
+            if q.get("topic"):
+                tk.Label(header, text=f"  📚 {q['topic']}",
+                         font=("Arial", 11),
+                         bg=PALETTE["white"], fg=PALETTE["sky_dark"]).pack(side=tk.LEFT, padx=6)
+
+            # 题目内容
+            content = q["content"]
+            # 如果太长截断 + 展开
+            if len(content) > 80:
+                content_display = content[:80] + "..."
+            else:
+                content_display = content
+            tk.Label(card, text=content_display,
+                     font=PALETTE["body_font"],
+                     bg=PALETTE["white"], fg=PALETTE["text"],
+                     wraplength=560, justify="left").pack(anchor="w", padx=12)
+
+            # 答题区
+            ans_area = tk.Frame(card, bg=PALETTE["white"]); ans_area.pack(fill=tk.X, padx=12, pady=(6, 10))
+
+            if q["type"] == "choice" and q.get("options"):
+                # 选择题 → RadioButton
+                var = tk.StringVar(value="")
+                answer_inputs.append((i, var, "choice"))
+                for opt_idx, opt_text in enumerate(q["options"]):
+                    letter = chr(ord("A") + opt_idx)
+                    rb = tk.Radiobutton(ans_area,
+                                        text=f"{letter}. {opt_text}",
+                                        variable=var, value=letter,
+                                        font=PALETTE["body_font"],
+                                        bg=PALETTE["white"],
+                                        activebackground=PALETTE["lavender"],
+                                        anchor="w")
+                    rb.pack(anchor="w", pady=1)
+            else:
+                # 填空题 → Entry 输入框
+                entry = tk.Entry(ans_area, font=PALETTE["body_font"],
+                                 bg=PALETTE["white"], fg=PALETTE["text"],
+                                 width=40, relief="solid", bd=2,
+                                 highlightcolor=PALETTE["lavender"],
+                                 highlightthickness=1)
+                entry.pack(fill=tk.X, ipady=4)
+                entry.insert(0, "")
+                answer_inputs.append((i, entry, "fill"))
+
+    def _collect_answers():
+        """从答题卡片收集所有学生答案"""
+        answers = []
+        for idx, widget, wtype in answer_inputs:
+            if wtype == "choice":
+                val = widget.get()  # StringVar
+            else:
+                val = widget.get().strip()  # Entry
+            answers.append(val)
+        return answers
+
+    # 标准答案面板 (折叠在底部，家长看)
+    def _show_answer_key():
+        ans_dlg = tk.Toplevel(tab_ocr); ans_dlg.title("📖 标准答案 (家长查看)")
+        ans_dlg.geometry("600x500"); ans_dlg.configure(bg=PALETTE["bg"])
+        ans_text_dlg = scrolledtext.ScrolledText(ans_dlg, font=PALETTE["body_font"],
+                                                   bg=PALETTE["white"], fg=PALETTE["text"],
+                                                   wrap="word", padx=10, pady=8)
+        ans_text_dlg.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        qs = generated_exam.get("questions", [])
+        meta = generated_exam.get("meta", {})
+        ans_text_dlg.insert("1.0", f"📝 {meta.get('grade','')} {meta.get('subject','')} · 标准答案\n{'═'*40}\n\n")
+        for i, q in enumerate(qs):
+            ans_text_dlg.insert("end", f"【第{i+1}题】 ✅ {q['answer']}  ({q['score']}分)")
+            if q.get("topic"):
+                ans_text_dlg.insert("end", f"  📚{q['topic']}")
+            ans_text_dlg.insert("end", "\n")
+            if q.get("analysis"):
+                ans_text_dlg.insert("end", f"    💡 {q['analysis'][:100]}\n")
+            ans_text_dlg.insert("end", "\n")
+
+    # 首次构建
+    _build_answer_cards()
+
+    # 当切换到这个 Tab 或试卷变化时刷新
+    def _refresh_cards_if_exam_changed():
+        _build_answer_cards()
+
+    # ═══ 图片管理状态 ═══
+    ocr_images = []          # [(path, photo_obj), ...]  缩略图 PhotoImage 要保持引用
+    ocr_photos_ref = []      # 大图 PhotoImage 引用列表
+    ocr_current_idx = tk.IntVar(value=-1)
+
+    def _refresh_thumbnail_list():
+        """刷新底部缩略图列表"""
+        for w in img_inner.winfo_children():
+            w.destroy()
+        ocr_photos_ref.clear()
+        for idx, (path, _) in enumerate(ocr_images):
+            frame = tk.Frame(img_inner, bg=PALETTE["bg"], bd=2, relief="ridge")
+            frame.pack(side=tk.LEFT, padx=4, pady=2)
+            try:
+                if HAS_PIL:
+                    img = Image.open(path)
+                    img.thumbnail((80, 60))
+                    from PIL import ImageTk
+                    photo = ImageTk.PhotoImage(img)
+                    ocr_photos_ref.append(photo)
+                    lbl = tk.Label(frame, image=photo, bg=PALETTE["bg"])
+                    lbl.pack()
+                else:
+                    tk.Label(frame, text=f"图{idx+1}", bg=PALETTE["bg"], width=8).pack()
+            except Exception:
+                tk.Label(frame, text=f"图{idx+1}", bg=PALETTE["bg"], width=8).pack()
+            tk.Label(frame, text=f"#{idx+1}", font=("Arial", 9), bg=PALETTE["bg"]).pack()
+            # 点击选中
+            for widget in (frame, frame.winfo_children()):
+                widget.bind("<Button-1>", lambda _e, i=idx: _show_img(i))
+
+    def _show_img(idx):
+        """显示第 idx 张图片的大图预览"""
+        if idx < 0 or idx >= len(ocr_images):
+            return
+        ocr_current_idx.set(idx)
+        path = ocr_images[idx][0]
         if HAS_PIL:
             try:
                 img = Image.open(path)
-                img.thumbnail((400, 400))
+                # 自适应预览区大小
+                max_w = img_preview.winfo_width() or 500
+                max_h = img_preview.winfo_height() or 380
+                img.thumbnail((max_w - 20, max_h - 20))
                 from PIL import ImageTk
                 photo = ImageTk.PhotoImage(img)
                 img_preview.config(image=photo, text="")
-                img_preview.image = photo
+                img_preview._current_photo = photo  # 保持引用
             except Exception as e:
-                img_preview.config(image="", text=f"图片加载失败: {e}")
-        # OCR 识别
-        if HAS_TESSERACT and HAS_PIL:
+                img_preview.config(image="", text=f"加载失败: {e}")
+
+    def _select_images_batch():
+        """批量选择多张图片"""
+        paths = filedialog.askopenfilenames(
+            title="选择答题纸照片 (可多选!)",
+            filetypes=[("图片", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff")])
+        if not paths:
+            return
+        added = 0
+        for p in paths:
+            # 避免重复
+            if not any(img[0] == p for img in ocr_images):
+                ocr_images.append((p, None))
+                added += 1
+        _refresh_thumbnail_list()
+        # 显示第一张
+        if ocr_images:
+            _show_img(0)
+        messagebox.showinfo("添加成功", f"✅ 添加了 {added} 张图片!\n共 {len(ocr_images)} 张在列表中。\n\n💡 可以点底部 🤖AI名师 → 👁️ 直接看图片批改")
+
+    # OCR 提示文字 (保留但不依赖旧 ocr_text)
+    def _ocr_all_images():
+        """批量 OCR 所有图片内容 (仅供参考，建议用 AI 直接看图)"""
+        if not ocr_images:
+            messagebox.showwarning("提示", "请先添加答题纸图片!")
+            return
+        if not (HAS_TESSERACT and HAS_PIL):
+            messagebox.showinfo("OCR 不可用", "未检测到 Tesseract OCR。\n\n💡 建议直接用 🤖 AI名师 → 👁️ 直接看图片批改")
+            return
+        all_texts = []
+        for idx, (path, _) in enumerate(ocr_images):
             try:
                 img = Image.open(path)
                 text = pytesseract.image_to_string(img, lang="chi_sim+eng")
-                ocr_text.delete("1.0", "end")
-                ocr_text.insert("1.0", text)
-                messagebox.showinfo("OCR完成", "已自动识别! 请检查并修正答案后点击批改~")
+                all_texts.append(f"=== 第{idx+1}张 ===\n{text.strip()}")
             except Exception as e:
-                messagebox.showwarning("OCR失败", f"识别失败: {e}\n请手动输入答案")
-        else:
-            messagebox.showinfo("提示", "请手动在右侧输入答案内容 (每行一个)")
+                all_texts.append(f"=== 第{idx+1}张 OCR失败: {e} ===")
+        # OCR 结果弹框展示 (不再写入答题区)
+        msg = "\n\n".join(all_texts)
+        messagebox.showinfo("OCR识别结果",
+                           f"已识别 {len(ocr_images)} 张图片!\n\n"
+                           f"识别内容 (仅供参考):\n\n{msg[:500]}"
+                           f"\n\n💡 建议: 请手动在右侧逐题答题框输入学生答案，或用 🤖AI名师 直接看图批改")
 
     def _grade_by_input():
         if not generated_exam["questions"]:
             messagebox.showwarning("提示", "请先到「📋出题器」生成试卷哦~")
             return
-        raw = ocr_text.get("1.0", "end").strip()
-        lines = [l.strip() for l in raw.split("\n") if l.strip() and not l.strip().startswith("#")]
+        answers = _collect_answers()
         questions = generated_exam["questions"]
         results = []
         total = 0
         topic_hits = {}
         for i, q in enumerate(questions):
-            user_ans = lines[i] if i < len(lines) else ""
+            user_ans = answers[i] if i < len(answers) else ""
             if q["type"] == "fill":
                 correct = user_ans and _normalize_answer(user_ans) == _normalize_answer(q["answer"])
             else:
                 try:
-                    idx = int(ord(user_ans.upper()) - ord("A")) if user_ans.upper() in "ABCD" else -1
+                    idx = ord(user_ans.upper()) - ord("A") if user_ans.upper() in "ABCD" else -1
                     correct = idx == q["answer"]
                 except:
                     correct = False
@@ -2265,7 +2974,6 @@ def _show_tutor_helper(root):
             results.append({"idx": i+1, "user_ans": user_ans, "correct": correct,
                             "score": score, "topic": topic})
         max_score = sum(q["score"] for q in questions)
-        # 保存
         progress = _load_progress()
         exam_record = {
             "grade": generated_exam["meta"]["grade"],
@@ -2276,7 +2984,7 @@ def _show_tutor_helper(root):
             "time": datetime.now().isoformat(),
             "topic_hits": topic_hits,
             "results": results,
-            "mode": "OCR/手动",
+            "mode": f"在线答题{' + AI看图' if ocr_images else ''}",
         }
         progress["exams"].append(exam_record)
         for tp, (h, t) in topic_hits.items():
@@ -2284,18 +2992,202 @@ def _show_tutor_helper(root):
             tp_score["correct"] += h
             tp_score["total"] += t
         _save_progress(progress)
-        # 弹窗显示
         _show_exam_result(exam_record)
 
-    btn_row_ocr = tk.Frame(tab_ocr, bg=PALETTE["bg"]); btn_row_ocr.pack(pady=8)
-    _mk_color_button(btn_row_ocr, "📷 选择图片", PALETTE["sky"],
-                    _select_and_ocr, width=16).pack(side=tk.LEFT, padx=6)
-    _mk_color_button(btn_row_ocr, "✅ 批改出分", PALETTE["mint"],
-                    _grade_by_input, width=16).pack(side=tk.LEFT, padx=6)
+    def _ai_grade_teacher():
+        """🤖 AI 名师评分 — 有图直接看，无图录入评"""
+        if not HAS_AI:
+            messagebox.showwarning("AI 不可用", "请在主程序 config/ai_config.json 中配置 deepseek API")
+            return
+        if not generated_exam["questions"]:
+            messagebox.showwarning("提示", "请先到「📋出题器」生成试卷")
+            return
 
-    # ═══════════════════════════════════════
-    # 子 Tab 4: 📊 薄弱点分析
-    # ═══════════════════════════════════════
+        has_images = len(ocr_images) > 0
+
+        style_dlg = tk.Toplevel(tab_ocr); style_dlg.title("👨‍🏫 AI 智能批改")
+        style_dlg.geometry("460x360")
+        style_dlg.configure(bg=PALETTE["bg"])
+
+        tk.Label(style_dlg, text="👨‍🏫 请选择 AI 批改方式:",
+                 font=PALETTE["title_font"],
+                 bg=PALETTE["bg"], fg=PALETTE["lavender_dark"]).pack(pady=(14, 8))
+
+        if has_images:
+            # 有图片 → 3 个选项
+            mode_frame = tk.LabelFrame(style_dlg, text="🎯 批改模式",
+                                       bg=PALETTE["bg"], font=PALETTE["body_bold"])
+            mode_frame.pack(fill=tk.X, padx=20, pady=4)
+
+            mode_var = tk.StringVar(value="vision")
+            tk.Radiobutton(mode_frame,
+                           text=f"👁️ 直接看图片批改 (多模态视觉模型, {len(ocr_images)}张图)",
+                           variable=mode_var, value="vision",
+                           font=PALETTE["body_font"], bg=PALETTE["bg"],
+                           fg=PALETTE["pink_dark"], anchor="w").pack(anchor="w", padx=6, pady=2)
+            tk.Radiobutton(mode_frame,
+                           text="📝 纯文字对比 (你已录入学生答案)",
+                           variable=mode_var, value="text",
+                           font=PALETTE["body_font"], bg=PALETTE["bg"],
+                           anchor="w").pack(anchor="w", padx=6, pady=2)
+        else:
+            mode_var = tk.StringVar(value="text")
+            tk.Label(style_dlg, text="💡 提示: 请先在左侧添加答题纸图片\n或在下方录入学生答案",
+                     font=PALETTE["body_font"], bg=PALETTE["bg"],
+                     fg=PALETTE["text_light"], justify="center").pack(pady=6)
+
+        tk.Label(style_dlg, text="\n👨‍🏫 请选择名师风格:",
+                 font=PALETTE["body_bold"],
+                 bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w", padx=20)
+
+        teacher_style_var = tk.StringVar(value="encourage")
+        for key, info in TEACHER_STYLES.items():
+            row = tk.Frame(style_dlg, bg=PALETTE["bg"]); row.pack(pady=2, padx=20, anchor="w")
+            rb = tk.Radiobutton(row, text=f"{info['emoji']} {info['name']}",
+                                variable=teacher_style_var, value=key,
+                                font=PALETTE["body_font"],
+                                bg=PALETTE["bg"], anchor="w")
+            rb.pack(side=tk.LEFT)
+            tk.Label(row, text=info["system"][:40] + "...",
+                     font=("Arial", 9),
+                     bg=PALETTE["bg"], fg=PALETTE["text_light"]).pack(side=tk.LEFT, padx=6)
+
+        def _do_ai():
+            style = teacher_style_var.get()
+            use_vision = has_images and mode_var.get() == "vision" if has_images else False
+            style_dlg.destroy()
+            style_name = TEACHER_STYLES[style]["name"]
+
+            if use_vision:
+                mode_label = f"👁️ 视觉模型直接看图片 ({len(ocr_images)}张)"
+            else:
+                mode_label = "📝 文字模式对比答案"
+
+            dlg = tk.Toplevel(tab_ocr); dlg.title(f"🤖 AI {style_name} 评分中...")
+            dlg.geometry("520x140"); dlg.configure(bg=PALETTE["bg"])
+            tk.Label(dlg,
+                     text=f"⏳ 正在让 {style_name} 批改...\n{mode_label}\n(deepseek API, 需10-30秒)",
+                     font=PALETTE["body_font"],
+                     bg=PALETTE["bg"], fg=PALETTE["lavender_dark"],
+                     justify="center").pack(expand=True)
+            dlg.update()
+
+            questions = generated_exam["questions"]
+            image_paths = [img[0] for img in ocr_images] if use_vision else []
+
+            # 文本模式: 从答题卡片提取学生答案
+            if not use_vision:
+                answers = _collect_answers()
+                questions = generated_exam["questions"]
+                user_answers = [answers[i] if i < len(answers) else "(未作答)" for i in range(len(questions))]
+            else:
+                user_answers = None
+
+            def _run_ai():
+                if use_vision:
+                    # 🖼️ 直接看图
+                    result = grade_exam_from_images(
+                        image_paths=image_paths,
+                        questions=questions,
+                        grade=generated_exam["meta"]["grade"],
+                        subject=generated_exam["meta"]["subject"],
+                        style=style,
+                        use_vision=True,
+                    )
+                else:
+                    # 📝 纯文字模式
+                    result = grade_exam_with_ai(
+                        questions, user_answers,
+                        grade=generated_exam["meta"]["grade"],
+                        subject=generated_exam["meta"]["subject"],
+                        style=style,
+                    )
+                dlg.after(0, lambda: _show_ai_result(result, style_name))
+
+            import threading
+            threading.Thread(target=_run_ai, daemon=True).start()
+
+        _mk_color_button(style_dlg, "开始 AI 批改 🚀", PALETTE["mint"], _do_ai, width=18).pack(pady=16)
+
+    def _show_ai_result(result, style_name):
+        """显示 AI 名师批改结果"""
+        dlg = tk.Toplevel(tab_ocr); dlg.title(f"👨‍🏫 {style_name} 的批改报告")
+        dlg.geometry("780x600"); dlg.configure(bg=PALETTE["bg"])
+
+        text = scrolledtext.ScrolledText(dlg, font=PALETTE["body_font"],
+                                         bg=PALETTE["white"], fg=PALETTE["text"],
+                                         wrap="word", padx=12, pady=10)
+        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        if "error" in result:
+            text.insert("1.0", f"❌ AI 出错了:\n{result['error']}\n\n"
+                               f"如果是 API 余额不足, 请充值 deepseek-chat key\n"
+                               f"如果是网络问题, 检查连接后重试")
+            if "raw_text" in result:
+                text.insert("end", f"\n\n── AI 原始返回 ──\n{result['raw_text']}")
+            return
+
+        pq = result.get("per_question", [])
+        total = result.get("total_score", "?")
+        max_t = result.get("max_total", "?")
+        rate = result.get("accuracy_rate", "?")
+        weak = result.get("weak_topics", [])
+        summary = result.get("teacher_summary", "")
+        suggestion = result.get("next_step_suggestion", "")
+
+        text.tag_config("title", font=("Comic Sans MS", 18, "bold"), foreground="#8B5CF6")
+        text.tag_config("score", font=("Arial", 28, "bold"), foreground="#10B981")
+        text.tag_config("q_title", font=("Arial", 14, "bold"), foreground="#374151")
+        text.tag_config("wrong", font=("Arial", 12), foreground="#EF4444")
+        text.tag_config("weak", font=("Arial", 12, "bold"), foreground="#F59E0B")
+
+        text.insert("end", f"👨‍🏫 {style_name} 批改报告\n{'═'*50}\n\n", "title")
+        text.insert("end", f"📊 总分: {total} / {max_t}   正确率: {rate}%\n\n", "score")
+
+        # 每道题
+        for p in pq:
+            no = p.get("no", "?")
+            score = p.get("score", 0)
+            max_s = p.get("max_score", 0)
+            correct = p.get("correct", False)
+            topic = p.get("knowledge_point", "")
+            why = p.get("why_wrong", "")
+            trap = p.get("easy_trap", "")
+            tip = p.get("teacher_tip", "")
+
+            emoji = "✅" if correct else "❌"
+            text.insert("end", f"\n【第{no}题】{emoji} {score}/{max_s}分  📚{topic}\n", "q_title")
+            if not correct and why:
+                text.insert("end", f"   错因: {why}\n", "wrong")
+            if trap:
+                text.insert("end", f"   ⚠️ 易陷阱: {trap}\n", "weak")
+            if tip:
+                text.insert("end", f"   👨‍🏫 {tip}\n")
+
+        text.insert("end", f"\n{'═'*50}\n🎯 薄弱知识点 TOP: {weak}\n", "weak")
+        text.insert("end", f"\n📝 老师总评:\n{summary}\n\n")
+        text.insert("end", f"🚀 下一步建议:\n{suggestion}\n")
+
+    # ═══ 底部按钮区 ═══
+    btn_row_ocr = tk.Frame(tab_ocr, bg=PALETTE["bg"]); btn_row_ocr.pack(pady=6)
+    _mk_color_button(btn_row_ocr, "📷 批量选图", PALETTE["sky"],
+                    _select_images_batch, width=14).pack(side=tk.LEFT, padx=4)
+    _mk_color_button(btn_row_ocr, "📋 刷新题目", PALETTE["sun"],
+                    _build_answer_cards, width=12).pack(side=tk.LEFT, padx=4)
+    _mk_color_button(btn_row_ocr, "📖 看标准答案", PALETTE["white"],
+                    _show_answer_key, width=12).pack(side=tk.LEFT, padx=4)
+    _mk_color_button(btn_row_ocr, "✅ 批改出分", PALETTE["mint"],
+                    _grade_by_input, width=12).pack(side=tk.LEFT, padx=4)
+    _ai_btn_ocr = _mk_color_button(btn_row_ocr, "🤖 AI名师", PALETTE["pink"],
+                                   _ai_grade_teacher, width=12)
+    _ai_btn_ocr.pack(side=tk.LEFT, padx=4)
+    if not HAS_AI:
+        _ai_btn_ocr.config(state=tk.DISABLED)
+
+    # 自动构建答题卡片 (如果已有试卷)
+    _build_answer_cards()
+
+    # ═══ 子 Tab 4: 📊 薄弱点分析 ═══
     tab_analysis = tk.Frame(exam_tabs, bg=PALETTE["bg"])
     exam_tabs.add(tab_analysis, text="📊 薄弱点分析")
 

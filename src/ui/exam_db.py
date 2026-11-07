@@ -264,19 +264,29 @@ def _row_to_dict(row) -> Dict:
 
 def pick_random_questions(grade: str, subject: str, topics: List[str],
                           num: int, exclude_ids=None) -> List[Dict]:
-    """从 DB 随机抽题"""
+    """从 DB 随机抽题 — 支持 topic 名模糊匹配 (UI名 vs DB名差异)"""
     exclude_ids = exclude_ids or []
     conn = _conn()
+
+    # 清洗 topics: None/"全部"/空字符串 都视为"不限"
+    real_topics = [t.strip() for t in (topics or []) if t and t != "全部" and t.strip()]
+
     sql = "SELECT * FROM questions WHERE grade=? AND subject=?"
     params = [grade, subject]
-    if topics and topics != ["全部"]:
-        placeholders = ",".join("?" * len(topics))
-        sql += f" AND topic IN ({placeholders})"
-        params.extend(topics)
+
+    if real_topics:
+        # 用 LIKE %topic% 模糊匹配 — 兼容 UI "运算定律" vs DB "运算定律与简便计算"
+        like_clauses = []
+        for t in real_topics:
+            like_clauses.append("topic LIKE ?")
+            params.append(f"%{t}%")
+        sql += " AND (" + " OR ".join(like_clauses) + ")"
+
     if exclude_ids:
         ph = ",".join("?" * len(exclude_ids))
         sql += f" AND id NOT IN ({ph})"
         params.extend(exclude_ids)
+
     sql += " ORDER BY RANDOM() LIMIT ?"
     params.append(num)
     rows = conn.execute(sql, params).fetchall()
