@@ -97121,9 +97121,8 @@ except Exception as e:
                 except Exception:
                     pass
                 if not collected:
-                    # fallback: 搜不到就构造一些合理的关键词占位，让 AI 自己查
-                    collected = [{"title": f"[{s}] 关于「{'/'.join(kws)}」的近期报道，待人工核实",
-                                  "time": "实时", "source": s, "url": ""} for s in src_picked[:8]]
+                    # 🔥 爬不到真实新闻 → 让 AI 明确说明"无实时数据"，而不是造假占位符
+                    print(f"[📊舆情助手] ⚠️ 东财新闻接口不可用, collected=0, 关键词={kws}")
                 news_buf[0] = collected
                 # 组装给 AI 的新闻摘要
                 news_summary_lines = []
@@ -97139,8 +97138,8 @@ except Exception as e:
 【舆情师风格】{style}
 【报告长度】{length}
 【需纳入分析的声音/视角】{', '.join(voices_picked) if voices_picked else '全部'}
-【已抓取的近期新闻/线索】
-{news_summary}
+【⚠️ 已抓取的真实新闻/线索 — 仅以下为真实数据，禁止编造】
+{news_summary if news_summary else '（⚠️ 当前东方财富/新浪财经新闻接口不可用，无实时数据。请基于关键词本身做框架性分析，并明确标注"无实时新闻支撑"）'}
 【报告结构要求】（严格按此结构，每部分有实际内容，不要空话）
 ═══ 执行摘要 (Executive Summary) ═══
 - 一句话结论（当前舆情态势）

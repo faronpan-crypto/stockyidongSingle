@@ -453,6 +453,42 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             print(f"[👁️游资看盘❌] {e}", flush=True)
             _tb.print_exc()
 
+    def _show_vv_style_library(self):
+        """📚 财经大V风格库 — 从主界面直接打开"""
+        print("[📚大V风格库] 启动...", flush=True)
+        try:
+            from ui.speculator_watch import _show_vv_main
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            _show_vv_main(root)
+        except Exception as e:
+            import traceback as _tb
+            print(f"[📚大V风格库❌] {e}", flush=True)
+            _tb.print_exc()
+
+    def _show_tutor_helper(self):
+        """🦊 家教辅导小助手 — 上海小学生专属"""
+        print("[🦊家教] 启动...", flush=True)
+        try:
+            from ui.tutor_helper import _show_tutor_helper as _sth
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            _sth(root)
+        except Exception as e:
+            import traceback as _tb
+            print(f"[🦊家教❌] {e}", flush=True)
+            _tb.print_exc()
+
+    def _attach_article_btn(self, dlg, ctx=None, focus_layer=None):
+        """🔧 通用: 给任意弹窗底部加 📝 红色文章生成按钮
+        
+        用法: dlg = tk.Toplevel(...); self._attach_article_btn(dlg, ctx={...}, focus_layer="涨停排名")
+        """
+        try:
+            from ui.speculator_watch import _add_article_btn
+            win = getattr(self, 'root', None) or dlg
+            _add_article_btn(dlg, win=win, ctx=ctx, focus_layer=focus_layer)
+        except Exception as e:
+            print(f"[📝文章按钮] 附加失败: {e}", flush=True)
+
 
     def __init__(self, root):
         self.root = root
@@ -4758,12 +4794,17 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         # Row1 末尾: 📝文章生成
         try:
             from ui.speculator_watch import _article_output_dialog as _aod1
-            _ROW1_ART = tk.Button(toolbar_row1, text="📝文章", font=("", 9, "bold"),
-                                  bg="#B71C1C", fg="white", padx=8, pady=0, cursor="hand2",
-                                  command=lambda: _aod1(self.winfo_toplevel(),
-                                       focus_layer="🌏 全球宏观·大盘看盘 (Row1)"))
+            def _click_row1():
+                print(f"[📝Row1] 点击!", flush=True)
+                try:
+                    _aod1(self.root, focus_layer="🌏 全球宏观·大盘看盘 (Row1)")
+                except Exception as _e:
+                    print(f"[📝Row1❌] {_e}", flush=True); import traceback; traceback.print_exc()
+            _ROW1_ART = ttk.Button(toolbar_row1, text="📝文章", width=8, command=_click_row1)
             _ROW1_ART.pack(side=tk.RIGHT, padx=(4, 0))
-        except Exception as _ea1: pass
+            print("[📝Row1] ✅ ttk.Button 已创建", flush=True)
+        except Exception as _ea1:
+            print(f"[📝Row1❌] 创建失败: {_ea1}", flush=True)
 
         # Row2: 🎯 选股 / 机会 / ETF周期 (actionable)
         try:
@@ -4794,12 +4835,17 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         # Row2 末尾: 📝文章生成
         try:
             from ui.speculator_watch import _article_output_dialog as _aod2
-            _ROW2_ART = tk.Button(toolbar_row2, text="📝文章", font=("", 9, "bold"),
-                                  bg="#B71C1C", fg="white", padx=8, pady=0, cursor="hand2",
-                                  command=lambda: _aod2(self.winfo_toplevel(),
-                                       focus_layer="🎯 选股·机会·ETF周期 (Row2)"))
+            def _click_row2():
+                print(f"[📝Row2] 点击!", flush=True)
+                try:
+                    _aod2(self.root, focus_layer="🎯 选股·机会·ETF周期 (Row2)")
+                except Exception as _e:
+                    print(f"[📝Row2❌] {_e}", flush=True); import traceback; traceback.print_exc()
+            _ROW2_ART = ttk.Button(toolbar_row2, text="📝文章", width=8, command=_click_row2)
             _ROW2_ART.pack(side=tk.RIGHT, padx=(4, 0))
-        except Exception as _ea2: pass
+            print("[📝Row2] ✅ ttk.Button 已创建", flush=True)
+        except Exception as _ea2:
+            print(f"[📝Row2❌] 创建失败: {_ea2}", flush=True)
 
         # Row3: 🔥 主力资金 / 个股分析 (深度)
         _ROW3 = [
@@ -4820,12 +4866,17 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         # Row3 末尾: 📝文章生成
         try:
             from ui.speculator_watch import _article_output_dialog as _aod3
-            _ROW3_ART = tk.Button(toolbar_row3, text="📝文章", font=("", 9, "bold"),
-                                  bg="#B71C1C", fg="white", padx=8, pady=0, cursor="hand2",
-                                  command=lambda: _aod3(self.winfo_toplevel(),
-                                       focus_layer="🔥 主力资金·个股分析 (Row3)"))
+            def _click_row3():
+                print(f"[📝Row3] 点击!", flush=True)
+                try:
+                    _aod3(self.root, focus_layer="🔥 主力资金·个股分析 (Row3)")
+                except Exception as _e:
+                    print(f"[📝Row3❌] {_e}", flush=True); import traceback; traceback.print_exc()
+            _ROW3_ART = ttk.Button(toolbar_row3, text="📝文章", width=8, command=_click_row3)
             _ROW3_ART.pack(side=tk.RIGHT, padx=(4, 0))
-        except Exception as _ea3: pass
+            print("[📝Row3] ✅ ttk.Button 已创建", flush=True)
+        except Exception as _ea3:
+            print(f"[📝Row3❌] 创建失败: {_ea3}", flush=True)
 
         # Row4: 📰 资讯 / 外部数据源 (最低频, 可选)
         # — 合并进 Row2/Row3 末尾, 不单独占一行 (太挤) —
@@ -5147,6 +5198,8 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("背离做T", self._show_divergence_t_v2, False, "quick"),
             ("✍️AI写手", self._show_ai_writer_dialog, False, "quick"),
             ("🎬短剧写手", self._show_short_drama_dialog, False, "quick"),
+            ("📚大V风格库", self._show_vv_style_library, False, "quick"),
+            ("🦊家教辅导", self._show_tutor_helper, False, "quick"),
             ("📊舆情助手", self._show_public_opinion_dialog, False, "quick"),
             # ---- 📰 资讯分析 (quick) ----
             ("近期资讯分析", self.show_news_data_dialog, False, "quick"),

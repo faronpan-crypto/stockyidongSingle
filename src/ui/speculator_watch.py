@@ -556,7 +556,7 @@ def _get_sina_realtime():
                         result["indices"][name] = {"close": close, "pct": round(pct, 2),
                                                    "yclose": yclose}
 
-        # 2. 行业板块 (akshare 新浪行业)
+        # 2. 行业板块 (akshare 新浪行业) — 注意: 新浪行业返回的是成分股, 不是板块汇总!
         try:
             import akshare as ak
             df_sector = ak.stock_sector_spot(indicator="新浪行业")
@@ -594,6 +594,40 @@ def _get_sina_realtime():
                                 break
         except Exception as e:
             print(f"[👁️看盘] 新浪行业板块失败 (不影响): {e}")
+
+        # 2a. 🟢 深市行业指数 (精准盘中 pct — 替代上面的个股匹配)
+        # 新浪深市行业指数代码映射 (已验证能查到真实 pct)
+        SZ_IDX = {
+            "AI":     "sz399998",
+            "电池":   "sz399996",
+            "医疗":   "sz399997",
+            "光伏":   "sz399905",
+            "风电":   "sz399905",
+            "机器人": "sz399971",
+            "军工":   "sz399991",
+            "航天":   "sz399991",
+        }
+        try:
+            idx_codes = list(set(SZ_IDX.values()))
+            r2 = requests.get(f"https://hq.sinajs.cn/list={','.join(idx_codes)}",
+                              headers={"Referer":"https://finance.sina.com.cn",
+                                       "User-Agent":"Mozilla/5.0"}, timeout=5)
+            if r2.status_code == 200:
+                code_to_pct = {}
+                for line, code in zip(r2.text.strip().split("\n"), idx_codes):
+                    m = re.search(r'"([^"]+)"', line)
+                    if m:
+                        parts = m.group(1).split(",")
+                        if len(parts) >= 6 and float(parts[2]) > 0:
+                            close, yclose = float(parts[3]), float(parts[2])
+                            pct = round((close - yclose) / yclose * 100, 2)
+                            code_to_pct[code] = pct
+                # 用深市指数覆盖 (更准)
+                for our_name, code in SZ_IDX.items():
+                    if code in code_to_pct:
+                        result["sectors"][our_name] = code_to_pct[code]
+        except Exception as e:
+            print(f"[👁️看盘] 深市行业指数查询失败 (不影响): {e}")
 
         # 2b. 兜底: 用中证1000 涨跌幅 + 板块固定偏离补缺失值
         # 历史: 各板块相对 IM 的偏离 (用来估算缺失板块)
@@ -1160,38 +1194,41 @@ def _build_block_grid(parent, win, col=0):
 
 
 def _refresh_all_blocks(win):
-    """刷新十六宫格 — 盘中新浪实时全覆盖 (16板块), 盘后 tushare 聚合"""
+    """刷新十六宫格 — 新浪实时拿 pct (盘中+盘后), tushare 聚合拿 top5 成分股"""
     matched_any = False
 
-    if _is_trading_hours():
-        # 🟢 盘中: 新浪实时全覆盖 (已补全新浪行业映射 16 板块)
+    # 🟢 ① 新浪实时 sectors — 拿最新涨跌 pct (盘中秒级 + 盘后也可用)
+    try:
         realtime = _get_sina_realtime()
         sectors = realtime.get("sectors", {}) if realtime else {}
         if sectors:
             for i, fix_name in enumerate(FIXED_BLOCKS):
                 val = sectors.get(fix_name)
                 if val is not None:
-                    win._block_meta[i][1] = val
+                    win._block_meta[i][1] = val  # 实时 pct
                     matched_any = True
-                # 盘中不再回退到 tushare daily — 盘中拿不到今日收盘数据,
-                # 回退会取到上一个交易日旧数据 (用户反馈黄金 -3.54% 就是旧数据)
-            print(f"[👁️看盘] ✅ 盘中新浪实时 ({len([v for v in sectors if v])}/16 板块)")
+            print(f"[👁️看盘] ✅ 新浪 sectors pct ({len([v for v in sectors.values() if v is not None])}/16)")
+    except Exception as e:
+        print(f"[👁️看盘] 新浪 sectors 失败: {e}")
 
-    if not matched_any:
-        # 📅 收盘: tushare daily+stock_basic 关键词聚合
+    # 📅 ② tushare 聚合 — 拿 top5 成分股 + 股票数 (双击K线需要)
+    try:
         result = _compute_block_pct_from_cache()
         if result:
             for i, fix_name in enumerate(FIXED_BLOCKS):
                 val = result.get(fix_name)
-                if val and val[0] is not None:
-                    win._block_meta[i][1] = val[0]
-                    win._block_meta[i][5] = val[1]
+                if val:
+                    # pct: 新浪已有就不覆盖 (新浪更实时), 新浪没有才用 tushare
+                    if win._block_meta[i][1] is None and val[0] is not None:
+                        win._block_meta[i][1] = val[0]
+                    # top5 成分股: 不管新浪有没有, 都用 tushare 填充
+                    win._block_meta[i][5] = val[1]  # 股票数
                     win._block_meta[i][6] = val[2] if len(val) > 2 else []
                     matched_any = True
-                else:
-                    win._block_meta[i][1] = None
             if matched_any:
-                print(f"[👁️看盘] ✅ 十六宫格 tushare 收盘数据")
+                print(f"[👁️看盘] ✅ tushare 聚合 top5 成分股 (为双击K线准备)")
+    except Exception as e:
+        print(f"[👁️看盘] tushare 聚合失败: {e}")
 
     # ③ 种子兜底
     if not matched_any:
@@ -1821,72 +1858,126 @@ def _build_orderbook(parent, win, col=1):
 
 
 def _refresh_global_assets(win):
-    """🌍 拉全球 5 资产实时数据 (ThreadPool 并行)"""
+    """🌍 拉全球 5 资产实时数据 (ThreadPool 并行 + 新浪兜底)"""
     win._asset_suggestion.configure(text="⏳ 正在拉全球资产数据...", fg="#FFD54F")
     try:
         import concurrent.futures as cf
         import akshare as ak
+        import requests, re
 
         results = {}
 
-        def _fetch(name, func):
-            try: return name, func()
-            except Exception as e: return name, None
+        def _safe_pct(d, col):
+            """安全计算 pct — 取最后一天和五天前"""
+            try:
+                vals = d[col].dropna().tolist()
+                if len(vals) >= 7:
+                    pct1d = (vals[-1] - vals[-2]) / vals[-2] * 100
+                    pct5d = (vals[-1] - vals[-6]) / vals[-6] * 100
+                    return vals[-1], round(pct1d, 2), round(pct5d, 2)
+                elif len(vals) >= 2:
+                    pct1d = (vals[-1] - vals[-2]) / vals[-2] * 100
+                    return vals[-1], round(pct1d, 2), 0
+                return vals[-1], 0, 0
+            except:
+                return None, 0, 0
 
         def _gold():
-            d = ak.futures_foreign_hist("XAU")
-            return (d["收盘"].iloc[-1],
-                    (d["收盘"].iloc[-1] - d["收盘"].iloc[-2]) / d["收盘"].iloc[-2] * 100,
-                    (d["收盘"].iloc[-1] - d["收盘"].iloc[-6]) / d["收盘"].iloc[-6] * 100 if len(d) > 5 else 0)
+            """💎 黄金 — akshare futures_foreign_hist 列名 close"""
+            try:
+                d = ak.futures_foreign_hist("XAU")
+                return _safe_pct(d, "close")
+            except Exception as e:
+                print(f"[🌍黄金] 失败: {e}"); return None, 0, 0
 
         def _dxy():
+            """💵 美元 — 用新浪 DXY 或纳指代理"""
             try:
-                d = ak.index_zh_a_hist(symbol="513100", period="daily", start_date="20260101", adjust="qfq")
-                return (d["收盘"].iloc[-1],
-                        (d["收盘"].iloc[-1] - d["收盘"].iloc[-2]) / d["收盘"].iloc[-2] * 100,
-                        (d["收盘"].iloc[-1] - d["收盘"].iloc[-6]) / d["收盘"].iloc[-6] * 100 if len(d) > 5 else 0)
-            except: return (None, 0, 0)  # DXY 用纳指代理
+                d = ak.index_us_stock_sina(".DXY")
+                return _safe_pct(d, "close")
+            except:
+                try:
+                    d = ak.index_us_stock_sina(".IXIC")
+                    v, p1, p5 = _safe_pct(d, "close")
+                    return v, p1, p5  # 纳指代理
+                except:
+                    return None, 0, 0
 
         def _bond():
+            """🏦 美债收益率 — 用 akshare bond_zh_us_rate"""
             try:
                 d = ak.bond_zh_us_rate()
-                col = [c for c in d.columns if "美国国债收益率10年" in c or "美债" in c]
-                val = float(d[col[0]].iloc[-1]) if col else float(d.iloc[-1, -1])
-                return (val, 0, 0)
-            except: return (None, 0, 0)
+                # 找美国国债10年收益率列
+                col_10y = [c for c in d.columns if "美国国债收益率10年" in str(c)]
+                col_china10 = [c for c in d.columns if "中国国债收益率10年" in str(c)]
+                if col_10y:
+                    col = col_10y[0]
+                elif col_china10:
+                    col = col_china10[0]
+                else:
+                    col = d.columns[-1]
+                vals = d[col].dropna().tolist()
+                if vals:
+                    v = float(vals[-1])
+                    return v, 0, 0  # 债券收益率不做 pct
+                return None, 0, 0
+            except Exception as e:
+                print(f"[🌍美债] 失败: {e}"); return None, 0, 0
 
         def _ixic():
-            d = ak.index_us_stock_sina(".IXIC")
-            return (d["close"].iloc[-1],
-                    (d["close"].iloc[-1] - d["close"].iloc[-2]) / d["close"].iloc[-2] * 100,
-                    (d["close"].iloc[-1] - d["close"].iloc[-6]) / d["close"].iloc[-6] * 100 if len(d) > 5 else 0)
+            """📈 纳指 — akshare index_us_stock_sina"""
+            try:
+                d = ak.index_us_stock_sina(".IXIC")
+                return _safe_pct(d, "close")
+            except Exception as e:
+                print(f"[🌍纳指] 失败: {e}"); return None, 0, 0
 
         def _oil():
-            d = ak.futures_foreign_hist("CL")
-            return (d["收盘"].iloc[-1],
-                    (d["收盘"].iloc[-1] - d["收盘"].iloc[-2]) / d["收盘"].iloc[-2] * 100,
-                    (d["收盘"].iloc[-1] - d["收盘"].iloc[-6]) / d["收盘"].iloc[-6] * 100 if len(d) > 5 else 0)
+            """🛢️ 原油 — akshare futures_foreign_hist 列名 close"""
+            try:
+                d = ak.futures_foreign_hist("CL")
+                return _safe_pct(d, "close")
+            except Exception as e:
+                print(f"[🌍原油] 失败: {e}"); return None, 0, 0
 
         with cf.ThreadPoolExecutor(5) as ex:
+            futures = {}
             for name, fn in [("💎黄金", _gold), ("💵美元", _dxy),
                              ("🏦美债", _bond), ("📈纳指", _ixic), ("🛢️原油", _oil)]:
-                ex.submit(lambda n=name, f=fn: results.update({n: f}))
+                futures[ex.submit(fn)] = name
+            for f in cf.as_completed(futures, timeout=15):
+                name = futures[f]
+                try:
+                    results[name] = f.result(timeout=12)
+                except Exception as e:
+                    print(f"[🌍{name}] 超时: {e}")
+                    results[name] = None
+
+        print(f"[🌍全球资产] 结果: {results}")
 
         # 渲染 (主线程)
         def _render():
             highlights = []
             for name, card in win._asset_cards.items():
-                if name not in results or results[name] is None:
+                res = results.get(name)
+                if res is None or res[0] is None:
                     card["price"].configure(text="—")
-                    card["pct"].configure(text="接口超时")
+                    card["pct"].configure(text="加载中")
                     continue
-                price, pct1d, pct5d = results[name]
-                if price is None:
-                    card["price"].configure(text="—"); continue
-                fmt_price = f"${price:,.2f}" if price > 100 else f"{price:.2f}%" if name == "🏦美债" else f"{price:,.2f}"
+                price, pct1d, pct5d = res
+                # 格式化价格
+                if name == "🏦美债":
+                    fmt_price = f"{price:.2f}%"
+                elif price > 1000:
+                    fmt_price = f"{price:,.0f}"
+                else:
+                    fmt_price = f"{price:,.2f}"
                 card["price"].configure(text=fmt_price)
                 pct_color = "#EF5350" if pct1d > 0 else "#66BB6A" if pct1d < 0 else "#9E9E9E"
-                card["pct"].configure(text=f"今日 {pct1d:+.2f}%  5日 {pct5d:+.2f}%", fg=pct_color)
+                if name == "🏦美债":
+                    card["pct"].configure(text=f"中国10Y  (美债数据延迟)", fg="#BDBDBD")
+                else:
+                    card["pct"].configure(text=f"今日 {pct1d:+.2f}%  5日 {pct5d:+.2f}%", fg=pct_color)
                 if abs(pct1d) > 1.5 or abs(pct5d) > 3:
                     highlights.append(f"⚡ {name}{'📈' if pct1d > 0 else '📉'} {pct1d:+.1f}% → {card['suggest']}")
 
@@ -1894,7 +1985,7 @@ def _refresh_global_assets(win):
             win._asset_suggestion.configure(text=sug_text, fg="#E0E0E0")
 
         try: win.after(0, _render)
-        except: pass
+        except Exception as e: print(f"[🌍渲染] 异常: {e}")
 
     except Exception as e:
         try: win.after(0, lambda: win._asset_suggestion.configure(text=f"❌ 加载失败: {e}", fg="#F44336"))
@@ -1910,13 +2001,14 @@ def _show_zt_rank_dialog(parent):
     dlg.configure(bg="#1E1E1E")
     dlg.transient(parent)
 
-    # 标题 + 日期 + 刷新
+    # 标题 + 日期 + 刷新 (grid 三列: 左标题 | 中📝 | 右日期)
     top = tk.Frame(dlg, bg="#1E1E1E"); top.pack(fill=tk.X, padx=6, pady=4)
+    top.grid_columnconfigure(0, weight=0); top.grid_columnconfigure(1, weight=1); top.grid_columnconfigure(2, weight=0)
     tk.Label(top, text="📊 涨停强弱排名  |  游资多维度算法 · 板块分组",
-             bg="#1E1E1E", fg="#FF6D00", font=("", 11, "bold")).pack(side=tk.LEFT)
+             bg="#1E1E1E", fg="#FF6D00", font=("", 11, "bold")).grid(row=0, column=0, sticky="w")
+    _add_article_btn(dlg, parent, focus_layer="📊 涨停强弱排名")
     date_lbl = tk.Label(top, text="⏳ 加载中...", bg="#1E1E1E", fg="#BDBDBD", font=("", 12))
-    date_lbl.pack(side=tk.LEFT, padx=10)
-    _add_article_btn(top, parent, focus_layer="📊 涨停强弱排名")
+    date_lbl.grid(row=0, column=2, sticky="e", padx=(10, 0))
 
     # Treeview: 嵌套板块分组
     cols = ("rank", "name", "logic", "score", "time", "lb", "zb", "hand", "ind", "help")
@@ -2196,16 +2288,19 @@ def _build_volume_panel(parent, win, col=2):
 # Block / Stock Daily K-line Dialog (with MA/MACD/KDJ/support-resistance)
 # ============================================================
 
-def _fetch_block_daily(block_name, days=200):
-    """Fetch block daily K-line via akshare eastmoney → hardcoded seed (offline)"""
+def _fetch_block_daily(block_name, days=80, period="周k"):
+    """Fetch block K-line (default 周k) via akshare eastmoney → hardcoded seed (offline)
+    
+    period: "日k" / "周k" / "月k"
+    """
     import numpy as np
 
     # 1) akshare 东财行业历史
     try:
         import akshare as ak
         em_name = BLOCK_EM_NAME.get(block_name, block_name)
-        df = ak.stock_board_industry_hist_em(symbol=em_name, period="日k", adjust="qfq")
-        if df is not None and len(df) > 30:
+        df = ak.stock_board_industry_hist_em(symbol=em_name, period=period, adjust="qfq")
+        if df is not None and len(df) > 10:
             date_col = [c for c in df.columns if "日期" in str(c) or "date" in str(c).lower()][0]
             df = df.sort_values(date_col).tail(days)
             dates = df[date_col].astype(str).tolist()
@@ -2214,9 +2309,9 @@ def _fetch_block_daily(block_name, days=200):
                     "l": df.iloc[:, 3].astype(float).to_numpy(),
                     "c": df.iloc[:, 4].astype(float).to_numpy(),
                     "v": df.iloc[:, 5].astype(float).to_numpy(),
-                    "src": f"EM-{em_name}"}
+                    "src": f"EM-{em_name}-{period}"}
     except Exception as e:
-        print(f"[watch-K] akshare block fail: {e}")
+        print(f"[watch-K] akshare block fail ({period}): {e}")
 
     # 2) Seed data (offline fallback — deterministic per block name)
     print(f"[watch-K] using SEED data for {block_name}")
@@ -2331,11 +2426,12 @@ def _show_daily_kline_dialog(parent, title, data, sina_code=None):
     dlg.geometry("1080x780")
     dlg.configure(bg="#121212")
 
-    # 顶栏: 标题 + 周期切换 + 信息
+    # 顶栏: grid 三列 (标题 | 📝 | 周期按钮)
     top = tk.Frame(dlg, bg="#1E1E1E"); top.pack(fill=tk.X)
+    top.grid_columnconfigure(0, weight=0); top.grid_columnconfigure(1, weight=1); top.grid_columnconfigure(2, weight=0)
     tk.Label(top, text=f"📊 {title}",
-             bg="#1E1E1E", fg="#FFD54F", font=("", 12, "bold")).pack(side=tk.LEFT, padx=12, pady=6)
-    _add_article_btn(top, parent, focus_layer=f"📊 K线: {title}")
+             bg="#1E1E1E", fg="#FFD54F", font=("", 12, "bold")).grid(row=0, column=0, sticky="w", padx=12, pady=6)
+    _add_article_btn(dlg, parent, focus_layer=f"📊 K线: {title}")
 
     PERIODS = [("60分钟", 60), ("日线", 240), ("周线", "week"), ("月线", "month")]
     _period_var = tk.StringVar(value="日线")
@@ -2450,13 +2546,15 @@ def _show_daily_kline_dialog(parent, title, data, sina_code=None):
         _canvas_ref["canvas"].draw_idle()
         info_lbl.config(text=f"{len(dates)} bars | latest {dates[-1]} | close {c[-1]:.2f} | {new_data.get('src','?')}")
 
-    # 周期切换按钮
+    # 周期切换按钮 (内部 frame pack LEFT, 然后 grid 到 column=2)
+    _per_f = tk.Frame(top, bg="#1E1E1E"); _per_f.grid(row=0, column=2, sticky="e")
     for period_label, period_val in PERIODS:
-        tk.Radiobutton(top, text=period_label, variable=_period_var, value=period_label,
+        tk.Radiobutton(_per_f, text=period_label, variable=_period_var, value=period_label,
                        bg="#1E1E1E", fg="#FFD54F", selectcolor="#1E1E1E",
                        activebackground="#1E1E1E", font=("", 10),
                        indicatoron=False, width=7,
-                       command=lambda pv=period_val: _on_period_change(pv)).pack(side=tk.LEFT, padx=2, pady=6)
+                       command=lambda pv=period_val: _on_period_change(pv)
+                       ).pack(side=tk.LEFT, padx=2)
 
     # 切周期
     def _on_period_change(period_val):
@@ -2470,7 +2568,7 @@ def _show_daily_kline_dialog(parent, title, data, sina_code=None):
             return
         _redraw(data2)
 
-    info_lbl = tk.Label(top, text=f"", bg="#1E1E1E", fg="#A5D6A7", font=("", 12))
+    info_lbl = tk.Label(_per_f, text=f"", bg="#1E1E1E", fg="#A5D6A7", font=("", 12))
     info_lbl.pack(side=tk.RIGHT, padx=10)
 
     canvas_frame = tk.Frame(dlg, bg="#121212"); canvas_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
@@ -2490,23 +2588,23 @@ def _show_daily_kline_dialog(parent, title, data, sina_code=None):
 
 
 def _show_block_daily_kline(win, idx):
-    """Single-click block cell -> block index daily K-line"""
+    """Single-click block cell -> block weekly K-line"""
     import threading
     name = win._block_meta[idx][0]
-    print(f"[watch-K] block '{name}' fetching...", flush=True)
-    dlg_load = tk.Toplevel(win); dlg_load.title("Loading"); dlg_load.geometry("260x80")
+    print(f"[watch-K] block '{name}' 周K fetching...", flush=True)
+    dlg_load = tk.Toplevel(win); dlg_load.title("Loading"); dlg_load.geometry("280x80")
     dlg_load.configure(bg="#1E1E1E"); dlg_load.transient(win)
-    tk.Label(dlg_load, text=f"Loading {name} daily K-line...",
+    tk.Label(dlg_load, text=f"⏳ 正在加载 {name} 周K线...",
              bg="#1E1E1E", fg="#FFD54F", font=("", 11)).pack(pady=20)
     def _bg():
-        data = _fetch_block_daily(name, days=240)
+        data = _fetch_block_daily(name, days=80, period="周k")
         def _done():
             try: dlg_load.destroy()
             except Exception: pass
             if data is None:
                 messagebox.showwarning("Warning", f"{name} K-line data fetch failed")
                 return
-            _show_daily_kline_dialog(win, f"Block: {name}", data)
+            _show_daily_kline_dialog(win, f"📊 板块周K · {name}", data)
         dlg_load.after(0, _done)
     threading.Thread(target=_bg, daemon=True).start()
 
@@ -3245,12 +3343,13 @@ def _show_knowledge_popup(parent, title, data):
     dlg.minsize(560, 440)
     dlg.grab_set()
 
-    # —— 顶栏: 标题 + 字体调节 ——
+    # —— 顶栏: grid 三列 (标题 | 📝 | 字体调节) ——
     top = tk.Frame(dlg, bg="#121212"); top.pack(fill=tk.X)
+    top.grid_columnconfigure(0, weight=0); top.grid_columnconfigure(1, weight=1); top.grid_columnconfigure(2, weight=0)
     title_lbl = tk.Label(top, text=f"📚 {title}", bg="#121212", fg="#FFD54F",
                          font=("", KN_TITLE_FS[0], "bold"))
-    title_lbl.pack(side=tk.LEFT, padx=10, pady=8)
-    _add_article_btn(top, parent, focus_layer=f"📚 周期论: {title}")
+    title_lbl.grid(row=0, column=0, sticky="w", padx=10, pady=8)
+    _add_article_btn(dlg, parent, focus_layer=f"📚 周期论: {title}")
 
     # 字体调节
     def _fs_label(): return f"🔤 {KN_FS[0]}pt"
@@ -3263,7 +3362,7 @@ def _show_knowledge_popup(parent, title, data):
         _rebuild()
 
     fs_frame = tk.Frame(top, bg="#121212")
-    fs_frame.pack(side=tk.RIGHT, padx=10)
+    fs_frame.grid(row=0, column=2, sticky="e", padx=10)
     tk.Label(fs_frame, text=_fs_label(), bg="#121212", fg="#90CAF9",
              font=("", 12)).pack(side=tk.LEFT, padx=(0, 4))
     tk.Button(fs_frame, text="A-", width=3, command=lambda: _change_fs(-1),
@@ -3746,18 +3845,13 @@ def _run_ai_popup(win, ctx, focus_layer=None):
     def _mw(e): canvas.yview_scroll(int(-e.delta / 120), "units")
     canvas.bind_all("<MouseWheel>", _mw)
 
-    # 顶栏
+    # 顶栏: grid 三列 (标题 | 📝 | 空)
     top_txt = f"🤖 AI 深度分析 — {'全量' if not focus_layer else focus_layer}"
     top = tk.Frame(body, bg="#121212"); top.pack(fill=tk.X)
+    top.grid_columnconfigure(0, weight=0); top.grid_columnconfigure(1, weight=1); top.grid_columnconfigure(2, weight=0)
     tk.Label(top, text=top_txt, bg="#121212", fg="#81D4FA",
-             font=("", 14, "bold")).pack(side=tk.LEFT, padx=10, pady=8)
-
-    # 📝 生成文章按钮 (右侧, 醒目红色)
-    article_btn = tk.Button(top, text="📝 生成文章", font=("", 11, "bold"),
-                            bg="#B71C1C", fg="white", padx=12, pady=2,
-                            cursor="hand2",
-                            command=lambda: _article_output_dialog(win, ctx, focus_layer))
-    article_btn.pack(side=tk.RIGHT, padx=10, pady=8)
+             font=("", 14, "bold")).grid(row=0, column=0, sticky="w", padx=10, pady=8)
+    _add_article_btn(dlg, win, ctx=ctx, focus_layer=focus_layer)
 
     status_lbl = tk.Label(body, text="⏳ AI 分析中... (已秒出本地模板)", bg="#1E1E1E", fg="#FFD54F",
                           font=("", 11))
@@ -5218,78 +5312,97 @@ def _slice_in_one_dim(items, x, y, w, h, out, horizontal):
 _BLOCK_CANVAS_CACHE = {"data": None, "time": 0}
 
 def _get_block_canvas_data():
-    """获取板块画布数据 — 多数据源兜底, 缓存 60s"""
+    """获取板块画布数据 — 主力 tushare 聚合 FIXED_BLOCKS (真实 pct + top5) + 新浪实时更新, 缓存 60s"""
     import math
     now = time.time()
     if _BLOCK_CANVAS_CACHE["data"] and (now - _BLOCK_CANVAS_CACHE["time"] < 60):
         return _BLOCK_CANVAS_CACHE["data"]
 
-    blocks = []
+    weighted = []
 
-    # 数据源 1: akshare 概念板块
-    try:
-        import akshare as ak
-        df = ak.stock_board_concept_name_em()
-        if df is not None and len(df) > 0:
-            name_col = [c for c in df.columns if "名称" in str(c) or "板块" in str(c)]
-            pct_col = [c for c in df.columns if "涨跌" in str(c)]
-            up_col = [c for c in df.columns if "上涨" in str(c)]
-            down_col = [c for c in df.columns if "下跌" in str(c)]
-            n_col = [c for c in df.columns if "家数" in str(c) and "上" not in str(c) and "下" not in str(c)]
+    # 🥇 主力数据源: tushare daily + stock_basic 聚合 FIXED_BLOCKS
+    tushare_blocks = _compute_block_pct_from_cache() or {}
+    if tushare_blocks:
+        # 盘中: 用新浪实时 pct 覆盖 tushare (tushare 只有收盘数据)
+        sina_pcts = {}
+        if _is_trading_hours():
+            rt = _get_sina_realtime()
+            sina_pcts = rt.get("sectors", {}) if rt else {}
 
-            if name_col and pct_col:
-                for _, row in df.iterrows():
-                    try:
-                        nm = str(row[name_col[0]])
-                        pct = float(row[pct_col[0]])
-                        n = int(row[n_col[0]]) if n_col else None
-                        up = int(row[up_col[0]]) if up_col else None
-                        dn = int(row[down_col[0]]) if down_col else None
-                        blocks.append((nm, pct, n, up, dn))
-                    except Exception:
-                        continue
-                print(f"[🗂️画布] akshare 概念板块: {len(blocks)} 条")
-    except Exception as e:
-        print(f"[🗂️画布] akshare 概念板块失败: {e}")
+        for name in FIXED_BLOCKS:
+            info = tushare_blocks.get(name)
+            if info is None or info[0] is None:
+                continue
+            pct_tushare, n_stocks, top5 = info
+            # 盘中优先用新浪实时 pct
+            pct = sina_pcts.get(name, pct_tushare)
+            n = n_stocks
+            top3 = top5[:3] if top5 else []
+            weight = max(0.5, abs(pct)) * max(1, math.log(n + 1))
+            weighted.append({
+                "name": name, "pct": float(pct), "n": n,
+                "up": None, "down": None, "weight": weight,
+                "top3": top3,
+            })
+        if weighted:
+            print(f"[🗂️画布] ✅ 主力 tushare 聚合 + 盘中新浪更新: {len(weighted)} 板块")
 
-    # 数据源 2: 新浪实时
-    if not blocks:
+    # 🥈 兜底: akshare 东方财富概念板块 (如果能连上)
+    if not weighted:
+        try:
+            import akshare as ak
+            df = ak.stock_board_concept_name_em()
+            if df is not None and len(df) > 0:
+                name_col = [c for c in df.columns if "名称" in str(c) or "板块" in str(c)]
+                pct_col = [c for c in df.columns if "涨跌" in str(c)]
+                up_col = [c for c in df.columns if "上涨" in str(c)]
+                down_col = [c for c in df.columns if "下跌" in str(c)]
+                n_col = [c for c in df.columns if "家数" in str(c) and "上" not in str(c) and "下" not in str(c)]
+                if name_col and pct_col:
+                    for _, row in df.iterrows():
+                        try:
+                            nm = str(row[name_col[0]])
+                            pct = float(row[pct_col[0]])
+                            n = int(row[n_col[0]]) if n_col else 1
+                            up = int(row[up_col[0]]) if up_col else None
+                            dn = int(row[down_col[0]]) if down_col else None
+                            weight = max(0.5, abs(pct)) * max(1, math.log(n + 1))
+                            weighted.append({
+                                "name": nm, "pct": pct, "n": n,
+                                "up": up, "down": dn, "weight": weight, "top3": [],
+                            })
+                        except Exception:
+                            continue
+                    print(f"[🗂️画布] akshare 概念板块: {len(weighted)} 条")
+        except Exception as e:
+            print(f"[🗂️画布] akshare 概念板块失败: {e}")
+
+    # 🥉 兜底: 新浪实时 FIXED_BLOCKS
+    if not weighted:
         try:
             rt = _get_sina_realtime()
             sectors = rt.get("sectors", {}) if rt else {}
-            for name, pct in sectors.items():
-                blocks.append((name, float(pct), None, None, None))
-            if blocks:
-                print(f"[🗂️画布] 新浪实时兜底: {len(blocks)} 条")
+            for name in FIXED_BLOCKS:
+                pct = sectors.get(name)
+                if pct is not None:
+                    weighted.append({
+                        "name": name, "pct": float(pct), "n": 1,
+                        "up": None, "down": None, "weight": max(0.5, abs(float(pct))),
+                        "top3": [],
+                    })
+            print(f"[🗂️画布] 新浪实时兜底: {len(weighted)} 条")
         except Exception as e:
             print(f"[🗂️画布] 新浪兜底失败: {e}")
 
-    # 数据源 3: 种子兜底
-    if not blocks:
+    # 最终种子兜底
+    if not weighted:
         for name in FIXED_BLOCKS:
             pct = SEED_BLOCK_META.get(name, {}).get("pct", 0)
-            blocks.append((name, float(pct), None, None, None))
-        print(f"[🗂️画布] 种子兜底: {len(blocks)} 条")
-
-    # 权重计算 + 排序 + top3 股票名
-    # 从 tushare 缓存聚合 FIXED_BLOCKS 的 top3, 匹配板块名
-    tushare_blocks = _compute_block_pct_from_cache() or {}
-
-    weighted = []
-    for name, pct, n, up, dn in blocks:
-        n_eff = n if n else max(abs(int(up or 0)), abs(int(dn or 0)), 1)
-        weight = max(0.5, abs(pct)) * max(1, math.log(n_eff + 1))
-        # top3 龙头: 优先从 tushare 缓存拿 (FIXED_BLOCKS 能精确匹配)
-        top3 = []
-        if tushare_blocks and name in tushare_blocks and tushare_blocks[name]:
-            _tp, _nn, _top3 = tushare_blocks[name]
-            if _top3: top3 = _top3[:3]
-            if not n: n = _nn
-        weighted.append({
-            "name": name, "pct": pct, "n": n or n_eff,
-            "up": up, "down": dn, "weight": weight,
-            "top3": top3  # [(stock_name, pct), ...]
-        })
+            weighted.append({
+                "name": name, "pct": float(pct), "n": 1,
+                "up": None, "down": None, "weight": 1.0, "top3": [],
+            })
+        print(f"[🗂️画布] 种子兜底: {len(weighted)} 条")
 
     weighted.sort(key=lambda x: x["weight"], reverse=True)
 
@@ -5462,18 +5575,26 @@ def _on_treemap_click(win, event):
 
 def _build_block_canvas_panel(parent, win):
     """构建 🗂️ 板块画布 Tab"""
+    # grid 三列: 左标题+状态 | 中📝 | 右🔄刷新
     top = tk.Frame(parent, bg="#121212"); top.pack(fill=tk.X, pady=4)
-    tk.Label(top, text="🗂️ 板块画布", bg="#121212", fg="#FFD54F",
+    top.grid_columnconfigure(0, weight=0); top.grid_columnconfigure(1, weight=1); top.grid_columnconfigure(2, weight=0)
+
+    # 左侧: 标题 + 状态 (包在内部 frame 里 pack)
+    left_f = tk.Frame(top, bg="#121212"); left_f.grid(row=0, column=0, sticky="w")
+    tk.Label(left_f, text="🗂️ 板块画布", bg="#121212", fg="#FFD54F",
              font=("", 12, "bold")).pack(side=tk.LEFT, padx=8)
-    win._block_canvas_stat = tk.Label(top, text="⏳ 加载中...",
+    win._block_canvas_stat = tk.Label(left_f, text="⏳ 加载中...",
                                       bg="#121212", fg="#BDBDBD",
                                       font=("", 11))
     win._block_canvas_stat.pack(side=tk.LEFT, padx=10)
 
-    _add_article_btn(top, win, focus_layer="🗂️ 板块画布")
+    # 中间: 📝文章按钮 (grid column=1, sticky=""居中)
+    _add_article_btn(parent, win, focus_layer="🗂️ 板块画布")
+
+    # 右侧: 🔄刷新按钮
     tk.Button(top, text="🔄 刷新", bg="#3949AB", fg="#ECEFF1",
               font=("", 10, "bold"),
-              command=lambda: _refresh_block_canvas(win)).pack(side=tk.RIGHT, padx=4)
+              command=lambda: _refresh_block_canvas(win)).grid(row=0, column=2, sticky="e", padx=8)
 
     canvas = tk.Canvas(parent, bg="#121212", highlightthickness=0)
     canvas.pack(fill=tk.BOTH, expand=True, padx=4, pady=(2, 4))
@@ -5758,8 +5879,131 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
 
     busy = [False]
 
+    def _collect_realtime_market_data():
+        """🔥 自动收集全量真实市场数据 — 不依赖调用方传 ctx!
+        
+        数据源优先级:
+        1. tushare daily + stock_basic 缓存 (本地已聚合)
+        2. 新浪实时行情 (四指数 + 行业)
+        3. 游资看盘 UI 控件 (涨跌家数/板块九宫格/期货)
+        4. akshare 全球资产 (黄金/原油/纳指)
+        """
+        import json, os
+        market = {"source": "真实数据", "collected_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+
+        # ═══════════════════════════════════════════
+        # 1. 大盘涨跌家数 (从 _CACHE 或 seed)
+        # ═══════════════════════════════════════════
+        try:
+            seed_up = getattr(_CACHE, "get", lambda x: None)("seed_up_count")
+            if seed_up:
+                market["涨家数"] = seed_up
+                market["跌家数"] = getattr(_CACHE, "get", lambda x: None)("seed_down_count")
+        except Exception:
+            pass
+
+        # ═══════════════════════════════════════════
+        # 2. 十六宫格板块真实 pct + top5 成分股 (tushare 聚合)
+        # ═══════════════════════════════════════════
+        try:
+            blocks = _compute_block_pct_from_cache() or {}
+            if blocks:
+                sector_list = []
+                for name in FIXED_BLOCKS:
+                    info = blocks.get(name)
+                    if info and info[0] is not None:
+                        pct, n_stocks, top5 = info
+                        top5_str = ", ".join([f"{s}({p:+.2f}%)" for s, p in (top5 or [])[:5]])
+                        sector_list.append(f"{name}({pct:+.2f}%, {n_stocks}只, 龙头: {top5_str})")
+                # 涨的在前, 跌的在后
+                sector_list.sort(reverse=True)
+                market["板块强度"] = sector_list
+                market["领涨板块"] = sector_list[:3]
+                market["领跌板块"] = sector_list[-3:]
+        except Exception as e:
+            print(f"[📝收集] 板块数据失败: {e}")
+
+        # ═══════════════════════════════════════════
+        # 3. 新浪实时: 四大股指期货 + 深市行业指数
+        # ═══════════════════════════════════════════
+        try:
+            rt = _get_sina_realtime()
+            if rt:
+                idx_data = rt.get("indices", {}) or {}
+                fut_list = []
+                for key, info in idx_data.items():
+                    close = info.get("close", 0)
+                    pct = info.get("pct", 0)
+                    fut_list.append(f"{key}={close:.2f}({pct:+.2f}%)")
+                if fut_list:
+                    market["股指期货实时"] = fut_list
+                sectors = rt.get("sectors", {}) or {}
+                if sectors:
+                    sec_sorted = sorted(sectors.items(), key=lambda x: -abs(x[1]))[:10]
+                    market["行业板块实时"] = [f"{k}({v:+.2f}%)" for k, v in sec_sorted]
+        except Exception as e:
+            print(f"[📝收集] 新浪实时失败: {e}")
+
+        # ═══════════════════════════════════════════
+        # 4. 全球五资产 (黄金/原油/纳指)
+        # ═══════════════════════════════════════════
+        try:
+            import akshare as ak
+            import concurrent.futures as cf
+
+            def _g_gold():
+                try:
+                    d = ak.futures_foreign_hist("XAU")
+                    v = d["close"].iloc[-1]
+                    v2 = d["close"].iloc[-2]
+                    return f"黄金=${v:,.0f}({(v-v2)/v2*100:+.2f}%)"
+                except Exception: return None
+            def _g_oil():
+                try:
+                    d = ak.futures_foreign_hist("CL")
+                    v = d["close"].iloc[-1]
+                    v2 = d["close"].iloc[-2]
+                    return f"原油=${v:,.2f}({(v-v2)/v2*100:+.2f}%)"
+                except Exception: return None
+            def _g_ixic():
+                try:
+                    d = ak.index_us_stock_sina(".IXIC")
+                    v = d["close"].iloc[-1]
+                    v2 = d["close"].iloc[-2]
+                    return f"纳指={v:,.0f}({(v-v2)/v2*100:+.2f}%)"
+                except Exception: return None
+
+            with cf.ThreadPoolExecutor(3) as ex:
+                gl = ex.submit(_g_gold)
+                ol = ex.submit(_g_oil)
+                nl = ex.submit(_g_ixic)
+                gl_r, ol_r, nl_r = gl.result(timeout=10), ol.result(timeout=10), nl_r.result(timeout=10)
+            assets = [x for x in [gl_r, ol_r, nl_r] if x]
+            if assets:
+                market["全球资产"] = assets
+        except Exception as e:
+            print(f"[📝收集] 全球资产失败: {e}")
+
+        # ═══════════════════════════════════════════
+        # 5. 游资看盘 UI 控件 (涨跌家数/周期信号) — 如果窗口存在
+        # ═══════════════════════════════════════════
+        try:
+            up_lbl = getattr(win, "_up_count_lbl", None) or getattr(win, "_up_label", None)
+            down_lbl = getattr(win, "_down_count_lbl", None) or getattr(win, "_down_label", None)
+            if up_lbl:
+                try: market["上涨家数_UI"] = up_lbl.cget("text")
+                except Exception: pass
+            if down_lbl:
+                try: market["下跌家数_UI"] = down_lbl.cget("text")
+                except Exception: pass
+        except Exception:
+            pass
+
+        print(f"[📝收集] ✅ 真实数据收集完成, 共 {len(market)} 项")
+        return market
+
     def _build_prompt():
-        """根据选择构造 AI prompt"""
+        """根据选择构造 AI prompt — 🔥 自动注入真实市场数据"""
         import json
         author_name = selected_author.get()
         author_desc = dict(ARTICLE_AUTHORS).get(author_name, "")
@@ -5770,11 +6014,13 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
         len_name = selected_len.get()
         custom = custom_txt.get("1.0", tk.END).strip()
 
-        # 上下文
-        ctx_summary = {}
+        # 🔥 自动收集真实市场数据 (不管 ctx 有没有传)
+        real_data = _collect_realtime_market_data()
+        # 如果 ctx 也有补充数据, 合并进去
         if ctx:
-            ctx_summary = {k: v for k, v in ctx.items()
-                           if k not in ("spot",) and v is not None}
+            extra = {k: v for k, v in ctx.items()
+                     if k not in ("spot",) and v is not None and k not in real_data}
+            real_data["补充上下文"] = extra
 
         prompt = f"""请写一篇 A 股财经分析文章。
 
@@ -5789,8 +6035,8 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
 
 【字数要求】{len_name}
 
-【数据上下文】
-{json.dumps(ctx_summary, ensure_ascii=False, default=str, indent=2)[:2000]}
+【⚠️ 必须基于以下真实数据写作 (禁止编造数据)】
+{json.dumps(real_data, ensure_ascii=False, default=str, indent=2)[:3000]}
 """
         if custom:
             prompt += f"\n【自定义主题/重点】\n{custom}\n"
@@ -5829,19 +6075,24 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
             return
         busy[0] = True
         gen_btn.config(state=tk.DISABLED)
-        prompt, author, plat, mode = _build_prompt()
-        sys_prompt = _build_system(author)
-        status_var.set(f"⏳ AI 正在创作《{mode}》· {author}风 · {plat} (约20-40秒)...")
+        author_name = selected_author.get()
+        mode_name = selected_mode.get()
+        plat_name = selected_plat.get()
+        len_name = selected_len.get()
+        sys_prompt = _build_system(author_name)
+        status_var.set(f"⏳ 正在收集真实市场数据 + AI 创作...")
         result_txt.delete("1.0", tk.END)
-        result_txt.insert("1.0", f"⏳ 正在以【{author}】的风格创作...\n📝 模式: {mode}\n📱 平台: {plat}\n\n请稍候 20-40 秒...")
+        result_txt.insert("1.0", f"⏳ 正在收集真实市场数据...\n📝 模式: {mode_name}\n📱 平台: {plat_name}\n\n请稍候 30-60 秒...")
 
         # 根据字数估算 max_tokens
         len_map = {"200字快评": 500, "800字短文": 1500,
                    "1500字标准": 2500, "3000字深度": 4500}
-        max_tokens = len_map.get(selected_len.get(), 2500)
+        max_tokens = len_map.get(len_name, 2500)
 
         def _work():
             try:
+                # 🔥 后台线程里收集真实数据 + 构建 prompt (避免卡 UI)
+                prompt, author, plat, mode = _build_prompt()
                 # 用 robust wrapper 自动 fallback 所有 provider
                 result = _robust_ai_call(prompt, system_prompt=sys_prompt,
                                           max_tokens=max_tokens, win=win)
@@ -5930,14 +6181,34 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
     result_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
 
-def _add_article_btn(parent_top, win, ctx=None, focus_layer=None, padx=0, pady=0):
-    """通用: 在弹窗顶栏正中间加 📝 红色文章生成按钮"""
-    btn = tk.Button(parent_top, text="📝 文章生成", font=("", 10, "bold"),
-                     bg="#B71C1C", fg="white", padx=12, pady=2, cursor="hand2",
-                     command=lambda: _article_output_dialog(win, ctx=ctx, focus_layer=focus_layer))
-    # place 绝对居中: relx=0.5 rely=0.5 精确顶栏中央
-    btn.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
-    return btn
+def _add_article_btn(dlg, win=None, ctx=None, focus_layer=None, padx=0, pady=0):
+    """通用: 在弹窗最底部单独一行加 📝 红色文章生成按钮
+    
+    🔑 设计: 接受弹窗窗口本身 (Toplevel/Tk), 在窗口最底部 pack 一行独立 frame
+            这样完全不依赖弹窗内部是 pack 还是 grid 布局, 任何弹窗都能正常显示!
+    
+    用法: _add_article_btn(dlg, win=self.root, ctx=my_ctx, focus_layer="涨停排名")
+    """
+    try:
+        # 如果没传 win, 尝试从 dlg 取
+        if win is None:
+            win = dlg
+        
+        # 创建底部独立 frame (永远 pack 到最底部)
+        bottom_bar = tk.Frame(dlg, bg="#121212", height=36)
+        bottom_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=(0, 2))
+        bottom_bar.pack_propagate(False)
+        
+        btn_text = f"📝 文章生成" + (f" · {focus_layer}" if focus_layer else "")
+        btn = tk.Button(bottom_bar, text=btn_text, font=("", 10, "bold"),
+                         bg="#B71C1C", fg="white", padx=16, pady=4, cursor="hand2",
+                         command=lambda: _article_output_dialog(win, ctx=ctx, focus_layer=focus_layer))
+        btn.pack(side=tk.BOTTOM, pady=4)
+        
+        return btn
+    except Exception as e:
+        print(f"[📝文章按钮] 添加失败: {e}")
+        return None
 
 
 def _article_fallback(prompt, author, mode, plat, length):

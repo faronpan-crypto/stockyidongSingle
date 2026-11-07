@@ -11344,6 +11344,75 @@ except Exception as e:
         banner = tk.Frame(win, bg="#5D4037", height=50); banner.pack(fill=tk.X); banner.pack_propagate(False)
         tk.Label(banner, text="🎯 量化预测 · 市场走势 5 维闭环 (数据-模型-验证)",
                  font=("Microsoft YaHei",12,"bold"),bg="#5D4037",fg="#FFF3E0").pack(side=tk.LEFT,padx=14,pady=10)
+
+        # 🔥 新增: 📝 写文章按钮 — 传所有量化预测数据
+        def _open_quant_article():
+            """📝 收集当前所有 Tab 的量化数据 → AI 写文章"""
+            ctx = {"场景": "🎯量化预测5维闭环", "标题": "A股市场量化预测分析报告"}
+
+            # Tab1: 市场宽广度
+            try:
+                ctx["市场宽广度"] = {k: v.cget("text") for k, v in b_vars.items()}
+            except Exception: pass
+            # Tab2: 技术评分
+            try:
+                ctx["技术指标评分"] = {k: v.cget("text") for k, v in sc_vars.items()}
+            except Exception: pass
+            # Tab2: 三大指数 Treeview
+            try:
+                idx_data = []
+                for item in tree_i.get_children():
+                    vals = tree_i.item(item)["values"]
+                    idx_data.append(dict(zip(["指数","收盘","涨跌%","MA20","MA60","MA250","RSI14","综合分"], vals)))
+                if idx_data: ctx["三大指数状态"] = idx_data
+            except Exception: pass
+            # Tab3: 形态拟合
+            try:
+                ctx["MA偏离度"] = {k: v.cget("text") for k, v in sim_vars.items()}
+            except Exception: pass
+            try: ctx["形态拟合结论"] = sim_concl.cget("text")
+            except Exception: pass
+            # Tab3: 历史匹配 Top5
+            try:
+                hist = []
+                for item in tree_s.get_children():
+                    v = tree_s.item(item)["values"]
+                    hist.append({"排名": v[0], "距离": v[1], "后续20日%": v[2], "后续60日%": v[3], "MA排列": v[4]})
+                if hist: ctx["历史形态匹配Top5"] = hist
+            except Exception: pass
+            # Tab4: KNN
+            try:
+                knn = []
+                for item in tree_k.get_children():
+                    v = tree_k.item(item)["values"]
+                    knn.append({"排名": v[0], "距离": v[1], "后续20日%": v[2], "后续60日%": v[3]})
+                if knn: ctx["KNN最近邻Top"] = knn
+            except Exception: pass
+            # 综合结论 label
+            try:
+                txt = concl_label.cget("text")
+                if txt and txt != "--": ctx["综合预测结论"] = txt
+            except Exception: pass
+            # 状态文字
+            try:
+                ctx["引擎状态"] = status_var.get()
+            except Exception: pass
+
+            # 调统一文章生成器
+            try:
+                from ui.speculator_watch import _article_output_dialog
+                _article_output_dialog(self.root, ctx=ctx, focus_layer="量化预测5维")
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                messagebox.showerror("Error", f"文章生成器加载失败: {e}")
+
+        art_btn = tk.Button(banner, text="📝 写文章",
+                            font=("Microsoft YaHei", 10, "bold"),
+                            bg="#B71C1C", fg="white", padx=12, pady=2,
+                            relief="flat", cursor="hand2",
+                            command=_open_quant_article)
+        art_btn.pack(side=tk.LEFT, padx=(8, 4), pady=10)
+
         status_var = tk.StringVar(value="⏳ 点击 🔄 开始量化预测...")
         tk.Label(banner, textvariable=status_var, font=("Microsoft YaHei",10),
                  bg="#5D4037",fg="#FFCCBC").pack(side=tk.LEFT,pady=12)

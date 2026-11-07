@@ -15036,31 +15036,106 @@ class DapanMixin:
             dlg.minsize(1100, 750)
 
             # ── 全局字体调节 ──
-            font_size = tk.IntVar(value=10)
+            font_size = tk.IntVar(value=14)  # 🔥 默认 14 号大字
+            font_refs = {}  # key → widget 字典
+
+            def _register_font(key, w):
+                """注册需要动态调字体的 widget"""
+                font_refs[key] = w
+
             def _refresh_fonts():
                 s = font_size.get()
-                for key, lbl in font_refs.items():
-                    try: lbl.configure(font=("Microsoft YaHei", s if "11" not in key else s+1, "bold" if "bold" in key else ""))
-                    except Exception: pass
+                for key, w in font_refs.items():
+                    try:
+                        base = ("Microsoft YaHei", s + (1 if "title" in key else 0))
+                        bold = "bold" if ("bold" in key or "title" in key) else ""
+                        w.configure(font=base + (bold,) if bold else base)
+                    except Exception:
+                        pass
+
             def _adjust_font(delta):
-                font_size.set(max(8, min(18, font_size.get() + delta)))
+                font_size.set(max(9, min(20, font_size.get() + delta)))
                 _refresh_fonts()
 
             # ── 顶部标题栏 ──
             header = tk.Frame(dlg, bg="#1E1E2E", height=50)
             header.pack(fill=tk.X, side=tk.TOP)
             header.pack_propagate(False)
-            font_refs = {}
             tk.Label(header, text="🌍 全球五巨头资产全景", bg="#1E1E2E", fg="#FFD54F",
                      font=("Microsoft YaHei", 15, "bold")).pack(side=tk.LEFT, padx=15, pady=8)
+
+            # 🔥 新增: 🤖 AI 联动分析按钮
+            ai_btn = tk.Button(header, text="🤖 AI 联动分析",
+                               font=("Microsoft YaHei", 10, "bold"),
+                               bg="#6A1B9A", fg="white", padx=12, pady=2,
+                               relief="flat", cursor="hand2")
+            ai_btn.pack(side=tk.LEFT, padx=8, pady=8)
+
+            # 🔥 新增: 📝 文章生成按钮 — 传当前五资产真实数据
+            def _open_article_writer():
+                """📝 把五卡片真实数据+相关性传给 AI 写文章"""
+                ctx = {}
+                for nm, v_lbl, c_lbl, d_lbl in [
+                    ("💎黄金", val_gold, chg_gold, dly_gold),
+                    ("💵美元", val_dxy, chg_dxy, dly_dxy),
+                    ("🏦美债", val_bond, chg_bond, dly_bond),
+                    ("📈纳指", val_eq, chg_eq, dly_eq),
+                    ("🛢️原油", val_oil, chg_oil, dly_oil),
+                ]:
+                    try:
+                        ctx[nm] = {
+                            "现价": v_lbl.cget("text"),
+                            "涨跌": c_lbl.cget("text"),
+                            "5日": d_lbl.cget("text"),
+                        }
+                    except Exception:
+                        pass
+                # 相关性矩阵也加进去
+                try:
+                    avail = {k: v for k, v in [("黄金",df_g),("纳指",df_eq),("原油",df_o),("美债10Y",df_b)]
+                             if v is not None and len(v) > 30}
+                    if len(avail) >= 3:
+                        cd = {}
+                        for k, v in avail.items():
+                            col = 'close' if k!='美债10Y' else '美国国债收益率10年'
+                            ic = 'date' if k!='美债10Y' else '日期'
+                            s = v.set_index(ic)[col]; s.index.name='date'
+                            cd[k] = s.diff() if k=='美债10Y' else s.pct_change()
+                        cdf = pd.DataFrame(cd).dropna()
+                        ctx["资产相关性矩阵(Pearson)"] = cdf.corr().round(2).to_dict()
+                except Exception:
+                    pass
+                ctx["场景"] = "🌍全球五巨头资产全景实时数据"
+                ctx["标题"] = "全球宏观资产联动分析"
+
+                # 调统一文章生成器
+                try:
+                    from ui.speculator_watch import _article_output_dialog
+                    _article_output_dialog(root, ctx=ctx, focus_layer="全球宏观资产")
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    messagebox.showerror("Error", f"文章生成器加载失败: {e}")
+
+            art_btn = tk.Button(header, text="📝 写文章",
+                                font=("Microsoft YaHei", 10, "bold"),
+                                bg="#B71C1C", fg="white", padx=12, pady=2,
+                                relief="flat", cursor="hand2",
+                                command=_open_article_writer)
+            art_btn.pack(side=tk.LEFT, padx=(0,8), pady=8)
+
+            status_lbl = tk.Label(header, text="⏳ 加载中...", bg="#1E1E2E", fg="#90A4AE",
+                                   font=("Microsoft YaHei", 11))
+            status_lbl.pack(side=tk.RIGHT, padx=10)
+
+            # 字体调节按钮 (放到 header 右侧最外)
             tk.Button(header, text="A-", width=3, command=lambda: _adjust_font(-1),
                       bg="#37474F", fg="#FFF", relief="flat").pack(side=tk.RIGHT, padx=(0,3))
             tk.Label(header, text="字体", bg="#1E1E2E", fg="#90A4AE").pack(side=tk.RIGHT, padx=3)
             tk.Button(header, text="A+", width=3, command=lambda: _adjust_font(1),
                       bg="#37474F", fg="#FFF", relief="flat").pack(side=tk.RIGHT, padx=(0,3))
-            status_lbl = tk.Label(header, text="⏳ 加载中...", bg="#1E1E2E", fg="#90A4AE")
-            status_lbl.pack(side=tk.RIGHT, padx=10)
-            font_refs["status"] = status_lbl
+
+            _register_font("status_bold", status_lbl)
 
             # ── 5 张资产实时卡片 ──
             cards = tk.Frame(dlg, bg="#121212")
@@ -15108,22 +15183,24 @@ class DapanMixin:
                 # ② 技术信号面板
                 sig_frame = tk.Frame(tab, bg="#1E1E1E"); sig_frame.pack(fill=tk.X, padx=6, pady=4)
                 tk.Label(sig_frame, text="🔬 技术信号", bg="#1E1E1E", fg="#FFD54F",
-                         font=("Microsoft YaHei", 10, "bold")).pack(anchor="w", padx=8)
+                         font=("Microsoft YaHei", 13, "bold")).pack(anchor="w", padx=8)
                 sig_text = tk.Text(sig_frame, height=6, bg="#121212", fg="#E0E0E0",
-                                   font=("Microsoft YaHei", 9), relief="flat", wrap="word")
+                                   font=("Microsoft YaHei", 13), relief="flat", wrap="word")
                 sig_text.pack(fill=tk.X, padx=6, pady=4)
                 sig_text.insert("1.0", "⏳ 数据加载中...")
                 sig_text.configure(state="disabled")
+                _register_font(f"sig_text_{code}", sig_text)
 
                 # ③ 联动影响面板
                 link_frame = tk.Frame(tab, bg="#1E1E1E"); link_frame.pack(fill=tk.X, padx=6, pady=4)
                 tk.Label(link_frame, text="🔗 对其他资产的联动影响", bg="#1E1E1E", fg="#42A5F5",
-                         font=("Microsoft YaHei", 10, "bold")).pack(anchor="w", padx=8)
+                         font=("Microsoft YaHei", 13, "bold")).pack(anchor="w", padx=8)
                 link_text = tk.Text(link_frame, height=5, bg="#121212", fg="#E0E0E0",
-                                    font=("Microsoft YaHei", 9), relief="flat", wrap="word")
+                                    font=("Microsoft YaHei", 13), relief="flat", wrap="word")
                 link_text.pack(fill=tk.X, padx=6, pady=4)
                 link_text.insert("1.0", "⏳ 等待数据...")
                 link_text.configure(state="disabled")
+                _register_font(f"link_text_{code}", link_text)
 
                 # 存引用
                 tab._fig = fig; tab._ax = ax; tab._canvas = canvas_fig
@@ -15146,26 +15223,31 @@ class DapanMixin:
             tab_corr = tk.Frame(nb, bg="#121212"); nb.add(tab_corr, text="🔗 联动全景")
             corr_title = tk.Label(tab_corr, text="📊 资产间相关性矩阵 (近60日收益率 Pearson)",
                                    bg="#121212", fg="#FFD54F",
-                                   font=("Microsoft YaHei", 11, "bold"))
+                                   font=("Microsoft YaHei", 13, "bold"))
             corr_title.pack(anchor="w", padx=10, pady=(10, 4))
+            _register_font("corr_title_bold", corr_title)
 
             corr_fig = Figure(figsize=(8, 4), dpi=100, facecolor="#121212")
             corr_canvas = FigureCanvasTkAgg(corr_fig, master=tab_corr)
             corr_canvas.get_tk_widget().pack(fill=tk.X, padx=6, pady=4)
 
             # 传导概率解释区
-            tk.Label(tab_corr, text="🎯 A股/美股个股联动传导概率参考", bg="#121212",
-                     fg="#42A5F5", font=("Microsoft YaHei", 11, "bold")).pack(anchor="w", padx=10, pady=(8,4))
+            corr_sub = tk.Label(tab_corr, text="🎯 A股/美股个股联动传导概率参考", bg="#121212",
+                     fg="#42A5F5", font=("Microsoft YaHei", 13, "bold"))
+            corr_sub.pack(anchor="w", padx=10, pady=(8,4))
+            _register_font("corr_sub_title", corr_sub)
             linkage_text = tk.Text(tab_corr, height=8, bg="#1E1E1E", fg="#E0E0E0",
-                                   font=("Microsoft YaHei", 10), relief="flat", wrap="word")
+                                   font=("Microsoft YaHei", 13), relief="flat", wrap="word")
             linkage_text.pack(fill=tk.X, padx=8, pady=4)
             linkage_text.configure(state="disabled")
+            _register_font("linkage_text_bold", linkage_text)
 
             # Tab 7: 底层逻辑
             tab_logic = tk.Frame(nb, bg="#121212"); nb.add(tab_logic, text="📚 底层逻辑")
             logic_text = tk.Text(tab_logic, bg="#121212", fg="#E0E0E0",
-                                  font=("Microsoft YaHei", 10), relief="flat", wrap="word")
+                                  font=("Microsoft YaHei", 14), relief="flat", wrap="word")
             logic_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+            _register_font("logic_text_bold", logic_text)
             LOGIC_CONTENT = """
     ═ 🌍 全球五巨头资产联动框架 ═
 
@@ -15197,6 +15279,59 @@ class DapanMixin:
             """
             logic_text.insert("1.0", LOGIC_CONTENT.strip())
             logic_text.configure(state="disabled")
+
+            # ═══════════════════════════════════════════
+            # Tab 8: 🤖 AI 联动分析 (独立 Tab + 独立字体控件)
+            # ═══════════════════════════════════════════
+            tab_ai = tk.Frame(nb, bg="#121212"); nb.add(tab_ai, text="🤖 AI 联动分析")
+
+            # Tab 内的独立字体调节 (只调 AI 报告区域)
+            ai_font_size = tk.IntVar(value=14)
+            ai_font_refs = []
+
+            def _ai_adjust_font(delta):
+                ai_font_size.set(max(11, min(24, ai_font_size.get() + delta)))
+                for w in ai_font_refs:
+                    try: w.configure(font=("Microsoft YaHei", ai_font_size.get()))
+                    except Exception: pass
+
+            # Tab 顶栏: 标题 + 字体控件
+            ai_header = tk.Frame(tab_ai, bg="#1E1E1E")
+            ai_header.pack(fill=tk.X, padx=4, pady=(4, 2))
+            tk.Label(ai_header, text="🤖 AI 资产联动分析报告", bg="#1E1E1E", fg="#CE93D8",
+                     font=("Microsoft YaHei", 14, "bold")).pack(side=tk.LEFT, padx=8, pady=6)
+            tk.Label(ai_header, text="点击顶部 🤖 AI 联动分析 按钮生成",
+                     bg="#1E1E1E", fg="#7E57C2", font=("Microsoft YaHei", 11)).pack(side=tk.LEFT, padx=8)
+            tk.Button(ai_header, text="A-", width=3, command=lambda: _ai_adjust_font(-1),
+                      bg="#6A1B9A", fg="#FFF", relief="flat",
+                      font=("", 10, "bold")).pack(side=tk.RIGHT, padx=(0, 4), pady=4)
+            tk.Label(ai_header, text="调字体", bg="#1E1E1E", fg="#AB47BC",
+                     font=("Microsoft YaHei", 11)).pack(side=tk.RIGHT, padx=4)
+            tk.Button(ai_header, text="A+", width=3, command=lambda: _ai_adjust_font(1),
+                      bg="#6A1B9A", fg="#FFF", relief="flat",
+                      font=("", 10, "bold")).pack(side=tk.RIGHT, padx=4, pady=4)
+
+            # AI 报告正文
+            ai_report = tk.Text(tab_ai, bg="#121212", fg="#E0E0E0",
+                                 font=("Microsoft YaHei", 14), relief="flat", wrap="word")
+            ai_report.pack(fill=tk.BOTH, expand=True, padx=8, pady=(2, 8))
+            ai_report.insert("1.0", """🤖 AI 资产联动分析报告
+═══════════════════════════════
+
+📌 点击顶部工具栏的 【🤖 AI 联动分析】 按钮
+AI 将基于实时市场数据生成深度分析报告
+
+📊 报告包含:
+  ① 五大资产全景解读
+  ② 联动格局诊断
+  ③ 关键驱动因子推演
+  ④ A股传导链分析
+  ⑤ 未来 1-2 周配置建议
+""")
+            ai_report.configure(state="disabled")
+            ai_font_refs.append(ai_report)
+            # 给全局字体系统也注册一份 (这样全局 A-/A+ 也能调)
+            _register_font("ai_report_bold", ai_report)
 
             # ── 极简同步方案: 直接在主线程 fetch + 渲染 (不用线程/after) ──
             def _do_all():
@@ -15367,6 +15502,108 @@ class DapanMixin:
 
             # ⭐ 同步调用 — 不启动任何线程, 直接在当前函数里跑完
             _do_all()
+
+            # 🔥 AI 联动分析按钮功能
+            def _ai_linkage_analysis():
+                """🤖 用真实数据调 AI 做资产联动深度分析"""
+                ai_btn.config(state=tk.DISABLED, text="⏳ AI 分析中...")
+                status_lbl.configure(text="🤖 AI 正在分析资产联动...", fg="#6A1B9A")
+
+                def _work():
+                    try:
+                        # 收集真实数据
+                        import json as _json
+                        ctx = {}
+                        # 1. 五张卡片的实时数值
+                        for nm, v_lbl, c_lbl in [("💎黄金", val_gold, chg_gold),
+                                                  ("💵美元", val_dxy, chg_dxy),
+                                                  ("🏦美债", val_bond, chg_bond),
+                                                  ("📈纳指", val_eq, chg_eq),
+                                                  ("🛢️原油", val_oil, chg_oil)]:
+                            try:
+                                ctx[nm] = {"现价": v_lbl.cget("text"), "涨跌": c_lbl.cget("text")}
+                            except Exception:
+                                pass
+
+                        # 2. 相关性矩阵数值 (从 cm 变量 — 但 cm 是局部的)
+                        # 重新计算一次
+                        try:
+                            avail = {k: v for k, v in [("黄金",df_g),("纳指",df_eq),("原油",df_o),("美债10Y",df_b)]
+                                     if v is not None and len(v) > 30}
+                            if len(avail) >= 3:
+                                cd = {}
+                                for k, v in avail.items():
+                                    col = 'close' if k!='美债10Y' else '美国国债收益率10年'
+                                    ic = 'date' if k!='美债10Y' else '日期'
+                                    s = v.set_index(ic)[col]; s.index.name='date'
+                                    cd[k] = s.diff() if k=='美债10Y' else s.pct_change()
+                                cdf = pd.DataFrame(cd).dropna(); cm = cdf.corr()
+                                ctx["相关性矩阵"] = cm.round(2).to_dict()
+                        except Exception:
+                            pass
+
+                        # 3. 底层逻辑 (已有的常量)
+                        ctx["理论框架"] = LOGIC_CONTENT[:800]
+
+                        # 调 AI
+                        from ui.speculator_watch import _robust_ai_call
+                        prompt = f"""请作为全球宏观策略师，基于以下真实市场数据，深度分析五大资产的联动关系并给出投资决策建议。
+
+【真实数据 — 禁止编造】
+{_json.dumps(ctx, ensure_ascii=False, default=str, indent=2)[:2500]}
+
+【分析框架 (供参考)】
+- 五大资产本质: 黄金=美元信用照妖镜 / 美元=全球贸易货币 / 美债=全球定价锚 / 美股=风险偏好晴雨表 / 石油=通胀发动机
+- 核心联动: 黄金↔美元(-相关) / 美元↔美债(加息循环) / 美债↔美股(股债跷跷板) / 美元↔石油(-相关) / 黄金↔美债(实际利率) / 石油↔美股(双刃剑)
+
+【请输出】
+═══ 一、今日五大资产全景解读 ═══
+(逐个解读现价+涨跌背后的宏观逻辑)
+
+═══ 二、当前联动格局诊断 ═══
+(基于相关性矩阵，现在是什么格局？正常/脱钩/共振？)
+
+═══ 三、关键驱动因子推演 ═══
+(当前谁是"龙头"？黄金涨→为什么？美元跌→因为什么？)
+
+═══ 四、A股传导链 ═══
+(黄金→A股哪些板块受益？原油涨→传导路径？纳指暴跌→A股影响？)
+
+═══ 五、未来 1-2 周资产配置建议 ═══
+(配什么？避什么？什么信号要警惕？)
+
+要求:
+1. 所有判断基于【真实数据】，有数据支撑才下结论
+2. 结论明确，不模棱两可
+3. 语言犀利，有交易员风格"""
+
+                        system = "你是顶级全球宏观策略师，深谙美元霸权周期、五资产联动逻辑，说话直接、数据先行、结论明确。"
+                        result = _robust_ai_call(prompt, system_prompt=system, max_tokens=4000, win=root)
+
+                        if not result:
+                            result = "❌ AI 不可用 — 请在「🔧 AI配置」里配置大模型 (DeepSeek/豆包/Ollama)"
+
+                        # 弹窗展示结果
+                        dlg.after(0, lambda: _show_ai_result(result))
+                    except Exception as e:
+                        import traceback
+                        dlg.after(0, lambda: _show_ai_result(f"❌ AI 分析失败: {e}\n\n{traceback.format_exc()}"))
+                    finally:
+                        dlg.after(0, lambda: (ai_btn.config(state=tk.NORMAL, text="🤖 AI 联动分析"),
+                                               status_lbl.configure(text="✅ 加载完成", fg="#90A4AE")))
+
+                def _show_ai_result(text):
+                    # 切到 🤖 AI 联动分析 Tab 显示
+                    nb.select(tab_ai)
+                    ai_report.configure(state="normal")
+                    ai_report.delete("1.0", tk.END)
+                    ai_report.insert("1.0", "🤖 AI 资产联动分析报告\n" + "="*50 + "\n\n" + text)
+                    ai_report.configure(state="disabled")
+
+                import threading as _th
+                _th.Thread(target=_work, daemon=True).start()
+
+            ai_btn.configure(command=_ai_linkage_analysis)
 
         except Exception as e:
             print(f"[🌍资产] ❌ 异常: {e}", flush=True)
