@@ -35,6 +35,19 @@ try:
 except Exception:
     HAS_MATPLOTLIB = False
 
+# 题库数据库 & Word 导出 (智能试卷 Tab 用)
+try:
+    from ui.exam_db import (
+        init_db, get_questions, count_questions, get_all_grades, get_all_subjects,
+        get_topics, get_stats, add_question, update_question, delete_question,
+        pick_random_questions, import_from_json_file, import_from_word_file,
+        scan_import_folder, do_import_folder, save_exam as db_save_exam,
+    )
+    from ui.exam_word import save_exam_docx, open_word_for_print
+    HAS_EXAM_DB = True
+except Exception:
+    HAS_EXAM_DB = False
+
 # ─────────────────────────────────────────────
 # 🎨 马卡龙主题配色 (小朋友喜欢)
 # ─────────────────────────────────────────────
@@ -53,17 +66,17 @@ PALETTE = {
     "white": "#FFFFFF",
     "text": "#2C3E50",         # 深夜蓝 (主文字)
     "text_light": "#7F8C8D",
-    "title_font": ("Comic Sans MS", 22, "bold"),
-    "body_font": ("Microsoft YaHei", 16),
-    "body_bold": ("Microsoft YaHei", 16, "bold"),
-    "small_font": ("Microsoft YaHei", 14),
-    "emoji_font": ("Apple Color Emoji", 20),
+    "title_font": ("Comic Sans MS", 30, "bold"),
+    "body_font": ("Microsoft YaHei", 22),
+    "body_bold": ("Microsoft YaHei", 22, "bold"),
+    "small_font": ("Microsoft YaHei", 18),
+    "emoji_font": ("Apple Color Emoji", 28),
 }
 
 # ─────────────────────────────────────────────
 # 🔧 全局字体调节 (A-/A+) — 支持电视大屏 3x 缩放!
 # ─────────────────────────────────────────────
-_FONT_SCALE = 1.0   # 默认 1.0, 范围 0.8 ~ 3.0 (电视大屏需要3倍!)
+_FONT_SCALE = 1.6   # 默认 1.6, 范围 0.8 ~ 3.0 (45寸电视默认1.6倍)
 _FONT_WIDGETS = []  # (widget, base_font_tuple) 注册表
 
 
@@ -724,7 +737,11 @@ QUESTION_BANK = {
 # ─────────────────────────────────────────────
 # 🎯 智能试卷题库 (各年级×学科×知识点)
 # ─────────────────────────────────────────────
+# -*- coding: utf-8 -*-
+"""📚 完整 EXAM_BANK — 6 年级 × 4 学科 × 多知识点"""
+
 EXAM_BANK = {
+    # ═══════════════════════
     "三年级上": {
         "数学": {
             "万以内加减法": [
@@ -749,11 +766,18 @@ EXAM_BANK = {
                 {"q": "47 ÷ 5 的余数是?", "type": "fill", "answer": "2", "score": 5, "topic": "除法-余数"},
             ],
             "长方形和正方形": [
-                {"q": "长方形长6cm, 宽4cm, 周长是多少?", "type": "fill", "answer": "20", "score": 5, "topic": "周长-长方形", "unit": "cm"},
-                {"q": "正方形边长5cm, 周长是多少?", "type": "fill", "answer": "20", "score": 5, "topic": "周长-正方形", "unit": "cm"},
-                {"q": "长方形长8cm, 宽3cm, 面积是多少?", "type": "fill", "answer": "24", "score": 5, "topic": "面积-长方形", "unit": "cm²"},
-                {"q": "正方形边长7cm, 面积是多少?", "type": "fill", "answer": "49", "score": 5, "topic": "面积-正方形", "unit": "cm²"},
+                {"q": "长方形长6cm, 宽4cm, 周长是多少?", "type": "fill", "answer": "20", "score": 5, "topic": "周长-长方形"},
+                {"q": "正方形边长5cm, 周长是多少?", "type": "fill", "answer": "20", "score": 5, "topic": "周长-正方形"},
+                {"q": "长方形长8cm, 宽3cm, 面积是多少?", "type": "fill", "answer": "24", "score": 5, "topic": "面积-长方形"},
+                {"q": "正方形边长7cm, 面积是多少?", "type": "fill", "answer": "49", "score": 5, "topic": "面积-正方形"},
                 {"q": "周长和面积的单位一样吗? (是/否)", "type": "choice", "options": ["是", "否"], "answer": 1, "score": 5, "topic": "周长vs面积"},
+            ],
+            "分数初步认识": [
+                {"q": "1/2 表示把一个东西平均分成几份?", "type": "fill", "answer": "2", "score": 5, "topic": "分数-意义"},
+                {"q": "比较大小: 1/3 ○ 1/5 (填 > < =)", "type": "choice", "options": [">", "<", "="], "answer": 0, "score": 5, "topic": "分数-比大小"},
+                {"q": "同分母分数相加: 1/5 + 2/5 = ?", "type": "fill", "answer": "3/5", "score": 5, "topic": "分数-加法"},
+                {"q": "1里面有几个 1/4?", "type": "fill", "answer": "4", "score": 5, "topic": "分数-单位1"},
+                {"q": "比较: 3/7 ○ 5/7", "type": "choice", "options": [">", "<", "="], "answer": 1, "score": 5, "topic": "分数-比大小"},
             ],
         },
         "语文": {
@@ -762,37 +786,37 @@ EXAM_BANK = {
                 {"q": "看拼音写词语: yǎng wàng (  )", "type": "fill", "answer": "仰望", "score": 5, "topic": "看拼音写字"},
                 {"q": "看拼音写词语: huāng yě (  )", "type": "fill", "answer": "荒野", "score": 5, "topic": "看拼音写字"},
                 {"q": "选字填空: (历 厉)史、(在 再)见", "type": "fill", "answer": "历/再", "score": 5, "topic": "形近字"},
-                {"q": "给'口'加偏旁, 写3个不同的字", "type": "fill", "answer": "吃/叫/唱/吹/叶...(任意3个)", "score": 5, "topic": "加偏旁写字"},
+                {"q": "给'口'加偏旁, 写3个不同的字", "type": "fill", "answer": "吃/叫/唱/吹/叶", "score": 5, "topic": "加偏旁写字"},
             ],
             "古诗文": [
                 {"q": "《山行》中'停车坐爱枫林晚'的下一句是?", "type": "fill", "answer": "霜叶红于二月花", "score": 5, "topic": "古诗-背诵"},
                 {"q": "《赠刘景文》'荷尽已无擎雨盖'的下一句是?", "type": "fill", "answer": "菊残犹有傲霜枝", "score": 5, "topic": "古诗-背诵"},
                 {"q": '"一年好景君须记"的下一句是?', "type": "fill", "answer": "最是橙黄橘绿时", "score": 5, "topic": "古诗-背诵"},
-                {"q": "《夜书所见》作者是? (朝代+姓名)", "type": "fill", "answer": "南宋·叶绍翁", "score": 5, "topic": "古诗-作者"},
+                {"q": "《夜书所见》作者是?", "type": "fill", "answer": "叶绍翁", "score": 5, "topic": "古诗-作者"},
                 {"q": '"萧萧梧叶送寒声"中"萧萧"是什么意思?', "type": "fill", "answer": "风吹落叶声", "score": 5, "topic": "古诗-词语解释"},
             ],
             "阅读理解": [
-                {"q": "《花的学校》是哪位作家的作品?", "type": "fill", "answer": "泰戈尔", "score": 5, "topic": "课文-作者"},
+                {"q": "《花的学校》作者是谁?", "type": "fill", "answer": "泰戈尔", "score": 5, "topic": "课文-作者"},
                 {"q": "《铺满金色巴掌的水泥道》中'金色巴掌'指什么?", "type": "fill", "answer": "梧桐树叶", "score": 5, "topic": "课文-比喻"},
-                {"q": "《秋天的雨》作者用了什么修辞手法描写颜色?", "type": "fill", "answer": "拟人/比喻", "score": 5, "topic": "课文-修辞"},
-                {"q": '"读了《金色的草地》, 草地一天中颜色有什么变化?" 简述', "type": "fill", "answer": "早上绿色→中午金色→傍晚绿色", "score": 5, "topic": "课文-内容理解"},
-                {"q": "预测阅读策略: 读故事时应该边读边做什么?", "type": "fill", "answer": "预测接下来会发生什么", "score": 5, "topic": "阅读方法"},
+                {"q": "《秋天的雨》用了什么修辞手法?", "type": "fill", "answer": "拟人/比喻", "score": 5, "topic": "课文-修辞"},
+                {"q": "阅读时的'预测策略'是指?", "type": "fill", "answer": "边读边猜接下来会发生什么", "score": 5, "topic": "阅读方法"},
+                {"q": "写日记的格式是?", "type": "fill", "answer": "日期+星期+天气", "score": 5, "topic": "写作-日记格式"},
             ],
         },
         "英语": {
             "字母与音标": [
                 {"q": "写出字母表中H后面的3个大写字母", "type": "fill", "answer": "I J K", "score": 5, "topic": "字母顺序"},
-                {"q": "字母O的音标是?", "type": "fill", "answer": "/ɒ/ 或 /əʊ/", "score": 5, "topic": "音标"},
-                {"q": "判断: 字母R的发音里有 /aː/ (对/错)", "type": "choice", "options": ["对", "错"], "answer": 1, "score": 5, "topic": "字母发音"},
-                {"q": "Apple 的首字母大写形式是?", "type": "fill", "answer": "A", "score": 5, "topic": "大小写"},
+                {"q": "字母O的音标是?", "type": "fill", "answer": "/ɒ/", "score": 5, "topic": "音标"},
                 {"q": "按顺序写出5个元音字母 (大写)", "type": "fill", "answer": "A E I O U", "score": 5, "topic": "元音字母"},
+                {"q": "Apple 的首字母大写形式是?", "type": "fill", "answer": "A", "score": 5, "topic": "大小写"},
+                {"q": "26个字母中第15个字母是?", "type": "fill", "answer": "O", "score": 5, "topic": "字母顺序"},
             ],
             "基础词汇": [
                 {"q": "英译汉: pencil bag", "type": "fill", "answer": "铅笔袋", "score": 5, "topic": "文具词汇"},
-                {"q": "英译汉: father", "type": "fill", "answer": "父亲/爸爸", "score": 5, "topic": "家庭词汇"},
                 {"q": "英译汉: orange juice", "type": "fill", "answer": "橙汁", "score": 5, "topic": "食物词汇"},
                 {"q": "汉译英: 红色", "type": "fill", "answer": "red", "score": 5, "topic": "颜色词汇"},
                 {"q": "汉译英: 十六", "type": "fill", "answer": "sixteen", "score": 5, "topic": "数字"},
+                {"q": "选出不同类的单词: cat / dog / orange / pig", "type": "fill", "answer": "orange", "score": 5, "topic": "词汇-分类"},
             ],
             "基本句型": [
                 {"q": "填空: Hello! ____ name is Tom.", "type": "fill", "answer": "My", "score": 5, "topic": "自我介绍"},
@@ -802,66 +826,91 @@ EXAM_BANK = {
                 {"q": "翻译: 你好吗?", "type": "fill", "answer": "How are you?", "score": 5, "topic": "中英互译"},
             ],
         },
+        "科学": {
+            "电路": [
+                {"q": "电池正极连接小灯泡的哪个金属点?", "type": "fill", "answer": "底部金属圆点", "score": 5, "topic": "电路-连接"},
+                {"q": "要让小灯泡亮, 必须形成什么回路?", "type": "fill", "answer": "闭合回路", "score": 5, "topic": "电路-原理"},
+                {"q": "判断: 开关能控制电路的通断 (对/错)", "type": "choice", "options": ["对", "错"], "answer": 0, "score": 5, "topic": "电路-开关"},
+                {"q": "铜和塑料哪个是导体?", "type": "fill", "answer": "铜", "score": 5, "topic": "导体-绝缘体"},
+                {"q": "电路中电流的方向是?", "type": "fill", "answer": "正极→小灯泡→负极", "score": 5, "topic": "电流方向"},
+            ],
+            "植物与动物": [
+                {"q": "植物生长需要哪些条件? (至少3个)", "type": "fill", "answer": "阳光/水/空气/温度/养分", "score": 5, "topic": "植物-生长条件"},
+                {"q": "光合作用需要哪两种物质?", "type": "fill", "answer": "二氧化碳和水", "score": 5, "topic": "植物-光合作用"},
+                {"q": "金鱼是脊椎动物还是无脊椎动物?", "type": "fill", "answer": "脊椎动物", "score": 5, "topic": "动物-分类"},
+                {"q": "蚂蚁是脊椎动物还是无脊椎动物?", "type": "fill", "answer": "无脊椎动物", "score": 5, "topic": "动物-分类"},
+                {"q": "绿色植物通过什么作用制造养料?", "type": "fill", "answer": "光合作用", "score": 5, "topic": "植物-光合作用"},
+            ],
+            "磁铁": [
+                {"q": "磁铁有几个磁极?", "type": "fill", "answer": "2个", "score": 5, "topic": "磁铁-磁极"},
+                {"q": "磁铁的两个磁极名称是?", "type": "fill", "answer": "南极(S)和北极(N)", "score": 5, "topic": "磁铁-磁极"},
+                {"q": "两个相同的磁极靠近会怎样?", "type": "fill", "answer": "互相排斥", "score": 5, "topic": "磁铁-作用"},
+                {"q": "指南针的原理是什么?", "type": "fill", "answer": "磁铁能指示南北方向", "score": 5, "topic": "磁铁-应用"},
+                {"q": "磁铁能吸引以下哪些物质? 铁/铜/铝/镍/木头", "type": "fill", "answer": "铁/镍", "score": 5, "topic": "磁铁-性质"},
+            ],
+        },
     },
-    "四年级下": {
+
+    # ═══════════════════════
+    "三年级下": {
         "数学": {
-            "三位数乘两位数": [
-                {"q": "计算: 125 × 16 = ?", "type": "fill", "answer": "2000", "score": 5, "topic": "乘法-基础"},
-                {"q": "计算: 248 × 35 = ?", "type": "fill", "answer": "8680", "score": 5, "topic": "乘法-竖式"},
-                {"q": "计算: 108 × 24 = ?", "type": "fill", "answer": "2592", "score": 5, "topic": "乘法-中间有0"},
-                {"q": "用简便方法: 125 × 8 × 7 = ?", "type": "fill", "answer": "7000", "score": 5, "topic": "乘法-简算"},
-                {"q": "估算: 498 × 21 ≈ ?", "type": "fill", "answer": "10000", "score": 5, "topic": "乘法-估算"},
+            "除数是一位数的除法": [
+                {"q": "计算: 84 ÷ 4 = ?", "type": "fill", "answer": "21", "score": 5, "topic": "除法-基础"},
+                {"q": "计算: 96 ÷ 3 = ?", "type": "fill", "answer": "32", "score": 5, "topic": "除法-基础"},
+                {"q": "计算: 428 ÷ 4 = ?", "type": "fill", "answer": "107", "score": 5, "topic": "除法-商中间有0"},
+                {"q": "判断: 0除以任何数都得0 (对/错)", "type": "choice", "options": ["对", "错"], "answer": 1, "score": 5, "topic": "除法-0的问题"},
+                {"q": "计算: 255 ÷ 5 = ?", "type": "fill", "answer": "51", "score": 5, "topic": "除法-基础"},
             ],
-            "除数是两位数的除法": [
-                {"q": "计算: 840 ÷ 35 = ?", "type": "fill", "answer": "24", "score": 5, "topic": "除法-基础"},
-                {"q": "计算: 936 ÷ 26 = ?", "type": "fill", "answer": "36", "score": 5, "topic": "除法-竖式"},
-                {"q": "计算: 728 ÷ 28 = ?", "type": "fill", "answer": "26", "score": 5, "topic": "除法-竖式"},
-                {"q": "试商时, 把28看作30试商, 商可能偏大还是偏小?", "type": "choice", "options": ["偏大", "偏小"], "answer": 1, "score": 5, "topic": "除法-试商"},
-                {"q": "625 ÷ 25 = ? (口算)", "type": "fill", "answer": "25", "score": 5, "topic": "除法-巧算"},
+            "两位数乘两位数": [
+                {"q": "计算: 12 × 13 = ?", "type": "fill", "answer": "156", "score": 5, "topic": "乘法-竖式"},
+                {"q": "计算: 25 × 40 = ?", "type": "fill", "answer": "1000", "score": 5, "topic": "乘法-有0"},
+                {"q": "计算: 36 × 24 = ?", "type": "fill", "answer": "864", "score": 5, "topic": "乘法-竖式"},
+                {"q": "估算: 48 × 21 ≈ ?", "type": "fill", "answer": "1000", "score": 5, "topic": "估算乘法"},
+                {"q": "计算: 15 × 15 = ? (巧算)", "type": "fill", "answer": "225", "score": 5, "topic": "乘法-巧算"},
             ],
-            "运算定律与简便计算": [
-                {"q": "用运算定律简算: 25 + 37 + 75 = ?", "type": "fill", "answer": "137", "score": 5, "topic": "加法交换律"},
-                {"q": "用运算定律简算: 125 × 32 = ?", "type": "fill", "answer": "4000", "score": 5, "topic": "乘法结合律"},
-                {"q": "用运算定律简算: 99 × 36 = ?", "type": "fill", "answer": "3564", "score": 5, "topic": "乘法分配律"},
-                {"q": "判断: a × (b + c) = a × b + a × c (对/错)", "type": "choice", "options": ["对", "错"], "answer": 0, "score": 5, "topic": "乘法分配律"},
-                {"q": "简算: 48 + 79 + 52 = ?", "type": "fill", "answer": "179", "score": 5, "topic": "加法交换律"},
+            "面积": [
+                {"q": "面积的单位有哪些? (写出3个)", "type": "fill", "answer": "cm² / dm² / m²", "score": 5, "topic": "面积-单位"},
+                {"q": "1 dm² = 多少 cm²?", "type": "fill", "answer": "100", "score": 5, "topic": "面积-单位换算"},
+                {"q": "长方形长10cm, 宽6cm, 面积是?", "type": "fill", "answer": "60", "score": 5, "topic": "面积-长方形"},
+                {"q": "正方形边长8cm, 面积是?", "type": "fill", "answer": "64", "score": 5, "topic": "面积-正方形"},
+                {"q": "面积和周长的换算关系是?", "type": "choice", "options": ["能换算", "不能换算", "没关系"], "answer": 1, "score": 5, "topic": "面积vs周长"},
             ],
-            "平行四边形与梯形": [
-                {"q": "平行四边形有几组对边平行?", "type": "fill", "answer": "2组", "score": 5, "topic": "平行四边形-特征"},
-                {"q": "梯形有几组对边平行?", "type": "fill", "answer": "1组", "score": 5, "topic": "梯形-特征"},
-                {"q": "三角形内角和是多少度?", "type": "fill", "answer": "180°", "score": 5, "topic": "三角形-内角和"},
-                {"q": "平行四边形面积公式是?", "type": "fill", "answer": "底×高", "score": 5, "topic": "平行四边形-面积"},
-                {"q": "梯形面积公式是?", "type": "fill", "answer": "(上底+下底)×高÷2", "score": 5, "topic": "梯形-面积"},
+            "年、月、日": [
+                {"q": "一年有多少个月?", "type": "fill", "answer": "12", "score": 5, "topic": "时间-年"},
+                {"q": "哪几个月有31天? (写出3个)", "type": "fill", "answer": "1/3/5/7/8/10/12", "score": 5, "topic": "时间-月"},
+                {"q": "平年2月有几天? 闰年2月有几天?", "type": "fill", "answer": "28/29", "score": 5, "topic": "时间-平闰年"},
+                {"q": "判断: 2024年是平年还是闰年?", "type": "choice", "options": ["平年", "闰年"], "answer": 1, "score": 5, "topic": "时间-平闰年判断"},
+                {"q": "一天有多少小时?", "type": "fill", "answer": "24", "score": 5, "topic": "时间-日"},
             ],
-            "小数的意义和性质": [
-                {"q": "0.1 表示几分之一?", "type": "fill", "answer": "十分之一", "score": 5, "topic": "小数-意义"},
-                {"q": "0.01 表示几分之一?", "type": "fill", "answer": "百分之一", "score": 5, "topic": "小数-意义"},
-                {"q": "比较大小: 0.5 ○ 0.50 (填 > < =)", "type": "choice", "options": [">", "<", "="], "answer": 2, "score": 5, "topic": "小数-性质"},
-                {"q": "2.05 米 = 多少厘米?", "type": "fill", "answer": "205", "score": 5, "topic": "小数-单位换算"},
-                {"q": "化简小数: 3.200 = ?", "type": "fill", "answer": "3.2", "score": 5, "topic": "小数-化简"},
+            "解决问题": [
+                {"q": "归一问题: 3本书24元, 1本多少元?", "type": "fill", "answer": "8", "score": 5, "topic": "应用题-归一"},
+                {"q": "归总问题: 每盒6支铅笔, 5盒平均分给10人, 每人几支?", "type": "fill", "answer": "3", "score": 5, "topic": "应用题-归总"},
+                {"q": "商店运来5箱苹果, 每箱8千克, 卖出12千克, 还剩多少?", "type": "fill", "answer": "28", "score": 5, "topic": "应用题-购物"},
+                {"q": "小明有36颗糖, 分给4个好朋友, 每人几颗?", "type": "fill", "answer": "9", "score": 5, "topic": "应用题-平均分"},
+                {"q": "修路队每天修80米, 5天修多少米?", "type": "fill", "answer": "400", "score": 5, "topic": "应用题-行程"},
             ],
         },
         "语文": {
             "古诗文": [
-                {"q": "《题西林壁》作者是谁?", "type": "fill", "answer": "苏轼", "score": 5, "topic": "古诗-作者"},
-                {"q": '"不识庐山真面目"的下一句是?', "type": "fill", "answer": "只缘身在此山中", "score": 5, "topic": "古诗-背诵"},
-                {"q": "《雪梅》'梅须逊雪三分白'的下一句是?", "type": "fill", "answer": "雪却输梅一段香", "score": 5, "topic": "古诗-背诵"},
-                {"q": "《暮江吟》'一道残阳铺水中'的下一句是?", "type": "fill", "answer": "半江瑟瑟半江红", "score": 5, "topic": "古诗-背诵"},
-                {"q": '"可怜九月初三夜"的下一句是?', "type": "fill", "answer": "露似真珠月似弓", "score": 5, "topic": "古诗-背诵"},
+                {"q": "《绝句》'迟日江山丽'的下一句是?", "type": "fill", "answer": "春风花草香", "score": 5, "topic": "古诗-背诵"},
+                {"q": "《惠崇春江晚景》作者是谁?", "type": "fill", "answer": "苏轼", "score": 5, "topic": "古诗-作者"},
+                {"q": "《三衢道中》'梅子黄时日日晴'的下一句是?", "type": "fill", "answer": "小溪泛尽却山行", "score": 5, "topic": "古诗-背诵"},
+                {"q": "《忆江南》作者是谁?", "type": "fill", "answer": "白居易", "score": 5, "topic": "古诗-作者"},
+                {"q": '"春来江水绿如蓝"上一句是?', "type": "fill", "answer": "日出江花红胜火", "score": 5, "topic": "古诗-背诵"},
             ],
-            "阅读方法": [
-                {"q": "阅读时的'提问策略'可以从哪几个角度提问? (写2个)", "type": "fill", "answer": "内容/写法/启示 (任选2)", "score": 5, "topic": "阅读-提问策略"},
-                {"q": "写一件事要按什么顺序? (六要素是什么?)", "type": "fill", "answer": "时间/地点/人物/起因/经过/结果", "score": 5, "topic": "写作-六要素"},
-                {"q": "写观察日记要连续观察并做什么记录?", "type": "fill", "answer": "数据/变化记录", "score": 5, "topic": "写作-观察日记"},
-                {"q": "《爬山虎的脚》作者是谁?", "type": "fill", "answer": "叶圣陶", "score": 5, "topic": "课文-作者"},
-                {"q": "《蟋蟀的住宅》作者是谁?", "type": "fill", "answer": "法布尔", "score": 5, "topic": "课文-作者"},
+            "寓言故事": [
+                {"q": "《守株待兔》告诉我们什么道理?", "type": "fill", "answer": "不要想着不劳而获", "score": 5, "topic": "寓言-道理"},
+                {"q": "《陶罐和铁罐》中谁最后被保留下来?", "type": "fill", "answer": "陶罐", "score": 5, "topic": "寓言-内容"},
+                {"q": "《鹿角和鹿腿》中鹿的腿有什么用?", "type": "fill", "answer": "逃跑救命", "score": 5, "topic": "寓言-内容"},
+                {"q": "《池子与河流》告诉我们什么道理?", "type": "fill", "answer": "要勤奋不能懒惰", "score": 5, "topic": "寓言-道理"},
+                {"q": "《守株待兔》是寓言故事吗? (是/否)", "type": "choice", "options": ["是", "否"], "answer": 0, "score": 5, "topic": "寓言-体裁"},
             ],
-            "词语与句子": [
-                {"q": "写出3个表示时间的四字词语", "type": "fill", "answer": "光阴似箭/日月如梭/白驹过隙...", "score": 5, "topic": "词语积累"},
-                {"q": "修改病句: 我们要养成良好的学习方法。", "type": "fill", "answer": "我们要养成良好的学习习惯。", "score": 5, "topic": "修改病句"},
-                {"q": "仿写拟人句: 湿润的东风走过荒野。", "type": "fill", "answer": "顽皮的雨滴在伞上跳舞。(示例)", "score": 5, "topic": "仿写-拟人"},
-                {"q": "写出一句反问句 (不能加问号以外标点)", "type": "fill", "answer": "难道我们不应该努力学习吗?", "score": 5, "topic": "句式-反问"},
-                {"q": "写出一句比喻句", "type": "fill", "answer": "弯弯的月亮像小船。(示例)", "score": 5, "topic": "句式-比喻"},
+            "写作": [
+                {"q": "写通知要包含哪些要素? (至少3个)", "type": "fill", "answer": "时间/地点/事件/通知人/日期", "score": 5, "topic": "写作-通知格式"},
+                {"q": "写观察日记要记录什么?", "type": "fill", "answer": "日期/观察对象/变化/数据记录", "score": 5, "topic": "写作-观察日记"},
+                {"q": "写一个身边的人要抓住什么特点?", "type": "fill", "answer": "人物外貌+性格+典型事件", "score": 5, "topic": "写作-写人"},
+                {"q": "按要求写句子: 湿润的东风走过荒野 (仿写拟人句)", "type": "fill", "answer": "顽皮的雨滴在伞上跳舞", "score": 5, "topic": "写作-仿写拟人"},
+                {"q": "作文修改时要检查哪些方面? (至少3个)", "type": "fill", "answer": "错别字/语句通顺/标点/内容/结构", "score": 5, "topic": "写作-修改"},
             ],
         },
         "英语": {
@@ -877,7 +926,7 @@ EXAM_BANK = {
                 {"q": "There ____ many students in the classroom.", "type": "fill", "answer": "are", "score": 5, "topic": "there be-复数"},
                 {"q": "There ____ (not be) any milk in the glass.", "type": "fill", "answer": "isn't", "score": 5, "topic": "there be-否定"},
                 {"q": "____ there a library near your home?", "type": "fill", "answer": "Is", "score": 5, "topic": "there be-疑问"},
-                {"q": "There be句型和have/has能连用吗? (能/不能)", "type": "choice", "options": ["能", "不能"], "answer": 1, "score": 5, "topic": "there be-区别"},
+                {"q": "判断: There be 和 have/has 能连用 (对/错)", "type": "choice", "options": ["对", "错"], "answer": 1, "score": 5, "topic": "there be-区别"},
             ],
             "情态动词 can": [
                 {"q": "I ____ swim very well.", "type": "fill", "answer": "can", "score": 5, "topic": "can-能力"},
@@ -888,6 +937,154 @@ EXAM_BANK = {
             ],
         },
     },
+
+    # ═══════════════════════
+    "四年级上": {
+        "数学": {
+            "大数的认识": [
+                {"q": "从右往左数, 亿位是第几位?", "type": "fill", "answer": "第9位", "score": 5, "topic": "大数-数位"},
+                {"q": "读出: 123456789 怎么读?", "type": "fill", "answer": "一亿二千三百四十五万六千七百八十九", "score": 5, "topic": "大数-读法"},
+                {"q": "写出: 二亿零三百万五千", "type": "fill", "answer": "203005000", "score": 5, "topic": "大数-写法"},
+                {"q": "四舍五入到万位: 995000 ≈ ?", "type": "fill", "answer": "100万", "score": 5, "topic": "大数-四舍五入"},
+                {"q": "比较大小: 99999999 ○ 100000000", "type": "choice", "options": [">", "<", "="], "answer": 1, "score": 5, "topic": "大数-比较"},
+            ],
+            "三位数乘两位数": [
+                {"q": "计算: 125 × 16 = ?", "type": "fill", "answer": "2000", "score": 5, "topic": "乘法-基础"},
+                {"q": "计算: 248 × 35 = ?", "type": "fill", "answer": "8680", "score": 5, "topic": "乘法-竖式"},
+                {"q": "计算: 108 × 24 = ?", "type": "fill", "answer": "2592", "score": 5, "topic": "乘法-中间有0"},
+                {"q": "用简便方法: 125 × 8 × 7 = ?", "type": "fill", "answer": "7000", "score": 5, "topic": "乘法-简算"},
+                {"q": "估算: 498 × 21 ≈ ?", "type": "fill", "answer": "10000", "score": 5, "topic": "乘法-估算"},
+            ],
+            "除数是两位数的除法": [
+                {"q": "计算: 840 ÷ 35 = ?", "type": "fill", "answer": "24", "score": 5, "topic": "除法-基础"},
+                {"q": "计算: 936 ÷ 26 = ?", "type": "fill", "answer": "36", "score": 5, "topic": "除法-竖式"},
+                {"q": "试商时, 把28看作30试商, 商可能偏大还是偏小?", "type": "choice", "options": ["偏大", "偏小"], "answer": 1, "score": 5, "topic": "除法-试商"},
+                {"q": "625 ÷ 25 = ? (口算)", "type": "fill", "answer": "25", "score": 5, "topic": "除法-巧算"},
+                {"q": "计算: 728 ÷ 28 = ?", "type": "fill", "answer": "26", "score": 5, "topic": "除法-竖式"},
+            ],
+            "平行与垂直": [
+                {"q": "同一平面内两条直线相交成直角, 这两条直线叫什么?", "type": "fill", "answer": "互相垂直", "score": 5, "topic": "垂直"},
+                {"q": "同一平面内不相交的两条直线叫什么?", "type": "fill", "answer": "平行线", "score": 5, "topic": "平行"},
+                {"q": "过直线外一点画已知直线的平行线, 能画几条?", "type": "fill", "answer": "1条", "score": 5, "topic": "平行-画法"},
+                {"q": "过直线上一点画已知直线的垂线, 能画几条?", "type": "fill", "answer": "1条", "score": 5, "topic": "垂直-画法"},
+                {"q": "判断: 平行线永远不相交 (对/错)", "type": "choice", "options": ["对", "错"], "answer": 0, "score": 5, "topic": "平行-性质"},
+            ],
+            "平行四边形和梯形": [
+                {"q": "平行四边形有几组对边平行?", "type": "fill", "answer": "2组", "score": 5, "topic": "平行四边形-特征"},
+                {"q": "梯形有几组对边平行?", "type": "fill", "answer": "1组", "score": 5, "topic": "梯形-特征"},
+                {"q": "三角形内角和是多少度?", "type": "fill", "answer": "180°", "score": 5, "topic": "三角形-内角和"},
+                {"q": "三角形按角分类可以分为哪几类?", "type": "fill", "answer": "锐角三角形/直角三角形/钝角三角形", "score": 5, "topic": "三角形-分类"},
+                {"q": "等腰三角形有几条对称轴?", "type": "fill", "answer": "1条", "score": 5, "topic": "三角形-对称性"},
+            ],
+        },
+        "语文": {
+            "古诗文": [
+                {"q": "《题西林壁》作者是谁?", "type": "fill", "answer": "苏轼", "score": 5, "topic": "古诗-作者"},
+                {"q": '"不识庐山真面目"的下一句是?', "type": "fill", "answer": "只缘身在此山中", "score": 5, "topic": "古诗-背诵"},
+                {"q": "《雪梅》'梅须逊雪三分白'的下一句是?", "type": "fill", "answer": "雪却输梅一段香", "score": 5, "topic": "古诗-背诵"},
+                {"q": "《暮江吟》'一道残阳铺水中'的下一句是?", "type": "fill", "answer": "半江瑟瑟半江红", "score": 5, "topic": "古诗-背诵"},
+                {"q": '"可怜九月初三夜"的下一句是?', "type": "fill", "answer": "露似真珠月似弓", "score": 5, "topic": "古诗-背诵"},
+            ],
+            "阅读提问策略": [
+                {"q": "阅读时可以从哪些角度提问? (至少3个)", "type": "fill", "answer": "内容/写法/启示/修辞手法/人物/主题", "score": 5, "topic": "阅读-提问策略"},
+                {"q": "读《盘古开天地》可以提什么问题? (写1个)", "type": "fill", "answer": "盘古为什么要开天地? 天地是怎么分开的?", "score": 5, "topic": "阅读-提问策略"},
+                {"q": "从'写法角度'可以提什么问题?", "type": "fill", "answer": "作者用了什么修辞手法/为什么这样安排结构", "score": 5, "topic": "阅读-提问策略"},
+                {"q": "从'启示角度'可以提什么问题?", "type": "fill", "answer": "这个故事告诉我们什么道理/对我们有什么启发", "score": 5, "topic": "阅读-提问策略"},
+                {"q": "边读边提问的好处是什么?", "type": "fill", "answer": "加深理解/提高思考能力", "score": 5, "topic": "阅读-提问策略"},
+            ],
+        },
+        "英语": {
+            "现在进行时": [
+                {"q": "Look! The children ____ (play) football.", "type": "fill", "answer": "are playing", "score": 5, "topic": "时态-进行时"},
+                {"q": "Listen! Someone ____ (knock) at the door.", "type": "fill", "answer": "is knocking", "score": 5, "topic": "时态-进行时"},
+                {"q": "She ____ (read) a book in her room now.", "type": "fill", "answer": "is reading", "score": 5, "topic": "时态-进行时"},
+                {"q": "现在进行时结构: be + ____", "type": "fill", "answer": "doing (现在分词)", "score": 5, "topic": "时态-结构"},
+                {"q": "动词现在分词: run → ____", "type": "fill", "answer": "running", "score": 5, "topic": "现在分词变化"},
+            ],
+            "一般过去时": [
+                {"q": "Yesterday I ____ (go) to the park.", "type": "fill", "answer": "went", "score": 5, "topic": "过去时-不规则"},
+                {"q": "She ____ (have) lunch at 12:00 yesterday.", "type": "fill", "answer": "had", "score": 5, "topic": "过去时-不规则"},
+                {"q": "Tom ____ (play) basketball last Sunday.", "type": "fill", "answer": "played", "score": 5, "topic": "过去时-规则"},
+                {"q": "不规则动词: see → ____", "type": "fill", "answer": "saw", "score": 5, "topic": "过去时-不规则表"},
+                {"q": "不规则动词: eat → ____", "type": "fill", "answer": "ate", "score": 5, "topic": "过去时-不规则表"},
+            ],
+        },
+    },
+
+    # ═══════════════════════
+    "四年级下": {
+        "数学": {
+            "三位数乘两位数": [
+                {"q": "计算: 125 × 16 = ?", "type": "fill", "answer": "2000", "score": 5, "topic": "乘法-基础"},
+                {"q": "计算: 248 × 35 = ?", "type": "fill", "answer": "8680", "score": 5, "topic": "乘法-竖式"},
+                {"q": "计算: 108 × 24 = ?", "type": "fill", "answer": "2592", "score": 5, "topic": "乘法-中间有0"},
+                {"q": "用简便方法: 125 × 8 × 7 = ?", "type": "fill", "answer": "7000", "score": 5, "topic": "乘法-简算"},
+                {"q": "估算: 498 × 21 ≈ ?", "type": "fill", "answer": "10000", "score": 5, "topic": "乘法-估算"},
+            ],
+            "运算定律与简便计算": [
+                {"q": "用运算定律简算: 25 + 37 + 75 = ?", "type": "fill", "answer": "137", "score": 5, "topic": "加法交换律"},
+                {"q": "用运算定律简算: 125 × 32 = ?", "type": "fill", "answer": "4000", "score": 5, "topic": "乘法结合律"},
+                {"q": "用运算定律简算: 99 × 36 = ?", "type": "fill", "answer": "3564", "score": 5, "topic": "乘法分配律"},
+                {"q": "判断: a × (b + c) = a × b + a × c (对/错)", "type": "choice", "options": ["对", "错"], "answer": 0, "score": 5, "topic": "乘法分配律"},
+                {"q": "简算: 48 + 79 + 52 = ?", "type": "fill", "answer": "179", "score": 5, "topic": "加法交换律"},
+            ],
+            "小数的意义和性质": [
+                {"q": "0.1 表示几分之一?", "type": "fill", "answer": "十分之一", "score": 5, "topic": "小数-意义"},
+                {"q": "0.01 表示几分之一?", "type": "fill", "answer": "百分之一", "score": 5, "topic": "小数-意义"},
+                {"q": "比较大小: 0.5 ○ 0.50", "type": "choice", "options": [">", "<", "="], "answer": 2, "score": 5, "topic": "小数-性质"},
+                {"q": "2.05 米 = 多少厘米?", "type": "fill", "answer": "205", "score": 5, "topic": "小数-单位换算"},
+                {"q": "化简小数: 3.200 = ?", "type": "fill", "answer": "3.2", "score": 5, "topic": "小数-化简"},
+            ],
+            "小数加减法": [
+                {"q": "计算: 3.5 + 2.8 = ?", "type": "fill", "answer": "6.3", "score": 5, "topic": "小数加法"},
+                {"q": "计算: 10 - 3.6 = ?", "type": "fill", "answer": "6.4", "score": 5, "topic": "小数减法"},
+                {"q": "计算: 12.5 + 7.75 = ?", "type": "fill", "answer": "20.25", "score": 5, "topic": "小数加法"},
+                {"q": "计算: 8.3 - 4.56 = ?", "type": "fill", "answer": "3.74", "score": 5, "topic": "小数减法"},
+                {"q": "小数加减法要注意什么?", "type": "fill", "answer": "小数点对齐", "score": 5, "topic": "小数-计算法则"},
+            ],
+            "三角形": [
+                {"q": "三角形内角和是多少度?", "type": "fill", "answer": "180°", "score": 5, "topic": "三角形-内角和"},
+                {"q": "三角形任意两边之和与第三边的关系?", "type": "fill", "answer": "大于第三边", "score": 5, "topic": "三角形-三边关系"},
+                {"q": "三角形按角分类有哪几类?", "type": "fill", "answer": "锐角/直角/钝角", "score": 5, "topic": "三角形-分类"},
+                {"q": "等腰三角形有几条边相等?", "type": "fill", "answer": "2条", "score": 5, "topic": "三角形-等腰"},
+                {"q": "等边三角形每个内角是多少度?", "type": "fill", "answer": "60°", "score": 5, "topic": "三角形-等边"},
+            ],
+        },
+        "语文": {
+            "文言文入门": [
+                {"q": "《囊萤夜读》中'胤恭勤不倦'的'恭勤'意思是?", "type": "fill", "answer": "恭敬勤勉", "score": 5, "topic": "文言文-词语解释"},
+                {"q": "《铁杵成针》的主人公是谁?", "type": "fill", "answer": "李白", "score": 5, "topic": "文言文-人物"},
+                {"q": "《囊萤夜读》告诉我们什么道理?", "type": "fill", "answer": "勤奋好学才能成才", "score": 5, "topic": "文言文-道理"},
+                {"q": "文言文'以夜继日'是什么意思?", "type": "fill", "answer": "用夜晚接续白天", "score": 5, "topic": "文言文-词语解释"},
+                {"q": "《铁杵成针》中'欲'的意思是?", "type": "fill", "answer": "想要", "score": 5, "topic": "文言文-词语解释"},
+            ],
+            "习作": [
+                {"q": "写一件事要按什么顺序? 六要素是?", "type": "fill", "answer": "时间/地点/人物/起因/经过/结果", "score": 5, "topic": "写作-六要素"},
+                {"q": "把事情写清楚要注意什么?", "type": "fill", "answer": "有顺序/详略得当/有细节", "score": 5, "topic": "写作-叙事方法"},
+                {"q": "写人要抓住什么?", "type": "fill", "answer": "外貌/性格/典型事件", "score": 5, "topic": "写作-写人方法"},
+                {"q": "写作中如何把话写生动?", "type": "fill", "answer": "用形容词/比喻/拟人/细节描写", "score": 5, "topic": "写作-生动具体"},
+                {"q": "文章的开头和结尾有什么作用?", "type": "fill", "answer": "开头点题吸引读者/结尾总结升华主题", "score": 5, "topic": "写作-结构"},
+            ],
+        },
+        "英语": {
+            "一般过去时": [
+                {"q": "Yesterday I ____ (go) to the park.", "type": "fill", "answer": "went", "score": 5, "topic": "过去时-不规则"},
+                {"q": "She ____ (have) lunch at 12:00 yesterday.", "type": "fill", "answer": "had", "score": 5, "topic": "过去时-不规则"},
+                {"q": "Tom ____ (play) basketball last Sunday.", "type": "fill", "answer": "played", "score": 5, "topic": "过去时-规则"},
+                {"q": "不规则动词: see → ____", "type": "fill", "answer": "saw", "score": 5, "topic": "过去时-不规则表"},
+                {"q": "不规则动词: eat → ____", "type": "fill", "answer": "ate", "score": 5, "topic": "过去时-不规则表"},
+            ],
+            "一般将来时": [
+                {"q": "Tomorrow we ____ (visit) the museum.", "type": "fill", "answer": "will visit", "score": 5, "topic": "将来时-will"},
+                {"q": "He ____ (buy) a new bike next month.", "type": "fill", "answer": "will buy/is going to buy", "score": 5, "topic": "将来时"},
+                {"q": "一般将来时两种结构是?", "type": "fill", "answer": "will+原形 / be going to+原形", "score": 5, "topic": "将来时-结构"},
+                {"q": "Next week 用什么时态?", "type": "fill", "answer": "一般将来时", "score": 5, "topic": "将来时-时间标志"},
+                {"q": "翻译: 我明天要去上海。", "type": "fill", "answer": "I will go to Shanghai tomorrow.", "score": 5, "topic": "将来时-翻译"},
+            ],
+        },
+    },
+
+    # ═══════════════════════
     "五年级上": {
         "数学": {
             "小数乘法": [
@@ -908,24 +1105,31 @@ EXAM_BANK = {
                 {"q": "解方程: 3x + 5 = 20", "type": "fill", "answer": "x = 5", "score": 5, "topic": "方程-基础"},
                 {"q": "解方程: 5x - 12 = 33", "type": "fill", "answer": "x = 9", "score": 5, "topic": "方程-基础"},
                 {"q": "解方程: 2(x + 3) = 16", "type": "fill", "answer": "x = 5", "score": 5, "topic": "方程-括号"},
-                {"q": "用字母表示: 路程 = 速度 × ?", "type": "fill", "answer": "时间 (s = v × t)", "score": 5, "topic": "用字母表示数"},
+                {"q": "用字母表示: 路程 = 速度 × ?", "type": "fill", "answer": "时间", "score": 5, "topic": "用字母表示数"},
                 {"q": "等式两边同时加/减/乘/除同一个数, 等式还成立吗?", "type": "choice", "options": ["成立", "不成立"], "answer": 0, "score": 5, "topic": "等式性质"},
             ],
             "多边形面积": [
-                {"q": "平行四边形底8cm, 高5cm, 面积是?", "type": "fill", "answer": "40", "score": 5, "topic": "平行四边形面积", "unit": "cm²"},
-                {"q": "三角形底6cm, 高4cm, 面积是?", "type": "fill", "answer": "12", "score": 5, "topic": "三角形面积", "unit": "cm²"},
-                {"q": "梯形上底3cm, 下底7cm, 高5cm, 面积是?", "type": "fill", "answer": "25", "score": 5, "topic": "梯形面积", "unit": "cm²"},
-                {"q": "两个完全一样的三角形可以拼成一个什么图形?", "type": "fill", "answer": "平行四边形", "score": 5, "topic": "三角形-拼图"},
-                {"q": "三角形面积公式要除以几?", "type": "fill", "answer": "÷2", "score": 5, "topic": "三角形面积-易错点"},
+                {"q": "平行四边形底8cm, 高5cm, 面积是?", "type": "fill", "answer": "40", "score": 5, "topic": "平行四边形面积"},
+                {"q": "三角形底6cm, 高4cm, 面积是?", "type": "fill", "answer": "12", "score": 5, "topic": "三角形面积"},
+                {"q": "梯形上底3cm, 下底7cm, 高5cm, 面积是?", "type": "fill", "answer": "25", "score": 5, "topic": "梯形面积"},
+                {"q": "两个完全一样的三角形可以拼成什么?", "type": "fill", "answer": "平行四边形", "score": 5, "topic": "三角形-拼图"},
+                {"q": "三角形面积公式为什么要÷2?", "type": "fill", "answer": "因为两个三角形拼成一个平行四边形", "score": 5, "topic": "三角形面积-推导"},
+            ],
+            "可能性": [
+                {"q": "抛一枚硬币, 正面朝上的概率是多少?", "type": "fill", "answer": "1/2", "score": 5, "topic": "概率-基础"},
+                {"q": "盒中有3红2蓝球, 摸到红球的可能性大还是蓝球大?", "type": "fill", "answer": "红球", "score": 5, "topic": "概率-比较"},
+                {"q": "掷一个骰子, 掷出1的可能性是多少?", "type": "fill", "answer": "1/6", "score": 5, "topic": "概率-骰子"},
+                {"q": "太阳从东边升起是确定事件还是随机事件?", "type": "fill", "answer": "确定事件", "score": 5, "topic": "概率-事件分类"},
+                {"q": "明天会下雨是什么事件?", "type": "fill", "answer": "随机事件", "score": 5, "topic": "概率-事件分类"},
             ],
         },
         "英语": {
             "现在进行时": [
                 {"q": "Look! The children ____ (play) football.", "type": "fill", "answer": "are playing", "score": 5, "topic": "时态-进行时"},
                 {"q": "Listen! Someone ____ (knock) at the door.", "type": "fill", "answer": "is knocking", "score": 5, "topic": "时态-进行时"},
-                {"q": "She ____ (read) a book in her room now.", "type": "fill", "answer": "is reading", "score": 5, "topic": "时态-进行时"},
+                {"q": "She ____ (read) a book now.", "type": "fill", "answer": "is reading", "score": 5, "topic": "时态-进行时"},
                 {"q": "现在进行时结构: be + ____", "type": "fill", "answer": "doing (现在分词)", "score": 5, "topic": "时态-结构"},
-                {"q": "动词现在分词: run → ____", "type": "fill", "answer": "running", "score": 5, "topic": "现在分词变化"},
+                {"q": "run 的现在分词是?", "type": "fill", "answer": "running", "score": 5, "topic": "现在分词变化"},
             ],
             "一般过去时": [
                 {"q": "Yesterday I ____ (go) to the park.", "type": "fill", "answer": "went", "score": 5, "topic": "过去时-不规则"},
@@ -934,12 +1138,115 @@ EXAM_BANK = {
                 {"q": "不规则动词: see → ____", "type": "fill", "answer": "saw", "score": 5, "topic": "过去时-不规则表"},
                 {"q": "不规则动词: eat → ____", "type": "fill", "answer": "ate", "score": 5, "topic": "过去时-不规则表"},
             ],
-            "一般将来时": [
-                {"q": "Tomorrow we ____ (visit) the museum.", "type": "fill", "answer": "will visit / are going to visit", "score": 5, "topic": "将来时-will/be going to"},
-                {"q": "He ____ (buy) a new bike next month.", "type": "fill", "answer": "will buy / is going to buy", "score": 5, "topic": "将来时"},
-                {"q": "一般将来时两种结构是? (写出)", "type": "fill", "answer": "will + 动词原形 / be going to + 动词原形", "score": 5, "topic": "将来时-结构"},
-                {"q": "Next week 用什么时态?", "type": "fill", "answer": "一般将来时", "score": 5, "topic": "将来时-时间标志"},
-                {"q": "翻译: 我明天要去上海。", "type": "fill", "answer": "I will go to Shanghai tomorrow.", "score": 5, "topic": "将来时-翻译"},
+            "比较级": [
+                {"q": "tall 的比较级是?", "type": "fill", "answer": "taller", "score": 5, "topic": "比较级-规则"},
+                {"q": "good 的比较级是?", "type": "fill", "answer": "better", "score": 5, "topic": "比较级-不规则"},
+                {"q": "big 的比较级是?", "type": "fill", "answer": "bigger", "score": 5, "topic": "比较级-规则"},
+                {"q": "She is ____ (tall) than her sister.", "type": "fill", "answer": "taller", "score": 5, "topic": "比较级-应用"},
+                {"q": "This book is ____ (good) than that one.", "type": "fill", "answer": "better", "score": 5, "topic": "比较级-应用"},
+            ],
+        },
+    },
+
+    # ═══════════════════════
+    "五年级下": {
+        "数学": {
+            "因数与倍数": [
+                {"q": "12 的因数有哪些?", "type": "fill", "answer": "1/2/3/4/6/12", "score": 5, "topic": "因数"},
+                {"q": "2 的倍数有什么特征?", "type": "fill", "answer": "个位是0/2/4/6/8", "score": 5, "topic": "2的倍数特征"},
+                {"q": "5 的倍数有什么特征?", "type": "fill", "answer": "个位是0或5", "score": 5, "topic": "5的倍数特征"},
+                {"q": "3 的倍数有什么特征?", "type": "fill", "answer": "各位数字之和是3的倍数", "score": 5, "topic": "3的倍数特征"},
+                {"q": "质数和合数的区别是什么?", "type": "fill", "answer": "质数只有1和它本身两个因数, 合数有更多", "score": 5, "topic": "质数-合数"},
+            ],
+            "分数的意义和性质": [
+                {"q": "把3米长的绳子平均分成5段, 每段长多少米?", "type": "fill", "answer": "3/5米", "score": 5, "topic": "分数-意义"},
+                {"q": "约分后分数的大小变吗?", "type": "fill", "answer": "不变", "score": 5, "topic": "分数-基本性质"},
+                {"q": "通分的依据是什么?", "type": "fill", "answer": "分数的基本性质", "score": 5, "topic": "分数-通分"},
+                {"q": "比较: 3/4 ○ 5/6 (通分后比较)", "type": "choice", "options": [">", "<", "="], "answer": 1, "score": 5, "topic": "分数-比大小"},
+                {"q": "把 0.6 化成分数是?", "type": "fill", "answer": "3/5", "score": 5, "topic": "分数-小数互化"},
+            ],
+            "分数加减法": [
+                {"q": "同分母分数相加: 2/7 + 3/7 = ?", "type": "fill", "answer": "5/7", "score": 5, "topic": "同分母分数加法"},
+                {"q": "异分母分数相加: 1/2 + 1/3 = ?", "type": "fill", "answer": "5/6", "score": 5, "topic": "异分母分数加法"},
+                {"q": "计算: 5/6 - 1/4 = ?", "type": "fill", "answer": "7/12", "score": 5, "topic": "异分母分数减法"},
+                {"q": "1 - 3/8 = ?", "type": "fill", "answer": "5/8", "score": 5, "topic": "分数减法-1减"},
+                {"q": "计算: 2/5 + 3/10 - 1/2 = ?", "type": "fill", "answer": "2/10或1/5", "score": 5, "topic": "分数加减混合"},
+            ],
+            "长方体和正方体": [
+                {"q": "长方体有几个面? 几条棱? 几个顶点?", "type": "fill", "answer": "6面/12棱/8顶点", "score": 5, "topic": "长方体-特征"},
+                {"q": "正方体棱长5cm, 表面积是多少?", "type": "fill", "answer": "150", "score": 5, "topic": "正方体-表面积"},
+                {"q": "长方体长4cm, 宽3cm, 高2cm, 体积是?", "type": "fill", "answer": "24", "score": 5, "topic": "长方体-体积"},
+                {"q": "1升 = 多少立方厘米?", "type": "fill", "answer": "1000", "score": 5, "topic": "体积-单位换算"},
+                {"q": "正方体体积公式是?", "type": "fill", "answer": "棱长×棱长×棱长 (或 a³)", "score": 5, "topic": "正方体-体积公式"},
+            ],
+            "旋转与对称": [
+                {"q": "等边三角形有几条对称轴?", "type": "fill", "answer": "3条", "score": 5, "topic": "对称轴"},
+                {"q": "正方形有几条对称轴?", "type": "fill", "answer": "4条", "score": 5, "topic": "对称轴"},
+                {"q": "图形旋转时需要确定哪三个要素?", "type": "fill", "answer": "旋转中心/旋转方向/旋转角度", "score": 5, "topic": "旋转-三要素"},
+                {"q": "图形平移时什么发生了变化?", "type": "fill", "answer": "位置", "score": 5, "topic": "平移"},
+                {"q": "判断: 圆有无数条对称轴 (对/错)", "type": "choice", "options": ["对", "错"], "answer": 0, "score": 5, "topic": "对称轴-圆"},
+            ],
+        },
+        "语文": {
+            "古诗文": [
+                {"q": "《示儿》作者是谁?", "type": "fill", "answer": "陆游", "score": 5, "topic": "古诗-作者"},
+                {"q": '"王师北定中原日"下一句是?', "type": "fill", "answer": "家祭无忘告乃翁", "score": 5, "topic": "古诗-背诵"},
+                {"q": "《题临安邸》'山外青山楼外楼'的下一句是?", "type": "fill", "answer": "西湖歌舞几时休", "score": 5, "topic": "古诗-背诵"},
+                {"q": "《己亥杂诗》作者是谁?", "type": "fill", "answer": "龚自珍", "score": 5, "topic": "古诗-作者"},
+                {"q": '"落红不是无情物"的下一句是?', "type": "fill", "answer": "化作春泥更护花", "score": 5, "topic": "古诗-背诵"},
+            ],
+            "革命文化": [
+                {"q": "《清贫》作者是谁?", "type": "fill", "answer": "方志敏", "score": 5, "topic": "课文-作者"},
+                {"q": "《军神》中'军神'指的是谁?", "type": "fill", "answer": "刘伯承", "score": 5, "topic": "课文-人物"},
+                {"q": "《青山处处埋忠骨》中毛泽东的儿子叫什么名字?", "type": "fill", "answer": "毛岸英", "score": 5, "topic": "课文-人物"},
+                {"q": "《清贫》表现了方志敏什么品质?", "type": "fill", "answer": "清贫朴素/坚定信仰", "score": 5, "topic": "课文-中心思想"},
+                {"q": "《军神》作者是谁?", "type": "fill", "answer": "毕必成", "score": 5, "topic": "课文-作者"},
+            ],
+        },
+        "英语": {
+            "一般过去时": [
+                {"q": "Yesterday I ____ (go) to the park.", "type": "fill", "answer": "went", "score": 5, "topic": "过去时-不规则"},
+                {"q": "She ____ (have) lunch at 12:00 yesterday.", "type": "fill", "answer": "had", "score": 5, "topic": "过去时-不规则"},
+                {"q": "Tom ____ (play) basketball last Sunday.", "type": "fill", "answer": "played", "score": 5, "topic": "过去时-规则"},
+                {"q": "不规则动词: see → ____", "type": "fill", "answer": "saw", "score": 5, "topic": "过去时-不规则表"},
+                {"q": "不规则动词: take → ____", "type": "fill", "answer": "took", "score": 5, "topic": "过去时-不规则表"},
+            ],
+            "比较级和最高级": [
+                {"q": "tall 的比较级和最高级分别是?", "type": "fill", "answer": "taller / tallest", "score": 5, "topic": "比较级-规则"},
+                {"q": "good 的比较级和最高级分别是?", "type": "fill", "answer": "better / best", "score": 5, "topic": "比较级-不规则"},
+                {"q": "This is the ____ (good) book I've ever read.", "type": "fill", "answer": "best", "score": 5, "topic": "最高级-应用"},
+                {"q": "She runs ____ (fast) than her friend.", "type": "fill", "answer": "faster", "score": 5, "topic": "比较级-应用"},
+                {"q": "big 的比较级是?", "type": "fill", "answer": "bigger", "score": 5, "topic": "比较级-规则"},
+            ],
+            "过去进行时": [
+                {"q": "I ____ (read) when my mother came back.", "type": "fill", "answer": "was reading", "score": 5, "topic": "过去进行时"},
+                {"q": "They ____ (play) football at 5pm yesterday.", "type": "fill", "answer": "were playing", "score": 5, "topic": "过去进行时"},
+                {"q": "过去进行时结构: was/were + ____", "type": "fill", "answer": "doing (现在分词)", "score": 5, "topic": "过去进行时-结构"},
+                {"q": "He was watching TV ____ the bell rang.", "type": "fill", "answer": "when", "score": 5, "topic": "过去进行时-连接词"},
+                {"q": "判断: 过去进行时表示过去某个时刻正在进行的动作 (对/错)", "type": "choice", "options": ["对", "错"], "answer": 0, "score": 5, "topic": "过去进行时-意义"},
+            ],
+        },
+        "科学": {
+            "地球与宇宙": [
+                {"q": "地球绕太阳转一圈是多长时间?", "type": "fill", "answer": "一年", "score": 5, "topic": "地球-公转"},
+                {"q": "地球自转一圈是多长时间?", "type": "fill", "answer": "一天", "score": 5, "topic": "地球-自转"},
+                {"q": "月球绕地球转一圈是多长时间?", "type": "fill", "answer": "一个月", "score": 5, "topic": "月球-公转"},
+                {"q": "四季变化是地球什么运动造成的?", "type": "fill", "answer": "公转", "score": 5, "topic": "四季-成因"},
+                {"q": "月食发生时, 日/地/月的位置关系?", "type": "fill", "answer": "地球在太阳和月球中间", "score": 5, "topic": "月食"},
+            ],
+            "沉与浮": [
+                {"q": "物体的沉浮和什么有关? (至少2个)", "type": "fill", "answer": "重量/体积/形状/材质/液体密度", "score": 5, "topic": "沉浮-因素"},
+                {"q": "为什么实心铁块在水中下沉, 轮船能浮?", "type": "fill", "answer": "排开水量不同/空心设计增大浮力", "score": 5, "topic": "沉浮-应用"},
+                {"q": "改变橡皮泥形状(做成船)能让它浮起来吗?", "type": "fill", "answer": "能", "score": 5, "topic": "沉浮-实验"},
+                {"q": "盐水和清水, 鸡蛋在哪个里更容易浮起来?", "type": "fill", "answer": "盐水", "score": 5, "topic": "沉浮-密度"},
+                {"q": "物体受到的浮力方向是?", "type": "fill", "answer": "向上", "score": 5, "topic": "浮力-方向"},
+            ],
+            "简单机械": [
+                {"q": "杠杆的三要素是什么?", "type": "fill", "answer": "支点/动力/阻力", "score": 5, "topic": "杠杆-三要素"},
+                {"q": "省力杠杆的动力臂和阻力臂关系?", "type": "fill", "answer": "动力臂大于阻力臂", "score": 5, "topic": "杠杆-省力"},
+                {"q": "旗杆顶部用的是什么滑轮?", "type": "fill", "answer": "定滑轮", "score": 5, "topic": "滑轮-应用"},
+                {"q": "定滑轮能省力吗? 能改变方向吗?", "type": "fill", "answer": "不省力/能改变方向", "score": 5, "topic": "定滑轮-特点"},
+                {"q": "斜面有什么作用?", "type": "fill", "answer": "省力/方便搬运重物", "score": 5, "topic": "斜面-应用"},
             ],
         },
     },
@@ -1071,21 +1378,21 @@ def _show_tutor_helper(root):
              font=PALETTE["body_font"],
              bg=PALETTE["pink"], fg=PALETTE["pink_dark"]).pack(side=tk.RIGHT, padx=16)
 
-    # Notebook Tabs
+    # Notebook Tabs — 用自定义 style 名, 不污染主程序全局样式!
     style = ttk.Style()
     try:
         style.theme_use("clam")
     except Exception:
         pass
-    style.configure("TNotebook", background=PALETTE["bg"], borderwidth=0)
-    style.configure("TNotebook.Tab",
-                    padding=[16, 8],
-                    font=("Comic Sans MS", 12, "bold"))
-    style.map("TNotebook.Tab",
+    style.configure("Tutor.TNotebook", background=PALETTE["bg"], borderwidth=0)
+    style.configure("Tutor.TNotebook.Tab",
+                    padding=[24, 12],
+                    font=("Comic Sans MS", 18, "bold"))
+    style.map("Tutor.TNotebook.Tab",
               background=[("selected", PALETTE["pink"]), ("!selected", PALETTE["white"])],
               foreground=[("selected", PALETTE["pink_dark"]), ("!selected", PALETTE["text"])])
 
-    nb = ttk.Notebook(dlg)
+    nb = ttk.Notebook(dlg, style="Tutor.TNotebook")
     nb.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
 
     # ═══════════════════════════════════════
@@ -1299,7 +1606,7 @@ def _show_tutor_helper(root):
 
     q_body = tk.Frame(tab_questions, bg=PALETTE["bg"]); q_body.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
 
-    q_tabs = ttk.Notebook(q_body)
+    q_tabs = ttk.Notebook(q_body, style="Tutor.TNotebook")
     q_tabs.pack(fill=tk.BOTH, expand=True)
 
     for subject, questions in QUESTION_BANK.items():
@@ -1349,6 +1656,1142 @@ def _show_tutor_helper(root):
                                         lambda: (ans_text.config(text=""), tip_text.config(text="")),
                                         width=12)
             hide_btn.pack(side=tk.LEFT, padx=6)
+
+    # ═══════════════════════════════════════
+    # Tab 8: 🎯 智能试卷
+    # ═══════════════════════════════════════
+    tab_exam = tk.Frame(nb, bg=PALETTE["bg"])
+    nb.add(tab_exam, text="🎯 智能试卷")
+
+    # ── 进度持久化 ──
+    PROGRESS_DIR = os.path.expanduser("~/.tutor_helper")
+    PROGRESS_FILE = os.path.join(PROGRESS_DIR, "exam_progress.json")
+
+    def _load_progress():
+        if os.path.exists(PROGRESS_FILE):
+            try:
+                with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {"exams": [], "topic_scores": {}}
+
+    def _save_progress(data):
+        os.makedirs(PROGRESS_DIR, exist_ok=True)
+        with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    # ── 子 Tab: 出题器 / 在线答题 / 拍照批改 / 薄弱点分析 ──
+    exam_tabs = ttk.Notebook(tab_exam, style="Tutor.TNotebook")
+    exam_tabs.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
+
+    # ═══════════════════════════════════════
+    # 子 Tab 1: 📋 出题器
+    # ═══════════════════════════════════════
+    tab_gen = tk.Frame(exam_tabs, bg=PALETTE["bg"])
+    exam_tabs.add(tab_gen, text="📋 出题器")
+
+    tk.Label(tab_gen, text="📋 智能试卷生成器",
+             font=PALETTE["title_font"],
+             bg=PALETTE["bg"], fg=PALETTE["lavender_dark"]).pack(pady=(14, 4))
+    gen_hint = tk.Label(tab_gen,
+                        text="选年级→选学科→选知识点→出题数→时间  🎲 随机抽题生成试卷!",
+                        font=PALETTE["body_font"],
+                        bg=PALETTE["bg"], fg=PALETTE["text_light"])
+    gen_hint.pack()
+    _reg_font(gen_hint, PALETTE["body_font"])
+
+    # 表单区
+    form_frame = tk.Frame(tab_gen, bg=PALETTE["bg"])
+    form_frame.pack(fill=tk.X, padx=30, pady=10)
+
+    # 年级选择
+    row1 = tk.Frame(form_frame, bg=PALETTE["bg"]); row1.pack(fill=tk.X, pady=6)
+    tk.Label(row1, text="🎓 年级:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"], width=14, anchor="w").pack(side=tk.LEFT)
+    grade_var = tk.StringVar(value=list(EXAM_BANK.keys())[0])
+    grade_cb = ttk.Combobox(row1, textvariable=grade_var, state="readonly",
+                            values=list(EXAM_BANK.keys()), width=14,
+                            font=PALETTE["body_font"])
+    grade_cb.pack(side=tk.LEFT, padx=6)
+
+    # 学科选择
+    tk.Label(row1, text="  📚 学科:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"], anchor="w").pack(side=tk.LEFT, padx=(20, 0))
+    subject_var = tk.StringVar()
+    subject_cb = ttk.Combobox(row1, textvariable=subject_var, state="readonly",
+                              width=10, font=PALETTE["body_font"])
+    subject_cb.pack(side=tk.LEFT, padx=6)
+
+    # 知识点选择
+    row2 = tk.Frame(form_frame, bg=PALETTE["bg"]); row2.pack(fill=tk.X, pady=6)
+    tk.Label(row2, text="🧩 知识点:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"], width=14, anchor="w").pack(side=tk.LEFT)
+    topic_var = tk.StringVar(value="全部")
+    topic_cb = ttk.Combobox(row2, textvariable=topic_var, state="readonly",
+                            values=["全部"], width=22, font=PALETTE["body_font"])
+    topic_cb.pack(side=tk.LEFT, padx=6)
+
+    # 题目数
+    tk.Label(row2, text="  🔢 题目数:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"], anchor="w").pack(side=tk.LEFT, padx=(20, 0))
+    num_var = tk.StringVar(value="10")
+    num_cb = ttk.Combobox(row2, textvariable=num_var, state="readonly",
+                          values=["5", "10", "15", "20", "30"], width=7,
+                          font=PALETTE["body_font"])
+    num_cb.pack(side=tk.LEFT, padx=6)
+
+    # 答题时间
+    row3 = tk.Frame(form_frame, bg=PALETTE["bg"]); row3.pack(fill=tk.X, pady=6)
+    tk.Label(row3, text="⏰ 答题时间:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"], width=14, anchor="w").pack(side=tk.LEFT)
+    time_var = tk.StringVar(value="20")
+    time_cb = ttk.Combobox(row3, textvariable=time_var, state="readonly",
+                           values=["10", "20", "30", "40", "50", "60"], width=7,
+                           font=PALETTE["body_font"])
+    time_cb.pack(side=tk.LEFT, padx=6)
+    tk.Label(row3, text="分钟", font=PALETTE["body_font"],
+             bg=PALETTE["bg"], fg=PALETTE["text"]).pack(side=tk.LEFT)
+
+    def _on_grade_change(*_):
+        g = grade_var.get()
+        subjects = list(EXAM_BANK.get(g, {}).keys())
+        subject_cb["values"] = subjects
+        subject_var.set(subjects[0] if subjects else "")
+        _on_subject_change()
+
+    def _on_subject_change(*_):
+        g, s = grade_var.get(), subject_var.get()
+        topics = ["全部"] + list(EXAM_BANK.get(g, {}).get(s, {}).keys())
+        topic_cb["values"] = topics
+        topic_var.set("全部")
+
+    grade_var.trace_add("write", _on_grade_change)
+    subject_var.trace_add("write", _on_subject_change)
+    _on_grade_change()
+
+    # 试卷预览区
+    preview_frame = tk.LabelFrame(tab_gen, text="📄 试卷预览",
+                                  font=PALETTE["body_bold"],
+                                  bg=PALETTE["bg"], fg=PALETTE["lavender_dark"],
+                                  padx=8, pady=6)
+    preview_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+    preview_txt = scrolledtext.ScrolledText(preview_frame, font=PALETTE["body_font"],
+                                            bg=PALETTE["white"], fg=PALETTE["text"],
+                                            relief="flat", bd=0, wrap="word",
+                                            padx=14, pady=14, height=14)
+    _reg_font(preview_txt, PALETTE["body_font"])
+    preview_txt.pack(fill=tk.BOTH, expand=True)
+
+    generated_exam = {"questions": [], "meta": {}}  # 存储当前生成的试卷
+
+    def _generate_exam():
+        g, s, t = grade_var.get(), subject_var.get(), topic_var.get()
+        num = int(num_var.get())
+        topics = [t] if t != "全部" else None
+        picked = []
+        if HAS_EXAM_DB:
+            picked = pick_random_questions(g, s, topics or [], num)
+        if not picked:
+            # 降级用内置 EXAM_BANK
+            if g in EXAM_BANK and s in EXAM_BANK[g]:
+                all_qs = []
+                top_keys = [t] if t != "全部" else list(EXAM_BANK[g][s].keys())
+                for tp in top_keys:
+                    all_qs.extend(EXAM_BANK[g][s].get(tp, []))
+                if all_qs:
+                    pick_n = min(num, len(all_qs))
+                    picked = random.sample(all_qs, pick_n)
+                    # 给没有 id 的题补一个
+                    for i, q in enumerate(picked):
+                        if "id" not in q:
+                            q["id"] = -(i+1)
+            else:
+                messagebox.showwarning("提示", f"DB和内置都没找到 {g} {s} 的题目")
+                return
+        if not picked:
+            messagebox.showwarning("提示", "该条件暂时没有题目哦~ 试试导入更多!")
+            return
+        # 预览文本
+        time_limit = int(time_var.get())
+        lines = [
+            f"📝 {g} {s} 练习卷",
+            f"⏰ 时间: {time_limit} 分钟   🔢 题数: {len(picked)}   💯 满分: {sum(q.get('score',5) for q in picked)}",
+            f"📅 日期: {datetime.now().strftime('%Y-%m-%d')}",
+            "─" * 50,
+        ]
+        for i, q in enumerate(picked, 1):
+            lines.append(f"\n【第{i}题 · {q.get('score',5)}分 · {q.get('topic','')}】")
+            lines.append(q.get("content", q.get("q", "")))
+            if q.get("q_type", q.get("type")) == "choice" and q.get("options"):
+                opts = q["options"]
+                if isinstance(opts, list):
+                    for j, opt in enumerate(opts):
+                        lines.append(f"  {chr(65+j)}. {opt}")
+            lines.append("")
+        # 答案区
+        lines.append("─" * 50)
+        lines.append("📎 参考答案 (家长用)")
+        for i, q in enumerate(picked, 1):
+            ans = q.get("answer", "")
+            qt = q.get("q_type", q.get("type", "fill"))
+            if qt == "choice" and q.get("options") and isinstance(q["options"], list):
+                try:
+                    opt = q["options"][q["answer"]]
+                    ans = f"{chr(65+q['answer'])}. {opt}"
+                except (IndexError, TypeError):
+                    pass
+            lines.append(f"  {i}. {ans}")
+            if q.get("analysis") or q.get("tip"):
+                lines.append(f"     💡 {q.get('analysis') or q.get('tip')}")
+        preview_txt.delete("1.0", "end")
+        preview_txt.insert("1.0", "\n".join(lines))
+        generated_exam["questions"] = picked
+        generated_exam["meta"] = {
+            "grade": g, "subject": s, "topic": t,
+            "time_limit": time_limit, "num": len(picked),
+            "total_score": sum(q.get("score",5) for q in picked),
+            "created_at": datetime.now().isoformat(),
+        }
+        # 保存试卷 JSON
+        os.makedirs(PROGRESS_DIR, exist_ok=True)
+        exam_file = os.path.join(PROGRESS_DIR, f"exam_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+        with open(exam_file, "w", encoding="utf-8") as f:
+            json.dump({"questions": picked, "meta": generated_exam["meta"]},
+                      f, ensure_ascii=False, indent=2)
+        # 保存到 DB
+        if HAS_EXAM_DB and picked:
+            try:
+                db_save_exam(f"{g}_{s}_{datetime.now().strftime('%H%M')}",
+                             g, s, [t], time_limit, picked)
+            except Exception:
+                pass
+
+    def _export_word():
+        """导出 Word 格式试卷 (学生版+答案页), 直接唤起 Word 打印"""
+        if not generated_exam["questions"]:
+            messagebox.showwarning("提示", "请先生成试卷哦~")
+            return
+        if not HAS_EXAM_DB:
+            messagebox.showwarning("提示", "Word导出需要 exam_db 模块可用")
+            return
+        try:
+            out_path = save_exam_docx(generated_exam["questions"],
+                                      generated_exam["meta"])
+            messagebox.showinfo("✅ Word已生成",
+                                f"📄 {os.path.basename(out_path)}\n"
+                                f"📍 路径: {out_path}\n"
+                                f"\n即将打开 Word / TextEdit, Cmd+P 直接打印!")
+            open_word_for_print(out_path)
+        except Exception as e:
+            messagebox.showerror("导出失败", str(e))
+
+    def _print_exam():
+        if not generated_exam["questions"]:
+            messagebox.showwarning("提示", "请先生成试卷哦~")
+            return
+        content = preview_txt.get("1.0", "end")
+        try:
+            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+            tmp.write(content)
+            tmp.close()
+            os.system(f'open -a "TextEdit" {tmp.name}')
+        except Exception as e:
+            messagebox.showerror("打印失败", str(e))
+
+    btn_frame_gen = tk.Frame(tab_gen, bg=PALETTE["bg"]); btn_frame_gen.pack(pady=8)
+    _mk_color_button(btn_frame_gen, "🎲 随机出题", PALETTE["mint"], _generate_exam, width=16).pack(side=tk.LEFT, padx=6)
+    _mk_color_button(btn_frame_gen, "📄 导出Word", PALETTE["lavender"], _export_word, width=16).pack(side=tk.LEFT, padx=6)
+    _mk_color_button(btn_frame_gen, "🖨️ 打开打印", PALETTE["sky"], _print_exam, width=16).pack(side=tk.LEFT, padx=6)
+
+    # ═══════════════════════════════════════
+    # 子 Tab 2: ✍️ 在线答题
+    # ═══════════════════════════════════════
+    tab_online = tk.Frame(exam_tabs, bg=PALETTE["bg"])
+    exam_tabs.add(tab_online, text="✍️ 在线答题")
+
+    tk.Label(tab_online, text="✍️ 在线答题模式",
+             font=PALETTE["title_font"],
+             bg=PALETTE["bg"], fg=PALETTE["mint_dark"]).pack(pady=(14, 4))
+
+    # 答题控件引用
+    exam_state = {"questions": [], "answers": {}, "current": 0, "time_left": 0,
+                  "timer_running": False, "timer_id": None}
+
+    online_control = tk.Frame(tab_online, bg=PALETTE["bg"]); online_control.pack(fill=tk.X, padx=20, pady=6)
+    timer_lbl = tk.Label(online_control, text="⏰ 时间: --:--", font=PALETTE["body_bold"],
+                        bg=PALETTE["bg"], fg=PALETTE["pink_dark"])
+    timer_lbl.pack(side=tk.LEFT, padx=10)
+    progress_lbl = tk.Label(online_control, text="📊 进度: 0/0", font=PALETTE["body_bold"],
+                           bg=PALETTE["bg"], fg=PALETTE["mint_dark"])
+    progress_lbl.pack(side=tk.LEFT, padx=10)
+    score_lbl = tk.Label(online_control, text="💯 得分: 0", font=PALETTE["body_bold"],
+                        bg=PALETTE["bg"], fg=PALETTE["lavender_dark"])
+    score_lbl.pack(side=tk.LEFT, padx=10)
+
+    online_body = tk.Frame(tab_online, bg=PALETTE["bg"]); online_body.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+    q_card = tk.Frame(online_body, bg=PALETTE["white"],
+                      bd=0, highlightthickness=2, highlightbackground=PALETTE["mint"])
+    q_card.pack(fill=tk.BOTH, expand=True)
+
+    q_title = tk.Label(q_card, text="点击上方「📋出题器」先生成试卷, 再回来答题哦!",
+                      font=PALETTE["body_font"], bg=PALETTE["white"],
+                      fg=PALETTE["text"], wraplength=900, justify="center")
+    q_title.pack(pady=30, padx=20)
+    _reg_font(q_title, PALETTE["body_font"])
+
+    q_content = tk.Frame(q_card, bg=PALETTE["white"])
+    q_content.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+    ans_entry = None
+    choice_frame = None
+    choice_vars = {}
+
+    online_btn_row = tk.Frame(tab_online, bg=PALETTE["bg"]); online_btn_row.pack(pady=10)
+
+    def _show_online_question(idx):
+        nonlocal ans_entry, choice_frame
+        for w in q_content.winfo_children():
+            w.destroy()
+        if idx < 0 or idx >= len(exam_state["questions"]):
+            return
+        q = exam_state["questions"][idx]
+        q_title.config(text=f"【第{idx+1}题 · {q['score']}分 · {q.get('topic', '')}】\n\n{q['q']}")
+
+        if q["type"] == "fill":
+            tk.Label(q_content, text="✏️ 请输入答案:", font=PALETTE["body_font"],
+                     bg=PALETTE["white"], fg=PALETTE["text"]).pack(anchor="w", pady=(10, 4))
+            ans_entry = tk.Entry(q_content, font=PALETTE["body_font"],
+                                 bg=PALETTE["bg"], fg=PALETTE["text"], relief="flat", bd=0)
+            ans_entry.pack(fill=tk.X, padx=6, ipady=6)
+            # 恢复已答
+            saved = exam_state["answers"].get(idx, "")
+            ans_entry.insert(0, saved)
+        elif q["type"] == "choice":
+            choice_frame = tk.Frame(q_content, bg=PALETTE["white"]); choice_frame.pack(fill=tk.X, pady=10)
+            var = tk.IntVar(value=exam_state["answers"].get(idx, -1))
+            choice_vars[idx] = var
+            for j, opt in enumerate(q.get("options", [])):
+                rb = tk.Radiobutton(choice_frame, text=f"  {chr(65+j)}. {opt}",
+                                    variable=var, value=j,
+                                    font=PALETTE["body_font"],
+                                    bg=PALETTE["white"], fg=PALETTE["text"],
+                                    activebackground=PALETTE["white"],
+                                    selectcolor=PALETTE["mint"])
+                rb.pack(anchor="w", pady=4)
+
+    def _save_current_answer():
+        idx = exam_state["current"]
+        if idx < 0 or idx >= len(exam_state["questions"]):
+            return
+        q = exam_state["questions"][idx]
+        if q["type"] == "fill" and ans_entry:
+            exam_state["answers"][idx] = ans_entry.get().strip()
+        elif q["type"] == "choice" and idx in choice_vars:
+            v = choice_vars[idx].get()
+            exam_state["answers"][idx] = v if v >= 0 else ""
+
+    def _tick_timer():
+        if not exam_state["timer_running"]:
+            return
+        if exam_state["time_left"] <= 0:
+            _submit_exam()
+            return
+        m, s = divmod(exam_state["time_left"], 60)
+        timer_lbl.config(text=f"⏰ 时间: {m:02d}:{s:02d}")
+        exam_state["time_left"] -= 1
+        exam_state["timer_id"] = tab_online.after(1000, _tick_timer)
+
+    def _start_online_exam():
+        # 使用已生成的试卷
+        if not generated_exam["questions"]:
+            messagebox.showinfo("提示", "请先到「📋出题器」Tab 生成试卷哦~")
+            exam_tabs.select(0)
+            return
+        exam_state["questions"] = generated_exam["questions"]
+        exam_state["answers"] = {}
+        exam_state["current"] = 0
+        exam_state["time_left"] = int(generated_exam["meta"]["time_limit"]) * 60
+        exam_state["timer_running"] = True
+        _show_online_question(0)
+        _tick_timer()
+        progress_lbl.config(text=f"📊 进度: 1/{len(exam_state['questions'])}")
+
+    def _prev_q():
+        _save_current_answer()
+        if exam_state["current"] > 0:
+            exam_state["current"] -= 1
+            _show_online_question(exam_state["current"])
+            progress_lbl.config(text=f"📊 进度: {exam_state['current']+1}/{len(exam_state['questions'])}")
+
+    def _next_q():
+        _save_current_answer()
+        if exam_state["current"] < len(exam_state["questions"]) - 1:
+            exam_state["current"] += 1
+            _show_online_question(exam_state["current"])
+            progress_lbl.config(text=f"📊 进度: {exam_state['current']+1}/{len(exam_state['questions'])}")
+
+    def _submit_exam():
+        exam_state["timer_running"] = False
+        if exam_state["timer_id"]:
+            try: tab_online.after_cancel(exam_state["timer_id"])
+            except: pass
+        _save_current_answer()
+        # 评分
+        questions = exam_state["questions"]
+        answers = exam_state["answers"]
+        results = []
+        total = 0
+        topic_hits = {}  # topic: [correct, total]
+        for i, q in enumerate(questions):
+            user_ans = answers.get(i, "")
+            if q["type"] == "fill":
+                correct = user_ans and _normalize_answer(user_ans) == _normalize_answer(q["answer"])
+            else:
+                correct = user_ans == q["answer"]
+            score = q["score"] if correct else 0
+            total += score
+            topic = q.get("topic", "其他")
+            if topic not in topic_hits:
+                topic_hits[topic] = [0, 0]
+            topic_hits[topic][1] += 1
+            if correct:
+                topic_hits[topic][0] += 1
+            results.append({"idx": i+1, "question": q["q"][:30],
+                            "user_ans": user_ans, "correct": correct,
+                            "correct_ans": q["answer"] if q["type"]=="fill" else q["options"][q["answer"]],
+                            "score": score, "topic": topic})
+        max_score = sum(q["score"] for q in questions)
+        # 保存进度
+        progress = _load_progress()
+        exam_record = {
+            "grade": generated_exam["meta"]["grade"],
+            "subject": generated_exam["meta"]["subject"],
+            "total_score": total,
+            "max_score": max_score,
+            "accuracy": round(total/max_score*100, 1) if max_score else 0,
+            "time": datetime.now().isoformat(),
+            "topic_hits": topic_hits,
+            "results": results,
+        }
+        progress["exams"].append(exam_record)
+        # 更新 topic 历史
+        for tp, (h, t) in topic_hits.items():
+            tp_score = progress["topic_scores"].setdefault(tp, {"correct": 0, "total": 0})
+            tp_score["correct"] += h
+            tp_score["total"] += t
+        _save_progress(progress)
+        # 显示结果弹窗
+        _show_exam_result(exam_record)
+
+    def _normalize_answer(s):
+        """简单答案归一化: 去空格去标点小写"""
+        import re
+        s = re.sub(r'[\s，。、.!！?？,.:;；"\'（）()【】\[\]]', '', s.lower())
+        return s
+
+    def _show_exam_result(record):
+        win = tk.Toplevel(tab_online)
+        win.title("🎉 答题结果")
+        win.configure(bg=PALETTE["bg"])
+        win.geometry("800x600")
+        win.transient(tab_online)
+        win.grab_set()
+
+        pct = record["accuracy"]
+        emoji = "🏆" if pct >= 90 else ("👍" if pct >= 70 else ("💪" if pct >= 60 else "📚"))
+        color = PALETTE["mint_dark"] if pct >= 70 else PALETTE["pink_dark"]
+
+        tk.Label(win, text=f"{emoji} 太棒啦! {record['total_score']}/{record['max_score']} 分 ({pct}%)",
+                 font=("Comic Sans MS", 20, "bold"),
+                 bg=PALETTE["bg"], fg=color).pack(pady=14)
+
+        result_txt = scrolledtext.ScrolledText(win, font=PALETTE["body_font"],
+                                               bg=PALETTE["white"], fg=PALETTE["text"],
+                                               relief="flat", bd=0, wrap="word",
+                                               padx=14, pady=14, height=18)
+        result_txt.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        _reg_font(result_txt, PALETTE["body_font"])
+
+        lines = [f"📚 {record['grade']} {record['subject']} 试卷批改结果",
+                 f"📅 {record['time']}", "─"*50, ""]
+        for r in record["results"]:
+            mark = "✅" if r["correct"] else "❌"
+            lines.append(f"{mark} 第{r['idx']}题 [{r['topic']}] — {r['score']}分")
+            lines.append(f"   题目: {r['question']}...")
+            lines.append(f"   你的答案: {r['user_ans'] or '(未作答)'}")
+            lines.append(f"   正确答案: {r['correct_ans']}")
+            lines.append("")
+        # 薄弱知识点
+        weak = [(tp, h[0], h[1]) for tp, h in record["topic_hits"].items() if h[0] < h[1]]
+        if weak:
+            lines.append("─"*50)
+            lines.append("⚠️ 需要加强的知识点:")
+            for tp, h, t in weak:
+                lines.append(f"  · {tp}: {h}/{t} ({h/t*100:.0f}%)")
+        result_txt.insert("1.0", "\n".join(lines))
+
+        btn_row = tk.Frame(win, bg=PALETTE["bg"]); btn_row.pack(pady=10)
+        _mk_color_button(btn_row, "📊 薄弱点分析", PALETTE["lavender"],
+                        lambda: (win.destroy(), exam_tabs.select(3)), width=16).pack(side=tk.LEFT, padx=6)
+        _mk_color_button(btn_row, "🆗 关闭", PALETTE["white"], win.destroy, width=12).pack(side=tk.LEFT, padx=6)
+
+    # 在线答题按钮
+    btn_row_online = tk.Frame(tab_online, bg=PALETTE["bg"]); btn_row_online.pack(pady=6)
+    _mk_color_button(btn_row_online, "🚀 开始答题", PALETTE["mint"],
+                    _start_online_exam, width=16).pack(side=tk.LEFT, padx=6)
+    _mk_color_button(btn_row_online, "⬅️ 上一题", PALETTE["sky"],
+                    _prev_q, width=12).pack(side=tk.LEFT, padx=6)
+    _mk_color_button(btn_row_online, "➡️ 下一题", PALETTE["sky"],
+                    _next_q, width=12).pack(side=tk.LEFT, padx=6)
+    _mk_color_button(btn_row_online, "📝 交卷", PALETTE["pink"],
+                    _submit_exam, width=12).pack(side=tk.LEFT, padx=6)
+
+    # ═══════════════════════════════════════
+    # 子 Tab 3: 📷 拍照批改
+    # ═══════════════════════════════════════
+    tab_ocr = tk.Frame(exam_tabs, bg=PALETTE["bg"])
+    exam_tabs.add(tab_ocr, text="📷 拍照批改")
+
+    tk.Label(tab_ocr, text="📷 OCR拍照批改 / 手动录入批改",
+             font=PALETTE["title_font"],
+             bg=PALETTE["bg"], fg=PALETTE["sky_dark"]).pack(pady=(14, 4))
+
+    ocr_hint_text = "✅ 选择图片 → (可选OCR识别) → 对比答案 → 出分!\n"
+    if HAS_TESSERACT and HAS_PIL:
+        ocr_hint_text += "✨ 已检测到 Tesseract OCR, 自动识别手写答案!"
+    else:
+        ocr_hint_text += "💡 未检测到 Tesseract OCR, 请手动录入答案批改\n"
+        ocr_hint_text += "   安装方法: brew install tesseract && pip install pytesseract pillow"
+    ocr_hint = tk.Label(tab_ocr, text=ocr_hint_text,
+                        font=PALETTE["body_font"],
+                        bg=PALETTE["bg"], fg=PALETTE["text_light"],
+                        justify="left")
+    ocr_hint.pack(pady=(0, 10))
+    _reg_font(ocr_hint, PALETTE["body_font"])
+
+    ocr_body = tk.Frame(tab_ocr, bg=PALETTE["bg"]); ocr_body.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+    # 左侧: 图片预览
+    left_col = tk.Frame(ocr_body, bg=PALETTE["bg"]); left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+    tk.Label(left_col, text="📷 答题纸图片",
+             font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["sky_dark"]).pack()
+
+    img_preview = tk.Label(left_col, text="(图片预览区)\n\n点击下方按钮选择图片",
+                           font=PALETTE["body_font"],
+                           bg=PALETTE["white"], fg=PALETTE["text_light"],
+                           width=40, height=16, relief="flat", bd=0)
+    img_preview.pack(fill=tk.BOTH, expand=True, pady=6)
+    _reg_font(img_preview, PALETTE["body_font"])
+
+    # 右侧: 手动/自动答案录入
+    right_col = tk.Frame(ocr_body, bg=PALETTE["bg"]); right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0))
+    tk.Label(right_col, text="✏️ 答案录入 (每行一个答案, 按题号顺序)",
+             font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["sky_dark"]).pack()
+
+    ocr_text = scrolledtext.ScrolledText(right_col, font=PALETTE["body_font"],
+                                         bg=PALETTE["white"], fg=PALETTE["text"],
+                                         relief="flat", bd=0, wrap="word",
+                                         padx=10, pady=10, height=16)
+    _reg_font(ocr_text, PALETTE["body_font"])
+    ocr_text.pack(fill=tk.BOTH, expand=True, pady=6)
+    ocr_text.insert("1.0", "# 第1题答案\n# 第2题答案\n# 第3题答案\n...\n(每行一个, 支持 # 开头注释)")
+
+    current_img_path = tk.StringVar(value="")
+
+    def _select_and_ocr():
+        path = filedialog.askopenfilename(
+            title="选择答题纸照片",
+            filetypes=[("图片", "*.png *.jpg *.jpeg *.bmp *.gif *.tiff")])
+        if not path:
+            return
+        current_img_path.set(path)
+        # 预览图片
+        if HAS_PIL:
+            try:
+                img = Image.open(path)
+                img.thumbnail((400, 400))
+                from PIL import ImageTk
+                photo = ImageTk.PhotoImage(img)
+                img_preview.config(image=photo, text="")
+                img_preview.image = photo
+            except Exception as e:
+                img_preview.config(image="", text=f"图片加载失败: {e}")
+        # OCR 识别
+        if HAS_TESSERACT and HAS_PIL:
+            try:
+                img = Image.open(path)
+                text = pytesseract.image_to_string(img, lang="chi_sim+eng")
+                ocr_text.delete("1.0", "end")
+                ocr_text.insert("1.0", text)
+                messagebox.showinfo("OCR完成", "已自动识别! 请检查并修正答案后点击批改~")
+            except Exception as e:
+                messagebox.showwarning("OCR失败", f"识别失败: {e}\n请手动输入答案")
+        else:
+            messagebox.showinfo("提示", "请手动在右侧输入答案内容 (每行一个)")
+
+    def _grade_by_input():
+        if not generated_exam["questions"]:
+            messagebox.showwarning("提示", "请先到「📋出题器」生成试卷哦~")
+            return
+        raw = ocr_text.get("1.0", "end").strip()
+        lines = [l.strip() for l in raw.split("\n") if l.strip() and not l.strip().startswith("#")]
+        questions = generated_exam["questions"]
+        results = []
+        total = 0
+        topic_hits = {}
+        for i, q in enumerate(questions):
+            user_ans = lines[i] if i < len(lines) else ""
+            if q["type"] == "fill":
+                correct = user_ans and _normalize_answer(user_ans) == _normalize_answer(q["answer"])
+            else:
+                try:
+                    idx = int(ord(user_ans.upper()) - ord("A")) if user_ans.upper() in "ABCD" else -1
+                    correct = idx == q["answer"]
+                except:
+                    correct = False
+            score = q["score"] if correct else 0
+            total += score
+            topic = q.get("topic", "其他")
+            if topic not in topic_hits:
+                topic_hits[topic] = [0, 0]
+            topic_hits[topic][1] += 1
+            if correct:
+                topic_hits[topic][0] += 1
+            results.append({"idx": i+1, "user_ans": user_ans, "correct": correct,
+                            "score": score, "topic": topic})
+        max_score = sum(q["score"] for q in questions)
+        # 保存
+        progress = _load_progress()
+        exam_record = {
+            "grade": generated_exam["meta"]["grade"],
+            "subject": generated_exam["meta"]["subject"],
+            "total_score": total,
+            "max_score": max_score,
+            "accuracy": round(total/max_score*100, 1) if max_score else 0,
+            "time": datetime.now().isoformat(),
+            "topic_hits": topic_hits,
+            "results": results,
+            "mode": "OCR/手动",
+        }
+        progress["exams"].append(exam_record)
+        for tp, (h, t) in topic_hits.items():
+            tp_score = progress["topic_scores"].setdefault(tp, {"correct": 0, "total": 0})
+            tp_score["correct"] += h
+            tp_score["total"] += t
+        _save_progress(progress)
+        # 弹窗显示
+        _show_exam_result(exam_record)
+
+    btn_row_ocr = tk.Frame(tab_ocr, bg=PALETTE["bg"]); btn_row_ocr.pack(pady=8)
+    _mk_color_button(btn_row_ocr, "📷 选择图片", PALETTE["sky"],
+                    _select_and_ocr, width=16).pack(side=tk.LEFT, padx=6)
+    _mk_color_button(btn_row_ocr, "✅ 批改出分", PALETTE["mint"],
+                    _grade_by_input, width=16).pack(side=tk.LEFT, padx=6)
+
+    # ═══════════════════════════════════════
+    # 子 Tab 4: 📊 薄弱点分析
+    # ═══════════════════════════════════════
+    tab_analysis = tk.Frame(exam_tabs, bg=PALETTE["bg"])
+    exam_tabs.add(tab_analysis, text="📊 薄弱点分析")
+
+    tk.Label(tab_analysis, text="📊 学习薄弱点雷达图 & 知识补漏",
+             font=PALETTE["title_font"],
+             bg=PALETTE["bg"], fg=PALETTE["mint_dark"]).pack(pady=(14, 4))
+
+    analysis_body = tk.Frame(tab_analysis, bg=PALETTE["bg"]); analysis_body.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    # 左侧: 雷达图
+    radar_frame = tk.LabelFrame(analysis_body, text="🎯 知识点掌握雷达图",
+                                font=PALETTE["body_bold"],
+                                bg=PALETTE["bg"], fg=PALETTE["lavender_dark"],
+                                padx=6, pady=6)
+    radar_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+
+    # 右侧: 建议 & 历史
+    right_analysis = tk.Frame(analysis_body, bg=PALETTE["bg"]); right_analysis.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0))
+
+    suggest_frame = tk.LabelFrame(right_analysis, text="💡 针对性复习建议",
+                                  font=PALETTE["body_bold"],
+                                  bg=PALETTE["bg"], fg=PALETTE["pink_dark"],
+                                  padx=6, pady=6)
+    suggest_frame.pack(fill=tk.BOTH, expand=True)
+
+    suggest_txt = scrolledtext.ScrolledText(suggest_frame, font=PALETTE["body_font"],
+                                            bg=PALETTE["white"], fg=PALETTE["text"],
+                                            relief="flat", bd=0, wrap="word",
+                                            padx=10, pady=10, height=14)
+    _reg_font(suggest_txt, PALETTE["body_font"])
+    suggest_txt.pack(fill=tk.BOTH, expand=True)
+
+    def _draw_radar():
+        # 清空
+        for w in radar_frame.winfo_children():
+            w.destroy()
+        progress = _load_progress()
+        topic_scores = progress.get("topic_scores", {})
+        if not topic_scores:
+            tk.Label(radar_frame,
+                     text="暂无数据~\n\n先到「📋出题器」出题\n→ 「✍️在线答题」或「📷拍照批改」\n→ 回来看看进步!",
+                     font=PALETTE["body_font"],
+                     bg=PALETTE["bg"], fg=PALETTE["text_light"],
+                     justify="center").pack(pady=40)
+            suggest_txt.delete("1.0", "end")
+            suggest_txt.insert("1.0", "🎯 开始你的第一次练习吧~\n\n数据会自动保存到 ~/.tutor_helper/\n下次打开就有进步曲线啦!")
+            return
+        # 取 TOP 8 薄弱知识点 (按 total 排序)
+        sorted_topics = sorted(topic_scores.items(),
+                               key=lambda x: x[1]["total"], reverse=True)[:8]
+        labels = [t[0] for t in sorted_topics]
+        values = [t[1]["correct"] / t[1]["total"] * 100 for t in sorted_topics]
+        values_clamped = [max(5, min(100, v)) for v in values]  # 雷达图最小值5
+
+        if HAS_MATPLOTLIB:
+            fig = plt.figure(figsize=(6, 5), facecolor=PALETTE["bg"])
+            ax = fig.add_subplot(111, polar=True)
+            angles = [n / float(len(labels)) * 2 * 3.14159 for n in range(len(labels))]
+            angles += angles[:1]
+            values_clamped += values_clamped[:1]
+            ax.plot(angles, values_clamped, "o-", linewidth=2, color=PALETTE["lavender_dark"])
+            ax.fill(angles, values_clamped, alpha=0.3, color=PALETTE["lavender"])
+            ax.set_xticks(angles[:-1])
+            ax.set_xticklabels(labels, fontsize=10, color=PALETTE["text"])
+            ax.set_ylim(0, 100)
+            ax.set_yticks([20, 40, 60, 80, 100])
+            ax.set_yticklabels(["20%", "40%", "60%", "80%", "100%"], fontsize=8)
+            ax.set_title("🎯 知识点掌握程度", fontsize=14, pad=15, color=PALETTE["lavender_dark"])
+            fig.tight_layout()
+            canvas = FigureCanvasTkAgg(fig, master=radar_frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        else:
+            # 降级: 纯文本条形图
+            tk.Label(radar_frame, text="📊 知识点掌握 (条形图):",
+                     font=PALETTE["body_bold"],
+                     bg=PALETTE["bg"], fg=PALETTE["lavender_dark"]).pack(pady=4)
+            for tp, v in sorted(zip(labels, values), key=lambda x: x[1]):
+                bar = "█" * int(v / 5) + "░" * (20 - int(v / 5))
+                color = PALETTE["mint_dark"] if v >= 70 else (PALETTE["sun_dark"] if v >= 50 else PALETTE["pink_dark"])
+                tk.Label(radar_frame, text=f"{tp:12s} {bar} {v:.0f}%",
+                         font=("Menlo", 12), bg=PALETTE["bg"], fg=color).pack(anchor="w", padx=10)
+
+        # 生成薄弱点建议
+        suggest_txt.delete("1.0", "end")
+        weak_topics = [(labels[i], values[i]) for i in range(len(labels)) if values[i] < 70]
+        suggest_lines = ["💡 薄弱点分析 & 复习建议", "─" * 40, ""]
+        if weak_topics:
+            suggest_lines.append(f"发现 {len(weak_topics)} 个需要加强的知识点:\n")
+            for tp, v in sorted(weak_topics, key=lambda x: x[1]):
+                level = "🔥 紧急" if v < 40 else ("⚠️ 注意" if v < 60 else "📚 巩固")
+                suggest_lines.append(f"  [{level}] {tp} — 正确率 {v:.0f}%")
+                # 推荐对应 Tab
+                for key, (tab_name, knowledge_key) in TOPIC_TO_KNOWLEDGE.items():
+                    if key in tp:
+                        suggest_lines.append(f"      → 建议: 打开「{tab_name}」Tab → 学习「{knowledge_key}」")
+                        break
+                else:
+                    suggest_lines.append(f"      → 建议: 回到知识点 Tab 查找对应章节复习")
+                suggest_lines.append("")
+        else:
+            suggest_lines.append("🎉 太棒了! 所有知识点正确率都超过 70%!")
+            suggest_lines.append("继续保持, 尝试更难的题目挑战自己吧!\n")
+
+        # 历史成绩趋势
+        history = progress.get("exams", [])[-5:]  # 最近5次
+        if history:
+            suggest_lines.append("─" * 40)
+            suggest_lines.append("📈 最近 5 次练习成绩:")
+            for rec in history:
+                time_str = rec.get("time", "")[5:16].replace("T", " ")
+                accuracy = rec.get("accuracy", 0)
+                bar = "█" * int(accuracy / 5) + "░" * (20 - int(accuracy / 5))
+                suggest_lines.append(f"  {time_str}  {rec['subject']} {rec['total_score']}/{rec['max_score']}  {bar}")
+        suggest_txt.insert("1.0", "\n".join(suggest_lines))
+
+    def _show_history():
+        progress = _load_progress()
+        exams = progress.get("exams", [])
+        if not exams:
+            messagebox.showinfo("暂无历史", "还没有练习记录哦~")
+            return
+        win = tk.Toplevel(tab_analysis)
+        win.title("📚 全部历史记录")
+        win.configure(bg=PALETTE["bg"])
+        win.geometry("700x500")
+        txt = scrolledtext.ScrolledText(win, font=PALETTE["body_font"],
+                                        bg=PALETTE["white"], fg=PALETTE["text"],
+                                        relief="flat", bd=0, wrap="word",
+                                        padx=14, pady=14)
+        _reg_font(txt, PALETTE["body_font"])
+        txt.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        lines = ["📚 全部练习历史", "═" * 40, ""]
+        for i, rec in enumerate(reversed(exams), 1):
+            lines.append(f"#{i}  {rec.get('time', '').replace('T', ' ')}")
+            lines.append(f"    {rec.get('grade','')} {rec.get('subject','')}")
+            lines.append(f"    得分: {rec['total_score']}/{rec['max_score']}  正确率: {rec['accuracy']}%")
+            lines.append("")
+        txt.insert("1.0", "\n".join(lines))
+
+    def _clear_history():
+        if messagebox.askyesno("确认", "确定要清空所有练习历史吗?"):
+            _save_progress({"exams": [], "topic_scores": {}})
+            _draw_radar()
+            messagebox.showinfo("已清空", "历史记录已清除!")
+
+    btn_row_analysis = tk.Frame(tab_analysis, bg=PALETTE["bg"]); btn_row_analysis.pack(pady=6)
+    _mk_color_button(btn_row_analysis, "🔄 刷新分析", PALETTE["mint"],
+                    _draw_radar, width=14).pack(side=tk.LEFT, padx=6)
+    _mk_color_button(btn_row_analysis, "📚 全部历史", PALETTE["sky"],
+                    _show_history, width=14).pack(side=tk.LEFT, padx=6)
+    _mk_color_button(btn_row_analysis, "🗑️ 清空历史", PALETTE["pink"],
+                    _clear_history, width=14).pack(side=tk.LEFT, padx=6)
+
+    # 首次加载时画一下
+    _draw_radar()
+
+    # 切换到分析Tab时自动刷新
+    def _on_exam_tab_changed(_evt=None):
+        idx = exam_tabs.index(exam_tabs.select())
+        if idx == 3:
+            _draw_radar()
+
+    exam_tabs.bind("<<NotebookTabChanged>>", _on_exam_tab_changed)
+
+    # ═══════════════════════════════════════
+    # 子 Tab 5: 📚 题库管理 (CRUD + 导入)
+    # ═══════════════════════════════════════
+    tab_kb = tk.Frame(exam_tabs, bg=PALETTE["bg"])
+    exam_tabs.add(tab_kb, text="📚 题库管理")
+
+    # 初始化 DB
+    if HAS_EXAM_DB:
+        try:
+            init_db()
+        except Exception as e:
+            messagebox.showwarning("DB 初始化", f"题库 DB 初始化: {e}")
+
+    # 顶部统计条
+    stats_bar = tk.Frame(tab_kb, bg=PALETTE["bg"]); stats_bar.pack(fill=tk.X, padx=10, pady=8)
+    stat_labels = {}
+    if HAS_EXAM_DB:
+        st = get_stats()
+        label_data = [
+            ("total_questions", "📝 总题数", PALETTE["mint_dark"]),
+            ("total_knowledge", "🧩 知识点", PALETTE["sky_dark"]),
+            ("total_exams", "📄 试卷", PALETTE["lavender_dark"]),
+        ]
+        for key, text, color in label_data:
+            lbl = tk.Label(stats_bar, text=f"{text}: {st.get(key, 0)}",
+                          font=PALETTE["body_bold"],
+                          bg=PALETTE["bg"], fg=color)
+            lbl.pack(side=tk.LEFT, padx=10)
+            _reg_font(lbl, PALETTE["body_bold"])
+            stat_labels[key] = lbl
+
+    # 筛选栏
+    filter_bar = tk.Frame(tab_kb, bg=PALETTE["bg"]); filter_bar.pack(fill=tk.X, padx=10, pady=4)
+
+    tk.Label(filter_bar, text="🎓 年级:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"]).pack(side=tk.LEFT)
+    kb_grade_var = tk.StringVar(value="全部")
+    kb_grade_cb = ttk.Combobox(filter_bar, textvariable=kb_grade_var, state="readonly",
+                                values=["全部"] + (get_all_grades() if HAS_EXAM_DB else []),
+                                width=12, font=PALETTE["body_font"])
+    kb_grade_cb.pack(side=tk.LEFT, padx=4)
+
+    tk.Label(filter_bar, text="📚 学科:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"]).pack(side=tk.LEFT, padx=(10, 0))
+    kb_subject_var = tk.StringVar(value="全部")
+    kb_subject_cb = ttk.Combobox(filter_bar, textvariable=kb_subject_var, state="readonly",
+                                 values=["全部"] + (get_all_subjects() if HAS_EXAM_DB else []),
+                                 width=10, font=PALETTE["body_font"])
+    kb_subject_cb.pack(side=tk.LEFT, padx=4)
+
+    tk.Label(filter_bar, text="🧩 知识点:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"]).pack(side=tk.LEFT, padx=(10, 0))
+    kb_topic_var = tk.StringVar(value="全部")
+    kb_topic_cb = ttk.Combobox(filter_bar, textvariable=kb_topic_var, state="readonly",
+                               values=["全部"], width=18, font=PALETTE["body_font"])
+    kb_topic_cb.pack(side=tk.LEFT, padx=4)
+
+    # 搜索框
+    tk.Label(filter_bar, text="🔍 搜索:", font=PALETTE["body_bold"],
+             bg=PALETTE["bg"], fg=PALETTE["text"]).pack(side=tk.LEFT, padx=(10, 0))
+    kb_search_var = tk.StringVar()
+    kb_search_entry = tk.Entry(filter_bar, textvariable=kb_search_var,
+                               font=PALETTE["body_font"], width=18,
+                               bg=PALETTE["white"], fg=PALETTE["text"],
+                               relief="flat", bd=0)
+    kb_search_entry.pack(side=tk.LEFT, padx=4)
+
+    # Treeview 表格
+    table_frame = tk.Frame(tab_kb, bg=PALETTE["bg"]); table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
+
+    style2 = ttk.Style()
+    try:
+        style2.theme_use("clam")
+    except Exception:
+        pass
+    style2.configure("KBT.Treeview", font=PALETTE["body_font"], rowheight=32)
+    style2.configure("KBT.Treeview.Heading", font=PALETTE["body_bold"])
+
+    columns = ("id", "grade", "subject", "topic", "q_type", "content", "answer", "score")
+    kb_tree = ttk.Treeview(table_frame, columns=columns, show="headings",
+                           style="KBT.Treeview", selectmode="browse")
+    heads = [("id", "ID", 50), ("grade", "年级", 70), ("subject", "学科", 60),
+             ("topic", "知识点", 120), ("q_type", "类型", 55),
+             ("content", "题干", 450), ("answer", "答案", 120), ("score", "分值", 50)]
+    for col, text, w in heads:
+        kb_tree.heading(col, text=text)
+        kb_tree.column(col, width=w, anchor="w")
+    kb_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    vsb = ttk.Scrollbar(table_frame, orient="vertical", command=kb_tree.yview)
+    vsb.pack(side=tk.RIGHT, fill=tk.Y)
+    kb_tree.configure(yscrollcommand=vsb.set)
+
+    def _refresh_kb_topics(*_):
+        if not HAS_EXAM_DB: return
+        g = None if kb_grade_var.get() == "全部" else kb_grade_var.get()
+        s = None if kb_subject_var.get() == "全部" else kb_subject_var.get()
+        topics = ["全部"] + get_topics(g, s)
+        kb_topic_cb["values"] = topics
+        kb_topic_var.set("全部")
+
+    def _refresh_kb_list():
+        """刷新列表"""
+        for item in kb_tree.get_children():
+            kb_tree.delete(item)
+        if not HAS_EXAM_DB: return
+        g = None if kb_grade_var.get() == "全部" else kb_grade_var.get()
+        s = None if kb_subject_var.get() == "全部" else kb_subject_var.get()
+        t = None if kb_topic_var.get() == "全部" else kb_topic_var.get()
+        kw = kb_search_var.get().strip() or None
+        rows = get_questions(grade=g, subject=s, topic=t, keyword=kw, limit=300)
+        for r in rows:
+            content_short = r["content"][:80] + ("..." if len(r["content"]) > 80 else "")
+            ans = r["answer"]
+            if r.get("q_type") == "choice" and r.get("options") and isinstance(r["options"], list):
+                try: ans = f"{chr(65+r['answer'])}. {r['options'][r['answer']]}"
+                except: pass
+            kb_tree.insert("", "end", iid=str(r["id"]),
+                           values=(r["id"], r["grade"], r["subject"], r["topic"],
+                                   r["q_type"], content_short, ans, r.get("score", 5)))
+        # 更新统计
+        st = get_stats()
+        stat_labels["total_questions"].config(text=f"📝 总题数: {st['total_questions']}")
+
+    kb_grade_var.trace_add("write", lambda *_: (_refresh_kb_topics(), _refresh_kb_list()))
+    kb_subject_var.trace_add("write", lambda *_: (_refresh_kb_topics(), _refresh_kb_list()))
+    kb_topic_var.trace_add("write", lambda *_: _refresh_kb_list())
+    kb_search_var.trace_add("write", lambda *_: _refresh_kb_list())
+
+    # 按钮区
+    btn_frame_kb = tk.Frame(tab_kb, bg=PALETTE["bg"]); btn_frame_kb.pack(pady=8)
+    _mk_color_button(btn_frame_kb, "🔄 刷新", PALETTE["mint"], _refresh_kb_list, width=10).pack(side=tk.LEFT, padx=4)
+    _mk_color_button(btn_frame_kb, "➕ 手动添加", PALETTE["pink"],
+                    lambda: _kb_add_dialog(tab_kb, on_save=_refresh_kb_list), width=14).pack(side=tk.LEFT, padx=4)
+    _mk_color_button(btn_frame_kb, "✏️ 编辑选中", PALETTE["sky"],
+                    lambda: _kb_edit_dialog(tab_kb, kb_tree, on_save=_refresh_kb_list), width=14).pack(side=tk.LEFT, padx=4)
+    _mk_color_button(btn_frame_kb, "🗑️ 删除选中", PALETTE["pink_dark"],
+                    lambda: _kb_delete(kb_tree, on_save=_refresh_kb_list), width=14).pack(side=tk.LEFT, padx=4)
+    _mk_color_button(btn_frame_kb, "📥 导入JSON", PALETTE["lavender"],
+                    lambda: _kb_import_json(on_done=_refresh_kb_list), width=14).pack(side=tk.LEFT, padx=4)
+    _mk_color_button(btn_frame_kb, "📄 导入Word", PALETTE["lavender"],
+                    lambda: _kb_import_word(on_done=_refresh_kb_list), width=14).pack(side=tk.LEFT, padx=4)
+    _mk_color_button(btn_frame_kb, "📁 扫描导入文件夹", PALETTE["sun"],
+                    lambda: _kb_scan_folder(on_done=_refresh_kb_list), width=18).pack(side=tk.LEFT, padx=4)
+
+    # 初始加载
+    _refresh_kb_topics()
+    _refresh_kb_list()
+    # 切换到题库管理 Tab 时也刷新
+    def _on_kb_tab_show(_evt=None):
+        try:
+            idx = exam_tabs.index(exam_tabs.select())
+            if idx >= 0:
+                _refresh_kb_topics()
+                _refresh_kb_list()
+        except Exception:
+            pass
+    exam_tabs.bind("<<NotebookTabChanged>>", lambda e: (_on_exam_tab_changed(e), _on_kb_tab_show()))
+
+    # ── 题库操作对话框 ──
+    def _kb_add_dialog(parent, on_save=None):
+        if not HAS_EXAM_DB:
+            messagebox.showwarning("提示", "题库 DB 模块不可用"); return
+        dlg = tk.Toplevel(parent); dlg.title("➕ 添加题目")
+        dlg.configure(bg=PALETTE["bg"]); dlg.geometry("620x580")
+        dlg.transient(parent); dlg.grab_set()
+        _kb_form(dlg, None, on_save)
+
+    def _kb_edit_dialog(parent, tree, on_save=None):
+        sel = tree.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先选一道题~"); return
+        if not HAS_EXAM_DB: return
+        qid = int(sel[0])
+        rows = get_questions()
+        row = next((r for r in rows if r["id"] == qid), None)
+        if not row: return
+        dlg = tk.Toplevel(parent); dlg.title("✏️ 编辑题目")
+        dlg.configure(bg=PALETTE["bg"]); dlg.geometry("620x580")
+        dlg.transient(parent); dlg.grab_set()
+        _kb_form(dlg, row, on_save, editing_id=qid)
+
+    def _kb_form(dlg, row, on_save, editing_id=None):
+        """题库添加/编辑共用表单"""
+        def _row(label, key, widget_class=tk.Entry, **kw):
+            r = tk.Frame(dlg, bg=PALETTE["bg"]); r.pack(fill=tk.X, padx=12, pady=4)
+            tk.Label(r, text=label, font=PALETTE["body_bold"], width=10, anchor="w",
+                     bg=PALETTE["bg"], fg=PALETTE["text"]).pack(side=tk.LEFT)
+            var = kw.pop("textvariable", tk.StringVar(value=(row or {}).get(key, "")))
+            w = widget_class(r, textvariable=var, font=PALETTE["body_font"],
+                             bg=PALETTE["white"], fg=PALETTE["text"],
+                             relief="flat", bd=0, **kw)
+            w.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4)
+            return var, w
+
+        grade_var, _ = _row("🎓 年级", "grade", ttk.Combobox,
+                            values=["三上","三下","四上","四下","五上","五下"])
+        if row: grade_var.set(row["grade"])
+        subject_var, _ = _row("📚 学科", "subject", ttk.Combobox,
+                              values=["语文","数学","英语","科学"])
+        if row: subject_var.set(row["subject"])
+        topic_var, _ = _row("🧩 知识点", "topic")
+        if row: topic_var.set(row["topic"])
+        type_var, _ = _row("📋 类型", "q_type", ttk.Combobox,
+                           values=["fill", "choice"])
+        if row: type_var.set(row.get("q_type", "fill"))
+
+        # 题干 (多行)
+        tr = tk.Frame(dlg, bg=PALETTE["bg"]); tr.pack(fill=tk.X, padx=12, pady=4)
+        tk.Label(tr, text="❓ 题干", font=PALETTE["body_bold"],
+                 bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w")
+        content_txt = scrolledtext.ScrolledText(dlg, font=PALETTE["body_font"],
+                                                bg=PALETTE["white"], fg=PALETTE["text"],
+                                                relief="flat", bd=0, wrap="word",
+                                                height=5, padx=8, pady=6)
+        content_txt.pack(fill=tk.BOTH, expand=True, padx=12, pady=2)
+        _reg_font(content_txt, PALETTE["body_font"])
+        content_txt.insert("1.0", (row or {}).get("content", (row or {}).get("q", "")))
+
+        # 选项 (仅 choice 类型)
+        opt_frame = tk.LabelFrame(dlg, text="🔤 选项 (选择题用, 每行一个)",
+                                  font=PALETTE["body_bold"],
+                                  bg=PALETTE["bg"], fg=PALETTE["text"], padx=6, pady=4)
+        opt_frame.pack(fill=tk.X, padx=12, pady=4)
+        opt_txt = scrolledtext.ScrolledText(opt_frame, font=PALETTE["small_font"],
+                                            bg=PALETTE["white"], fg=PALETTE["text"],
+                                            relief="flat", bd=0, height=4,
+                                            padx=6, pady=4)
+        opt_txt.pack(fill=tk.X)
+        _reg_font(opt_txt, PALETTE["small_font"])
+        if row and row.get("options"):
+            if isinstance(row["options"], list):
+                opt_txt.insert("1.0", "\n".join(row["options"]))
+
+        # 答案
+        ans_var, _ = _row("✅ 答案", "answer")
+        if row: ans_var.set(row["answer"])
+
+        # 解析
+        ar = tk.Frame(dlg, bg=PALETTE["bg"]); ar.pack(fill=tk.X, padx=12, pady=4)
+        tk.Label(ar, text="💡 解析/易错点", font=PALETTE["body_bold"],
+                 bg=PALETTE["bg"], fg=PALETTE["text"]).pack(anchor="w")
+        ana_txt = scrolledtext.ScrolledText(dlg, font=PALETTE["small_font"],
+                                            bg=PALETTE["white"], fg=PALETTE["text"],
+                                            relief="flat", bd=0, height=3,
+                                            padx=6, pady=4)
+        ana_txt.pack(fill=tk.BOTH, expand=True, padx=12, pady=2)
+        _reg_font(ana_txt, PALETTE["small_font"])
+        ana_txt.insert("1.0", (row or {}).get("analysis", ""))
+
+        score_var, _ = _row("💯 分值", "score")
+        if row: score_var.set(str(row.get("score", 5)))
+
+        def _save():
+            content = content_txt.get("1.0", "end").strip()
+            if not content or not grade_var.get() or not subject_var.get():
+                messagebox.showwarning("缺少信息", "年级/学科/题干必填"); return
+            opts_text = opt_txt.get("1.0", "end").strip()
+            opts = [l.strip() for l in opts_text.split("\n") if l.strip()] or None
+            q = {
+                "grade": grade_var.get(), "subject": subject_var.get(),
+                "topic": topic_var.get() or "未分类",
+                "q_type": type_var.get(),
+                "content": content, "options": opts,
+                "answer": ans_var.get().strip(),
+                "analysis": ana_txt.get("1.0", "end").strip(),
+                "score": int(score_var.get() or 5),
+            }
+            if editing_id:
+                update_question(editing_id, q)
+            else:
+                add_question(q)
+            dlg.destroy()
+            if on_save: on_save()
+
+        btn_r = tk.Frame(dlg, bg=PALETTE["bg"]); btn_r.pack(pady=8)
+        _mk_color_button(btn_r, "💾 保存", PALETTE["mint"], _save, width=12).pack(side=tk.LEFT, padx=6)
+        _mk_color_button(btn_r, "🆗 取消", PALETTE["white"], dlg.destroy, width=12).pack(side=tk.LEFT, padx=6)
+
+    def _kb_delete(tree, on_save=None):
+        sel = tree.selection()
+        if not sel: return
+        if not messagebox.askyesno("确认", f"删除 {len(sel)} 道题?"): return
+        for sid in sel:
+            delete_question(int(sid))
+        if on_save: on_save()
+
+    def _kb_import_json(on_done=None):
+        if not HAS_EXAM_DB: return
+        path = filedialog.askopenfilename(title="选择 JSON 文件",
+                                          filetypes=[("JSON", "*.json")])
+        if not path: return
+        try:
+            n = import_from_json_file(path)
+            messagebox.showinfo("导入成功", f"✅ 导入了 {n} 道题!")
+            if on_done: on_done()
+        except Exception as e:
+            messagebox.showerror("导入失败", str(e))
+
+    def _kb_import_word(on_done=None):
+        if not HAS_EXAM_DB: return
+        path = filedialog.askopenfilename(title="选择 Word 文件",
+                                          filetypes=[("Word", "*.docx *.doc")])
+        if not path: return
+        try:
+            n = import_from_word_file(path)
+            messagebox.showinfo("导入成功", f"✅ 从 Word 导入了 {n} 道题!")
+            if on_done: on_done()
+        except Exception as e:
+            messagebox.showerror("导入失败", str(e))
+
+    def _kb_scan_folder(on_done=None):
+        if not HAS_EXAM_DB: return
+        folder = os.path.join(os.path.expanduser("~/.tutor_helper"), "import_folder")
+        if not os.path.isdir(folder):
+            os.makedirs(folder, exist_ok=True)
+        files = scan_import_folder()
+        if not files:
+            messagebox.showinfo("📂 导入文件夹",
+                                f"还没有可导入的文件~\n\n"
+                                f"请把 .json / .docx 文件拷贝到:\n📁 {folder}\n\n"
+                                f"JSON 格式示例:\n"
+                                f'[{{"grade":"四下","subject":"数学","topic":"运算定律","q_type":"fill",'
+                                f'"content":"计算: 125×32=?","answer":"4000","score":5}}]')
+            os.system(f'open "{folder}"')
+            return
+        total, errs = do_import_folder()
+        msg = f"✅ 成功导入 {total} 道题!\n"
+        if errs:
+            msg += f"\n⚠️ {len(errs)} 个文件有错误:\n" + "\n".join(errs[:5])
+        messagebox.showinfo("扫描完成", msg)
+        if on_done: on_done()
 
     # ═══════════════════════════════════════
     # Tab 5: 📖 语文
