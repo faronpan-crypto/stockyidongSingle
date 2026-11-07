@@ -366,9 +366,9 @@ def grade_exam_from_images(image_paths: List[str],
     result_text = None
     used_fallback = False
 
-    # 优先用多模态 (直接看图) — flash 不行自动换 chat
+    # 优先用多模态 (直接看图) — chat 优先, flash 备选
     if use_vision and image_paths:
-        for try_model in ["deepseek-flash", "deepseek-chat"]:
+        for try_model in ["deepseek-chat", "deepseek-flash"]:
             result_text = call_deepseek_vision(
                 system_prompt=system,
                 user_prompt=user_prompt,
@@ -489,9 +489,9 @@ def grade_pure_from_images(image_paths: List[str],
 
 开始批改吧。"""
 
-    # 先试 deepseek-flash，不行再用 deepseek-chat
+    # ⚠️ deepseek-flash 现在 vision 不稳定, 直接用 chat, flash 当备选
     result_text = None
-    for try_model in ["deepseek-flash", "deepseek-chat"]:
+    for try_model in ["deepseek-chat", "deepseek-flash"]:
         result_text = call_deepseek_vision(
             system_prompt=system,
             user_prompt=user_prompt,
@@ -499,25 +499,25 @@ def grade_pure_from_images(image_paths: List[str],
             model=try_model,
             max_tokens=4000,
         )
+        # None 也视为失败, 继续换模型
         if result_text and not _looks_like_refusal(result_text):
             break
         if result_text and _looks_like_refusal(result_text):
-            print(f"[PURE_GRADE] {try_model} 返回 refusal, 换模型重试")
-            continue
-        print(f"[PURE_GRADE] {try_model} 返回 None, 换模型")
+            print(f"[PURE_GRADE] {try_model} refusal, 换模型")
+        else:
+            print(f"[PURE_GRADE] {try_model} 返回 {result_text!r}, 换模型")
 
     if not result_text:
         return {"error": "AI 调用失败 — 两个模型都没返回结果"}
 
-    # 检测 refusal
-    if _looks_like_refusal(result_text):
-        # retry 一次，用更强硬的 prompt
+    # 检测 refusal —— chat retry (flash 已经试过了)
+    if result_text and _looks_like_refusal(result_text):
         retry_system = system + "\n\n**再次强调: 图片已经上传到本次对话中了! 你必须自己看图片，不要让我再发一次!**"
         result_text = call_deepseek_vision(
             system_prompt=retry_system,
             user_prompt=user_prompt + "\n\n(请直接看图，不要再让我重新上传!)",
             image_paths=image_paths,
-            model="deepseek-flash",
+            model="deepseek-chat",
             max_tokens=4000,
         )
 
