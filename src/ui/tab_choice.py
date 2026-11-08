@@ -993,16 +993,24 @@ class ChoiceMixin:
         left = ttk.Frame(pw, width=700)
         pw.add(left, weight=3)
 
-        # 扫描按钮
-        scan_frame = ttk.LabelFrame(left, text="🔍 扫描维度", padding=6)
+        # 扫描按钮 (MCP)
+        scan_frame = ttk.LabelFrame(left, text="🔍 MCP 扫描 (需积分)", padding=6)
         scan_frame.pack(fill=tk.X, padx=6, pady=4)
         for i, (label, q) in enumerate(self._INST_BUY_PRESETS):
             btn = ttk.Button(scan_frame, text=f"🚀 {label}", width=16,
                              command=lambda qq=q: self._run_inst_buy_scan(qq))
             btn.grid(row=0, column=i, padx=4, pady=2)
-        ttk.Button(scan_frame, text="📋 Choice面板",
+
+        # AKShare 免费兜底按钮
+        ak_frame = ttk.LabelFrame(left, text="🆓 AKShare 免费兜底 (无积分也能用)", padding=6)
+        ak_frame.pack(fill=tk.X, padx=6, pady=4)
+        for i, (label, hint, mode) in enumerate(self._INST_AK_PRESETS):
+            btn = ttk.Button(ak_frame, text=f"🆓 {label}", width=18,
+                             command=lambda m=mode: self._run_ak_scan(m))
+            btn.grid(row=i // 2, column=i % 2, padx=4, pady=2, sticky="ew")
+        ttk.Button(ak_frame, text="📋 Choice面板",
                    command=lambda: (dlg.destroy(), self._show_choice_dialog())
-                   ).grid(row=0, column=len(self._INST_BUY_PRESETS), padx=4, pady=2)
+                   ).grid(row=0, column=2, rowspan=1, padx=4, pady=2)
 
         # 结果 Notebook
         tk.Label(left, text="📊 扫描结果 (双击行 → 右栏展开详情)",
@@ -1294,3 +1302,304 @@ class ChoiceMixin:
 
         self._inst_buy_status.set(
             f"✅ 已加载 {name}({code}): {len(sheets)} 张资讯表")
+
+    # ═══════════════════════════════════════════════════════════
+    # 🔄 AKShare 兜底扫描 (MCP 积分用完时的免费替代)
+    # ═══════════════════════════════════════════════════════════
+
+    _INST_AK_PRESETS = [
+        ("基金重仓TOP", "🔄 免费 AKShare", "stock_report_fund_hold"),
+        ("北向持续买入TOP", "🔄 免费 AKShare", "hsgt_recent_buy"),
+        ("机构增持股(股东户数降)", "🔄 免费 AKShare", "holder_count_down"),
+    ]
+
+    def _run_ak_scan(self, ak_mode: str):
+        """AKShare 兜底扫描 —— 不依赖妙想 MCP"""
+        for w in self._inst_buy_nb.winfo_children():
+            w.destroy()
+        self._inst_buy_status.set(f"⏳ AKShare {ak_mode} 扫描中...")
+
+        def _run():
+            import akshare as ak
+            import pandas as pd
+            t0 = time.time()
+            result = {"ok": False, "sheets": [], "error": ""}
+            try:
+                if ak_mode == "stock_report_fund_hold":
+                    # 基金重仓TOP — 按持有基金家数排序
+                    import datetime
+                    date_str = datetime.datetime.now().strftime("%Y%m%d")
+                    # 尝试最近 4 个季度的报告期
+                    for offset in [0, 90, 180, 270]:
+                        dt = datetime.datetime.now() - datetime.timedelta(days=offset)
+                        ds = dt.strftime("%Y") + ("0930" if dt.month >= 9 else "0630" if dt.month >= 6 else "0331" if dt.month >= 3 else "1231")
+                        try:
+                            df = ak.stock_report_fund_hold(date=ds)
+                            if df is not None and len(df) > 0:
+                                date_str = ds
+                                break
+                        except Exception:
+                            continue
+                    if df is None or len(df) == 0:
+                        df = ak.stock_report_fund_hold(date="20251231")
+                    # 转成表格
+                    cols = list(df.columns)
+                    items = df.values.tolist()[:50]  # TOP50
+                    result["ok"] = True
+                    result["sheets"] = [(f"基金重仓TOP50 ({date_str})", cols, items)]
+
+                elif ak_mode == "hsgt_recent_buy":
+                    # 北向持续买入 — 逐只查太耗时, 用历史汇总 + 单只 top
+                    # 方案: 拉沪股通+深股通最近 30 天数据, 找出累计净流入>0 的日期占比
+                    frames = []
+                    for sym in ["沪股通", "深股通"]:
+                        try:
+                            df = ak.stock_hsgt_hist_em(symbol=sym)
+                            if df is not None and len(df) > 0:
+                                df = df.tail(60).copy()
+                                df["板块"] = sym
+                                frames.append(df[["日期", "当日成交净买额", "历史累计净买额", "板块"]])
+                        except Exception:
+                            pass
+                    if frames:
+                        import pandas as pd
+                        combined = pd.concat(frames, ignore_index=True)
+                        cols = list(combined.columns)
+                        items = combined.values.tolist()
+                        result["ok"] = True
+                        result["sheets"] = [(f"北向资金近60日净流入 ({len(combined)}行)", cols, items)]
+                    else:
+                        result["error"] = "北向数据获取失败"
+
+                elif ak_mode == "holder_count_down":
+                    # 股东户数下降TOP = 免费版机构增持代理指标
+                    # stock_circulate_stock_holder 逐只查, 批量会慢 → 用实时行情前 100 只抽样
+                    import pandas as pd
+                    spot = ak.stock_zh_a_spot_em()
+                    spot = spot.head(100)
+                    results = []
+                    for _, row in spot.iterrows():
+                        code = str(row["代码"])
+                        name = str(row["名称"])
+                        try:
+                            df = ak.stock_circulate_stock_holder(symbol=code)
+                            if df is not None and len(df) >= 2:
+                                dates = df["截止日期"].tolist()[:2]
+                                counts = df["股东户数"].tolist()[:2]
+                                if len(counts) >= 2 and counts[1] and counts[0]:
+                                    try:
+                                        pct = (float(counts[0]) - float(counts[1])) / float(counts[1]) * 100
+                                        results.append({
+                                            "代码": code, "名称": name,
+                                            "最新价": row.get("最新价", ""),
+                                            "涨跌幅": row.get("涨跌幅", ""),
+                                            "上上期截止": dates[0], "上上期户数": counts[0],
+                                            "上期截止": dates[1], "上期户数": counts[1],
+                                            "户数变化%": round(pct, 2),
+                                        })
+                                    except (ValueError, ZeroDivisionError):
+                                        pass
+                        except Exception:
+                            continue
+                        if len(results) >= 30:
+                            break
+                    results.sort(key=lambda x: x["户数变化%"], reverse=True)
+                    if results:
+                        cols = list(results[0].keys())
+                        items = [[r[c] for c in cols] for r in results]
+                        result["ok"] = True
+                        result["sheets"] = [(f"股东户数下降TOP ({len(results)}只, 抽样100)", cols, items)]
+                    else:
+                        result["error"] = "股东户数数据获取失败"
+
+            except Exception as e:
+                result["error"] = f"AKShare 异常: {str(e)[:200]}"
+
+            dt = time.time() - t0
+            if self._inst_buy_dlg and self._inst_buy_dlg.winfo_exists():
+                self._inst_buy_dlg.after(0, lambda: self._render_ak_scan_result(result, dt, ak_mode))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _render_ak_scan_result(self, result: dict, dt: float, ak_mode: str):
+        """渲染 AKShare 扫描结果到左栏"""
+        if not result.get("ok"):
+            self._inst_buy_status.set(f"❌ {result.get('error','AKShare 失败')[:60]}")
+            return
+
+        sheets = result.get("sheets", [])
+        if not sheets:
+            self._inst_buy_status.set(f"⚠️ AKShare 返回空 ({dt:.1f}s)")
+            return
+
+        for sheet_name, cols, items in sheets[:5]:
+            sheet_frame = ttk.Frame(self._inst_buy_nb)
+            tab_label = sheet_name[:30] + ("..." if len(sheet_name) > 30 else "")
+            self._inst_buy_nb.add(sheet_frame, text=tab_label)
+
+            if not cols or not items:
+                ttk.Label(sheet_frame, text="📭 无数据", foreground="gray").pack(pady=40)
+                continue
+
+            tree_cols = [str(c) for c in cols]
+            tv = ttk.Treeview(sheet_frame, columns=tree_cols, show="headings",
+                              height=min(25, len(items)))
+
+            def _cw(idx, _cols=cols, _items=items):
+                mc = str(_cols[idx] if idx < len(_cols) else "")
+                for row in _items:
+                    if idx < len(row):
+                        cell = str(row[idx])[:80] if row[idx] else ""
+                        if len(cell) > len(mc): mc = cell
+                w = sum(14 if ord(ch) > 127 else 8 for ch in mc)
+                return max(60, min(260, w + 14))
+
+            for h, w in zip(tree_cols, [_cw(i) for i in range(len(tree_cols))]):
+                tv.heading(h, text=h)
+                tv.column(h, width=w, anchor="w", minwidth=50, stretch=True)
+
+            for row in items:
+                vals = [str(v)[:100] if v else "" for v in row[:len(tree_cols)]]
+                tv.insert("", tk.END, values=vals)
+
+            vsb = ttk.Scrollbar(sheet_frame, orient=tk.VERTICAL, command=tv.yview)
+            hsb = ttk.Scrollbar(sheet_frame, orient=tk.HORIZONTAL, command=tv.xview)
+            tv.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+            tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+            hsb.pack(side=tk.BOTTOM, fill=tk.X)
+
+            # 双击行 → 右栏加载 AKShare 详情
+            def _on_select(event=None, _tv=tv):
+                sel = _tv.selection()
+                if not sel: return
+                vals = _tv.item(sel[0], "values")
+                # 找到 代码 和 名称 列
+                code, name = "", ""
+                for i, c in enumerate(cols):
+                    if "代码" in c and i < len(vals): code = str(vals[i])
+                    if "名称" in c and i < len(vals): name = str(vals[i])
+                if code and name:
+                    self._inst_current_stock = {"code": code, "name": name}
+                    self._inst_buy_status.set(f"🔄 加载 {name}({code}) AKShare 详情...")
+                    self._load_ak_detail(code, name)
+            tv.bind("<<TreeviewSelect>>", _on_select)
+            tv.bind("<Double-1>", _on_select)
+
+        total = sum(len(i) for _, _, i in sheets)
+        self._inst_buy_status.set(
+            f"✅ AKShare 免费数据: {total} 条 / {len(sheets)} 张表 ({dt:.1f}s)")
+
+    def _load_ak_detail(self, code: str, name: str):
+        """右栏用 AKShare 加载个股机构/股东/北向详情 (不依赖 MCP)"""
+        for w in self._inst_holding_tab.winfo_children(): w.destroy()
+        for w in self._inst_news_tab.winfo_children(): w.destroy()
+
+        import akshare as ak
+
+        tk.Label(self._inst_holding_tab, text=f"⏳ {name}({code}) AKShare 机构/股东加载中...",
+                 foreground="gray").pack(pady=40)
+
+        # 并行拉: 股东户数 + 十大股东 + 基金持仓 + 北向持股
+        def _run():
+            import concurrent.futures
+            t0 = time.time()
+            results = {}
+
+            def _holder_count():
+                try: return ("股东户数历史", ak.stock_circulate_stock_holder(symbol=code))
+                except Exception as e: return ("股东户数历史", None)
+
+            def _top_holders():
+                try: return ("十大股东历史", ak.stock_main_stock_holder(stock=code))
+                except Exception as e: return ("十大股东历史", None)
+
+            def _fund_holdings():
+                try: return ("基金持仓明细", ak.stock_fund_stock_holder(symbol=code))
+                except Exception as e: return ("基金持仓明细", None)
+
+            def _hsgt():
+                try: return ("北向持股历史", ak.stock_hsgt_individual_em(symbol=code))
+                except Exception as e: return ("北向持股历史", None)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                futures = {
+                    pool.submit(_holder_count): "股东户数",
+                    pool.submit(_top_holders): "十大股东",
+                    pool.submit(_fund_holdings): "基金持仓",
+                    pool.submit(_hsgt): "北向持股",
+                }
+                for fut, key in futures.items():
+                    try:
+                        label, df = fut.result(timeout=30)
+                        results[key] = (label, df)
+                    except Exception:
+                        results[key] = (fut.exception(), None)
+
+            dt = time.time() - t0
+            if self._inst_buy_dlg and self._inst_buy_dlg.winfo_exists():
+                self._inst_buy_dlg.after(0, lambda: self._render_ak_detail(code, name, results, dt))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _render_ak_detail(self, code, name, results, dt=0):
+        """渲染 AKShare 详情到右栏两个 tab"""
+        import pandas as pd
+
+        def _render_tab(tab, title_str, dataframes):
+            for w in tab.winfo_children(): w.destroy()
+            tk.Label(tab, text=title_str, font=("", 12, "bold")).pack(anchor="w", padx=4, pady=4)
+
+            nb = ttk.Notebook(tab)
+            nb.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+            for label, df in dataframes:
+                frame = ttk.Frame(nb)
+                nb.add(frame, text=label[:25] + ("..." if len(label) > 25 else ""))
+
+                if df is None or len(df) == 0:
+                    ttk.Label(frame, text="📭 AKShare 接口暂不可用", foreground="gray").pack(pady=20)
+                    continue
+
+                cols = list(df.columns)
+                items = df.head(300).values.tolist()  # 最多 300 行
+                tree_cols = [str(c) for c in cols]
+                tv = ttk.Treeview(frame, columns=tree_cols, show="headings",
+                                  height=min(15, len(items)))
+
+                def _cw(idx, _cols=cols, _items=items):
+                    mc = str(_cols[idx] if idx < len(_cols) else "")
+                    for row in _items:
+                        if idx < len(row):
+                            cell = str(row[idx])[:80] if row[idx] else ""
+                            if len(cell) > len(mc): mc = cell
+                    w = sum(14 if ord(ch) > 127 else 8 for ch in mc)
+                    return max(50, min(300, w + 14))
+
+                for h, w in zip(tree_cols, [_cw(i) for i in range(len(tree_cols))]):
+                    tv.heading(h, text=h)
+                    tv.column(h, width=w, anchor="w", minwidth=45)
+                for row in items:
+                    vals = [str(v)[:100] if v else "" for v in row[:len(tree_cols)]]
+                    tv.insert("", tk.END, values=vals)
+
+                vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tv.yview)
+                hsb = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=tv.xview)
+                tv.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+                tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
+                vsb.pack(side=tk.RIGHT, fill=tk.Y)
+                hsb.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # 🏒 机构持仓历史 tab
+        hold_tables = []
+        if "股东户数" in results and results["股东户数"][1] is not None:
+            hold_tables.append(results["股东户数"])
+        if "十大股东" in results and results["十大股东"][1] is not None:
+            hold_tables.append(results["十大股东"])
+        _render_tab(self._inst_holding_tab, f"🏒 {name}({code}) 机构/股东 (AKShare免费)", hold_tables)
+
+        # 📰 资讯研报 tab (用 AKShare 北向 + 基金持仓)
+        news_tables = []
+        if "北向持股" in results and results["北向持股"][1] is not None:
+            news_tables.append(results["北向持股"])
+        if "基金持仓" in results and results["基金持仓"][1] is not None:
+            news_tables.append(results["基金持仓"])
+        _render_tab(self._inst_news_tab, f"📰 {name} AKShare 免费数据 ({dt:.1f}s)", news_tables)
