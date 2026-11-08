@@ -399,9 +399,17 @@ class AIConfigManager:
             print(f"保存AI配置失败: {e}")
             return False
     def get_active_provider_config(self):
-        """获取当前激活的AI提供商配置"""
+        """获取当前激活的AI提供商配置 (环境变量 DEEPSEEK_API_KEY / DOUBAO_API_KEY 优先)"""
+        import os as _os
         provider = self.config.get("active_provider", "deepseek")
-        return self.config.get("providers", {}).get(provider, {})
+        pc = dict(self.config.get("providers", {}).get(provider, {}))  # copy
+        # 🔒 环境变量覆盖 JSON 明文 (安全存储密钥)
+        env_map = {"deepseek": "DEEPSEEK_API_KEY", "doubao": "DOUBAO_API_KEY"}
+        env_key_name = env_map.get(provider, f"{provider.upper()}_API_KEY")
+        env_key = _os.environ.get(env_key_name, "")
+        if env_key:
+            pc["api_key"] = env_key  # 环境变量优先
+        return pc
     def get_tushare_config(self):
         """获取Tushare配置"""
         return self.config.get("tushare", {"account": "", "token": ""})
@@ -463,6 +471,10 @@ class AIConfigManager:
         _t0 = _time.time()
         try:
             api_key = provider_config.get("api_key", "")
+            # 🔒 环境变量优先
+            env_key = _os.environ.get(f"{provider.upper()}_API_KEY", "")
+            if env_key:
+                api_key = env_key
             if not api_key:
                 entry["error"] = "no_api_key"
                 return "错误: 未配置API密钥"
