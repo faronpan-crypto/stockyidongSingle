@@ -975,11 +975,10 @@ def show_emotion_freeze(root=None, app=None):
             tip_lbl.config(text=f"✅ 已加载 {len(kd['closes'])} 根日线", fg=_FG_GREEN)
 
             fig = Figure(figsize=(12.4, 6.8), facecolor=_BG_DEEP, dpi=100)
-            fig.subplots_adjust(left=0.06, right=0.97, top=0.92, bottom=0.08,
-                                hspace=0.05, height_ratios=[3.5, 1])
-
-            ax_main = fig.add_subplot(211)  # K线 + Ichimoku
-            ax_vol  = fig.add_subplot(212, sharex=ax_main)  # 成交量
+            # ⚠️ height_ratios 必须在 fig.subplots() 里, 不是 subplots_adjust!
+            ax_arr = fig.subplots(2, 1, height_ratios=[3.5, 1], sharex=True)
+            fig.subplots_adjust(left=0.06, right=0.97, top=0.92, bottom=0.10, hspace=0.05)
+            ax_main, ax_vol = ax_arr
 
             for ax in [ax_main, ax_vol]:
                 ax.set_facecolor(_BG_DEEP)
