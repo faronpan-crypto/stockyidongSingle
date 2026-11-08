@@ -434,10 +434,101 @@ def analyze_trading_stage(df: pd.DataFrame, fund_df=None, top_n=20):
 # ─────────────────────────────────────────────────────────────
 
 class TechStageMixin:
-    """📊 操盘阶段识别 Mixin — 挂到主程序上"""
+    """📊 操盘阶段识别 Mixin — 挂到主程序上, 复用原"🧬生命周期"按钮"""
+
+    # ── 🧬 原生命周期按钮入口 (覆盖原 MA20 简单判断, 升级为完整操盘阶段分析) ──
+
+    def _show_lifecycle_popup(self):
+        """🧬 生命周期扫描 — 升级为完整操盘阶段识别 (吸筹/洗盘/拉升/出货)"""
+        print("\n" + "="*60)
+        print("🧬 [操盘阶段 V2.0] 已加载! 吸筹→洗盘→拉升→出货 识别")
+        print("="*60)
+        pick = tk.Toplevel(getattr(self, "root", None))
+        pick.title("🧬 生命周期·操盘阶段扫描 V2 — 选择候选池")
+        pick.geometry("500x440")
+        pick.configure(bg="#FCE4EC")
+        pick.transient(getattr(self, "root", None))
+        pick.grab_set()
+        pick.resizable(False, False)
+
+        tk.Label(pick, text="🧬 生命周期·操盘阶段扫描", bg="#FCE4EC",
+                 font=("", 14, "bold"), fg="#AD1457").pack(pady=(18, 4))
+        tk.Label(pick, text="吸筹 → 洗盘 → 拉升 → 出货  四阶段识别", bg="#FCE4EC",
+                 font=("", 10), fg="#AD1457").pack()
+        tk.Label(pick, text="(均线位置方向/量能/K线形态/机构票vs游资票)", bg="#FCE4EC",
+                 font=("", 9), fg="#880E4F").pack(pady=(0, 12))
+
+        _GROUP_MAP = [
+            (2, "龙头股"), (4, "Main"), (6, "同花顺"),
+            (7, "标签1"), (8, "标签2"), (9, "标签3"), (10, "标签4"),
+            (11, "标签5"), (12, "标签6"), (13, "标签7"), (14, "标签8"),
+        ]
+        _selected = {gi: tk.BooleanVar(value=True) for gi, _ in _GROUP_MAP}
+
+        _counts = {}
+        for gi, _ in _GROUP_MAP:
+            hs = getattr(self, f"holding_stocks_{gi}", [None] * 80)
+            _counts[gi] = sum(1 for h in hs if h)
+
+        box = tk.Frame(pick, bg="#FCE4EC")
+        box.pack(padx=20, fill="x")
+        for i, (gi, gname) in enumerate(_GROUP_MAP):
+            cb = ttk.Checkbutton(box, text=f"{gname} ({_counts[gi]}只)", variable=_selected[gi])
+            cb.grid(row=i // 2, column=i % 2, sticky="w", padx=8, pady=3)
+
+        _total_all = sum(_counts.values())
+        tk.Label(pick, text=f"📊 当前共 {_total_all} 只", bg="#FCE4EC", fg="#666", font=("", 9)).pack(pady=8)
+
+        def _toggle_all(val):
+            for v in _selected.values(): v.set(val)
+        btn_row = tk.Frame(pick, bg="#FCE4EC")
+        btn_row.pack()
+        ttk.Button(btn_row, text="全选", command=lambda: _toggle_all(True)).pack(side="left", padx=4)
+        ttk.Button(btn_row, text="全不选", command=lambda: _toggle_all(False)).pack(side="left", padx=4)
+
+        def _do_scan():
+            chosen = [gi for gi, _ in _GROUP_MAP if _selected[gi].get()]
+            if not chosen:
+                tk.messagebox.showwarning("提示", "请至少勾选一个标签页!", parent=pick)
+                return
+            pick.destroy()
+            self._ts_scan_groups(chosen)
+
+        ttk.Button(pick, text="🔍 开始扫描", command=_do_scan, width=18).pack(pady=14)
+
+    def _ts_scan_groups(self, group_indices):
+        """从指定 group_indices 取股票, 跑操盘阶段分析"""
+        pairs = []
+        seen = set()
+        for gi in group_indices:
+            hs = getattr(self, f"holding_stocks_{gi}", [None] * 80)
+            for holding in hs:
+                if not holding: continue
+                name, code = holding
+                code6 = re.search(r"(\d{6})", str(code))
+                if code6:
+                    c = code6.group(1)
+                    if c not in seen:
+                        seen.add(c)
+                        pairs.append((str(name or c).strip(), c))
+
+        print(f"🧬 [操盘阶段] 从 groups {group_indices} 取到 {len(pairs)} 只股票 (去重后)")
+
+        if not pairs:
+            tk.messagebox.showinfo("提示", "所选标签页均为空!")
+            return
+
+        # 弹窗 + 启动扫描
+        self._show_tech_stage_dialog()
+        # 覆盖状态文字
+        self._ts_status.set(f"📊 已选 {len(group_indices)} 组 → {len(pairs)} 只股票 (去重后)")
+        # 后台扫描
+        self._ts_run_scan(pairs)
+
+    # ── 备用独立入口 ──
 
     def _show_tech_stage_dialog(self):
-        """弹窗入口: 股票阶段扫描"""
+        """弹窗入口: 操盘阶段卡片网格 (带过滤/CSV导出)"""
         dlg = tk.Toplevel(getattr(self, "root", None))
         dlg.title("📊 操盘阶段识别 — 吸筹/洗盘/拉升/出货")
         dlg.geometry("1280x780")
@@ -457,7 +548,9 @@ class TechStageMixin:
         ctrl = tk.LabelFrame(dlg, text="🎛️ 扫描控制", padding=6)
         ctrl.pack(fill=tk.X, padx=8, pady=4)
 
-        ttk.Button(ctrl, text="🔍 自选股扫描",
+        ttk.Button(ctrl, text="🧬 重新选组扫描",
+                   command=lambda: (dlg.destroy(), self._show_lifecycle_popup())).pack(side=tk.LEFT, padx=4)
+        ttk.Button(ctrl, text="🔄 扫描 Main 持仓",
                    command=lambda: self._ts_scan_from_watchlist(dlg)).pack(side=tk.LEFT, padx=4)
         ttk.Button(ctrl, text="📋 输入代码扫描",
                    command=lambda: self._ts_input_codes(dlg)).pack(side=tk.LEFT, padx=4)
@@ -482,9 +575,13 @@ class TechStageMixin:
                      command=lambda e: self._ts_apply_filter()
                      ).pack(side=tk.LEFT, padx=4)
 
-        # 进度条
-        self._ts_progress = ttk.Progressbar(ctrl, length=200)
-        self._ts_progress.pack(side=tk.RIGHT, padx=8)
+        # 进度条 + 步骤标签
+        self._ts_step_label = tk.Label(ctrl, text="[0%] 准备中...",
+                                       bg="#F1F5F9", fg="#1E40AF",
+                                       font=("", 10, "bold"))
+        self._ts_step_label.pack(side=tk.RIGHT, padx=(4, 8))
+        self._ts_progress = ttk.Progressbar(ctrl, length=300, mode="determinate")
+        self._ts_progress.pack(side=tk.RIGHT, padx=4)
 
         # 卡片容器 (Canvas + Scrollbar 实现滚动)
         container = tk.Frame(dlg)
@@ -510,41 +607,85 @@ class TechStageMixin:
         self._ts_cards = []  # [(widget, data_dict)]
         self._ts_all_results = []
 
-    def _ts_scan_from_watchlist(self, dlg):
-        """从自选股/监测池扫描"""
-        codes = []
-        names = []
-        # 尝试多个来源
-        for attr in ["monitor_stocks", "_monitor_stocks", "self_monitor_stocks", "watchlist_stocks", "_watchlist"]:
-            val = getattr(self, attr, None)
-            if val:
-                if isinstance(val, list):
-                    for item in val:
-                        if isinstance(item, (tuple, list)) and len(item) >= 2:
-                            n, c = item[0], item[1]
-                            codes.append(str(c).strip())
-                            names.append(str(n).strip())
-                break
+        # 🚀 打开即自动扫描: 取所有持仓组 (2=龙头, 4=Main, 6=同花顺, 7-14=标签1-8)
+        dlg.after(200, self._ts_auto_scan_all_groups)
 
-        if not codes:
-            # 最后兜底: 从 db 的 monitor_list
+    def _ts_auto_scan_all_groups(self):
+        """自动取所有持仓组, 去重后跑扫描"""
+        groups = [2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        pairs = []
+        seen = set()
+        for gi in groups:
+            hs = getattr(self, f"holding_stocks_{gi}", [None] * 80)
+            for holding in hs:
+                if not holding:
+                    continue
+                name, code = holding
+                m = re.search(r"(\d{6})", str(code))
+                if m:
+                    c = m.group(1)
+                    if c not in seen:
+                        seen.add(c)
+                        pairs.append((str(name or c).strip(), c))
+        print(f"[操盘阶段] 自动扫描: 从 {len(groups)} 组取到 {len(pairs)} 只 (去重后)")
+        if pairs:
+            self._ts_status.set(f"📊 从 {len(groups)} 组取到 {len(pairs)} 只 → 开始扫描...")
+            self._ts_run_scan(pairs)
+        else:
+            self._ts_status.set("⚠️ 所有持仓组都是空的, 请先在 Main 等标签页添加股票")
+
+    def _ts_scan_from_watchlist(self, dlg):
+        """从自选股/监测池扫描 —— 用主程序已有的持仓股列表"""
+        pairs = []
+
+        # 1. 优先用 _get_self_holding_monitor_stocks (龙头股+Main+同花顺+标签1-8, 去重)
+        try:
+            fn = getattr(self, "_get_self_holding_monitor_stocks", None)
+            if fn:
+                stocks = fn()
+                for item in stocks:
+                    if isinstance(item, (tuple, list)) and len(item) >= 2:
+                        pairs.append((str(item[0]).strip() or str(item[1]), str(item[1]).strip()))
+        except Exception as e:
+            print(f"[操盘阶段] ⚠️ _get_self_holding_monitor_stocks 失败: {e}")
+
+        # 2. 还不够的话, 再补 _get_main_holding_stocks (Main 标签页)
+        if len(pairs) < 3:
             try:
-                import sqlite3
-                db = getattr(self, "_db_conn", None)
-                if db:
-                    cur = db.execute("SELECT code, name FROM monitor_list LIMIT 100")
-                    for row in cur.fetchall():
-                        codes.append(row[0])
-                        names.append(row[1])
+                fn2 = getattr(self, "_get_main_holding_stocks", None)
+                if fn2:
+                    for item in fn2():
+                        if isinstance(item, (tuple, list)) and len(item) >= 2:
+                            pairs.append((str(item[0]).strip(), str(item[1]).strip()))
             except Exception:
                 pass
 
-        if not codes:
-            # 再兜底: 提示用户手动输入
+        # 3. 再补 _get_monitor_holding_stocks (全部组)
+        if len(pairs) < 3:
+            try:
+                fn3 = getattr(self, "_get_monitor_holding_stocks", None)
+                if fn3:
+                    for item in fn3():
+                        if isinstance(item, (tuple, list)) and len(item) >= 2:
+                            pairs.append((str(item[0]).strip(), str(item[1]).strip()))
+            except Exception:
+                pass
+
+        # 去重 (按代码)
+        seen = set()
+        unique = []
+        for name, code in pairs:
+            code6 = re.search(r"(\d{6})", str(code))
+            if code6 and code6.group(1) not in seen:
+                seen.add(code6.group(1))
+                unique.append((name, code6.group(1)))
+
+        if not unique:
+            # 兜底: 手动输入
             self._ts_input_codes(dlg)
             return
 
-        self._ts_run_scan(list(zip(names, codes)))
+        self._ts_run_scan(unique)
 
     def _ts_input_codes(self, dlg):
         """弹窗让用户输入代码"""
@@ -577,86 +718,111 @@ class TechStageMixin:
         ttk.Button(sub, text="🔍 开始扫描", command=_go).pack(pady=6)
 
     def _ts_run_scan(self, pairs):
-        """后台扫描线程 —— 逐只跑 AKShare + 分析"""
+        """后台扫描线程 —— 逐只跑 AKShare + 分析, 带分步骤进度"""
         import akshare as ak
 
-        # 清空旧卡片
-        for w in self._ts_card_frame.winfo_children():
-            w.destroy()
+        # 清空旧卡片 (主线程)
+        try:
+            if hasattr(self, '_ts_card_frame') and self._ts_card_frame.winfo_exists():
+                for w in self._ts_card_frame.winfo_children():
+                    w.destroy()
+        except Exception:
+            pass
         self._ts_cards = []
         self._ts_all_results = []
+        dlg_ref = self._ts_dlg  # 主线程缓存, 后续只用这个引用
 
-        self._ts_status.set(f"⏳ 开始扫描 {len(pairs)} 只...")
-        self._ts_progress["maximum"] = len(pairs)
-        self._ts_progress["value"] = 0
+        N = len(pairs)
+
+        # 初始化进度条 (主线程)
+        try:
+            self._ts_progress.configure(maximum=N * 3, value=0)  # 3步/只: K线+基金+分析
+            self._ts_status.set(f"⏳ 准备扫描 {N} 只...")
+            self._ts_step_label.configure(text="准备中...")
+        except Exception:
+            pass
+
+        def _ui_update(step_text, bar_val):
+            """🔒 主线程安全的 UI 更新 (必须通过 after 调)"""
+            try:
+                self._ts_progress.configure(value=bar_val)
+                pct = int(bar_val / (N * 3) * 100)
+                self._ts_status.set(f"📊 {step_text}  ({bar_val}/{N*3} 步骤, {pct}%)")
+                self._ts_step_label.configure(text=f"[{pct}%] {step_text}")
+            except Exception:
+                pass
 
         def _run():
             results = []
+            step_counter = [0]  # 用列表当可变计数器
+
             for i, (name, code) in enumerate(pairs):
+                code6 = re.search(r"(\d{6})", str(code))
+                if not code6:
+                    results.append({"name": name, "code": code, "price": 0,
+                                    "analyze": None, "error": "无有效代码"})
+                    continue
+                code6 = code6.group(1)
+
+                # ── Step 1: 拉 K 线 ──
+                dlg_ref.after(0, lambda n=name, idx=i:
+                    _ui_update(f"拉K线 {idx+1}/{N} — {n}", step_counter[0]))
+                df = None
                 try:
-                    code6 = re.search(r"(\d{6})", str(code)).group(1)
-                    # 1. 拉 K 线 (AKShare)
-                    df = None
-                    for market_key in ["sh", "sz", "bj"]:
-                        try:
-                            df = ak.stock_zh_a_hist(symbol=code6, period="daily",
-                                                    start_date=(datetime.now() - timedelta(days=400)).strftime("%Y%m%d"),
-                                                    end_date=datetime.now().strftime("%Y%m%d"),
-                                                    adjust="qfq")
-                            if df is not None and len(df) >= 60:
-                                break
-                        except Exception:
-                            continue
+                    df = ak.stock_zh_a_hist(symbol=code6, period="daily",
+                                            start_date=(datetime.now() - timedelta(days=400)).strftime("%Y%m%d"),
+                                            end_date=datetime.now().strftime("%Y%m%d"),
+                                            adjust="qfq")
+                except Exception:
+                    pass
+                step_counter[0] += 1
 
-                    if df is None or len(df) < 60:
-                        # 用实时数据补
-                        try:
-                            spot = ak.stock_zh_a_spot_em()
-                            row = spot[spot["代码"] == code6]
-                            if len(row) > 0:
-                                price = float(row.iloc[0]["最新价"])
-                                results.append({
-                                    "name": name or row.iloc[0]["名称"],
-                                    "code": code6,
-                                    "price": price,
-                                    "analyze": None,
-                                    "error": "K线不足",
-                                })
-                        except Exception:
-                            pass
-                        continue
-
-                    # 2. 拉基金持仓 (可选, 失败不阻塞)
-                    fund_df = None
-                    try:
-                        fund_df = ak.stock_fund_stock_holder(symbol=code6)
-                    except Exception:
-                        pass
-
-                    # 3. 分析
-                    analysis = analyze_trading_stage(df, fund_df)
+                if df is None or len(df) < 60:
                     results.append({
                         "name": name, "code": code6,
-                        "price": float(df.iloc[-1]["收盘"]),
-                        "analyze": analysis, "error": None,
+                        "price": 0, "analyze": None,
+                        "error": f"K线不足({len(df) if df is not None else 0}行)",
                     })
+                    # 跳过剩余 2 步
+                    step_counter[0] += 2
+                    dlg_ref.after(0, lambda n=name, idx=i:
+                        _ui_update(f"⚠️ {idx+1}/{N} {n} K线不足, 跳过", step_counter[0]))
+                    time.sleep(0.15)
+                    continue
 
+                # ── Step 2: 拉基金持仓 ──
+                dlg_ref.after(0, lambda n=name, idx=i:
+                    _ui_update(f"拉基金持仓 {idx+1}/{N} — {n}", step_counter[0]))
+                fund_df = None
+                try:
+                    fund_df = ak.stock_fund_stock_holder(symbol=code6)
+                except Exception:
+                    pass
+                step_counter[0] += 1
+
+                # ── Step 3: 分析 ──
+                dlg_ref.after(0, lambda n=name, idx=i:
+                    _ui_update(f"分析操盘阶段 {idx+1}/{N} — {n}", step_counter[0]))
+                try:
+                    analysis = analyze_trading_stage(df, fund_df)
                 except Exception as e:
-                    results.append({
-                        "name": name, "code": code,
-                        "price": 0, "analyze": None, "error": str(e)[:60],
-                    })
+                    analysis = None
+                    print(f"[操盘阶段] 分析异常 {name}: {e}")
+                step_counter[0] += 1
 
-                if self._ts_dlg and self._ts_dlg.winfo_exists():
-                    self._ts_dlg.after(0, lambda i=i, n=name: (
-                        self._ts_progress.configure(value=i + 1),
-                        self._ts_status.set(f"⏳ {i+1}/{len(pairs)} — {n}")
-                    ))
-                time.sleep(0.3)  # 节流 AKShare 频率
+                results.append({
+                    "name": name, "code": code6,
+                    "price": float(df.iloc[-1]["收盘"]),
+                    "analyze": analysis, "error": None,
+                })
 
-            # 完成
-            if self._ts_dlg and self._ts_dlg.winfo_exists():
-                self._ts_dlg.after(0, lambda: self._ts_finish_scan(results))
+                dlg_ref.after(0, lambda n=name, idx=i, sc=step_counter[0]:
+                    _ui_update(f"✅ {idx+1}/{N} 完成 — {n}", sc))
+                time.sleep(0.15)
+
+            # ── 完成 ──
+            dlg_ref.after(0, lambda: _ui_update("全部扫描完成, 渲染卡片中...", N * 3))
+            dlg_ref.after(200, lambda: self._ts_finish_scan(results))
 
         threading.Thread(target=_run, daemon=True).start()
 

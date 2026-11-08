@@ -1003,6 +1003,323 @@ class StockDetailMixin:
             show_bt_var = tk.BooleanVar(value=True)
             ttk.Checkbutton(top, text="🛒买卖点", variable=show_bs_var).pack(side=tk.LEFT, padx=(10,3))
             ttk.Checkbutton(top, text="💡胜率提示", variable=show_bt_var).pack(side=tk.LEFT, padx=3)
+            # 🧠 操盘阶段分析按钮
+            stage_result = [None]  # 可变容器存分析结果
+            stage_bar_visible = [False]
+            stage_bar_frame = ttk.Frame(win)  # 延迟 pack, 初始隐藏
+            stage_bar_label_var = tk.StringVar(value="🧠 操盘阶段分析  (点按钮运行)")
+            stage_stage_var = tk.StringVar(value="—")
+            stage_score_var = tk.StringVar(value="—")
+            stage_institution_var = tk.StringVar(value="—")
+            stage_trend_var = tk.StringVar(value="—")
+            stage_ma_var = tk.StringVar(value="—")
+            stage_vol_var = tk.StringVar(value="—")
+            stage_kline_var = tk.StringVar(value="—")
+            stage_rsi_var = tk.StringVar(value="—")
+            stage_macd_var = tk.StringVar(value="—")
+            stage_ytd_var = tk.StringVar(value="—")
+            stage_pos_var = tk.StringVar(value="—")
+
+            _STAGE_COLORS = {
+                "吸筹": "#FBC02D", "洗盘": "#42A5F5", "拉升": "#66BB6A",
+                "出货": "#EF5350", "下跌": "#616161", "底部横盘": "#AB47BC",
+            }
+
+            def _toggle_stage_bar():
+                """展开/折叠操盘阶段面板"""
+                if stage_bar_visible[0]:
+                    stage_bar_frame.pack_forget()
+                    stage_bar_visible[0] = False
+                else:
+                    # 用 chart_fr_ref[0] (延迟绑定的 Frame 对象)
+                    anchor = chart_fr_ref[0] if chart_fr_ref[0] else win
+                    stage_bar_frame.pack(fill=tk.X, before=anchor)
+                    stage_bar_visible[0] = True
+
+            chart_fr_ref = [None]  # 延迟绑定 — 在 chart_fr 创建后赋值
+
+            def _run_stage_analysis():
+                """跑操盘阶段分析 — 用 kline_data 现成的 DataFrame"""
+                # 显示进度
+                stage_stage_var.set("⏳ 分析中...")
+                stage_bar_label_var.set("🧠 操盘阶段分析 — 正在计算...")
+                win.update_idletasks()
+
+                try:
+                    from ui.tab_tech_stage import analyze_trading_stage
+                    df = kline_data.get("data")
+                    if df is None or len(df) < 60:
+                        stage_stage_var.set("❌ K线数据不足60天")
+                        return
+
+                    # 用 AKShare 拉基金持仓 (并行尝试, 失败不阻塞)
+                    fund_df = None
+                    try:
+                        import re as _re
+                        import akshare as _ak
+                        code6 = _re.search(r"(\d{6})", stock_name + str(kline_data.get("code", ""))).group(1)
+                        # 从 kline_data 里找 code
+                        fund_df = _ak.stock_fund_stock_holder(symbol=code6)
+                    except Exception:
+                        pass
+
+                    result = analyze_trading_stage(df, fund_df)
+                    stage_result[0] = result
+
+                    if not result:
+                        stage_stage_var.set("❌ 分析返回空")
+                        return
+
+                    # 填充面板
+                    stage_name = result.get("stage", "—")
+                    stage_score = result.get("stage_score", 0)
+                    color = _STAGE_COLORS.get(stage_name, "#455A64")
+                    stage_stage_var.set(f"{stage_name}  ({stage_score}/100)")
+                    # 改颜色
+                    try:
+                        for child in stage_bar_frame.winfo_children():
+                            if isinstance(child, ttk.Frame) and str(child.cget("style")).find("stage") >= 0:
+                                break
+                        # 找到 stage_stage_label 改颜色
+                    except Exception:
+                        pass
+
+                    inst = result.get("institution_vs_hot_money", "")
+                    inst_score_n = result.get("institution_score", 0)
+                    hot_score_n = result.get("hot_money_score", 0)
+                    fund_cnt = result.get("fund_count", "—")
+                    stage_institution_var.set(
+                        f"{inst}  机构{inst_score_n} 游资{hot_score_n}  基金{fund_cnt}家"
+                    )
+
+                    trend = result.get("trend", "—")
+                    stage_trend_var.set(trend)
+
+                    ma = result.get("ma_status", {})
+                    # ma_status 是 {MA5: {pos,dir,val}, ...}
+                    arr_labels = []
+                    pos_strs = []
+                    dir_strs = []
+                    for ma_name in ["MA5", "MA10", "MA20", "MA60"]:
+                        info = ma.get(ma_name, {}) if isinstance(ma, dict) else {}
+                        if info:
+                            arr_labels.append(ma_name)
+                            pos_strs.append(f"{info.get('pos','?')}")
+                            d = info.get('dir', '→')
+                            if d == '↑': dir_strs.append(f"{ma_name}↑")
+                            elif d == '↓': dir_strs.append(f"{ma_name}↓")
+                            else: dir_strs.append(f"{ma_name}→")
+                    # 排列判断
+                    arr_type = "缠绕"
+                    closes = df["收盘"].values.astype(float)
+                    if len(closes) > 60:
+                        ma5v = ma.get("MA5", {}).get("val", closes[-1])
+                        ma10v = ma.get("MA10", {}).get("val", closes[-1])
+                        ma20v = ma.get("MA20", {}).get("val", closes[-1])
+                        ma60v = ma.get("MA60", {}).get("val", closes[-1])
+                        if ma5v > ma10v > ma20v > ma60v: arr_type = "多头排列"
+                        elif ma5v < ma10v < ma20v < ma60v: arr_type = "空头排列"
+                    stage_ma_var.set(f"排列={arr_type}  位置={'/'.join(pos_strs)}  方向={' '.join(dir_strs)}")
+
+                    vol = result.get("volume_status", {})
+                    if isinstance(vol, dict):
+                        stage_vol_var.set(f"{vol.get('state','—')}  量比={vol.get('vratio','—')}")
+                    else:
+                        stage_vol_var.set(str(vol))
+
+                    kline = result.get("kline_pattern", {})
+                    if isinstance(kline, dict):
+                        stage_kline_var.set(f"{kline.get('形态', kline.get('pattern', '—'))}")
+                    else:
+                        stage_kline_var.set(str(kline))
+
+                    stage_rsi_var.set(f"RSI={result.get('rsi', '—')}")
+
+                    macd_dif = result.get("macd_dif", "—")
+                    macd_signal = "—"
+                    # 简单判断金叉死叉
+                    if isinstance(macd_dif, (int, float)) and macd_dif > 0:
+                        macd_signal = "DIF>0"
+                    elif isinstance(macd_dif, (int, float)):
+                        macd_signal = "DIF<0"
+                    stage_macd_var.set(f"{macd_signal}  DIF={macd_dif}")
+
+                    stage_ytd_var.set(f"20日={result.get('ret20_pct', '—')}%  60日={result.get('ret60_pct', '—')}%")
+                    stage_pos_var.set(f"60日位置={result.get('pos_range_pct', '—')}%")
+
+                    stage_bar_label_var.set(f"🧠 操盘阶段分析 — ✅ {stage_name} ({stage_score}分)")
+
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    stage_stage_var.set(f"❌ 异常: {str(e)[:40]}")
+
+            # ── ❓ 帮助弹窗 ──
+            _HELP_TEXT = """
+🧠 操盘阶段分析 — 判定逻辑详解
+═════════════════════════════════════════
+
+📊 六大阶段 (评分制, 取最高分者)
+─────────────────────────────────────────
+
+🟡 吸筹 (最高分 70)
+  · 60日位置 < 30%         → +20分
+  · 中期下跌+低位          → +15分
+  · 低位缩量/地量          → +15分
+  · 低位MACD金叉(DIF<0)    → +10分
+  · MA5上穿MA20(MA20未拐头)→ +10分
+
+🔵 洗盘 (最高分 70)
+  · 回调缩量+MA5拐头       → +20分
+  · 高位缩量回调           → +15分
+  · MA5上穿缩量           → +15分
+  · K线形态(锤子/启明星)   → +10分
+  · RSI 25-40+高位         → +10分
+
+🟢 拉升 (最高分 85)
+  · 上升趋势+多头排列      → +30分 ⭐最重
+  · 20日涨>10%+MA20向上    → +20分
+  · 放量/倍量+20日涨>5%    → +15分
+  · K线形态(红三兵/看涨)   → +10分
+  · 高位区+上涨            → +10分
+
+🔴 出货 (最高分 85)
+  · 高位(>80%)放量滞涨     → +25分 ⭐最重
+  · 高位均线拐头           → +20分
+  · K线形态(射击/黄昏/看跌)→ +15分
+  · MACD高位死叉(DIF>0)    → +15分
+  · RSI > 75               → +10分
+  · 高位地量(无人接盘)     → +10分
+
+⚫ 下跌 (最高分 65)
+  · 下降趋势+空头排列      → +30分 ⭐最重
+  · 60日跌>15%+MA20向下    → +20分
+  · 低位+MA60向下          → +15分
+
+🟣 底部横盘 (最高分 60)
+  · 震荡趋势+低位          → +25分 ⭐最重
+  · 均线缠绕+低位          → +20分
+  · 地量+低位              → +15分
+
+═════════════════════════════════════════
+
+🏛 机构票 vs 🎭 游资票 (0-100分制)
+─────────────────────────────────────────
+
+机构票加分:
+  · 沿MA20多头排列          → +25分
+  · 价格距MA20 < 3%         → +15分
+  · MA5/MA20斜率比 < 1.5    → +15分
+  · 20日涨3-20%+小实体日多  → +20分
+  · 基金重仓(每50家+15)     → +30分封顶
+
+游资票加分:
+  · MA5/MA20斜率比 > 3      → +20分
+  · 近20日涨停 ≥ 2次        → +20分
+  · 近20日大波动日 ≥ 8天    → +15分
+
+判定: 机构>游资+10且基金≥60 → 机构票
+      游资>机构+15           → 游资票
+      其他                    → 混合型
+
+═════════════════════════════════════════
+
+📐 关键指标说明
+─────────────────────────────────────────
+
+· 60日位置% = (当前价-60日最低)/(60日最高-60日最低)
+  → < 30% 低位区, > 70% 高位区
+
+· 均线排列: MA5 > MA10 > MA20 > MA60 = 多头排列 ↑
+            MA5 < MA10 < MA20 < MA60 = 空头排列 ↓
+            均线交叉纠缠 = 缠绕 →
+
+· 量能: 放量 > 1.5倍均量, 倍量 > 2倍
+        缩量 < 0.7倍均量, 地量 < 0.5倍
+
+· MACD金叉 = DIF上穿DEA (红柱转大)
+  MACD死叉 = DIF下穿DEA (绿柱转大)
+
+· RSI: < 30 超卖区, 30-70 常态, > 70 超买区
+
+═════════════════════════════════════════
+
+⚠️ 使用注意
+  1. 60日位置%是核心 — 高低位决定很多评分
+  2. 量能状态(缩量/放量)常与位置配合判断
+  3. MA60方向是长期趋势的关键锚点
+  4. 机构/游资票型会影响后续走势节奏
+  5. 阶段评分≥60可信度较高, <40需多观察
+  6. 本分析仅供参考, 不构成投资建议
+"""
+
+            def _show_stage_help():
+                """弹出操盘阶段帮助窗口"""
+                dlg = tk.Toplevel(win)
+                dlg.title("🧠 操盘阶段 — 判定逻辑详解")
+                dlg.geometry("720x640")
+                dlg.configure(bg="#FAFAFA")
+                # 居中
+                dlg.transient(win)
+                dlg.grab_set()
+
+                # 顶部标题条
+                tk.Label(dlg, text="🧠 操盘阶段分析 — 判定逻辑详解",
+                         bg="#1565C0", fg="white",
+                         font=("", 14, "bold"), pady=10).pack(fill=tk.X)
+
+                # 滚动文本
+                from tkinter import scrolledtext
+                txt = scrolledtext.ScrolledText(dlg, wrap=tk.WORD,
+                                                font=("Menlo", 11),
+                                                bg="#FAFAFA", fg="#222",
+                                                borderwidth=0, highlightthickness=0)
+                txt.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
+                txt.insert("1.0", _HELP_TEXT.strip())
+                txt.configure(state=tk.DISABLED)
+
+                # 底部关闭
+                ttk.Button(dlg, text="关闭", command=dlg.destroy).pack(pady=8)
+
+            # 顶栏按钮 (从右往左 pack, ❓ 在最右)
+            ttk.Button(top, text="🧠操盘阶段", command=_run_stage_analysis).pack(side=tk.RIGHT, padx=(10, 0))
+            ttk.Button(top, text="📊展开/折叠", command=_toggle_stage_bar).pack(side=tk.RIGHT, padx=(10, 0))
+            ttk.Button(top, text="❓帮助", command=_show_stage_help).pack(side=tk.RIGHT, padx=(10, 0))
+
+            # 操盘阶段结果面板 (初始隐藏, 点击后展开)
+            stage_bar_frame.configure(style="Card.TFrame")
+            tk.Label(stage_bar_frame, textvariable=stage_bar_label_var,
+                     bg="#E3F2FD", fg="#1565C0",
+                     font=("", 10, "bold"), anchor="w").pack(fill=tk.X)
+
+            body = ttk.Frame(stage_bar_frame)
+            body.pack(fill=tk.X, padx=6, pady=4)
+
+            # Grid 布局: 6 列 × 2 行
+            _LABEL_CFG = dict(bg="#FAFAFA", fg="#555", font=("", 9))
+            _VALUE_CFG = dict(bg="#FAFAFA", fg="#000", font=("", 9, "bold"))
+
+            rows = [
+                ("🎯 阶段:", stage_stage_var, "🏛 票型:", stage_institution_var,
+                 "📈 趋势:", stage_trend_var, "📊 均线:", stage_ma_var,
+                 "💰 量能:", stage_vol_var, "🕯 K线形态:", stage_kline_var),
+                ("📉 RSI:", stage_rsi_var, "📊 MACD:", stage_macd_var,
+                 "📅 涨跌:", stage_ytd_var, "📍 位置:", stage_pos_var,
+                 "", None, "", None),
+            ]
+            for r, row in enumerate(rows):
+                for c in range(0, len(row), 2):
+                    lbl_text, var = row[c], row[c+1]
+                    if not lbl_text:
+                        continue
+                    tk.Label(body, text=lbl_text, **_LABEL_CFG).grid(row=r, column=c, sticky="e", padx=4, pady=2)
+                    tk.Label(body, textvariable=var, **_VALUE_CFG).grid(row=r, column=c+1, sticky="w", padx=4, pady=2)
+            for c in range(0, 12):
+                body.columnconfigure(c, weight=1)
+
+            # 默认展开并自动分析
+            win.after(300, lambda: (_toggle_stage_bar(), _run_stage_analysis()))
+
             chart_inner = None
             status_var = tk.StringVar(value="")
             # hover tooltip 浮动窗口
@@ -1585,6 +1902,7 @@ class StockDetailMixin:
             # 图表框架 - 在所有按钮之后创建
             chart_fr = ttk.Frame(win, padding=(4, 0, 4, 4))
             chart_fr.pack(fill=tk.BOTH, expand=True)
+            chart_fr_ref[0] = chart_fr  # 🔒 操盘阶段面板锚点绑定
             chart_inner = ttk.Frame(chart_fr)
             chart_inner.pack(fill=tk.BOTH, expand=True)
             # 添加快速切换按钮
