@@ -636,7 +636,8 @@ class ChoiceMixin:
             return {"ok": False, "error": str(e)[:200]}
 
     def _choice_mcp_parse_result(self, mcp_result: dict) -> list:
-        """解析 MCP tools/call 返回 → [(sheet_name, columns, items)]"""
+        """解析 MCP tools/call 返回 → [(sheet_name, columns, items)]
+        同时识别业务提示(message-only, 如积分耗尽)"""
         sheets = []
         content = mcp_result.get("content") or []
         for c in content:
@@ -645,6 +646,11 @@ class ChoiceMixin:
                     inner = json.loads(c["text"])
                 except Exception:
                     sheets.append(("📝 原始文本", [], [[c["text"]]]))
+                    continue
+                # 业务提示: 只有 message 没有 data (如积分耗尽)
+                if "message" in inner and "data" not in inner:
+                    msg = inner["message"]
+                    sheets.append(("⚠️ 提示", ["消息"], [[msg]]))
                     continue
                 data_list = inner.get("data") or []
                 for d in data_list:
@@ -964,53 +970,77 @@ class ChoiceMixin:
     ]
 
     def _show_institutional_buy(self):
-        """🚀 机构大幅增持 —— 弹窗 + 自动扫描"""
+        """🚀 机构大幅增持 —— 左右分栏弹窗 (左扫描 / 右详情报告)"""
         dlg = tk.Toplevel(getattr(self, "root", None))
         dlg.title("🚀 机构大幅增持扫描")
-        dlg.geometry("1200x720")
+        dlg.geometry("1420x780")
         dlg.transient(getattr(self, "root", None))
 
-        tk.Label(dlg, text="🚀 机构大幅增持扫描",
-                 font=("", 14, "bold")).pack(anchor="w", padx=10, pady=(8, 4))
-        tk.Label(dlg, text="基于东方财富妙想 MCP 数据库，快速筛选机构持仓大幅增加的股票",
-                 foreground="gray", font=("", 9)).pack(anchor="w", padx=10)
+        # 顶栏
+        top = ttk.Frame(dlg)
+        top.pack(fill=tk.X, padx=10, pady=(8, 4))
+        tk.Label(top, text="🚀 机构大幅增持扫描",
+                 font=("", 14, "bold")).pack(side=tk.LEFT)
+        self._inst_buy_status = tk.StringVar(value="⏳ 加载中...")
+        ttk.Label(top, textvariable=self._inst_buy_status,
+                  foreground="blue").pack(side=tk.LEFT, padx=12)
 
-        # API Key 检查
-        keys = _load_apikey()
-        mx_key = keys.get("mx_apikey") or keys.get("skills_apikey") or ""
-        if not mx_key:
-            ttk.Label(dlg, text="⚠️ 需先配置妙想 MCP API Key → 打开 Choice dialog → 🔑",
-                      foreground="red", font=("", 10)).pack(pady=20)
-            ttk.Button(dlg, text="打开 Choice 配置",
-                       command=lambda: (dlg.destroy(), self._show_choice_dialog())).pack()
+        # 主分栏 PanedWindow
+        pw = ttk.PanedWindow(dlg, orient=tk.HORIZONTAL)
+        pw.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
 
-        # ── 扫描按钮区 ──
-        btn_frame = ttk.LabelFrame(dlg, text="选择扫描维度", padding=6)
-        btn_frame.pack(fill=tk.X, padx=10, pady=8)
+        # ═══ 左栏: 扫描 + 结果 ═══
+        left = ttk.Frame(pw, width=700)
+        pw.add(left, weight=3)
 
-        for label, q in self._INST_BUY_PRESETS:
-            ttk.Button(btn_frame, text=f"🚀 {label}",
-                       width=18,
-                       command=lambda qq=q: self._run_inst_buy_scan(qq, dlg)
-                       ).pack(side=tk.LEFT, padx=6, pady=4)
-
-        ttk.Button(btn_frame, text="📋 打开 Choice 完整面板",
+        # 扫描按钮
+        scan_frame = ttk.LabelFrame(left, text="🔍 扫描维度", padding=6)
+        scan_frame.pack(fill=tk.X, padx=6, pady=4)
+        for i, (label, q) in enumerate(self._INST_BUY_PRESETS):
+            btn = ttk.Button(scan_frame, text=f"🚀 {label}", width=16,
+                             command=lambda qq=q: self._run_inst_buy_scan(qq))
+            btn.grid(row=0, column=i, padx=4, pady=2)
+        ttk.Button(scan_frame, text="📋 Choice面板",
                    command=lambda: (dlg.destroy(), self._show_choice_dialog())
-                   ).pack(side=tk.RIGHT, padx=6)
+                   ).grid(row=0, column=len(self._INST_BUY_PRESETS), padx=4, pady=2)
 
-        # ── 结果展示区 ──
-        self._inst_buy_status = tk.StringVar(value="点上方按钮开始扫描")
-        ttk.Label(dlg, textvariable=self._inst_buy_status,
-                  foreground="blue").pack(anchor="w", padx=10)
+        # 结果 Notebook
+        tk.Label(left, text="📊 扫描结果 (双击行 → 右栏展开详情)",
+                 font=("", 10, "bold")).pack(anchor="w", padx=8, pady=(4, 2))
+        self._inst_buy_nb = ttk.Notebook(left)
+        self._inst_buy_nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 4))
 
-        tree_wrap = ttk.Frame(dlg)
-        tree_wrap.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
+        # ═══ 右栏: 详情报告面板 ═══
+        right = ttk.Frame(pw, width=620)
+        pw.add(right, weight=2)
 
-        self._inst_buy_nb = ttk.Notebook(tree_wrap)
-        self._inst_buy_nb.pack(fill=tk.BOTH, expand=True)
+        tk.Label(right, text="📋 详情报告",
+                 font=("", 11, "bold")).pack(anchor="w", padx=6, pady=(4, 2))
+        self._inst_detail_nb = ttk.Notebook(right)
+        self._inst_detail_nb.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
 
-        dlg.after(200, lambda: self._run_inst_buy_scan(
-            self._INST_BUY_PRESETS[0][1], dlg))
+        # 两个 tab: 机构持仓历史 / 资讯研报
+        self._inst_holding_tab = ttk.Frame(self._inst_detail_nb)
+        self._inst_detail_nb.add(self._inst_holding_tab, text="🏒 机构持仓历史")
+        self._inst_news_tab = ttk.Frame(self._inst_detail_nb)
+        self._inst_detail_nb.add(self._inst_news_tab, text="📰 资讯研报")
+
+        # 空状态提示
+        tk.Label(self._inst_holding_tab,
+                 text="👈 双击左侧表格任一行\n\n自动展开该股票的机构持仓历史",
+                 foreground="gray", font=("", 11), justify="center"
+                 ).pack(expand=True)
+        tk.Label(self._inst_news_tab,
+                 text="👈 双击左侧表格任一行\n\n自动加载该股票的资讯研报",
+                 foreground="gray", font=("", 11), justify="center"
+                 ).pack(expand=True)
+
+        # 保存当前股票代码/名称, 供双击使用
+        self._inst_buy_dlg = dlg
+        self._inst_current_stock = {"code": "", "name": ""}
+
+        dlg.after(300, lambda: self._run_inst_buy_scan(
+            self._INST_BUY_PRESETS[0][1]))
 
     def _run_inst_buy_scan(self, query: str, parent=None):
         """后台线程跑机构增持扫描"""
@@ -1039,6 +1069,18 @@ class ChoiceMixin:
         if not sheets:
             self._inst_buy_status.set(f"⚠️ 返回空数据 ({dt:.1f}s)")
             return
+
+        # 检测业务提示 (如积分耗尽)
+        for sname, _, sitems in sheets:
+            if "提示" in sname and sitems:
+                msg = str(sitems[0][0]) if sitems[0] else ""
+                if "积分" in msg:
+                    self._inst_buy_status.set("💰 MCP 积分用完啦 → https://ai.eastmoney.com/work 购买")
+                else:
+                    self._inst_buy_status.set(f"⚠️ {msg[:40]}")
+                break
+        else:
+            self._inst_buy_status.set(f"✅ 扫描中 ({dt:.1f}s)...")
 
         for sheet_name, cols, items in sheets[:5]:
             sheet_frame = ttk.Frame(self._inst_buy_nb)
@@ -1078,25 +1120,177 @@ class ChoiceMixin:
             vsb.pack(side=tk.RIGHT, fill=tk.Y)
             hsb.pack(side=tk.BOTTOM, fill=tk.X)
 
-            # 双击行 → 打开 Choice 查这只股票详情
-            def _on_dblclick(event, _tv=tv):
+            # 选中/双击行 → 右栏展开该股票详情报告
+            def _on_select(event=None, _tv=tv):
                 sel = _tv.selection()
                 if not sel: return
                 vals = _tv.item(sel[0], "values")
-                if len(vals) >= 2:
-                    code, name = vals[1], vals[2] if len(vals) > 2 else ""
-                    q = f"{name}({code}) 机构持仓历史变化、机构数量、累计持股"
-                    self._show_choice_dialog()
-                    # 延迟填查询
-                    import time as _t
-                    _t.sleep(0.3)
-                    try:
-                        self._choice_query_ent.delete(0, tk.END)
-                        self._choice_query_ent.insert(0, q)
-                        self._choice_do_mcp("mx_ashare_finance_data")
-                    except Exception:
-                        pass
-            tv.bind("<Double-1>", _on_dblclick)
+                # 列顺序: 序号、代码、名称, 跳过序号列
+                code = str(vals[1]) if len(vals) > 1 else ""
+                name = str(vals[2]) if len(vals) > 2 else ""
+                if code and name:
+                    self._inst_current_stock = {"code": code, "name": name}
+                    self._inst_buy_status.set(f"🔄 加载 {name}({code}) 详情...")
+                    self._load_inst_detail(code, name)
+            tv.bind("<<TreeviewSelect>>", _on_select)
+            tv.bind("<Double-1>", _on_select)
 
         self._inst_buy_status.set(
             f"✅ 扫描完成: {sum(len(i) for _, _, i in sheets)} 条记录 / {len(sheets)} 张表 ({dt:.1f}s)")
+
+    def _load_inst_detail(self, code: str, name: str):
+        """右栏加载机构持仓历史 + 资讯研报 (两条 MCP 并行)"""
+        # 清空右栏
+        for w in self._inst_holding_tab.winfo_children():
+            w.destroy()
+        for w in self._inst_news_tab.winfo_children():
+            w.destroy()
+
+        tk.Label(self._inst_holding_tab, text=f"⏳ {name}({code}) 机构持仓加载中...",
+                 foreground="gray").pack(pady=40)
+        tk.Label(self._inst_news_tab, text=f"⏳ {name} 资讯研报加载中...",
+                 foreground="gray").pack(pady=40)
+
+        holding_q = f"{name}({code}) 机构持仓历史变化、持股机构家数、累计持股数量、基金/社保/其他机构分类"
+        news_q = f"{name} 最新券商研报、评级观点、目标价、行业资讯"
+
+        def _run():
+            import concurrent.futures
+            t0 = time.time()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                f_hold = pool.submit(self._choice_mcp_call, "mx_ashare_finance_data", holding_q)
+                f_news = pool.submit(self._choice_mcp_call, "mx_finance_search_news", news_q)
+                holding_result = f_hold.result(timeout=60)
+                news_result = f_news.result(timeout=60)
+            dt = time.time() - t0
+            if self._inst_buy_dlg and self._inst_buy_dlg.winfo_exists():
+                self._inst_buy_dlg.after(0, lambda: (
+                    self._render_inst_holding(code, name, holding_result),
+                    self._render_inst_news(code, name, news_result, dt),
+                ))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _render_inst_holding(self, code, name, result):
+        """渲染机构持仓历史到右栏"""
+        for w in self._inst_holding_tab.winfo_children():
+            w.destroy()
+
+        header = tk.Frame(self._inst_holding_tab)
+        header.pack(fill=tk.X, padx=4, pady=4)
+        tk.Label(header, text=f"🏒 {name}({code}) 机构持仓历史",
+                 font=("", 12, "bold")).pack(side=tk.LEFT)
+
+        if not result.get("ok"):
+            tk.Label(self._inst_holding_tab,
+                     text=f"❌ {result.get('error','加载失败')}",
+                     foreground="red").pack(pady=20)
+            return
+
+        sheets = self._choice_mcp_parse_result(result.get("mcp_result", {}))
+        if not sheets:
+            tk.Label(self._inst_holding_tab, text="📭 无数据",
+                     foreground="gray").pack(pady=20)
+            return
+
+        # 多 sheet 用子 Notebook
+        sub_nb = ttk.Notebook(self._inst_holding_tab)
+        sub_nb.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        for sheet_name, cols, items in sheets[:8]:
+            frame = ttk.Frame(sub_nb)
+            label = sheet_name[:28] + ("..." if len(sheet_name) > 28 else "")
+            sub_nb.add(frame, text=label)
+
+            if not cols or not items:
+                ttk.Label(frame, text="📭 空", foreground="gray").pack(pady=20)
+                continue
+
+            tree_cols = [str(c) for c in cols]
+            tv = ttk.Treeview(frame, columns=tree_cols, show="headings",
+                              height=min(15, len(items)))
+            def _cw(idx, _cols=cols, _items=items):
+                mc = str(_cols[idx] if idx < len(_cols) else "")
+                for row in _items:
+                    if idx < len(row):
+                        cell = str(row[idx])[:60] if row[idx] else ""
+                        if len(cell) > len(mc): mc = cell
+                w = sum(14 if ord(ch) > 127 else 8 for ch in mc)
+                return max(60, min(260, w + 14))
+            for h, w in zip(tree_cols, [_cw(i) for i in range(len(tree_cols))]):
+                tv.heading(h, text=h)
+                tv.column(h, width=w, anchor="w", minwidth=50)
+            for row in items:
+                vals = [str(v)[:80] if v else "" for v in row[:len(tree_cols)]]
+                tv.insert("", tk.END, values=vals)
+
+            vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tv.yview)
+            hsb = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=tv.xview)
+            tv.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+            tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+            hsb.pack(side=tk.BOTTOM, fill=tk.X)
+
+    def _render_inst_news(self, code, name, result, dt=0):
+        """渲染资讯研报到右栏"""
+        for w in self._inst_news_tab.winfo_children():
+            w.destroy()
+
+        header = tk.Frame(self._inst_news_tab)
+        header.pack(fill=tk.X, padx=4, pady=4)
+        tk.Label(header, text=f"📰 {name} 资讯研报",
+                 font=("", 12, "bold")).pack(side=tk.LEFT)
+        if dt:
+            tk.Label(header, text=f"  ({dt:.1f}s)",
+                     foreground="gray").pack(side=tk.LEFT)
+
+        if not result.get("ok"):
+            tk.Label(self._inst_news_tab,
+                     text=f"❌ {result.get('error','加载失败')}",
+                     foreground="red").pack(pady=20)
+            return
+
+        sheets = self._choice_mcp_parse_result(result.get("mcp_result", {}))
+        if not sheets:
+            tk.Label(self._inst_news_tab, text="📭 无资讯数据",
+                     foreground="gray").pack(pady=20)
+            return
+
+        sub_nb = ttk.Notebook(self._inst_news_tab)
+        sub_nb.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        for sheet_name, cols, items in sheets[:5]:
+            frame = ttk.Frame(sub_nb)
+            label = sheet_name[:28] + ("..." if len(sheet_name) > 28 else "")
+            sub_nb.add(frame, text=label)
+
+            if not cols or not items:
+                ttk.Label(frame, text="📭 空", foreground="gray").pack(pady=20)
+                continue
+
+            tree_cols = [str(c) for c in cols]
+            tv = ttk.Treeview(frame, columns=tree_cols, show="headings",
+                              height=min(18, len(items)))
+            def _cw2(idx, _cols=cols, _items=items):
+                mc = str(_cols[idx] if idx < len(_cols) else "")
+                for row in _items:
+                    if idx < len(row):
+                        cell = str(row[idx])[:80] if row[idx] else ""
+                        if len(cell) > len(mc): mc = cell
+                w = sum(14 if ord(ch) > 127 else 8 for ch in mc)
+                return max(60, min(300, w + 14))
+            for h, w in zip(tree_cols, [_cw2(i) for i in range(len(tree_cols))]):
+                tv.heading(h, text=h)
+                tv.column(h, width=w, anchor="w", minwidth=50)
+            for row in items:
+                vals = [str(v)[:100] if v else "" for v in row[:len(tree_cols)]]
+                tv.insert("", tk.END, values=vals)
+
+            vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tv.yview)
+            hsb = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=tv.xview)
+            tv.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+            tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+            hsb.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self._inst_buy_status.set(
+            f"✅ 已加载 {name}({code}): {len(sheets)} 张资讯表")

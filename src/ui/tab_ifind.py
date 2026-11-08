@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from utils.ifind_client import (
-    AUTH_TOKEN,
+    _refresh_token,
     ETF_SYMBOLS_DEFAULT,
     INDEX_SYMBOLS_DEFAULT,
     TRENDING_SIZE_DEFAULT,
@@ -211,7 +211,7 @@ class IfindMixin:
         self._ifind_news_text.bind("<Button-1>", self._on_ifind_news_text_click)
 
         # ── 自动加载: 大盘指数 + 热点资讯 + 默认选中第一项 ──
-        if not AUTH_TOKEN:
+        if not _refresh_token():
             self._ifind_status.set("⚠️ 未授权 iFinD, 请在 Trae 插件里授权")
         else:
             self._ifind_refresh_all(_dlg)

@@ -3,9 +3,11 @@
 - 无 session 模式 (新版 MCP endpoint 不需要 Mcp-Session-Id)
 - 统一工具集: security_highfreq_quotes / search_trending_news / search_news / search_notice / get_security_indicators / fetch_edb / search_edb / search_securities / get_stock_summary
 - 返回格式: {"ok": bool, "data": dict|None, "error": str|None}
+- ✅ 自动刷新 AUTH_TOKEN (每次调用检查 mcp_config.json 是否变化, 防止 1h token 过期)
 """
 import json
 import os
+import time
 import warnings
 from pathlib import Path
 
@@ -15,27 +17,50 @@ import requests
 _PLUGIN_DIR = Path.home() / ".trae-cn" / "plugins" / "trae-remote-official" / "ifind" / "1.5.0" / "skills" / "ifind-finance-data"
 _CONFIG_PATH = _PLUGIN_DIR / "mcp_config.json"
 
-try:
-    _CONFIG = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-except Exception:
-    _CONFIG = {}
+_SERVER_URL = "https://api-mcp.51ifind.com:8643/ds-mcp-servers/hexin-ifind-financial-mcp"
 
-AUTH_TOKEN = os.getenv("IFIND_AUTH_TOKEN") or _CONFIG.get("IFIND_AUTH_TOKEN", "")
-SERVER_URL = "https://api-mcp.51ifind.com:8643/ds-mcp-servers/hexin-ifind-financial-mcp"
+# 缓存 + 上次读取时间 (token 约 1h 过期, 每 5min 检查一次文件)
+_cached_token = ""
+_cached_token_time = 0
+_TOKEN_CHECK_INTERVAL = 300  # 5 分钟
 
 warnings.filterwarnings("ignore", category=Warning)
 
 
+def _refresh_token(force=False) -> str:
+    """自动刷新 AUTH_TOKEN —— 读环境变量或 mcp_config.json, 每 5min 检查一次"""
+    global _cached_token, _cached_token_time
+    now = time.time()
+    if not force and (now - _cached_token_time) < _TOKEN_CHECK_INTERVAL and _cached_token:
+        return _cached_token
+
+    # 1. 环境变量优先
+    tok = os.getenv("IFIND_AUTH_TOKEN", "")
+    # 2. 再读 mcp_config.json
+    if not tok and _CONFIG_PATH.exists():
+        try:
+            cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+            tok = cfg.get("IFIND_AUTH_TOKEN", "")
+        except Exception:
+            tok = ""
+
+    _cached_token = tok
+    _cached_token_time = now
+    return tok
+
+
 def _headers() -> dict:
+    token = _refresh_token()
     return {
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
-        "Authorization": f"Bearer {AUTH_TOKEN}",
+        "Authorization": f"Bearer {token}",
     }
 
 
 def mcp_call(server_type: str, tool_name: str, params: dict, timeout: int = 60) -> dict:
-    """发起一次 MCP tools/call 请求 (无 session)"""
+    """发起一次 MCP tools/call 请求 (无 session) + 401 时自动刷新 token 重试一次"""
+    AUTH_TOKEN = _refresh_token()
     if not AUTH_TOKEN:
         return {"ok": False, "error": "缺少 IFIND_AUTH_TOKEN, 请在 Trae 插件里授权 iFinD"}
 
@@ -46,7 +71,11 @@ def mcp_call(server_type: str, tool_name: str, params: dict, timeout: int = 60) 
         "params": {"name": tool_name, "arguments": params},
     }
     try:
-        resp = requests.post(SERVER_URL, json=payload, headers=_headers(), verify=False, timeout=timeout)
+        resp = requests.post(_SERVER_URL, json=payload, headers=_headers(), verify=False, timeout=timeout)
+        # 401 → token 过期 → 强制刷新 + 重试一次
+        if resp.status_code == 401:
+            _refresh_token(force=True)
+            resp = requests.post(_SERVER_URL, json=payload, headers=_headers(), verify=False, timeout=timeout)
         if resp.status_code != 200:
             _body = resp.text[:300] if resp.text else ""
             if resp.status_code == 429:
@@ -68,7 +97,26 @@ def mcp_call(server_type: str, tool_name: str, params: dict, timeout: int = 60) 
                 except Exception:
                     return {"ok": True, "data": c["text"], "error": None}
     if "error" in j:
-        return {"ok": False, "error": str(j["error"])}
+        # 内层 401 也自动重试一次
+        err = str(j["error"])
+        if "-32001" in err or "Authentication failed" in err:
+            _refresh_token(force=True)
+            # 重试一次
+            try:
+                resp2 = requests.post(_SERVER_URL, json=payload, headers=_headers(), verify=False, timeout=timeout)
+                if resp2.status_code == 200:
+                    j2 = resp2.json()
+                    if "result" in j2:
+                        for c in j2["result"].get("content", []):
+                            if c.get("type") == "text":
+                                try:
+                                    inner = json.loads(c["text"])
+                                    return {"ok": inner.get("code") == 1, "data": inner, "error": inner.get("msg") if inner.get("code") != 1 else None}
+                                except Exception:
+                                    return {"ok": True, "data": c["text"], "error": None}
+            except Exception:
+                pass
+        return {"ok": False, "error": err}
     return {"ok": True, "data": j, "error": None}
 
 
