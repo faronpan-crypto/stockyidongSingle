@@ -116,16 +116,30 @@ def analyze_trading_stage(df: pd.DataFrame, fund_df=None, top_n=20):
 
     last = close.iloc[-1]
     ma5_l, ma10_l, ma20_l, ma60_l = ma5.iloc[-1], ma10.iloc[-1], ma20.iloc[-1], ma60.iloc[-1]
-    ma5_d = ma5.diff().iloc[-1]
-    ma10_d = ma10.diff().iloc[-1]
-    ma20_d = ma20.diff().iloc[-1]
-    ma60_d = ma60.diff().iloc[-1]
+
+    # 用近 N 天线性回归斜率判定均线方向 (比单天 diff 稳定得多)
+    def _ma_slope(ma_series, n_days):
+        """计算均线近 n_days 天的日均斜率"""
+        recent = ma_series.dropna().tail(n_days)
+        if len(recent) < 3:
+            return 0.0
+        x = np.arange(len(recent))
+        slope = np.polyfit(x, recent.values, 1)[0]  # 每天变化值
+        # 归一化为百分比斜率, 消除价格量级影响
+        base = recent.iloc[0] if recent.iloc[0] != 0 else 1
+        return slope / base * 100  # 每天变化百分比
+
+    ma5_d = _ma_slope(ma5, 5)     # MA5 看近 5 天
+    ma10_d = _ma_slope(ma10, 5)   # MA10 看近 5 天
+    ma20_d = _ma_slope(ma20, 10)  # MA20 看近 10 天
+    ma60_d = _ma_slope(ma60, 10)  # MA60 看近 10 天
 
     # 均线位置 (vs 最新价)
     def _pos(ma_val): return "上" if last > ma_val else "下"
-    def _dir(diff):
-        if diff > 0.01: return "↑"
-        elif diff < -0.01: return "↓"
+    def _dir(slope_pct):
+        """基于百分比斜率判定方向"""
+        if slope_pct > 0.05: return "↑"    # 日均涨 > 0.05%
+        elif slope_pct < -0.05: return "↓"  # 日均跌 > 0.05%
         return "→"
 
     # 均线排列
