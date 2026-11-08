@@ -2672,6 +2672,7 @@
   ],
   "crawler_checkbox_states": {
     "taoguba": true,
-    "jiuyan": true
+    "jiuyan": true,
+    "xuangubao": true
   }
 }

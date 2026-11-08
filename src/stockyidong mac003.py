@@ -4812,6 +4812,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 ("🎯超跌", 8, self._show_oversold_dialog),
                 ("🎯机会", 7, self._show_jianlou),
                 ("🎯高抛低吸", 8, self._show_high_low_swing),
+                ("🧊冰点修复", 9, self._show_emotion_freeze),
                 ("🪙筹码", 7, self._show_chouma),
                 ("📊融资盘", 8, self._show_margin_dialog),
                 ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
