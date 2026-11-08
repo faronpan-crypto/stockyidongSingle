@@ -87,9 +87,10 @@ _CATALYST_KEYWORDS = {
 def _fetch_market_breadth():
     """📊 E1 大盘情绪冰点判定 — 涨跌家数 / 涨停跌停统计
 
-    多源 fallback:
-      1. AkShare stock_zh_a_spot_em  (东财全市场, ≈5300只)
-      2. 新浪 + 自选股池             (迷你扫描, 91只)
+    ⚡ 多源 fallback (速度优先, 秒级出结果):
+      1. AkShare stock_market_activity_legu  (乐股, 0.2s, 全市场涨跌家数)
+      2. 新浪 + 自选股池                     (0.2s, 迷你扫描)
+      3. AkShare stock_zh_a_spot_em          (东财全市场, ~50s, 超时保护10s)
 
     Returns dict:
       limit_down  : 跌停家数 (≤-9.5%)
@@ -101,41 +102,54 @@ def _fetch_market_breadth():
       total       : 总样本数
       freeze_flag : 是否触发冰点 (E1 3选2)
       source      : 数据源名称
+      raw_df      : 东财全市场 DataFrame (候选池过滤用, None if 没拉)
     """
+    import concurrent.futures
     result = dict(limit_down=0, limit_up=0, down_count=0, up_count=0,
                   flat_count=0, ratio=None, total=0, freeze_flag=False,
                   source="empty", raw_df=None)
 
-    # ── Source 1: AkShare 东财全市场 ──
+    # ── Source 1: AkShare 乐股市场活跃度 (0.2s 秒出) ──
     try:
+        import pandas as pd
         import akshare as ak
-        df = ak.stock_zh_a_spot_em()
-        if df is not None and len(df) > 1000:
-            pct_col = None
-            for c in ["涨跌幅", "涨跌幅(%)", "change_pct"]:
-                if c in df.columns:
-                    pct_col = c; break
-            if pct_col:
-                series = df[pct_col].astype(float)
-                result["limit_down"] = int((series <= E3_LIMIT_DOWN_PCT).sum())
-                result["limit_up"]   = int((series >= 9.5).sum())
-                result["down_count"] = int((series < 0).sum())
-                result["up_count"]   = int((series > 0).sum())
-                result["flat_count"] = int((series == 0).sum())
-                result["total"]      = len(df)
-                result["ratio"]      = round(result["limit_up"] / max(result["limit_down"], 1), 2)
-                result["source"]     = "东财全市场"
-                result["raw_df"]     = df
-                # E1 冰点判定: 3条满足 ≥2
-                flags = [
-                    result["limit_down"] >= E1_LIMIT_DOWN_MIN,
-                    result["limit_up"] / max(result["limit_down"], 1) <= E1_UP_DOWN_RATIO_MAX,
-                    result["down_count"] >= E1_DOWN_COUNT_MIN,
-                ]
-                result["freeze_flag"] = sum(flags) >= 2
-                return result
+        df = ak.stock_market_activity_legu()
+        if df is not None and len(df) >= 8:
+            # 乐股 value 列混合 float/str ('13.71%', '2026-11-06 15:00:00')
+            # 用 to_numeric(coerce=True) 把非数字转 NaN, 再 zip 回 item
+            vals = pd.to_numeric(df["value"], errors="coerce")
+            items = dict(zip(df["item"].astype(str), vals))
+            # 取 key, 跳过 NaN 项 (活跃度/统计日期)
+            up        = int(items.get("上涨", 0) or 0)
+            dn        = int(items.get("下跌", 0) or 0)
+            flat      = int(items.get("平盘", 0) or 0)
+            limit_up   = int(items.get("真实涨停", items.get("涨停", 0)) or 0)
+            limit_down = int(items.get("真实跌停", items.get("跌停", 0)) or 0)
+            halt      = int(items.get("停牌", 0) or 0)
+            total = up + dn + flat + halt
+            # 乐股总家数应 ≈5300, 如果偏低说明数据不全
+
+            result["limit_down"] = limit_down
+            result["limit_up"]   = limit_up
+            result["down_count"] = dn
+            result["up_count"]   = up
+            result["flat_count"] = flat
+            result["total"]      = total
+            result["ratio"]      = round(limit_up / max(limit_down, 1), 2) if limit_down else None
+            result["source"]     = "乐股市场活跃度"
+            # E1 冰点判定: 3条满足 ≥2
+            flags = [
+                limit_down >= E1_LIMIT_DOWN_MIN,
+                limit_up / max(limit_down, 1) <= E1_UP_DOWN_RATIO_MAX,
+                dn >= E1_DOWN_COUNT_MIN,
+            ]
+            result["freeze_flag"] = sum(flags) >= 2
+            print(f"[🧊breadth✅] 乐股秒级: 跌停{limit_down} 涨停{limit_up} "
+                  f"跌{dn}/{total} 升率={result['ratio']} freeze={result['freeze_flag']}")
+            return result
     except Exception as e:
-        print(f"[🧊breadth❌] AkShare 东财连不上: {e}")
+        print(f"[🧊breadth❌] 乐股也挂了: {e}")
+        import traceback; traceback.print_exc()
 
     # ── Source 2: 自选股池迷你扫描 ──
     try:
@@ -167,8 +181,44 @@ def _fetch_market_breadth():
                 downs >= 40,
             ]
             result["freeze_flag"] = sum(flags) >= 2
+            return result
     except Exception as e:
         print(f"[🧊breadth❌] 自选池也挂了: {e}")
+
+    # ── Source 3: AkShare 东财全市场 (超时保护 10s) ──
+    def _fetch_eastmoney():
+        import akshare as ak
+        return ak.stock_zh_a_spot_em()
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(_fetch_eastmoney)
+            df = fut.result(timeout=10)
+        if df is not None and len(df) > 1000:
+            pct_col = next((c for c in df.columns if '涨跌幅' in c or c == 'change_pct'), None)
+            cap_col = next((c for c in df.columns if '流通市值' in c or '市值' in c), None)
+            amt_col = next((c for c in df.columns if '成交额' in c), None)
+            if pct_col:
+                series = df[pct_col].astype(float)
+                result["limit_down"] = int((series <= E3_LIMIT_DOWN_PCT).sum())
+                result["limit_up"]   = int((series >= 9.5).sum())
+                result["down_count"] = int((series < 0).sum())
+                result["up_count"]   = int((series > 0).sum())
+                result["flat_count"] = int((series == 0).sum())
+                result["total"]      = len(df)
+                result["ratio"]      = round(result["limit_up"] / max(result["limit_down"], 1), 2)
+                result["source"]     = "东财全市场(超时10s)"
+                result["raw_df"]     = df  # 留着候选池过滤用
+                flags = [
+                    result["limit_down"] >= E1_LIMIT_DOWN_MIN,
+                    result["limit_up"] / max(result["limit_down"], 1) <= E1_UP_DOWN_RATIO_MAX,
+                    result["down_count"] >= E1_DOWN_COUNT_MIN,
+                ]
+                result["freeze_flag"] = sum(flags) >= 2
+    except concurrent.futures.TimeoutError:
+        print("[🧊breadth⚠️] 东财全市场 10s 超时, 放弃, 只用乐股/自选池数据")
+    except Exception as e:
+        print(f"[🧊breadth❌] 东财 fallback 也挂了: {e}")
 
     return result
 
@@ -188,39 +238,60 @@ def _fetch_margin_trend(days=10):
 
     try:
         import akshare as ak
-        # 沪市
+        import pandas as pd
         df_sh = ak.macro_china_market_margin_sh()
-        # 深市
         df_sz = ak.macro_china_market_margin_sz()
-        if df_sh is not None and df_sz is not None:
-            # 合并沪深
-            sh_col = [c for c in df_sh.columns if '余额' in str(c) or '融资' in str(c)]
-            sz_col = [c for c in df_sz.columns if '余额' in str(c) or '融资' in str(c)]
-            if sh_col and sz_col:
-                sh_vals = df_sh[sh_col[0]].astype(float).tolist()[-days:]
-                sz_vals = df_sz[sz_col[0]].astype(float).tolist()[-days:]
-                # 同长度对齐后相加
-                n = min(len(sh_vals), len(sz_vals))
-                total = [sh_vals[-n-i] + sz_vals[-n-i] for i in range(n)]
-                # 计算连续下降
-                consecutive = 0
-                for i in range(1, len(total)):
-                    if total[i] < total[i-1]:
-                        consecutive += 1
-                    else:
-                        break  # 只看最近连续段
-                result["consecutive_down"] = consecutive
-                result["recent_values"] = [round(v, 1) for v in reversed(total)]
-                if consecutive >= E2_MARGIN_CONSECUTIVE_DAYS:
-                    result["trend"] = "down"
-                elif consecutive == 0 and len(total) >= 2 and total[-1] > total[-2]:
-                    result["trend"] = "up"
-                else:
-                    result["trend"] = "flat"
-                result["freeze_flag"] = consecutive >= E2_MARGIN_CONSECUTIVE_DAYS
-                result["source"] = "沪深两融"
+        if df_sh is None or df_sz is None:
+            return result
+
+        # 精确匹配列名 (融资融券余额 > 融资余额 > 其他)
+        def _pick_col(df):
+            for pref in ["融资融券余额", "融资余额"]:
+                if pref in df.columns:
+                    return pref
+            return None
+
+        col_sh = _pick_col(df_sh)
+        col_sz = _pick_col(df_sz)
+        if not col_sh or not col_sz:
+            print(f"[🧊margin⚠️] 找不到余额列, sh={list(df_sh.columns)}, sz={list(df_sz.columns)}")
+            return result
+
+        # 转 float, 清洗 NaN
+        sh_vals = pd.to_numeric(df_sh[col_sh], errors="coerce").dropna().astype(float).tolist()[-days:]
+        sz_vals = pd.to_numeric(df_sz[col_sz], errors="coerce").dropna().astype(float).tolist()[-days:]
+        if not sh_vals or not sz_vals:
+            print(f"[🧊margin⚠️] 余额列空, sh={len(sh_vals)} sz={len(sz_vals)}")
+            return result
+
+        # 同长度对齐, 沪深相加得到全市场融资融券余额
+        n = min(len(sh_vals), len(sz_vals))
+        # sh_vals[-n:] 是最近 n 天 (早→晚), 直接 zip 相加
+        total = [sh_vals[-n:][i] + sz_vals[-n:][i] for i in range(n)]
+
+        # 从最新往回数, 看连续下降了几天
+        consecutive = 0
+        for i in range(n - 1, 0, -1):
+            if total[i] < total[i - 1]:
+                consecutive += 1
+            else:
+                break  # 遇到第一个非下降就停
+
+        result["consecutive_down"] = consecutive
+        result["recent_values"] = [round(v / 1e8, 2) for v in total]  # 转成亿
+        if consecutive >= E2_MARGIN_CONSECUTIVE_DAYS:
+            result["trend"] = "down"
+        elif consecutive == 0 and n >= 2 and total[-1] > total[-2]:
+            result["trend"] = "up"
+        else:
+            result["trend"] = "flat"
+        result["freeze_flag"] = consecutive >= E2_MARGIN_CONSECUTIVE_DAYS
+        result["source"] = f"沪深两融({col_sh}+{col_sz})"
+        print(f"[🧊margin✅] {consecutive}天连降, 全市场 {result['recent_values'][-1]:.1f}亿 "
+              f"trend={result['trend']} freeze={result['freeze_flag']}")
     except Exception as e:
         print(f"[🧊margin❌] {e}")
+        import traceback; traceback.print_exc()
 
     return result
 
