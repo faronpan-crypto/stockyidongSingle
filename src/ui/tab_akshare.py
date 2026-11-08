@@ -232,6 +232,8 @@ class AKShareMixin:
         self._ak_detail.configure(state=tk.NORMAL)
         self._ak_detail.delete("1.0", tk.END)
         self._ak_detail.insert("1.0", t)
+        try: self._apply_hyperlinks_to_text_widget(self._ak_detail)
+        except Exception: pass
         self._ak_detail.configure(state=tk.DISABLED)
 
     # ═══════════════════════════════════════════════════════════

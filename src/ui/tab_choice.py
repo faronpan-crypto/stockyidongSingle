@@ -35,6 +35,59 @@ except ImportError:
 MIAOXIANG_MCP_URL = "https://mxapi.eastmoney.com/mxds/mcp"
 MIAOXIANG_SKILLS_URL = "https://mkapi2.dfcfs.com/finskillshub/api/claw/query"
 
+# ── 妙想 MCP 11 个工具 ──
+MCP_TOOLS = {
+    "mx_ashare_finance_data":       ("🏒", "A股数据",   "股票行情/财务/估值/股东/事件"),
+    "mx_fund_finance_data":         ("💰", "基金数据",   "基金净值/业绩/持仓/分红/公司"),
+    "mx_bond_finance_data":         ("📜", "债券数据",   "债券基本/行情/估值/信用评级"),
+    "mx_index_block_finance_data":  ("📊", "指数板块",   "指数/行业/概念/板块行情指标"),
+    "mx_us_finance_data":           ("🇺🇸", "美股数据",   "美股行情/财务/IPO/回购/分红"),
+    "mx_hk_finance_data":           ("🇭🇰", "港股数据",   "港股行情/财务/估值/IPO/分红"),
+    "mx_comprehensive_finance_data":("🏢", "综合企业",   "跨市场/非上市公司/企业发行人"),
+    "mx_macro_data":                ("🌍", "宏观经济",   "GDP/CPI/PMI/利率/大宗商品"),
+    "mx_stocks_screener":           ("🎯", "多维选股",   "按条件筛选股票/基金/债券"),
+    "mx_finance_search_news":       ("📰", "资讯新闻",   "研报/评级/目标价/行业新闻"),
+    "mx_finance_search_notice":     ("📋", "公告披露",   "上市公司公告/定期报告/重大事项"),
+}
+
+# ── MCP 分类模板 ──
+MCP_TEMPLATES = {
+    "🏒 A股": [
+        ("mx_ashare_finance_data", "贵州茅台最新市值、PE(TTM)、股价"),
+        ("mx_ashare_finance_data", "宁德时代近10日涨跌幅和换手率"),
+        ("mx_ashare_finance_data", "比亚迪2025三季报营收和净利润"),
+        ("mx_ashare_finance_data", "格力电器上市时间和最近分红"),
+    ],
+    "🌍 宏观": [
+        ("mx_macro_data", "中国2026年三季度GDP同比增速"),
+        ("mx_macro_data", "最新CPI和PPI数据"),
+        ("mx_macro_data", "美联储联邦基金利率历史走势"),
+        ("mx_macro_data", "原油价格近6个月走势"),
+    ],
+    "🎯 选股": [
+        ("mx_stocks_screener", "市盈率低于20倍的医药股"),
+        ("mx_stocks_screener", "股价创新高的新能源股票"),
+        ("mx_stocks_screener", "创业板市值前10的股票"),
+        ("mx_stocks_screener", "北向资金连续5日净买入的股票"),
+    ],
+    "💰 基金": [
+        ("mx_fund_finance_data", "工银双盈债券A(010068)最新净值"),
+        ("mx_fund_finance_data", "易方达蓝筹精选前十大重仓股"),
+        ("mx_fund_finance_data", "近一年收益率最高的公募基金TOP10"),
+    ],
+    "📰 资讯": [
+        ("mx_finance_search_news", "中信证券最新研报观点"),
+        ("mx_finance_search_news", "半导体板块近期利好消息"),
+        ("mx_finance_search_notice", "格力电器最新分红公告"),
+        ("mx_finance_search_notice", "比亚迪最新增发公告"),
+    ],
+    "🚀 机构增持": [
+        ("mx_stocks_screener", "2026中报机构数量较2025年报增长超过50%的股票，按机构增长率排序，显示机构持股家数环比增长率、上期机构家数、本期机构家数、净利润增长率、总市值"),
+        ("mx_stocks_screener", "北向资金+机构持仓同时大幅增加的股票TOP30，显示沪深股通净买入额、机构持股较上期变化、涨跌幅、市盈率、总市值"),
+        ("mx_stocks_screener", "机构持仓占总股本比例上升最快的A股TOP30，显示机构持股占比变化、机构数量变化、累计持股变化、净利润增长率"),
+    ],
+}
+
 # API key 存储 (用户填了就持久化)
 _CHOICE_KEY_PATH = os.path.expanduser("~/.choice_apikey.json")
 
@@ -198,12 +251,62 @@ class ChoiceMixin:
         ttk.Entry(left_frame, textvariable=self._choice_code_var,
                   font=("", 10)).pack(fill=tk.X, padx=4)
 
-        # 模板
-        tk.Label(left_frame, text="📋 妙想 AI 模板",
+        # MCP 快捷按钮 (常用工具)
+        tk.Label(left_frame, text="⚡ MCP 快捷",
                  font=("", 10, "bold")).pack(anchor="w", padx=6, pady=(10, 2))
-        for tpl in self._CHOICE_TEMPLATES[:5]:
+        mcp_quick_frame = ttk.Frame(left_frame)
+        mcp_quick_frame.pack(fill=tk.X, padx=4)
+        # 2 列常用按钮
+        quick_tools = [
+            ("mx_ashare_finance_data", "🏒 A股"),
+            ("mx_macro_data", "🌍 宏观"),
+            ("mx_stocks_screener", "🎯 选股"),
+            ("mx_finance_search_news", "📰 资讯"),
+            ("mx_fund_finance_data", "💰 基金"),
+            ("mx_index_block_finance_data", "📊 指数"),
+        ]
+        for i, (tool, label) in enumerate(quick_tools):
+            btn = ttk.Button(mcp_quick_frame, text=label, width=6,
+                             command=lambda t=tool: self._choice_do_mcp(t))
+            btn.grid(row=i // 2, column=i % 2, padx=2, pady=1, sticky="ew")
+        mcp_quick_frame.columnconfigure(0, weight=1)
+        mcp_quick_frame.columnconfigure(1, weight=1)
+
+        # MCP 分类模板 (可展开)
+        self._choice_mcp_tpl_frame = ttk.Frame(left_frame)
+        self._choice_mcp_tpl_visible = tk.BooleanVar(value=False)
+
+        def _toggle_mcp_tpl():
+            if self._choice_mcp_tpl_visible.get():
+                self._choice_mcp_tpl_frame.pack_forget()
+                self._choice_mcp_tpl_visible.set(False)
+            else:
+                self._choice_mcp_tpl_frame.pack(fill=tk.X, padx=4, pady=2)
+                self._choice_mcp_tpl_visible.set(True)
+
+        ttk.Button(left_frame, text="📋 MCP 模板 ▼", width=14,
+                   command=_toggle_mcp_tpl).pack(anchor="w", padx=6, pady=(6, 2))
+        # 先隐藏, 点按钮再展开
+        # 填充模板内容
+        for cat, tpls in MCP_TEMPLATES.items():
+            cat_frame = ttk.LabelFrame(self._choice_mcp_tpl_frame, text=cat, padding=2)
+            cat_frame.pack(fill=tk.X, padx=2, pady=2)
+            for tool, q in tpls[:3]:  # 每类最多 3 个
+                btn = tk.Button(cat_frame, text=q, cursor="hand2", relief=tk.FLAT,
+                                fg="#FF6600", font=("", 8), anchor="w", pady=0,
+                                wraplength=200, justify="left",
+                                command=lambda t=tool, qq=q: (
+                                    self._choice_query_ent.delete(0, tk.END),
+                                    self._choice_query_ent.insert(0, qq),
+                                    self._choice_do_mcp(t)))
+                btn.pack(anchor="w", padx=2, fill=tk.X)
+
+        # 妙想 AI 模板 (原有的 + 新增)
+        tk.Label(left_frame, text="🤖 AI 自由问答",
+                 font=("", 10, "bold")).pack(anchor="w", padx=6, pady=(10, 2))
+        for tpl in self._CHOICE_TEMPLATES[:4]:
             btn = tk.Button(left_frame, text=tpl, cursor="hand2", relief=tk.FLAT,
-                            fg="#FF6600", font=("", 9), anchor="w", pady=1,
+                            fg="#666", font=("", 9), anchor="w", pady=1,
                             command=lambda tt=tpl: self._choice_preset(tt))
             btn.pack(anchor="w", padx=6)
 
@@ -233,11 +336,28 @@ class ChoiceMixin:
         self._choice_query_ent.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
         self._choice_query_ent.bind("<Return>", lambda e: self._choice_go())
 
-        ttk.Button(search_frame, text="🧠 妙想 AI", width=10,
+        # MCP 工具选择下拉 + 一键调用
+        mcp_btn_frame = ttk.Frame(search_frame)
+        mcp_btn_frame.pack(side=tk.LEFT, padx=2)
+        self._choice_mcp_tool_var = tk.StringVar(value="🏒 A股数据")
+        mcp_tool_names = [f"{e} {n}" for e, n, _ in MCP_TOOLS.values()]
+        mcp_tool_keys = list(MCP_TOOLS.keys())
+        # 映射显示名 → tool_name
+        self._choice_mcp_tool_map = dict(zip(mcp_tool_names, mcp_tool_keys))
+        mcp_combo = ttk.Combobox(mcp_btn_frame, textvariable=self._choice_mcp_tool_var,
+                                 values=mcp_tool_names, width=10, state="readonly",
+                                 font=("", 10))
+        mcp_combo.pack(side=tk.LEFT)
+        ttk.Button(mcp_btn_frame, text="▶ MCP", width=6,
+                   command=lambda: self._choice_do_mcp(
+                       self._choice_mcp_tool_map.get(self._choice_mcp_tool_var.get(), ""))
+                   ).pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(search_frame, text="🧠 AI", width=5,
                     command=lambda: self._choice_do("miaoxiang")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(search_frame, text="🏒 涨停池", width=10,
+        ttk.Button(search_frame, text="🏒 涨停", width=6,
                     command=lambda: self._choice_do("zt_pool")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(search_frame, text="🐉 龙虎榜", width=8,
+        ttk.Button(search_frame, text="🐉 龙虎", width=6,
                     command=lambda: self._choice_do("lhb")).pack(side=tk.LEFT, padx=2)
 
         self._choice_nb = ttk.Notebook(mid_frame)
@@ -462,6 +582,192 @@ class ChoiceMixin:
         except Exception as e:
             return {"ok": False, "error": str(e)[:200]}
 
+    # ── 妙想 MCP (JSON-RPC 2.0) ──
+
+    def _choice_mcp_call(self, tool_name: str, query: str) -> dict:
+        """调妙想 MCP tools/call"""
+        keys = _load_apikey()
+        apikey = (keys.get("mx_apikey") or keys.get("skills_apikey") or "").strip()
+        if not apikey:
+            return {"ok": False, "error": ("⚠️ 需要妙想 MCP API Key\n\n"
+                    "1. 点顶栏「🔑 配置 API Key」按钮\n"
+                    "2. 打开 https://choice.eastmoney.com/mcp/ 获取\n"
+                    "3. MCP Key 通常以 em_ 开头")}
+        try:
+            resp = requests.post(
+                MIAOXIANG_MCP_URL,
+                json={"jsonrpc": "2.0", "id": 1,
+                      "method": "tools/call",
+                      "params": {"name": tool_name, "arguments": {"query": query}}},
+                headers={"Content-Type": "application/json",
+                         "Accept": "application/json, text/event-stream",
+                         "em_api_key": apikey},
+                timeout=60,
+            )
+            if resp.status_code in (401, 403):
+                return {"ok": False, "error": f"❌ API Key 无效 (HTTP {resp.status_code})\n\n请重新获取: https://choice.eastmoney.com/mcp/"}
+            j = resp.json()
+            result = j.get("result") or {}
+            if result.get("isError"):
+                return {"ok": False, "error": json.dumps(result, ensure_ascii=False)[:500]}
+            return {"ok": True, "mcp_result": result}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:300]}
+
+    def _choice_mcp_list_tools(self) -> dict:
+        """调妙想 MCP tools/list 获取所有可用工具"""
+        keys = _load_apikey()
+        apikey = (keys.get("mx_apikey") or keys.get("skills_apikey") or "").strip()
+        if not apikey:
+            return {"ok": False, "error": "需要 MCP API Key"}
+        try:
+            resp = requests.post(
+                MIAOXIANG_MCP_URL,
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={"Content-Type": "application/json",
+                         "Accept": "application/json, text/event-stream",
+                         "em_api_key": apikey},
+                timeout=30,
+            )
+            j = resp.json()
+            tools = j.get("result", {}).get("tools", [])
+            return {"ok": True, "tools": tools}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:200]}
+
+    def _choice_mcp_parse_result(self, mcp_result: dict) -> list:
+        """解析 MCP tools/call 返回 → [(sheet_name, columns, items)]"""
+        sheets = []
+        content = mcp_result.get("content") or []
+        for c in content:
+            if c.get("type") == "text":
+                try:
+                    inner = json.loads(c["text"])
+                except Exception:
+                    sheets.append(("📝 原始文本", [], [[c["text"]]]))
+                    continue
+                data_list = inner.get("data") or []
+                for d in data_list:
+                    sheet_name = d.get("name") or d.get("sheetName") or "数据"
+                    cols = d.get("columns") or []
+                    items = d.get("items") or []
+                    sheets.append((sheet_name, cols, items))
+                meta = inner.get("meta") or {}
+                if meta.get("jumpUrlList"):
+                    for ju in meta["jumpUrlList"]:
+                        url = ju.get("choiceUrl", "")
+                        if url:
+                            sheets.append((f"🔗 {ju.get('typeName','跳转')}", ["URL"], [[url]]))
+        return sheets
+
+    def _choice_do_mcp(self, tool_name: str):
+        """MCP 工具一键查询"""
+        query = self._choice_query_ent.get().strip()
+        # 如果用户没输入, 根据工具给一个默认示例
+        if not query:
+            # 从模板里找一个默认值
+            for cat, tpls in MCP_TEMPLATES.items():
+                for t, q in tpls:
+                    if t == tool_name:
+                        query = q
+                        break
+                if query: break
+        if not query:
+            tk.messagebox.showinfo("提示", f"请输入 {MCP_TOOLS.get(tool_name, ('','',''))[1]} 查询内容\n例如: 贵州茅台最新市值")
+            return
+
+        emoji, label, _ = MCP_TOOLS.get(tool_name, ("🧠", tool_name, ""))
+        self._choice_status.set(f"⏳ MCP {label}: {query[:40]}...")
+        self._choice_set_detail(f"⏳ 正在通过妙想 MCP 调用 {tool_name}\n\n查询: {query}\n\n请稍候...")
+
+        def _run():
+            t0 = time.time()
+            result = self._choice_mcp_call(tool_name, query)
+            dt = time.time() - t0
+            dlg = self._choice_nb.winfo_toplevel()
+            dlg.after(0, lambda: self._choice_render_mcp(result, dt, tool_name))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _choice_render_mcp(self, result: dict, dt: float, tool_name: str):
+        """MCP 结果渲染 → 数据列表 Tab"""
+        self._choice_nb.select(0)
+        for w in self._choice_tree_frame.winfo_children():
+            w.destroy()
+
+        if not result.get("ok"):
+            self._choice_status.set(f"❌ MCP 失败: {result.get('error','?')[:50]}")
+            self._choice_set_detail(f"❌ MCP 调用失败\n\n{result.get('error', '未知错误')}")
+            return
+
+        sheets = self._choice_mcp_parse_result(result.get("mcp_result", {}))
+        if not sheets:
+            self._choice_status.set(f"⚠️ MCP 返回空数据 ({dt:.1f}s)")
+            self._choice_set_detail(json.dumps(result.get("mcp_result", {}), ensure_ascii=False, indent=2)[:1500])
+            return
+
+        # 用 Notebook 展示多 sheet
+        sheet_nb = ttk.Notebook(self._choice_tree_frame)
+        sheet_nb.pack(fill=tk.BOTH, expand=True)
+
+        for sheet_name, cols, items in sheets[:8]:  # 最多 8 个 sheet
+            sheet_frame = ttk.Frame(sheet_nb)
+            tab_label = sheet_name[:25] + ("..." if len(sheet_name) > 25 else "")
+            sheet_nb.add(sheet_frame, text=tab_label)
+
+            if not cols or not items:
+                ttk.Label(sheet_frame, text="📭 无数据", foreground="gray").pack(pady=40)
+                continue
+
+            # 创建 Treeview
+            tree_cols = [str(c) for c in cols]
+            tv = ttk.Treeview(sheet_frame, columns=tree_cols, show="headings",
+                              height=min(20, len(items)))
+            # 自适应列宽: 取列头 + 数据每行最长内容, 按中文字符 14px / 英文 8px 估算
+            def _col_width(col_idx):
+                # 列头宽度
+                header = str(cols[col_idx] if col_idx < len(cols) else "")
+                # 数据中该列最长
+                max_cell = header
+                for row in items:
+                    if col_idx < len(row):
+                        cell = str(row[col_idx])[:60] if row[col_idx] else ""
+                        if len(cell) > len(max_cell):
+                            max_cell = cell
+                # 中文按 14px/字, 英文按 8px/字
+                w = 0
+                for ch in max_cell:
+                    w += 14 if ord(ch) > 127 else 8
+                return max(70, min(280, w + 18))  # 最少 70, 最多 280, 加 18px padding
+            widths = [_col_width(i) for i in range(len(tree_cols))]
+            for h, w in zip(tree_cols, widths):
+                tv.heading(h, text=h)
+                tv.column(h, width=w, anchor="w", minwidth=60, stretch=True)
+            # 允许横向滚动 (防止列太多时被挤没)
+            hsb = ttk.Scrollbar(sheet_frame, orient=tk.HORIZONTAL, command=tv.xview)
+            tv.configure(xscrollcommand=hsb.set)
+            hsb.pack(side=tk.BOTTOM, fill=tk.X)
+
+            for row in items:
+                vals = []
+                for i, v in enumerate(row):
+                    if i < len(tree_cols):
+                        vals.append(str(v)[:80] if v else "")
+                tv.insert("", tk.END, values=vals)
+
+            vsb = ttk.Scrollbar(sheet_frame, orient=tk.VERTICAL, command=tv.yview)
+            tv.configure(yscrollcommand=vsb.set)
+            tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        emoji, label, _ = MCP_TOOLS.get(tool_name, ("🧠", tool_name, ""))
+        self._choice_status.set(f"✅ MCP {label}: {len(sheets)} 张表 ({dt:.1f}s)")
+        self._choice_set_detail(
+            f"✅ 妙想 MCP 查询完成\n\n"
+            f"🔧 工具: {tool_name}\n"
+            f"📊 返回: {len(sheets)} 张数据表\n"
+            f"⏱️ 耗时: {dt:.1f}s\n\n"
+            f"💡 提示: 点下方 Sheet 切换查看不同表格")
+
     # ── 渲染 ──
 
     def _choice_render(self, mode: str, result: dict, dt: float):
@@ -553,6 +859,8 @@ class ChoiceMixin:
         # 解包妙想 Skills 返回
         rendered = self._choice_format_miaoxiang_resp(j)
         txt.insert("1.0", f"🧠 妙想 AI 查询结果\n\n{'='*40}\n\n{rendered}")
+        try: self._apply_hyperlinks_to_text_widget(txt)
+        except Exception: pass
         txt.configure(state=tk.DISABLED)
 
         self._choice_status.set(f"✅ 妙想 AI 完成 ({dt:.1f}s)")
@@ -609,6 +917,8 @@ class ChoiceMixin:
         self._choice_detail_text.configure(state=tk.NORMAL)
         self._choice_detail_text.delete("1.0", tk.END)
         self._choice_detail_text.insert("1.0", text)
+        try: self._apply_hyperlinks_to_text_widget(self._choice_detail_text)
+        except Exception: pass
         self._choice_detail_text.configure(state=tk.DISABLED)
 
     # ── 工具 ──
@@ -638,3 +948,155 @@ class ChoiceMixin:
                   "换手率": 70, "封板资金": 90, "连板数": 60, "净买入额": 90,
                   "买入总额": 90, "卖出总额": 90}
         return [widths.get(h, 100) for h in headers]
+
+    # ═══════════════════════════════════════════════════════════
+    # 🚀 机构大幅增持 (主界面快捷入口)
+    # ═══════════════════════════════════════════════════════════
+
+    # 3 个机构增持预设查询
+    _INST_BUY_PRESETS = [
+        ("机构数增幅TOP",
+         "2026中报机构数量较2025年报增长超过50%的股票，按机构增长率排序，显示机构持股家数环比增长率、上期机构家数、本期机构家数、净利润增长率、总市值"),
+        ("北向+机构双增TOP",
+         "北向资金+机构持仓同时大幅增加的股票TOP30，显示沪深股通净买入额、机构持股较上期变化、涨跌幅、市盈率、总市值"),
+        ("机构占比提升TOP",
+         "机构持仓占总股本比例上升最快的A股TOP30，显示机构持股占比变化、机构数量变化、累计持股变化、净利润增长率"),
+    ]
+
+    def _show_institutional_buy(self):
+        """🚀 机构大幅增持 —— 弹窗 + 自动扫描"""
+        dlg = tk.Toplevel(getattr(self, "root", None))
+        dlg.title("🚀 机构大幅增持扫描")
+        dlg.geometry("1200x720")
+        dlg.transient(getattr(self, "root", None))
+
+        tk.Label(dlg, text="🚀 机构大幅增持扫描",
+                 font=("", 14, "bold")).pack(anchor="w", padx=10, pady=(8, 4))
+        tk.Label(dlg, text="基于东方财富妙想 MCP 数据库，快速筛选机构持仓大幅增加的股票",
+                 foreground="gray", font=("", 9)).pack(anchor="w", padx=10)
+
+        # API Key 检查
+        keys = _load_apikey()
+        mx_key = keys.get("mx_apikey") or keys.get("skills_apikey") or ""
+        if not mx_key:
+            ttk.Label(dlg, text="⚠️ 需先配置妙想 MCP API Key → 打开 Choice dialog → 🔑",
+                      foreground="red", font=("", 10)).pack(pady=20)
+            ttk.Button(dlg, text="打开 Choice 配置",
+                       command=lambda: (dlg.destroy(), self._show_choice_dialog())).pack()
+
+        # ── 扫描按钮区 ──
+        btn_frame = ttk.LabelFrame(dlg, text="选择扫描维度", padding=6)
+        btn_frame.pack(fill=tk.X, padx=10, pady=8)
+
+        for label, q in self._INST_BUY_PRESETS:
+            ttk.Button(btn_frame, text=f"🚀 {label}",
+                       width=18,
+                       command=lambda qq=q: self._run_inst_buy_scan(qq, dlg)
+                       ).pack(side=tk.LEFT, padx=6, pady=4)
+
+        ttk.Button(btn_frame, text="📋 打开 Choice 完整面板",
+                   command=lambda: (dlg.destroy(), self._show_choice_dialog())
+                   ).pack(side=tk.RIGHT, padx=6)
+
+        # ── 结果展示区 ──
+        self._inst_buy_status = tk.StringVar(value="点上方按钮开始扫描")
+        ttk.Label(dlg, textvariable=self._inst_buy_status,
+                  foreground="blue").pack(anchor="w", padx=10)
+
+        tree_wrap = ttk.Frame(dlg)
+        tree_wrap.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
+
+        self._inst_buy_nb = ttk.Notebook(tree_wrap)
+        self._inst_buy_nb.pack(fill=tk.BOTH, expand=True)
+
+        dlg.after(200, lambda: self._run_inst_buy_scan(
+            self._INST_BUY_PRESETS[0][1], dlg))
+
+    def _run_inst_buy_scan(self, query: str, parent=None):
+        """后台线程跑机构增持扫描"""
+        # 清空旧结果
+        for w in self._inst_buy_nb.winfo_children():
+            w.destroy()
+
+        self._inst_buy_status.set(f"⏳ 扫描中: {query[:50]}...")
+        dlg = parent or getattr(self, "_inst_buy_dlg", None)
+
+        def _run():
+            t0 = time.time()
+            result = self._choice_mcp_call("mx_stocks_screener", query)
+            dt = time.time() - t0
+            if dlg and dlg.winfo_exists():
+                dlg.after(0, lambda: self._render_inst_buy_result(result, dt, dlg))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _render_inst_buy_result(self, result: dict, dt: float, dlg):
+        """渲染机构增持扫描结果"""
+        if not result.get("ok"):
+            self._inst_buy_status.set(f"❌ 扫描失败: {result.get('error','?')[:50]}")
+            return
+
+        sheets = self._choice_mcp_parse_result(result.get("mcp_result", {}))
+        if not sheets:
+            self._inst_buy_status.set(f"⚠️ 返回空数据 ({dt:.1f}s)")
+            return
+
+        for sheet_name, cols, items in sheets[:5]:
+            sheet_frame = ttk.Frame(self._inst_buy_nb)
+            tab_label = sheet_name[:30] + ("..." if len(sheet_name) > 30 else "")
+            self._inst_buy_nb.add(sheet_frame, text=tab_label)
+
+            if not cols or not items:
+                ttk.Label(sheet_frame, text="📭 无数据", foreground="gray").pack(pady=40)
+                continue
+
+            tree_cols = [str(c) for c in cols]
+            tv = ttk.Treeview(sheet_frame, columns=tree_cols, show="headings",
+                              height=min(25, len(items)))
+            # 自适应列宽
+            def _cw(idx):
+                max_cell = str(cols[idx] if idx < len(cols) else "")
+                for row in items:
+                    if idx < len(row):
+                        cell = str(row[idx])[:60] if row[idx] else ""
+                        if len(cell) > len(max_cell):
+                            max_cell = cell
+                w = sum(14 if ord(ch) > 127 else 8 for ch in max_cell)
+                return max(70, min(280, w + 18))
+            widths = [_cw(i) for i in range(len(tree_cols))]
+            for h, w in zip(tree_cols, widths):
+                tv.heading(h, text=h)
+                tv.column(h, width=w, anchor="w", minwidth=60, stretch=True)
+
+            for row in items:
+                vals = [str(v)[:80] if v else "" for v in row[:len(tree_cols)]]
+                tv.insert("", tk.END, values=vals)
+
+            vsb = ttk.Scrollbar(sheet_frame, orient=tk.VERTICAL, command=tv.yview)
+            hsb = ttk.Scrollbar(sheet_frame, orient=tk.HORIZONTAL, command=tv.xview)
+            tv.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+            tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+            hsb.pack(side=tk.BOTTOM, fill=tk.X)
+
+            # 双击行 → 打开 Choice 查这只股票详情
+            def _on_dblclick(event, _tv=tv):
+                sel = _tv.selection()
+                if not sel: return
+                vals = _tv.item(sel[0], "values")
+                if len(vals) >= 2:
+                    code, name = vals[1], vals[2] if len(vals) > 2 else ""
+                    q = f"{name}({code}) 机构持仓历史变化、机构数量、累计持股"
+                    self._show_choice_dialog()
+                    # 延迟填查询
+                    import time as _t
+                    _t.sleep(0.3)
+                    try:
+                        self._choice_query_ent.delete(0, tk.END)
+                        self._choice_query_ent.insert(0, q)
+                        self._choice_do_mcp("mx_ashare_finance_data")
+                    except Exception:
+                        pass
+            tv.bind("<Double-1>", _on_dblclick)
+
+        self._inst_buy_status.set(
+            f"✅ 扫描完成: {sum(len(i) for _, _, i in sheets)} 条记录 / {len(sheets)} 张表 ({dt:.1f}s)")

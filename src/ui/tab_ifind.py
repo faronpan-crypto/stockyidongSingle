@@ -575,6 +575,8 @@ class IfindMixin:
                        font=("TkDefaultFont", 11), background="#fafafa")
         _txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         _txt.insert("1.0", text)
+        try: self._apply_hyperlinks_to_text_widget(_txt)
+        except Exception: pass
         _txt.configure(state=tk.DISABLED)
 
     def _ifind_render_mid(self, key, label, r):

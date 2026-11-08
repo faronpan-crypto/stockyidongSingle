@@ -256,6 +256,8 @@ class YingmiMixin:
         text.insert(tk.END, "=" * 40 + "\n\n")
         for label, url in self._YINGMI_WORKFLOWS:
             text.insert(tk.END, f"{label}\n  🔗 {url}\n\n")
+        try: self._apply_hyperlinks_to_text_widget(text)
+        except Exception: pass
         text.configure(state=tk.DISABLED)
 
     def _yingmi_do_action(self, mode: str):
@@ -588,6 +590,8 @@ class YingmiMixin:
         self._yingmi_detail_text.configure(state=tk.NORMAL)
         self._yingmi_detail_text.delete("1.0", tk.END)
         self._yingmi_detail_text.insert("1.0", text)
+        try: self._apply_hyperlinks_to_text_widget(self._yingmi_detail_text)
+        except Exception: pass
         self._yingmi_detail_text.configure(state=tk.DISABLED)
 
     # ═══════════════════════════════════════════════════════════

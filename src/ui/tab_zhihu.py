@@ -521,6 +521,11 @@ class ZhihuMixin:
         self._zhihu_detail_text.configure(state=tk.NORMAL)
         self._zhihu_detail_text.delete("1.0", tk.END)
         self._zhihu_detail_text.insert("1.0", text)
+        # 让 URL 变成可点击超链接
+        try:
+            self._apply_hyperlinks_to_text_widget(self._zhihu_detail_text)
+        except Exception:
+            pass
         self._zhihu_detail_text.configure(state=tk.DISABLED)
 
     def _zhihu_show_empty(self, text: str):

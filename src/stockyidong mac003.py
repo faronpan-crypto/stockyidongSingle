@@ -5237,6 +5237,14 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("🔮明日预测", self._show_tomorrow_predict_popup, False, "tools"),
             ("预测", self.show_news_prediction_analysis, False, "tools"),
             ("🧭市场导航", self.open_market_nav_dialog, False, "tools"),
+            ("🚀机构增持", self._show_institutional_buy, False, "quick"),
+            # ---- 💬 API/MCP 数据工具 (tools) ----
+            ("💬知乎", self._show_zhihu_dialog, False, "tools"),
+            ("🎯Choice", self._show_choice_dialog, False, "tools"),
+            ("🔗全链路", self._show_full_link_dialog, False, "tools"),
+            ("📊iFinD", self._show_ths_ifind_dialog, False, "tools"),
+            ("💰盈米", self._show_yingmi_dialog, False, "tools"),
+            ("📈AKShare", self._show_akshare_dialog, False, "tools"),
         ]
         print(f"[🔎] _BUTTON_DEFAULTS 共 {len(_BUTTON_DEFAULTS)} 项, 含📸: {any('📸' in str(t) for t in _BUTTON_DEFAULTS)}", flush=True)
         # 从配置加载自定义 tab 分配
