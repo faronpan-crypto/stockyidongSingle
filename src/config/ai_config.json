@@ -3,7 +3,7 @@
   "provider": "deepseek",
   "providers": {
     "deepseek": {
-      "base_url": "https://api.deepseek.com/v1",
+      "base_url": "http://127.0.0.1:8787",
       "api_key": "",
       "model": "deepseek-chat",
       "mode": "chat",
@@ -12,7 +12,7 @@
       "endpoint": "/chat/completions"
     },
     "doubao": {
-      "base_url": "https://ark.cn-beijing.volces.com",
+      "base_url": "http://127.0.0.1:8787",
       "endpoint": "/api/v3/chat/completions",
       "api_key": "",
       "model": "doubao-seedance-1-0-pro-250528",

@@ -528,6 +528,28 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         init_database()
         # 初始化AI配置管理器(快速操作,先完成)
         self.ai_config_manager = AIConfigManager()
+        # 🔒 自动启动本地 AI 代理 (如果 provider base_url 指向 localhost)
+        try:
+            for _pname, _pcfg in self.ai_config_manager.config.get("providers", {}).items():
+                _bu = _pcfg.get("base_url", "")
+                if any(_x in _bu for _x in ("127.0.0.1", "localhost")):
+                    import socket as _sk, subprocess as _sp
+                    _proxy_port = 8787
+                    _alive = False
+                    try:
+                        _s = _sk.socket(); _s.settimeout(0.5)
+                        _s.connect(("127.0.0.1", _proxy_port)); _s.close()
+                        _alive = True
+                    except Exception:
+                        pass
+                    if not _alive:
+                        _proxy_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logic", "ai_proxy.py")
+                        _sp.Popen([sys.executable, _proxy_py],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        time.sleep(1)
+                    break  # 启动一次即可
+        except Exception as _e:
+            print(f"[proxy] 自动启动跳过: {_e}")
         try:
             import tkinter.font as _tkfont_cfg
             _bdf0 = _tkfont_cfg.nametofont("TkDefaultFont")

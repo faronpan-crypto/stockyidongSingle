@@ -485,15 +485,39 @@ class AIConfigManager:
                 url = f"{base_url}/chat/completions"
             else:
                 url = f"{base_url}{endpoint}"
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
+
+            # 🔒 代理模式: base_url 指向 localhost 时, 用签名转发 (主程序不持 key)
+            _is_proxy = any(x in base_url for x in ("127.0.0.1", "localhost"))
+            import hmac as _hmac, hashlib as _hashlib
+            headers = {"Content-Type": "application/json"}
             data = {
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": provider_config.get("temperature", 0.3)
+                "temperature": provider_config.get("temperature", 0.3),
             }
+            if _is_proxy:
+                # 代理模式: 签名 + 不带 Authorization
+                _proxy_secret = _os.environ.get("STOCK_AI_PROXY_SECRET", "")
+                if not _proxy_secret:
+                    # 从代理留下的临时文件读
+                    try:
+                        _sf = "/tmp/stock_ai_proxy.secret"
+                        if _os.path.exists(_sf):
+                            _proxy_secret = open(_sf).read().strip()
+                    except Exception:
+                        pass
+                _nonce = str(_time.time_ns())
+                _sig = _hmac.new(_proxy_secret.encode(),
+                                 ("ai_proxy" + _nonce).encode(),
+                                 _hashlib.sha256).hexdigest()[:16]
+                headers["X-Nonce"] = _nonce
+                headers["X-Proxy-Token"] = _sig
+                # 告诉代理转发到哪个后端
+                data["provider"] = provider
+            else:
+                # 直连模式: 带 Authorization
+                headers["Authorization"] = f"Bearer {api_key}"
+
             response = requests.post(url, json=data, headers=headers,
                                   timeout=provider_config.get("timeout", 60))
             entry["latency_ms"] = int((_time.time() - _t0) * 1000)
