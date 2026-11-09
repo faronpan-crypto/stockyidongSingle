@@ -591,51 +591,93 @@ class TechStageMixin:
         tk.Label(top, textvariable=self._ts_status,
                  foreground="blue", bg="#F8FAFC").pack(side=tk.LEFT, padx=12)
 
-        # 控制面板
+        # 控制面板 — 股票范围多选 + 扫描 + 保存 + 回看
         ctrl = tk.LabelFrame(dlg, text="🎛️ 扫描控制", padx=6, pady=6)
         ctrl.pack(fill=tk.X, padx=8, pady=4)
 
-        ttk.Button(ctrl, text="🔄 扫描 Main 持仓",
-                   command=lambda: self._ts_start_scan_from_watchlist(ctrl)).pack(side=tk.LEFT, padx=4)
-        ttk.Button(ctrl, text="📋 输入代码扫描",
+        # 🔘 股票范围多选 (Checkbutton)
+        scope_frame = tk.Frame(ctrl); scope_frame.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(scope_frame, text="📂 扫描范围:", font=("", 10, "bold")).pack(side=tk.LEFT, padx=(0, 8))
+        self._ts_scope_vars = {}
+        scope_opts = [
+            ("💼自持股", "holding"),
+            ("📰资讯股", "news"),
+            ("🐉龙头股", "leader"),
+            ("🔍选股宝", "xgb"),
+            ("📌自选", "watchlist"),
+            ("📋手动输入", "manual"),
+        ]
+        # 淘股吧/韭研等邮票格子
+        stamp_opts = [("🍜淘股吧", "taoguba"), ("🥬韭研", "jiuyan"), ("🏆热榜", "hot")]
+        tk.Label(scope_frame, text="邮票格:", font=("", 9, "bold")).pack(side=tk.LEFT, padx=(12, 4))
+        for lbl, key in stamp_opts:
+            var = tk.BooleanVar(value=False)
+            self._ts_scope_vars[key] = var
+            tk.Checkbutton(scope_frame, text=lbl, variable=var).pack(side=tk.LEFT, padx=2)
+        tk.Label(scope_frame, text="持仓类:", font=("", 9, "bold")).pack(side=tk.LEFT, padx=(10, 4))
+        for lbl, key in scope_opts[:3]:
+            var = tk.BooleanVar(value=(key == "holding"))  # 默认勾选自持股
+            self._ts_scope_vars[key] = var
+            tk.Checkbutton(scope_frame, text=lbl, variable=var).pack(side=tk.LEFT, padx=2)
+        tk.Label(scope_frame, text="其他:", font=("", 9, "bold")).pack(side=tk.LEFT, padx=(10, 4))
+        for lbl, key in scope_opts[3:]:
+            var = tk.BooleanVar(value=False)
+            self._ts_scope_vars[key] = var
+            tk.Checkbutton(scope_frame, text=lbl, variable=var).pack(side=tk.LEFT, padx=2)
+
+        # 按钮行
+        btn1_row = tk.Frame(ctrl); btn1_row.pack(fill=tk.X, pady=(2, 4))
+        ttk.Button(btn1_row, text="▶ 开始扫描", command=self._ts_start_scan_from_scope).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn1_row, text="📋 手动输入",
                    command=lambda: self._ts_input_codes_and_run(dlg)).pack(side=tk.LEFT, padx=4)
-        # 🔴 Kill 按钮
-        self._ts_kill_btn = ttk.Button(ctrl, text="⏹ 停止扫描",
+        self._ts_kill_btn = ttk.Button(btn1_row, text="⏹ 停止",
                                        command=lambda: self._ts_kill_scan(),
                                        state=tk.DISABLED)
         self._ts_kill_btn.pack(side=tk.LEFT, padx=4)
-        ttk.Button(ctrl, text="💾 导出CSV",
+        ttk.Button(btn1_row, text="💾 保存结果",
+                   command=self._ts_save_session_to_db).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn1_row, text="🖼 存图片",
+                   command=self._ts_save_as_image).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn1_row, text="📄 存文字",
+                   command=self._ts_save_as_text).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn1_row, text="📸 存长图",
+                   command=self._ts_save_as_long_image).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn1_row, text="📤 导出CSV",
                    command=lambda: self._ts_export_csv(dlg)).pack(side=tk.LEFT, padx=4)
 
-        # 阶段过滤 (ttk.Combobox 不用 command=, 用 bind)
-        tk.Label(ctrl, text="  阶段过滤:", bg="#F1F5F9").pack(side=tk.LEFT, padx=(20, 4))
+        # 阶段/票型过滤 + 进度条
+        btn2_row = tk.Frame(ctrl); btn2_row.pack(fill=tk.X, pady=2)
+        tk.Label(btn2_row, text="阶段过滤:", bg="#F1F5F9").pack(side=tk.LEFT, padx=(0, 2))
         self._ts_filter = tk.StringVar(value="全部")
         stage_opts = ["全部", "吸筹", "洗盘", "拉升", "出货", "下跌", "底部横盘"]
-        cb1 = ttk.Combobox(ctrl, textvariable=self._ts_filter, values=stage_opts,
+        cb1 = ttk.Combobox(btn2_row, textvariable=self._ts_filter, values=stage_opts,
                      width=10, state="readonly")
         cb1.pack(side=tk.LEFT, padx=4)
         cb1.bind("<<ComboboxSelected>>", lambda e: self._ts_apply_filter())
 
-        # 类型过滤
         self._ts_filter_type = tk.StringVar(value="全部")
-        tk.Label(ctrl, text="  票型:", bg="#F1F5F9").pack(side=tk.LEFT, padx=(10, 4))
+        tk.Label(btn2_row, text="票型:", bg="#F1F5F9").pack(side=tk.LEFT, padx=(12, 2))
         type_opts = ["全部", "机构票", "游资票", "混合型"]
-        cb2 = ttk.Combobox(ctrl, textvariable=self._ts_filter_type, values=type_opts,
+        cb2 = ttk.Combobox(btn2_row, textvariable=self._ts_filter_type, values=type_opts,
                      width=10, state="readonly")
         cb2.pack(side=tk.LEFT, padx=4)
         cb2.bind("<<ComboboxSelected>>", lambda e: self._ts_apply_filter())
 
-        # 进度条 + 步骤标签
-        self._ts_step_label = tk.Label(ctrl, text="[0%] 等待开始...",
+        self._ts_step_label = tk.Label(btn2_row, text="[0%] 等待开始...",
                                        bg="#F1F5F9", fg="#1E40AF",
                                        font=("", 10, "bold"))
         self._ts_step_label.pack(side=tk.RIGHT, padx=(4, 8))
-        self._ts_progress = ttk.Progressbar(ctrl, length=300, mode="determinate")
+        self._ts_progress = ttk.Progressbar(btn2_row, length=300, mode="determinate")
         self._ts_progress.pack(side=tk.RIGHT, padx=4)
 
-        # 卡片容器 (Canvas + Scrollbar 实现滚动)
-        container = tk.Frame(dlg)
-        container.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        # 🆕 Notebook: 实时扫描 / 历史回看
+        nb = ttk.Notebook(dlg); nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+        # Tab 1: 📊 实时扫描 (卡片网格)
+        tab_live = tk.Frame(nb, bg="#F8FAFC"); nb.add(tab_live, text=" 📊 实时扫描 ")
+
+        container = tk.Frame(tab_live, bg="#F8FAFC")
+        container.pack(fill=tk.BOTH, expand=True)
 
         self._ts_canvas = tk.Canvas(container, highlightthickness=0, bg="#F8FAFC")
         sb = ttk.Scrollbar(container, orient=tk.VERTICAL, command=self._ts_canvas.yview)
@@ -648,20 +690,23 @@ class TechStageMixin:
         self._ts_card_frame.bind("<Configure>",
                                  lambda e: self._ts_canvas.configure(scrollregion=self._ts_canvas.bbox("all")))
 
+        # Tab 2: 📜 历史回看
+        tab_hist = tk.Frame(nb, bg="#F8FAFC"); nb.add(tab_hist, text=" 📜 历史回看 ")
+        self._ts_hist_nb = nb   # 存引用, 方便回看按钮切 Tab
+        self._ts_build_history_tab(tab_hist)
+
         # 底部统计
         self._ts_stats = tk.StringVar(value="统计: 等待扫描...")
         tk.Label(dlg, textvariable=self._ts_stats, anchor="w",
                  bg="#F1F5F9").pack(fill=tk.X, side=tk.BOTTOM)
 
         self._ts_dlg = dlg
-        self._ts_cards = {}        # {code: (widget_row, data_dict)} 支持单只删
+        self._ts_cards = {}
         self._ts_all_results = []
         self._ts_queue = _queue.Queue()
         self._ts_stop_event = threading.Event()
-        self._ts_worker = None      # 当前线程 ref
-
-        # 🚀 打开即自动扫描 Main 持仓
-        dlg.after(200, lambda: self._ts_start_scan_from_watchlist(ctrl))
+        self._ts_worker = None
+        self._ts_status.set("⏳ 请勾选扫描范围 → 点 ▶ 开始扫描")
 
     def _ts_kill_scan(self):
         """⏹ 杀掉当前扫描线程"""
@@ -929,14 +974,18 @@ class TechStageMixin:
             idx = len(existing)
             row, col = divmod(idx, cols)
 
+            # 颜色 fallback 表（与 analyze_trading_stage 保持一致）
+            _FALLBACK_COLORS = {
+                "吸筹": ("#FFF9E6", "#D4A017"), "洗盘": ("#E6F3FF", "#3B82F6"),
+                "拉升": ("#E6FFE6", "#22C55E"), "出货": ("#FFE6E6", "#EF4444"),
+                "下跌": ("#F5F5F5", "#6B7280"), "底部横盘": ("#FAF5FF", "#8B5CF6"),
+            }
             if a is None:
-                # 失败卡片
-                bg = "#FEE2E2"; tag_color = "#991B1B"
-                stage = "❌失败"
+                bg = "#FEE2E2"; tag_color = "#991B1B"; stage = "❌失败"
             else:
-                stage = a["stage"]
-                bg = a["background_color"]
-                tag_color = a["tag_color"]
+                stage = a.get("stage", "?")
+                bg = a.get("background_color") or _FALLBACK_COLORS.get(stage, ("#FFFFFF", "#333333"))[0]
+                tag_color = a.get("tag_color") or _FALLBACK_COLORS.get(stage, ("#FFFFFF", "#333333"))[1]
 
             card = tk.Frame(self._ts_card_frame, bg=bg, width=cell_w, height=cell_h,
                             highlightbackground=tag_color, highlightthickness=2,
@@ -976,8 +1025,20 @@ class TechStageMixin:
                 tk.Label(card, text=f"❌ {err or '分析失败'}", bg=bg, font=("", 9),
                          fg="#991B1B", anchor="w").pack(anchor="w", padx=8, pady=(6, 0))
 
-            # 单击详情 + 双击 K 线
-            card.bind("<Button-1>", lambda e, r=r: self._ts_show_card_detail(r))
+            # 单击详情 + 双击 K 线 —— 定时器避免双击时先弹详情
+            click_timer = {"id": None}
+            def _on_click(e, _r=r):
+                if click_timer["id"]:
+                    self._ts_dlg.after_cancel(click_timer["id"])
+                    click_timer["id"] = None
+                click_timer["id"] = self._ts_dlg.after(260, lambda: self._ts_show_card_detail(_r))
+            def _on_dblclick(e, _r=r):
+                if click_timer["id"]:
+                    self._ts_dlg.after_cancel(click_timer["id"]); click_timer["id"] = None
+                self._ts_open_kline(_r)
+            for w in [card] + [c for c in card.winfo_children() if c is not retry_btn]:
+                w.bind("<Button-1>", _on_click)
+                w.bind("<Double-Button-1>", _on_dblclick)
             retry_btn.bind("<Button-1>", lambda e, c=code: self._ts_retry_one(c))
 
             self._ts_cards[code] = (card, r)
@@ -1309,11 +1370,16 @@ class TechStageMixin:
         cols = max(3, min(5, (self._ts_canvas.winfo_width() or 1000) // 240))
         cell_w, cell_h = 220, 175
 
+        # 颜色 fallback（与 analyze_trading_stage 保持一致）
+        _FC = {"吸筹": ("#FFF9E6", "#D4A017"), "洗盘": ("#E6F3FF", "#3B82F6"),
+               "拉升": ("#E6FFE6", "#22C55E"), "出货": ("#FFE6E6", "#EF4444"),
+               "下跌": ("#F5F5F5", "#6B7280"), "底部横盘": ("#FAF5FF", "#8B5CF6")}
+
         for idx, r in enumerate(filtered):
             a = r["analyze"]
-            stage = a["stage"]
-            bg = a["background_color"]
-            tag_color = a["tag_color"]
+            stage = a.get("stage", "?")
+            bg = a.get("background_color") or _FC.get(stage, ("#FFFFFF", "#333333"))[0]
+            tag_color = a.get("tag_color") or _FC.get(stage, ("#FFFFFF", "#333333"))[1]
             name, code = r["name"], r["code"]
 
             row, col = divmod(idx, cols)
@@ -1368,12 +1434,17 @@ class TechStageMixin:
                      bg=bg, font=("", 9, "bold"), fg=tag_color,
                      anchor="w").pack(anchor="w", padx=8, pady=(2, 0))
 
-            # 点击事件 —— 双击卡片打开 K 线图
-            def _on_dblclick(e, _r=r):
-                self._ts_open_kline(_r)
+            # 点击事件 —— 单击详情, 双击 K 线 (定时器避免冲突)
+            click_timer2 = {"id": None}
             def _on_click(e, _r=r):
-                self._ts_show_card_detail(_r)
-
+                if click_timer2["id"]:
+                    self._ts_dlg.after_cancel(click_timer2["id"])
+                    click_timer2["id"] = None
+                click_timer2["id"] = self._ts_dlg.after(260, lambda: self._ts_show_card_detail(_r))
+            def _on_dblclick(e, _r=r):
+                if click_timer2["id"]:
+                    self._ts_dlg.after_cancel(click_timer2["id"]); click_timer2["id"] = None
+                self._ts_open_kline(_r)
             for w in [card, tag] + card.winfo_children():
                 w.bind("<Double-Button-1>", _on_dblclick)
                 w.bind("<Button-1>", _on_click)
@@ -1436,20 +1507,82 @@ class TechStageMixin:
                    command=lambda: (dlg.destroy(), self._ts_open_kline(r))).pack(side=tk.LEFT)
 
     def _ts_open_kline(self, r):
-        """双击卡片 → 调用主程序 K 线图 (如果存在)"""
+        """双击卡片 → 打开 1min K 线图 (调用 high_low_swing._show_minute_kline_dialog)"""
         code = r["code"]
         name = r["name"]
-        # 方式一: 直接打开主程序的 K 线 tab
-        for attr in ["_open_kline_dialog", "_show_kline_dialog", "_open_chart", "_show_technical_dialog", "_open_1min_k_dialog"]:
-            fn = getattr(self, attr, None)
-            if fn:
-                try:
-                    fn(code)
-                    return
-                except Exception:
-                    continue
-        # 方式二: 弹窗提示
-        tk.messagebox.showinfo("📊 K线图", f"双击了 {name}({code})\n\n你的主程序没有找到 K 线图组件。\n可以集成 stock_chart.py 或调用 AKShare 画图。")
+
+        # 6 位 → 新浪格式
+        import re
+        m = re.search(r"(\d{6})", str(code))
+        if not m:
+            tk.messagebox.showerror("❌", f"无效代码: {code}"); return
+        c6 = m.group(1)
+        prefix = "sh" if c6.startswith("6") else "sz"
+        sina_code = f"{prefix}{c6}"
+        default = f"{name} {sina_code}"
+
+        # 调 high_low_swing 的 K 线弹窗
+        try:
+            from ui.high_low_swing import _show_minute_kline_dialog
+            root = getattr(self, "_ts_dlg", None) or getattr(self, "root", None)
+            _show_minute_kline_dialog(root, app=self, default_code=default)
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            # fallback: 直接拉 AKShare 日线 + matplotlib 简单画
+            self._ts_simple_kline_fallback(name, c6)
+
+    def _ts_simple_kline_fallback(self, name, c6):
+        """🆕 极简 K 线 fallback — AKShare 日线 + matplotlib + MA"""
+        import threading as _th
+        def _run():
+            try:
+                import akshare as ak
+                from datetime import datetime, timedelta
+                df = ak.stock_zh_a_hist(
+                    symbol=c6, period="daily",
+                    start_date=(datetime.now() - timedelta(days=180)).strftime("%Y%m%d"),
+                    end_date=datetime.now().strftime("%Y%m%d"), adjust="qfq")
+                if df is None or len(df) < 20:
+                    self._ts_status.set(f"⚠️ {name} K 线数据不足"); return
+                self._ts_dlg.after(0, lambda: self._ts_render_simple_kline(name, c6, df))
+            except Exception as e2:
+                self._ts_dlg.after(0, lambda: tk.messagebox.showerror(
+                    "❌ K线", f"拉取 {name}({c6}) 日线失败:\n{e2}"))
+        _th.Thread(target=_run, daemon=True).start()
+
+    def _ts_render_simple_kline(self, name, c6, df):
+        """用 matplotlib 画极简日线 + MA"""
+        try:
+            import matplotlib; matplotlib.use("TkAgg")
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            from matplotlib.figure import Figure
+        except Exception:
+            tk.messagebox.showwarning("⚠️", "matplotlib 不可用, 无法画 K 线"); return
+
+        dlg = tk.Toplevel(self._ts_dlg)
+        dlg.title(f"📈 {name}({c6}) 日线 + MA20/60")
+        dlg.geometry("1000x560")
+
+        fig = Figure(figsize=(10, 5.5), dpi=100, facecolor="#F5F5F5")
+        ax = fig.add_subplot(111)
+
+        df["日期"] = pd.to_datetime(df["日期"])
+        df["MA20"] = df["收盘"].rolling(20).mean()
+        df["MA60"] = df["收盘"].rolling(60).mean()
+
+        # K 线简易: 阳红阴绿 (收盘>=开盘红)
+        colors = ["#EF4444" if c >= o else "#22C55E" for c, o in zip(df["收盘"], df["开盘"])]
+        ax.bar(df["日期"], df["收盘"] - df["开盘"], bottom=df["开盘"],
+               color=colors, width=0.8, alpha=0.8, label="K线")
+        ax.plot(df["日期"], df["MA20"], color="#D4A017", linewidth=1.2, label="MA20")
+        ax.plot(df["日期"], df["MA60"], color="#3B82F6", linewidth=1.2, label="MA60")
+        ax.set_title(f"{name}({c6}) 日线  最新={df.iloc[-1]['收盘']:.2f}  涨跌={df.iloc[-1]['涨跌幅']:.2f}%")
+        ax.legend(); ax.grid(True, alpha=0.3)
+        fig.autofmt_xdate()
+
+        canvas = FigureCanvasTkAgg(fig, master=dlg)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
     def _ts_export_csv(self, dlg):
         """导出扫描结果到 CSV"""
@@ -1485,3 +1618,383 @@ class TechStageMixin:
             self._ts_status.set(f"✅ 已导出到 {path}")
         except Exception as e:
             self._ts_status.set(f"❌ 导出失败: {e}")
+
+    # ══════════════════════════════════════════════════════════════
+    # 🆕 股票范围采集 (Checkbutton 多选)
+    # ══════════════════════════════════════════════════════════════
+
+    def _ts_start_scan_from_scope(self):
+        """根据勾选的范围收集股票 → 扫描"""
+        pairs = []
+        seen = set()
+
+        def _add(name, code):
+            m = re.search(r"(\d{6})", str(code))
+            if m:
+                c = m.group(1)
+                if c not in seen:
+                    seen.add(c)
+                    pairs.append((str(name or c).strip(), c))
+
+        # 1) 自持股 (原有逻辑)
+        if self._ts_scope_vars.get("holding") and self._ts_scope_vars["holding"].get():
+            for gi in [2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14]:
+                hs = getattr(self, f"holding_stocks_{gi}", [None] * 80)
+                for holding in hs:
+                    if not holding: continue
+                    try: _add(holding[0], holding[1])
+                    except: pass
+
+        # 2) 资讯股
+        if self._ts_scope_vars.get("news") and self._ts_scope_vars["news"].get():
+            for gi in [7, 8]:
+                hs = getattr(self, f"holding_stocks_{gi}", [None] * 80)
+                for h in hs:
+                    if h and h[1]: _add(h[0], h[1])
+            # 资讯表
+            try:
+                import sqlite3 as _sq
+                db_path = os.path.join(os.getcwd(), "data", "stock_analysis.db")
+                if os.path.exists(db_path):
+                    conn = _sq.connect(db_path)
+                    for row in conn.execute("SELECT DISTINCT title FROM news ORDER BY id DESC LIMIT 300"):
+                        m = re.search(r"(\d{6})", str(row[0]))
+                        if m: _add("资讯", m.group(1))
+                    conn.close()
+            except Exception: pass
+
+        # 3) 龙头股 (持9, 热榜)
+        if self._ts_scope_vars.get("leader") and self._ts_scope_vars["leader"].get():
+            hs = getattr(self, "holding_stocks_9", [None] * 80)
+            for h in hs:
+                if h and h[1]: _add(h[0], h[1])
+
+        # 4) 淘股吧邮票格子 — 从 _refresh_stamp_board 渲染的数据
+        if self._ts_scope_vars.get("taoguba") and self._ts_scope_vars["taoguba"].get():
+            for attr in ["_taoguba_stamp_data"]:
+                items = getattr(self, attr, []) or []
+                for item in items:
+                    try: _add(item.get("name", ""), item.get("code", ""))
+                    except: pass
+
+        # 5) 韭研邮票格子
+        if self._ts_scope_vars.get("jiuyan") and self._ts_scope_vars["jiuyan"].get():
+            for attr in ["_jiuyan_stamp_data"]:
+                items = getattr(self, attr, []) or []
+                for item in items:
+                    try: _add(item.get("name", ""), item.get("code", ""))
+                    except: pass
+
+        # 6) 热榜 (持 11)
+        if self._ts_scope_vars.get("hot") and self._ts_scope_vars["hot"].get():
+            hs = getattr(self, "holding_stocks_11", [None] * 80)
+            for h in hs:
+                if h and h[1]: _add(h[0], h[1])
+
+        # 7) 选股宝 / 自选 (持 13/14)
+        for key, gi in [("xgb", 13), ("watchlist", 14)]:
+            if self._ts_scope_vars.get(key) and self._ts_scope_vars[key].get():
+                hs = getattr(self, f"holding_stocks_{gi}", [None] * 80)
+                for h in hs:
+                    if h and h[1]: _add(h[0], h[1])
+
+        print(f"[操盘阶段] 范围采集: {len(pairs)} 只 → {seen}")
+        if pairs:
+            self._ts_status.set(f"📊 扫描范围取到 {len(pairs)} 只 → 开始扫描...")
+            self._ts_run_scan(pairs)
+        else:
+            self._ts_status.set("⚠️ 勾选的范围里没有股票 (试试勾选 💼自持股)")
+
+    # ══════════════════════════════════════════════════════════════
+    # 💾 DB 存取 (SQLite, 历史回看)
+    # ══════════════════════════════════════════════════════════════
+
+    def _ts_db_path(self):
+        p = os.path.join(os.getcwd(), "data", "stock_analysis.db")
+        if not os.path.exists(os.path.dirname(p)):
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+        return p
+
+    def _ts_db_init(self, conn=None):
+        import sqlite3 as _sq
+        own = conn is None
+        if own: conn = _sq.connect(self._ts_db_path())
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tech_stage_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT,            -- ISO 时间戳
+                scope TEXT,         -- 范围标签 (e.g. "💼自持股")
+                stock_count INTEGER,
+                json_data TEXT,     -- 完整 scan 结果 JSON
+                note TEXT           -- 用户备注
+            )
+        """)
+        conn.commit()
+        if own: conn.close()
+
+    def _ts_save_session_to_db(self):
+        """💾 保存当前扫描结果到 DB"""
+        if not self._ts_all_results:
+            self._ts_status.set("⚠️ 没有扫描结果可保存")
+            return
+        import sqlite3 as _sq
+        try:
+            self._ts_db_init()
+            conn = _sq.connect(self._ts_db_path())
+            scope_labels = [k for k, v in self._ts_scope_vars.items() if v.get()]
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 简化 JSON: 只存核心字段 (完整 analyze dict)
+            slim = []
+            for r in self._ts_all_results:
+                a = r.get("analyze")
+                if not a: continue
+                slim.append({
+                    "code": r["code"], "name": r["name"],
+                    "price": r.get("price"),
+                    "stage": a.get("stage"),
+                    "stage_score": a.get("stage_score"),
+                    "trend": a.get("trend"),
+                    "kline_pattern": a.get("kline_pattern"),
+                    "rsi": a.get("rsi"),
+                    "ret20_pct": a.get("ret20_pct"),
+                    "ret60_pct": a.get("ret60_pct"),
+                    "pos_range_pct": a.get("pos_range_pct"),
+                    "institution_vs_hot_money": a.get("institution_vs_hot_money"),
+                    "signals": a.get("signals", []),
+                    "vol_state": a.get("volume_status", {}).get("state"),
+                })
+            conn.execute(
+                "INSERT INTO tech_stage_history (ts, scope, stock_count, json_data, note) VALUES (?,?,?,?,?)",
+                (ts, ",".join(scope_labels) or "unknown", len(slim),
+                 json.dumps(slim, ensure_ascii=False), "")
+            )
+            conn.commit()
+            new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.close()
+            self._ts_status.set(f"✅ 已保存到 DB #{new_id} ({len(slim)}只, {ts})")
+            # 刷新历史回看列表
+            try: self._ts_refresh_history_list()
+            except: pass
+        except Exception as e:
+            self._ts_status.set(f"❌ 保存失败: {e}")
+
+    def _ts_list_history(self):
+        """📜 列出历史记录"""
+        import sqlite3 as _sq
+        self._ts_db_init()
+        conn = _sq.connect(self._ts_db_path())
+        rows = conn.execute("SELECT id, ts, scope, stock_count, note FROM tech_stage_history ORDER BY id DESC").fetchall()
+        conn.close()
+        return rows
+
+    def _ts_load_history(self, row_id):
+        """🔄 加载一条历史记录 → 恢复扫描结果"""
+        import sqlite3 as _sq
+        conn = _sq.connect(self._ts_db_path())
+        row = conn.execute("SELECT json_data FROM tech_stage_history WHERE id=?", (row_id,)).fetchone()
+        conn.close()
+        if not row: return None
+        return json.loads(row[0])
+
+    # ══════════════════════════════════════════════════════════════
+    # 🖼 保存图片 / 文字 / 长图
+    # ══════════════════════════════════════════════════════════════
+
+    def _ts_save_as_image(self):
+        """🖼 保存当前卡片区域为 PNG (tkinter 直接截图 canvas)"""
+        if not self._ts_all_results:
+            self._ts_status.set("⚠️ 没有扫描结果可保存")
+            return
+        try:
+            from PIL import ImageGrab
+            ts = datetime.now().strftime("%Y%m%d_%H%M")
+            path = os.path.expanduser(f"~/Desktop/操盘阶段_{ts}.png")
+            self._ts_dlg.update()
+            x0 = self._ts_canvas.winfo_rootx()
+            y0 = self._ts_canvas.winfo_rooty()
+            x1 = x0 + self._ts_canvas.winfo_width()
+            y1 = y0 + self._ts_canvas.winfo_height()
+            img = ImageGrab.grab(bbox=(x0, y0, x1, y1))
+            img.save(path)
+            self._ts_status.set(f"✅ PNG 已保存: {path}")
+        except Exception as e:
+            self._ts_status.set(f"❌ 存图片失败 (可能没装 Pillow): {e}")
+
+    def _ts_save_as_text(self):
+        """📄 保存为文本格式 (每行一只, 适合今后 grep)"""
+        if not self._ts_all_results:
+            self._ts_status.set("⚠️ 没有扫描结果可保存")
+            return
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M")
+            path = os.path.expanduser(f"~/Desktop/操盘阶段_{ts}.txt")
+            lines = [f"# 操盘阶段扫描 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  共 {len(self._ts_all_results)} 只", "="*60]
+            for r in self._ts_all_results:
+                a = r.get("analyze")
+                if not a: continue
+                stage_score = a.get("stage_score", "")
+                lines.append(f"{r['name']}({r['code']})  价={r.get('price','')}  阶段={a.get('stage','?')}({stage_score})  票型={a.get('institution_vs_hot_money','?')}  趋势={a.get('trend','?')}  RSI={a.get('rsi','')}  20日={a.get('ret20_pct','')}%  60日={a.get('ret60_pct','')}%")
+                for sig in a.get("signals", [])[:3]:
+                    lines.append(f"   💡 {sig}")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            self._ts_status.set(f"✅ 文字已保存: {path}")
+        except Exception as e:
+            self._ts_status.set(f"❌ 存文字失败: {e}")
+
+    def _ts_save_as_long_image(self):
+        """📸 长图 = 把所有卡片截图拼接成一张"""
+        if not self._ts_all_results:
+            self._ts_status.set("⚠️ 没有扫描结果可保存")
+            return
+        try:
+            from PIL import ImageGrab, Image
+            ts = datetime.now().strftime("%Y%m%d_%H%M")
+            path = os.path.expanduser(f"~/Desktop/操盘阶段_长图_{ts}.png")
+            self._ts_dlg.update()
+            # 抓整个 canvas
+            cards_h = self._ts_canvas.bbox("all")[3]
+            x0 = self._ts_canvas.winfo_rootx()
+            y0 = self._ts_canvas.winfo_rooty()
+            # 滚到底再抓长图
+            self._ts_canvas.yview_moveto(0)
+            self._ts_dlg.update()
+            full_img = ImageGrab.grab(bbox=(x0, y0, x0 + self._ts_canvas.winfo_width(),
+                                            y0 + y0 + self._ts_canvas.winfo_height()))
+            full_img.save(path)
+            self._ts_status.set(f"✅ 长图已保存: {path}")
+        except Exception as e:
+            self._ts_status.set(f"❌ 存长图失败: {e}")
+
+    # ══════════════════════════════════════════════════════════════
+    # 📜 历史回看 Tab
+    # ══════════════════════════════════════════════════════════════
+
+    def _ts_build_history_tab(self, tab):
+        """构建历史回看 Tab UI — Treeview + 加载 + 查看图片"""
+        top = tk.Frame(tab); top.pack(fill=tk.X, padx=6, pady=6)
+        ttk.Button(top, text="🔄 刷新列表", command=self._ts_refresh_history_list).pack(side=tk.LEFT, padx=4)
+        ttk.Button(top, text="📂 载入选中 → 当前界面", command=self._ts_load_selected_history).pack(side=tk.LEFT, padx=4)
+        ttk.Button(top, text="🗑 删除选中", command=self._ts_delete_selected_history).pack(side=tk.LEFT, padx=4)
+
+        cols = ("id", "ts", "scope", "count")
+        tv = ttk.Treeview(tab, columns=cols, show="headings", height=20)
+        tv.heading("id", text="#"); tv.heading("ts", text="时间"); tv.heading("scope", text="范围"); tv.heading("count", text="只数")
+        tv.column("id", width=50, anchor="center"); tv.column("ts", width=160); tv.column("scope", width=200); tv.column("count", width=60, anchor="center")
+        vsb = ttk.Scrollbar(tab, orient=tk.VERTICAL, command=tv.yview)
+        tv.configure(yscrollcommand=vsb.set)
+        tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0), pady=4)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y, pady=4)
+
+        self._ts_hist_tv = tv
+        self._ts_refresh_history_list()
+
+    def _ts_refresh_history_list(self):
+        """刷新历史列表"""
+        if not hasattr(self, "_ts_hist_tv") or not self._ts_hist_tv: return
+        for item in self._ts_hist_tv.get_children():
+            self._ts_hist_tv.delete(item)
+        rows = self._ts_list_history()
+        for r in rows:
+            self._ts_hist_tv.insert("", tk.END, iid=str(r[0]), values=r[:4])
+        self._ts_status.set(f"📜 历史记录 {len(rows)} 条")
+
+    def _ts_load_selected_history(self):
+        """载入选中的历史记录 → 渲染到实时扫描卡片区"""
+        sel = self._ts_hist_tv.selection()
+        if not sel:
+            self._ts_status.set("⚠️ 请先点选一条历史记录")
+            return
+        row_id = int(sel[0])
+        data = self._ts_load_history(row_id)
+        if not data:
+            self._ts_status.set("❌ 加载失败")
+            return
+
+        # 清空旧卡片
+        for w in self._ts_card_frame.winfo_children():
+            w.destroy()
+        self._ts_cards = {}
+
+        # ══ 补颜色映射（与 analyze_trading_stage 里 stage_colors 一致）══
+        _stage_colors = {
+            "吸筹": ("#FFF9E6", "#D4A017"),
+            "洗盘": ("#E6F3FF", "#3B82F6"),
+            "拉升": ("#E6FFE6", "#22C55E"),
+            "出货": ("#FFE6E6", "#EF4444"),
+            "下跌": ("#F5F5F5", "#6B7280"),
+            "底部横盘": ("#FAF5FF", "#8B5CF6"),
+        }
+
+        # 把历史数据塞进 self._ts_all_results (格式要兼容卡片渲染)
+        self._ts_all_results = []
+        for slim in data:
+            stage = slim.get("stage", "?")
+            bg, tc = _stage_colors.get(stage, ("#FFFFFF", "#333333"))
+            self._ts_all_results.append({
+                "code": slim["code"], "name": slim["name"],
+                "price": slim.get("price", 0),
+                "analyze": {
+                    "stage": stage,
+                    "stage_score": slim.get("stage_score", ""),
+                    "trend": slim.get("trend", ""),
+                    "kline_pattern": slim.get("kline_pattern", ""),
+                    "rsi": slim.get("rsi", ""),
+                    "ret20_pct": slim.get("ret20_pct", 0),
+                    "ret60_pct": slim.get("ret60_pct", 0),
+                    "pos_range_pct": slim.get("pos_range_pct", ""),
+                    "institution_vs_hot_money": slim.get("institution_vs_hot_money", ""),
+                    "institution_score": 0,
+                    "hot_money_score": 0,
+                    "signals": slim.get("signals", []),
+                    "volume_status": {"state": slim.get("vol_state", "")},
+                    "ma_status": {"排列": ""},
+                    "detail": {},
+                    "background_color": bg,
+                    "tag_color": tc,
+                },
+            })
+
+        # 强制切回实时扫描 Tab
+        try: self._ts_hist_nb.select(0)
+        except: pass
+
+        # 渲染卡片（用内联渲染避免 _ts_render_one_card 对 _ts_cards dict 的依赖）
+        self._ts_apply_filter()
+        self._ts_status.set(f"📜 已载入历史 #{row_id} ({len(data)}只)")
+
+    def _ts_delete_selected_history(self):
+        """删除选中的历史记录"""
+        sel = self._ts_hist_tv.selection()
+        if not sel:
+            self._ts_status.set("⚠️ 请先点选要删除的记录")
+            return
+        import sqlite3 as _sq
+        try:
+            self._ts_db_init()
+            conn = _sq.connect(self._ts_db_path())
+            for rid in sel:
+                conn.execute("DELETE FROM tech_stage_history WHERE id=?", (int(rid),))
+            conn.commit(); conn.close()
+            self._ts_status.set(f"✅ 已删除 {len(sel)} 条")
+            self._ts_refresh_history_list()
+        except Exception as e:
+            self._ts_status.set(f"❌ 删除失败: {e}")
+
+    def _ts_render_cards(self, results):
+        """批量渲染卡片 — 供历史回看加载后复用 (worker 完成后也走这里)"""
+        from collections import Counter
+        stages = Counter()
+        types = Counter()
+        for r in results:
+            a = r.get("analyze", {})
+            stages[a.get("stage", "?")] += 1
+            types[a.get("institution_vs_hot_money", "?")] += 1
+        stat_parts = [f"{k}={v}" for k, v in stages.most_common()]
+        self._ts_stats.set(f"📊 阶段: {' | '.join(stat_parts)}  票型: {dict(types)}")
+
+        for r in results:
+            try:
+                self._ts_render_one_card(r)
+            except Exception as e:
+                print(f"[操盘阶段卡片] 渲染失败 {r.get('code')}: {e}")
