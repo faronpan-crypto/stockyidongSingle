@@ -1507,29 +1507,242 @@ class TechStageMixin:
                    command=lambda: (dlg.destroy(), self._ts_open_kline(r))).pack(side=tk.LEFT)
 
     def _ts_open_kline(self, r):
-        """双击卡片 → 打开 1min K 线图 (调用 high_low_swing._show_minute_kline_dialog)"""
-        code = r["code"]
-        name = r["name"]
-
-        # 6 位 → 新浪格式
+        """双击卡片 → 日线 K 线 + 一目均衡表"""
+        code = r["code"]; name = r["name"]
         import re
         m = re.search(r"(\d{6})", str(code))
-        if not m:
-            tk.messagebox.showerror("❌", f"无效代码: {code}"); return
+        if not m: tk.messagebox.showerror("❌", f"无效代码: {code}"); return
         c6 = m.group(1)
-        prefix = "sh" if c6.startswith("6") else "sz"
-        sina_code = f"{prefix}{c6}"
-        default = f"{name} {sina_code}"
+        self._ts_show_daily_ichimoku(name, c6)
 
-        # 调 high_low_swing 的 K 线弹窗
-        try:
-            from ui.high_low_swing import _show_minute_kline_dialog
-            root = getattr(self, "_ts_dlg", None) or getattr(self, "root", None)
-            _show_minute_kline_dialog(root, app=self, default_code=default)
-        except Exception as e:
-            import traceback; traceback.print_exc()
-            # fallback: 直接拉 AKShare 日线 + matplotlib 简单画
-            self._ts_simple_kline_fallback(name, c6)
+    def _ts_show_daily_ichimoku(self, name, c6):
+        """🆕 日线 K 线 + 一目均衡表 — AKShare 日线 + matplotlib"""
+        import threading as _th
+        dlg_loading = tk.Toplevel(self._ts_dlg)
+        dlg_loading.title("加载中"); dlg_loading.geometry("300x100")
+        tk.Label(dlg_loading, text=f"⏳ 拉取 {name}({c6}) 日线 + 计算一目均衡...",
+                 font=("", 11)).pack(expand=True)
+        dlg_loading.transient(self._ts_dlg)
+
+        def _run():
+            try:
+                import akshare as ak
+                from datetime import datetime, timedelta
+                df = ak.stock_zh_a_hist(
+                    symbol=c6, period="daily",
+                    start_date=(datetime.now() - timedelta(days=500)).strftime("%Y%m%d"),
+                    end_date=datetime.now().strftime("%Y%m%d"), adjust="qfq")
+                if df is None or len(df) < 60:
+                    self._ts_dlg.after(0, lambda: (dlg_loading.destroy(),
+                        tk.messagebox.showwarning("⚠️", f"{name} 日线不足")))
+                    return
+                self._ts_dlg.after(0, lambda: (dlg_loading.destroy(),
+                    self._ts_render_daily_ichimoku(name, c6, df)))
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                self._ts_dlg.after(0, lambda: (dlg_loading.destroy(),
+                    tk.messagebox.showerror("❌", f"拉取日线失败: {e}")))
+        _th.Thread(target=_run, daemon=True).start()
+
+    def _ts_render_daily_ichimoku(self, name, c6, df):
+        """日线图 + 一目均衡表 — Notebook 2 Tab + 指标可选项"""
+        import matplotlib; matplotlib.use("TkAgg")
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        from matplotlib.figure import Figure
+        from matplotlib.patches import Rectangle
+        from matplotlib import font_manager
+        import numpy as np
+        import pandas as pd
+
+        # 中文字体
+        _avail = {f.name for f in font_manager.fontManager.ttflist}
+        for _f in ["PingFang SC", "Heiti SC", "STHeiti", "Arial Unicode MS"]:
+            if _f in _avail:
+                matplotlib.rcParams["font.sans-serif"] = [_f]; break
+        matplotlib.rcParams["axes.unicode_minus"] = False
+
+        o = df["开盘"].to_numpy(); h = df["最高"].to_numpy()
+        lo = df["最低"].to_numpy(); c = df["收盘"].to_numpy()
+        v = df["成交量"].to_numpy()
+        x = np.arange(len(c)); dates = df["日期"].astype(str).to_numpy()
+        _XLIM = (max(0, len(x)-200), len(x)-1)
+        _TICK = max(1, len(dates[-200:]) // 10)
+
+        def _ma(a, n): return np.convolve(a, np.ones(n)/n, mode="valid")
+        def _hlc(_h, _lo, n):
+            return (np.array([np.max(_h[max(0,i-n+1):i+1]) for i in range(len(_h))]) +
+                    np.array([np.min(_lo[max(0,i-n+1):i+1]) for i in range(len(_lo))])) / 2
+
+        # 预计算所有指标
+        ma5, ma10, ma20, ma60 = _ma(c, 5), _ma(c, 10), _ma(c, 20), _ma(c, 60)
+        tenkan = _hlc(h, lo, 9); kijun = _hlc(h, lo, 26)
+        senkou_a = (tenkan + kijun) / 2; senkou_b = _hlc(h, lo, 52)
+        senkou_a_fwd = np.concatenate([senkou_a[26:], [np.nan]*26])
+        senkou_b_fwd = np.concatenate([senkou_b[26:], [np.nan]*26])
+        chikou = np.concatenate([[np.nan]*26, c[:-26]]) if len(c) > 26 else c
+
+        ema12 = np.convolve(c, np.exp(-np.arange(24)/(2*12)), mode="full")[:len(c)] / np.exp(-np.arange(24)/(2*12)).sum()
+        ema26 = np.convolve(c, np.exp(-np.arange(52)/(2*26)), mode="full")[:len(c)] / np.exp(-np.arange(52)/(2*26)).sum()
+        dif = ema12 - ema26
+        dea = np.convolve(dif, np.exp(-np.arange(18)/(2*9)), mode="full")[:len(c)] / np.exp(-np.arange(18)/(2*9)).sum()
+        macd_h = (dif - dea) * 2
+
+        # KDJ
+        low9 = pd.Series(lo).rolling(9).min().to_numpy()
+        high9 = pd.Series(h).rolling(9).max().to_numpy()
+        rsv = np.where(high9 - low9 > 0, (c - low9) / (high9 - low9) * 100, 50.0)
+        k = np.convolve(np.nan_to_num(rsv, 50), np.exp(-np.arange(6)/(2*3)), mode="full")[:len(c)] / np.exp(-np.arange(6)/(2*3)).sum()
+        d = np.convolve(k, np.exp(-np.arange(6)/(2*3)), mode="full")[:len(c)] / np.exp(-np.arange(6)/(2*3)).sum()
+        j = 3 * k - 2 * d
+
+        # ═══════ Tk 窗口 ═══════
+        dlg = tk.Toplevel(self._ts_dlg)
+        dlg.title(f"{name}({c6})  日线 K 线 / 一目均衡表")
+        dlg.geometry("1320x840"); dlg.configure(bg="#121212")
+
+        # 顶栏: 指标选项
+        top = tk.Frame(dlg, bg="#1E1E1E"); top.pack(fill=tk.X, padx=6, pady=4)
+        tk.Label(top, text=f"{name}({c6})  收盘 ¥{c[-1]:.2f}  |  {dates[-1]}",
+                 bg="#1E1E1E", fg="#FFD54F", font=("", 11, "bold")).pack(side=tk.LEFT, padx=6)
+
+        opts = {"ma5": True, "ma10": True, "ma20": True, "ma60": True,
+                "vol": True, "macd": True, "kdj": False}
+        opt_vars = {k: tk.BooleanVar(value=v) for k, v in opts.items()}
+        tk.Label(top, text="指标:", bg="#1E1E1E", fg="#9E9E9E").pack(side=tk.LEFT, padx=(14, 2))
+        for k, lbl in [("ma5","MA5"),("ma10","MA10"),("ma20","MA20"),("ma60","MA60"),
+                       ("vol","成交量"),("macd","MACD"),("kdj","KDJ")]:
+            tk.Checkbutton(top, text=lbl, variable=opt_vars[k],
+                           bg="#1E1E1E", fg="#CCC", selectcolor="#121212",
+                           activebackground="#1E1E1E").pack(side=tk.LEFT, padx=1)
+
+        nb = ttk.Notebook(dlg); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        tab_frame1 = tk.Frame(nb, bg="#121212"); nb.add(tab_frame1, text="  📊 日线 K 线  ")
+        tab_frame2 = tk.Frame(nb, bg="#121212"); nb.add(tab_frame2, text="  📈 一目均衡表  ")
+
+        canvases = {"daily": None, "ichi": None}
+
+        def _setup_ax(a):
+            a.set_facecolor("#1E1E1E"); a.tick_params(colors="#9E9E9E", labelsize=8)
+            for sp in a.spines.values(): sp.set_color("#444")
+            a.grid(True, alpha=0.12, color="#666")
+
+        def _do_candles(ax):
+            for i in range(len(x)):
+                up = c[i] >= o[i]; col = "#EF5350" if up else "#66BB6A"
+                ax.plot([x[i], x[i]], [lo[i], h[i]], color=col, lw=0.8)
+                ax.add_patch(Rectangle((x[i]-0.35, min(o[i],c[i])), 0.7, max(abs(c[i]-o[i]), 0.001),
+                                        facecolor=col, edgecolor=col, linewidth=0.3))
+
+        def _apply_xaxis(ax):
+            ax.set_xlim(*_XLIM)
+            tp = np.arange(_XLIM[0], _XLIM[1], _TICK)
+            ax.set_xticks(tp); ax.set_xticklabels([dates[i][2:] for i in tp], rotation=45, fontsize=7)
+
+        # ═══════ Tab 1: 📊 日线 K 线 ═══════
+        def _draw_daily():
+            for w in tab_frame1.winfo_children(): w.destroy()
+            fig = Figure(figsize=(12.8, 7.8), dpi=100, facecolor="#121212")
+            has_vol = opt_vars["vol"].get()
+            has_macd = opt_vars["macd"].get()
+            has_kdj = opt_vars["kdj"].get()
+            sub_count = 1 + (1 if has_vol else 0) + (1 if has_macd else 0) + (1 if has_kdj else 0)
+            hs = [4.5, 1.2, 1.0, 1.0][:sub_count]
+            gs = fig.add_gridspec(sub_count, 1, height_ratios=hs, hspace=0.06)
+            axes_list = [fig.add_subplot(gs[0])]
+            _setup_ax(axes_list[0])
+            cur_idx = 1
+            if has_vol: axes_list.append(fig.add_subplot(gs[cur_idx], sharex=axes_list[0])); _setup_ax(axes_list[-1]); cur_idx += 1
+            if has_macd: axes_list.append(fig.add_subplot(gs[cur_idx], sharex=axes_list[0])); _setup_ax(axes_list[-1]); cur_idx += 1
+            if has_kdj: axes_list.append(fig.add_subplot(gs[cur_idx], sharex=axes_list[0])); _setup_ax(axes_list[-1])
+
+            ax = axes_list[0]
+            _do_candles(ax)
+            if opt_vars["ma5"].get():  ax.plot(x[4:], ma5, color="#FFD54F", lw=1.1, label="MA5")
+            if opt_vars["ma10"].get(): ax.plot(x[9:], ma10, color="#42A5F5", lw=1.1, label="MA10")
+            if opt_vars["ma20"].get(): ax.plot(x[19:], ma20, color="#AB47BC", lw=1.3, label="MA20")
+            if opt_vars["ma60"].get(): ax.plot(x[59:], ma60, color="#66BB6A", lw=1.4, label="MA60")
+            ax.set_title(f"{name}({c6})  日线 K 线", color="white", fontsize=12, fontweight="bold")
+            if any(opt_vars[k].get() for k in ["ma5","ma10","ma20","ma60"]):
+                ax.legend(loc="upper left", fontsize=7, ncol=4, facecolor="#1E1E1E", labelcolor="#CCC", edgecolor="#444")
+            _apply_xaxis(ax)
+
+            ai = 1
+            if has_vol:
+                axv = axes_list[ai]; ai += 1
+                colors_v = ["#EF5350" if c[i] >= o[i] else "#66BB6A" for i in range(len(c))]
+                axv.bar(x, v / 1e6, color=colors_v, alpha=0.7, width=0.8)
+                axv.set_ylabel("成交量(万手)", color="#9E9E9E", fontsize=8)
+                _apply_xaxis(axv)
+            if has_macd:
+                axm = axes_list[ai]; ai += 1
+                axm.plot(x, dif, color="#42A5F5", lw=1.0, label="DIF")
+                axm.plot(x, dea, color="#FFAB40", lw=1.0, label="DEA")
+                axm.bar(x, macd_h, color=["#EF5350" if m>=0 else "#66BB6A" for m in macd_h], width=0.8, alpha=0.8)
+                axm.axhline(0, color="#555", lw=0.5)
+                axm.legend(loc="upper left", fontsize=7, facecolor="#1E1E1E", labelcolor="#CCC", edgecolor="#444")
+                axm.set_ylabel("MACD", color="#9E9E9E", fontsize=8)
+                _apply_xaxis(axm)
+            if has_kdj:
+                axk = axes_list[ai]
+                axk.plot(x, k, color="#FFD54F", lw=1.0, label="K")
+                axk.plot(x, d, color="#42A5F5", lw=1.0, label="D")
+                axk.plot(x, j, color="#EF5350", lw=0.9, label="J")
+                axk.axhline(80, color="#EF5350", lw=0.5, ls="--", alpha=0.5)
+                axk.axhline(20, color="#66BB6A", lw=0.5, ls="--", alpha=0.5)
+                axk.set_ylim(-20, 120)
+                axk.legend(loc="upper left", fontsize=7, facecolor="#1E1E1E", labelcolor="#CCC", edgecolor="#444")
+                axk.set_ylabel("KDJ", color="#9E9E9E", fontsize=8)
+                _apply_xaxis(axk)
+
+            for a in axes_list[:-1]:
+                try: a.tick_params(labelbottom=False)
+                except: pass
+
+            cv = FigureCanvasTkAgg(fig, master=tab_frame1); cv.draw()
+            cv.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            tb = NavigationToolbar2Tk(cv, tab_frame1); tb.update(); tb.pack(side=tk.BOTTOM, fill=tk.X)
+            canvases["daily"] = cv
+
+        # ═══════ Tab 2: 📈 一目均衡表 ═══════
+        def _draw_ichi():
+            for w in tab_frame2.winfo_children(): w.destroy()
+            fig = Figure(figsize=(12.8, 7.8), dpi=100, facecolor="#121212")
+            sub_count = 1 + (1 if opt_vars["vol"].get() else 0)
+            gs = fig.add_gridspec(sub_count, 1, height_ratios=[5, 1.5][:sub_count], hspace=0.06)
+            ax = fig.add_subplot(gs[0]); _setup_ax(ax)
+            _do_candles(ax)
+            # 一目均衡
+            ax.plot(x, tenkan, color="#FFAB40", lw=1.3, label="转换线(9)")
+            ax.plot(x, kijun,  color="#40C4FF", lw=1.5, label="基准线(26)")
+            ax.plot(x, senkou_a_fwd, color="#FF80AB", lw=1.2, label="先行带A")
+            ax.plot(x, senkou_b_fwd, color="#7C4DFF", lw=1.2, label="先行带B")
+            ax.fill_between(x, senkou_a_fwd, senkou_b_fwd,
+                            where=senkou_a_fwd >= senkou_b_fwd, color="#FF80AB", alpha=0.15)
+            ax.fill_between(x, senkou_a_fwd, senkou_b_fwd,
+                            where=senkou_a_fwd < senkou_b_fwd, color="#7C4DFF", alpha=0.15)
+            ax.plot(x, chikou, color="#FFF59D", lw=1.1, ls="--", label="延迟线(26)")
+            ax.set_title(f"{name}({c6})  一目均衡表 (Tenkan9 / Kijun26 / Senkou52 / Displace26)",
+                         color="white", fontsize=12, fontweight="bold")
+            ax.legend(loc="upper left", fontsize=7, ncol=6, facecolor="#1E1E1E", labelcolor="#CCC", edgecolor="#444")
+            _apply_xaxis(ax)
+
+            if opt_vars["vol"].get():
+                axv = fig.add_subplot(gs[1], sharex=ax); _setup_ax(axv)
+                colors_v = ["#EF5350" if c[i] >= o[i] else "#66BB6A" for i in range(len(c))]
+                axv.bar(x, v / 1e6, color=colors_v, alpha=0.7, width=0.8)
+                axv.set_ylabel("成交量(万手)", color="#9E9E9E", fontsize=8)
+                _apply_xaxis(axv)
+                ax.tick_params(labelbottom=False)
+
+            cv = FigureCanvasTkAgg(fig, master=tab_frame2); cv.draw()
+            cv.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            tb = NavigationToolbar2Tk(cv, tab_frame2); tb.update(); tb.pack(side=tk.BOTTOM, fill=tk.X)
+            canvases["ichi"] = cv
+
+        def _redraw(): _draw_daily(); _draw_ichi()
+        for _bv in opt_vars.values(): _bv.trace_add("write", lambda *a: _redraw())
+
+        _draw_daily(); _draw_ichi()
 
     def _ts_simple_kline_fallback(self, name, c6):
         """🆕 极简 K 线 fallback — AKShare 日线 + matplotlib + MA"""
@@ -1801,30 +2014,23 @@ class TechStageMixin:
     # ══════════════════════════════════════════════════════════════
 
     def _ts_save_as_image(self):
-        """🖼 保存当前卡片区域为 PNG (tkinter 直接截图 canvas)"""
+        """🖼 保存图片 — matplotlib 渲染卡片网格 (无需屏幕权限)"""
         if not self._ts_all_results:
-            self._ts_status.set("⚠️ 没有扫描结果可保存")
-            return
+            self._ts_status.set("⚠️ 没有扫描结果可保存"); return
         try:
-            from PIL import ImageGrab
             ts = datetime.now().strftime("%Y%m%d_%H%M")
             path = os.path.expanduser(f"~/Desktop/操盘阶段_{ts}.png")
-            self._ts_dlg.update()
-            x0 = self._ts_canvas.winfo_rootx()
-            y0 = self._ts_canvas.winfo_rooty()
-            x1 = x0 + self._ts_canvas.winfo_width()
-            y1 = y0 + self._ts_canvas.winfo_height()
-            img = ImageGrab.grab(bbox=(x0, y0, x1, y1))
-            img.save(path)
+            img = self._ts_render_to_image(self._ts_all_results, long_mode=False)
+            img.save(path, "PNG")
             self._ts_status.set(f"✅ PNG 已保存: {path}")
         except Exception as e:
-            self._ts_status.set(f"❌ 存图片失败 (可能没装 Pillow): {e}")
+            import traceback; traceback.print_exc()
+            self._ts_status.set(f"❌ 存图片失败: {e}")
 
     def _ts_save_as_text(self):
         """📄 保存为文本格式 (每行一只, 适合今后 grep)"""
         if not self._ts_all_results:
-            self._ts_status.set("⚠️ 没有扫描结果可保存")
-            return
+            self._ts_status.set("⚠️ 没有扫描结果可保存"); return
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M")
             path = os.path.expanduser(f"~/Desktop/操盘阶段_{ts}.txt")
@@ -1843,28 +2049,136 @@ class TechStageMixin:
             self._ts_status.set(f"❌ 存文字失败: {e}")
 
     def _ts_save_as_long_image(self):
-        """📸 长图 = 把所有卡片截图拼接成一张"""
+        """📸 长图 — matplotlib 把所有卡片纵向串成一张 (无需屏幕权限, 不遗漏)"""
         if not self._ts_all_results:
-            self._ts_status.set("⚠️ 没有扫描结果可保存")
-            return
+            self._ts_status.set("⚠️ 没有扫描结果可保存"); return
         try:
-            from PIL import ImageGrab, Image
             ts = datetime.now().strftime("%Y%m%d_%H%M")
             path = os.path.expanduser(f"~/Desktop/操盘阶段_长图_{ts}.png")
-            self._ts_dlg.update()
-            # 抓整个 canvas
-            cards_h = self._ts_canvas.bbox("all")[3]
-            x0 = self._ts_canvas.winfo_rootx()
-            y0 = self._ts_canvas.winfo_rooty()
-            # 滚到底再抓长图
-            self._ts_canvas.yview_moveto(0)
-            self._ts_dlg.update()
-            full_img = ImageGrab.grab(bbox=(x0, y0, x0 + self._ts_canvas.winfo_width(),
-                                            y0 + y0 + self._ts_canvas.winfo_height()))
-            full_img.save(path)
-            self._ts_status.set(f"✅ 长图已保存: {path}")
+            img = self._ts_render_to_image(self._ts_all_results, long_mode=True)
+            img.save(path, "PNG")
+            self._ts_status.set(f"✅ 长图已保存 ({img.size[0]}x{img.size[1]}): {path}")
         except Exception as e:
+            import traceback; traceback.print_exc()
             self._ts_status.set(f"❌ 存长图失败: {e}")
+
+    def _ts_render_to_image(self, results, long_mode=False):
+        """🖼 核心: matplotlib 从数据渲染卡片图 (无屏幕权限依赖)"""
+        import matplotlib; matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib.patches import FancyBboxPatch
+        from matplotlib import font_manager
+        from PIL import Image as PILImage
+        import io
+
+        # 中文字体 fallback 链
+        _CN_FONTS = ["PingFang SC", "Heiti SC", "STHeiti", "Arial Unicode MS", "Noto Sans CJK SC"]
+        _avail = {f.name for f in font_manager.fontManager.ttflist}
+        _chosen = next((f for f in _CN_FONTS if f in _avail), "DejaVu Sans")
+        plt.rcParams["font.sans-serif"] = [_chosen, "DejaVu Sans"]
+        plt.rcParams["axes.unicode_minus"] = False
+        print(f"[渲染图片] 字体={_chosen}")
+
+        # 去 Emoji (matplotlib 不支持)
+        import re
+        def _strip_emoji(s):
+            return re.sub(r'[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F000-\U0001F02F]', '', str(s)).strip()
+
+        _SC = {
+            "吸筹": ("#FFF9E6", "#D4A017"), "洗盘": ("#E6F3FF", "#3B82F6"),
+            "拉升": ("#E6FFE6", "#22C55E"), "出货": ("#FFE6E6", "#EF4444"),
+            "下跌": ("#F5F5F5", "#6B7280"), "底部横盘": ("#FAF5FF", "#8B5CF6"),
+        }
+
+        if long_mode:
+            # 长图 = 1 列 N 行
+            cols = 1; rows = len(results)
+            card_w = 14; card_h = 3.2; dpi = 120
+        else:
+            cols = max(3, min(5, int(18 / 3)))  # 4 列
+            rows = (len(results) + cols - 1) // cols
+            card_w = 4.2; card_h = 3.8; dpi = 120
+
+        fig, axes = plt.subplots(rows, cols, figsize=(card_w * cols, card_h * rows),
+                                  squeeze=False, facecolor="#F8FAFC")
+        axes_flat = [a for row in axes for a in row]
+
+        for i, r in enumerate(results):
+            a = r.get("analyze")
+            ax = axes_flat[i]
+            ax.set_xticks([]); ax.set_yticks([])
+            for sp in ax.spines.values(): sp.set_visible(False)
+
+            if a is None:
+                ax.add_patch(FancyBboxPatch((0, 0), 1, 1, boxstyle="round,pad=0.03",
+                           facecolor="#FEE2E2", edgecolor="#991B1B", linewidth=2,
+                           transform=ax.transAxes))
+                ax.text(0.5, 0.5, f"{r['name']}({r['code']})\n❌ 分析失败",
+                        ha="center", va="center", fontsize=10, color="#991B1B",
+                        transform=ax.transAxes)
+                continue
+
+            stage = a.get("stage", "?")
+            bg, tc = _SC.get(stage, ("#FFFFFF", "#333333"))
+            price = r.get("price", 0)
+            inst = a.get("institution_vs_hot_money", "?")
+            trend = a.get("trend", "")
+            rsip = a.get("ret20_pct", "")
+            rs60 = a.get("ret60_pct", "")
+            signals = a.get("signals", [])[:2]
+            score = a.get("stage_score", "")
+
+            # 卡片背景
+            ax.add_patch(FancyBboxPatch((0.02, 0.02), 0.96, 0.96,
+                         boxstyle="round,pad=0.02",
+                         facecolor=bg, edgecolor=tc, linewidth=2,
+                         transform=ax.transAxes))
+            # 阶段标签
+            ax.add_patch(FancyBboxPatch((0.65, 0.75), 0.30, 0.22,
+                         boxstyle="round,pad=0.02",
+                         facecolor=tc, edgecolor="none",
+                         transform=ax.transAxes))
+            ax.text(0.80, 0.86, stage, ha="center", va="center",
+                    fontsize=9, fontweight="bold", color="white",
+                    transform=ax.transAxes)
+
+            # 内容 (去 Emoji)
+            ax.text(0.06, 0.92, _strip_emoji(r["name"]), fontsize=11, fontweight="bold",
+                    color="#1F2937", transform=ax.transAxes)
+            ax.text(0.06, 0.80, _strip_emoji(r["code"]), fontsize=8.5, color="#6B7280",
+                    transform=ax.transAxes)
+            ax.text(0.06, 0.65, f"{_strip_emoji(inst)}  ¥{price}", fontsize=9, color="#374151",
+                    transform=ax.transAxes)
+            ax.text(0.06, 0.52, f"{_strip_emoji(trend)}  20日={rsip}%  60日={rs60}%", fontsize=8,
+                    color="#4B5563", transform=ax.transAxes)
+            # 信号
+            sig_y = 0.38
+            for s in signals:
+                ax.text(0.06, sig_y, f"- {_strip_emoji(s)}", fontsize=7.5, color="#1E40AF",
+                        transform=ax.transAxes)
+                sig_y -= 0.12
+            # 分数
+            ax.text(0.06, 0.12, f"score: {score}/100", fontsize=8.5, fontweight="bold",
+                    color=tc, transform=ax.transAxes)
+
+        # 隐藏多余格子
+        for j in range(len(results), len(axes_flat)):
+            axes_flat[j].set_visible(False)
+
+        # 标题 + 日期
+        fig.suptitle(
+            f"操盘阶段扫描 - 共 {len(results)} 只  |  {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            fontsize=13, fontweight="bold", y=1.005)
+        fig.tight_layout(pad=1.2)
+
+        # 转 PIL Image
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
+                    facecolor=fig.get_facecolor())
+        buf.seek(0)
+        img = PILImage.open(buf)
+        plt.close(fig)
+        return img
 
     # ══════════════════════════════════════════════════════════════
     # 📜 历史回看 Tab
