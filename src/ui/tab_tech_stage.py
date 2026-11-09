@@ -607,23 +607,23 @@ class TechStageMixin:
         ttk.Button(ctrl, text="💾 导出CSV",
                    command=lambda: self._ts_export_csv(dlg)).pack(side=tk.LEFT, padx=4)
 
-        # 阶段过滤
+        # 阶段过滤 (ttk.Combobox 不用 command=, 用 bind)
         tk.Label(ctrl, text="  阶段过滤:", bg="#F1F5F9").pack(side=tk.LEFT, padx=(20, 4))
         self._ts_filter = tk.StringVar(value="全部")
         stage_opts = ["全部", "吸筹", "洗盘", "拉升", "出货", "下跌", "底部横盘"]
-        ttk.Combobox(ctrl, textvariable=self._ts_filter, values=stage_opts,
-                     width=10, state="readonly",
-                     command=lambda e: self._ts_apply_filter()
-                     ).pack(side=tk.LEFT, padx=4)
+        cb1 = ttk.Combobox(ctrl, textvariable=self._ts_filter, values=stage_opts,
+                     width=10, state="readonly")
+        cb1.pack(side=tk.LEFT, padx=4)
+        cb1.bind("<<ComboboxSelected>>", lambda e: self._ts_apply_filter())
 
         # 类型过滤
         self._ts_filter_type = tk.StringVar(value="全部")
         tk.Label(ctrl, text="  票型:", bg="#F1F5F9").pack(side=tk.LEFT, padx=(10, 4))
         type_opts = ["全部", "机构票", "游资票", "混合型"]
-        ttk.Combobox(ctrl, textvariable=self._ts_filter_type, values=type_opts,
-                     width=10, state="readonly",
-                     command=lambda e: self._ts_apply_filter()
-                     ).pack(side=tk.LEFT, padx=4)
+        cb2 = ttk.Combobox(ctrl, textvariable=self._ts_filter_type, values=type_opts,
+                     width=10, state="readonly")
+        cb2.pack(side=tk.LEFT, padx=4)
+        cb2.bind("<<ComboboxSelected>>", lambda e: self._ts_apply_filter())
 
         # 进度条 + 步骤标签
         self._ts_step_label = tk.Label(ctrl, text="[0%] 等待开始...",

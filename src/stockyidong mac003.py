@@ -440,8 +440,9 @@ from ui.tab_tushare import TushareMixin
 from ui.tab_full_link import FullLinkMixin
 from ui.tab_akshare import AKShareMixin
 from ui.tab_tech_stage import TechStageMixin
+from ui.tab_financial_check import FinancialCheckMixin
 
-class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ChoiceMixin, ChouMaMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, EventCalendarMixin, ExportMixin, FileIoMixin, FinanceMixin, FullLinkMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IfindMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, TechStageMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, TushareMixin, WarningMixin, WebMixin, WencaiMixin, YingmiMixin, ZhihuMixin, WordcloudMixin, BetaAlphaMixin):
+class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ChoiceMixin, ChouMaMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, EventCalendarMixin, ExportMixin, FileIoMixin, FinanceMixin, FinancialCheckMixin, FullLinkMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IfindMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, TechStageMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, TushareMixin, WarningMixin, WebMixin, WencaiMixin, YingmiMixin, ZhihuMixin, WordcloudMixin, BetaAlphaMixin):
     def _show_speculator_watch(self):
         """👁️ 游资看盘 — 6 区布局 (板块九宫格/盘口/量能/期指/周期/状态)"""
         print("[👁️游资看盘] 启动...", flush=True)

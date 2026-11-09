@@ -572,7 +572,8 @@ class StockDetailMixin:
                     ma_values['vwap'] = vwap_values
                     dates_list = list(df['trade_date'].astype(str))
                     print(f"  [K线] ✅ Tushare Pro tab_stock_detail {stock_code} {len(data)} 根")
-                    return {'data': data, 'ma_values': ma_values, 'dates': dates_list, 'trade_dates': dates_list}
+                    return {'data': data, 'ma_values': ma_values, 'dates': dates_list,
+                            'trade_dates': dates_list, 'code': str(stock_code).zfill(6)}
         except Exception as e:
             print(f"  [K线] tab_stock_detail Tushare 挂: {e}")
         # ===== 方案2: akshare 兜底 =====
@@ -616,7 +617,8 @@ class StockDetailMixin:
                 vwap_values.append(float(cum_amount / cum_vol) if cum_vol > 0 else float(typ))
         ma_values['vwap'] = vwap_values
         dates_list = pd.to_datetime(df['date']).dt.strftime('%Y%m%d').tolist()
-        return {'data': data, 'ma_values': ma_values, 'dates': dates_list, 'trade_dates': dates_list}
+        return {'data': data, 'ma_values': ma_values, 'dates': dates_list,
+                'trade_dates': dates_list, 'code': code}
 
     def _apply_daily_kline_ax(self, ax1, kline_data, stock_name, show_zoom_hint=True, hide_x_labels=False, show_support_resistance=True, show_bs_signals=True):
         """在给定 Axes 上绘制主图 K 线 + 均线 + 支撑/压力线。"""
@@ -1329,6 +1331,9 @@ class StockDetailMixin:
 
             # 顶栏按钮 (从右往左 pack, ❓ 在最右)
             ttk.Button(top, text="🧠操盘阶段", command=_run_stage_analysis).pack(side=tk.RIGHT, padx=(10, 0))
+            ttk.Button(top, text="📒财务检查",
+                       command=lambda: self._open_financial_check_from_kline(stock_name, kline_data)
+                       ).pack(side=tk.RIGHT, padx=(10, 0))
             ttk.Button(top, text="📊展开/折叠", command=_toggle_stage_bar).pack(side=tk.RIGHT, padx=(10, 0))
             ttk.Button(top, text="❓帮助", command=_show_stage_help).pack(side=tk.RIGHT, padx=(10, 0))
 
@@ -1418,7 +1423,11 @@ class StockDetailMixin:
                         fig = self._build_daily_kline_figure(kline_data, stock_name, figsize=(14, 9), show_support_resistance=show_support_resistance_var.get())
                         self._apply_daily_kline_ax = original_apply2
                         canvas = FigureCanvasTkAgg(fig, chart_inner)
-                        canvas.draw()
+                        try:
+                            canvas.draw()
+                        except Exception as _de:
+                            import traceback as _tb2; _tb2.print_exc()
+                            print(f"[K线渲染❌canvas.draw()] {_de}", flush=True)
                         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
                         status_var.set("当前显示:只显示主图 | 买卖点开" if show_bs_var.get() else "当前显示:只显示主图")
                         _bind_hover(canvas, fig)
@@ -1437,6 +1446,8 @@ class StockDetailMixin:
                         except Exception:
                             pass
                     except Exception as ex:
+                        import traceback as _tb; _tb.print_exc()
+                        print(f"[K线渲染❌主图] {ex}", flush=True)
                         messagebox.showerror("错误", f"绘制失败: {ex}", parent=win)
                 else:
                     # 显示主图+副图
