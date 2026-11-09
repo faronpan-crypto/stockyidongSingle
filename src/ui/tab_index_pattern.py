@@ -377,16 +377,18 @@ def show_index_pattern_analyzer(parent, app=None):
     # 时间窗口
     tk.Label(ctrl, text="窗口:", bg="#E3F2FD").pack(side=tk.LEFT, padx=(14, 2))
     win_var = tk.StringVar(value="60天")
-    ttk.Combobox(ctrl, textvariable=win_var,
-                 values=["5天", "10天", "20天", "30天", "60天", "120天"],
-                 width=8, state="readonly").pack(side=tk.LEFT, padx=4)
+    win_cb = ttk.Combobox(ctrl, textvariable=win_var,
+                          values=["5天", "10天", "20天", "30天", "60天", "120天"],
+                          width=8, state="readonly")
+    win_cb.pack(side=tk.LEFT, padx=4)
 
     # 高开阈值
     tk.Label(ctrl, text="高开阈值:", bg="#E3F2FD").pack(side=tk.LEFT, padx=(14, 2))
     gap_var = tk.StringVar(value="0.3")
-    ttk.Combobox(ctrl, textvariable=gap_var,
-                 values=["0.1", "0.2", "0.3", "0.5", "1.0"],
-                 width=5, state="readonly").pack(side=tk.LEFT, padx=4)
+    gap_cb = ttk.Combobox(ctrl, textvariable=gap_var,
+                          values=["0.1", "0.2", "0.3", "0.5", "1.0"],
+                          width=5, state="readonly")
+    gap_cb.pack(side=tk.LEFT, padx=4)
     tk.Label(ctrl, text="%", bg="#E3F2FD").pack(side=tk.LEFT)
 
     # 按钮
@@ -847,15 +849,22 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
         return sel, None, type_var.get(), True
 
     def _on_analyze():
+        # 防重入: 已经在跑就忽略
+        if analyze_btn.cget("state") == "disabled":
+            return
         analyze_btn.config(state="disabled")
 
-        name, code, kind, need_lookup = _parse_selection(combo_var.get())
+        # ⚠️ 关键修复: tk StringVar 不能在后台线程读!
+        # 必须在主线程先全部读出来, 作为普通值传给 worker
+        sel_text = combo_var.get()
+        gap_th = float(gap_var.get())
+        window_days = int(win_var.get().replace("天", ""))
+
+        name, code, kind, need_lookup = _parse_selection(sel_text)
 
         if code is None and not need_lookup:
             status_var.set("❌ 无法识别标的")
             analyze_btn.config(state="normal"); return
-
-        gap_th = float(gap_var.get())
 
         def _worker():
             nonlocal name, code, kind
@@ -867,16 +876,7 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
                     if found_code is None:
                         _q.put(("error", f"找不到「{name}」的代码，请输入6位代码")); return
                     code = found_code
-                    # 确定 kind
-                    t = kind  # 这里存的是 type_var.get()
-                    if t == "自动":
-                        kind = _auto_detect_kind(code)
-                    elif t == "指数":
-                        kind = "index"
-                    elif t == "ETF":
-                        kind = "etf"
-                    else:
-                        kind = "stock"
+                    # 确定 kind (type_var 的值已经在 _parse_selection 里处理了)
                     _q.put(("progress", f"✅ {name} → {code} ({kind})"))
 
                 _q.put(("progress", f"📥 拉取 {name}({code}) K 线..."))
@@ -884,7 +884,6 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
                 if full_df is None or len(full_df) < 30:
                     _q.put(("error", f"{name}({code}) 数据不足")); return
 
-                window_days = int(win_var.get().replace("天", ""))
                 work_df = full_df.tail(window_days + 60).copy()
                 work_df["next_pct"] = work_df["close"].shift(-1) / work_df["close"] - 1
 
@@ -905,5 +904,12 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
 
     analyze_btn.config(command=_on_analyze)
 
+    # 下拉框切换 → 自动重跑 (macOS ttk.Combobox 用 <<ComboboxSelected>>)
+    cb.bind("<<ComboboxSelected>>", lambda e: _on_analyze())
+    gap_cb.bind("<<ComboboxSelected>>", lambda e: _on_analyze())
+    win_cb.bind("<<ComboboxSelected>>", lambda e: _on_analyze())
+
     # 自动跑一次 (默认选中项)
     win.after(200, _on_analyze)
+
+    return win
