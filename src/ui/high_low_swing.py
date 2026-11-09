@@ -5159,6 +5159,25 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None, stock_list=No
         except Exception:
             _hover_win = None
 
+    # ⚠️ macOS Tk 线程安全: 后台线程绝对不能调 dlg.after()!
+    # 用 Queue + 主线程 poll 代替 (和 tab_index_pattern.py 同架构)
+    import queue as _queue
+    _bg_q = _queue.Queue()
+
+    def _poll_draw():
+        try:
+            msg = _bg_q.get_nowait()
+            d, p = msg
+            if d:
+                _cache["data"] = d; _cache["period"] = p
+                _draw(d, p)
+            else:
+                status.config(text="❌ 拉取失败 (网络/非交易时段)", fg="#EF5350")
+        except _queue.Empty:
+            pass
+        if dlg.winfo_exists():
+            dlg.after(80, _poll_draw)
+
     def _reload():
         _gen[0] += 1
         _my_gen = _gen[0]
@@ -5170,13 +5189,11 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None, stock_list=No
             if _my_gen != _gen[0]:
                 print(f"[日K] stale bg result (gen {_my_gen} vs current {_gen[0]}), skip draw", flush=True)
                 return
-            if d:
-                _cache["data"] = d; _cache["period"] = period
-            dlg.after(0, lambda: (_draw(d, period) if d else
-                      status.config(text="❌ 拉取失败 (网络/非交易时段)", fg="#EF5350")))
+            _bg_q.put((d, period))
         import threading
         threading.Thread(target=_bg, daemon=True).start()
 
+    _poll_draw()  # 启动主线程轮询
     _reload()
     if not _is_embed:
         dlg.grab_set()

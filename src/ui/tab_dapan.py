@@ -18218,23 +18218,22 @@ AI 将基于实时市场数据生成深度分析报告
         if tip: tip.withdraw()
 
     def _stamp_on_click(self, event, stamp, item):
-        """邮票格子: 300ms 内两次点击 → 直接用新浪秒开日K线"""
+        """邮票格子: 单击=直接开日K, 双击=跳过等待秒开"""
         import time as _t
+        code = str(item.get("code", "") or "").strip()
+        name = str(item.get("name", "") or "").strip()
+        if not code: return
+
         now = int(_t.time() * 1000)
         last = stamp._last_click["time"]
-        if 0 < (now - last) < 400:
+
+        def _do_open():
             stamp._last_click["time"] = 0
-            code = str(item.get("code", "") or "").strip()
-            name = str(item.get("name", "") or "").strip()
-            if not code: return
-            # 🔄 直接复用高抛低吸的秒开日K — 新浪接口不挂
             try:
-                from ui.high_low_swing import _quick_open_daily_kline
-                # 🆕 把淘股吧匹配到的文章标题传给 K 线弹窗
+                from ui.high_low_swing import _quick_open_daily_kline, _TAOGUBA_ARTICLES
                 try:
-                    from ui import high_low_swing as _hl
                     import time as _t2
-                    _hl._TAOGUBA_ARTICLES[code] = {
+                    _TAOGUBA_ARTICLES[code] = {
                         "articles": list(item.get("articles", []))[:5],
                         "source": item.get("origin", ""),
                         "freq": item.get("freq", 0),
@@ -18243,32 +18242,21 @@ AI 将基于实时市场数据生成深度分析报告
                 except Exception: pass
                 _quick_open_daily_kline(self.root, code, name)
             except Exception as e:
-                print(f"[邮票双击-K线] 快速路径失败: {e}")
-                # 回退: 原 tushare/akshare 路径
-                import threading as _th, traceback as _tb
-                def _kw():
-                    try:
-                        import tkinter.messagebox as _mb
-                        code_clean = code
-                        for _p in ["sz", "sh", "bj"]:
-                            if code_clean.lower().startswith(_p):
-                                code_clean = code_clean[2:]; break
-                        code_clean = code_clean.zfill(6)
-                        kd = None
-                        for i, fn in enumerate([self._get_daily_kline_data_tushare,
-                                               self._get_daily_kline_data_akshare]):
-                            try:
-                                kd = fn(code_clean, days=120)
-                                if kd: break
-                            except Exception: pass
-                        ok = (isinstance(kd, dict) and 'data' in kd and len(kd['data']) > 10) or \
-                             (isinstance(kd, list) and len(kd) > 10)
-                        if ok: self.root.after(0, lambda: self._show_daily_kline_zoom(kd, name))
-                        else: self.root.after(0, lambda: _mb.showwarning("提示", f"无法获取 {name} 的K线数据"))
-                    except Exception: _tb.print_exc()
-                _th.Thread(target=_kw, daemon=True).start()
-        else:
-            stamp._last_click["time"] = now
+                print(f"[邮票点击-K线] 快速路径失败: {e}")
+
+        # 双击 (两次间隔 < 400ms) → 立即秒开
+        if 0 < (now - last) < 400:
+            stamp._last_click["time"] = 0
+            _do_open()
+            return
+
+        # 单击: 设 250ms 定时器, 等不到双击就执行
+        stamp._last_click["time"] = now
+        try:
+            if hasattr(stamp, "_click_job") and stamp._click_job:
+                stamp.after_cancel(stamp._click_job)
+        except Exception: pass
+        stamp._click_job = stamp.after(250, _do_open)
 
 
     def _load_crash_rally_events(self):

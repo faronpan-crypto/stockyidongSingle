@@ -3971,7 +3971,16 @@ def _refresh_watch_analysis(win, force_ai=False):
 def _gather_analysis_context(win):
     ctx = {}
     is_intraday = _is_trading_hours()
-    realtime = _get_sina_realtime() if is_intraday else None
+    # 🆕 周六日/非交易时间也调新浪实时 — 收盘后新浪仍返回当日数据, 够看盘用
+    realtime = _get_sina_realtime()
+    if not is_intraday:
+        # 非盘中: 如果 realtime 拿到数据 (新浪周末也有当日收盘数据), 仍然进盘中渲染路径
+        # 只有 realtime 完全没数据才走 tushare/sentiment 收盘兜底
+        if realtime and realtime.get("indices") and realtime.get("sectors"):
+            print(f"[👁️看盘] 非交易时段但新浪有实时数据, 用之渲染", flush=True)
+            is_intraday = True  # 假装盘中, 让 block_ranking / spot 都被塞进去
+        else:
+            print(f"[👁️看盘] 非交易时段 + 新浪无数据 → 走 tushare/sentiment 兜底", flush=True)
 
     # 盘中: 优先用新浪实时覆盖 tushare 收盘数据
     if is_intraday and realtime and realtime.get("indices"):
@@ -6937,7 +6946,7 @@ def _show_vv_main(win):
         ctx_str = ""
         if data_src_cb.get() == "📌 游资看盘实时":
             try:
-                ctx = _gather_analysis_context(win)
+                ctx = _gather_ui_context(win)
                 import json as _j
                 ctx_str = _j.dumps(ctx, ensure_ascii=False, default=str)[:1500]
             except Exception as e:
@@ -6994,7 +7003,7 @@ def _show_vv_from_speculator(win):
     dlg = _show_vv_main(win)
     # 自动游资看盘上下文预填
     try:
-        ctx = _gather_analysis_context(win)
+        ctx = _gather_ui_context(win)
         import json as _j
         obs_preview = (
             f"游资看盘实时数据预览:\n"
@@ -7014,8 +7023,8 @@ def _show_vv_from_speculator(win):
         pass
 
 
-def _gather_analysis_context(win):
-    """从游资看盘界面收集当前市场状态 → 供风格分析使用"""
+def _gather_ui_context(win):
+    """从游资看盘界面收集当前市场状态 → 供风格分析使用 (轻量, 不联网)"""
     ctx = {}
     # 1. 大盘涨跌幅 (从 seed light)
     up_lbl = getattr(win, "_up_count_lbl", None)
