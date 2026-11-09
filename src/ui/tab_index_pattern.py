@@ -49,6 +49,52 @@ ETF_PRESETS = [
     ("日经ETF", "513520", "etf"),
 ]
 
+# 热门个股 (硬编码, 保证下拉框始终有得选)
+HOT_STOCKS = [
+    # 大消费
+    ("贵州茅台", "600519"),
+    ("五粮液", "000858"),
+    ("泸州老窖", "000568"),
+    ("中国中免", "601888"),
+    ("海天味业", "603288"),
+    ("伊利股份", "600887"),
+    # 金融
+    ("招商银行", "600036"),
+    ("宁波银行", "002142"),
+    ("中国平安", "601318"),
+    ("东方财富", "300059"),
+    ("中信证券", "600030"),
+    ("华泰证券", "601688"),
+    # 新能源/科技
+    ("宁德时代", "300750"),
+    ("比亚迪", "002594"),
+    ("隆基绿能", "601012"),
+    ("阳光电源", "300274"),
+    ("亿纬锂能", "300014"),
+    # 半导体
+    ("中芯国际", "688981"),
+    ("韦尔股份", "603501"),
+    ("斯达半导", "603290"),
+    ("北方华创", "002371"),
+    ("中微公司", "688012"),
+    # AI/计算机
+    ("科大讯飞", "002230"),
+    ("海康威视", "002415"),
+    ("金山办公", "688111"),
+    ("工业富联", "601138"),
+    # 医药
+    ("恒瑞医药", "600276"),
+    ("药明康德", "603259"),
+    ("迈瑞医疗", "300760"),
+    # 周期/其他
+    ("中国神华", "601088"),
+    ("紫金矿业", "601899"),
+    ("长江电力", "600900"),
+    ("美的集团", "000333"),
+    ("格力电器", "000651"),
+    ("万科A", "000002"),
+]
+
 
 # ═══════════════════════════════════════════════════════════════
 # 🔢 核心分析
@@ -278,11 +324,48 @@ def show_index_pattern_analyzer(parent, app=None):
     ctrl.pack(fill=tk.X, padx=6, pady=6)
 
     tk.Label(ctrl, text="标的:", bg="#E3F2FD").pack(side=tk.LEFT, padx=(10, 2))
-    all_items = ([f"{n} ({c})" for n, c, _ in INDEX_PRESETS] +
-                 [f"{n} ({c})" for n, c, _ in ETF_PRESETS])
+
+    # ── 收集所有下拉项 ──
+    all_items = []
+    # 1) 预设指数
+    for n, c, _ in INDEX_PRESETS:
+        all_items.append(f"🗂 指数 · {n} ({c})")
+    # 2) 预设 ETF
+    for n, c, _ in ETF_PRESETS:
+        all_items.append(f"🗂 ETF · {n} ({c})")
+    # 3) 热门个股 (硬编码, 保证有得选)
+    for n, c in HOT_STOCKS:
+        all_items.append(f"🔥 个股 · {n} ({c})")
+
+    # 4) 从 app 注入持仓/龙头/资讯股 (有数据才加)
+    if app is not None:
+        group_map = [
+            ("💼 持仓", "holding_stocks"),
+            ("🐉 龙头", "holding_stocks_2"),
+            ("📰 资讯", "holding_stocks_3"),
+        ]
+        for group_label, attr in group_map:
+            stocks = getattr(app, attr, None)
+            if not stocks:
+                continue
+            count = 0
+            for item in stocks:
+                if item is None:
+                    continue
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    s_name, s_code = str(item[0]).strip(), str(item[1]).strip()
+                    if s_code and s_name and s_code.isdigit() and len(s_code) == 6:
+                        all_items.append(f"{group_label} · {s_name} ({s_code})")
+                        count += 1
+            if count > 0:
+                pass  # 这个组有数据了就保留
+            else:
+                # 整个组都是 None, 不加 "💼 持仓 · ..." 这些
+                pass
+
     combo_var = tk.StringVar(value=all_items[0])
     cb = ttk.Combobox(ctrl, textvariable=combo_var, values=all_items,
-                      width=28)  # 可编辑, 用户可直接输入6位代码
+                      width=34)  # 可编辑
     cb.pack(side=tk.LEFT, padx=4)
 
     # 标的类型 (自定义时需要)
@@ -381,14 +464,189 @@ def show_index_pattern_analyzer(parent, app=None):
     sug_text.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
     # ── Tab2: 每日明细 ──
-    cols2 = ("date", "open", "close", "gap_pct", "body_pct", "pattern", "next_pct")
+    # 帮助弹窗函数
+    def _show_help(topic):
+        help_win = tk.Toplevel(win)
+        help_win.title("❓ 指标说明")
+        help_win.geometry("620x560")
+        help_win.configure(bg="#FFFDE7")
+        help_win.transient(win)
+
+        # 根据主题显示不同内容
+        helps = {
+            "gap": {
+                "title": "gap_pct — 高开/低开幅度",
+                "color": "#F57F17",
+                "content": """
+gap_pct = (今日开盘价 − 昨日收盘价) / 昨日收盘价 × 100%
+
+═══════════════════════════════════
+
+  正  → 高开 (跳空高开)
+  负  → 低开 (跳空低开)
+  0   → 平开
+
+  例:
+    昨收 10.00 → 今开 10.30 → gap_pct = +3.0%  高开
+    昨收 10.00 → 今开  9.80 → gap_pct = −2.0%  低开
+    昨收 10.00 → 今开 10.01 → gap_pct = +0.1%  基本平开
+
+═══════════════════════════════════
+
+⚙️ 高开阈值 (用户可配, 默认 0.3%)
+
+  |gap_pct| > 阈值 → 判定为"高开"或"低开"
+  |gap_pct| ≤ 阈值 → 判定为"平开"
+
+  阈值越大 → 平开越多, 高开/低开越少
+  阈值越小 → 高开/低开区分越敏感
+""",
+            },
+            "body": {
+                "title": "body_pct — 实体涨跌幅",
+                "color": "#1565C0",
+                "content": """
+body_pct = (今日收盘价 − 今日开盘价) / 今日开盘价 × 100%
+
+═══════════════════════════════════
+
+  正  → 收盘 > 开盘 (阳线, 上影或锤子)
+  负  → 收盘 < 开盘 (阴线, 下影或射击之星)
+  0   → 收盘 = 开盘 (十字星)
+
+  例:
+    开盘 10.00 → 收盘 10.50 → body_pct = +5.0%  大阳线
+    开盘 10.00 → 收盘  9.90 → body_pct = −1.0%  小阴线
+    开盘 10.00 → 收盘 10.00 → body_pct =  0.0%  十字星
+
+═══════════════════════════════════
+
+💡 body_pct 回答的问题:
+   "今天盘中是买盘赢还是卖盘赢？"
+   不管高开低开, 只要收盘比开盘高 → 多方胜出 🟢
+""",
+            },
+            "pattern": {
+                "title": "pattern — 日走势形态分类逻辑",
+                "color": "#2E7D32",
+                "content": """
+═══════════════════════════════════
+  分类公式 (两步判定)
+═══════════════════════════════════
+
+  第一步: 看 gap_pct → 判定高开/低开/平开
+  第二步: 看 body_pct → 判定高走/低走
+
+═══════════════════════════════════
+
+  gap_pct >  +阈值  → 高开组
+    body ≥ 0 → 高开高走 🟢   (跳空向上, 盘中继续涨)
+    body < 0 → 高开低走 🔴   (跳空向上, 盘中回落)
+
+  gap_pct <  −阈值  → 低开组
+    body ≥ 0 → 低开高走 🟢   (跳空向下, 盘中拉起)
+    body < 0 → 低开低走 🔴   (跳空向下, 继续杀跌)
+
+  |gap| ≤ 阈值      → 平开组
+    body ≥ 0 → 平走高 🟢     (无跳空, 盘中收阳)
+    body < 0 → 平走低 🔴     (无跳空, 盘中收阴)
+
+═══════════════════════════════════
+  做 T 实战意义
+═══════════════════════════════════
+
+  高开低走 🔴 → 多头试盘失败 → 次日低开概率高 → 尾盘低吸
+  低开高走 🟢 → 空头施压被承接 → 次日延续概率高 → 低开买入
+  平开多     → 震荡市, 追涨风险大 → 高抛低吸为主
+""",
+            },
+            "next": {
+                "title": "next_pct — 次日涨跌幅",
+                "color": "#6A1B9A",
+                "content": """
+next_pct = 次日收盘价 / 当日收盘价 − 1
+
+═══════════════════════════════════
+
+  正  → 今日买入, 次日卖出可盈利
+  负  → 今日买入, 次日卖出亏损
+
+═══════════════════════════════════
+
+💡 核心用途: 做 T 时机评估
+
+  统计每种 pattern 出现后, next_pct > 0 的比例 → "次日上涨概率"
+
+  例: 历史上 高开低走 出现 20 次, 次日涨 13 次
+      → 高开低走后次日上涨概率 = 65%
+      → 做 T 建议: 高开低走日尾盘低吸
+
+  注意: 这是历史统计, 不构成投资建议
+""",
+            },
+        }
+
+        info = helps.get(topic, {"title": "帮助", "color": "#333", "content": ""})
+
+        header = tk.Frame(help_win, bg=info["color"], height=44)
+        header.pack(fill=tk.X)
+        tk.Label(header, text=f"❓ {info['title']}",
+                 font=("", 12, "bold"), bg=info["color"], fg="white",
+                 pady=10).pack(side=tk.LEFT, padx=14)
+
+        body = tk.LabelFrame(help_win, text="", bg="#FFFDE7", fg="#333")
+        body.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+        tk.Label(body, text=info["content"], bg="#FFFDE7", fg="#212121",
+                 font=("Menlo", 10), justify="left", anchor="w",
+                 padx=10, pady=10).pack(fill=tk.BOTH, expand=True)
+
+        tk.Button(help_win, text="关闭", bg="#333", fg="white",
+                  font=("", 10), padx=20, pady=4,
+                  command=help_win.destroy).pack(pady=(0, 12))
+
+    # 列定义: (内部key, 显示名, 帮助topic或None, 宽度)
+    col_defs = [
+        ("date",     "日期",       None,     100),
+        ("open",     "开盘价",     None,      80),
+        ("close",    "收盘价",     None,      80),
+        ("gap_pct",  "gap_pct ❓",  "gap",     90),
+        ("body_pct", "body_pct ❓", "body",    90),
+        ("pattern",  "形态 ❓",     "pattern", 130),
+        ("next_pct", "次日涨跌 ❓", "next",   100),
+    ]
+    cols2 = tuple(c[0] for c in col_defs)
     tv2 = ttk.Treeview(tab2, columns=cols2, show="headings", height=20)
-    for c in cols2:
-        tv2.heading(c, text=c)
-        widths = {"date": 100, "open": 80, "close": 80, "gap_pct": 80,
-                  "body_pct": 80, "pattern": 120, "next_pct": 100}
-        tv2.column(c, width=widths.get(c, 80), anchor="center")
+
+    # 帮助 topic 映射: key → topic
+    col_topic_map = {c[0]: c[2] for c in col_defs}
+
+    for key, disp, topic, w in col_defs:
+        tv2.heading(key, text=disp)
+        tv2.column(key, width=w, anchor="center")
+
+    # macOS ttk.Treeview heading 的 command= 不生效!
+    # 改用 <Button-1> + identify_column() 手动判定
+    def _on_tv2_click(event):
+        col_id = tv2.identify_column(event.x)  # 返回 "#1", "#2" ...
+        try:
+            idx = int(col_id.replace("#", "")) - 1
+            key = cols2[idx]
+            topic = col_topic_map.get(key)
+            if topic:
+                _show_help(topic)
+        except (ValueError, IndexError):
+            pass
+
+    tv2.bind("<Button-1>", _on_tv2_click)
+
     tv2.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+    # 底部提示
+    hint = tk.Frame(tab2, bg="#E3F2FD")
+    hint.pack(fill=tk.X, padx=6, pady=(0, 6))
+    tk.Label(hint,
+             text="💡 点击带 ❓ 的列标题查看公式与逻辑说明",
+             bg="#E3F2FD", fg="#1565C0", font=("", 9)).pack(pady=4)
 
     # 队列 + worker
     _q = _queue.Queue()
@@ -482,37 +740,98 @@ def show_index_pattern_analyzer(parent, app=None):
         """根据代码自动判断类型"""
         code = str(code).strip()
         # 指数代码特征
-        if code.startswith("000") or code.startswith("399") or code.startswith("899") or code.startswith("0006"):
+        if code.startswith("000") or code.startswith("399") or code.startswith("899"):
+            return "index"
+        if code.startswith("0006"):  # 科创50
             return "index"
         # ETF: 51xxxx/52xxxx (沪市) / 15xxxx/16xxxx (深市) / 58xxxx (科创板)
         if code.startswith("51") or code.startswith("52") or code.startswith("15") or code.startswith("16") or code.startswith("58"):
             return "etf"
-        # 个股
+        # 个股 (60/00/30开头)
         return "stock"
 
-    def _on_analyze():
-        analyze_btn.config(state="disabled")
-        status_var.set("⏳ 拉取数据中...")
+    # 模块级名字→代码缓存 (后台填充)
+    _name_code_cache = {}
+    _name_code_loaded = False
 
-        # 解析选择 — 支持 "名称 (代码)" 或纯6位代码
-        sel = combo_var.get().strip()
-        m = re.match(r"(.+?)\s*\((\d{6})\)", sel)
+    def _ensure_name_cache():
+        """首次调用时从 AKShare 拉全量名字映射"""
+        if _name_code_loaded:
+            return
+        try:
+            import akshare as ak
+            df = ak.stock_zh_a_spot_em()
+            # 股票
+            for _, row in df.iterrows():
+                _name_code_cache[row["名称"]] = row["代码"]
+            _name_code_loaded = True
+        except Exception:
+            pass
+
+    def _lookup_code_by_name(name):
+        """名字→代码 (精确→模糊)"""
+        if not _name_code_loaded:
+            _ensure_name_cache()
+        if name in _name_code_cache:
+            return _name_code_cache[name]  # 精确
+        # 模糊: 名字包含或被包含
+        for n, c in _name_code_cache.items():
+            if name in n or n in name:
+                return c
+        return None
+
+    def _parse_selection(sel_text):
+        """
+        解析用户输入 → (name, code, kind, need_akshare_lookup)
+        支持格式:
+          1. "🗂 指数 · 上证指数 (000001)"   — 带分类前缀的预设
+          2. "上证指数 (000001)"             — 原始预设格式
+          3. "💼 持仓 · 贵州茅台 (600519)"   — app注入的持仓/龙头/资讯
+          4. "600519" 或 "贵州茅台 600519"    — 纯代码 / 名字+代码
+          5. "贵州茅台"                      — 纯名字 (需AKShare查询)
+        """
+        sel = sel_text.strip()
+
+        # 统一正则: 提取末尾的 "名称 (6位代码)" 格式
+        # 允许前面有 emoji 和分类前缀
+        m = re.search(r"(.+?)\s*\((\d{6})\)\s*$", sel)
         if m:
-            # 预设格式
-            name, code = m.group(1).strip(), m.group(2)
-            kind = "index"
-            for n, c, k in INDEX_PRESETS + ETF_PRESETS:
-                if c == code:
-                    kind = k; break
-        else:
-            # 自定义 — 提取6位代码
-            cm = re.search(r"(\d{6})", sel)
-            if not cm:
-                status_var.set("❌ 请选择预设或输入6位代码")
-                analyze_btn.config(state="normal"); return
+            full_name_with_prefix = m.group(1).strip()
+            code = m.group(2)
+            # 去掉前缀 emoji 和 "xxx · " 部分
+            # 例: "💼 持仓 · 贵州茅台" → "贵州茅台"
+            # 例: "🗂 指数 · 上证指数" → "上证指数"
+            name = re.sub(r"^[^\s]*\s+[^\s]*\s*·\s*", "", full_name_with_prefix).strip()
+            if not name:
+                name = full_name_with_prefix
+
+            # 判断 kind — 先看文本标签, 再 fallback 代码特征
+            kind = "stock"  # 默认个股
+            if "指数" in sel or "🗂" in sel and "指数" in sel:
+                kind = "index"
+            elif "ETF" in sel:
+                kind = "etf"
+            elif "个股" in sel or "💼" in sel or "🐉" in sel or "📰" in sel or "🔥" in sel:
+                kind = "stock"
+            else:
+                # 没明确标签才看代码特征
+                if code.startswith("399") or code.startswith("899") or code.startswith("000688"):
+                    kind = "index"  # 深证/北证/科创50
+                elif code.startswith("51") or code.startswith("52") or code.startswith("15") or code.startswith("16") or code.startswith("58"):
+                    kind = "etf"
+                # 000xxx / 600xxx / 300xxx / 688xxx 都是个股
+                else:
+                    # 最后查预设确认 (覆盖 000001 这种)
+                    for n, c, k in INDEX_PRESETS + ETF_PRESETS:
+                        if c == code:
+                            kind = k; break
+            return name, code, kind, False
+
+        # 2) 纯6位代码
+        cm = re.search(r"(\d{6})", sel)
+        if cm:
             code = cm.group(1)
-            name = sel.replace(code, "").strip() or f"标的{code}"
-            # 用户指定 or 自动检测
+            name = sel.replace(code, "").strip(" ·-— \t") or f"标的{code}"
             t = type_var.get()
             if t == "自动":
                 kind = _auto_detect_kind(code)
@@ -522,27 +841,58 @@ def show_index_pattern_analyzer(parent, app=None):
                 kind = "etf"
             else:
                 kind = "stock"
+            return name, code, kind, False
+
+        # 3) 纯名字 → 需要 AKShare 查询
+        return sel, None, type_var.get(), True
+
+    def _on_analyze():
+        analyze_btn.config(state="disabled")
+
+        name, code, kind, need_lookup = _parse_selection(combo_var.get())
+
+        if code is None and not need_lookup:
+            status_var.set("❌ 无法识别标的")
+            analyze_btn.config(state="normal"); return
 
         gap_th = float(gap_var.get())
 
         def _worker():
+            nonlocal name, code, kind
             try:
+                # 3) 纯名字 → 后台查代码
+                if need_lookup:
+                    _q.put(("progress", f"🔍 搜索「{name}」的股票代码..."))
+                    found_code = _lookup_code_by_name(name)
+                    if found_code is None:
+                        _q.put(("error", f"找不到「{name}」的代码，请输入6位代码")); return
+                    code = found_code
+                    # 确定 kind
+                    t = kind  # 这里存的是 type_var.get()
+                    if t == "自动":
+                        kind = _auto_detect_kind(code)
+                    elif t == "指数":
+                        kind = "index"
+                    elif t == "ETF":
+                        kind = "etf"
+                    else:
+                        kind = "stock"
+                    _q.put(("progress", f"✅ {name} → {code} ({kind})"))
+
                 _q.put(("progress", f"📥 拉取 {name}({code}) K 线..."))
                 full_df = fetch_kline(code, kind=kind, days=300)
                 if full_df is None or len(full_df) < 30:
-                    _q.put(("error", f"{name} 数据不足")); return
+                    _q.put(("error", f"{name}({code}) 数据不足")); return
 
                 window_days = int(win_var.get().replace("天", ""))
-                work_df = full_df.tail(window_days + 60).copy()  # 多拉 60 天算前收
-                # 补 next_pct
+                work_df = full_df.tail(window_days + 60).copy()
                 work_df["next_pct"] = work_df["close"].shift(-1) / work_df["close"] - 1
 
-                _q.put(("progress", f"🔍 分析形态分布..."))
+                _q.put(("progress", "🔍 分析形态分布..."))
                 stats = analyze_pattern_stats(work_df, gap_threshold=gap_th)
                 if stats is None:
                     _q.put(("error", "分析失败")); return
 
-                # 补回 show_df
                 full_df["next_pct"] = full_df["close"].shift(-1) / full_df["close"] - 1
                 _q.put(("done", full_df, stats, f"{name}({code})"))
             except Exception as e:
@@ -550,6 +900,7 @@ def show_index_pattern_analyzer(parent, app=None):
                 _q.put(("error", str(e)))
 
         threading.Thread(target=_worker, daemon=True).start()
+        status_var.set("⏳ 启动中...")
         _poll()
 
     analyze_btn.config(command=_on_analyze)

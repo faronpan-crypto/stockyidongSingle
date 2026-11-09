@@ -673,6 +673,17 @@ def show_high_low_swing(parent, app=None):
               font=("", 10, "bold"), padx=10, pady=2,
               command=_on_index_pattern).pack(side=tk.LEFT, padx=4, pady=8)
 
+    # 💡 有效市场假说
+    def _on_emh():
+        try:
+            from ui.tab_emh import show_emh_panel
+            show_emh_panel(parent, app=app)
+        except Exception as e:
+            import traceback; traceback.print_exc()
+    tk.Button(toolbar, text="💡 有效市场", bg="#1A237E", fg="white",
+              font=("", 10, "bold"), padx=10, pady=2,
+              command=_on_emh).pack(side=tk.LEFT, padx=4, pady=8)
+
     # 🔄 刷新
     tk.Button(toolbar, text="🔄 刷新", bg="#1976D2", fg="white",
               font=("", 10, "bold"), padx=10, pady=2,
