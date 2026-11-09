@@ -545,7 +545,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                     if not _alive:
                         _proxy_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logic", "ai_proxy.py")
                         _sp.Popen([sys.executable, _proxy_py],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                 stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
                         time.sleep(1)
                     break  # 启动一次即可
         except Exception as _e:

@@ -1144,8 +1144,12 @@ class StockDetailMixin:
                         macd_signal = "DIF<0"
                     stage_macd_var.set(f"{macd_signal}  DIF={macd_dif}")
 
-                    stage_ytd_var.set(f"20日={result.get('ret20_pct', '—')}%  60日={result.get('ret60_pct', '—')}%")
-                    stage_pos_var.set(f"60日位置={result.get('pos_range_pct', '—')}%")
+                    stage_ytd_var.set(f"近20日={result.get('ret20_pct', '—')}%  近60日={result.get('ret60_pct', '—')}%")
+                    cd = result.get("calc_detail", {})
+                    pd = cd.get("pos_range", {})
+                    h60v = pd.get("60日最高", "?")
+                    l60v = pd.get("60日最低", "?")
+                    stage_pos_var.set(f"60日位置={result.get('pos_range_pct', '—')}%  (区间 {l60v}~{h60v})")
 
                     stage_bar_label_var.set(f"🧠 操盘阶段分析 — ✅ {stage_name} ({stage_score}分)")
 
@@ -1254,31 +1258,73 @@ class StockDetailMixin:
 """
 
             def _show_stage_help():
-                """弹出操盘阶段帮助窗口"""
+                """弹出操盘阶段帮助窗口 — 含实时计算过程"""
                 dlg = tk.Toplevel(win)
-                dlg.title("🧠 操盘阶段 — 判定逻辑详解")
-                dlg.geometry("720x640")
+                dlg.title("🧠 操盘阶段 — 判定逻辑详解 + 实时计算")
+                dlg.geometry("780x780")
                 dlg.configure(bg="#FAFAFA")
-                # 居中
                 dlg.transient(win)
                 dlg.grab_set()
 
-                # 顶部标题条
-                tk.Label(dlg, text="🧠 操盘阶段分析 — 判定逻辑详解",
+                tk.Label(dlg, text="🧠 操盘阶段分析 — 判定逻辑 + 实时计算过程",
                          bg="#1565C0", fg="white",
                          font=("", 14, "bold"), pady=10).pack(fill=tk.X)
 
-                # 滚动文本
                 from tkinter import scrolledtext
                 txt = scrolledtext.ScrolledText(dlg, wrap=tk.WORD,
                                                 font=("Menlo", 11),
                                                 bg="#FAFAFA", fg="#222",
                                                 borderwidth=0, highlightthickness=0)
                 txt.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
-                txt.insert("1.0", _HELP_TEXT.strip())
-                txt.configure(state=tk.DISABLED)
 
-                # 底部关闭
+                # 先塞入实时计算过程 (如果已有结果)
+                sr = stage_result[0]
+                if sr:
+                    cd = sr.get("calc_detail", {})
+                    lines = ["=" * 60,
+                             "📐 当前股票 — 实时计算过程 (双击面板刷新)",
+                             "=" * 60, ""]
+                    # 60日位置
+                    pd = cd.get("pos_range", {})
+                    if pd:
+                        lines.append("📍 60日位置 pos_range")
+                        lines.append(f"  公式: {pd.get('公式', '')}")
+                        lines.append(f"  60日最高 = {pd.get('60日最高', '?')}")
+                        lines.append(f"  60日最低 = {pd.get('60日最低', '?')}")
+                        lines.append(f"  当前价   = {pd.get('当前价', '?')}")
+                        lines.append(f"  区间振幅 = {pd.get('区间振幅', '?')}")
+                        lines.append(f"  → pos_range = {pd.get('结果%', '?')}%")
+                        lines.append("")
+                    # 20/60 日涨幅
+                    for _k, _lbl in [("ret20", "📅 近20日涨幅 ret20"), ("ret60", "📅 近60日涨幅 ret60")]:
+                        rd = cd.get(_k, {})
+                        if rd:
+                            lines.append(_lbl)
+                            lines.append(f"  公式: {rd.get('公式', '')}")
+                            for _kk, _vv in rd.items():
+                                if _kk != "公式":
+                                    lines.append(f"  {_kk} = {_vv}")
+                            lines.append("")
+                    # MA60 斜率
+                    lines.append("📊 MA60 方向判定")
+                    lines.append(f"  近10天线性回归斜率 = {cd.get('ma60_slope_pct', '?')}%/天")
+                    lines.append(f"  阈值: >+0.05% = ↑  <-0.05% = ↓  中间 = →")
+                    lines.append(f"  结果: {'↑' if cd.get('ma60_slope_pct',0)>0.05 else '↓' if cd.get('ma60_slope_pct',0)<-0.05 else '→'}")
+                    lines.append("")
+                    # 量比
+                    lines.append("💰 量比")
+                    lines.append(f"  公式: 今日成交量 / 20日均量")
+                    lines.append(f"  = {cd.get('volume_ratio', '?')}")
+                    lines.append("")
+
+                    lines.append("=" * 60)
+                    lines.append("📘 判定逻辑详解 (通用规则)")
+                    lines.append("=" * 60)
+                    txt.insert("1.0", "\n".join(lines) + "\n\n" + _HELP_TEXT.strip())
+                else:
+                    txt.insert("1.0", "⚠️ 请先等待操盘阶段分析完成再打开帮助\n\n" + _HELP_TEXT.strip())
+
+                txt.configure(state=tk.DISABLED)
                 ttk.Button(dlg, text="关闭", command=dlg.destroy).pack(pady=8)
 
             # 顶栏按钮 (从右往左 pack, ❓ 在最右)
@@ -1304,7 +1350,7 @@ class StockDetailMixin:
                  "📈 趋势:", stage_trend_var, "📊 均线:", stage_ma_var,
                  "💰 量能:", stage_vol_var, "🕯 K线形态:", stage_kline_var),
                 ("📉 RSI:", stage_rsi_var, "📊 MACD:", stage_macd_var,
-                 "📅 涨跌:", stage_ytd_var, "📍 位置:", stage_pos_var,
+                 "📅 近涨跌:", stage_ytd_var, "📍 位置:", stage_pos_var,
                  "", None, "", None),
             ]
             for r, row in enumerate(rows):

@@ -13183,7 +13183,9 @@ class DapanMixin:
                 except Exception:
                     pass
 
-        _th_ab.Thread(target=_alpha_beta_diag, daemon=True).start()
+        # 🔒 延迟启动 _alpha_beta_diag, 避开主线程 __init__ 里的 SSL 请求竞争
+        # Python 3.11 + macOS 存在 PyEval_RestoreThread GIL 崩溃
+        rev_frame.after(4000, lambda: _th_ab.Thread(target=_alpha_beta_diag, daemon=True).start())
 
 
 
@@ -29472,7 +29474,9 @@ AI 将基于实时市场数据生成深度分析报告
                 except Exception:
                     pass
 
-        _th_ab.Thread(target=_alpha_beta_diag, daemon=True).start()
+        # 🔒 延迟启动 _alpha_beta_diag, 避开主线程 __init__ 里的 SSL 请求竞争
+        # Python 3.11 + macOS 存在 PyEval_RestoreThread GIL 崩溃
+        rev_frame.after(4000, lambda: _th_ab.Thread(target=_alpha_beta_diag, daemon=True).start())
         # 固定高度, 让滚动条能正确工作
         rev_frame.update_idletasks()
         h = rev_frame.winfo_reqheight()

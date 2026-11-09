@@ -253,6 +253,28 @@ def analyze_trading_stage(df: pd.DataFrame, fund_df=None, top_n=20):
     l60 = low.tail(60).min()
     pos_range = (last - l60) / (h60 - l60) * 100 if h60 != l60 else 50  # 当前价在 60 日区间位置
 
+    # 计算过程详情 (供 ❓帮助弹窗 + 面板 tooltip 使用)
+    _ret20_detail = {
+        "公式": f"(收盘价[-1] / 收盘价[-20] - 1) × 100",
+        "20天前收盘": round(close.iloc[-20], 3) if len(close) >= 20 else None,
+        "今日收盘": round(last, 3),
+        "结果%": round(ret20, 2),
+    }
+    _ret60_detail = {
+        "公式": f"(收盘价[-1] / 收盘价[-60] - 1) × 100",
+        "60天前收盘": round(close.iloc[-60], 3) if len(close) >= 60 else None,
+        "今日收盘": round(last, 3),
+        "结果%": round(ret60, 2),
+    }
+    _pos_detail = {
+        "公式": f"(当前价 - 60日最低) / (60日最高 - 60日最低) × 100",
+        "60日最高": round(h60, 3),
+        "60日最低": round(l60, 3),
+        "当前价": round(last, 3),
+        "区间振幅": round(h60 - l60, 3),
+        "结果%": round(pos_range, 1),
+    }
+
     # ── 7. 机构 vs 游资识别 ──
     inst_score = 0
     hm_score = 0
@@ -432,6 +454,16 @@ def analyze_trading_stage(df: pd.DataFrame, fund_df=None, top_n=20):
         "ret60_pct": round(ret60, 1),
         "rsi": round(rsi_l, 1),
         "macd_dif": round(dif_l, 3),
+        # 计算过程详情 (帮助弹窗用)
+        "calc_detail": {
+            "ret20": _ret20_detail,
+            "ret60": _ret60_detail,
+            "pos_range": _pos_detail,
+            "ma60_slope_pct": round(ma60_d, 3),
+            "ma20_slope_pct": round(ma20_d, 3),
+            "volume_ratio": round(vratio, 2),
+            "data_rows": len(close),
+        },
         "limit_up_days": int(limit_up_days),
         "detail": {
             "close": round(last, 2),
@@ -542,7 +574,8 @@ class TechStageMixin:
     # ── 备用独立入口 ──
 
     def _show_tech_stage_dialog(self):
-        """弹窗入口: 操盘阶段卡片网格 (带过滤/CSV导出)"""
+        """弹窗入口: 操盘阶段卡片网格 (输入框+实时卡片+进度条+kill+单只重试)"""
+        import queue as _queue
         dlg = tk.Toplevel(getattr(self, "root", None))
         dlg.title("📊 操盘阶段识别 — 吸筹/洗盘/拉升/出货")
         dlg.geometry("1280x780")
@@ -559,15 +592,18 @@ class TechStageMixin:
                  foreground="blue", bg="#F8FAFC").pack(side=tk.LEFT, padx=12)
 
         # 控制面板
-        ctrl = tk.LabelFrame(dlg, text="🎛️ 扫描控制", padding=6)
+        ctrl = tk.LabelFrame(dlg, text="🎛️ 扫描控制", padx=6, pady=6)
         ctrl.pack(fill=tk.X, padx=8, pady=4)
 
-        ttk.Button(ctrl, text="🧬 重新选组扫描",
-                   command=lambda: (dlg.destroy(), self._show_lifecycle_popup())).pack(side=tk.LEFT, padx=4)
         ttk.Button(ctrl, text="🔄 扫描 Main 持仓",
-                   command=lambda: self._ts_scan_from_watchlist(dlg)).pack(side=tk.LEFT, padx=4)
+                   command=lambda: self._ts_start_scan_from_watchlist(ctrl)).pack(side=tk.LEFT, padx=4)
         ttk.Button(ctrl, text="📋 输入代码扫描",
-                   command=lambda: self._ts_input_codes(dlg)).pack(side=tk.LEFT, padx=4)
+                   command=lambda: self._ts_input_codes_and_run(dlg)).pack(side=tk.LEFT, padx=4)
+        # 🔴 Kill 按钮
+        self._ts_kill_btn = ttk.Button(ctrl, text="⏹ 停止扫描",
+                                       command=lambda: self._ts_kill_scan(),
+                                       state=tk.DISABLED)
+        self._ts_kill_btn.pack(side=tk.LEFT, padx=4)
         ttk.Button(ctrl, text="💾 导出CSV",
                    command=lambda: self._ts_export_csv(dlg)).pack(side=tk.LEFT, padx=4)
 
@@ -590,7 +626,7 @@ class TechStageMixin:
                      ).pack(side=tk.LEFT, padx=4)
 
         # 进度条 + 步骤标签
-        self._ts_step_label = tk.Label(ctrl, text="[0%] 准备中...",
+        self._ts_step_label = tk.Label(ctrl, text="[0%] 等待开始...",
                                        bg="#F1F5F9", fg="#1E40AF",
                                        font=("", 10, "bold"))
         self._ts_step_label.pack(side=tk.RIGHT, padx=(4, 8))
@@ -618,17 +654,26 @@ class TechStageMixin:
                  bg="#F1F5F9").pack(fill=tk.X, side=tk.BOTTOM)
 
         self._ts_dlg = dlg
-        self._ts_cards = []  # [(widget, data_dict)]
+        self._ts_cards = {}        # {code: (widget_row, data_dict)} 支持单只删
         self._ts_all_results = []
+        self._ts_queue = _queue.Queue()
+        self._ts_stop_event = threading.Event()
+        self._ts_worker = None      # 当前线程 ref
 
-        # 🚀 打开即自动扫描: 取所有持仓组 (2=龙头, 4=Main, 6=同花顺, 7-14=标签1-8)
-        dlg.after(200, self._ts_auto_scan_all_groups)
+        # 🚀 打开即自动扫描 Main 持仓
+        dlg.after(200, lambda: self._ts_start_scan_from_watchlist(ctrl))
 
-    def _ts_auto_scan_all_groups(self):
-        """自动取所有持仓组, 去重后跑扫描"""
-        groups = [2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    def _ts_kill_scan(self):
+        """⏹ 杀掉当前扫描线程"""
+        self._ts_stop_event.set()
+        self._ts_status.set("⏹ 停止信号已发送 — 等待当前步骤退出...")
+        self._ts_kill_btn.configure(state=tk.DISABLED)
+
+    def _ts_start_scan_from_watchlist(self, ctrl=None):
+        """取 Main 持仓 + 自动扫描"""
         pairs = []
         seen = set()
+        groups = [2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14]
         for gi in groups:
             hs = getattr(self, f"holding_stocks_{gi}", [None] * 80)
             for holding in hs:
@@ -641,12 +686,393 @@ class TechStageMixin:
                     if c not in seen:
                         seen.add(c)
                         pairs.append((str(name or c).strip(), c))
-        print(f"[操盘阶段] 自动扫描: 从 {len(groups)} 组取到 {len(pairs)} 只 (去重后)")
+        print(f"[操盘阶段] 自动扫描: {len(pairs)} 只")
         if pairs:
-            self._ts_status.set(f"📊 从 {len(groups)} 组取到 {len(pairs)} 只 → 开始扫描...")
+            self._ts_status.set(f"📊 取到 {len(pairs)} 只 → 开始扫描...")
             self._ts_run_scan(pairs)
         else:
-            self._ts_status.set("⚠️ 所有持仓组都是空的, 请先在 Main 等标签页添加股票")
+            self._ts_status.set("⚠️ 所有持仓组都是空的")
+
+    def _ts_input_codes_and_run(self, dlg):
+        """弹窗让用户输入代码 → 解析 → 开始扫描"""
+        sub = tk.Toplevel(dlg)
+        sub.title("📋 输入股票代码 (多个用逗号/空格/换行分隔)")
+        sub.geometry("480x420")
+        sub.configure(bg="#F8FAFC")
+        sub.transient(dlg)
+
+        tk.Label(sub, text="📋 股票代码 (支持 名称,代码 或纯代码)",
+                 bg="#F8FAFC", font=("", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=(12, 4))
+
+        txt_frame = tk.Frame(sub, bg="#F8FAFC")
+        txt_frame.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=12, pady=4)
+        sub.rowconfigure(1, weight=1)
+        sub.columnconfigure(0, weight=1)
+
+        txt = scrolledtext.ScrolledText(txt_frame, font=("", 12),
+                                        wrap=tk.WORD, borderwidth=1,
+                                        relief="solid", height=14)
+        txt.pack(fill=tk.BOTH, expand=True)
+        txt.insert("1.0", "601899\n300456,000001\n紫金矿业 601899")
+        # 自动 focus
+        sub.after(100, lambda: txt.focus_set())
+
+        def _go():
+            raw = txt.get("1.0", tk.END).strip()
+            pairs = []
+            for line in raw.replace(",", " ").replace("\n", " ").split():
+                m = re.search(r"(\d{6})", line)
+                if m:
+                    c = m.group(1)
+                    n = line.replace(c, "").replace(",", " ").strip() or c
+                    pairs.append((n, c))
+            sub.destroy()
+            if pairs:
+                self._ts_status.set(f"📊 输入 {len(pairs)} 只 → 开始扫描...")
+                self._ts_run_scan(pairs)
+            else:
+                self._ts_status.set("⚠️ 没识别到有效 6 位代码")
+
+        btn = ttk.Button(sub, text="▶ 开始扫描", command=_go)
+        btn.grid(row=2, column=0, columnspan=2, pady=10)
+
+    def _ts_run_scan(self, pairs):
+        """🔒 后台扫描线程 — 进程安全版本
+        后台线程只做两件事:
+          1. 把进度/结果塞进 Queue
+          2. 绝不碰任何 Tk widget
+        主线程用 after(100ms) 轮询 Queue 并 render
+        """
+        import queue as _queue
+        import akshare as ak
+        from datetime import datetime, timedelta
+
+        # 清空旧卡片 (主线程)
+        try:
+            for w in self._ts_card_frame.winfo_children():
+                w.destroy()
+        except Exception:
+            pass
+        self._ts_cards = {}
+        self._ts_all_results = []
+        self._ts_stop_event.clear()
+        self._ts_kill_btn.configure(state=tk.NORMAL)
+
+        N = len(pairs)
+        TOTAL_STEPS = N * 3  # 3步/只: K线+基金+分析
+
+        # 初始化进度
+        self._ts_progress.configure(maximum=TOTAL_STEPS, value=0)
+        self._ts_step_label.configure(text=f"[0%] 准备扫描 {N} 只...")
+
+        q = _queue.Queue()
+
+        def _worker():
+            """后台 worker — 线程安全, 只往 Queue 塞消息"""
+            step_counter = [0]
+
+            for i, (name, code) in enumerate(pairs):
+                if self._ts_stop_event.is_set():
+                    q.put(("stopped", step_counter[0], N))
+                    return
+
+                code6 = re.search(r"(\d{6})", str(code))
+                if not code6:
+                    q.put(("result", {
+                        "name": name, "code": code, "price": 0,
+                        "analyze": None, "error": "无有效代码",
+                        "index": i, "total": N,
+                    }))
+                    continue
+                code6 = code6.group(1)
+
+                # ── Step 1: 拉 K 线 ──
+                if self._ts_stop_event.is_set(): break
+                q.put(("progress", step_counter[0],
+                       f"K线 {i+1}/{N} — {name}"))
+                df = None
+                try:
+                    df = ak.stock_zh_a_hist(symbol=code6, period="daily",
+                                            start_date=(datetime.now() - timedelta(days=400)).strftime("%Y%m%d"),
+                                            end_date=datetime.now().strftime("%Y%m%d"),
+                                            adjust="qfq")
+                except Exception as e:
+                    q.put(("log", f"⚠️ {code6} K线拉取异常: {str(e)[:80]}"))
+                step_counter[0] += 1
+
+                if df is None or len(df) < 60:
+                    step_counter[0] += 2  # 跳过剩余 2 步
+                    q.put(("result", {
+                        "name": name, "code": code6,
+                        "price": 0, "analyze": None,
+                        "error": f"K线不足({len(df) if df is not None else 0}行)",
+                        "index": i, "total": N,
+                    }))
+                    continue
+
+                # ── Step 2: 拉基金持仓 ──
+                if self._ts_stop_event.is_set(): break
+                q.put(("progress", step_counter[0],
+                       f"基金持仓 {i+1}/{N} — {name}"))
+                fund_df = None
+                try:
+                    fund_df = ak.stock_fund_stock_holder(symbol=code6)
+                except Exception:
+                    pass
+                step_counter[0] += 1
+
+                # ── Step 3: 分析 ──
+                if self._ts_stop_event.is_set(): break
+                q.put(("progress", step_counter[0],
+                       f"分析 {i+1}/{N} — {name}"))
+                try:
+                    analysis = analyze_trading_stage(df, fund_df)
+                except Exception as e:
+                    analysis = None
+                    q.put(("log", f"⚠️ {name} 分析异常: {str(e)[:80]}"))
+                step_counter[0] += 1
+
+                q.put(("result", {
+                    "name": name, "code": code6,
+                    "price": float(df.iloc[-1]["收盘"]),
+                    "analyze": analysis, "error": None,
+                    "index": i, "total": N,
+                }))
+
+                if self._ts_stop_event.is_set(): break
+
+            q.put(("done", step_counter[0], N))
+
+        # 启动 worker 线程
+        self._ts_worker = threading.Thread(target=_worker, daemon=True)
+        self._ts_worker.start()
+
+        # 🚀 主线程轮询 Queue — 彻底线程安全
+        self._ts_poll_queue(q, TOTAL_STEPS, N)
+
+    def _ts_poll_queue(self, q, total_steps, N):
+        """主线程轮询 Queue — 每 80ms render 一次"""
+        import queue as _queue
+
+        try:
+            msgs = []
+            # 一次性 drain 所有可用消息
+            while True:
+                try:
+                    msgs.append(q.get_nowait())
+                except _queue.Empty:
+                    break
+
+            for msg in msgs:
+                kind = msg[0]
+
+                if kind == "progress":
+                    step_val, text = msg[1], msg[2]
+                    self._ts_progress.configure(value=min(step_val, total_steps))
+                    pct = int(step_val / total_steps * 100) if total_steps else 0
+                    self._ts_step_label.configure(text=f"[{pct}%] {text}")
+
+                elif kind == "result":
+                    data = msg[1]
+                    self._ts_all_results.append(data)
+                    self._ts_render_one_card(data)
+
+                elif kind == "log":
+                    self._ts_status.set(msg[1])
+
+                elif kind == "stopped":
+                    step_val, n = msg[1], msg[2]
+                    self._ts_progress.configure(value=step_val)
+                    self._ts_step_label.configure(text="[⏹] 用户停止")
+                    self._ts_status.set(f"⏹ 扫描已停止 — 已完成 {len(self._ts_all_results)}/{n}")
+                    self._ts_kill_btn.configure(state=tk.DISABLED)
+                    self._ts_update_stats()
+                    return
+
+                elif kind == "done":
+                    step_val, n = msg[1], msg[2]
+                    self._ts_progress.configure(value=total_steps)
+                    self._ts_step_label.configure(text="[100%] 扫描完成")
+                    self._ts_status.set(f"✅ 全部完成 — {len(self._ts_all_results)}/{n} 只")
+                    self._ts_kill_btn.configure(state=tk.DISABLED)
+                    self._ts_update_stats()
+                    return
+
+        except Exception as e:
+            print(f"[操盘阶段] poll_queue 异常: {e}")
+
+        # 继续轮询
+        if self._ts_dlg and self._ts_dlg.winfo_exists():
+            self._ts_dlg.after(80, lambda: self._ts_poll_queue(q, total_steps, N))
+
+    def _ts_render_one_card(self, r):
+        """实时渲染一张卡片 (主线程调用)"""
+        try:
+            name, code = r["name"], r["code"]
+            a = r.get("analyze")
+            err = r.get("error")
+
+            # 如果已有 (比如重试), 先删旧的
+            if code in self._ts_cards:
+                old_card, _ = self._ts_cards[code]
+                try:
+                    old_card.destroy()
+                except Exception:
+                    pass
+                del self._ts_cards[code]
+
+            cols = max(3, min(5, (self._ts_canvas.winfo_width() or 1000) // 240))
+            cell_w, cell_h = 220, 180
+
+            # 找到空位
+            existing = list(self._ts_cards.values())
+            idx = len(existing)
+            row, col = divmod(idx, cols)
+
+            if a is None:
+                # 失败卡片
+                bg = "#FEE2E2"; tag_color = "#991B1B"
+                stage = "❌失败"
+            else:
+                stage = a["stage"]
+                bg = a["background_color"]
+                tag_color = a["tag_color"]
+
+            card = tk.Frame(self._ts_card_frame, bg=bg, width=cell_w, height=cell_h,
+                            highlightbackground=tag_color, highlightthickness=2,
+                            cursor="hand2")
+            card.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
+            card.pack_propagate(False)
+
+            # 阶段标签 + 🔄 重试按钮 (右上角)
+            top_right = tk.Frame(card, bg=tag_color)
+            top_right.place(relx=0.98, rely=0, anchor="ne", y=4, x=-4)
+            tk.Label(top_right, text=f"{stage}", bg=tag_color, fg="white",
+                     font=("", 9, "bold"), padx=6, pady=1).pack(side=tk.LEFT)
+            retry_btn = tk.Label(top_right, text=" 🔄", bg=tag_color, fg="white",
+                                 font=("", 9, "bold"), cursor="hand2", padx=3)
+            retry_btn.pack(side=tk.LEFT)
+            retry_btn.bind("<Button-1>", lambda e, c=code: self._ts_retry_one(c))
+
+            tk.Label(card, text=f"{name}", bg=bg, font=("", 12, "bold"),
+                     anchor="w").pack(anchor="w", padx=8, pady=(6, 0))
+            tk.Label(card, text=f"{code}", bg=bg, font=("", 9), fg="#666",
+                     anchor="w").pack(anchor="w", padx=8)
+
+            if a is not None:
+                inst = a.get("institution_vs_hot_money", "")
+                inst_color = "#1E40AF" if "机构" in inst else "#DC2626" if "游资" in inst else "#6B7280"
+                tk.Label(card, text=f"🏛 {inst}({a.get('institution_score',0)})",
+                         bg=bg, fg=inst_color, font=("", 9, "bold"),
+                         anchor="w").pack(anchor="w", padx=8, pady=(2, 0))
+                d = a.get("detail", {})
+                tk.Label(card, text=f"¥{d.get('close','?')}  MA5={d.get('ma5','?')}  MA20={d.get('ma20','?')}",
+                         bg=bg, font=("", 9), fg="#333",
+                         anchor="w").pack(anchor="w", padx=8)
+                tk.Label(card, text=f"📅 近20日={a.get('ret20_pct','?')}%  近60日={a.get('ret60_pct','?')}%  📍{a.get('pos_range_pct','?')}%",
+                         bg=bg, font=("", 9), fg="#333",
+                         anchor="w").pack(anchor="w", padx=8)
+            else:
+                tk.Label(card, text=f"❌ {err or '分析失败'}", bg=bg, font=("", 9),
+                         fg="#991B1B", anchor="w").pack(anchor="w", padx=8, pady=(6, 0))
+
+            # 单击详情 + 双击 K 线
+            card.bind("<Button-1>", lambda e, r=r: self._ts_show_card_detail(r))
+            retry_btn.bind("<Button-1>", lambda e, c=code: self._ts_retry_one(c))
+
+            self._ts_cards[code] = (card, r)
+
+        except Exception as e:
+            print(f"[操盘阶段] render_card 异常: {e}")
+
+    def _ts_retry_one(self, code):
+        """🔄 单只重新跑 (后台线程, 不影响其他卡片)"""
+        import akshare as ak
+        from datetime import datetime, timedelta
+
+        # 找 name
+        name = code
+        for r in self._ts_all_results:
+            if r.get("code") == code:
+                name = r.get("name", code)
+                break
+
+        # 更新状态
+        self._ts_status.set(f"🔄 重跑 {name}({code})...")
+
+        def _worker():
+            df = fund_df = None
+            try:
+                df = ak.stock_zh_a_hist(symbol=code, period="daily",
+                                        start_date=(datetime.now() - timedelta(days=400)).strftime("%Y%m%d"),
+                                        end_date=datetime.now().strftime("%Y%m%d"),
+                                        adjust="qfq")
+            except Exception:
+                pass
+            try:
+                fund_df = ak.stock_fund_stock_holder(symbol=code)
+            except Exception:
+                pass
+
+            if df is not None and len(df) >= 60:
+                try:
+                    a = analyze_trading_stage(df, fund_df)
+                    price = float(df.iloc[-1]["收盘"])
+                except Exception as e:
+                    a = None; price = 0; print(f"[操盘阶段] 重跑异常: {e}")
+                err = None
+            else:
+                a = None; price = 0; err = f"K线不足({len(df) if df is not None else 0}行)"
+
+            # 主线程渲染
+            def _apply():
+                # 替换旧结果
+                for i, r in enumerate(self._ts_all_results):
+                    if r.get("code") == code:
+                        self._ts_all_results[i] = {
+                            "name": name, "code": code,
+                            "price": price, "analyze": a, "error": err,
+                            "index": r.get("index", 0), "total": r.get("total", 0),
+                        }
+                        break
+                else:
+                    self._ts_all_results.append({
+                        "name": name, "code": code,
+                        "price": price, "analyze": a, "error": err,
+                        "index": 0, "total": 1,
+                    })
+                self._ts_render_one_card({
+                    "name": name, "code": code,
+                    "price": price, "analyze": a, "error": err,
+                })
+                self._ts_status.set(f"✅ {name}({code}) 重跑完成")
+                self._ts_update_stats()
+
+            if self._ts_dlg and self._ts_dlg.winfo_exists():
+                self._ts_dlg.after(0, _apply)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _ts_update_stats(self):
+        """更新底部统计"""
+        stage_cnt = Counter()
+        total_good = 0
+        for r in self._ts_all_results:
+            a = r.get("analyze")
+            if a:
+                stage_cnt[a.get("stage", "?")] += 1
+                total_good += 1
+        if stage_cnt:
+            stat = f"📊 总有效: {total_good} | " + " ".join(f"【{k}:{v}】" for k, v in stage_cnt.most_common())
+        else:
+            stat = f"📊 已完成 {len(self._ts_all_results)} 只 — 等待分析..."
+        self._ts_stats.set(stat)
+
+    def _ts_finish_scan(self, results):
+        """兼容旧入口 — 现在实时渲染, 此函数不做全量 render"""
+        # 保留引用以防外部调用
+        self._ts_all_results = results
+        self._ts_update_stats()
 
     def _ts_scan_from_watchlist(self, dlg):
         """从自选股/监测池扫描 —— 用主程序已有的持仓股列表"""
