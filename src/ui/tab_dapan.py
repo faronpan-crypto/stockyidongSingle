@@ -15896,16 +15896,36 @@ AI 将基于实时市场数据生成深度分析报告
             nb = ttk.Notebook(dlg)
             nb.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
 
-            # Tab1: 宽基指数强弱
+            # Tab1: 宽基指数强弱 (左=数据表格, 右=分析师逐条解读)
             tab1 = tk.Frame(nb, bg="#121212")
             nb.add(tab1, text=" 📊 宽基指数强弱 ")
-            bench_txt = tk.Text(tab1, bg="#1E1E1E", fg="#DDD", font=("Menlo", 11), wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=12, pady=10)
-            bench_txt.pack(fill=tk.BOTH, expand=True)
-            bench_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 11, "bold"))
-            bench_txt.tag_configure("g", foreground="#EF5350", font=("Helvetica", 11, "bold"))
-            bench_txt.tag_configure("b", foreground="#66BB6A", font=("Helvetica", 11, "bold"))
-            bench_txt.tag_configure("w", foreground="#FFD54F")
+            t1_split = tk.Frame(tab1, bg="#121212")
+            t1_split.pack(fill=tk.BOTH, expand=True)
+
+            # 左侧: 数据表格
+            bench_txt = tk.Text(t1_split, bg="#1E1E1E", fg="#DDD", font=("Menlo", 12), wrap=tk.NONE, relief=tk.FLAT, borderwidth=0, padx=10, pady=8, width=78)
+            bench_txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            bench_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 12, "bold"))
+            bench_txt.tag_configure("g", foreground="#EF5350", font=("Menlo", 12, "bold"))
+            bench_txt.tag_configure("b", foreground="#66BB6A", font=("Menlo", 12, "bold"))
+            bench_txt.tag_configure("w", foreground="#FFD54F", font=("Menlo", 12))
             bench_txt.tag_configure("m", foreground="#4FC3F7")
+            # 左侧滚动条
+            _s1 = tk.Scrollbar(t1_split, command=bench_txt.yview)
+            _s1.pack(side=tk.LEFT, fill=tk.Y); bench_txt.config(yscrollcommand=_s1.set)
+
+            # 分隔
+            tk.Frame(t1_split, bg="#333", width=2).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+
+            # 右侧: 分析师逐条解读
+            analyst_txt = tk.Text(t1_split, bg="#1A1A2E", fg="#E0E0E0", font=("Menlo", 11), wrap=tk.WORD, relief=tk.FLAT, borderwidth=0, padx=12, pady=8, width=55)
+            analyst_txt.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+            analyst_txt.tag_configure("hdr", foreground="#FFD54F", font=("Helvetica", 13, "bold"))
+            analyst_txt.tag_configure("b", foreground="#EF5350", font=("Menlo", 11, "bold"))
+            analyst_txt.tag_configure("g", foreground="#66BB6A", font=("Menlo", 11, "bold"))
+            analyst_txt.tag_configure("w", foreground="#E0E0E0", font=("Menlo", 11))
+            analyst_txt.tag_configure("c", foreground="#4FC3F7", font=("Menlo", 10))  # 解释
+            analyst_txt.tag_configure("q", foreground="#FF80AB", font=("Menlo", 10, "bold"))  # 问题
 
             # Tab2: 资金变化 + 涨跌中位数
             tab2 = tk.Frame(nb, bg="#121212")
@@ -16008,6 +16028,14 @@ AI 将基于实时市场数据生成深度分析报告
                 import traceback as _tb2
                 print(f"[📺游资看盘❌] {_e}")
                 _tb2.print_exc()
+
+            # ═══════ 新增: 估值 / 资金 / 市场点位 3 个 Tab ═══════
+            try:
+                from ui.tab_market_valuation import add_market_tabs
+                add_market_tabs(nb, dlg)
+            except Exception as _e:
+                import traceback as _tb3
+                print(f"[📺估值Tab❌] {_e}"); _tb3.print_exc()
 
             # ══════════════════════════════════════════════════════
             # 数据 Fetch (并行)
@@ -16177,12 +16205,18 @@ AI 将基于实时市场数据生成深度分析报告
                 if not r_global: global_txt.insert(tk.END, "全球数据拉取失败")
 
                 # ══════════════════════════════════════════════════════
-                # Tab1: 宽基指数强弱
+                # Tab1: 宽基指数强弱 (左=数据表格, 右=分析师逐条解读)
                 # ══════════════════════════════════════════════════════
                 bench_txt.delete("1.0", tk.END)
+                analyst_txt.delete("1.0", tk.END)
+
                 bench_txt.insert(tk.END, "📊 宽基指数强弱对比 (MA15斜率 + 上穿 + 量能)\n\n", "hdr")
-                bench_txt.insert(tk.END, f"{'指数':8s} {'收盘':>8s} {'1日%':>7s} {'5日%':>7s} {'MA15斜率5D':>10s} {'上穿MA15':>9s} {'MA15走平':>9s} {'>MA60':>7s} {'量比':>6s}\n", "hdr")
-                bench_txt.insert(tk.END, "─" * 85 + "\n", "w")
+                bench_txt.insert(tk.END, f"{'指数':8s} {'收盘':>8s} {'1日%':>7s} {'5日%':>7s} {'MA15斜率':>9s} {'上穿MA15':>9s} {'MA15走平':>9s} {'>MA60':>7s} {'量比':>6s}\n", "hdr")
+                bench_txt.insert(tk.END, "─" * 80 + "\n", "w")
+
+                # 右侧分析师解读 Header
+                analyst_txt.insert(tk.END, "🧠 专业分析师逐条解读\n", "hdr")
+                analyst_txt.insert(tk.END, "─" * 60 + "\n\n", "c")
 
                 valid_bench = []
                 for b in r_bench:
@@ -16193,11 +16227,92 @@ AI 将基于实时市场数据生成深度分析报告
                     flat = "✅" if b["flat"] else "—"
                     above60 = "✅" if b["above_ma60"] else "—"
                     vr = f"{b['vol_ratio']:.2f}"
-                    line = f"{b['name']:8s} {b['close']:>8.0f} {b['pct_1d']:>+7.2f} {b['pct_5d']:>+7.2f} {slope_str:>10s} {up:>9s} {flat:>9s} {above60:>7s} {vr:>6s}\n"
+                    line = f"{b['name']:8s} {b['close']:>8.0f} {b['pct_1d']:>+7.2f} {b['pct_5d']:>+7.2f} {slope_str:>9s} {up:>9s} {flat:>9s} {above60:>7s} {vr:>6s}\n"
                     tag = "b" if b["slope5"] > 0.5 else "g" if b["slope5"] < -0.5 else "w"
                     bench_txt.insert(tk.END, line, tag)
 
-                # 强弱排序 (按 5日涨幅)
+                    # ═══ 分析师逐条解读 ═══
+                    _an = []
+                    _an.append(f"【{b['name']}】收盘 {b['close']:.0f}")
+
+                    # 1日% 解读
+                    if b["pct_1d"] > 1.5:
+                        _an.append(f"  🟢 1日 {b['pct_1d']:+.2f}% → 强势拉升, 多头主导, 关注能否站稳")
+                    elif b["pct_1d"] > 0:
+                        _an.append(f"  ⚪ 1日 {b['pct_1d']:+.2f}% → 小涨, 温和, 非核心方向")
+                    elif b["pct_1d"] > -1.5:
+                        _an.append(f"  🔴 1日 {b['pct_1d']:+.2f}% → 回调, 但幅度可控, 无需恐慌")
+                    else:
+                        _an.append(f"  🟠 1日 {b['pct_1d']:+.2f}% → 明显下跌, 警惕趋势走坏")
+
+                    # 5日% 解读
+                    if b["pct_5d"] > 3:
+                        _an.append(f"  🚀 5日 {b['pct_5d']:+.2f}% → 短期涨幅大, 注意短期获利盘兑现")
+                    elif b["pct_5d"] > 0:
+                        _an.append(f"  📈 5日 {b['pct_5d']:+.2f}% → 5日小涨, 趋势温和向上")
+                    elif b["pct_5d"] > -3:
+                        _an.append(f"  📉 5日 {b['pct_5d']:+.2f}% → 5日小跌, 可能短期调整")
+                    else:
+                        _an.append(f"  🧊 5日 {b['pct_5d']:+.2f}% → 5日连跌, 关注支撑位是否有效")
+
+                    # MA15 斜率 解读
+                    _sl = b["slope5"]
+                    if _sl > 1:
+                        _an.append(f"  📈 MA15斜率 {_sl:+.2f}% → 均线陡峭上行, 上升趋势加速 → 持有")
+                    elif _sl > 0.3:
+                        _an.append(f"  ➕ MA15斜率 {_sl:+.2f}% → 均线温和上行, 趋势健康")
+                    elif _sl > -0.3:
+                        _an.append(f"  ➡️ MA15斜率 {_sl:+.2f}% → 均线走平, 变盘前兆, 等方向")
+                    elif _sl > -1:
+                        _an.append(f"  ➖ MA15斜率 {_sl:+.2f}% → 均线温和下行, 注意风险")
+                    else:
+                        _an.append(f"  📉 MA15斜率 {_sl:+.2f}% → 均线陡峭下行, 下跌趋势加速 → 减仓")
+
+                    # 上穿 MA15
+                    if b["cross_up"]:
+                        _an.append(f"  ✅ 上穿MA15 → 短期买入信号! 价格突破短期压力线, 可能启动上攻")
+                    else:
+                        _an.append(f"  ⚪ 未上穿MA15 → 观望, 等突破信号再进场")
+
+                    # MA15 走平
+                    if b["flat"]:
+                        _an.append(f"  ✅ MA15走平 → 短期即将变盘 (方向未定), 谨慎操作")
+
+                    # > MA60
+                    if b["above_ma60"]:
+                        _an.append(f"  ✅ 站上MA60 → 中期趋势向上, 60日均线是重要支撑")
+                    else:
+                        _an.append(f"  ⚠️ 低于MA60 → 中期趋势偏弱, 反弹高度看MA60压力")
+
+                    # 量比解读 (核心问题!)
+                    _vr = b["vol_ratio"]
+                    if _vr > 2.0:
+                        _an.append(f"  💥 量比 {_vr:.2f} → 超放量! 比20日均量大2倍 → 关注是出货还是抢筹 (看涨跌)")
+                    elif _vr > 1.3:
+                        _an.append(f"  📢 量比 {_vr:.2f} → 明显放量 (1.3-2.0倍) → 量价配合时是健康上涨")
+                    elif _vr > 0.8:
+                        _an.append(f"  ➡️ 量比 {_vr:.2f} → 正常量能区间 (0.8-1.3倍) → 无异常, 自然换手")
+                    elif _vr > 0.5:
+                        _an.append(f"  🍃 量比 {_vr:.2f} → 温和缩量 (0.5-0.8倍) → 观望为主, 等待放量选择方向")
+                    else:
+                        _an.append(f"  🥀 量比 {_vr:.2f} → 极度缩量 (<0.5倍) → 多空都不敢动, 临近变盘")
+
+                    analyst_txt.insert(tk.END, "\n".join(_an) + "\n", "w")
+                    analyst_txt.insert(tk.END, "─" * 60 + "\n", "c")
+
+                # 右侧总结
+                analyst_txt.insert(tk.END, "\n📘 量比核心解读:\n", "hdr")
+                analyst_txt.insert(tk.END, "  量比 = 今日成交量 / 过去20日均量\n\n", "c")
+                analyst_txt.insert(tk.END, "  ✅ 量比 1.3~2.0 且涨 → 健康放量上涨, 追涨安全\n", "g")
+                analyst_txt.insert(tk.END, "  ⚠️ 量比 1.3~2.0 但跌 → 放量下跌, 主力出货嫌疑, 勿抄底\n", "b")
+                analyst_txt.insert(tk.END, "  💥 量比 > 2.0 → 不管涨跌都是异常, 次日大概率波动加大\n", "q")
+                analyst_txt.insert(tk.END, "  ➡️ 量比 0.8~1.3 → 正常换手, 看趋势不看量\n", "w")
+                analyst_txt.insert(tk.END, "  🍃 量比 0.5~0.8 → 缩量上涨 = 虚涨, 缩量下跌 = 惜售\n", "c")
+                analyst_txt.insert(tk.END, "  🥀 量比 < 0.5 → 多空平衡, 临近选择方向\n\n", "c")
+                analyst_txt.insert(tk.END, "  💡 量比大一定好吗? → 不一定! 要看价涨还是价跌。\n", "q")
+                analyst_txt.insert(tk.END, "     量价齐升 = 好事, 量增价跌 = 坏事, 量缩价稳 = 观望。\n", "w")
+
+                # 强弱排序 (按 5日涨幅) — 继续写在左侧
                 if valid_bench:
                     sorted_b = sorted(valid_bench, key=lambda x: x["pct_5d"], reverse=True)
                     bench_txt.insert(tk.END, "\n🏆 5日强弱排名:\n", "hdr")
@@ -16206,7 +16321,6 @@ AI 将基于实时市场数据生成深度分析报告
                         sign = "🥇" if i==0 else "🥈" if i==1 else "🥉" if i==2 else "  "
                         bench_txt.insert(tk.END, f"  {sign} {b['name']:8s} 5日 {b['pct_5d']:+.2f}%\n", tag)
 
-                    # 上穿/走平统计
                     cross_list = [b for b in valid_bench if b["cross_up"]]
                     flat_list = [b for b in valid_bench if b["flat"]]
                     bench_txt.insert(tk.END, f"\n📈 MA15上穿: {len(cross_list)} 只 ({', '.join(b['name'] for b in cross_list)})\n", "w")
