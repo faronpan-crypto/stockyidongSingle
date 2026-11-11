@@ -7728,7 +7728,7 @@ except Exception as e:
             _n = len(_pct)
             return pd.Series({
                 "成分股数": _n,
-                "总成交额亿": g["amount"].sum() / 10000.0,
+                "总成交额亿": g["amount"].sum() / 100000.0,  # amount 单位:千元, 千元→亿需÷100000
                 "总市值亿": g["total_mv"].sum() / 10000.0,
                 "平均涨跌幅": _pct.mean(),
                 "中位数涨幅": _pct.median(),
@@ -8056,6 +8056,113 @@ except Exception as e:
                                ("sc","评分",32,"center"),("pct","涨跌%",50,"center"),("to","换手%",50,"center")]:
             tree_m.heading(_c, text=_t); tree_m.column(_c, width=_w, anchor=_a)
         tree_m.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        # 🆕 🤖 AI 分析按钮 (板块状态矩阵下方)
+        _ai_btn_frame = tk.Frame(f_mt); _ai_btn_frame.pack(fill=tk.X, padx=4, pady=(0, 4))
+        _ai_btn = tk.Button(_ai_btn_frame, text="🤖 AI 选股分析", font=("", 10, "bold"),
+                            bg="#FF6F00", fg="white", activebackground="#E65100",
+                            relief=tk.FLAT, padx=8, pady=2, cursor="hand2")
+        _ai_btn.pack(side=tk.LEFT)
+        _ai_status = tk.Label(_ai_btn_frame, text="点我用 AI 分析板块 · 选出适合操作的股票",
+                              font=("", 9), fg="#666"); _ai_status.pack(side=tk.LEFT, padx=8)
+
+        def _ai_analyze_sectors():
+            """用 AI 分析板块排名 + 个股数据, 选出适合操作的"""
+            try:
+                _ai_btn.config(state=tk.DISABLED, text="🤖 AI 分析中... (20-40秒)")
+                _ai_status.config(text="正在调用 AI, 请稍候...", fg="#FF6F00")
+
+                # 收集当前板块数据
+                _agg_data = getattr(win, "_last_agg", None)
+                if _agg_data is None or len(_agg_data) == 0:
+                    _ai_btn.config(state=tk.NORMAL, text="🤖 AI 选股分析")
+                    _ai_status.config(text="⚠️ 请先点「扫描全市场」获取数据", fg="#D32F2F")
+                    return
+
+                # 构造板块排名文本
+                _sector_text = ""
+                for i, (_, r) in enumerate(_agg_data.iterrows(), 1):
+                    _sector_text += (f"  {i}. {r['industry']} | 阶段:{r['阶段']} "
+                                    f"评分:{int(r.get('阶段分',0))} 涨跌:{float(r.get('平均涨跌幅',0)):+.2f}% "
+                                    f"换手:{float(r.get('平均换手率',0)):.1f}% 涨停:{int(r.get('涨停数',0))} "
+                                    f">5%占比:{float(r.get('超5占比%',0)):.1f}%\n")
+
+                # 收集主线看板里的龙头股
+                _leaders_text = ""
+                try:
+                    _all_leaders = getattr(win, "_all_mainline_leaders", [])
+                    if _all_leaders:
+                        _leaders_text = "🔥 主线龙头池 (部分):\n"
+                        for code, name in _all_leaders[:30]:
+                            _leaders_text += f"  - {name}({code})\n"
+                except Exception:
+                    pass
+
+                _prompt = f"""你是一位专业的A股交易分析师。请根据以下今日板块排名数据, 选出3-5只最适合操作的股票, 并说明逻辑理由。
+
+📊 今日板块排名 TOP15:
+{_sector_text}
+{_leaders_text}
+
+请按以下格式输出 (不要输出 Markdown, 直接中文):
+
+═══════════════════════════════
+🤖 AI 选股建议 (YYYY-MM-DD)
+═══════════════════════════════
+
+🎯 适合操作的板块:
+  (列出2-3个最值得关注的板块, 一句话理由)
+
+🏆 精选股票 (3-5只):
+  1. 股票名称(代码)
+     · 所属板块:
+     · 看好理由: (技术面+资金面+情绪面)
+     · 风险提示:
+
+📋 操作策略:
+  · 买入时机:
+  · 止损位:
+  · 仓位建议:
+
+⚠️ 风险警告: (1-2句话)
+
+═══════════════════════════════"""
+
+                # 在后台线程调 AI
+                def _run_ai():
+                    try:
+                        from ui.speculator_watch import _robust_ai_call
+                        result = _robust_ai_call(_prompt, system_prompt="你是专业的A股交易分析师, 擅长板块分析、龙头识别和短线交易策略。输出中文, 简洁实用。", max_tokens=2000)
+                        if result and len(result.strip()) > 20:
+                            self.root.after(0, lambda: _show_ai_result(result))
+                        else:
+                            self.root.after(0, lambda: _ai_fail("AI 返回为空"))
+                    except Exception as _e:
+                        import traceback; traceback.print_exc()
+                        self.root.after(0, lambda: _ai_fail(str(_e)))
+
+                def _show_ai_result(text):
+                    _ai_btn.config(state=tk.NORMAL, text="🤖 AI 选股分析")
+                    _ai_status.config(text="✅ AI 分析完成", fg="#2E7D32")
+                    # 弹窗展示
+                    from ui.tab_builders import _enhanced_help_dialog
+                    _enhanced_help_dialog(win, "🤖 AI 板块选股分析",
+                                          [("h1", "═══ AI 选股建议 ═══", "#FF6F00"),
+                                           ("text", text)], base_font_size=14)
+
+                def _ai_fail(err):
+                    _ai_btn.config(state=tk.NORMAL, text="🤖 AI 选股分析")
+                    _ai_status.config(text=f"❌ AI 失败: {err}", fg="#D32F2F")
+
+                import threading
+                threading.Thread(target=_run_ai, daemon=True).start()
+
+            except Exception as _e:
+                import traceback; traceback.print_exc()
+                _ai_btn.config(state=tk.NORMAL, text="🤖 AI 选股分析")
+                _ai_status.config(text=f"❌ 错误: {_e}", fg="#D32F2F")
+
+        _ai_btn.config(command=_ai_analyze_sectors)
         for _tag, _fg in [("brk","#66BB6A"),("acc","#42A5F5"),("dst","#EF5350"),("dec","#90A4AE"),("unk","#888")]:
             tree_m.tag_configure(_tag, foreground=_fg, font=("", 10, "bold"))
 
@@ -8276,7 +8383,7 @@ except Exception as e:
                     _c = _tsc.split(".")[0]; _n = str(r.get("name", "") or "").strip()
                     _pct = float(r.get("pct_chg", 0) or 0)
                     _turn = float(r.get("turnover_rate", 0) or 0)
-                    _amt_e = float(r.get("amount", 0) or 0) / 10000.0
+                    _amt_e = float(r.get("amount", 0) or 0) / 100000.0  # amount:千元→亿元
                     lines.append(("text", f"  {_c} {_n}  {_pct:+.2f}%  换手{_turn:.1f}%  成交{_amt_e:.0f}亿", "#D32F2F"))
                 _enhanced_help_dialog(parent=ml_txt.winfo_toplevel(),
                     title=f"{_sector} 统计详情", content_lines=lines,
@@ -8347,6 +8454,8 @@ except Exception as e:
             except Exception as e:
                 import traceback; traceback.print_exc()
                 ml_txt.insert(tk.END, f"❌ 主线渲染失败: {e}\n")
+            # 🆕 挂到 win 上给 AI 按钮用
+            win._all_mainline_leaders = _all_mainline_leaders
 
         def _render_matrix(agg):
             for it in tree_m.get_children(): tree_m.delete(it)
@@ -8355,10 +8464,39 @@ except Exception as e:
                 t20 = agg.head(20).copy(); t20["_sr"] = t20["阶段"].map(_rank).fillna(99)
                 t20 = t20.sort_values("_sr")
                 _tag_map = {"启动": "brk", "吸筹": "acc", "拉高出货": "dst", "下跌": "dec"}
-                for _, r in t20.iterrows():
+                # 🆕 先配好每种排名的字体大小 (名次越小字体越大)
+                _row_tags = []
+                for i, (_, r) in enumerate(t20.iterrows()):
                     _stg = str(r.get("阶段", "震荡整理")); _tag = _tag_map.get(_stg, "unk")
+                    _pct = float(r.get("平均涨跌幅", 0))
+                    # 🆕 排名对应字体大小: 第1名 12pt → 第20名 8pt
+                    _font_size = max(8, 12 - i // 3)
+                    # 🆕 涨跌% → 红到绿渐变的背景色 (红=涨, 绿=跌)
+                    # pct +5 → #FFCDD2 (浅红), pct 0 → #F5F5F5 (灰), pct -5 → #C8E6C9 (浅绿)
+                    if _pct >= 0:
+                        # 红渐变: 0%→#FFEBEE, +5%→#FFCDD2, +10%→#EF9A9A
+                        _ratio = min(1.0, _pct / 5.0)
+                        _bg_r = int(245 + (239 - 245) * _ratio)  # 245→239
+                        _bg_g = int(245 + (154 - 245) * _ratio)  # 245→154
+                        _bg_b = int(245 + (154 - 245) * _ratio)  # 245→154
+                    else:
+                        # 绿渐变: 0%→#F1F8E9, -5%→#C8E6C9, -10%→#A5D6A7
+                        _ratio = min(1.0, abs(_pct) / 5.0)
+                        _bg_r = int(245 + (165 - 245) * _ratio)
+                        _bg_g = int(245 + (214 - 245) * _ratio)
+                        _bg_b = int(245 + (167 - 245) * _ratio)
+                    _bg_hex = f"#{_bg_r:02X}{_bg_g:02X}{_bg_b:02X}"
+                    # 暗色背景用白字
+                    _fg = _tag_map.get(_stg, "unk")
+                    # 每行唯一 tag
+                    _row_tag = f"row_{i}"
+                    tree_m.tag_configure(_row_tag, background=_bg_hex,
+                                         font=("", _font_size, "bold"))
+                    _row_tags.append(_row_tag)
                     tree_m.insert("", tk.END, values=(r["industry"], _stg, int(r.get("阶段分", 0)),
-                        f"{r['平均涨跌幅']:+.2f}", f"{r['平均换手率']:.1f}"), tags=(_tag,))
+                        f"{_pct:+.2f}", f"{r['平均换手率']:.1f}"), tags=(_row_tag,))
+                # 保存聚合数据到窗口, 给 AI 按钮用
+                win._last_agg = agg.head(15).copy()
             except Exception as e: tree_m.insert("", tk.END, values=(f"❌ {e}", "", "", "", ""))
 
         def _render_flows(agg):
@@ -8634,7 +8772,7 @@ except Exception as e:
                 up_n = int((_daily_all["pct_chg"] > 0).sum())
                 dn_n = int((_daily_all["pct_chg"] < 0).sum())
                 flt_n = int((_daily_all["pct_chg"] == 0).sum())
-                amt_total = float(_daily_all["amount"].sum()) / 10000.0
+                amt_total = float(_daily_all["amount"].sum()) / 100000.0  # 千元→亿元
                 if lu is None:
                     # 估算涨停: pct_chg >= 9.5% 或 >= 19% (科创板688/创业板300)
                     _pcs = _daily_all["pct_chg"].astype(float)

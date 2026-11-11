@@ -39,9 +39,9 @@ def _get_ai_config() -> Dict:
             }
     except Exception:
         pass
-    # Fallback — 硬编码 key (和主程序一致)
+    # Fallback — 从环境变量读 (主程序已 export)
     return {
-        "api_key": "sk-255db1f6651a465b9e8daac02ebb2b25",
+        "api_key": os.environ.get("DEEPSEEK_API_KEY", ""),
         "base_url": "https://api.deepseek.com/v1",
         "model": "deepseek-chat",
         "timeout": 60,

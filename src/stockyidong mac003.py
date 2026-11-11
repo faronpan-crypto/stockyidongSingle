@@ -4814,6 +4814,8 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("全", 3, self.show_market_situation),
             ("👁️游资看盘", 7, self._show_speculator_watch),
             ("📺看盘", 7, self._show_realtime_market_dialog),
+            ("🔥主线·资金", 10, self._show_mainline_capital_dialog),
+            ("🧊冰点修复", 9, self._show_emotion_freeze),
             ("🏛️美联储", 9, self._show_fed_analysis_dialog),
             ("🌏纳指套利", 10, self._show_etf_holiday_dialog),
             ("🌍全球资产", 8, self._show_global_assets_dialog),
@@ -4846,7 +4848,6 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 ("📊操盘阶段", 9, self._show_tech_stage_dialog),
                 ("💼持仓检测", 9, self._hc_open_dialog),
                 ("🌐多站设置", 9, self._open_web_settings),
-                ("🧊冰点修复", 9, self._show_emotion_freeze),
                 ("🪙筹码", 7, self._show_chouma),
                 ("📊融资盘", 8, self._show_margin_dialog),
                 ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
@@ -4882,9 +4883,8 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         except Exception as _ea2:
             print(f"[📝Row2❌] 创建失败: {_ea2}", flush=True)
 
-        # Row3: 🔥 主力资金 / 个股分析 (深度)
+        # Row3: 💡 主力资金 / 个股分析 (深度)
         _ROW3 = [
-            ("🔥主线·资金", 10, self._show_mainline_capital_dialog),
             ("💡主力趋势", 8, self._show_main_trend_dialog),
             ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
             ("📊K线", 6, self.show_kline_dialog),

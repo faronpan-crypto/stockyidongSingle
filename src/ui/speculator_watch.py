@@ -5280,7 +5280,7 @@ def _load_leak_data(win):
                         tc = str(r["ts_code"]); pure = tc.split(".")[0]
                         data["strong"].append((pure, str(r["name"] or ""),
                                                f"{float(r['pct_chg']):+.2f}",
-                                               f"{float(r['amount'] or 0)/1e4:.1f}", "主升"))
+                                               f"{float(r['amount'] or 0)/1e5:.1f}", "主升"))
             except Exception as e:
                 print(f"[捡漏] 强势票失败: {e}")
 

@@ -18165,11 +18165,22 @@ AI 将基于实时市场数据生成深度分析报告
             except: iw = 800
         cols = max(3, iw // COL_W)
 
-        def _blk_span(items): return (len(items) + cols - 1) // cols
-        total_span = sum(_blk_span(it) for _, it in sorted_blocks)
-        header_rows = len(sorted_blocks)
-        inner.configure(width=cols * COL_W, height=total_span * ROW_H + header_rows * 34 + 8)
-        inner.grid_propagate(False)
+        # ── 🔧 表格式渲染: 每只股票独占一整行 ──
+        # 总高度 = 表头行(1) + 板块分组数(每个板块首行合并视觉, 但表格是每只一行)
+        # 实际上 sorted_blocks 每个 items 里的每只股票都要占 1 行
+        total_rows = 1  # 表头
+        for _, items in sorted_blocks:
+            total_rows += len(items)  # 每只股票 1 行
+
+        inner.configure(width=max(cols * COL_W, 600), height=total_rows * 28 + 12)
+        # 🔧 关键: 去掉 grid_propagate(False), 让 inner 根据实际渲染的行自动撑高
+        # 之前用 grid 邮票格子公式算 height → 算出来只有几行高 → scrollregion 锁死
+        try: inner.grid_propagate(True)
+        except: pass
+        # 🔧 绑定 Configure 事件自动更新 scrollregion
+        inner.bind("<Configure>", lambda e, cv_ref=inner.master: (
+            cv_ref.configure(scrollregion=cv_ref.bbox("all")),
+        ))
 
         cur_row = 0
         # ── 🆕 表头行 (板块 | 股票 | 涨跌幅 | 词频 | 逻辑) ──

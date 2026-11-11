@@ -390,10 +390,16 @@ class AIConfigManager:
                 print(f"加载AI配置失败: {e}")
         return default_config
     def save_config(self):
-        """保存AI配置"""
+        """保存AI配置 — 🔒 api_key 永远不写入文件, 只在环境变量"""
         try:
+            # 🔒 脱敏: 保存前把所有 api_key 字段置空, 防止明文落盘
+            import copy as _copy
+            safe_cfg = _copy.deepcopy(self.config)
+            for _pname, _pcfg in safe_cfg.get("providers", {}).items():
+                if "api_key" in _pcfg:
+                    _pcfg["api_key"] = ""  # 关键: 永远不写入 json
             with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, ensure_ascii=False, indent=2)
+                json.dump(safe_cfg, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
             print(f"保存AI配置失败: {e}")

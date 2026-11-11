@@ -24913,13 +24913,19 @@ class StockKeywordAnalyzerGUI:
             model_var = tk.StringVar(value=provider_config.get("model", ""))
             config_vars["model"] = model_var
             ttk.Entry(model_frame, textvariable=model_var, width=50).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
-            # API Key
+            # API Key (🔒 优先从环境变量读取, 永远不回显明文)
             key_frame = ttk.Frame(provider_frame_item)
             key_frame.pack(fill=tk.X, pady=2)
             ttk.Label(key_frame, text="API Key:", width=15).pack(side=tk.LEFT)
-            key_var = tk.StringVar(value=provider_config.get("api_key", ""))
+            _KEY_ENV_MAP = {"deepseek": "DEEPSEEK_API_KEY", "doubao": "DOUBAO_API_KEY"}
+            _env_key = os.environ.get(_KEY_ENV_MAP.get(provider_name, f"{provider_name.upper()}_API_KEY"), "")
+            _init_key_display = "✓ 已从环境变量读取 (点击可修改)" if _env_key else ""
+            key_var = tk.StringVar(value=_init_key_display)
             config_vars["api_key"] = key_var
-            ttk.Entry(key_frame, textvariable=key_var, width=50, show="*").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+            key_entry = ttk.Entry(key_frame, textvariable=key_var, width=50, show="*")
+            key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+            # 点击 Entry 时清空提示, 允许用户重新输入
+            key_entry.bind("<FocusIn>", lambda e, kv=key_var: kv.set("") if "已从环境变量" in kv.get() else None)
             # Endpoint (可选)
             endpoint_frame = ttk.Frame(provider_frame_item)
             endpoint_frame.pack(fill=tk.X, pady=2)
@@ -24959,13 +24965,21 @@ class StockKeywordAnalyzerGUI:
             # 更新配置
             active_provider = provider_var.get()
             self.ai_config_manager.config["active_provider"] = active_provider
+            # 🔒 key → 环境变量 (永远不写 json)
+            _KEY_ENV_MAP = {"deepseek": "DEEPSEEK_API_KEY", "doubao": "DOUBAO_API_KEY"}
             for provider_name, config_vars in provider_config_vars.items():
                 if provider_name not in self.ai_config_manager.config["providers"]:
                     self.ai_config_manager.config["providers"][provider_name] = {}
-                # 更新所有配置项
                 for key, var in config_vars.items():
                     value = var.get()
-                    if key in ["temperature", "timeout"]:
+                    if key in ("api_key",):
+                        # 🔒 保存到进程环境变量, 不写 json
+                        env_name = _KEY_ENV_MAP.get(provider_name, f"{provider_name.upper()}_API_KEY")
+                        if value and "已从环境变量" not in value:
+                            os.environ[env_name] = value
+                        # json 里保持空 (save_config 也会二次脱敏)
+                        self.ai_config_manager.config["providers"][provider_name]["api_key"] = ""
+                    elif key in ("temperature", "timeout"):
                         try:
                             self.ai_config_manager.config["providers"][provider_name][key] = float(value)
                         except:
@@ -24973,8 +24987,10 @@ class StockKeywordAnalyzerGUI:
                     else:
                         self.ai_config_manager.config["providers"][provider_name][key] = value
             if self.ai_config_manager.save_config():
-                messagebox.showinfo("成功", "AI配置已保存")
-                # 更新配置显示
+                _env_hint = ""
+                if os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DOUBAO_API_KEY"):
+                    _env_hint = " (Key 已加密存入进程环境变量)"
+                messagebox.showinfo("成功", f"AI配置已保存{_env_hint}")
                 self.update_ai_config_display()
                 config_window.destroy()
             else:
