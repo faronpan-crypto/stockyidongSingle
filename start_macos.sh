@@ -23,4 +23,4 @@ export TUSHARE_TOKEN="8a12ec4cf932a073f4284fd256cd215d88e10c31b8acce0021174c5c"
 
 # 启动应用
 echo "正在启动股票分析工具..."
-"$PYTHON_BIN" "src/stockyidong mac.py"
+"$PYTHON_BIN" "src/stockyidong mac003.py"

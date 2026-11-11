@@ -17956,6 +17956,43 @@ AI 将基于实时市场数据生成深度分析报告
             self.root.after(0, lambda: self._render_stamp_board(source, rows, status))
 
         _th.Thread(target=_worker, daemon=True).start()
+    def _add_web_checkbar(self, parent):
+        """在邮票格子 Tab 顶部工具栏加一排 🌐 网站勾选按钮"""
+        try:
+            import ui.stock_web_open as _wmod
+        except Exception as e:
+            print(f"[web_checkbar❌] import失败: {e}"); return
+        # 用 tk.Frame + Checkbutton (不是 ttk, 颜色好控制)
+        bar = tk.Frame(parent, bg="#1E1E2E")
+        bar.pack(side=tk.LEFT, padx=(8, 0))
+        tk.Label(bar, text="🌐网页:", bg="#1E1E2E", fg="#FFD54F",
+                 font=("", 11, "bold")).pack(side=tk.LEFT, padx=(0, 4))
+        current = _wmod.load_settings()
+        _vars = {}
+        for s in _wmod.SITES:
+            v = tk.BooleanVar(value=current.get(s["key"], s["default"]))
+            _vars[s["key"]] = v
+            cb = tk.Checkbutton(bar, text=f"{s['icon']}{s['name'][:2]}", variable=v,
+                                bg="#1E1E2E", fg="#CCC", selectcolor="#263238",
+                                activebackground="#1E1E2E", activeforeground="#FFF",
+                                font=("", 10), bd=0, highlightthickness=0, padx=2)
+            cb.pack(side=tk.LEFT, padx=1)
+        def _save_now():
+            s = {k: v.get() for k, v in _vars.items()}
+            _wmod.save_settings(s); print(f"[🌐保存] {sum(s.values())} 个网站已选")
+            # 视觉反馈
+            try:
+                _save_btn.config(text="✅已保存!", fg="#81C784")
+                bar.after(1500, lambda: _save_btn.config(text="💾保存", fg="#FFD54F"))
+            except: pass
+        _save_btn = tk.Label(bar, text="💾保存", bg="#1E1E2E", fg="#FFD54F",
+                              font=("", 10, "bold"), cursor="hand2", padx=4)
+        _save_btn.pack(side=tk.LEFT, padx=(4, 0))
+        _save_btn.bind("<Button-1>", lambda e: _save_now())
+        def _hover_in(e): _save_btn.config(bg="#37474F")
+        def _hover_out(e): _save_btn.config(bg="#1E1E2E")
+        _save_btn.bind("<Enter>", _hover_in); _save_btn.bind("<Leave>", _hover_out)
+
     def _render_stamp_board(self, source, rows, status=None):
         """主线程: 画邮票格子 (用 grid + 板块分组 + 板块逻辑/资讯)"""
         import tkinter as tk
@@ -18166,6 +18203,35 @@ AI 将基于实时市场数据生成深度分析报告
                 # 第2列: 股票名
                 tk.Label(row, text=item["name"], bg=row_bg, fg="white",
                          font=("", 10, "bold"), width=12, anchor="w").pack(side=tk.LEFT, padx=2)
+
+                # 🆕 🌐 8 个网站小图标 (横排, 点击各自打开对应网站)
+                try:
+                    import ui.stock_web_open as _wmod
+                    _prefix6, _code6 = _wmod._code_to_prefix(item.get("code",""))
+                    _name6 = item.get("name","")
+                    _web_f = tk.Frame(row, bg=row_bg)
+                    _web_f._skip_row_click = True  # 🆕 标记, 跳过行的单击 handler
+                    _web_f.pack(side=tk.LEFT, padx=2)
+                    for _s in _wmod.SITES:
+                        def _open_one(_evt=None, _s2=_s, _pf=_prefix6, _cd=_code6, _nm=_name6):
+                            import webbrowser, urllib.parse as _up
+                            if _s2["fmt_code"]: url = _s2["fmt_code"].format(prefix=_pf, code=_cd)
+                            elif _s2["fmt_name"] and _nm: url = _s2["fmt_name"].format(name=_up.quote(_nm))
+                            else: return "break"
+                            try: webbrowser.open(url, new=2)
+                            except Exception as _e: print(f"[web❌] {_s2['name']}: {_e}")
+                            return "break"
+                        _lbl = tk.Label(_web_f, text=_s["icon"], bg=row_bg, fg="#888",
+                                        font=("", 12), cursor="hand2", padx=1)
+                        _lbl._skip_row_click = True
+                        _lbl.pack(side=tk.LEFT)
+                        _lbl.bind("<Button-1>", _open_one)
+                        def _hi(e, _l=_lbl, _bg=row_bg): _l.config(bg="#37474F", fg="#FFD54F")
+                        def _lo(e, _l=_lbl, _bg=row_bg): _l.config(bg=_bg, fg="#888")
+                        _lbl.bind("<Enter>", _hi); _lbl.bind("<Leave>", _lo)
+                except Exception as _e_web:
+                    print(f"[web图标❌] {_e_web}")
+
                 # 第3列: 涨跌幅
                 tk.Label(row, text=f"{pct:+.2f}%", bg=row_bg, fg=pct_color,
                          font=("", 10, "bold"), width=8, anchor="w").pack(side=tk.LEFT, padx=2)
@@ -18281,11 +18347,13 @@ AI 将基于实时市场数据生成深度分析报告
                         _btn_k.pack(side=tk.RIGHT, padx=2, pady=(0,0))
                         _btn_k.bind("<Button-1>", lambda e, _c=item.get("code",""), _n=item.get("name",""), _m=_ms:
                                     self._show_kelly_detail(_c, _n, _m))
-                cur_row += 1
                 row._stamp = item
-                row._last_click = {"time": 0}  # 🆕 必须初始化, 否则第一次点击就 AttributeError
+                row._last_click = {"time": 0}
+
                 row.bind("<Button-1>", lambda e, it=item, stamp=row, src=source: self._stamp_on_click(e, stamp, it))
                 for c in row.winfo_children():
+                    # 🆕 跳过 web 图标 frame 及其子 Label (有独立 handler)
+                    if getattr(c, "_skip_row_click", False): continue
                     c.bind("<Button-1>", lambda e, it=item, stamp=row, src=source: self._stamp_on_click(e, stamp, it))
                     c.bind("<Motion>", lambda e, it=item, src=source: self._show_stamp_hover(e, src, it))
                     c.bind("<Leave>", lambda e, src=source: self._hide_stamp_hover(src))

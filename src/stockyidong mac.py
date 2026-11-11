@@ -3886,6 +3886,9 @@ class StockKeywordAnalyzerGUI:
         self.sentiment_index_ma1_above_var.trace_add("write", lambda *args: self._update_sentiment_index_check_coord())
         # 同花顺情绪指数提醒弹窗引用:最多同时并存 2 个,超出则停止弹出,待用户清除后再恢复
         self._ths_reminder_windows = []
+        self._ths_reminder_after_id = None   # 定时器 id,防止重复调度
+        self._ths_reminder_max = 2           # 同时最多保留的弹窗数
+        self._ths_reminder_cooldown = False  # 达到上限后进入冷却,等用户清除后恢复
         # 创建菜单栏
         self.menubar = tk.Menu(self.root)
         # 添加设置菜单
@@ -9383,12 +9386,11 @@ class StockKeywordAnalyzerGUI:
         self.wordcloud_stocks_data = []  # 保存词云中的股票数据(股票名称、逻辑、时间、来源)
         # 更新text_input指向当前活动标签页
         self.update_text_input_reference()
-        # 同花顺情绪指数弹窗: 已禁用自动弹出 — 用户明确反馈"不需要启动就弹"
-        # 如需手动设置, 点工具栏"情绪"按钮或大盘分析 Tab 手动查看
-        # try:
-        #     self.root.after(15000, self._th_reminder_tick)  # 延后 15s
-        # except Exception:
-        #     pass
+        # 同花顺情绪指数弹窗:启动约 15 秒后弹一次,之后每 30 分钟再提醒(配额限制最多并存 2 个)
+        try:
+            self.root.after(15000, self._th_reminder_tick)
+        except Exception:
+            pass
     def _popup_font_family(self):
         import tkinter.font as tkfont
         try:
@@ -9600,19 +9602,36 @@ class StockKeywordAnalyzerGUI:
         self._apply_ths_sentiment_trend_to_checkboxes(trend)
     def _th_reminder_tick(self):
         """每半小时弹出一次:请选择同花顺情绪指数方向。最多同时保留 2 个,超出则停止弹出。"""
+        self._ths_reminder_after_id = None  # 重置标记,允许下一轮调度
+        should_reschedule = True
         try:
             # 清理已被关闭的弹窗引用,避免列表无限增长
             self._ths_reminder_windows = [w for w in self._ths_reminder_windows if w.winfo_exists()]
-            # 已堆叠 2 个未清除时,本轮停止弹出,待用户清除后下个周期再恢复
-            if len(self._ths_reminder_windows) < 2 and self.root.winfo_exists():
-                self._show_ths_sentiment_reminder_dialog()
+            # 配额检查:已堆叠 max 个未清除时,本轮停止弹出,待用户清除后下个周期再恢复
+            if len(self._ths_reminder_windows) >= self._ths_reminder_max:
+                self._ths_reminder_cooldown = True
+            else:
+                self._ths_reminder_cooldown = False
+                if self.root.winfo_exists():
+                    self._show_ths_sentiment_reminder_dialog()
         except Exception:
             pass
-        try:
-            self.root.after(30 * 60 * 1000, self._th_reminder_tick)
-        except Exception:
-            pass
+        # 确保定时器被正确追踪,避免重复调度
+        if should_reschedule:
+            try:
+                if self.root.winfo_exists():
+                    # 若仍有未关闭弹窗且已达上限,提前 5 分钟再检查一次(给用户清除后恢复的机会)
+                    interval = 5 * 60 * 1000 if self._ths_reminder_cooldown else 30 * 60 * 1000
+                    self._ths_reminder_after_id = self.root.after(interval, self._th_reminder_tick)
+            except Exception:
+                pass
     def _show_ths_sentiment_reminder_dialog(self):
+        """创建情绪指数提醒弹窗。入口再次检查配额,防止并发调用突破上限。"""
+        # 双重配额检查 —— 即使 tick 层的检查因为并发跳过了,这里也能拦截
+        self._ths_reminder_windows = [w for w in self._ths_reminder_windows if w.winfo_exists()]
+        if len(self._ths_reminder_windows) >= self._ths_reminder_max:
+            self._ths_reminder_cooldown = True
+            return  # 静默放弃,不弹出
         top = self._toplevel(self.root)
         top.title("同花顺情绪指数")
         try:
@@ -9621,15 +9640,20 @@ class StockKeywordAnalyzerGUI:
         except Exception:
             pass
         # 登记到提醒弹窗列表,关闭时(确定/稍后/×)移除引用以释放配额
+        _destroyed_holder = {"done": False}
         try:
             self._ths_reminder_windows.append(top)
-            def _on_destroy(event, ref=top):
-                if event.widget is not ref:
+            def _on_destroy(event, ref=top, holder=_destroyed_holder):
+                if event.widget is not ref or holder["done"]:
                     return
+                holder["done"] = True
                 try:
                     self._ths_reminder_windows.remove(ref)
                 except ValueError:
                     pass
+                # 弹窗清零后退出冷却状态,下个 tick 正常按 30 分钟间隔弹出
+                if len(self._ths_reminder_windows) == 0:
+                    self._ths_reminder_cooldown = False
             top.bind("<Destroy>", _on_destroy)
         except Exception:
             pass

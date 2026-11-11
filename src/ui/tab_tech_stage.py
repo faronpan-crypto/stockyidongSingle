@@ -185,6 +185,15 @@ def analyze_trading_stage(df: pd.DataFrame, fund_df=None, top_n=20):
     ret20 = (c20.iloc[-1] / c20.iloc[0] - 1) * 100 if c20.iloc[0] > 0 else 0
     ret60 = (c60.iloc[-1] / c60.iloc[0] - 1) * 100 if c60.iloc[0] > 0 else 0
 
+    # ── 当日/5日/10日 涨跌幅 ──
+    def _ret(n):
+        if len(close) > n and close.iloc[-n - 1] > 0:
+            return (close.iloc[-1] / close.iloc[-n - 1] - 1) * 100
+        return float("nan")
+    ret1 = _ret(1)   # 当日 vs 昨收
+    ret5 = _ret(5)   # 近5日
+    ret10 = _ret(10)  # 近10日
+
     # 用线性回归斜率标准化
     x = np.arange(len(c20))
     slope20 = np.polyfit(x, c20.values, 1)[0]
@@ -450,6 +459,9 @@ def analyze_trading_stage(df: pd.DataFrame, fund_df=None, top_n=20):
         "tag_color": tag_color,
         "signals": signals,
         "pos_range_pct": round(pos_range, 1),
+        "ret1_pct": round(ret1, 2) if not (ret1 != ret1) else None,
+        "ret5_pct": round(ret5, 2) if not (ret5 != ret5) else None,
+        "ret10_pct": round(ret10, 2) if not (ret10 != ret10) else None,
         "ret20_pct": round(ret20, 1),
         "ret60_pct": round(ret60, 1),
         "rsi": round(rsi_l, 1),
@@ -967,7 +979,7 @@ class TechStageMixin:
                 del self._ts_cards[code]
 
             cols = max(3, min(5, (self._ts_canvas.winfo_width() or 1000) // 240))
-            cell_w, cell_h = 220, 180
+            cell_w, cell_h = 220, 210
 
             # 找到空位
             existing = list(self._ts_cards.values())
@@ -1018,9 +1030,49 @@ class TechStageMixin:
                 tk.Label(card, text=f"¥{d.get('close','?')}  MA5={d.get('ma5','?')}  MA20={d.get('ma20','?')}",
                          bg=bg, font=("", 9), fg="#333",
                          anchor="w").pack(anchor="w", padx=8)
-                tk.Label(card, text=f"📅 近20日={a.get('ret20_pct','?')}%  近60日={a.get('ret60_pct','?')}%  📍{a.get('pos_range_pct','?')}%",
-                         bg=bg, font=("", 9), fg="#333",
-                         anchor="w").pack(anchor="w", padx=8)
+
+                # 📊 涨跌幅行 —— 红涨绿跌
+                def _pct_color(val):
+                    """涨跌幅颜色: 红涨绿跌"""
+                    try:
+                        v = float(val)
+                        if v > 0: return "#DC2626"   # 红
+                        if v < 0: return "#16A34A"   # 绿
+                        return "#666666"
+                    except Exception:
+                        return "#666666"
+
+                def _fmt(val, n=2):
+                    if val is None: return "--"
+                    try:
+                        return f"{float(val):+.{n}f}%"
+                    except Exception:
+                        return "--"
+
+                # 第一行: 当日 + 5日
+                r1, r5 = a.get("ret1_pct"), a.get("ret5_pct")
+                row_r1 = tk.Frame(card, bg=bg)
+                row_r1.pack(anchor="w", padx=8)
+                tk.Label(row_r1, text="当日:", bg=bg, font=("", 9), fg="#333").pack(side=tk.LEFT)
+                tk.Label(row_r1, text=_fmt(r1), bg=bg, font=("", 9, "bold"),
+                         fg=_pct_color(r1)).pack(side=tk.LEFT, padx=(0, 10))
+                tk.Label(row_r1, text="5日:", bg=bg, font=("", 9), fg="#333").pack(side=tk.LEFT)
+                tk.Label(row_r1, text=_fmt(r5), bg=bg, font=("", 9, "bold"),
+                         fg=_pct_color(r5)).pack(side=tk.LEFT)
+
+                # 第二行: 10日 + 20日 + 60日 + 位置
+                r10, r20, r60 = a.get("ret10_pct"), a.get("ret20_pct"), a.get("ret60_pct")
+                row_r2 = tk.Frame(card, bg=bg)
+                row_r2.pack(anchor="w", padx=8)
+                tk.Label(row_r2, text="10日:", bg=bg, font=("", 9), fg="#333").pack(side=tk.LEFT)
+                tk.Label(row_r2, text=_fmt(r10), bg=bg, font=("", 9, "bold"),
+                         fg=_pct_color(r10)).pack(side=tk.LEFT, padx=(0, 10))
+                tk.Label(row_r2, text="20日:", bg=bg, font=("", 9), fg="#333").pack(side=tk.LEFT)
+                tk.Label(row_r2, text=_fmt(r20, 1), bg=bg, font=("", 9, "bold"),
+                         fg=_pct_color(r20)).pack(side=tk.LEFT, padx=(0, 10))
+                tk.Label(row_r2, text="📍", bg=bg, font=("", 9), fg="#333").pack(side=tk.LEFT)
+                tk.Label(row_r2, text=f"{a.get('pos_range_pct','?')}%",
+                         bg=bg, font=("", 9), fg="#333").pack(side=tk.LEFT)
             else:
                 tk.Label(card, text=f"❌ {err or '分析失败'}", bg=bg, font=("", 9),
                          fg="#991B1B", anchor="w").pack(anchor="w", padx=8, pady=(6, 0))

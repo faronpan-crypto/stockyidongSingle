@@ -440,10 +440,11 @@ from ui.tab_tushare import TushareMixin
 from ui.tab_full_link import FullLinkMixin
 from ui.tab_akshare import AKShareMixin
 from ui.tab_tech_stage import TechStageMixin
+from ui.tab_holding_check import HoldingCheckMixin
 from ui.tab_financial_check import FinancialCheckMixin
 import ui.stock_web_open as _web_open
 
-class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ChoiceMixin, ChouMaMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, EventCalendarMixin, ExportMixin, FileIoMixin, FinanceMixin, FinancialCheckMixin, FullLinkMixin, FormatMixin, GettersMixin, HoldingsMixin, HotMixin, IfindMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, TechStageMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, TushareMixin, WarningMixin, WebMixin, WencaiMixin, YingmiMixin, ZhihuMixin, WordcloudMixin, BetaAlphaMixin):
+class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ChoiceMixin, ChouMaMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, EventCalendarMixin, ExportMixin, FileIoMixin, FinanceMixin, FinancialCheckMixin, FullLinkMixin, FormatMixin, GettersMixin, HoldingCheckMixin, HoldingsMixin, HotMixin, IfindMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, TechStageMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, TushareMixin, WarningMixin, WebMixin, WencaiMixin, YingmiMixin, ZhihuMixin, WordcloudMixin, BetaAlphaMixin):
     # ═══════ 🌐 股票多站打开 (单击股票同时在多站打开) ═══════
     def _open_web_settings(self):
         _web_open.show_settings_dialog(self)
@@ -4843,6 +4844,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 ("🎯机会", 7, self._show_jianlou),
                 ("🎯高抛低吸", 8, self._show_high_low_swing),
                 ("📊操盘阶段", 9, self._show_tech_stage_dialog),
+                ("💼持仓检测", 9, self._hc_open_dialog),
                 ("🌐多站设置", 9, self._open_web_settings),
                 ("🧊冰点修复", 9, self._show_emotion_freeze),
                 ("🪙筹码", 7, self._show_chouma),
