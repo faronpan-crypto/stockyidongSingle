@@ -1346,22 +1346,59 @@ def _render_mainline_cards(win, mainlines, agg, raw):
             tk.Label(_key, text=f"  |  涨停:{_zd}  封板{_fbl:.0f}%",
                      bg="#263238", fg="#FFB74D", font=("", 10, "bold")).pack(side=tk.LEFT)
 
-            # Top 龙头 (涨幅榜前 3)
+            # Top 龙头 (涨幅榜前 3) + 8 个网站 emoji
             if top_stocks:
+                try:
+                    from ui.tab_builders import SITE_LINKS, open_stock_web
+                except Exception:
+                    SITE_LINKS, open_stock_web = [], None
                 tk.Label(_card, text="─ 🔥 涨幅榜 TOP ─",
                          bg="#263238", fg="#90A4AE", font=("", 8)).pack(anchor="w", pady=(4, 0))
                 for ti, stk in enumerate(top_stocks[:3]):
                     _pct = stk["change_pct"]
-                    _short = stk["name"][:6] if stk["name"] else stk["code"]
+                    _code = stk["code"]
+                    _nm = stk.get("name", "") or ""
+                    _short = _nm[:6] if _nm else _code
                     _color = "#FF5252" if _pct >= 9.5 else ("#FF8A80" if _pct >= 5 else "#CFD8DC")
                     _arrow = "🟥" if _pct >= 5 else ""
                     _line = tk.Frame(_card, bg="#263238")
                     _line.pack(fill=tk.X)
-                    tk.Label(_line, text=f"  {ti + 1}. {_short}", bg="#263238", fg="#ECEFF1",
-                             font=("", 9)).pack(side=tk.LEFT)
+
+                    # 序号
+                    tk.Label(_line, text=f"  {ti + 1}.", bg="#263238", fg="#90A4AE",
+                             font=("", 8)).pack(side=tk.LEFT)
+
+                    # 股票名 (双击→K线)
+                    _name_lbl = tk.Label(_line, text=_short, bg="#263238", fg="#FFFFFF",
+                                         font=("", 9, "bold"), cursor="hand2")
+                    _name_lbl.pack(side=tk.LEFT)
+                    def _dbl_kline(e, c=_code, n=_nm):
+                        try:
+                            from ui.high_low_swing import _quick_open_daily_kline
+                            _quick_open_daily_kline(win, str(c), str(n))
+                        except Exception:
+                            pass
+                        return "break"  # 阻止冒泡到卡片 click
+                    _name_lbl.bind("<Double-Button-1>", _dbl_kline)
+                    _name_lbl.bind("<Button-1>", lambda e: "break")  # 单击也拦截
+
+                    # 涨幅
                     tk.Label(_line, text=f" {_arrow} {_pct:+.2f}%",
                              bg="#263238", fg=_color,
-                             font=("", 9, "bold")).pack(side=tk.RIGHT)
+                             font=("", 9, "bold")).pack(side=tk.LEFT, padx=(2, 2))
+
+                    # 🆕 8 个网站 emoji 链接
+                    if SITE_LINKS and open_stock_web:
+                        for si, (_emoji, _label, _tmpl) in enumerate(SITE_LINKS):
+                            _elbl = tk.Label(_line, text=_emoji, bg="#263238", fg="#B0BEC5",
+                                             font=("", 9), cursor="hand2")
+                            _elbl.pack(side=tk.LEFT)
+                            def _open(e, c=_code, n=_nm, i=si):
+                                open_stock_web(c, n, i)
+                                return "break"
+                            _elbl.bind("<Button-1>", _open)
+                            _elbl.bind("<Enter>", lambda e, lab=_label: _elbl.configure(fg="#FFD54F"))
+                            _elbl.bind("<Leave>", lambda e: _elbl.configure(fg="#B0BEC5"))
 
         # 点击事件 — 打开主线资金详情
         _card.bind("<Button-1>", lambda e: _open_mainline_detail(win))
@@ -1415,13 +1452,31 @@ def _open_mainline_from_card(win):
 
 
 def _refresh_all_blocks(win):
-    """🔥 刷新主线看板 — 优先用 Tushare 主线识别, 降级用旧逻辑"""
+    """🔥 刷新主线看板 — 优先复用板块画布缓存, 没有才自己扫描"""
+    import time as _time
     matched_any = False
 
-    # 🎯 ① 优先: 复用 tab_builders.py 的主线识别 (完整数据链路)
+    root = getattr(win, '_app', None) or win.winfo_toplevel()
+    # 🎯 ① 优先: 复用板块画布 (🔥主线·资金) 扫描后的缓存
     try:
-        # ✅ 修复: win._app 才是主程序 (win 是 Toplevel 弹窗)
-        root = getattr(win, '_app', None) or win.winfo_toplevel()
+        _cache = getattr(root, "_mainline_cache", None)
+        if _cache and isinstance(_cache, dict):
+            _age = _time.time() - _cache.get("ts", 0)
+            if _age < 600 and _cache.get("mainlines"):  # 10 分钟有效
+                print(f"[👁️看盘] 🎯 命中主线缓存 (age={_age:.0f}s): {[m[0] for m in _cache['mainlines']]}")
+                win._block_mode_lbl.config(text=f"📦 复用缓存 ({_age:.0f}s前)", fg="#66BB6A")
+                win.update_idletasks()
+                _render_mainline_cards(win, _cache["mainlines"], _cache["agg"], _cache["raw"])
+                matched_any = True
+                return
+            elif _cache:
+                print(f"[👁️看盘] 缓存过期 ({_age:.0f}s), 重新扫描...")
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        print(f"[👁️看盘] 读缓存失败: {e}")
+
+    # 🎯 ② 次选: 自己走 Tushare 主线识别链路 (和板块画布独立扫描)
+    try:
         _fetch = getattr(root, "_fetch_industry_capital_data", None)
         _identify = getattr(root, "_identify_mainline", None)
         if _fetch and _identify:
@@ -1433,10 +1488,18 @@ def _refresh_all_blocks(win):
             mainlines = _identify(agg, top_n=3)
 
             if mainlines:
+                # 🆕 扫描完也存缓存, 方便板块画布下次用
+                try:
+                    root._mainline_cache = {
+                        "agg": agg, "raw": raw, "mainlines": mainlines,
+                        "td": td, "ts": _time.time(),
+                    }
+                except Exception:
+                    pass
                 _render_mainline_cards(win, mainlines, agg, raw)
                 print(f"[👁️看盘] ✅ 主线识别成功: {[m[0] for m in mainlines]}")
                 matched_any = True
-                return  # 成功就不走后面的兜底了
+                return
     except Exception as e:
         import traceback; traceback.print_exc()
         print(f"[👁️看盘] Tushare 主线识别失败 (降级): {e}")
@@ -4443,13 +4506,18 @@ def _build_7layer_analysis(ctx):
     layers = {"① 数据层": l1, "② 特征层": l2, "③ 信号层": l3,
               "④ 决策层": l4, "⑤ 风控层": l5, "⑥ 执行层": l6, "⑦ 复盘层": l7}
 
+    if pct >= 0:
+        _pct_label = f"均涨 +{pct:.2f}%"
+    else:
+        _pct_label = f"均跌 {pct:.2f}%"
+
     if light.startswith("🔴"):
-        conclusion = f"🔴 今日红灯 — 空仓观望, 不抄底\n 上涨仅 {up}/{down+up}, 均跌 {pct:.2f}%\n周期 P4 退潮, 双重看空"
+        conclusion = f"🔴 今日红灯 — 空仓观望, 不抄底\n 上涨仅 {up}/{down+up}, {_pct_label}\n周期 P4 退潮, 双重看空"
     elif light.startswith("🟡"):
-        conclusion = f"🟡 今日黄灯 — 轻仓试探\n涨 {up}/{down}, 均跌 {pct:.2f}%\n可 α 15% 试 {blocks[0][0] if blocks else ''} 龙头"
+        conclusion = f"🟡 今日黄灯 — 轻仓试探\n涨 {up}/{down}, {_pct_label}\n可 α 15% 试 {blocks[0][0] if blocks else ''} 龙头"
     else:
         tb = blocks[0][0] if blocks else ""
-        conclusion = f"🟢 今日绿灯 — 进攻 {tb} 主线\n涨 {up}/{down}, 均涨 +{pct:.2f}%\nα 30-40% 分 3 笔建仓"
+        conclusion = f"🟢 今日绿灯 — 进攻 {tb} 主线\n涨 {up}/{down}, {_pct_label}\nα 30-40% 分 3 笔建仓"
 
     return layers, conclusion
 

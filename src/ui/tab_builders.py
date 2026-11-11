@@ -31,8 +31,34 @@ import time
 import threading
 import traceback
 import hashlib
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote as _url_encode
 import sqlite3
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🌐 8 个主流股票网站链接 (模块级公共, 多处复用)
+# ═══════════════════════════════════════════════════════════════════════════
+SITE_LINKS = [
+    ("📈", "东方财富", "https://quote.eastmoney.com/{code}.html"),
+    ("📊", "同花顺", "http://stockpage.10jqka.com.cn/{code}/"),
+    ("🎯", "雪球",    "https://xueqiu.com/S/{prefix}{code}"),
+    ("📰", "新浪",    "https://finance.sina.com.cn/realstock/company/{prefix}{code}/nc.shtml"),
+    ("💹", "东财股吧", "https://guba.eastmoney.com/list,{code}.html"),
+    ("🔍", "百度",    "https://www.baidu.com/s?wd={name}+%E8%82%A1%E7%A5%A8"),
+    ("📱", "知乎",    "https://www.zhihu.com/search?q={name}+%E8%82%A1%E7%A5%A8"),
+    ("🌐", "谷歌",    "https://www.google.com/search?q={name}+stock"),
+]
+
+def open_stock_web(code6, name, site_idx):
+    """打开指定网站查询该股票 (公共函数, 任何模块都能调用)"""
+    import webbrowser
+    try:
+        _emoji, _label, _tmpl = SITE_LINKS[site_idx]
+        _prefix = "sh" if str(code6).startswith("6") else "sz"
+        _name_raw = str(name or "")
+        _url = _tmpl.format(code=code6, prefix=_prefix, name=_url_encode(_name_raw))
+        webbrowser.open(_url)
+    except Exception as _e:
+        import traceback; traceback.print_exc()
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 📖 增强版帮助弹窗工厂函数 —— 支持字号/背景色实时调节 + 主题切换
@@ -8084,30 +8110,7 @@ except Exception as e:
             except Exception as _e:
                 import traceback; traceback.print_exc()
 
-        # 🆕 8 个主流股票网站链接 (Emoji + URL 模板)
-        _SITE_LINKS = [
-            ("📈", "东方财富", "https://quote.eastmoney.com/{code}.html"),
-            ("📊", "同花顺", "http://stockpage.10jqka.com.cn/{code}/"),
-            ("🎯", "雪球",    "https://xueqiu.com/S/{prefix}{code}"),
-            ("📰", "新浪",    "https://finance.sina.com.cn/realstock/company/{prefix}{code}/nc.shtml"),
-            ("💹", "东财股吧", "https://guba.eastmoney.com/list,{code}.html"),
-            ("🔍", "百度",    "https://www.baidu.com/s?wd={name}+股票"),
-            ("📱", "知乎",    "https://www.zhihu.com/search?q={name}+股票"),
-            ("🌐", "谷歌",    "https://www.google.com/search?q={name}+stock"),
-        ]
-
-        def _open_stock_web(code6, name, site_idx):
-            """打开指定网站查询该股票"""
-            import webbrowser
-            try:
-                _emoji, _label, _tmpl = _SITE_LINKS[site_idx]
-                # 判断沪/深前缀 (6 开头=sh, 0/3 开头=sz)
-                _prefix = "sh" if str(code6).startswith("6") else "sz"
-                _url = _tmpl.format(code=code6, prefix=_prefix, name=str(name or ""))
-                webbrowser.open(_url)
-            except Exception as _e:
-                import traceback; traceback.print_exc()
-
+        # 🆕 用模块级公共函数: open_stock_web, SITE_LINKS
         def _insert_stock_row(text_widget, li, ld, rank, list_type, _all_leaders_ref):
             """🆕 统一渲染一只股票的一行: 序号 + 股票名 + 数据 + 8个网站链接"""
             pct = ld["change_pct"]
@@ -8128,13 +8131,13 @@ except Exception as e:
             _pct_color = "hl" if pct >= 9.5 else ("up" if pct >= 5 else "")
             text_widget.insert(tk.END, f"  {pct:+.2f}%  价{ld['price']:.2f}  换手{ld['turnover_rate']:.1f}%", _pct_color)
 
-            # 🆕 8 个网站链接 emoji (每个一个独立 tag, 点击打开)
-            for si, (_emoji, _label, _tmpl) in enumerate(_SITE_LINKS):
+            # 🆕 8 个网站链接 emoji (每个一个独立 tag, 点击打开) — 用模块级公共函数
+            for si, (_emoji, _label, _tmpl) in enumerate(SITE_LINKS):
                 _site_tag = f"site_{list_type}_{rank}_{li}_{si}"
                 text_widget.insert(tk.END, f" {_emoji}", _site_tag)
                 text_widget.tag_config(_site_tag, font=("", 10))
                 text_widget.tag_bind(_site_tag, "<Button-1>",
-                                     lambda e, c=_code, n=_nm, i=si: _open_stock_web(c, n, i))
+                                     lambda e, c=_code, n=_nm, i=si: open_stock_web(c, n, i))
                 text_widget.tag_bind(_site_tag, "<Enter>",
                                      lambda e, lab=_label: text_widget.configure(cursor="hand2"))
                 text_widget.tag_bind(_site_tag, "<Leave>",
@@ -8155,6 +8158,17 @@ except Exception as e:
                 agg = agg.copy(); agg["阶段"] = "震荡整理"; agg["阶段分"] = 0
                 for _, row in agg.head(20).iterrows():
                     agg.loc[agg["industry"] == row["industry"], "阶段"] = self._simple_stage_from_cross_section(row)
+
+                # 🆕 存缓存 — 让游资看盘界面主线看板直接复用, 不再重复扫描
+                import time as _time
+                try:
+                    self._mainline_cache = {
+                        "agg": agg, "raw": raw, "mainlines": mainlines,
+                        "td": td, "ts": _time.time(),
+                    }
+                    print(f"[🔥主线] ✅ 扫描完成, 已缓存 agg={len(agg)} raw={len(raw)} mainlines={[m[0] for m in mainlines]}")
+                except Exception as _e:
+                    print(f"[🔥主线] 缓存失败 (不影响渲染): {_e}")
 
                 _set_prog(55, "渲染资金总览...")
                 self.root.after(0, lambda: _render_overview(agg, mainlines))
@@ -8208,9 +8222,9 @@ except Exception as e:
         def _render_mainline(raw, agg, mainlines, td):
             ml_txt.delete("1.0", tk.END)
             for _t in ml_txt.tag_names():
-                if _t.startswith("stock_"): ml_txt.tag_unbind(_t, "<Double-Button-1>")
-
-            # tag 样式
+                if _t.startswith("stock_") or _t.startswith("site_"):
+                    ml_txt.tag_unbind(_t, "<Double-Button-1>")
+                    ml_txt.tag_unbind(_t, "<Button-1>")
             ml_txt.tag_config("title", font=("", 12, "bold"), foreground="#B71C1C")
             ml_txt.tag_config("title2", font=("", 11, "bold"), foreground="#1565C0")
             ml_txt.tag_config("stat", font=("", 10, "bold"), foreground="#2E7D32")
@@ -8256,7 +8270,6 @@ except Exception as e:
                     ("blank",),
                     ("h1", "═══ 涨幅 ≥ 5% 个股列表 (双击→K线) ═══"),
                 ]
-                # >5% 全部股票
                 hot_stocks = raw[(raw["industry"] == _sector) & (raw["pct_chg"] >= 5)].sort_values("pct_chg", ascending=False)
                 for _, r in hot_stocks.iterrows():
                     _tsc = str(r["ts_code"])
@@ -8274,14 +8287,12 @@ except Exception as e:
                 ml_txt.insert(tk.END, "═" * 55 + "\n\n")
 
                 for rank, (name, score, reason) in enumerate(mainlines, 1):
-                    # 找 agg 里的统计行
                     agg_row = agg[agg["industry"] == name]
                     stat = agg_row.iloc[0] if len(agg_row) > 0 else None
 
                     ml_txt.insert(tk.END, f"🔥 主线 #{rank}: {name}\n", "title")
                     ml_txt.insert(tk.END, f"   综合分 {score:.1f}/100  |  {reason}\n", "stat_row")
 
-                    # 🆕 统计卡片
                     if stat is not None:
                         _cnt = int(stat.get("成分股数", 0))
                         _zd = int(stat.get("涨停数", 0))
@@ -8297,52 +8308,42 @@ except Exception as e:
                         _avg_turn = float(stat.get("平均换手率", 0))
 
                         ml_txt.insert(tk.END, "   ── 📊 板块统计 ", "stat")
-                        # ❓ 按钮 (点这里弹详情)
                         _help_tag = f"help_{rank}"
                         ml_txt.insert(tk.END, "[❓点查看详细分布] ", _help_tag)
                         ml_txt.insert(tk.END, "──\n", "stat")
                         ml_txt.tag_config(_help_tag, foreground="#1565C0", font=("", 10, "bold", "underline"))
                         ml_txt.tag_bind(_help_tag, "<Button-1>", lambda e, s=name: _ml_stats_help(s))
 
-                        _stat_line = (
+                        ml_txt.insert(tk.END, (
                             f"   🎯 {_cnt}只  涨{_up}/跌{_dn}  涨停{_zd}  跌停{_dx}  "
-                            f"平均{_avg_pct:+.2f}%  换手{_avg_turn:.1f}%\n"
-                        )
-                        ml_txt.insert(tk.END, _stat_line, "stat_row")
-                        _stat_line2 = (
+                            f"平均{_avg_pct:+.2f}%  换手{_avg_turn:.1f}%\n"), "stat_row")
+                        ml_txt.insert(tk.END, (
                             f"   🚀 ≥7%:{_up7}只  ≥5%:{_up5}只({_up5p:.1f}%)  "
-                            f"≥3%:{_up3}只  封板率{_fbl:.1f}%\n"
-                        )
-                        ml_txt.insert(tk.END, _stat_line2, "stat_row")
+                            f"≥3%:{_up3}只  封板率{_fbl:.1f}%\n"), "stat_row")
 
-                    # 🆕 多维度选股
                     result = self._get_sector_leaders(raw, name, top_n=5)
                     hot_list = result.get("超涨5全列", [])
 
-                    # 先收集所有龙头给左侧 Listbox
                     for ld in (result.get("涨幅榜", []) + result.get("成交额榜", [])):
                         if (ld["code"], ld.get("name", "")) not in _all_mainline_leaders:
                             _all_mainline_leaders.append((ld["code"], ld.get("name", "")))
 
-                    # ── 涨幅榜 TOP5 ──
                     leaders = result.get("涨幅榜", [])
                     ml_txt.insert(tk.END, "\n   🏆 涨幅榜 TOP5 (双击股票→K线 | 点emoji开网站)\n", "title2")
                     for li, ld in enumerate(leaders, 1):
                         _insert_stock_row(ml_txt, li, ld, rank, "pct", _all_mainline_leaders)
 
-                    # ── >5% 全部罗列 (如果 >5 只，额外提示) ──
                     if len(hot_list) > len(leaders):
                         ml_txt.insert(tk.END, f"\n   🔥 涨幅 ≥ 5% 个股 (共 {len(hot_list)} 只)\n", "title2")
                         for li, ld in enumerate(hot_list, 1):
                             _insert_stock_row(ml_txt, li, ld, rank, "hot", _all_mainline_leaders)
 
-                    # ── 成交额榜 TOP5 ──
                     amt_list = result.get("成交额榜", [])
                     ml_txt.insert(tk.END, "\n   💰 成交额榜 TOP5\n", "title2")
                     for li, ld in enumerate(amt_list, 1):
                         _insert_stock_row(ml_txt, li, ld, rank, "amt", _all_mainline_leaders)
 
-                    ml_txt.insert(tk.END, "\n" + "─" * 50 + "\n\n")
+                    ml_txt.insert(tk.END, "\n" + "─" * 55 + "\n\n")
             except Exception as e:
                 import traceback; traceback.print_exc()
                 ml_txt.insert(tk.END, f"❌ 主线渲染失败: {e}\n")
