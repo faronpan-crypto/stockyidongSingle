@@ -21,17 +21,31 @@ import time
 import traceback
 from datetime import datetime, timedelta
 
+import numpy as np
+import pandas as pd
 import tkinter as tk
 from tkinter import ttk
 
-import numpy as np
-import pandas as pd
-
-# 复用操盘阶段的核心分析函数
+# 顶部 try-import: 让 import 失败能被捕获并上报
 try:
-    from .tab_tech_stage import analyze_trading_stage
+    import akshare as _ak_module
+    _HC_AK_OK = True
+except Exception as _e:
+    _HC_AK_OK = False
+    _HC_AK_ERR = str(_e)
+    print(f"⚠️ [持仓检测] akshare 导入失败: {_e}")
+
+# 导入 analyze_trading_stage
+try:
+    from .tab_tech_stage import analyze_trading_stage as _HC_analyze
+    _HC_ANALYZE_OK = True
 except ImportError:
-    from tab_tech_stage import analyze_trading_stage
+    try:
+        from tab_tech_stage import analyze_trading_stage as _HC_analyze
+        _HC_ANALYZE_OK = True
+    except Exception as _e:
+        _HC_ANALYZE_OK = False
+        print(f"⚠️ [持仓检测] analyze_trading_stage 导入失败: {_e}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -72,10 +86,15 @@ class HoldingCheckMixin:
         for gi in range(7, 15):
             _GROUP_MAP.append((gi, f"标签{gi-6}"))
 
+        def _get_holding_list(gi):
+            """gi=1 叫 holding_stocks (无后缀), 其他叫 holding_stocks_{gi}"""
+            name = "holding_stocks" if gi == 1 else f"holding_stocks_{gi}"
+            return getattr(self, name, [None] * 80)
+
         _selected = {gi: tk.BooleanVar(value=(gi == 1)) for gi, _ in _GROUP_MAP}
         _counts = {}
         for gi, _ in _GROUP_MAP:
-            hs = getattr(self, f"holding_stocks_{gi}", [None] * 80)
+            hs = _get_holding_list(gi)
             _counts[gi] = sum(1 for h in hs if h)
 
         box = tk.Frame(pick, bg="#F0FDF4")
@@ -115,10 +134,16 @@ class HoldingCheckMixin:
 
     def _hc_scan_groups(self, group_indices):
         """从指定 group_indices 取持仓股跑分析"""
+        def _get_holding_list(gi):
+            name = "holding_stocks" if gi == 1 else f"holding_stocks_{gi}"
+            return getattr(self, name, [None] * 80)
+
         pairs = []
         seen = set()
+        debug_counts = {}
         for gi in group_indices:
-            hs = getattr(self, f"holding_stocks_{gi}", [None] * 80)
+            hs = _get_holding_list(gi)
+            _cnt = 0
             for holding in hs:
                 if not holding:
                     continue
@@ -129,6 +154,22 @@ class HoldingCheckMixin:
                     if c not in seen:
                         seen.add(c)
                         pairs.append((str(name or c).strip(), c, gi))
+                        _cnt += 1
+            debug_counts[gi] = _cnt
+
+        # 🎯 调试输出 —— 帮用户排查
+        print(f"\n{'='*60}")
+        print(f"[💼持仓检测] _hc_scan_groups 调试")
+        print(f"  选择组: {group_indices}")
+        for gi, cnt in debug_counts.items():
+            name_attr = "holding_stocks" if gi == 1 else f"holding_stocks_{gi}"
+            print(f"  gi={gi} → getattr({name_attr}) → {cnt} 只")
+        print(f"  最终 pairs: {len(pairs)} 只")
+        for name, c, gi in pairs[:5]:
+            print(f"    [{gi}] {name}({c})")
+        if len(pairs) > 5:
+            print(f"    ... 还有 {len(pairs)-5} 只")
+        print(f"{'='*60}\n")
 
         print(f"💼 [持仓检测] groups={group_indices} → {len(pairs)} 只 (去重后)")
 
@@ -136,9 +177,33 @@ class HoldingCheckMixin:
             tk.messagebox.showinfo("提示", "所选标签页均为空!")
             return
 
-        self._hc_show_dialog()
-        self._hc_status.set(f"📊 已选 {len(group_indices)} 组 → {len(pairs)} 只")
-        self._hc_run_scan(pairs)
+        # 🛡 启动前自检 —— 防止弹窗空白
+        errs = []
+        if not _HC_AK_OK:
+            errs.append(f"akshare 导入失败: {_HC_AK_ERR}")
+        if not _HC_ANALYZE_OK:
+            errs.append("analyze_trading_stage 导入失败")
+        if errs:
+            tk.messagebox.showerror("❌ 依赖缺失",
+                                   "持仓检测无法启动:\n\n" + "\n".join(errs))
+            return
+
+        print(f"\n{'='*60}")
+        print(f"[💼持仓检测] ✅ 自检通过: akshare + analyze_trading_stage 就绪")
+        print(f"{'='*60}\n")
+
+        try:
+            self._hc_show_dialog()
+        except Exception as _e:
+            tk.messagebox.showerror("❌ 弹窗创建失败", traceback.format_exc())
+            return
+
+        try:
+            self._hc_status.set(f"📊 已选 {len(group_indices)} 组 → {len(pairs)} 只")
+            self._hc_run_scan(pairs)
+        except Exception as _e:
+            tk.messagebox.showerror("❌ 扫描启动失败", traceback.format_exc())
+            traceback.print_exc()
 
     # ═══════════════════════════════════════════════════════════
     # 弹窗: 扫描控制 + 卡片网格 + 进度条
@@ -245,95 +310,192 @@ class HoldingCheckMixin:
 
     def _hc_run_scan(self, pairs):
         """后台线程: 逐只跑 AKShare + analyze_trading_stage"""
-        import akshare as ak
+        import akshare as ak  # 局部 import 备用
 
         N = len(pairs)
-        self._hc_kill_flag = False
-        self._hc_kill_btn.configure(state=tk.NORMAL)
-        self._hc_progress.configure(maximum=N, value=0)
+        try:
+            self._hc_kill_flag = False
+            self._hc_kill_btn.configure(state=tk.NORMAL)
+            self._hc_progress.configure(maximum=N, value=0)
+            self._hc_status.set(f"🔄 正在初始化 {N} 只...")
+        except Exception as e:
+            print(f"❌ [持仓检测] 初始化 UI 控件失败: {e}")
 
+        print(f"\n[💼持仓检测] _hc_run_scan 启动, N={N}")
+
+        # worker 线程
         def _worker(q):
+            print(f"[💼持仓检测] 🧵 worker 线程启动! pairs[0]={pairs[0] if pairs else 'EMPTY'}")
+            try:
+                q.put(("log", f"🚀 worker 线程已启动, 准备扫描 {N} 只..."))
+            except Exception:
+                pass
+
             for i, (name, code, gidx) in enumerate(pairs):
-                if self._hc_kill_flag:
-                    q.put(("killed", i, N))
-                    return
-                q.put(("log", f"🔍 [{i+1}/{N}] {name}({code})..."))
-
-                df = fund_df = None
                 try:
-                    df = ak.stock_zh_a_hist(
-                        symbol=code, period="daily",
-                        start_date=(datetime.now() - timedelta(days=400)).strftime("%Y%m%d"),
-                        end_date=datetime.now().strftime("%Y%m%d"),
-                        adjust="qfq"
-                    )
-                except Exception:
-                    pass
-                try:
-                    fund_df = ak.stock_fund_stock_holder(symbol=code)
-                except Exception:
-                    pass
+                    if self._hc_kill_flag:
+                        q.put(("killed", i, N))
+                        print(f"[💼持仓检测] worker 被用户停止 @ {i}")
+                        return
 
-                analyze = None
-                price = 0.0
-                err = None
-                if df is not None and len(df) >= 60:
+                    q.put(("log", f"🔍 [{i+1}/{N}] {name}({code})..."))
+
+                    df = fund_df = None
                     try:
-                        analyze = analyze_trading_stage(df, fund_df)
-                        price = float(df.iloc[-1]["收盘"])
+                        df = _ak_module.stock_zh_a_hist(
+                            symbol=code, period="daily",
+                            start_date=(datetime.now() - timedelta(days=400)).strftime("%Y%m%d"),
+                            end_date=datetime.now().strftime("%Y%m%d"),
+                            adjust="qfq"
+                        )
+                        print(f"[💼持仓检测] [{i+1}/{N}] {name} akshare 返回 {len(df) if df is not None else 0} 行")
                     except Exception as e:
-                        err = f"分析异常: {e}"
-                else:
-                    err = f"K线不足 ({len(df) if df is not None else 0}行)"
+                        print(f"[💼持仓检测] [{i+1}/{N}] {name} akshare 失败: {e}")
+                        traceback.print_exc()
 
-                q.put(("result", {
-                    "name": name, "code": code, "group": gidx,
-                    "price": price, "analyze": analyze, "error": err,
-                    "index": i, "total": N,
-                }))
+                    try:
+                        fund_df = _ak_module.stock_fund_stock_holder(symbol=code)
+                    except Exception:
+                        pass
 
-            q.put(("done", N, N))
+                    analyze = None
+                    price = 0.0
+                    err = None
+                    if df is not None and len(df) >= 60:
+                        try:
+                            analyze = _HC_analyze(df, fund_df)
+                            price = float(df.iloc[-1]["收盘"])
+                            print(f"[💼持仓检测] [{i+1}/{N}] {name} analyze ✅ stage={analyze.get('stage')}")
+                        except Exception as e:
+                            err = f"分析异常: {e}"
+                            print(f"[💼持仓检测] [{i+1}/{N}] {name} analyze ❌: {e}")
+                            traceback.print_exc()
+                    else:
+                        err = f"K线不足 ({len(df) if df is not None else 0}行)"
+                        print(f"[💼持仓检测] [{i+1}/{N}] {name} K线不足: {err}")
 
-        threading.Thread(target=_worker, args=(self._hc_queue,), daemon=True).start()
-        self._hc_poll_queue(self._hc_queue, N)
+                    _df_tail = None
+                    if df is not None and len(df) >= 60:
+                        try:
+                            dft = df.tail(200).reset_index(drop=True)
+                            _df_tail = [
+                                {"date": str(r.get("日期", "")), "open": float(r.get("开盘", 0)),
+                                 "high": float(r.get("最高", 0)), "low": float(r.get("最低", 0)),
+                                 "close": float(r.get("收盘", 0)), "vol": float(r.get("成交量", 0))}
+                                for _, r in dft.iterrows()
+                            ]
+                        except Exception:
+                            _df_tail = None
+
+                    q.put(("result", {
+                        "name": name, "code": code, "group": gidx,
+                        "price": price, "analyze": analyze, "error": err,
+                        "index": i, "total": N, "df_tail": _df_tail,
+                    }))
+
+                except Exception as loop_err:
+                    # 单只股票出问题不影响整体
+                    print(f"[💼持仓检测] [{i+1}/{N}] {name} 循环异常: {loop_err}")
+                    traceback.print_exc()
+                    q.put(("result", {
+                        "name": name, "code": code, "group": gidx,
+                        "price": 0, "analyze": None, "error": str(loop_err),
+                        "index": i, "total": N, "df_tail": None,
+                    }))
+
+            print(f"[💼持仓检测] worker 循环结束, 发送 done 消息")
+            try:
+                q.put(("done", N, N))
+            except Exception:
+                pass
+
+        # 启动线程 —— 这行也包 try-except
+        try:
+            t = threading.Thread(target=_worker, args=(self._hc_queue,), daemon=True)
+            t.start()
+            print(f"[💼持仓检测] ✅ worker 线程已创建 (pid={t.ident})")
+        except Exception as e:
+            print(f"❌ [持仓检测] 线程创建失败: {e}")
+            tk.messagebox.showerror("❌ 线程创建失败", traceback.format_exc())
+            return
+
+        # 立即调 poll_queue —— 也包 try-except
+        try:
+            self._hc_poll_queue(self._hc_queue, N)
+        except Exception as e:
+            print(f"❌ [持仓检测] poll_queue 启动失败: {e}")
+            traceback.print_exc()
 
     def _hc_poll_queue(self, q, N):
-        """主线程轮询 Queue"""
+        """主线程轮询 Queue + 更新进度条"""
         try:
+            # 用 try-while 一次性把 Queue 里所有可用消息都取走
+            got_any = False
             while True:
-                msg = q.get_nowait()
+                try:
+                    msg = q.get_nowait()
+                    got_any = True
+                except _queue.Empty:
+                    break
+
                 kind = msg[0]
 
                 if kind == "log":
-                    self._hc_status.set(msg[1])
+                    try:
+                        self._hc_status.set(msg[1])
+                    except Exception:
+                        pass
 
                 elif kind == "result":
                     r = msg[1]
                     self._hc_all_results[r["code"]] = r
-                    self._hc_render_one_card(r)
-                    self._hc_step_label.configure(text=f"[{r['index']+1}/{N}] 已完成")
+                    done = r["index"] + 1
+                    try:
+                        self._hc_render_one_card(r)
+                        self._hc_progress.configure(value=done)
+                        self._hc_step_label.configure(text=f"[{done}/{N}] 已完成")
+                        self._hc_status.set(f"✅ {r['name']}({r['code']}) — {done}/{N} ({100*done//N}%)")
+                    except Exception as e:
+                        print(f"[💼持仓检测] render/UI 更新失败: {e}")
+                        traceback.print_exc()
+                    print(f"[💼持仓检测] poll result: [{done}/{N}] {r['name']} stage={r.get('analyze',{}).get('stage') if r.get('analyze') else r.get('error')}")
 
                 elif kind == "killed":
-                    step_val, tot = msg[1], msg[2]
-                    self._hc_progress.configure(value=step_val)
-                    self._hc_step_label.configure(text=f"[⏹] 用户停止 {step_val}/{tot}")
-                    self._hc_kill_btn.configure(state=tk.DISABLED)
+                    try:
+                        step_val, tot = msg[1], msg[2]
+                        self._hc_progress.configure(value=step_val)
+                        self._hc_step_label.configure(text=f"[⏹] 用户停止 {step_val}/{tot}")
+                        self._hc_kill_btn.configure(state=tk.DISABLED)
+                    except Exception:
+                        pass
                     return
 
                 elif kind == "done":
-                    self._hc_progress.configure(value=N)
-                    self._hc_step_label.configure(text=f"[100%] 扫描完成 {N}/{N}")
-                    self._hc_status.set(f"✅ 全部完成 — {len(self._hc_all_results)}/{N} 只")
-                    self._hc_kill_btn.configure(state=tk.DISABLED)
+                    try:
+                        self._hc_progress.configure(value=N)
+                        self._hc_step_label.configure(text=f"[100%] 扫描完成 {N}/{N}")
+                        self._hc_status.set(f"✅ 全部完成 — {len(self._hc_all_results)}/{N} 只")
+                        self._hc_kill_btn.configure(state=tk.DISABLED)
+                    except Exception:
+                        pass
+                    print(f"[💼持仓检测] ✅ poll done: {len(self._hc_all_results)}/{N}")
                     return
 
-        except _queue.Empty:
-            pass
-        except Exception as e:
-            print(f"[持仓检测] poll_queue 异常: {e}")
+            # 队列暂时空了 → 80ms 后再 poll
+            if self._hc_dlg and self._hc_dlg.winfo_exists():
+                self._hc_dlg.after(80, lambda: self._hc_poll_queue(q, N))
+            else:
+                print(f"[💼持仓检测] poll_queue 停止 (dlg 已关闭)")
 
-        if self._hc_dlg and self._hc_dlg.winfo_exists():
-            self._hc_dlg.after(80, lambda: self._hc_poll_queue(q, N))
+        except Exception as e:
+            print(f"❌ [持仓检测] poll_queue 异常: {e}")
+            traceback.print_exc()
+            # 即使异常也不放弃, 继续调度
+            try:
+                if self._hc_dlg and self._hc_dlg.winfo_exists():
+                    self._hc_dlg.after(200, lambda: self._hc_poll_queue(q, N))
+            except Exception:
+                pass
 
     # ═══════════════════════════════════════════════════════════
     # 卡片渲染
@@ -356,7 +518,7 @@ class HoldingCheckMixin:
                 del self._hc_cards[code]
 
             cols = max(3, min(5, (self._hc_canvas.winfo_width() or 1000) // 240))
-            cell_w, cell_h = 220, 220
+            cell_w, cell_h = 220, 260
 
             existing = list(self._hc_cards.values())
             idx = len(existing)
@@ -451,6 +613,25 @@ class HoldingCheckMixin:
             else:
                 tk.Label(card, text=f"❌ {err or '分析失败'}", bg=bg, font=("", 9),
                          fg="#991B1B", anchor="w").pack(anchor="w", padx=8, pady=(6, 0))
+
+            # ── 底部操作按钮行 ──
+            btn_bar = tk.Frame(card, bg=bg)
+            btn_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=4)
+            # 🔍一键诊断
+            _b1 = tk.Button(btn_bar, text="🔍诊断", command=lambda _r=r: self._hc_diagnose_dialog(_r),
+                            relief=tk.FLAT, bg="#DBEAFE", fg="#1E40AF",
+                            font=("", 8, "bold"), padx=6, pady=1, cursor="hand2")
+            _b1.pack(side=tk.LEFT, padx=2)
+            # 📈K线
+            _b2 = tk.Button(btn_bar, text="📈K线", command=lambda _r=r: self._hc_open_kline(_r),
+                            relief=tk.FLAT, bg="#DCFCE7", fg="#166534",
+                            font=("", 8, "bold"), padx=6, pady=1, cursor="hand2")
+            _b2.pack(side=tk.LEFT, padx=2)
+            # ↻ 重扫
+            _b3 = tk.Button(btn_bar, text="↻", command=lambda _r=r: self._hc_rescan_one(_r["code"]),
+                            relief=tk.FLAT, bg="#F3F4F6", fg="#6B7280",
+                            font=("", 9), padx=4, pady=1, cursor="hand2")
+            _b3.pack(side=tk.RIGHT, padx=2)
 
             # 绑定事件: 单击详情, 双击 K 线
             click_timer = {"id": None}
@@ -782,3 +963,412 @@ class HoldingCheckMixin:
                 self._hc_dlg.after(0, lambda: self._hc_status.set(f"❌ 重扫失败: {e}"))
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    # ═══════════════════════════════════════════════════════════
+    # 🔍 一键诊断 —— 完整面板 (阶段/均线/信号 + K线图 + 一目均衡)
+    # ═══════════════════════════════════════════════════════════
+
+    def _hc_diagnose_dialog(self, r):
+        """🔍 一键诊断: 左侧详情 + 右侧嵌入式 K 线 + 一目均衡表"""
+        a = r.get("analyze")
+        if not a:
+            tk.messagebox.showwarning("提示", "该股票分析数据不可用")
+            return
+
+        dlg = tk.Toplevel(self._hc_dlg)
+        dlg.title(f"🔍一键诊断 — {r['name']}({r['code']})")
+        dlg.geometry("1180x780")
+        try:
+            dlg.transient(self._hc_dlg)
+            dlg.grab_set()
+        except Exception:
+            pass
+
+        # ═══ 顶部标题栏 ═══
+        header_bg = a.get("tag_color", "#1E40AF")
+        header = tk.Frame(dlg, bg=header_bg, height=56)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        tk.Label(header, text=f"🔍 {r['name']} ({r['code']})",
+                 bg=header_bg, fg="white",
+                 font=("", 16, "bold")).pack(side=tk.LEFT, padx=14, pady=10)
+        tk.Label(header, text=f"🎯 阶段: {a.get('stage','--')}  "
+                              f"得分: {a.get('stage_score','--')}  "
+                              f"💰 ¥{r.get('price','--')}",
+                 bg=header_bg, fg="white",
+                 font=("", 11)).pack(side=tk.LEFT, padx=14)
+
+        # ═══ 主体 PanedWindow 左右分割 ═══
+        pw = ttk.PanedWindow(dlg, orient=tk.HORIZONTAL)
+        pw.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        # ── 左栏: 详情面板 ──
+        left = tk.Frame(pw, bg="#F8FAFC")
+        pw.add(left, weight=1)
+        self._hc_diagnose_left(left, r, a)
+
+        # ── 右栏: K线 + 一目均衡 ──
+        right = tk.Frame(pw, bg="#FFFFFF")
+        pw.add(right, weight=3)
+
+        # 先放一个 Loading 提示, 后台画好再替换
+        loading = tk.Label(right, text="📊 正在加载 K 线图 + 一目均衡表...",
+                           font=("", 11), fg="#666", bg="#FFFFFF")
+        loading.pack(expand=True)
+
+        # 后台线程: 准备 df 并画图
+        df_tail = r.get("df_tail")
+        threading.Thread(
+            target=self._hc_diagnose_draw_chart,
+            args=(right, r, df_tail, loading),
+            daemon=True,
+        ).start()
+
+        # ═══ 底部操作栏 ═══
+        bot = tk.Frame(dlg, bg="#F1F5F9", height=44)
+        bot.pack(fill=tk.X, side=tk.BOTTOM)
+        bot.pack_propagate(False)
+        ttk.Button(bot, text="📈 独立 K 线窗口",
+                   command=lambda: self._hc_open_kline(r)).pack(side=tk.LEFT, padx=10, pady=8)
+        ttk.Button(bot, text="🔄 重扫此股",
+                   command=lambda: self._hc_rescan_one(r["code"])).pack(side=tk.LEFT, padx=10, pady=8)
+        ttk.Button(bot, text="💾 保存本次到 DB",
+                   command=self._hc_save_to_db).pack(side=tk.LEFT, padx=10, pady=8)
+        ttk.Button(bot, text="关闭",
+                   command=dlg.destroy).pack(side=tk.RIGHT, padx=10, pady=8)
+
+    # ── 左栏: 详情 ──
+
+    def _hc_diagnose_left(self, parent, r, a):
+        """左栏: 阶段/均线/信号/涨跌幅汇总"""
+        # 滚动容器
+        outer = tk.Frame(parent, bg="#F8FAFC")
+        outer.pack(fill=tk.BOTH, expand=True)
+        sb = ttk.Scrollbar(outer)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas = tk.Canvas(outer, bg="#F8FAFC", highlightthickness=0,
+                           yscrollcommand=sb.set)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.configure(command=canvas.yview)
+        body = tk.Frame(canvas, bg="#F8FAFC")
+        canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+        def _section(title, color="#1E40AF"):
+            """小工具: 画一个区块标题"""
+            f = tk.Frame(body, bg="#F8FAFC")
+            f.pack(fill=tk.X, padx=8, pady=(8, 2))
+            tk.Label(f, text=f"▌ {title}", bg="#F8FAFC", fg=color,
+                     font=("", 11, "bold")).pack(side=tk.LEFT)
+            tk.Frame(body, bg="#CBD5E1", height=1).pack(fill=tk.X, padx=8)
+            return f
+
+        def _pct_color(val):
+            try:
+                v = float(val)
+                if v > 0: return "#DC2626"
+                if v < 0: return "#16A34A"
+                return "#666666"
+            except Exception:
+                return "#666666"
+
+        def _fmt(val, n=2):
+            if val is None: return "--"
+            try:
+                return f"{float(val):+.{n}f}%"
+            except Exception:
+                return "--"
+
+        bg_body = "#FFFFFF"
+
+        # ① 阶段
+        _section("🎯 操盘阶段", "#DC2626")
+        f1 = tk.Frame(body, bg=bg_body, relief=tk.FLAT)
+        f1.pack(fill=tk.X, padx=8, pady=4)
+        for i, (k, v) in enumerate([
+            ("阶段", a.get("stage", "--")),
+            ("得分", str(a.get("stage_score", "--"))),
+            ("趋势", a.get("trend", "--")),
+        ]):
+            tk.Label(f1, text=f"{k}:", bg=bg_body, fg="#64748B",
+                     font=("", 9)).grid(row=i, column=0, sticky="w", padx=8, pady=2)
+            tk.Label(f1, text=str(v), bg=bg_body, fg="#0F172A",
+                     font=("", 10, "bold")).grid(row=i, column=1, sticky="w", padx=4, pady=2)
+
+        # ② 涨跌幅
+        _section("📊 涨跌幅", "#16A34A")
+        f2 = tk.Frame(body, bg=bg_body)
+        f2.pack(fill=tk.X, padx=8, pady=4)
+        pct_rows = [
+            ("当日", a.get("ret1_pct", None)),
+            ("5日", a.get("ret5_pct", None)),
+            ("10日", a.get("ret10_pct", None)),
+            ("20日", a.get("ret20_pct", None)),
+            ("60日", a.get("ret60_pct", None)),
+        ]
+        for i, (lbl, val) in enumerate(pct_rows):
+            tk.Label(f2, text=f"{lbl}:", bg=bg_body, fg="#64748B",
+                     font=("", 9)).grid(row=i // 2, column=(i % 2) * 2,
+                                        sticky="w", padx=(8, 2), pady=2)
+            tk.Label(f2, text=_fmt(val), bg=bg_body, fg=_pct_color(val),
+                     font=("", 10, "bold")).grid(row=i // 2, column=(i % 2) * 2 + 1,
+                                                sticky="w", padx=(0, 12), pady=2)
+
+        # ③ 均线
+        _section("📈 均线", "#3B82F6")
+        d = a.get("detail", {})
+        f3 = tk.Frame(body, bg=bg_body)
+        f3.pack(fill=tk.X, padx=8, pady=4)
+        ma_labels = [("收盘", "close"), ("MA5", "ma5"), ("MA10", "ma10"),
+                     ("MA20", "ma20"), ("MA60", "ma60"), ("60日高", "high60"),
+                     ("60日低", "low60")]
+        for i, (lbl, key) in enumerate(ma_labels):
+            tk.Label(f3, text=f"{lbl}:", bg=bg_body, fg="#64748B",
+                     font=("", 9)).grid(row=i // 2, column=(i % 2) * 2,
+                                        sticky="w", padx=(8, 2), pady=2)
+            tk.Label(f3, text=str(d.get(key, "--")), bg=bg_body, fg="#0F172A",
+                     font=("", 9, "bold")).grid(row=i // 2, column=(i % 2) * 2 + 1,
+                                                sticky="w", padx=(0, 12), pady=2)
+        ms = a.get("ma_status", {})
+        tk.Label(f3, text=f"排列: {ms.get('排列','--')}", bg=bg_body,
+                 fg="#0F172A", font=("", 9)).grid(row=4, column=0, columnspan=4,
+                                                  sticky="w", padx=8, pady=(4, 2))
+        tk.Label(f3, text=f"📍 60日位置: {a.get('pos_range_pct','--')}%",
+                 bg=bg_body, fg="#0F172A", font=("", 9)).grid(row=5, column=0, columnspan=4,
+                                                              sticky="w", padx=8, pady=(0, 4))
+
+        # ④ 量能
+        _section("📉 量能", "#F59E0B")
+        f4 = tk.Frame(body, bg=bg_body)
+        f4.pack(fill=tk.X, padx=8, pady=4)
+        vs = a.get("volume_status", {})
+        for i, (k, v) in enumerate([
+            ("状态", vs.get("state", "--")),
+            ("量比", str(vs.get("vratio", "--"))),
+            ("位置", str(vs.get("pos", "--"))),
+        ]):
+            tk.Label(f4, text=f"{k}:", bg=bg_body, fg="#64748B",
+                     font=("", 9)).grid(row=i, column=0, sticky="w", padx=8, pady=2)
+            tk.Label(f4, text=str(v), bg=bg_body, fg="#0F172A",
+                     font=("", 10, "bold")).grid(row=i, column=1, sticky="w", padx=4, pady=2)
+
+        # ⑤ 机构/游资
+        _section("🏛 机构 vs 游资", "#1E40AF")
+        f5 = tk.Frame(body, bg=bg_body)
+        f5.pack(fill=tk.X, padx=8, pady=4)
+        inst_type = a.get("institution_vs_hot_money", "--")
+        inst_color = "#1E40AF" if "机构" in inst_type else "#DC2626" if "游资" in inst_type else "#6B7280"
+        tk.Label(f5, text=f"属性: {inst_type}", bg=bg_body, fg=inst_color,
+                 font=("", 10, "bold")).grid(row=0, column=0, columnspan=4,
+                                              sticky="w", padx=8, pady=(2, 4))
+        for i, (lbl, key) in enumerate([
+            ("机构分", "institution_score"),
+            ("游资分", "hot_money_score"),
+        ]):
+            tk.Label(f5, text=f"{lbl}:", bg=bg_body, fg="#64748B",
+                     font=("", 9)).grid(row=1 + i, column=0, sticky="w", padx=8, pady=2)
+            tk.Label(f5, text=str(a.get(key, "--")), bg=bg_body, fg="#0F172A",
+                     font=("", 10, "bold")).grid(row=1 + i, column=1, sticky="w", padx=4, pady=2)
+
+        # ⑥ 关键信号
+        _section("🚦 关键信号", "#EF4444")
+        f6 = tk.Frame(body, bg=bg_body)
+        f6.pack(fill=tk.X, padx=8, pady=4)
+        sigs = a.get("signals", [])
+        if sigs:
+            for i, sig in enumerate(sigs):
+                tk.Label(f6, text=f"• {sig}", bg=bg_body, fg="#374151",
+                         font=("", 9), anchor="w", wraplength=320,
+                         justify=tk.LEFT).pack(anchor="w", padx=8, pady=1)
+        else:
+            tk.Label(f6, text="(暂无)", bg=bg_body, fg="#9CA3AF",
+                     font=("", 9)).pack(anchor="w", padx=8, pady=4)
+
+        # ⑦ K线形态
+        _section("🕯 K线形态", "#8B5CF6")
+        tk.Label(body, text=f"  {a.get('kline_pattern', '--')}",
+                 bg=bg_body, fg="#374151", font=("", 9), wraplength=340,
+                 justify=tk.LEFT).pack(anchor="w", padx=8, pady=(2, 8))
+
+    # ── 右栏: K 线 + 一目均衡 (matplotlib) ──
+
+    def _hc_diagnose_draw_chart(self, parent, r, df_tail, loading_label):
+        """后台: 准备 df → 画 K 线 + MA + 一目均衡表 → FigureCanvasTkAgg"""
+        try:
+            import matplotlib
+            matplotlib.use("TkAgg", force=False)
+            import matplotlib.pyplot as plt
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            from matplotlib.patches import FancyBboxPatch
+            import matplotlib.dates as mdates
+            from datetime import datetime as _dt
+
+            plt.rcParams["font.sans-serif"] = ["Arial Unicode MS", "PingFang SC",
+                                                "Heiti SC", "STHeiti", "SimHei", "DejaVu Sans"]
+            plt.rcParams["axes.unicode_minus"] = False
+
+            # 若无缓存 df_tail, 现场取一次
+            if not df_tail:
+                import akshare as ak
+                code = r["code"]
+                df = ak.stock_zh_a_hist(
+                    symbol=code, period="daily", adjust="qfq",
+                    start_date=(_dt.now() - _dt.timedelta(days=500)).strftime("%Y%m%d"),
+                    end_date=_dt.now().strftime("%Y%m%d"),
+                )
+                dft = df.tail(200).reset_index(drop=True)
+                df_tail = [
+                    {
+                        "date": str(row.get("日期", "")),
+                        "open": float(row.get("开盘", 0)),
+                        "high": float(row.get("最高", 0)),
+                        "low": float(row.get("最低", 0)),
+                        "close": float(row.get("收盘", 0)),
+                        "vol": float(row.get("成交量", 0)),
+                    }
+                    for _, row in dft.iterrows()
+                ]
+
+            # 转 numpy 方便画图
+            closes = np.array([x["close"] for x in df_tail], dtype=float)
+            opens = np.array([x["open"] for x in df_tail], dtype=float)
+            highs = np.array([x["high"] for x in df_tail], dtype=float)
+            lows = np.array([x["low"] for x in df_tail], dtype=float)
+            vols = np.array([x["vol"] for x in df_tail], dtype=float)
+            dates_raw = [x["date"] for x in df_tail]
+            n = len(closes)
+
+            # ── 计算均线 ──
+            def _ma(arr, w):
+                out = np.full_like(arr, np.nan)
+                if len(arr) >= w:
+                    out[w - 1:] = np.convolve(arr, np.ones(w) / w, mode="valid")
+                return out
+
+            ma5 = _ma(closes, 5)
+            ma10 = _ma(closes, 10)
+            ma20 = _ma(closes, 20)
+            ma60 = _ma(closes, 60)
+
+            # ── 一目均衡表 ──
+            def _ichimoku(highs, lows, closes):
+                # 转换线 (9日)
+                tl = 9
+                turn = np.full(n, np.nan)
+                for i in range(tl - 1, n):
+                    turn[i] = (np.max(highs[i - tl + 1:i + 1]) +
+                               np.min(lows[i - tl + 1:i + 1])) / 2
+                # 基准线 (26日)
+                bl = 26
+                base = np.full(n, np.nan)
+                for i in range(bl - 1, n):
+                    base[i] = (np.max(highs[i - bl + 1:i + 1]) +
+                               np.min(lows[i - bl + 1:i + 1])) / 2
+                # 先行带 A/B (各前移 26 天)
+                span_a = np.full(n, np.nan)
+                span_b = np.full(n, np.nan)
+                shift = 26
+                for i in range(n):
+                    if i + shift < n:
+                        if not np.isnan(turn[i]) and not np.isnan(base[i]):
+                            span_a[i + shift] = (turn[i] + base[i]) / 2
+                    if i + shift < n and i >= 51:
+                        span_b[i + shift] = (np.max(highs[i - 51:i + 1]) +
+                                             np.min(lows[i - 51:i + 1])) / 2
+                # 延迟带 (收盘价后移 26)
+                lag = np.full(n, np.nan)
+                for i in range(n - shift):
+                    lag[i + shift] = closes[i]
+                return turn, base, span_a, span_b, lag
+
+            turn, base, span_a, span_b, lag = _ichimoku(highs, lows, closes)
+
+            # ── 画图 ──
+            fig = plt.figure(figsize=(10, 7.5), dpi=100, facecolor="#FFFFFF")
+            ax = fig.add_axes([0.08, 0.18, 0.88, 0.78])
+            ax.set_facecolor("#FAFAFA")
+
+            x = np.arange(n)
+
+            # K 线 (简化: 用竖线 + 小矩形, 红涨绿跌)
+            body_w = 0.6
+            for i in range(n):
+                c, o, h, lo = closes[i], opens[i], highs[i], lows[i]
+                up = c >= o
+                color = "#DC2626" if up else "#16A34A"
+                ax.plot([x[i], x[i]], [lo, h], color=color, lw=0.7, zorder=2)
+                body_lo = min(c, o)
+                body_hi = max(c, o)
+                rect = plt.Rectangle((x[i] - body_w / 2, body_lo), body_w,
+                                     max(body_hi - body_lo, 0.001),
+                                     facecolor=color, edgecolor=color, zorder=3)
+                ax.add_patch(rect)
+
+            # MA
+            ax.plot(x, ma5, color="#F59E0B", lw=1.2, label="MA5", zorder=4)
+            ax.plot(x, ma10, color="#3B82F6", lw=1.2, label="MA10", zorder=4)
+            ax.plot(x, ma20, color="#8B5CF6", lw=1.2, label="MA20", zorder=4)
+            ax.plot(x, ma60, color="#6B7280", lw=1.3, label="MA60", zorder=4)
+
+            # 一目均衡表
+            ax.plot(x, turn, color="#EC4899", lw=1.0, label="转换线", zorder=5)
+            ax.plot(x, base, color="#06B6D4", lw=1.0, label="基准线", zorder=5)
+            ax.plot(x, lag, color="#A855F7", lw=1.0, ls="--", label="延迟线", zorder=5)
+            # 先行带 A/B 填充
+            ax.fill_between(x, span_a, span_b,
+                            where=(~np.isnan(span_a)) & (~np.isnan(span_b)),
+                            color="#3B82F6", alpha=0.15, label="先行带A")
+            ax.fill_between(x, span_a, span_b,
+                            where=(~np.isnan(span_a)) & (~np.isnan(span_b)) & (span_a < span_b),
+                            color="#16A34A", alpha=0.12, label="先行带B")
+
+            # 样式
+            ax.set_title(f"{r['name']}({r['code']})  K线 + 一目均衡表",
+                         fontsize=12, pad=8, color="#0F172A")
+            ax.grid(True, alpha=0.3, linestyle="--")
+            ax.legend(loc="upper left", fontsize=8, ncol=4, framealpha=0.9)
+            # X 轴标签: 每 20 天显示一次
+            step = max(1, n // 8)
+            ticks = list(range(0, n, step)) + [n - 1]
+            ax.set_xticks(ticks)
+            ax.set_xticklabels([dates_raw[i][-5:] for i in ticks], rotation=30, fontsize=8)
+
+            # 成交量副图
+            ax2 = fig.add_axes([0.08, 0.06, 0.88, 0.10], sharex=ax)
+            for i in range(n):
+                up = closes[i] >= opens[i]
+                c = "#DC2626" if up else "#16A34A"
+                ax2.bar(x[i], vols[i], width=0.7, color=c)
+            ax2.set_ylabel("量", fontsize=8)
+            ax2.tick_params(axis="x", labelsize=7)
+            ax2.grid(True, alpha=0.2)
+
+            # 嵌到 Tk
+            canvas = FigureCanvasTkAgg(fig, master=parent)
+
+            def _on_ready():
+                try:
+                    loading_label.destroy()
+                except Exception:
+                    pass
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                canvas.draw()
+
+            # 调度回主线程
+            try:
+                parent.winfo_toplevel().after(0, _on_ready)
+            except Exception:
+                _on_ready()
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            def _fail():
+                try:
+                    loading_label.configure(text=f"❌ K线图加载失败: {e}", fg="#DC2626")
+                except Exception:
+                    pass
+            try:
+                parent.winfo_toplevel().after(0, _fail)
+            except Exception:
+                _fail()
