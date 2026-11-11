@@ -3157,6 +3157,23 @@ class StockDetailMixin:
                                      textvariable=symbol_var)
             sym_combo.pack(side=tk.LEFT, padx=2)
 
+            # 🆕 ◀ ▶ 上下切换按钮 (股票/指数)
+            def _shift_symbol(delta):
+                try:
+                    cur = symbol_var.get().strip()
+                    if cur in display_names:
+                        idx = display_names.index(cur)
+                    else:
+                        # 手动输入的不在列表, 找最接近的或从头开始
+                        idx = -1
+                    new_idx = (idx + delta) % len(display_names) if display_names else 0
+                    symbol_var.set(display_names[new_idx])
+                    redraw()
+                except Exception as _e:
+                    print(f"[K线] 切换股票失败: {_e}")
+            ttk.Button(top_frame, text="◀", width=3, command=lambda: _shift_symbol(-1)).pack(side=tk.LEFT)
+            ttk.Button(top_frame, text="▶", width=3, command=lambda: _shift_symbol(+1)).pack(side=tk.LEFT)
+
             def _resolve_and_draw():
                 """解析输入: 纯代码/名称/名称(代码) 都能识别"""
                 raw = symbol_var.get().strip()
@@ -3208,6 +3225,23 @@ class StockDetailMixin:
                                         width=10, state="readonly")
             period_combo.set("日K")
             period_combo.pack(side=tk.LEFT, padx=2)
+
+            # 🆕 ◀ ▶ 周期切换按钮
+            def _shift_period(delta):
+                try:
+                    cur_label = period_combo.get()
+                    labels = [PERIOD_LABELS[p] for p in PERIOD_KEYS]
+                    if cur_label in labels:
+                        idx = labels.index(cur_label)
+                    else:
+                        idx = 0
+                    new_idx = (idx + delta) % len(labels)
+                    period_combo.set(labels[new_idx])
+                    redraw()
+                except Exception as _e:
+                    print(f"[K线] 切换周期失败: {_e}")
+            ttk.Button(top_frame, text="◀", width=3, command=lambda: _shift_period(-1)).pack(side=tk.LEFT)
+            ttk.Button(top_frame, text="▶", width=3, command=lambda: _shift_period(+1)).pack(side=tk.LEFT)
 
             ttk.Button(top_frame, text="🔄 刷新", command=lambda: redraw()).pack(side=tk.LEFT, padx=(15, 4))
 

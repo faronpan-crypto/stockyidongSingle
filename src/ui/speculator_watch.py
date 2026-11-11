@@ -1222,6 +1222,78 @@ def _build_block_grid(parent, win, col=0):
         _col_btns[cn] = _b
     _switch_cols(2)  # 默认高亮 2 列
 
+    # 🧠 决策疲劳 (交易高频时必看)
+    def _show_decision_fatigue():
+        try:
+            from ui.tab_builders import _enhanced_help_dialog
+        except Exception:
+            import traceback; traceback.print_exc(); return
+        lines = [
+            ("h1", "═══ 🧠 决策疲劳 · 交易员必读 ═══"),
+            ("text", "来源: B站「决策疲劳」热门视频 · 交易中每 3 小时必看一次"),
+            ("blank",),
+
+            ("h2", "💡 什么是决策疲劳?", "#FF1744"),
+            ("bullet", "人每天的「意志力预算」是有限的 (约 30-40 个重要决策)"),
+            ("bullet", "做了太多决定后, 大脑会自动进入「省电模式」"),
+            ("bullet", "省电模式 = 要么草率决策 (追高), 要么逃避决策 (错过)"),
+            ("bullet", "交易场景: 盘中频繁看盘 → 每个波动都想操作 → 疲劳累积 → 冲动下单"),
+            ("blank",),
+
+            ("h2", "🚫 决策疲劳的 7 个信号 (中 3 个就要停机!)", "#D32F2F"),
+            ("bullet", "① 忍不住追涨, 看见拉升就想打板"),
+            ("bullet", "② 对亏损麻木, 连续止损还想继续交易"),
+            ("bullet", "③ 频繁改计划, 5 分钟内买卖来回 3 次以上"),
+            ("bullet", "④ 放弃系统, 凭「直觉」交易 (直觉=疲劳的大脑)"),
+            ("bullet", "⑤ 易怒或沮丧, 对家人/同事发脾气"),
+            ("bullet", "⑥ 忘记吃饭喝水, 身体僵硬肩颈痛"),
+            ("bullet", "⑦ 收盘后无法复盘, 只想躺平或刷短视频"),
+            ("blank",),
+
+            ("h2", "🛡️ 防止决策疲劳的 5 条铁律", "#1565C0"),
+            ("bullet", "❶ 限定交易次数: 每天最多 3 笔, 超过就停机 (用「交易纪律」Tab 设闹钟)"),
+            ("bullet", "❷ 90 分钟强制休息: 盘中每 90 分钟起来走 3 分钟, 看远处 20 秒"),
+            ("bullet", "❸ 写下来再下单: 口头决策 → 冲动, 写下来 → 理性。买前写「为什么买」"),
+            ("bullet", "❹ 减少选择: 自选股控制在 20 只以内, 超过用 AI 筛 (👁️游资看盘里的信号决策)"),
+            ("bullet", "❺ 自动执行: 把纪律写成代码 (止损-5%自动卖, 涨停挂单自动撤)"),
+            ("blank",),
+
+            ("h2", "🧘 疲劳急救 (已经累了怎么办)", "#6A1B9A"),
+            ("bullet", "💧 喝 500ml 水, 站起来伸个懒腰, 走 30 米"),
+            ("bullet", "👀 看窗外 20 秒 (20-20-20 法则: 每 20 分钟看 20 英尺外 20 秒)"),
+            ("bullet", "📵 关掉所有非必要弹窗, 只留 2 个核心指标 (大盘+板块)"),
+            ("bullet", "🛑 承认累了, 今天不再开新仓, 只处理已持仓"),
+            ("bullet", "🌙 晚上 11 点前睡觉, 睡眠是最便宜的意志力充值"),
+            ("blank",),
+
+            ("h2", "📈 交易中如何做决策 (防疲劳版)", "#2E7D32"),
+            ("text", "用「三步法」代替直觉判断:"),
+            ("bullet", "Step 1: 板块环境判断 → 主线是谁? 大盘在 P 几阶段?"),
+            ("bullet", "Step 2: 个股位置判断 → 60 日高低位? 均线排列? 有机构在吗?"),
+            ("bullet", "Step 3: 风险收益比 → 止损在哪? 止盈在哪? 值不值得?"),
+            ("blank",),
+            ("text", "决策疲劳时, 最多能做好 Step 1。Step 2/3 需要清醒的大脑。"),
+            ("text", "所以累了就只做「板块环境判断」, 个股交给明天。"),
+            ("blank",),
+
+            ("h2", "🎬 延伸学习 (B站热门视频)", "#FF6D00"),
+            ("bullet", "《精英的护脑秘籍之决策减法》— 减少不必要决策, 保存意志力"),
+            ("bullet", "《有钱人为啥都喜欢助理》— 把执行交给别人, 你只做判断"),
+            ("bullet", "《决策疲劳让人变穷》— 认知资源 × 时间 × 执行 = 结果"),
+            ("bullet", "《别每天 3 万次决策!》— CEO 级别的高效决策法"),
+            ("bullet", "《心理学中的决策疲劳》— 心理学科普, 理解大脑的工作模式"),
+            ("blank",),
+            ("text", "🧠 记住: 交易的核心不是看谁看得勤, 是看谁看得清。"),
+            ("text", "  一天做 3 个高质量决策 > 一小时做 10 个低质量决策。"),
+        ]
+        _enhanced_help_dialog(parent=win, title="🧠 决策疲劳 · 交易员必读",
+                              content_lines=lines, base_font_size=13, window_size=(780, 720))
+
+    tk.Button(title_bar, text="🧠 决策疲劳", width=10,
+              bg="#263238", fg="#FF8A65", font=("", 10, "bold"),
+              relief=tk.RAISED, bd=1, cursor="hand2",
+              command=_show_decision_fatigue).pack(side=tk.RIGHT, padx=(0, 6))
+
     # 📊 详细按钮 (打开 🔥主线·资金 完整窗口)
     tk.Button(title_bar, text="📊 详细分析", width=10,
               bg="#FFA726", fg="#1E1E1E", font=("", 10, "bold"),
@@ -4250,6 +4322,13 @@ def _refresh_watch_analysis(win, force_ai=False):
 
 def _gather_analysis_context(win):
     ctx = {}
+    # 🆕 先主动加载 tushare daily — 后面算涨跌比要用真实数据, 比估算准 10 倍!
+    try:
+        _get_tushare_daily_today()
+        print(f"[👁️看盘] tushare daily 缓存就绪, 共 {len(_TUSHARE_DAILY_CACHE.get('data', [])) if _TUSHARE_DAILY_CACHE.get('data') is not None else 0} 行")
+    except Exception as _e:
+        print(f"[👁️看盘] tushare daily 预加载失败 (不影响): {_e}")
+
     is_intraday = _is_trading_hours()
     # 🆕 周六日/非交易时间也调新浪实时 — 收盘后新浪仍返回当日数据, 够看盘用
     realtime = _get_sina_realtime()
@@ -4289,12 +4368,31 @@ def _gather_analysis_context(win):
             print(f"[👁️看盘] ⚠️ pct_mean 兜底用指数均值 {_pct_mean} (不准!)")
         ctx["pct_mean"] = _pct_mean
 
-        # 涨跌比从实时估算
-        est_up = realtime.get("estimated_up_count", 2300)
-        ctx["up_count"] = est_up
-        ctx["down_count"] = 5565 - est_up  # 总股数近似 5565
-        ctx["zt_count"] = None  # 盘中涨停数不精确, 不覆盖
-        ctx["dt_count"] = None
+        # 涨跌比 —— 🟢 优先 tushare daily 真实数据 (比估算准 10 倍!)
+        _daily_cache = _TUSHARE_DAILY_CACHE.get("data")
+        if _daily_cache is not None and len(_daily_cache) > 0:
+            try:
+                ctx["up_count"] = int((_daily_cache["pct_chg"] > 0).sum())
+                ctx["down_count"] = int((_daily_cache["pct_chg"] < 0).sum())
+                ctx["zt_count"] = int((_daily_cache["pct_chg"] >= 9.5).sum())
+                ctx["dt_count"] = int((_daily_cache["pct_chg"] <= -9.5).sum())
+                print(f"[👁️看盘] ✅ 涨跌比用 tushare daily 真实: 涨{ctx['up_count']}/跌{ctx['down_count']}/涨停{ctx['zt_count']}")
+            except Exception as _e:
+                print(f"[👁️看盘] tushare daily 涨跌比解析失败, 降级估算: {_e}")
+                # 降级: 不用 IM 反推 (那个线性模型不准!), 改用板块均值反推
+                est_up = int(2800 + _pct_mean * 200)
+                est_up = max(500, min(5000, est_up))
+                ctx["up_count"] = est_up
+                ctx["down_count"] = 5565 - est_up
+                ctx["zt_count"] = None; ctx["dt_count"] = None
+        else:
+            # 降级: 不用 IM 反推, 改用板块 pct_mean 反推 (比 IM 靠谱)
+            est_up = int(2800 + _pct_mean * 200)
+            est_up = max(500, min(5000, est_up))
+            ctx["up_count"] = est_up
+            ctx["down_count"] = 5565 - est_up
+            ctx["zt_count"] = None; ctx["dt_count"] = None
+            print(f"[👁️看盘] ⚠️ 无 tushare daily 缓存, 用板块均值估算: 涨{est_up} (pct_mean={_pct_mean})")
         # 板块
         if realtime.get("sectors"):
             ctx["block_ranking"] = sorted(realtime["sectors"].items(),
@@ -6040,8 +6138,11 @@ def _robust_ai_call(prompt, system_prompt="", max_tokens=1500, win=None):
         p = cfg_providers.get(pname)
         if not p: continue
         api_key = (p.get("api_key") or "").strip()
-        # ollama 不需要 key
-        if not api_key and pname != "ollama": continue
+        # 🆕 代理模式 (localhost:8787) 不需要 config 里填 api_key —— 代理从环境变量读
+        _base = p.get("base_url", "")
+        _is_proxy = "8787" in _base or "ai_proxy" in _base.lower()
+        # ollama 不需要 key, 代理也不需要, 只有直连官方才需要 config 里有 key
+        if not api_key and pname != "ollama" and not _is_proxy: continue
         if pname == "ollama":
             try:
                 _req.get("http://localhost:11434/api/tags", timeout=2)
@@ -6053,7 +6154,31 @@ def _robust_ai_call(prompt, system_prompt="", max_tokens=1500, win=None):
         model = p["model"]
         url = f"{base}{ep}"
         headers = {"Content-Type": "application/json"}
-        if api_key: headers["Authorization"] = f"Bearer {api_key}"
+
+        # 🆕 检测 localhost:8787 → 走代理协议 (加 X-Nonce + X-Proxy-Token)
+        _is_proxy = "8787" in base or "ai_proxy" in base.lower()
+        if _is_proxy:
+            try:
+                import hmac as _hmac, hashlib as _hashlib, secrets as _secrets
+                _secret_path = "/tmp/stock_ai_proxy.secret"
+                if _os.path.exists(_secret_path):
+                    _proxy_secret = open(_secret_path).read().strip()
+                    _nonce = _secrets.token_hex(8)
+                    _proxy_token = _hmac.new(
+                        _proxy_secret.encode(),
+                        ("ai_proxy" + _nonce).encode(),
+                        _hashlib.sha256).hexdigest()[:16]
+                    headers["X-Nonce"] = _nonce
+                    headers["X-Proxy-Token"] = _proxy_token
+                    print(f"[🤖AI] 走本地代理 8787 (provider={pname}, nonce={_nonce[:6]}...)")
+                else:
+                    print(f"[🤖AI] 代理 secret 文件不存在: {_secret_path}")
+                    continue
+            except Exception as _e:
+                print(f"[🤖AI] 代理签名失败: {_e}")
+                continue
+        elif api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         messages = []
         if system_prompt: messages.append({"role": "system", "content": system_prompt})
@@ -6066,16 +6191,19 @@ def _robust_ai_call(prompt, system_prompt="", max_tokens=1500, win=None):
             "temperature": p.get("temperature", 0.3),
             "stream": False,
         }
+        if _is_proxy:
+            body["provider"] = pname  # 🆕 代理需要知道路由到哪个 provider
+
         try:
             resp = _req.post(url, headers=headers, json=body, timeout=p.get("timeout", 45))
             if resp.status_code == 200:
                 data = resp.json()
                 text = data["choices"][0]["message"]["content"]
                 if text and len(text.strip()) > 10:
-                    print(f"[🤖AI] ✅ {pname}/{model} fallback 成功!")
+                    print(f"[🤖AI] ✅ {pname}/{model} 成功!")
                     return text
             else:
-                print(f"[🤖AI] {pname} 返回 {resp.status_code}: {resp.text[:80]}")
+                print(f"[🤖AI] {pname} 返回 {resp.status_code}: {resp.text[:120]}")
         except Exception as e:
             print(f"[🤖AI] {pname} 失败: {e}")
 
