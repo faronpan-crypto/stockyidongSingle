@@ -7832,7 +7832,7 @@ class StockDetailMixin:
                             f"  20日均量:  {avg_vol20/1e4:.1f} 万手",
                             f"  5日均量:   {avg_vol5/1e4:.1f} 万手",
                             f"  量比(5/20): {vol_ratio:.2f}x",
-                            f"  成交额(亿): {amount[-1]/1e5:.1f}" if len(amount)>0 else "",
+                            f"  成交额(亿): {amount[-1]/1e4:.1f}" if len(amount)>0 else "",
                         ])
                         if vol_ratio > 2.0: lines.append(f"  ⚠️ 显著放量 ({vol_ratio:.1f}x), 资金关注度上升")
                         elif vol_ratio < 0.5: lines.append(f"  💤 明显缩量 ({vol_ratio:.1f}x), 交投清淡")
@@ -9050,153 +9050,54 @@ class StockDetailMixin:
         win.transient(getattr(self, "root", None) or win.master)
 
         # 工具栏
-        toolbar = ttk.Frame(win); toolbar.pack(fill=tk.X, padx=8, pady=6)
+        toolbar = ttk.Frame(win); toolbar.pack(fill=tk.X, padx=8, pady=(6, 2))
         ttk.Label(toolbar, text="🔍搜索:").pack(side=tk.LEFT)
         search_var = tk.StringVar()
-        # 🔧 改成 Combobox — 自动补全文章标题+股票名+淘韭热股
-        search_combo = ttk.Combobox(toolbar, textvariable=search_var, width=22, values=[],
-                                    state="normal")
-        search_combo.pack(side=tk.LEFT, padx=4)
-        # 🔧 自动补全下拉 (从 articles + crawled_articles 两张表)
-        def _rebuild_combo():
-            try:
-                _conn = _sql3.connect(self._ARTICLE_DB); _cur = _conn.cursor()
-                _vals = set()
-                # articles 表: 标题 + 股票名
-                _cur.execute("SELECT DISTINCT stock_name FROM articles WHERE stock_name IS NOT NULL AND stock_name!='' LIMIT 100")
-                _vals.update(r[0] for r in _cur.fetchall())
-                # crawled_articles: 标题关键词
-                _cur.execute("SELECT DISTINCT source FROM crawled_articles LIMIT 20")
-                _vals.update(r[0] for r in _cur.fetchall())
-                # 常见板块关键词 (兜底)
-                _vals.update(["AI","券商","半导体","新能源","白酒","煤炭","机器人","医药","银行","黄金","光伏","军工","CPO","算力"])
-                _conn.close()
-                search_combo["values"] = sorted(_vals)[:200]
-            except Exception: pass
-        _rebuild_combo()
-
-        # 🔧 回车搜索
-        def _on_search_key(_evt=None): _refresh_list()
-        search_combo.bind("<Return>", _on_search_key)
-        # 🔧 输入时动态过滤
-        def _on_search_keyup(_evt=None):
-            _kw = search_var.get().strip()
-            if len(_kw) >= 1:
-                try:
-                    _conn = _sql3.connect(self._ARTICLE_DB); _cur = _conn.cursor()
-                    _kw2 = f"%{_kw}%"
-                    _cur.execute("SELECT DISTINCT title FROM articles WHERE title LIKE ? LIMIT 30", (_kw2,))
-                    _titles = [r[0][:40] for r in _cur.fetchall()]
-                    _cur.execute("SELECT DISTINCT title FROM crawled_articles WHERE title LIKE ? LIMIT 30", (_kw2,))
-                    _titles2 = [r[0][:40] for r in _cur.fetchall()]
-                    _conn.close()
-                    search_combo["values"] = _titles + _titles2 + [v for v in search_combo["values"] if _kw in str(v)][:30]
-                except Exception: pass
-        search_combo.bind("<KeyRelease>", _on_search_keyup)
-
+        search_entry = ttk.Entry(toolbar, textvariable=search_var, width=22, font=("", 11))
+        search_entry.pack(side=tk.LEFT, padx=4)
+        search_entry.bind("<Return>", lambda _e: _refresh_list())
         ttk.Label(toolbar, text="来源:").pack(side=tk.LEFT, padx=(8,0))
         source_var = tk.StringVar(value="全部")
         ttk.Combobox(toolbar, textvariable=source_var,
-                     values=["全部","淘股吧","韭研","韭研公社","东财新闻","东财热度榜","机构研报","雪球讨论","同花顺","Choice","知乎","手动导入"],
+                     values=["全部","东财新闻","东财热度榜","机构研报","淘股吧","韭研","韭研公社","雪球讨论","同花顺","Choice","手动导入"],
                      width=12, state="readonly").pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🔄刷新", width=7,
-                   command=_refresh_list).pack(side=tk.LEFT, padx=4)
+        # 🆕 醒目的大按钮 "🚀开始搜索" + 进度条 (在工具栏下方单独一行)
+        _search_btn = tk.Button(toolbar, text="🚀 开始搜索", width=12, bg="#FF6F00", fg="white",
+                                 font=("", 11, "bold"), relief=tk.FLAT, cursor="hand2",
+                                 command=_refresh_list)
+        _search_btn.pack(side=tk.LEFT, padx=10)
+        ttk.Button(toolbar, text="🔄重置", width=6,
+                   command=lambda: (search_var.set(""), source_var.set("全部"), _refresh_list())).pack(side=tk.LEFT, padx=2)
 
+        # 🆕 进度条单独一行 (工具栏下方, 状态栏上方)
+        progress_frame = ttk.Frame(win); progress_frame.pack(fill=tk.X, padx=8, pady=(0, 2))
+        progress = ttk.Progressbar(progress_frame, mode="indeterminate", length=400)
+        status = tk.StringVar(value="👋 欢迎! 输入关键词 + 选择来源 → 点 🚀开始搜索")
+        tk.Label(progress_frame, textvariable=status, fg="#1976D2", font=("", 10)).pack(side=tk.LEFT, padx=4)
+
+        # 爬取区分隔
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
-        # 🔧 联网搜索 (知乎 + 同花顺)
-        def _do_web_search():
-            kw = search_var.get().strip()
-            if not kw: messagebox.showinfo("提示","请先输入搜索关键词",parent=win); return
-            status.set(f"⏳ 联网搜索知乎+同花顺..."); win.update_idletasks()
-            import threading as _th, webbrowser
-            def _thread():
-                results = []
-                # 知乎搜索 API (公开接口)
-                try:
-                    import requests as _req
-                    r = _req.get(f"https://www.zhihu.com/api/v4/search_v3?t=general&q={_req.utils.quote(kw)}&correction=1&offset=0&limit=10",
-                                headers={"User-Agent":"Mozilla/5.0","Referer":"https://www.zhihu.com/"}, timeout=10)
-                    if r.status_code == 200:
-                        import json as _j
-                        for item in _j.loads(r.text).get("data", [])[:10]:
-                            obj = item.get("object", {})
-                            title = obj.get("title", item.get("query", ""))[:60]
-                            url = obj.get("url", f"https://www.zhihu.com/search?q={_req.utils.quote(kw)}")
-                            if not url.startswith("http"): url = f"https://www.zhihu.com{url}"
-                            results.append(("知乎", title, url))
-                except Exception: pass
-                # 同花顺搜索
-                try:
-                    import requests as _req
-                    r = _req.get(f"https://so.10jqka.com.cn/api/suggest/?wd={_req.utils.quote(kw)}",
-                                headers={"User-Agent":"Mozilla/5.0","Referer":"https://www.10jqka.com.cn/"}, timeout=10)
-                    if r.status_code == 200:
-                        import json as _j
-                        data = _j.loads(r.text)
-                        for d in (data.get("data", []) if isinstance(data, dict) else [])[:5]:
-                            results.append(("同花顺", str(d)[:40] if isinstance(d,str) else d.get("title",str(d))[:40],
-                                           f"https://so.10jqka.com.cn/?keyword={_req.utils.quote(kw)}"))
-                except Exception: pass
-                # 如果联网都没返回 → 直接打开搜索页
-                if not results:
-                    results.append(("知乎搜索", kw, f"https://www.zhihu.com/search?q={_req.utils.quote(kw)}"))
-                    results.append(("同花顺搜索", kw, f"https://so.10jqka.com.cn/?keyword={_req.utils.quote(kw)}"))
-                    results.append(("Choice搜索", kw, f"https://choice.10jqka.com.cn/search?keyword={_req.utils.quote(kw)}"))
-
-                # 主线程渲染
-                def _render():
-                    _tmp_win = tk.Toplevel(win); _tmp_win.title(f"🌐 联网搜索: {kw}"); _tmp_win.geometry("900x500")
-                    _cols = ("来源","标题","链接")
-                    _tree2 = ttk.Treeview(_tmp_win, columns=_cols, show="headings", height=18)
-                    for _c, _t, _w in [("来源","来源",80),("标题","标题(双击打开链接)",400),("链接","链接",360)]:
-                        _tree2.heading(_c, text=_t); _tree2.column(_c, width=_w, anchor="w")
-                    _tree2.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-                    for _src, _t, _u in results:
-                        _tree2.insert("", "end", values=(_src, _t, _u))
-                    def _open_link(_evt=None):
-                        _sel = _tree2.selection()
-                        if not _sel: return
-                        _u = _tree2.item(_sel[0], "values")[2]
-                        try: webbrowser.open(_u, new=2)
-                        except Exception as _e: messagebox.showerror("错误", str(_e), parent=_tmp_win)
-                    _tree2.bind("<Double-1>", _open_link)
-                    status.set(f"✅ 联网搜索 {kw}: {len(results)} 条结果 (双击打开链接)")
-                try: self.root.after(0, _render)
-                except: _render()
-            _th.Thread(target=_thread, daemon=True).start()
-        ttk.Button(toolbar, text="🌐联网搜", width=8,
-                   command=_do_web_search).pack(side=tk.LEFT, padx=2)
-        ttk.Label(toolbar, text="(回车搜索/双击打开链接)", foreground="#888").pack(side=tk.LEFT, padx=6)
-
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
-        # 爬取区
         ttk.Label(toolbar, text="📥爬取:").pack(side=tk.LEFT)
         crawl_stock_var = tk.StringVar(value=prefill_stock_code or "")
         ttk.Entry(toolbar, textvariable=crawl_stock_var, width=10).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🚀爬个股新闻", width=14,
+        ttk.Button(toolbar, text="🚀爬个股", width=9,
                    command=lambda: _do_crawl_stock()).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🌐全站热帖", width=10,
+        ttk.Button(toolbar, text="🌐全站", width=7,
                    command=lambda: _do_crawl_global()).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🏮淘股吧", width=9,
+        ttk.Button(toolbar, text="🏮淘股吧", width=8,
                    command=lambda: _do_crawl_taoguba()).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🌾韭研公社", width=10,
+        ttk.Button(toolbar, text="🌾韭研", width=6,
                    command=lambda: _do_crawl_jiuyan()).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="☃️雪球讨论", width=10,
+        ttk.Button(toolbar, text="☃️雪球", width=6,
                    command=lambda: _do_crawl_xueqiu()).pack(side=tk.LEFT, padx=2)
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
-        ttk.Button(toolbar, text="➕新增", width=7,
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
+        ttk.Button(toolbar, text="➕新增", width=6,
                    command=lambda: _do_add_manual()).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🗑️删除", width=7,
+        ttk.Button(toolbar, text="🗑️删除", width=6,
                    command=lambda: _do_delete()).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🏷️打标签", width=8,
+        ttk.Button(toolbar, text="🏷️标签", width=6,
                    command=lambda: _do_tag()).pack(side=tk.LEFT, padx=2)
-
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
-        ttk.Button(toolbar, text="🔗联动分析", width=10,
-                   command=lambda: _do_linked_analysis()).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🔄遍历喂入", width=10,
-                   command=lambda: _do_crawl_feed_in()).pack(side=tk.LEFT, padx=2)
 
         # 主区: 左列表 + 右详情
         paned = ttk.PanedWindow(win, orient=tk.HORIZONTAL)
@@ -9204,15 +9105,33 @@ class StockDetailMixin:
 
         # 左: Treeview
         left_frame = ttk.Frame(paned); paned.add(left_frame, weight=3)
-        cols = ("id", "title", "source", "stock", "time")
+        # 🔧 加 "链接" 列
+        cols = ("id", "title", "source", "stock", "time", "link")
         tree = ttk.Treeview(left_frame, columns=cols, show="headings", height=20)
-        for c, t, w in [("id","#",45),("title","标题",320),("source","来源",100),("stock","股票",100),("time","时间",110)]:
+        for c, t, w in [("id","#",40),("title","标题",280),("source","来源",90),("stock","股票",90),("time","时间",100),("link","链接",70)]:
             tree.heading(c, text=t); tree.column(c, width=w, anchor="w", stretch=True)
         vs = ttk.Scrollbar(left_frame, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=vs.set)
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); vs.pack(side=tk.RIGHT, fill=tk.Y)
         tree.tag_configure("saved", background="#E8F5E9")
-        tree.tag_configure("hot", foreground="#D32F2F")
+        tree.tag_configure("crawled", background="#FFF3E0")
+        # 双击行 → 打开原文链接
+        def _tree_double(_evt=None):
+            import webbrowser as _wb
+            _sel = tree.selection()
+            if not _sel: return
+            _row_id = tree.item(_sel[0], "values")[0]
+            conn2 = _sql3.connect(self._ARTICLE_DB); cur2 = conn2.cursor()
+            if _row_id.startswith("A|"):
+                cur2.execute("SELECT url FROM articles WHERE id=?", (_row_id[2],))
+            else:
+                cur2.execute("SELECT url FROM crawled_articles WHERE id=?", (_row_id[2],))
+            _u = (cur2.fetchone() or [""])[0]; conn2.close()
+            if _u and _u.startswith("http"):
+                try: _wb.open(_u, new=2); status.set(f"🔗 打开: {_u[:60]}")
+                except: status.set(f"⚠️ 无法打开")
+            else: status.set("⚠️ 这篇文章没有有效链接")
+        tree.bind("<Double-1>", _tree_double)
 
         # 右: 详情 + 标签
         right_frame = ttk.Frame(paned); paned.add(right_frame, weight=4)
@@ -9235,51 +9154,71 @@ class StockDetailMixin:
         status = tk.StringVar(value="就绪")
         ttk.Label(win, textvariable=status, anchor="w").pack(fill=tk.X, padx=8, pady=2)
 
-        # ── 🔧 刷新列表 (同时查 articles + crawled_articles 两张表) ──
+        # ── 🔧 刷新列表 (后台线程 + 进度条) ──
         def _refresh_list():
-            for iid in tree.get_children(): tree.delete(iid)
-            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
-            kw = search_var.get().strip()
-            src = source_var.get()
-            # ✅ UNION ALL 两张表: articles + crawled_articles
-            # articles 字段: id,title,source,stock_code,stock_name,created_at
-            # crawled_articles 字段: id,source,title,content,url,publish_time
-            sql = """
-            SELECT 'A|' || CAST(id AS TEXT) AS row_id, title, source,
-                   COALESCE(stock_name,'') || CASE WHEN stock_code!='' THEN '('||stock_code||')' ELSE '' END AS stock_col,
-                   COALESCE(created_at,'') AS time_col
-            FROM articles WHERE 1=1
-            UNION ALL
-            SELECT 'C|' || CAST(id AS TEXT) AS row_id, title, source,
-                   '' AS stock_col,
-                   COALESCE(publish_time,'') AS time_col
-            FROM crawled_articles WHERE 1=1
-            """
-            params = []
-            if kw:
-                sql = sql.replace("WHERE 1=1", "WHERE (title LIKE ? OR content LIKE ? OR stock_name LIKE ?)", 1)
-                sql = sql.replace("WHERE 1=1", "WHERE (title LIKE ? OR content LIKE ?)", 1)
-                k = f"%{kw}%"
-                params.extend([k, k, k, k, k])
-            if src != "全部":
-                sql = sql.replace("FROM articles WHERE", f"FROM articles WHERE source=? AND", 1)
-                sql = sql.replace("FROM crawled_articles WHERE", f"FROM crawled_articles WHERE source=? AND", 1)
-                params.insert(0, src)
-                params.append(src)
-            sql += " ORDER BY time_col DESC LIMIT 800"
-            try:
-                cur.execute(sql, params)
-                n_articles = n_crawled = 0
-                for row in cur.fetchall():
-                    rid, title, src2, stock_col, ctime = row
-                    if rid.startswith("A|"): n_articles += 1
-                    else: n_crawled += 1
-                    _tag = "saved" if rid.startswith("A|") else "crawled"
-                    tree.insert("", "end", values=(rid, title[:80], src2, stock_col, ctime), tags=(_tag,))
-                status.set(f"📚 文章库: articles={n_articles} + crawled={n_crawled} 共 {n_articles+n_crawled} 篇")
-            except Exception as _e:
-                status.set(f"⚠️ SQL 执行失败: {_e}")
-            conn.close()
+            import threading as _th
+            # 禁用搜索按钮 + 显示进度条
+            _search_btn.configure(state="disabled", text="⏳ 搜索中...")
+            progress.pack(fill=tk.X, padx=8, pady=(0, 2))
+            progress["value"] = 0; progress.start(10)
+            status.set("⏳ 正在搜索文章库..."); win.update_idletasks()
+
+            def _thread():
+                try:
+                    for iid in tree.get_children():
+                        try: tree.delete(iid)
+                        except: pass
+                    conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
+                    kw = search_var.get().strip()
+                    src = source_var.get()
+                    sql = """
+                    SELECT 'A|' || CAST(id AS TEXT) AS row_id, title, source, url,
+                           COALESCE(stock_code,'') AS scode, COALESCE(stock_name,'') AS sname,
+                           COALESCE(created_at,'') AS t
+                    FROM articles WHERE 1=1
+                    UNION ALL
+                    SELECT 'C|' || CAST(id AS TEXT), title, source, url,
+                           '', '', COALESCE(publish_time,'')
+                    FROM crawled_articles WHERE 1=1
+                    ORDER BY t DESC LIMIT 800
+                    """
+                    params = []
+                    if kw:
+                        sql = sql.replace("FROM articles WHERE", "FROM articles WHERE (title LIKE ? OR content LIKE ? OR stock_name LIKE ?) AND", 1)
+                        sql = sql.replace("FROM crawled_articles WHERE", "FROM crawled_articles WHERE (title LIKE ? OR content LIKE ?) AND", 1)
+                        k = f"%{kw}%"
+                        params.extend([k, k, k, k, k])
+                    if src != "全部":
+                        sql = sql.replace("FROM articles WHERE", f"FROM articles WHERE source=? AND", 1)
+                        sql = sql.replace("FROM crawled_articles WHERE", f"FROM crawled_articles WHERE source=? AND", 1)
+                        params.insert(0, src); params.append(src)
+                    cur.execute(sql, params)
+                    rows = cur.fetchall()
+                    conn.close()
+                    # 主线程渲染
+                    def _render():
+                        for row in rows:
+                            rid, title, src2, url, scode, sname, ctime = row
+                            stock_col = f"{sname}({scode})" if sname else scode
+                            tag = "saved" if rid.startswith("A|") else "crawled"
+                            url_disp = "🔗打开" if url and url.startswith("http") else ""
+                            tree.insert("", "end", values=(rid, title[:75], src2, stock_col, ctime, url_disp), tags=(tag,))
+                        nA = sum(1 for r in rows if r[0].startswith("A|"))
+                        nC = len(rows) - nA
+                        status.set(f"📚 共 {len(rows)} 篇 (articles={nA}, crawled={nC})")
+                        progress.stop(); progress.pack_forget()
+                        _search_btn.configure(state="normal", text="🚀 开始搜索")
+                    try: self.root.after(0, _render)
+                    except: win.after(0, _render)
+                except Exception as _e:
+                    import traceback; traceback.print_exc()
+                    def _err():
+                        progress.stop(); progress.pack_forget()
+                        status.set(f"⚠️ 查询失败: {_e}")
+                        _search_btn.configure(state="normal", text="🚀 开始搜索")
+                    try: self.root.after(0, _err)
+                    except: win.after(0, _err)
+            _th.Thread(target=_thread, daemon=True).start()
 
         def _load_detail(_evt=None):
             sel = tree.selection();
@@ -9287,7 +9226,6 @@ class StockDetailMixin:
             vals = tree.item(sel[0], "values"); row_id = vals[0]
             conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
             if row_id.startswith("A|"):
-                # articles 表
                 aid = row_id[2:]
                 cur.execute("SELECT title,author,source,url,content,stock_code,stock_name,created_at FROM articles WHERE id=?", (aid,))
                 row = cur.fetchone()
@@ -9297,7 +9235,6 @@ class StockDetailMixin:
                 if not row: return
                 title, author, source, url, content, scode, sname, ctime = row
             else:
-                # crawled_articles 表
                 cid = row_id[2:]
                 cur.execute("SELECT title,author,source,url,content,publish_time FROM crawled_articles WHERE id=?", (cid,))
                 row = cur.fetchone()
@@ -9306,9 +9243,7 @@ class StockDetailMixin:
                 title, author, source, url, content, ctime = row
                 scode, sname, atags = "", "", []
             r_title_var.set(title)
-            url_display = url or "(无链接)"
-            if url and len(url) > 70: url_display = url[:70] + "..."
-            r_meta_var.set(f"✍️ {author or '匿名'}  |  📌 {source}  |  📅 {ctime}  |  🔗 {url_display}")
+            r_meta_var.set(f"✍️ {author or '匿名'}  |  📌 {source}  |  📅 {ctime}")
             content_text.config(state="normal"); content_text.delete("1.0", "end")
             content_text.insert("end", content or "(正文为空)"); content_text.config(state="disabled")
             # 标签 chips
@@ -9317,8 +9252,8 @@ class StockDetailMixin:
                 tags_chips_var.set(chip_str)
             else:
                 tags_chips_var.set("(无标签)")
-            # 保存当前 row_id 到 closure (带表前缀)
-            _current_article_id[0] = row_id
+            # 保存当前 aid 到 closure
+            _current_article_id[0] = aid
             _current_tags_ids[0] = [t[0] for t in atags]
 
         _current_article_id = [None]
@@ -9776,43 +9711,11 @@ class StockDetailMixin:
         tw[18].config(command=_do_linked_analysis)        # 🔗联动分析
         tw[19].config(command=_do_crawl_feed_in)          # 🔄遍历喂入 🆕
         tree.bind("<<TreeviewSelect>>", _load_detail)
-        # 🔧 双击打开链接 (从 articles / crawled_articles 两张表)
-        def _tree_double(_evt=None):
-            _sel = tree.selection()
-            if not _sel: return
-            _row_id = tree.item(_sel[0], "values")[0]
-            conn = _sql3.connect(self._ARTICLE_DB); cur = conn.cursor()
-            if _row_id.startswith("A|"):
-                cur.execute("SELECT url FROM articles WHERE id=?", (_row_id[2],))
-            else:
-                cur.execute("SELECT url FROM crawled_articles WHERE id=?", (_row_id[2],))
-            _u = (cur.fetchone() or [""])[0]; conn.close()
-            if _u and _u.startswith("http"):
-                try: webbrowser.open(_u, new=2); status.set(f"🔗 打开: {_u[:60]}")
-                except: status.set(f"⚠️ 无法打开: {_u[:60]}")
-            else: status.set("⚠️ 这篇文章没有有效链接")
-        tree.bind("<Double-1>", _tree_double)
-        # 🔧 右键菜单
-        try:
-            _menu = tk.Menu(win, tearoff=0)
-            _menu.add_command(label="🔗 打开原文链接", command=_tree_double)
-            _menu.add_command(label="📋 复制标题", command=lambda: win.clipboard_append(
-                (tree.item(tree.selection()[0], "values")[1] if tree.selection() else "")))
-            _menu.add_separator()
-            _menu.add_command(label="🏷️ 打标签 (仅 articles)",
-                              command=lambda: _do_tag() if _current_article_id[0] and _current_article_id[0].startswith("A|")
-                              else status.set("⚠️ crawled 文章不支持标签"))
-            _menu.add_command(label="🗑️ 删除", command=_do_delete)
-            def _on_right_click(e):
-                try: _menu.tk_popup(e.x_root, e.y_root)
-                finally: _menu.grab_release()
-            tree.bind("<Button-3>", _on_right_click)
-        except Exception: pass
-        search_var.trace_add("write", lambda *_: _refresh_list())
-        source_var.trace_add("write", lambda *_: _refresh_list())
+        # 🔧 去掉自动刷新 — 用户必须点 🔄搜索 按钮才搜 (或按回车)
+        # source_var.trace_add("write", lambda *_: _refresh_list())
 
-        # 初始加载
-        _refresh_list()
+        # 🔧 初始不自动刷新 — 用户手动点🔄才搜
+        status.set("👋 欢迎! 请输入关键词 + 选择来源 → 点 🔄搜索")
         if prefill_stock_code:
             crawl_stock_var.set(prefill_stock_code)
 

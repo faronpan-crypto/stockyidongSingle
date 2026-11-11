@@ -17152,9 +17152,9 @@ AI 将基于实时市场数据生成深度分析报告
             _tb.print_exc()
 
     def _build_taoguba_stamp_tab(self, parent):
-        """📯 淘股吧 邮票格子 Tab"""
+        """📯 淘股吧 热股扫描 Tab"""
         top = ttk.Frame(parent); top.pack(fill=tk.X, pady=(0, 6))
-        ttk.Label(top, text="📯 淘股吧热股扫描 — 邮票格子 (红涨绿跌, 词频徽标=提及次数)",
+        ttk.Label(top, text="📯 淘股吧热股扫描 (红涨绿跌, 词频徽标=提及次数)",
                   font=("", 11, "bold")).pack(side=tk.LEFT)
         # 🆕 淘股吧联动 + 文章库 (优先 pack → side=RIGHT 最左)
         ttk.Button(top, text="📯淘股吧联动", width=11,
@@ -17189,9 +17189,9 @@ AI 将基于实时市场数据生成深度分析报告
         parent.after(200, lambda: self._refresh_stamp_board("taoguba"))
 
     def _build_jiuyan_stamp_tab(self, parent):
-        """🧭 韭研公社 邮票格子 Tab"""
+        """🧭 韭研公社 热股扫描 Tab"""
         top = ttk.Frame(parent); top.pack(fill=tk.X, pady=(0, 6))
-        ttk.Label(top, text="🧭 韭研公社热股扫描 — 邮票格子 (红涨绿跌, 词频徽标=提及次数)",
+        ttk.Label(top, text="🧭 韭研公社热股扫描 (红涨绿跌, 词频徽标=提及次数)",
                   font=("", 11, "bold")).pack(side=tk.LEFT)
         # 🆕 韭研联动 + 文章库 (优先 pack → side=RIGHT 最左)
         ttk.Button(top, text="🧭韭研联动", width=10,
@@ -18157,229 +18157,75 @@ AI 将基于实时市场数据生成深度分析报告
             extra = f" 🧲爬取{crawl_cnt}只" if crawl_cnt > 0 else ""
             status.configure(text=f"✅ {len(rows)}只热股{extra}", foreground="#81C784")
 
-        iw = inner.winfo_width()
-        if iw < 50:
-            try:
-                cv = inner.master
-                iw = cv.winfo_width() if hasattr(cv, 'winfo_width') else 800
-            except: iw = 800
-        cols = max(3, iw // COL_W)
+        # ── ✅ 用 Treeview 表格渲染 (天生支持滚动+双击K线) ──
+        for w in inner.winfo_children(): w.destroy()
+        inner.update_idletasks()
 
-        # ── 🔧 表格式渲染: 每只股票独占一整行 ──
-        # 总高度 = 表头行(1) + 板块分组数(每个板块首行合并视觉, 但表格是每只一行)
-        # 实际上 sorted_blocks 每个 items 里的每只股票都要占 1 行
-        total_rows = 1  # 表头
-        for _, items in sorted_blocks:
-            total_rows += len(items)  # 每只股票 1 行
+        import tkinter as tk
+        from tkinter import ttk
 
-        inner.configure(width=max(cols * COL_W, 600), height=total_rows * 28 + 12)
-        # 🔧 关键: 去掉 grid_propagate(False), 让 inner 根据实际渲染的行自动撑高
-        # 之前用 grid 邮票格子公式算 height → 算出来只有几行高 → scrollregion 锁死
-        try: inner.grid_propagate(True)
-        except: pass
-        # 🔧 绑定 Configure 事件自动更新 scrollregion
-        inner.bind("<Configure>", lambda e, cv_ref=inner.master: (
-            cv_ref.configure(scrollregion=cv_ref.bbox("all")),
-        ))
+        _stamp_style = ttk.Style()
+        _stamp_style.configure("Stamp.Treeview", font=("Menlo", 10), rowheight=22)
+        _stamp_style.configure("Stamp.Treeview.Heading", font=("Helvetica", 10, "bold"))
 
-        cur_row = 0
-        # ── 🆕 表头行 (板块 | 股票 | 涨跌幅 | 词频 | 逻辑) ──
-        head = tk.Frame(inner, bg="#263238")
-        head.grid(row=cur_row, column=0, columnspan=5, sticky="we", padx=2, pady=(6, 2))
-        for txt, w, c in [("板块", 110, "#FFD54F"), ("股票", 100, "white"),
-                          ("涨跌幅", 70, "#A5D6A7"), ("词频", 50, "#80DEEA"),
-                          ("逻辑 / 资讯", 300, "#CE93D8")]:
-            tk.Label(head, text=txt, bg="#263238", fg=c, font=("", 10, "bold"),
-                     width=w//9, anchor="w").pack(side=tk.LEFT, padx=4)
-        cur_row += 1
+        cols = ("blk", "name", "code", "pct", "freq", "logic")
+        tv = ttk.Treeview(inner, columns=cols, show="headings", height=25, style="Stamp.Treeview")
+        for col, t, w, an in [("blk","板块",80,"w"),("name","股票",100,"w"),("code","代码",72,"w"),
+                              ("pct","涨跌幅",72,"e"),("freq","词频",50,"e"),("logic","逻辑/资讯",400,"w")]:
+            tv.heading(col, text=t); tv.column(col, width=w, anchor=an, stretch=True)
+        sb = ttk.Scrollbar(inner, orient="vertical", command=tv.yview)
+        tv.configure(yscrollcommand=sb.set)
+        tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        tv.tag_configure("up", foreground="#EF5350")
+        tv.tag_configure("down", foreground="#66BB6A")
+        tv.tag_configure("blkhead", background="#263238", foreground="#FFD54F")
+        tv.tag_configure("crawl", background="#1A3A2A")
 
         seen_blocks = set()
         for blk_name, items in sorted_blocks:
-            BLOCK_LOGIC = BLOCK_LOGIC  # 外层已定义
             for i, item in enumerate(items):
-                row_bg = "#1B3A3A" if i == 0 else "#1E1E2E"  # 板块首行高亮
-                row = tk.Frame(inner, bg=row_bg, cursor="hand2")
-                row.grid(row=cur_row, column=0, columnspan=5, sticky="we", padx=2, pady=1)
-                row.grid_propagate(False)
-                pct = item["pct"]
-                pct_color = "#EF5350" if pct >= 0 else "#66BB6A"
-                freq = item.get("freq", 0)
-                # 第1列: 板块名 (每板块只在首行显示, 合并视觉)
-                if blk_name not in seen_blocks:
-                    tk.Label(row, text=f" {blk_name}", bg=row_bg, fg="#FFD54F",
-                             font=("", 10, "bold"), width=12, anchor="w").pack(side=tk.LEFT, padx=4)
-                    seen_blocks.add(blk_name)
-                else:
-                    tk.Label(row, text=" ", bg=row_bg, width=12, anchor="w").pack(side=tk.LEFT, padx=4)
-                # 第2列: 股票名
-                tk.Label(row, text=item["name"], bg=row_bg, fg="white",
-                         font=("", 10, "bold"), width=12, anchor="w").pack(side=tk.LEFT, padx=2)
-
-                # 🆕 🌐 8 个网站小图标 (横排, 点击各自打开对应网站)
-                try:
-                    import ui.stock_web_open as _wmod
-                    _prefix6, _code6 = _wmod._code_to_prefix(item.get("code",""))
-                    _name6 = item.get("name","")
-                    _web_f = tk.Frame(row, bg=row_bg)
-                    _web_f._skip_row_click = True  # 🆕 标记, 跳过行的单击 handler
-                    _web_f.pack(side=tk.LEFT, padx=2)
-                    for _s in _wmod.SITES:
-                        def _open_one(_evt=None, _s2=_s, _pf=_prefix6, _cd=_code6, _nm=_name6):
-                            import webbrowser, urllib.parse as _up
-                            if _s2["fmt_code"]: url = _s2["fmt_code"].format(prefix=_pf, code=_cd)
-                            elif _s2["fmt_name"] and _nm: url = _s2["fmt_name"].format(name=_up.quote(_nm))
-                            else: return "break"
-                            try: webbrowser.open(url, new=2)
-                            except Exception as _e: print(f"[web❌] {_s2['name']}: {_e}")
-                            return "break"
-                        _lbl = tk.Label(_web_f, text=_s["icon"], bg=row_bg, fg="#888",
-                                        font=("", 12), cursor="hand2", padx=1)
-                        _lbl._skip_row_click = True
-                        _lbl.pack(side=tk.LEFT)
-                        _lbl.bind("<Button-1>", _open_one)
-                        def _hi(e, _l=_lbl, _bg=row_bg): _l.config(bg="#37474F", fg="#FFD54F")
-                        def _lo(e, _l=_lbl, _bg=row_bg): _l.config(bg=_bg, fg="#888")
-                        _lbl.bind("<Enter>", _hi); _lbl.bind("<Leave>", _lo)
-                except Exception as _e_web:
-                    print(f"[web图标❌] {_e_web}")
-
-                # 第3列: 涨跌幅
-                tk.Label(row, text=f"{pct:+.2f}%", bg=row_bg, fg=pct_color,
-                         font=("", 10, "bold"), width=8, anchor="w").pack(side=tk.LEFT, padx=2)
-                # 第4列: 词频徽标 (≥3才显示)
-                if freq >= 3:
-                    fbg = "#FF6F00" if freq >= 10 else "#EF5350" if freq >= 5 else "#FF8A65"
-                    tk.Label(row, text=f"🔥{freq}", bg=fbg, fg="white",
-                             font=("", 9, "bold"), padx=3, pady=0).pack(side=tk.LEFT, padx=2)
-                else:
-                    tk.Label(row, text="  ", bg=row_bg, width=5).pack(side=tk.LEFT, padx=2)
-                # 第5列: 板块逻辑 + 匹配状态
+                pct = item.get("pct", 0); freq = item.get("freq", 0)
+                code = item.get("code", ""); name = item.get("name", "")
+                blk_disp = blk_name if blk_name not in seen_blocks else ""
+                if blk_name not in seen_blocks: seen_blocks.add(blk_name)
+                freq_disp = f"🔥{freq}" if freq >= 3 else ""
                 _stock_arts = item.get("articles", [])
-                # 🆕 兼容 str[] 和 dict[] 两种格式
-                def _art_title(a):
-                    if isinstance(a, dict): return a.get("title", "") or a.get("标题", "")
-                    return str(a) if a else ""
-                _first_art = _art_title(_stock_arts[0]) if _stock_arts else ""
-                _blk_logic = BLOCK_LOGIC.get(blk_name, "")[:32]
+                _art_title = ""
                 if _stock_arts:
-                    # 有爬取文章 → 📰文章标题 | 板块逻辑
-                    _first = _first_art[:28]
-                    _show = f"📰 {_first}  |  {_blk_logic}"
-                    tk.Label(row, text=_show, bg=row_bg, fg="#A5D6A7",
-                             font=("", 9), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
-                elif i == 0:
-                    # 板块首行无爬取文章 → 📰匹配 | 板块逻辑
-                    _m1 = "📰匹配" if freq < 3 else ""
-                    logic_text = f"{_m1}  {_blk_logic}".strip()
-                    tk.Label(row, text=logic_text, bg=row_bg, fg="#B0BEC5",
-                             font=("", 9), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
-                else:
-                    # 非首行无文章 → 📰匹配 | 逻辑简写
-                    _short = f"📰匹配  {_blk_logic[:28]}" if freq < 3 else _blk_logic[:32]
-                    tk.Label(row, text=_short, bg=row_bg, fg="#78909C",
-                             font=("", 8), anchor="w").pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
-                # 🆕 第6列: 技术指标综合信号 (MA + BIAS + MACD + KDJ + 背离)
-                _ma_cache = getattr(self, '_stamp_ma_cache', {}).get(source, {})
-                _ms = _ma_cache.get(item.get("code", ""))
-                if _ms:
-                    def _ma_disp(_a, _u, _d, n):
-                        if _a and _u: return f"🟢{n}↑"
-                        if _a and not _d: return f"🟡{n}→"
-                        return f"🔴{n}↓"
-                    # MA 三行
-                    _m5 = _ma_disp(_ms.get('above_ma5', False), _ms.get('ma5_up', False), _ms.get('ma5_down', False), 5)
-                    _m10 = _ma_disp(_ms.get('above_ma10', False), _ms.get('ma10_up', False), _ms.get('ma10_down', False), 10)
-                    _m20 = _ma_disp(_ms.get('above_ma20', False), _ms.get('ma20_up', False), _ms.get('ma20_down', False), 20)
-                    # BIAS 值
-                    _bias6 = _ms.get('bias6'); _bias12 = _ms.get('bias12'); _bias24 = _ms.get('bias24')
-                    bias_parts = []
-                    if _bias12 is not None:
-                        _b12_c = "#EF5350" if _bias12 > 5 else "#66BB6A" if _bias12 < -5 else "#90CAF9"
-                        bias_parts.append(f"B12:{_bias12:+.1f}%")
-                    if _bias24 is not None: bias_parts.append(f"B24:{_bias24:+.1f}%")
-                    bias_txt = " ".join(bias_parts)
-                    # MACD 金叉死叉
-                    sig_parts = []
-                    if _ms.get('macd_golden'): sig_parts.append("🟣MACD金")
-                    elif _ms.get('macd_death'): sig_parts.append("🔴MACD死")
-                    elif _ms.get('macd_dif_up'): sig_parts.append("🔵DIF↑")
-                    # KDJ
-                    if _ms.get('kdj_golden'): sig_parts.append("🟢KDJ金")
-                    elif _ms.get('kdj_death'): sig_parts.append("🔴KDJ死")
-                    if _ms.get('kdj_overbought'): sig_parts.append("⚠KDJ超买")
-                    elif _ms.get('kdj_oversold'): sig_parts.append("⚠KDJ超卖")
-                    # RSI
-                    _rsi = _ms.get('rsi14')
-                    if _rsi is not None and _ms.get('rsi_overbought'): sig_parts.append("⏫RSI>70")
-                    elif _rsi is not None and _ms.get('rsi_oversold'): sig_parts.append("⏬RSI<30")
-                    # 背离
-                    if _ms.get('divergence_top'): sig_parts.append("🔻顶背离")
-                    if _ms.get('divergence_bottom'): sig_parts.append("🔺底背离")
-                    if _ms.get('ma_zip'): sig_parts.append("⚠粘合变盘")
-                    # 鱼身鱼尾
-                    _fish = ""
-                    if _ms.get('fish_body'): _fish = "🐟鱼身"
-                    elif _ms.get('fish_tail'): _fish = "🐠鱼尾"
-                    # 组装
-                    _ma_line = f"{_m5} {_m10} {_m20}{(' '+_fish) if _fish else ''}"
-                    _sig_line = "  ".join(sig_parts) if sig_parts else ""
-                    # 背景色: 强/中/弱
-                    all_ma_ok = _ms.get('ma5') and _ms.get('ma10') and _ms.get('ma20')
-                    any_break = not _ms.get('above_ma20', False)
-                    if all_ma_ok: _ma_color = "#81C784"
-                    elif any_break: _ma_color = "#EF5350"
-                    else: _ma_color = "#FFA726"
-                    # 第一行: MA + 鱼身鱼尾
-                    tk.Label(row, text=_ma_line, bg=row_bg, fg=_ma_color,
-                             font=("", 9, "bold")).pack(side=tk.RIGHT, padx=(4,2), pady=(0,0))
-                    # 🆕 第二行: BIAS + 信号 + 凯利胜率/盈亏比
-                    sub_parts = []
-                    if bias_txt: sub_parts.append(bias_txt)
-                    if _sig_line: sub_parts.append(_sig_line)
-                    # 凯利预测
-                    _kwr = _ms.get('kelly_win_rate')
-                    _kb = _ms.get('kelly_b')
-                    _kf = _ms.get('kelly_f')
-                    _kg = _ms.get('kelly_grade', '')
-                    _k_ev = _ms.get('kelly_ev', 0)
-                    if _kwr is not None:
-                        _k_txt = f"胜率{_kwr:.0f}%  {_kb:.1f}:1  凯{_kf:.0f}% [{_kg}]"
-                        sub_parts.append(_k_txt)
-                    if sub_parts:
-                        full_sub = "  ".join(sub_parts)
-                        _sub_fg = "#81C784" if _k_ev > 0.15 else "#FFA726" if _k_ev > 0 else "#EF5350"
-                        # 凯利部分单独显示, 带凯❓点击
-                        tk.Label(row, text=full_sub, bg=row_bg, fg=_sub_fg,
-                                 font=("", 8, "bold")).pack(side=tk.RIGHT, padx=(4,2), pady=(0,0))
-                    # 🆕 凯❓按钮 (点击看详情)
-                    if _kwr is not None:
-                        _btn_k = tk.Label(row, text="凯❓", bg="#263238", fg="#FFD54F",
-                                          font=("", 8, "bold"), padx=2, cursor="hand2")
-                        _btn_k.pack(side=tk.RIGHT, padx=2, pady=(0,0))
-                        _btn_k.bind("<Button-1>", lambda e, _c=item.get("code",""), _n=item.get("name",""), _m=_ms:
-                                    self._show_kelly_detail(_c, _n, _m))
-                row._stamp = item
-                row._last_click = {"time": 0}
+                    a = _stock_arts[0]
+                    if isinstance(a, dict): _art_title = a.get("title", "") or a.get("标题", "")
+                    else: _art_title = str(a) if a else ""
+                _blk_logic = BLOCK_LOGIC.get(blk_name, "")[:32]
+                if _art_title: logic_disp = f"📰 {_art_title[:28]} | {_blk_logic}"
+                elif i == 0: logic_disp = f"📰匹配 {_blk_logic}"
+                else: logic_disp = _blk_logic[:32]
+                tags = ("up" if pct >= 0 else "down",)
+                if i == 0: tags += ("blkhead",)
+                origin = item.get("origin", "")
+                if origin in ("taogubaSSR","taoguba详情","jiuyanSSR","jiuyan详情") or "爬取" in origin:
+                    tags += ("crawl",)
+                tv.insert("", "end", values=(blk_disp, name, code, f"{pct:+.2f}%", freq_disp, logic_disp), tags=tags)
 
-                row.bind("<Button-1>", lambda e, it=item, stamp=row, src=source: self._stamp_on_click(e, stamp, it))
-                for c in row.winfo_children():
-                    # 🆕 跳过 web 图标 frame 及其子 Label (有独立 handler)
-                    if getattr(c, "_skip_row_click", False): continue
-                    c.bind("<Button-1>", lambda e, it=item, stamp=row, src=source: self._stamp_on_click(e, stamp, it))
-                    c.bind("<Motion>", lambda e, it=item, src=source: self._show_stamp_hover(e, src, it))
-                    c.bind("<Leave>", lambda e, src=source: self._hide_stamp_hover(src))
+        # 双击 → 打开 K 线图
+        def _tree_double(_evt=None):
+            sel = tv.selection()
+            if not sel: return
+            vals = tv.item(sel[0], "values")
+            c = vals[2] if len(vals) > 2 else ""
+            n = vals[1] if len(vals) > 1 else ""
+            if c and n:
+                try:
+                    from ui.high_low_swing import _quick_open_daily_kline
+                    _quick_open_daily_kline(self.root, c, n)
+                except Exception as _e:
+                    print(f"[邮票格子] 双击K线失败: {_e}", flush=True)
+        tv.bind("<Double-1>", _tree_double)
 
-        # 强制刷新 scrollregion
-        inner.update_idletasks()
-        try:
-            cv = inner.master
-            cv.configure(scrollregion=cv.bbox("all"))
-        except Exception as e:
-            print(f"[邮票格子] scrollregion 更新: {e}", flush=True)
-        print(f"[邮票格子] {source} 渲染完成: {len(rows)} 只, {len(sorted_blocks)} 板块", flush=True)
-        # 释放并发锁 (无论成功失败)
+        print(f"[邮票格子] {source} Treeview渲染: {len(rows)}只, {len(sorted_blocks)}板块", flush=True)
         try: setattr(self, f"_{source}_stamp_running", False)
-        except Exception: pass
+        except: pass
+        return
     def _show_stamp_hover(self, event, source, item):
         """hover 显示详情"""
         import tkinter as tk
