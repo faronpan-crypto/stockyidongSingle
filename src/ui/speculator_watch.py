@@ -1119,6 +1119,17 @@ def _seed_fill_all(win):
         layers, concl = _build_7layer_analysis(ctx)
         _apply_analysis(win, layers, concl)
         print(f"[👁️看盘] 种子秒出: up={seed_up}, date={seed_date}, light={light}", flush=True)
+
+        # 🆕 主线看板种子 — 用 block_ranking 前 3 个板块先填充 (避免白屏)
+        try:
+            block_ranks = ctx.get("block_ranking", [])
+            if block_ranks:
+                seed_mainlines = [(n, max(30.0 + p * 10, 15.0), "种子数据→后台刷新")
+                                   for n, p in block_ranks[:3]]
+                _render_mainline_cards(win, seed_mainlines, None, None)
+                win._block_mode_lbl.config(text="🌱 种子数据 (后台扫描中)", fg="#FFB74D")
+        except Exception:
+            pass
     except Exception as e:
         print(f"[👁️看盘] 种子填充失败 (不影响): {e}")
 
@@ -1159,45 +1170,278 @@ def _load_limitup_dropdown(win):
 
 
 def _build_block_grid(parent, win, col=0):
+    """🔥 主线板块看板 — 动态识别最强主线 + 精髓展示 + 详细按钮 + 列数切换"""
     frm = tk.LabelFrame(parent, bg="#1E1E1E", fg="#FFA726",
-                        font=("", 12, "bold"), padx=4, pady=4)
+                        font=("", 12, "bold"), padx=6, pady=6)
     frm.grid(row=0, column=col, sticky="nsew", padx=3, pady=3)
     parent.grid_columnconfigure(col, weight=1, uniform="watchrow")
     parent.grid_rowconfigure(0, weight=1)
-    _add_title_row(frm, "① 板块十六宫格 (16板块·4×4·⚠️异动>3%)",
-                   "#FFA726", BLOCK_GRID_KNOWLEDGE)
 
-    # 9 格 Canvas (4×4), 增大
-    canvas = tk.Canvas(frm, bg="#1E1E1E", highlightthickness=0, height=380)
-    canvas.pack(fill=tk.BOTH, expand=True)
-    win._block_canvas = canvas
+    # 默认 2 列
+    win._block_cols = tk.IntVar(value=2)
 
-    # ⚠️ 关键: Configure 事件 → 窗口大小变化时重绘
-    # 后台线程第一次 draw 时 winfo_width 可能还很小, 等布局稳定后再重绘
-    def _on_cfg(e):
-        if e.width > 100 and e.height > 100:
-            _draw_block_grid(win)
-    canvas.bind("<Configure>", _on_cfg)
-    # 多次保险触发首次绘制 (100ms / 300ms / 600ms)
-    for delay in (100, 300, 600):
-        canvas.after(delay, lambda: _draw_block_grid(win) if canvas.winfo_width() > 100 else None)
+    # 标题行 (🔥 主线看板 · 实时动态识别)
+    title_bar = tk.Frame(frm, bg="#1E1E1E")
+    title_bar.pack(fill=tk.X, pady=(0, 4))
+    tk.Label(title_bar, text="🔥 主线看板 · 实时动态识别",
+             bg="#1E1E1E", fg="#FFA726", font=("", 12, "bold")).pack(side=tk.LEFT)
+    win._block_mode_lbl = tk.Label(title_bar, text="(加载中...)",
+                                    bg="#1E1E1E", fg="#9E9E9E", font=("", 10))
+    win._block_mode_lbl.pack(side=tk.LEFT, padx=(8, 0))
 
-    win._block_meta = [[name, None, None, True, False, None, []] for name in FIXED_BLOCKS]
-    win._block_cells = []
+    # 🎛️ 列数切换 (默认 2 列)
+    col_box = tk.Frame(title_bar, bg="#1E1E1E")
+    col_box.pack(side=tk.RIGHT, padx=(0, 8))
+    tk.Label(col_box, text="列数:", bg="#1E1E1E", fg="#B0BEC5",
+             font=("", 9)).pack(side=tk.LEFT)
+    _col_btns = {}
 
-    win._block_conflict_lbl = tk.Label(frm, text="正在加载板块数据...",
-                                       bg="#1E1E1E", fg="#E0E0E0",
+    def _switch_cols(n):
+        win._block_cols.set(n)
+        # 更新按钮高亮
+        for _n, _btn in _col_btns.items():
+            _btn.configure(bg="#FFA726" if _n == n else "#37474F",
+                          fg="#1E1E1E" if _n == n else "#ECEFF1")
+        # 重新配置 grid 权重
+        frame = getattr(win, '_block_cards_frame', None)
+        if frame is not None:
+            for _c in range(3):
+                frame.grid_columnconfigure(_c, weight=(1 if _c < n else 0))
+        # 如果已有数据, 重新渲染
+        _redraw = getattr(win, '_block_mainlines_cache', None)
+        if _redraw is not None:
+            _agg_cache = getattr(win, '_block_agg_cache', None)
+            _raw_cache = getattr(win, '_block_raw_cache', None)
+            _render_mainline_cards(win, _redraw, _agg_cache, _raw_cache)
+
+    for cn in (1, 2, 3):
+        _b = tk.Button(col_box, text=f"{cn}", width=2, relief=tk.RAISED,
+                       font=("", 9, "bold"), cursor="hand2",
+                       command=lambda n=cn: _switch_cols(n))
+        _b.pack(side=tk.LEFT, padx=1)
+        _col_btns[cn] = _b
+    _switch_cols(2)  # 默认高亮 2 列
+
+    # 📊 详细按钮 (打开 🔥主线·资金 完整窗口)
+    tk.Button(title_bar, text="📊 详细分析", width=10,
+              bg="#FFA726", fg="#1E1E1E", font=("", 10, "bold"),
+              relief=tk.RAISED, bd=1, cursor="hand2",
+              command=lambda: _open_mainline_detail(win)).pack(side=tk.RIGHT)
+
+    # 主线卡片容器 (N 列 × N 行, 动态填)
+    cards_frame = tk.Frame(frm, bg="#1E1E1E")
+    cards_frame.pack(fill=tk.BOTH, expand=True)
+    for _c in range(3):
+        cards_frame.grid_columnconfigure(_c, weight=(1 if _c < 2 else 0))
+
+    # 冲突/摘要描述 (底部)
+    win._block_conflict_lbl = tk.Label(frm, text="⏳ 点击刷新按钮加载主线数据...",
+                                       bg="#1E1E1E", fg="#B0BEC5",
                                        font=("", 11), wraplength=600, justify=tk.LEFT)
-    win._block_conflict_lbl.pack(fill=tk.X, pady=(2, 0))
+    win._block_conflict_lbl.pack(fill=tk.X, pady=(6, 0))
 
-    win._pulse_cells = {}
+    # 存储卡片引用 (刷新时先清再重填)
+    win._block_cards_frame = cards_frame
+    win._block_cards = []
+    # 缓存最后一次数据 (列数切换时重绘用)
+    win._block_mainlines_cache = None
+    win._block_agg_cache = None
+    win._block_raw_cache = None
+    # 保存原始 meta 兼容旧逻辑 (如有需要)
+    win._block_meta = [[name, None, None, True, False, None, []] for name in FIXED_BLOCKS]
+
+    # 🆕 打开 🔥主线·资金 完整窗口 (复用 tab_builders.py 的逻辑)
+    def _open_mainline_detail(_w=None):
+        try:
+            # ✅ 修复: win._app 才是主程序
+            root = getattr(win, '_app', None) or win.winfo_toplevel()
+            _show = getattr(root, "_show_mainline_capital_dialog", None)
+            if _show:
+                _show()
+            else:
+                messagebox.showinfo("提示", "主线资金窗口未就绪，请确认主程序已启动")
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            messagebox.showerror("错误", f"打开主线分析失败: {e}")
+
+    # 存储到 win 供刷新函数访问
+    win._open_mainline_detail = _open_mainline_detail
+
+
+def _render_mainline_cards(win, mainlines, agg, raw):
+    """渲染主线卡片 — 动态列数 (1/2/3 可切换)"""
+    frame = getattr(win, '_block_cards_frame', None)
+    if frame is None:
+        return
+
+    # 🆕 缓存数据 (列数切换时重绘用)
+    win._block_mainlines_cache = mainlines
+    win._block_agg_cache = agg
+    win._block_raw_cache = raw
+
+    # 🆕 读当前列数
+    try:
+        _cols = int(win._block_cols.get())
+    except Exception:
+        _cols = 2
+    _cols = max(1, min(3, _cols))
+
+    # 清空旧卡片
+    for w in frame.winfo_children():
+        w.destroy()
+    win._block_cards = []
+
+    if not mainlines:
+        tk.Label(frame, text="⏳ 暂无主线数据 (扫描后自动显示)",
+                 bg="#1E1E1E", fg="#78909C", font=("", 11)).grid(row=0, column=0, columnspan=_cols, pady=30)
+        return
+
+    def _grade_fg(score):
+        if score >= 80: return ("A+ 极强", "#FF1744")
+        if score >= 65: return ("A 强", "#FF6D00")
+        if score >= 45: return ("B 中", "#FFD600")
+        return ("C 弱", "#78909C")
+
+    def _make_card(parent, rank, name, score, agg_row, top_stocks):
+        """构建单张主线卡片"""
+        _row = rank // _cols   # 🆕 动态列数
+        _col = rank % _cols
+
+        _card = tk.Frame(parent, bg="#263238", bd=2, relief=tk.RIDGE, padx=6, pady=6)
+        _card.grid(row=_row, column=_col, sticky="nsew", padx=4, pady=4)
+
+        # 评级色
+        grade_text, grade_fg = _grade_fg(score)
+
+        # 标题行: 🔥 #1 电子  A+
+        _head = tk.Frame(_card, bg="#263238")
+        _head.pack(fill=tk.X)
+        tk.Label(_head, text=f"🔥#{rank + 1}", bg="#263238", fg="#FFD54F",
+                 font=("", 10, "bold")).pack(side=tk.LEFT)
+        tk.Label(_head, text=f" {name}", bg="#263238", fg="#FFFFFF",
+                 font=("", 12, "bold")).pack(side=tk.LEFT)
+        tk.Label(_head, text=f"  {grade_text}", bg="#263238", fg=grade_fg,
+                 font=("", 10, "bold")).pack(side=tk.RIGHT)
+
+        if agg_row is not None:
+            _cnt = int(agg_row.get("成分股数", 0))
+            _zd = int(agg_row.get("涨停数", 0))
+            _up5 = int(agg_row.get("超涨5", 0))
+            _up5p = float(agg_row.get("超5占比%", 0))
+            _avg_pct = float(agg_row.get("平均涨跌幅", 0))
+            _fbl = float(agg_row.get("封板率%", 0))
+            _up = int(agg_row.get("上涨数", 0))
+            _dn = int(agg_row.get("下跌数", 0))
+
+            # 指标行
+            tk.Label(_card,
+                     text=f"🎯{_cnt}只  涨{_up}·跌{_dn}  均{_avg_pct:+.2f}%",
+                     bg="#263238", fg="#CFD8DC", font=("", 9)).pack(anchor="w", pady=(4, 0))
+
+            # 核心指标 (大号)
+            _key = tk.Frame(_card, bg="#263238")
+            _key.pack(fill=tk.X, pady=(2, 0))
+            tk.Label(_key, text=f"🚀≥5%:{_up5}({_up5p:.0f}%)",
+                     bg="#263238", fg="#FF8A65", font=("", 10, "bold")).pack(side=tk.LEFT)
+            tk.Label(_key, text=f"  |  涨停:{_zd}  封板{_fbl:.0f}%",
+                     bg="#263238", fg="#FFB74D", font=("", 10, "bold")).pack(side=tk.LEFT)
+
+            # Top 龙头 (涨幅榜前 3)
+            if top_stocks:
+                tk.Label(_card, text="─ 🔥 涨幅榜 TOP ─",
+                         bg="#263238", fg="#90A4AE", font=("", 8)).pack(anchor="w", pady=(4, 0))
+                for ti, stk in enumerate(top_stocks[:3]):
+                    _pct = stk["change_pct"]
+                    _short = stk["name"][:6] if stk["name"] else stk["code"]
+                    _color = "#FF5252" if _pct >= 9.5 else ("#FF8A80" if _pct >= 5 else "#CFD8DC")
+                    _arrow = "🟥" if _pct >= 5 else ""
+                    _line = tk.Frame(_card, bg="#263238")
+                    _line.pack(fill=tk.X)
+                    tk.Label(_line, text=f"  {ti + 1}. {_short}", bg="#263238", fg="#ECEFF1",
+                             font=("", 9)).pack(side=tk.LEFT)
+                    tk.Label(_line, text=f" {_arrow} {_pct:+.2f}%",
+                             bg="#263238", fg=_color,
+                             font=("", 9, "bold")).pack(side=tk.RIGHT)
+
+        # 点击事件 — 打开主线资金详情
+        _card.bind("<Button-1>", lambda e: _open_mainline_detail(win))
+        for child in _card.winfo_children():
+            child.bind("<Button-1>", lambda e: _open_mainline_detail(win))
+            for grand in child.winfo_children():
+                grand.bind("<Button-1>", lambda e: _open_mainline_detail(win))
+
+        win._block_cards.append(_card)
+
+    # ═══ 渲染 3 张主线卡片 ═══
+    for rank, (name, score, reason) in enumerate(mainlines):
+        agg_row = agg[agg["industry"] == name] if agg is not None else None
+        row_data = agg_row.iloc[0] if agg_row is not None and len(agg_row) > 0 else None
+        # 找 top 龙头 (涨幅榜前 3)
+        top_list = []
+        try:
+            from ui.tab_builders import _enhanced_help_dialog  # noqa — 确保已加载
+            # 直接从 raw 取
+            if raw is not None and len(raw) > 0:
+                sub = raw[raw["industry"] == name]
+                if len(sub) > 0:
+                    top3 = sub.nlargest(3, "pct_chg")
+                    for _, r in top3.iterrows():
+                        top_list.append({
+                            "code": str(r["ts_code"]).split(".")[0],
+                            "name": str(r.get("name", "") or "").strip(),
+                            "change_pct": float(r.get("pct_chg", 0) or 0),
+                            "price": float(r.get("close", 0) or 0),
+                        })
+        except Exception:
+            pass
+        _make_card(cards_frame, rank, name, score, row_data, top_list)
+
+    # 底部摘要行
+    _first = mainlines[0] if mainlines else None
+    if _first:
+        _top_name, _top_score, _top_reason = _first
+        _gr, _fg = _grade_fg(_top_score)
+        win._block_conflict_lbl.config(
+            text=f"🔥 当前最强主线: {_top_name} | {_gr} ({_top_score:.0f}分) | {_top_reason}  →  点卡片或📊看详细",
+            fg="#FFD54F"
+        )
+        win._block_mode_lbl.config(text=f"📡 {_gr} 实时监测中", fg="#81C784")
+
+
+def _open_mainline_from_card(win):
+    """从主线卡片点击打开详细窗口"""
+    fn = getattr(win, '_open_mainline_detail', None)
+    if fn: fn()
 
 
 def _refresh_all_blocks(win):
-    """刷新十六宫格 — 新浪实时拿 pct (盘中+盘后), tushare 聚合拿 top5 成分股"""
+    """🔥 刷新主线看板 — 优先用 Tushare 主线识别, 降级用旧逻辑"""
     matched_any = False
 
-    # 🟢 ① 新浪实时 sectors — 拿最新涨跌 pct (盘中秒级 + 盘后也可用)
+    # 🎯 ① 优先: 复用 tab_builders.py 的主线识别 (完整数据链路)
+    try:
+        # ✅ 修复: win._app 才是主程序 (win 是 Toplevel 弹窗)
+        root = getattr(win, '_app', None) or win.winfo_toplevel()
+        _fetch = getattr(root, "_fetch_industry_capital_data", None)
+        _identify = getattr(root, "_identify_mainline", None)
+        if _fetch and _identify:
+            print("[👁️看盘] 🎯 走 Tushare 主线识别链路...")
+            win._block_mode_lbl.config(text="⏳ 扫描主线中...", fg="#FFB74D")
+            win.update_idletasks()
+
+            agg, raw, industries, td = _fetch(token=getattr(root, "ts_token", None))
+            mainlines = _identify(agg, top_n=3)
+
+            if mainlines:
+                _render_mainline_cards(win, mainlines, agg, raw)
+                print(f"[👁️看盘] ✅ 主线识别成功: {[m[0] for m in mainlines]}")
+                matched_any = True
+                return  # 成功就不走后面的兜底了
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        print(f"[👁️看盘] Tushare 主线识别失败 (降级): {e}")
+
+    # 🟢 ② 降级: 旧逻辑 — 新浪实时 + tushare 聚合
     try:
         realtime = _get_sina_realtime()
         sectors = realtime.get("sectors", {}) if realtime else {}
@@ -1205,73 +1449,46 @@ def _refresh_all_blocks(win):
             for i, fix_name in enumerate(FIXED_BLOCKS):
                 val = sectors.get(fix_name)
                 if val is not None:
-                    win._block_meta[i][1] = val  # 实时 pct
+                    win._block_meta[i][1] = val
                     matched_any = True
-            print(f"[👁️看盘] ✅ 新浪 sectors pct ({len([v for v in sectors.values() if v is not None])}/16)")
+            print(f"[👁️看盘] 🟢 新浪 sectors pct ({len([v for v in sectors.values() if v is not None])}/16)")
     except Exception as e:
         print(f"[👁️看盘] 新浪 sectors 失败: {e}")
 
-    # 📅 ② tushare 聚合 — 拿 top5 成分股 + 股票数 (双击K线需要)
     try:
         result = _compute_block_pct_from_cache()
         if result:
             for i, fix_name in enumerate(FIXED_BLOCKS):
                 val = result.get(fix_name)
                 if val:
-                    # pct: 新浪已有就不覆盖 (新浪更实时), 新浪没有才用 tushare
                     if win._block_meta[i][1] is None and val[0] is not None:
                         win._block_meta[i][1] = val[0]
-                    # top5 成分股: 不管新浪有没有, 都用 tushare 填充
-                    win._block_meta[i][5] = val[1]  # 股票数
+                    win._block_meta[i][5] = val[1]
                     win._block_meta[i][6] = val[2] if len(val) > 2 else []
                     matched_any = True
-            if matched_any:
-                print(f"[👁️看盘] ✅ tushare 聚合 top5 成分股 (为双击K线准备)")
     except Exception as e:
         print(f"[👁️看盘] tushare 聚合失败: {e}")
 
-    # ③ 种子兜底
+    # 种子兜底
     if not matched_any:
-        print(f"[👁️看盘] 🌱 九宫格走种子兜底")
         for i, fix_name in enumerate(FIXED_BLOCKS):
             if fix_name in SEED_BLOCK_META:
                 win._block_meta[i][1] = SEED_BLOCK_META[fix_name]["pct"]
             else:
                 win._block_meta[i][1] = None
 
-    # 更新顶栏日期标签 (盘中/收盘不同来源)
-    if _is_trading_hours():
-        realtime = _get_sina_realtime()
-        if realtime and realtime.get("indices"):
-            spot = realtime["indices"]
-            pcts = [v["pct"] for v in spot.values()]
-            mean_pct = sum(pcts) / len(pcts) if pcts else 0
-            win._data_date_lbl.config(
-                text=f"🟢 盘中实时 {datetime.now().strftime('%H:%M')} | "
-                     f"{realtime['trade_date']} | 新浪直连",
-                fg="#81C784" if mean_pct >= 0 else "#EF5350")
-    else:
-        dc = _TUSHARE_DAILY_CACHE.get("data")
-        if dc is not None and len(dc) > 0:
-            trade_dates = sorted(dc["trade_date"].unique())
-            latest = trade_dates[-1]
-            pct_mean = dc["pct_chg"].mean()
-            win._data_date_lbl.config(
-                text=f"📅 {latest} | 收盘均值 {pct_mean:+.2f}% | 涨 {(dc['pct_chg']>0).sum()}/{len(dc)}",
-                fg="#66BB6A" if pct_mean >= 0 else "#EF5350")
-
-    # 脉冲 + 矛盾描述
-    for idx, meta in enumerate(win._block_meta):
-        meta[4] = (meta[1] is not None and abs(meta[1]) >= 3.0)
-
-    pcts_only = [(FIXED_BLOCKS[i], win._block_meta[i][1] or 0) for i in range(len(FIXED_BLOCKS))]
-    pcts_only.sort(key=lambda x: x[1], reverse=True)
-    top2, bot2 = pcts_only[:2], pcts_only[-2:]
-    conflict = f"🔥 主线板块: {' / '.join([x[0] for x in top2])} ({top2[0][1]:+.2f}% {top2[1][1]:+.2f}%)"
-    conflict += f"  |  ⬇️ 压力: {' / '.join([x[0] for x in bot2])} ({bot2[0][1]:+.2f}% {bot2[1][1]:+.2f}%)"
-    win._block_conflict_lbl.config(text=conflict)
-
-    _draw_block_grid(win)
+    # 用旧数据渲染主线卡片 (按涨幅前 3 的板块)
+    try:
+        _sorted = sorted(
+            [(win._block_meta[i][0], win._block_meta[i][1] or 0, i) for i in range(len(FIXED_BLOCKS))],
+            key=lambda x: x[1], reverse=True
+        )
+        top3 = _sorted[:3]
+        fake_mainlines = [(n, max(30.0 + p * 5, 10.0), "新浪实时/种子数据") for n, p, _ in top3]
+        _render_mainline_cards(win, fake_mainlines, None, None)
+        win._block_mode_lbl.config(text="🟡 降级模式 (新浪/种子)", fg="#FFB74D")
+    except Exception as e:
+        print(f"[👁️看盘] 降级渲染失败: {e}")
 
 
 def _draw_block_grid(win):
@@ -3985,10 +4202,30 @@ def _gather_analysis_context(win):
     # 盘中: 优先用新浪实时覆盖 tushare 收盘数据
     if is_intraday and realtime and realtime.get("indices"):
         ctx["trade_date"] = realtime.get("trade_date", datetime.now().strftime("%Y%m%d"))
-        # 用中证1000 作为"全市场情绪代理"的均值
         spot = realtime["indices"]
-        pcts = [v["pct"] for v in spot.values()]
-        ctx["pct_mean"] = round(sum(pcts) / len(pcts), 2) if pcts else 0
+
+        # ✅ 修复 pct_mean: 指数均值 ≠ 个股均值 (指数被权重蓝筹拖累!)
+        # 优先级: ① 板块 pct 均值 (全行业股票均值) → ② tushare daily 缓存 → ③ 指数均值 (兜底)
+        _pct_mean = None
+        # ① 板块均值 (16 个行业板块, 比 4 个指数靠谱)
+        if realtime.get("sectors"):
+            _svals = [v for v in realtime["sectors"].values() if v is not None]
+            if _svals:
+                _pct_mean = round(sum(_svals) / len(_svals), 2)
+                print(f"[👁️看盘] ✅ pct_mean 用板块均值 {_pct_mean} ({len(_svals)} 个板块)")
+        # ② tushare daily 缓存 (如果有)
+        if _pct_mean is None or abs(_pct_mean) > 10:  # 极端值大概率不准
+            daily_cache = _TUSHARE_DAILY_CACHE.get("data")
+            if daily_cache is not None and len(daily_cache) > 0:
+                _pct_mean = round(float(daily_cache["pct_chg"].mean()), 2)
+                print(f"[👁️看盘] ✅ pct_mean 用 tushare daily 缓存 {_pct_mean}")
+        # ③ 兜底: 指数均值 (不推荐, 但总比没有好)
+        if _pct_mean is None:
+            pcts = [v["pct"] for v in spot.values()]
+            _pct_mean = round(sum(pcts) / len(pcts), 2) if pcts else 0
+            print(f"[👁️看盘] ⚠️ pct_mean 兜底用指数均值 {_pct_mean} (不准!)")
+        ctx["pct_mean"] = _pct_mean
+
         # 涨跌比从实时估算
         est_up = realtime.get("estimated_up_count", 2300)
         ctx["up_count"] = est_up

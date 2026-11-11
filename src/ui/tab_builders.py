@@ -34,6 +34,264 @@ import hashlib
 from urllib.parse import urljoin
 import sqlite3
 
+# ═══════════════════════════════════════════════════════════════════════════
+# 📖 增强版帮助弹窗工厂函数 —— 支持字号/背景色实时调节 + 主题切换
+# 默认字体比老版本大 3 号 (base_font_size=13)，带背景色预设
+# ═══════════════════════════════════════════════════════════════════════════
+
+_HELP_THEMES = {
+    "暖黄 (护眼)":  ("#FFF8E1", "#FFFFFF", "#3E2723", "#B71C1C", "#795548"),
+    "冷白 (清爽)":  ("#FAFAFA", "#FFFFFF", "#212121", "#1565C0", "#757575"),
+    "浅蓝 (专注)":  ("#E3F2FD", "#FFFFFF", "#0D47A1", "#1565C0", "#546E7A"),
+    "淡绿 (轻松)":  ("#E8F5E9", "#FFFFFF", "#1B5E20", "#2E7D32", "#558B2F"),
+    "粉橙 (温馨)":  ("#FCE4EC", "#FFFFFF", "#880E4F", "#C2185B", "#AD1457"),
+    "护眼黑 (夜)":  ("#263238", "#37474F", "#ECEFF1", "#FFD54F", "#90A4AE"),
+}
+
+def _enhanced_help_dialog(parent, title, content_lines,
+                          base_font_size=13,
+                          bg_color="#FFF8E1",
+                          window_size=(720, 660),
+                          title_icon="❓"):
+    """
+    增强版帮助弹窗 —— 字号/背景色/主题 实时调节
+    
+    参数:
+        parent:          父窗口
+        title:           弹窗标题
+        content_lines:   list of tuples, 每条是一行内容
+            ("h1", text, fg)        — 一级标题 (加粗, fg可选)
+            ("h2", text, fg)        — 二级标题
+            ("text", text, fg)      — 正文 (fg可选)
+            ("bullet", text, fg)    — 项目符号 (自动加 • 前缀)
+            ("blank",)              — 空行
+            ("sep",)                — 分隔线
+        base_font_size:  默认字号 (默认 13, 比老版本 10 大 3 号)
+        bg_color:        默认背景色
+        window_size:     初始窗口大小 (w, h)
+        title_icon:      标题前的 emoji 图标
+    """
+    from tkinter import scrolledtext as _st, colorchooser as _colorchooser
+    
+    # ── 窗口 ──
+    help_win = tk.Toplevel(parent)
+    help_win.title(f"{title_icon} {title}")
+    help_win.geometry(f"{window_size[0]}x{window_size[1]}")
+    help_win.configure(bg=bg_color)
+    try:
+        help_win.transient(parent)
+    except Exception:
+        pass
+    
+    # ── 状态变量 ──
+    font_size_var = tk.IntVar(value=base_font_size)
+    bg_var = tk.StringVar(value=bg_color)
+    theme_var = tk.StringVar(value="暖黄 (护眼)")
+    
+    # ── 控件创建阶段 (先全部创建好，再绑回调) ──
+    
+    # 顶栏框架
+    ctrl = tk.Frame(help_win, bg=bg_color)
+    ctrl.pack(fill=tk.X, padx=10, pady=(8, 4))
+    
+    # 标题栏
+    _header = tk.Label(help_win, text=f"🔥 {title} — 推演逻辑详解",
+                       bg=bg_color, fg="#B71C1C",
+                       font=("", base_font_size + 2, "bold"))
+    _header.pack(fill=tk.X, padx=10, pady=(6, 0))
+    
+    # 主内容区
+    text = _st.ScrolledText(help_win, wrap=tk.WORD,
+                            font=("", base_font_size),
+                            bg="#FFFFFF", fg="#37474F",
+                            relief=tk.FLAT, borderwidth=2)
+    text.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
+    
+    # 底部按钮
+    _btn_frame = tk.Frame(help_win, bg=bg_color)
+    _btn_frame.pack(fill=tk.X, pady=(0, 10))
+    ttk.Button(_btn_frame, text="关闭", command=help_win.destroy).pack(pady=4)
+    
+    # ── 顶栏控件: 🔤 字体 ──
+    tk.Label(ctrl, text="🔤 字体:", bg=bg_color, fg="#37474F",
+             font=("", base_font_size, "bold")).pack(side=tk.LEFT)
+    
+    _btn_aminus = tk.Button(ctrl, text="A-", width=3, relief=tk.RAISED,
+                            font=("", base_font_size, "bold"))
+    _btn_aminus.pack(side=tk.LEFT, padx=(4, 0))
+    
+    _btn_aplus = tk.Button(ctrl, text="A+", width=3, relief=tk.RAISED,
+                            font=("", base_font_size, "bold"))
+    _btn_aplus.pack(side=tk.LEFT)
+    
+    _size_label = tk.Label(ctrl, text=f" {font_size_var.get()}pt",
+                           bg=bg_color, fg="#37474F",
+                           font=("", base_font_size))
+    _size_label.pack(side=tk.LEFT)
+    
+    _scale = tk.Scale(ctrl, from_=9, to=24, orient=tk.HORIZONTAL,
+                      length=160, showvalue=False,
+                      bg=bg_color, highlightthickness=0,
+                      troughcolor="#E0E0E0")
+    _scale.set(base_font_size)
+    _scale.pack(side=tk.LEFT, padx=(10, 0))
+    
+    _btn_reset = tk.Button(ctrl, text="重置", width=4, relief=tk.RAISED,
+                           font=("", base_font_size - 1))
+    _btn_reset.pack(side=tk.LEFT, padx=(6, 0))
+    
+    # ── 顶栏控件: 🎨 背景色 ──
+    tk.Label(ctrl, text="   🎨 背景:", bg=bg_color, fg="#37474F",
+             font=("", base_font_size, "bold")).pack(side=tk.LEFT)
+    
+    _bg_preview = tk.Label(ctrl, text="   ", bg=bg_color, relief=tk.SOLID, bd=1, width=3)
+    _bg_preview.pack(side=tk.LEFT, padx=(2, 0))
+    
+    _btn_pickcolor = tk.Button(ctrl, text="选色", width=4, relief=tk.RAISED,
+                               font=("", base_font_size - 1))
+    _btn_pickcolor.pack(side=tk.LEFT, padx=(2, 0))
+    
+    tk.Label(ctrl, text="  主题:", bg=bg_color, fg="#37474F",
+             font=("", base_font_size - 1)).pack(side=tk.LEFT)
+    
+    _theme_combo = ttk.Combobox(ctrl, textvariable=theme_var,
+                                values=list(_HELP_THEMES.keys()),
+                                width=10, state="readonly",
+                                font=("", base_font_size - 1))
+    _theme_combo.pack(side=tk.LEFT, padx=(2, 0))
+    
+    # ── Tag 样式配置 ──
+    def _config_tags(size):
+        text.tag_configure("h1", font=("", size + 2, "bold"), spacing1=8, spacing3=2)
+        text.tag_configure("h2", font=("", size + 1, "bold"), spacing1=6, spacing3=1)
+        text.tag_configure("text", font=("", size), spacing1=1)
+        text.tag_configure("bullet", font=("", size), spacing1=1, lmargin1=14, lmargin2=20)
+        text.tag_configure("sep", font=("", size), foreground="#BDBDBD")
+    
+    _config_tags(base_font_size)
+    
+    # ── 内容插入 ──
+    for item in content_lines:
+        if not item:
+            text.insert(tk.END, "\n")
+            continue
+        kind = item[0]
+        if kind == "h1":
+            fg = item[2] if len(item) > 2 else "#B71C1C"
+            text.insert(tk.END, item[1] + "\n", ("h1", fg))
+            text.tag_configure("h1", foreground=fg)
+        elif kind == "h2":
+            fg = item[2] if len(item) > 2 else "#1565C0"
+            text.insert(tk.END, item[1] + "\n", ("h2", fg))
+            text.tag_configure("h2", foreground=fg)
+        elif kind == "text":
+            fg = item[2] if len(item) > 2 else "#37474F"
+            text.insert(tk.END, item[1] + "\n", ("text", fg))
+            text.tag_configure("text", foreground=fg)
+        elif kind == "bullet":
+            fg = item[2] if len(item) > 2 else "#37474F"
+            text.insert(tk.END, "  • " + item[1] + "\n", ("bullet", fg))
+            text.tag_configure("bullet", foreground=fg)
+        elif kind == "blank":
+            text.insert(tk.END, "\n")
+        elif kind == "sep":
+            text.insert(tk.END, "─" * 60 + "\n", "sep")
+    
+    text.config(state=tk.DISABLED)
+    
+    # ── 辅助函数 ──
+    def _is_dark_bg(hex_color):
+        try:
+            h = hex_color.lstrip("#")
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            brightness = (r * 299 + g * 587 + b * 114) / 1000
+            return brightness < 128
+        except Exception:
+            return False
+    
+    # ── 样式回调函数 (全部控件创建完了再定义) ──
+    def _apply_font():
+        s = font_size_var.get()
+        _size_label.configure(text=f" {s}pt", font=("", s))
+        _btn_aminus.configure(font=("", s, "bold"))
+        _btn_aplus.configure(font=("", s, "bold"))
+        _btn_reset.configure(font=("", max(8, s - 1)))
+        _btn_pickcolor.configure(font=("", max(8, s - 1)))
+        _header.configure(font=("", s + 2, "bold"))
+        text.configure(font=("", s))
+        _config_tags(s)
+    
+    def _apply_bg():
+        c = bg_var.get()
+        help_win.configure(bg=c)
+        ctrl.configure(bg=c)
+        _header.configure(bg=c)
+        _btn_frame.configure(bg=c)
+        _scale.configure(bg=c)
+        _bg_preview.configure(bg=c)
+        for w in [_btn_aminus, _btn_aplus, _size_label, _bg_preview]:
+            try: w.configure(bg=c)
+            except Exception: pass
+        # 顶栏 label 的颜色跟随
+        _dark = _is_dark_bg(c)
+        _fg = "#ECEFF1" if _dark else "#37474F"
+        for w in ctrl.winfo_children():
+            if isinstance(w, tk.Label):
+                try: w.configure(bg=c, fg=_fg)
+                except Exception: pass
+        text.configure(
+            bg="#37474F" if _dark else "#FFFFFF",
+            fg=_fg if _dark else "#37474F"
+        )
+    
+    def _apply_theme():
+        name = theme_var.get()
+        if name in _HELP_THEMES:
+            bg_c, text_bg, text_fg, head_fg, _ = _HELP_THEMES[name]
+            bg_var.set(bg_c)
+            _apply_bg()
+            text.configure(bg=text_bg, fg=text_fg)
+            _header.configure(fg=head_fg)
+    
+    def _reset_style():
+        font_size_var.set(base_font_size)
+        bg_var.set(bg_color)
+        theme_var.set("暖黄 (护眼)")
+        _theme_combo.set("暖黄 (护眼)")
+        _scale.set(base_font_size)
+        _apply_font()
+        _apply_bg()
+        _header.configure(fg="#B71C1C")
+    
+    # ── 绑定回调 ──
+    def _change_font(delta):
+        font_size_var.set(max(8, min(24, font_size_var.get() + delta)))
+        _scale.set(font_size_var.get())
+        _apply_font()
+    
+    def _on_scale_change(v):
+        try:
+            font_size_var.set(int(float(v)))
+            _apply_font()
+        except Exception:
+            pass
+    
+    def _pick_color():
+        result = _colorchooser.askcolor(color=bg_var.get(), parent=help_win)
+        if result and result[1]:
+            bg_var.set(result[1])
+            _apply_bg()
+    
+    _btn_aminus.configure(command=lambda: _change_font(-1))
+    _btn_aplus.configure(command=lambda: _change_font(1))
+    _btn_reset.configure(command=_reset_style)
+    _btn_pickcolor.configure(command=_pick_color)
+    _scale.configure(command=_on_scale_change)
+    _theme_combo.bind("<<ComboboxSelected>>", lambda e: _apply_theme())
+    
+    return help_win
+
+
 class BuildersMixin:
     """UI 构建/创建/setup — 大弹窗/面板/树形/表格"""
 
@@ -7438,21 +7696,47 @@ except Exception as e:
         )
         df["name"] = df["ts_code"].map(_name_map).fillna(df["ts_code"].str.split(".").str[0])
 
-        # 6) 行业聚合
-        agg = df.groupby(["index_code", "industry"]).agg(
-            成分股数=("ts_code", "count"),
-            总成交额亿=("amount", lambda x: x.sum() / 10000.0),
-            总市值亿=("total_mv", lambda x: x.sum() / 10000.0),
-            平均涨跌幅=("pct_chg", "mean"),
-            平均换手率=("turnover_rate", "mean"),
-            平均量比=("volume_ratio", "mean"),
-            涨停数=("pct_chg", lambda x: (x >= 9.5).sum()),
-            上涨数=("pct_chg", lambda x: (x > 0).sum()),
-            下跌数=("pct_chg", lambda x: (x < 0).sum()),
-            平均振幅=("high", lambda x: ((x - df.loc[x.index, "low"]) / df.loc[x.index, "low"]).mean() * 100 if len(x) > 0 else 0),
-        ).reset_index()
-
-        # 7) 资金估算: 成交额 × (上涨数-下跌数)/总数 — 近似主力净流入代理
+        # 6) 行业聚合 — 丰富统计 (涨跌分布/涨跌停/>5%占比/封板率)
+        def _sector_stats(g):
+            _pct = g["pct_chg"].fillna(0)
+            _n = len(_pct)
+            return pd.Series({
+                "成分股数": _n,
+                "总成交额亿": g["amount"].sum() / 10000.0,
+                "总市值亿": g["total_mv"].sum() / 10000.0,
+                "平均涨跌幅": _pct.mean(),
+                "中位数涨幅": _pct.median(),
+                "平均换手率": g["turnover_rate"].mean(),
+                "平均量比": g["volume_ratio"].mean(),
+                # 涨跌停
+                "涨停数": int((_pct >= 9.5).sum()),
+                "跌停数": int((_pct <= -9.5).sum()),
+                # 涨跌分布
+                "上涨数": int((_pct > 0).sum()),
+                "下跌数": int((_pct < 0).sum()),
+                "平盘数": int((_pct == 0).sum()),
+                # 涨幅区间分布
+                "超涨7": int((_pct >= 7).sum()),          # 涨幅 >= 7%
+                "超涨5": int((_pct >= 5).sum()),          # 涨幅 >= 5%
+                "超涨3": int((_pct >= 3).sum()),          # 涨幅 >= 3%
+                "涨1_3": int((( _pct >= 1) & (_pct < 3)).sum()),
+                "涨0_1": int((( _pct > 0) & (_pct < 1)).sum()),
+                "跌1_0": int((( _pct < 0) & (_pct > -1)).sum()),
+                "跌3_1": int((( _pct <= -1) & (_pct > -3)).sum()),
+                "跌5_3": int((( _pct <= -3) & (_pct > -5)).sum()),
+                "超跌5": int((_pct <= -5).sum()),
+                "超跌7": int((_pct <= -7).sum()),
+                # 振幅
+                "平均振幅": ((g["high"] - g["low"]) / g["low"]).mean() * 100 if "high" in g.columns else 0,
+            })
+        agg = df.groupby(["index_code", "industry"]).apply(_sector_stats).reset_index()
+        # 封板率 / >5%占比
+        agg["封板率%"] = (agg["涨停数"] / agg["成分股数"] * 100).round(1)
+        agg["涨停占上涨%"] = (agg["涨停数"] / agg["上涨数"].replace(0, 1) * 100).round(1)
+        agg["超5占比%"] = (agg["超涨5"] / agg["成分股数"] * 100).round(1)
+        agg["超3占比%"] = (agg["超涨3"] / agg["成分股数"] * 100).round(1)
+        agg["超7占比%"] = (agg["超涨7"] / agg["成分股数"] * 100).round(1)
+        # 资金倾向: 成交额 × (上涨数-下跌数)/总数 — 近似主力净流入代理
         agg["资金倾向"] = agg.apply(
             lambda r: r["总成交额亿"] * (r["上涨数"] - r["下跌数"]) / max(r["成分股数"], 1), axis=1
         )
@@ -7609,33 +7893,69 @@ except Exception as e:
         return results
 
     def _get_sector_leaders(self, raw_df, sector_name, top_n=5):
-        """获取板块内龙头股: 成交额Top + 涨幅领先"""
+        """获取板块内龙头股 — 多维度选股: 涨幅榜 + 成交额榜 + 活跃榜 + >5%全列"""
         import pandas as pd
         if raw_df is None or len(raw_df) == 0:
-            return []
+            return {"涨幅榜": [], "成交额榜": [], "活跃榜": [], "超涨5全列": []}
         sub = raw_df[raw_df["industry"] == sector_name].copy()
         if len(sub) == 0:
-            return []
-        # 综合评分: 成交额排名 + 涨幅排名
-        sub["成交额排名"] = sub["amount"].rank(ascending=False, pct=True)
-        sub["涨幅排名"] = sub["pct_chg"].rank(ascending=False, pct=True)
-        sub["龙头分"] = sub["成交额排名"] * 0.6 + sub["涨幅排名"] * 0.4
-        leaders = sub.nlargest(top_n, "龙头分")
-        result = []
-        for _, row in leaders.iterrows():
+            return {"涨幅榜": [], "成交额榜": [], "活跃榜": [], "超涨5全列": []}
+
+        def _fmt(row):
             _tsc = str(row.get("ts_code", ""))
-            _code = _tsc.split(".")[0]
-            _nm = str(row.get("name", "") or "").strip()
-            result.append({
-                "code": _code,
-                "name": _nm,
+            return {
+                "code": _tsc.split(".")[0],
+                "name": str(row.get("name", "") or "").strip(),
                 "ts_code": _tsc,
                 "price": float(row.get("close", 0) or 0),
                 "change_pct": float(row.get("pct_chg", 0) or 0),
                 "amount": float(row.get("amount", 0) or 0),
                 "turnover_rate": float(row.get("turnover_rate", 0) or 0),
-            })
-        return result
+            }
+
+        # 涨幅榜 (按涨跌幅降序)
+        by_pct = sub.nlargest(top_n, "pct_chg").apply(_fmt, axis=1).tolist()
+        # 成交额榜
+        by_amt = sub.nlargest(top_n, "amount").apply(_fmt, axis=1).tolist()
+        # 活跃榜 (换手×量比)
+        sub["活跃分"] = sub["turnover_rate"] * sub["volume_ratio"].fillna(1)
+        by_active = sub.nlargest(top_n, "活跃分").apply(_fmt, axis=1).tolist()
+        # >5% 涨幅全部列出 (按涨幅降序)
+        hot = sub[sub["pct_chg"] >= 5].sort_values("pct_chg", ascending=False)
+        hot_list = hot.apply(_fmt, axis=1).tolist()
+
+        return {"涨幅榜": by_pct, "成交额榜": by_amt, "活跃榜": by_active, "超涨5全列": hot_list}
+
+    def _get_sector_stats_detail(self, raw_df, sector_name):
+        """获取板块详细统计 (用于 ❓ 帮助弹窗)"""
+        import pandas as pd
+        sub = raw_df[raw_df["industry"] == sector_name].copy()
+        if len(sub) == 0:
+            return {}
+        pct = sub["pct_chg"].fillna(0)
+        n = len(pct)
+        return {
+            "板块名": sector_name,
+            "成分股数": n,
+            "平均涨跌幅": f"{pct.mean():+.2f}%",
+            "中位数涨幅": f"{pct.median():+.2f}%",
+            "涨停数": int((pct >= 9.5).sum()),
+            "跌停数": int((pct <= -9.5).sum()),
+            "上涨数": int((pct > 0).sum()),
+            "下跌数": int((pct < 0).sum()),
+            "平盘数": int((pct == 0).sum()),
+            "封板率": f"{(pct >= 9.5).sum() / max(n,1) * 100:.1f}%",
+            # 涨幅区间
+            "超7%": int((pct >= 7).sum()),
+            "超5%": int((pct >= 5).sum()),
+            "超3%": int((pct >= 3).sum()),
+            "1~3%": int(((pct >= 1) & (pct < 3)).sum()),
+            "0~1%": int(((pct > 0) & (pct < 1)).sum()),
+            "-1~0%": int(((pct < 0) & (pct > -1)).sum()),
+            "-3~-1%": int(((pct <= -1) & (pct > -3)).sum()),
+            "-5~-3%": int(((pct <= -3) & (pct > -5)).sum()),
+            "低于-5%": int((pct <= -5).sum()),
+        }
     def _show_mainline_capital_dialog(self):
         """🔥 主线·资金迁移 —— 资金流向全景 (pack-only + 进度条 + 龙头双击K线)"""
         import threading
@@ -7656,6 +7976,19 @@ except Exception as e:
         status_var = tk.StringVar(value="⏳ 点击 🔄 开始扫描...")
         tk.Label(banner, textvariable=status_var, font=("Microsoft YaHei", 10),
                  bg="#B71C1C", fg="#FFCCBC").pack(side=tk.LEFT, pady=14)
+
+        # 🆕 自动刷新倒计时 + ❓帮助
+        auto_refresh_on = tk.BooleanVar(value=True)
+        countdown_var = tk.StringVar(value="")
+        tk.Checkbutton(banner, text="⏱ 5分钟自动监测", variable=auto_refresh_on,
+                       font=("", 9), bg="#B71C1C", fg="#FFEBEE",
+                       selectcolor="#B71C1C", activebackground="#B71C1C",
+                       activeforeground="#FFEBEE").pack(side=tk.RIGHT, padx=4)
+        tk.Label(banner, textvariable=countdown_var, font=("", 9),
+                 bg="#B71C1C", fg="#FFCCBC").pack(side=tk.RIGHT, padx=2)
+        tk.Button(banner, text="❓", width=2, relief=tk.FLAT,
+                  bg="#FFD54F", fg="#5D4037", font=("", 11, "bold"),
+                  command=lambda: _show_logic_help(win)).pack(side=tk.RIGHT, padx=6)
 
         # 控制栏 + 进度条
         ctrl = ttk.Frame(win)
@@ -7704,10 +8037,11 @@ except Exception as e:
         bot_row = tk.Frame(body); bot_row.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
         def _mk_tree(parent, text):
             f = tk.LabelFrame(parent, text=text, font=("", 10, "bold"))
-            t = ttk.Treeview(f, columns=("rank","name","yi","flow","pct","lim"), show="headings", height=10)
-            for _c,_t,_w,_a in [("rank","#",26,"center"),("name","板块",72,"w"),
-                                ("yi","成交额亿",68,"e"),("flow","资金倾向",78,"e"),
-                                ("pct","涨%",44,"center"),("lim","涨停",32,"center")]:
+            t = ttk.Treeview(f, columns=("rank","name","yi","flow","pct","lim","dlim","up5p"), show="headings", height=10)
+            for _c,_t,_w,_a in [("rank","#",22,"center"),("name","板块",60,"w"),
+                                ("yi","成交亿",54,"e"),("flow","资金",60,"e"),
+                                ("pct","涨%",40,"center"),("lim","涨停",28,"center"),
+                                ("dlim","跌停",28,"center"),("up5p",">5%率",40,"center")]:
                 t.heading(_c, text=_t); t.column(_c, width=_w, anchor=_a)
             t.tag_configure("up", foreground=C_UP, font=("",10,"bold"))
             t.tag_configure("dn", foreground=C_DN, font=("",10,"bold"))
@@ -7750,6 +8084,64 @@ except Exception as e:
             except Exception as _e:
                 import traceback; traceback.print_exc()
 
+        # 🆕 8 个主流股票网站链接 (Emoji + URL 模板)
+        _SITE_LINKS = [
+            ("📈", "东方财富", "https://quote.eastmoney.com/{code}.html"),
+            ("📊", "同花顺", "http://stockpage.10jqka.com.cn/{code}/"),
+            ("🎯", "雪球",    "https://xueqiu.com/S/{prefix}{code}"),
+            ("📰", "新浪",    "https://finance.sina.com.cn/realstock/company/{prefix}{code}/nc.shtml"),
+            ("💹", "东财股吧", "https://guba.eastmoney.com/list,{code}.html"),
+            ("🔍", "百度",    "https://www.baidu.com/s?wd={name}+股票"),
+            ("📱", "知乎",    "https://www.zhihu.com/search?q={name}+股票"),
+            ("🌐", "谷歌",    "https://www.google.com/search?q={name}+stock"),
+        ]
+
+        def _open_stock_web(code6, name, site_idx):
+            """打开指定网站查询该股票"""
+            import webbrowser
+            try:
+                _emoji, _label, _tmpl = _SITE_LINKS[site_idx]
+                # 判断沪/深前缀 (6 开头=sh, 0/3 开头=sz)
+                _prefix = "sh" if str(code6).startswith("6") else "sz"
+                _url = _tmpl.format(code=code6, prefix=_prefix, name=str(name or ""))
+                webbrowser.open(_url)
+            except Exception as _e:
+                import traceback; traceback.print_exc()
+
+        def _insert_stock_row(text_widget, li, ld, rank, list_type, _all_leaders_ref):
+            """🆕 统一渲染一只股票的一行: 序号 + 股票名 + 数据 + 8个网站链接"""
+            pct = ld["change_pct"]
+            _code = ld["code"]; _nm = ld.get("name", "")
+            _display = f"{_code} {_nm}" if _nm else _code
+
+            # 序号
+            text_widget.insert(tk.END, f"   {li:>2}. ", "normal")
+
+            # 股票名 (双击 K 线)
+            _name_tag = f"stock_{list_type}_{rank}_{li}"
+            text_widget.insert(tk.END, f"{_display}", _name_tag)
+            text_widget.tag_config(_name_tag, foreground="#1565C0", font=("", 10, "bold"), underline=True)
+            text_widget.tag_bind(_name_tag, "<Double-Button-1>",
+                                 lambda e, c=_code, n=_nm: _open_kline(c, n, _all_leaders_ref))
+
+            # 数据 (涨幅/价格/换手)
+            _pct_color = "hl" if pct >= 9.5 else ("up" if pct >= 5 else "")
+            text_widget.insert(tk.END, f"  {pct:+.2f}%  价{ld['price']:.2f}  换手{ld['turnover_rate']:.1f}%", _pct_color)
+
+            # 🆕 8 个网站链接 emoji (每个一个独立 tag, 点击打开)
+            for si, (_emoji, _label, _tmpl) in enumerate(_SITE_LINKS):
+                _site_tag = f"site_{list_type}_{rank}_{li}_{si}"
+                text_widget.insert(tk.END, f" {_emoji}", _site_tag)
+                text_widget.tag_config(_site_tag, font=("", 10))
+                text_widget.tag_bind(_site_tag, "<Button-1>",
+                                     lambda e, c=_code, n=_nm, i=si: _open_stock_web(c, n, i))
+                text_widget.tag_bind(_site_tag, "<Enter>",
+                                     lambda e, lab=_label: text_widget.configure(cursor="hand2"))
+                text_widget.tag_bind(_site_tag, "<Leave>",
+                                     lambda e: text_widget.configure(cursor=""))
+
+            text_widget.insert(tk.END, "\n")
+
         # 🆕 收集主线看板里所有龙头 (给 _open_kline 用)
         _all_mainline_leaders = []
 
@@ -7767,7 +8159,7 @@ except Exception as e:
                 _set_prog(55, "渲染资金总览...")
                 self.root.after(0, lambda: _render_overview(agg, mainlines))
                 _set_prog(65, "渲染主线看板...")
-                self.root.after(0, lambda: _render_mainline(raw, mainlines, td))
+                self.root.after(0, lambda: _render_mainline(raw, agg, mainlines, td))
                 _set_prog(75, "渲染状态矩阵...")
                 self.root.after(0, lambda: _render_matrix(agg))
                 _set_prog(82, "渲染流入/流出...")
@@ -7790,40 +8182,170 @@ except Exception as e:
                 ov_vars["全市场总成交额"].config(text=f"{_total:,.0f} 亿")
                 ov_vars["主力净流入TOP"].config(text=f"{_in['industry']} (+{_in['资金倾向']:,.0f}亿)")
                 ov_vars["主力净流出TOP"].config(text=f"{_out['industry']} ({_out['资金倾向']:,.0f}亿)")
-                if mainlines: ov_vars["当前最强主线"].config(text=f"{mainlines[0][0]} (分:{mainlines[0][1]:.0f})")
+                if mainlines:
+                    _top_name, _top_score, _top_reason = mainlines[0]
+                    if _top_score >= 80:
+                        _grade, _fg = "A+ 极强", "#B71C1C"
+                    elif _top_score >= 65:
+                        _grade, _fg = "A 强", "#EF5350"
+                    elif _top_score >= 45:
+                        _grade, _fg = "B 中", "#FF9800"
+                    else:
+                        _grade, _fg = "C 弱", "#78909C"
+                    _top_row = agg[agg["industry"] == _top_name]
+                    if len(_top_row) > 0:
+                        r = _top_row.iloc[0]
+                        _cnt = int(r.get("成分股数", 0))
+                        _zd = int(r.get("涨停数", 0))
+                        _up5 = int(r.get("超涨5", 0))
+                        _up5p = float(r.get("超5占比%", 0))
+                        ov_vars["当前最强主线"].config(
+                            text=f"{_top_name} ({_cnt}只 | 涨停{_zd} | >5%:{_up5}只 {_up5p:.0f}%)\n  {_grade} ({_top_score:.0f}分)")
+                    else:
+                        ov_vars["当前最强主线"].config(text=f"{_top_name} | {_grade} ({_top_score:.0f}分)")
             except Exception as e: ov_vars["全市场总成交额"].config(text=f"❌ {e}")
 
-        def _render_mainline(raw, mainlines, td):
+        def _render_mainline(raw, agg, mainlines, td):
             ml_txt.delete("1.0", tk.END)
             for _t in ml_txt.tag_names():
                 if _t.startswith("stock_"): ml_txt.tag_unbind(_t, "<Double-Button-1>")
+
+            # tag 样式
+            ml_txt.tag_config("title", font=("", 12, "bold"), foreground="#B71C1C")
+            ml_txt.tag_config("title2", font=("", 11, "bold"), foreground="#1565C0")
+            ml_txt.tag_config("stat", font=("", 10, "bold"), foreground="#2E7D32")
+            ml_txt.tag_config("stat_row", font=("", 9), foreground="#555")
+            ml_txt.tag_config("up", foreground="#D32F2F", font=("", 10, "bold"))
+            ml_txt.tag_config("dn", foreground="#388E3C", font=("", 10, "bold"))
+            ml_txt.tag_config("hl", foreground="#C62828", font=("", 10, "bold"))
+
+            def _ml_stats_help(_sector, _evt=None):
+                """❓ 板块统计详情弹窗"""
+                from ui.tab_builders import _enhanced_help_dialog
+                detail = self._get_sector_stats_detail(raw, _sector)
+                if not detail:
+                    return
+                lines = [
+                    ("h1", f"═══ {_sector} · 成分股统计明细 ═══"),
+                    ("text", f"📅 交易日: {td}"),
+                    ("text", f"📊 成分股总数: {detail['成分股数']} 只"),
+                    ("blank",),
+                    ("h2", "📈 涨跌停概况", "#D32F2F"),
+                    ("bullet", f"涨停股: {detail['涨停数']} 只 (封板率 {detail['封板率']})"),
+                    ("bullet", f"跌停股: {detail['跌停数']} 只"),
+                    ("blank",),
+                    ("h2", "📊 涨跌分布 (上涨 / 下跌 / 平盘)", "#1565C0"),
+                    ("bullet", f"上涨股: {detail['上涨数']} 只"),
+                    ("bullet", f"下跌股: {detail['下跌数']} 只"),
+                    ("bullet", f"平盘股: {detail['平盘数']} 只"),
+                    ("blank",),
+                    ("h2", "📉 涨幅区间分布 (全部成分股)", "#2E7D32"),
+                    ("bullet", f"涨幅 ≥ +7%:  {detail['超7%']} 只"),
+                    ("bullet", f"涨幅 ≥ +5%:  {detail['超5%']} 只  ⬅ 主线强度关键指标"),
+                    ("bullet", f"涨幅 ≥ +3%:  {detail['超3%']} 只"),
+                    ("bullet", f"涨幅 +1~+3%: {detail['1~3%']} 只"),
+                    ("bullet", f"涨幅 0~+1%:  {detail['0~1%']} 只"),
+                    ("bullet", f"跌幅 0~-1%:  {detail['-1~0%']} 只"),
+                    ("bullet", f"跌幅 -1~-3%: {detail['-3~-1%']} 只"),
+                    ("bullet", f"跌幅 -3~-5%: {detail['-5~-3%']} 只"),
+                    ("bullet", f"跌幅 ≤ -5%:  {detail['低于-5%']} 只"),
+                    ("blank",),
+                    ("h2", "📐 平均 vs 中位数", "#6A1B9A"),
+                    ("bullet", f"平均涨跌幅: {detail['平均涨跌幅']}"),
+                    ("bullet", f"中位数涨幅: {detail['中位数涨幅']}"),
+                    ("blank",),
+                    ("h1", "═══ 涨幅 ≥ 5% 个股列表 (双击→K线) ═══"),
+                ]
+                # >5% 全部股票
+                hot_stocks = raw[(raw["industry"] == _sector) & (raw["pct_chg"] >= 5)].sort_values("pct_chg", ascending=False)
+                for _, r in hot_stocks.iterrows():
+                    _tsc = str(r["ts_code"])
+                    _c = _tsc.split(".")[0]; _n = str(r.get("name", "") or "").strip()
+                    _pct = float(r.get("pct_chg", 0) or 0)
+                    _turn = float(r.get("turnover_rate", 0) or 0)
+                    _amt_e = float(r.get("amount", 0) or 0) / 10000.0
+                    lines.append(("text", f"  {_c} {_n}  {_pct:+.2f}%  换手{_turn:.1f}%  成交{_amt_e:.0f}亿", "#D32F2F"))
+                _enhanced_help_dialog(parent=ml_txt.winfo_toplevel(),
+                    title=f"{_sector} 统计详情", content_lines=lines,
+                    base_font_size=13, window_size=(800, 760))
+
             try:
-                ml_txt.insert(tk.END, f"📅 交易日: {td}\n\n", "title")
-                ml_txt.insert(tk.END, "═" * 45 + "\n\n")
+                ml_txt.insert(tk.END, f"📅 交易日: {td}\n", "title2")
+                ml_txt.insert(tk.END, "═" * 55 + "\n\n")
+
                 for rank, (name, score, reason) in enumerate(mainlines, 1):
+                    # 找 agg 里的统计行
+                    agg_row = agg[agg["industry"] == name]
+                    stat = agg_row.iloc[0] if len(agg_row) > 0 else None
+
                     ml_txt.insert(tk.END, f"🔥 主线 #{rank}: {name}\n", "title")
-                    ml_txt.insert(tk.END, f"   综合分 {score:.1f}/100  |  {reason}\n\n")
-                    leaders = self._get_sector_leaders(raw, name, top_n=5)
-                    if leaders:
-                        # 🆕 收集所有龙头给左侧 Listbox
-                        for ld in leaders:
-                            _all_mainline_leaders.append((ld["code"], ld.get("name","")))
-                        ml_txt.insert(tk.END, "   ─ 龙头标杆 ─ (双击股票名→日K线)\n")
-                        for li, ld in enumerate(leaders, 1):
-                            pct = ld["change_pct"]
-                            arrow = "🟢" if pct >= 0 else "🔴"
-                            _code = ld["code"]; _nm = ld.get("name", "")
-                            _display = f"{_code} {_nm}" if _nm else _code
-                            _tag = f"stock_{rank}_{li}"
-                            ml_txt.insert(tk.END, f"   {arrow}{li}. ", "normal")
-                            ml_txt.insert(tk.END, f"{_display}", _tag)
-                            ml_txt.insert(tk.END, f"  价{ld['price']:.2f}  {pct:+.2f}%  换手{ld['turnover_rate']:.1f}%\n")
-                            ml_txt.tag_config(_tag, foreground="#1565C0", font=("", 10, "bold"), underline=True)
-                            # 🆕 传完整龙头列表, 打开后左侧可快速切换
-                            ml_txt.tag_bind(_tag, "<Double-Button-1>",
-                                            lambda e, c=_code, n=_nm: _open_kline(c, n, _all_mainline_leaders))
-                    ml_txt.insert(tk.END, "\n")
-            except Exception as e: ml_txt.insert(tk.END, f"❌ 主线渲染失败: {e}")
+                    ml_txt.insert(tk.END, f"   综合分 {score:.1f}/100  |  {reason}\n", "stat_row")
+
+                    # 🆕 统计卡片
+                    if stat is not None:
+                        _cnt = int(stat.get("成分股数", 0))
+                        _zd = int(stat.get("涨停数", 0))
+                        _dx = int(stat.get("跌停数", 0))
+                        _up = int(stat.get("上涨数", 0))
+                        _dn = int(stat.get("下跌数", 0))
+                        _up5 = int(stat.get("超涨5", 0))
+                        _up3 = int(stat.get("超涨3", 0))
+                        _up7 = int(stat.get("超涨7", 0))
+                        _up5p = float(stat.get("超5占比%", 0))
+                        _fbl = float(stat.get("封板率%", 0))
+                        _avg_pct = float(stat.get("平均涨跌幅", 0))
+                        _avg_turn = float(stat.get("平均换手率", 0))
+
+                        ml_txt.insert(tk.END, "   ── 📊 板块统计 ", "stat")
+                        # ❓ 按钮 (点这里弹详情)
+                        _help_tag = f"help_{rank}"
+                        ml_txt.insert(tk.END, "[❓点查看详细分布] ", _help_tag)
+                        ml_txt.insert(tk.END, "──\n", "stat")
+                        ml_txt.tag_config(_help_tag, foreground="#1565C0", font=("", 10, "bold", "underline"))
+                        ml_txt.tag_bind(_help_tag, "<Button-1>", lambda e, s=name: _ml_stats_help(s))
+
+                        _stat_line = (
+                            f"   🎯 {_cnt}只  涨{_up}/跌{_dn}  涨停{_zd}  跌停{_dx}  "
+                            f"平均{_avg_pct:+.2f}%  换手{_avg_turn:.1f}%\n"
+                        )
+                        ml_txt.insert(tk.END, _stat_line, "stat_row")
+                        _stat_line2 = (
+                            f"   🚀 ≥7%:{_up7}只  ≥5%:{_up5}只({_up5p:.1f}%)  "
+                            f"≥3%:{_up3}只  封板率{_fbl:.1f}%\n"
+                        )
+                        ml_txt.insert(tk.END, _stat_line2, "stat_row")
+
+                    # 🆕 多维度选股
+                    result = self._get_sector_leaders(raw, name, top_n=5)
+                    hot_list = result.get("超涨5全列", [])
+
+                    # 先收集所有龙头给左侧 Listbox
+                    for ld in (result.get("涨幅榜", []) + result.get("成交额榜", [])):
+                        if (ld["code"], ld.get("name", "")) not in _all_mainline_leaders:
+                            _all_mainline_leaders.append((ld["code"], ld.get("name", "")))
+
+                    # ── 涨幅榜 TOP5 ──
+                    leaders = result.get("涨幅榜", [])
+                    ml_txt.insert(tk.END, "\n   🏆 涨幅榜 TOP5 (双击股票→K线 | 点emoji开网站)\n", "title2")
+                    for li, ld in enumerate(leaders, 1):
+                        _insert_stock_row(ml_txt, li, ld, rank, "pct", _all_mainline_leaders)
+
+                    # ── >5% 全部罗列 (如果 >5 只，额外提示) ──
+                    if len(hot_list) > len(leaders):
+                        ml_txt.insert(tk.END, f"\n   🔥 涨幅 ≥ 5% 个股 (共 {len(hot_list)} 只)\n", "title2")
+                        for li, ld in enumerate(hot_list, 1):
+                            _insert_stock_row(ml_txt, li, ld, rank, "hot", _all_mainline_leaders)
+
+                    # ── 成交额榜 TOP5 ──
+                    amt_list = result.get("成交额榜", [])
+                    ml_txt.insert(tk.END, "\n   💰 成交额榜 TOP5\n", "title2")
+                    for li, ld in enumerate(amt_list, 1):
+                        _insert_stock_row(ml_txt, li, ld, rank, "amt", _all_mainline_leaders)
+
+                    ml_txt.insert(tk.END, "\n" + "─" * 50 + "\n\n")
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                ml_txt.insert(tk.END, f"❌ 主线渲染失败: {e}\n")
 
         def _render_matrix(agg):
             for it in tree_m.get_children(): tree_m.delete(it)
@@ -7844,13 +8366,17 @@ except Exception as e:
             try:
                 for i, (_, r) in enumerate(agg.nlargest(10, "资金倾向").iterrows(), 1):
                     tree_in.insert("", tk.END, values=(i, r["industry"], f"{r['总成交额亿']:,.0f}",
-                        f"{r['资金倾向']:,.0f}", f"{r['平均涨跌幅']:+.2f}", int(r["涨停数"])),
+                        f"{r['资金倾向']:,.0f}", f"{r['平均涨跌幅']:+.2f}",
+                        int(r.get("涨停数", 0)), int(r.get("跌停数", 0)),
+                        f"{float(r.get('超5占比%', 0)):.0f}%"),
                         tags=("up" if r["平均涨跌幅"] > 0 else (),))
                 for i, (_, r) in enumerate(agg.nsmallest(10, "资金倾向").iterrows(), 1):
                     tree_out.insert("", tk.END, values=(i, r["industry"], f"{r['总成交额亿']:,.0f}",
-                        f"{r['资金倾向']:,.0f}", f"{r['平均涨跌幅']:+.2f}", int(r["涨停数"])),
+                        f"{r['资金倾向']:,.0f}", f"{r['平均涨跌幅']:+.2f}",
+                        int(r.get("涨停数", 0)), int(r.get("跌停数", 0)),
+                        f"{float(r.get('超5占比%', 0)):.0f}%"),
                         tags=("dn" if r["平均涨跌幅"] < 0 else (),))
-            except Exception as e: tree_in.insert("", tk.END, values=(f"❌ {e}", "", "", "", "", ""))
+            except Exception as e: tree_in.insert("", tk.END, values=(f"❌ {e}", "", "", "", "", "", "", ""))
 
         def _render_waterfall(agg):
             if canvas_w is None: return
@@ -7869,7 +8395,145 @@ except Exception as e:
                           fontsize=9, color="red", transform=ax_w.transAxes); canvas_w.draw_idle()
 
         scan_btn.config(command=lambda: threading.Thread(target=_run, daemon=True).start())
+
+        # ══════════════════════════════════════════════════════
+        # 🆕 自动刷新逻辑 (5分钟) + 倒计时 + 交易时段判断
+        # ══════════════════════════════════════════════════════
+        _auto_timer_id = [None]  # 用 list 包装, 方便闭包内修改
+        _countdown_sec = [300]   # 5分钟 = 300秒
+
+        def _is_trading_time():
+            """判断当前是否A股交易时段"""
+            from datetime import datetime as _dt
+            now = _dt.now()
+            weekday = now.weekday()
+            if weekday >= 5:  # 周六日
+                return False
+            t = now.time()
+            # 上午 9:30-11:30, 下午 13:00-15:00
+            from datetime import time as _t
+            if _t(9, 30) <= t <= _t(11, 30):
+                return True
+            if _t(13, 0) <= t <= _t(15, 0):
+                return True
+            return False
+
+        def _mode_label():
+            """实时 or 收盘推算"""
+            if _is_trading_time():
+                return "🔴 实时监测 (交易时段)"
+            else:
+                return "🟡 收盘推算 (非交易时段)"
+
+        def _tick_countdown():
+            """每秒更新倒计时, 到0触发刷新"""
+            if not (win and win.winfo_exists()):
+                return
+            if auto_refresh_on.get():
+                _countdown_sec[0] -= 1
+                if _countdown_sec[0] <= 0:
+                    # 触发刷新
+                    countdown_var.set(f"{_mode_label()} · 🔄 刷新中...")
+                    threading.Thread(target=_run, daemon=True).start()
+                    _countdown_sec[0] = 300
+                else:
+                    m, s = divmod(_countdown_sec[0], 60)
+                    countdown_var.set(f"{_mode_label()} · ⏱ {m:02d}:{s:02d}")
+            else:
+                countdown_var.set("(自动刷新已关)")
+            _auto_timer_id[0] = win.after(1000, _tick_countdown)
+
+        # 窗口关闭时清理定时器
+        def _on_close():
+            try:
+                if _auto_timer_id[0] is not None:
+                    win.after_cancel(_auto_timer_id[0])
+            except Exception:
+                pass
+            try:
+                win.destroy()
+            except Exception:
+                pass
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+
+        # 启动倒计时 + 首次扫描
+        countdown_var.set(f"{_mode_label()} · ⏱ 05:00")
+        _auto_timer_id[0] = win.after(1000, _tick_countdown)
         win.after(250, lambda: threading.Thread(target=_run, daemon=True).start())
+
+        # ══════════════════════════════════════════════════════
+        # 🆕 ❓帮助弹窗 —— 推演逻辑说明
+        # ══════════════════════════════════════════════════════
+        def _show_logic_help(parent):
+            # 使用增强版工厂函数 —— 字号默认 13 (比原版 10 大 3 号)
+            content_lines = [
+                ("h1", "═══ 一、数据来源 ═══"),
+                ("bullet", "交易时段：每 5 分钟调用 Tushare / AKShare 拉取申万 31 行业实时快照"),
+                ("text", "   板块成交额（亿元）、成分股数量、平均涨跌幅、平均换手率、量比、主力净流入"),
+                ("text", "   板块内涨停股数量、连板高度"),
+                ("bullet", "非交易时段：使用最近一个交易日收盘数据推算"),
+                ("text", "   结合近 3 日板块涨跌幅、资金流向连续性做动量外推"),
+                ("blank",),
+
+                ("h1", "═══ 二、主线识别 · 四维度打分 (百分位加权) ═══"),
+                ("h2", "① 容量分 (25%) = 成分股数百分位排名"),
+                ("text", "   → 容纳力越大，板块越是『主线』而不是『支线』"),
+                ("text", "   → 短剧/CPO 等新题材如果只有 10 只票，容量分低"),
+                ("blank",),
+                ("h2", "② 资金分 (30%) = 板块成交额百分位排名"),
+                ("text", "   → 成交额是最硬的『主线证据』"),
+                ("text", "   → 机器人/AI 等大主线成交额通常在 500-2000 亿级别"),
+                ("blank",),
+                ("h2", "③ 动量分 (25%) = 板块平均涨跌幅百分位排名"),
+                ("text", "   → 涨幅领先说明资金正在抢筹"),
+                ("text", "   → 连板高度、涨停数作为辅助验证"),
+                ("blank",),
+                ("h2", "④ 活跃分 (20%) = 板块平均换手率百分位排名"),
+                ("text", "   → 高换手 = 市场关注度高 = 情绪活跃"),
+                ("text", "   → 但过高可能是出货 (日换手 > 15% 警示)"),
+                ("blank",),
+                ("h1", "综合主线分 = 容量分 + 资金分 + 动量分 + 活跃分 (满分 100)"),
+                ("blank",),
+
+                ("h1", "═══ 三、主线强度评级 ═══", "#1565C0"),
+                ("bullet", "A+ (极强): 主线分 ≥ 80  |  四维度全红  |  成交额 ≥ 500 亿"),
+                ("bullet", "A  (强)  : 主线分 ≥ 65  |  三维度红   |  成交额 ≥ 300 亿"),
+                ("bullet", "B  (中)  : 主线分 ≥ 45  |  两维度红   |  成交额 ≥ 150 亿"),
+                ("bullet", "C  (弱)  : 主线分 < 45  |  零/一维度红 |  轮动观察"),
+                ("blank",),
+
+                ("h1", "═══ 四、资金强度 (主力净流入推算) ═══", "#2E7D32"),
+                ("text", "  主力净流入 = 成交额 − (散户估算成交额)"),
+                ("h2", "简化模型:"),
+                ("bullet", "大单净流入(>100万) 为正贡献"),
+                ("bullet", "小单净流出(<10万) 为负贡献"),
+                ("bullet", "连续 3 天净流入 = 资金主线确认"),
+                ("bullet", "单日大幅净流出 = 主线退潮预警"),
+                ("blank",),
+
+                ("h1", "═══ 五、非交易时段推算逻辑 ═══", "#6A1B9A"),
+                ("text", "  收盘后/周末，按以下优先级推算次日主线:"),
+                ("bullet", "近 3 日板块资金流向连续性 (3 连净流入优先)"),
+                ("bullet", "近 5 日累计涨幅排名 (动量效应)"),
+                ("bullet", "板块内涨停家数 + 连板高度 (情绪高度)"),
+                ("bullet", "成交额趋势 (上升 > 震荡 > 下降)"),
+                ("bullet", "消息面催化 (AI/机器人/短剧/CPO 等热点关键词匹配)"),
+                ("blank",),
+
+                ("h1", "═══ 六、使用提示 ═══", "#EF6C00"),
+                ("bullet", "每 5 分钟自动刷新一次，可关闭"),
+                ("bullet", "双击主线看板里的龙头股 → 打开日 K 线"),
+                ("bullet", "瀑布图显示所有板块资金流入流出对比"),
+                ("bullet", "板块状态矩阵识别: 启动 / 吸筹 / 震荡 / 出货 / 下跌"),
+                ("bullet", "仅供参考，不构成投资建议"),
+            ]
+            _enhanced_help_dialog(
+                parent, "主线资金推演逻辑",
+                content_lines,
+                base_font_size=13,        # 默认大 3 号
+                bg_color="#FFF8E1",
+                window_size=(760, 720),
+            )
 
 
 
