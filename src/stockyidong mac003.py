@@ -487,6 +487,17 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             print(f"[🦊家教❌] {e}", flush=True)
             _tb.print_exc()
 
+    def _show_top_gurus_dialog(self):
+        """👥 大V榜 — A股交易体系总览（4路径对比 + 链接 + 股性 + 情绪周期）"""
+        print("[👥大V榜] 启动...", flush=True)
+        try:
+            from ui.top_gurus import _show_top_gurus_dialog as _stg
+            _stg(self)
+        except Exception as e:
+            import traceback as _tb
+            print(f"[👥大V榜❌] {e}", flush=True)
+            _tb.print_exc()
+
     def _attach_article_btn(self, dlg, ctx=None, focus_layer=None):
         """🔧 通用: 给任意弹窗底部加 📝 红色文章生成按钮
         
@@ -4818,8 +4829,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("🔥主线·资金", 10, self._show_mainline_capital_dialog),
             ("🧊冰点修复", 9, self._show_emotion_freeze),
             ("🎯高抛低吸", 9, self._show_high_low_swing),
-            ("🏛️美联储", 9, self._show_fed_analysis_dialog),
-            ("🌏纳指套利", 10, self._show_etf_holiday_dialog),
+            ("👥大V榜", 8, self._show_top_gurus_dialog),
             ("🌍全球资产", 8, self._show_global_assets_dialog),
             ("🔧基础信息", 10, self._show_base_info_dialog),
         ]
@@ -5013,6 +5023,12 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                    command=self.show_batch_stock_analyzer, width=14).pack(**_tools_pad)
         ttk.Button(tools_row_d, text="🐉 龙虎榜",
                    command=self.show_top_list_dialog, width=14).pack(**_tools_pad)
+        # 宏观/全球类 (从 toolbar_row1 迁入)
+        tools_row_e = ttk.Frame(tools_frame); tools_row_e.pack(fill=tk.X, pady=2)
+        ttk.Button(tools_row_e, text="🏛️ 美联储",
+                   command=self._show_fed_analysis_dialog, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_e, text="🌏 纳指套利",
+                   command=self._show_etf_holiday_dialog, width=14).pack(**_tools_pad)
         # 将咨询分析、投资、系统、赌博、交易体系、交割单分析按钮移到交易标签页
         trading_buttons_frame = ttk.LabelFrame(trading_tab, text="交易功能", padding=3)
         trading_buttons_frame.pack(fill=tk.X, expand=False, pady=2)

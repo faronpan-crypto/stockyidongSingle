@@ -8806,14 +8806,28 @@ class DapanMixin:
                         status_var.set(f"❌ 加载失败: {msg[1]}")
                     elif msg[0] == "predict_done":
                         _result_store["predict"] = msg[1]
-                        _render_predict(msg[1])
+                        try:
+                            _render_predict(msg[1])
+                        except Exception as _re:
+                            import traceback; traceback.print_exc()
+                            _clear_body()
+                            tk.Label(body, text=f"❌ 渲染异常: {_re}",
+                                     bg="#1a1a2e", fg="#EF5350",
+                                     font=("", 12)).pack(pady=40)
                         refresh_btn.config(state="normal")
                         status_var.set("✅ 推断完成")
                     elif msg[0] == "predict_error":
                         status_var.set(f"❌ 推断失败: {msg[1]}")
                         refresh_btn.config(state="normal")
                     elif msg[0] == "review_done":
-                        _render_review(msg[1])
+                        try:
+                            _render_review(msg[1])
+                        except Exception as _re:
+                            import traceback; traceback.print_exc()
+                            _clear_body()
+                            tk.Label(body, text=f"❌ 渲染异常: {_re}",
+                                     bg="#1a1a2e", fg="#EF5350",
+                                     font=("", 12)).pack(pady=40)
                         review_btn.config(state="normal")
                         status_var.set("✅ 回看完成")
                     elif msg[0] == "review_error":

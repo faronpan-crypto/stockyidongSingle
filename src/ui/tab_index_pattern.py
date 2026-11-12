@@ -3,14 +3,20 @@
 📈 指数日走势形态统计工具
 用途: 统计指数/ETF/个股 近 N 天 每日的高开高走/高开低走/低开高走/低开低走 分布
       → 指导做 T 时机
-数据源: AKShare (东方财富)
+数据源: AKShare (东方财富 + 新浪兜底)
 """
 import re
+import time as _time
 import threading
 import queue
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 from collections import Counter
+
+# ── 🆕 快速内存缓存 (避免重复拉 K 线) ──
+_KLINE_CACHE = {}          # (code, kind, days) → (df, timestamp)
+_KLINE_CACHE_TTL = 300     # 5 分钟过期
+_CN_MARKETDATA_FAIL = False  # 🆕 标记东方财富 index_zh_a_hist 是否已失败(一直挂则跳过)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -131,7 +137,7 @@ def classify_daily_pattern(prev_close, open_p, close_p, gap_threshold=0.3):
 
 def fetch_kline(code, kind="index", days=180):
     """
-    拉 K 线数据
+    拉 K 线数据 (带内存缓存 5 分钟)
 
     Returns:
         DataFrame with columns: date, open, high, low, close, volume, prev_close, gap_pct, body_pct, pattern
@@ -142,19 +148,32 @@ def fetch_kline(code, kind="index", days=180):
     import numpy as np
     from datetime import datetime, timedelta
 
+    # ── 🆕 内存缓存检查 ──
+    cache_key = (code, kind, days)
+    now = _time.time()
+    if cache_key in _KLINE_CACHE:
+        _df, _ts = _KLINE_CACHE[cache_key]
+        if now - _ts < _KLINE_CACHE_TTL and _df is not None:
+            print(f"[fetch_kline] 🆕 命中缓存 {code}: {len(_df)} 行")
+            return _df.copy()
+
     end = datetime.now().strftime("%Y%m%d")
     start = (datetime.now() - timedelta(days=days * 2)).strftime("%Y%m%d")
+
+    global _CN_MARKETDATA_FAIL
 
     try:
         if kind == "index":
             df = None
-            # 路径1: akshare index_zh_a_hist (东方财富)
-            try:
-                df = ak.index_zh_a_hist(symbol=code, period="daily",
-                                        start_date=start, end_date=end)
-            except Exception as _e1:
-                print(f"[fetch_kline] index_zh_a_hist 失败: {_e1.__class__.__name__}")
-                df = None
+            # 路径1: akshare index_zh_a_hist (东方财富) — 如果之前已失败则直接跳过
+            if not _CN_MARKETDATA_FAIL:
+                try:
+                    df = ak.index_zh_a_hist(symbol=code, period="daily",
+                                            start_date=start, end_date=end)
+                except Exception as _e1:
+                    print(f"[fetch_kline] index_zh_a_hist 失败: {_e1.__class__.__name__} → 标记跳过")
+                    _CN_MARKETDATA_FAIL = True
+                    df = None
             # 路径2: 🆕 新浪 stock_zh_index_daily (兜底, 99% 稳定)
             if df is None or len(df) == 0:
                 try:
@@ -249,7 +268,11 @@ def fetch_kline(code, kind="index", days=180):
     df["pattern"] = df.apply(
         lambda r: classify_daily_pattern(r["prev_close"], r["open"], r["close"]), axis=1)
 
-    return df.tail(days).reset_index(drop=True)
+    _final = df.tail(days).reset_index(drop=True)
+    # 🆕 写入缓存
+    _KLINE_CACHE[cache_key] = (_final.copy(), _time.time())
+    print(f"[fetch_kline] ✅ 缓存写入 {code}: {len(_final)} 行")
+    return _final
 
 
 def analyze_pattern_stats(df, windows=[5, 10, 20, 30, 60], gap_threshold=0.3):
