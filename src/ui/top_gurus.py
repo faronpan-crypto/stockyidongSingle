@@ -31,11 +31,10 @@ def _open(url):
         pass
 
 
-def _link_label(parent, text, url, row=0, col=0):
-    """蓝色可点击链接 Label"""
+def _link_label(parent, text, url):
+    """蓝色可点击链接 Label（不布局，由调用方 pack/grid）"""
     lbl = _tk.Label(parent, text=text, fg=_BLUE, bg=parent["bg"],
                     font=("TkDefaultFont", 10, "underline"), cursor="hand2")
-    lbl.grid(row=row, column=col, sticky="w", padx=4, pady=2)
     lbl.bind("<Button-1>", lambda e, u=url: _open(u))
     lbl.bind("<Enter>", lambda e: lbl.config(fg="#FF8A65"))
     lbl.bind("<Leave>", lambda e: lbl.config(fg=_BLUE))
@@ -44,12 +43,18 @@ def _link_label(parent, text, url, row=0, col=0):
 
 # ── 涨停/跌停阈值 ──
 def _limit_pct(code):
-    """主板±10%，科创/创业±20%，北交所±30%"""
+    """主板±10%，科创/创业±20%，北交所±30%（先 strip sh/sz/bj 前缀）"""
     try:
-        c = str(code).zfill(6)
+        c = str(code).strip()
+        # strip 交易所前缀
+        for p in ("sh", "sz", "bj", "kc", "cy"):
+            if c.startswith(p):
+                c = c[len(p):]
+                break
+        c = c.zfill(6)
         if c.startswith(("30", "68")):
             return 20.0
-        if c.startswith(("4", "8")):
+        if c.startswith(("4", "8", "9")):
             return 30.0
     except Exception:
         pass
@@ -57,7 +62,7 @@ def _limit_pct(code):
 
 
 def _fetch_spot():
-    """📊 全 A 实时行情：先试东财全量，失败则分市场拉（沪/深/科创/创业/北交）兜底"""
+    """📊 全 A 实时行情：东财全量 → 分市场 → 新浪兜底，60 秒缓存"""
     now = _time.time()
     df, ts = _CACHE["spot"]
     if df is not None and (now - ts) < _CACHE_TTL:
@@ -65,33 +70,44 @@ def _fetch_spot():
     try:
         import akshare as _ak
         import pandas as _pd
-        # 路径1: 全量接口（快但偶发断连）
+        dfs = []
+        # 路径1: 东财全量
         try:
-            df = _ak.stock_zh_a_spot_em()
-            if df is not None and not df.empty and len(df) > 3000:
-                _CACHE["spot"] = (df, now)
-                return df
+            part = _ak.stock_zh_a_spot_em()
+            if part is not None and not part.empty and len(part) > 3000:
+                dfs.append(part)
         except Exception:
             pass
-        # 路径2: 分市场拉（稳）
-        dfs = []
-        for fn in [_ak.stock_sh_a_spot_em, _ak.stock_sz_a_spot_em,
-                   _ak.stock_kc_a_spot_em, _ak.stock_cy_a_spot_em,
-                   _ak.stock_bj_a_spot_em]:
+        # 路径2: 东财分市场
+        if not dfs:
+            for fn in [_ak.stock_sh_a_spot_em, _ak.stock_sz_a_spot_em,
+                       _ak.stock_kc_a_spot_em, _ak.stock_cy_a_spot_em,
+                       _ak.stock_bj_a_spot_em]:
+                try:
+                    part = fn()
+                    if part is not None and not part.empty:
+                        dfs.append(part)
+                except Exception:
+                    continue
+        # 路径3: 新浪兜底
+        if not dfs:
             try:
-                part = fn()
+                part = _ak.stock_zh_a_spot()
                 if part is not None and not part.empty:
+                    # 新浪列名不同，统一处理
                     dfs.append(part)
-            except Exception:
-                continue
+                    print(f"[👥大V榜] 新浪兜底成功: {len(part)} 只")
+            except Exception as e:
+                print(f"[👥大V榜] 新浪也失败: {e}")
+
         if dfs:
             df = _pd.concat(dfs, ignore_index=True)
             _CACHE["spot"] = (df, now)
             return df
-        print("[👥大V榜❌] 东财全量+分市场均失败")
+        print("[👥大V榜❌] 所有行情源均失败")
         return None
     except Exception as e:
-        print(f"[👥大V榜❌] 拉行情失败: {e}")
+        print(f"[👥大V榜❌] 拉行情异常: {e}")
         return None
 
 
@@ -118,30 +134,30 @@ def _analyze_market(spot_df):
     返回 dict:
       up_count, down_count, flat_count, limit_up, limit_down, tian_de_ban
       total_amount_yi, avg_change, rise_pct
-      style: "大盘价值" / "小盘成长" / "均衡"
-      cycle_stage: "冰点试错" / "主升发酵" / "高潮一致" / "退潮主跌"
-      cycle_score (0-100)
+      style: "大盘价值" / "小盘成长" / "均衡" / "数据不足"
+      cycle_stage, cycle_score (0-100), position
     """
     if spot_df is None or spot_df.empty:
         return None
     df = spot_df.copy()
-    # 清洗
-    for col in ["涨跌幅", "成交额", "换手率", "振幅", "流通市值", "总市值"]:
-        if col in df.columns:
+    HAS = {c: c in df.columns for c in
+           ["涨跌幅", "成交额", "换手率", "振幅", "流通市值", "总市值", "代码"]}
+
+    # 数值化
+    for col in ["涨跌幅", "成交额", "换手率", "振幅", "流通市值", "总市值", "成交量"]:
+        if HAS.get(col):
             df[col] = _pd_to_num(df[col])
 
     total = len(df)
-    up = int((df["涨跌幅"] > 0).sum())
-    down = int((df["涨跌幅"] < 0).sum())
+    up = int((df["涨跌幅"] > 0).sum()) if HAS["涨跌幅"] else 0
+    down = int((df["涨跌幅"] < 0).sum()) if HAS["涨跌幅"] else 0
     flat = total - up - down
     rise_pct = round(up / total * 100, 1) if total else 0
-    avg_change = round(float(df["涨跌幅"].mean()), 2) if "涨跌幅" in df.columns else 0
+    avg_change = round(float(df["涨跌幅"].mean()), 2) if HAS["涨跌幅"] else 0
 
     # 涨停/跌停（逐股算阈值）
-    limit_up = 0
-    limit_down = 0
-    tian_de_ban = 0  # 天地板（涨停→跌停）
-    if "代码" in df.columns and "涨跌幅" in df.columns:
+    limit_up = limit_down = tian_de_ban = 0
+    if HAS["代码"] and HAS["涨跌幅"]:
         for _, row in df[["代码", "涨跌幅"]].dropna().iterrows():
             pct = _limit_pct(row["代码"])
             ch = row["涨跌幅"]
@@ -149,19 +165,35 @@ def _analyze_market(spot_df):
                 limit_up += 1
             elif ch <= -pct + 0.3:
                 limit_down += 1
-            if ch <= -9.5:  # 近似天地板（日内从涨停到跌停）
+            if ch <= -9.5:
                 tian_de_ban += 1
 
     # 成交额（亿）
-    total_amount_yi = round(float(df["成交额"].sum()) / 1e8, 1) if "成交额" in df.columns else 0
+    total_amount_yi = round(float(df["成交额"].sum()) / 1e8, 1) if HAS["成交额"] else 0
 
-    # ── 风格判断：大盘 vs 小盘 ──
-    style = "均衡"
-    if "流通市值" in df.columns:
-        df_m = df[df["流通市值"] > 0].copy()
+    # ── 风格判断：大盘 vs 小盘（有市值数据才判断） ──
+    style = "📊 数据不足"
+    mv_col = "流通市值" if HAS.get("流通市值") else ("总市值" if HAS.get("总市值") else None)
+    if mv_col and HAS["涨跌幅"]:
+        df_m = df[df[mv_col] > 0].copy()
         if len(df_m) > 100:
-            top20 = df_m.nlargest(int(len(df_m) * 0.2), "流通市值")["涨跌幅"].mean()
-            bot20 = df_m.nsmallest(int(len(df_m) * 0.2), "流通市值")["涨跌幅"].mean()
+            n_top = max(1, int(len(df_m) * 0.2))
+            top20 = df_m.nlargest(n_top, mv_col)["涨跌幅"].mean()
+            bot20 = df_m.nsmallest(n_top, mv_col)["涨跌幅"].mean()
+            diff = top20 - bot20
+            if diff > 0.5:
+                style = "🐘 大盘价值"
+            elif diff < -0.5:
+                style = "🚀 小盘成长"
+            else:
+                style = "⚖️ 均衡"
+    elif HAS["成交额"] and HAS["涨跌幅"]:
+        # 无市值时用成交额代理
+        df_v = df[df["成交额"] > 0].copy()
+        if len(df_v) > 100:
+            n_top = max(1, int(len(df_v) * 0.2))
+            top20 = df_v.nlargest(n_top, "成交额")["涨跌幅"].mean()
+            bot20 = df_v.nsmallest(n_top, "成交额")["涨跌幅"].mean()
             diff = top20 - bot20
             if diff > 0.5:
                 style = "🐘 大盘价值"
@@ -170,32 +202,22 @@ def _analyze_market(spot_df):
             else:
                 style = "⚖️ 均衡"
 
-    # ── 情绪周期判定（多指标加权） ──
-    # 指标1: 涨跌家数比 (0-30分)
+    # ── 情绪周期判定 ──
     ratio_score = min(30, max(0, (up / max(down, 1)) * 7.5))
-    # 指标2: 涨停数 (0-25分)
     limit_score = min(25, limit_up * 1.25)
-    # 指标3: 跌停惩罚 (-15~0)
     down_penalty = min(0, -limit_down * 1.5)
-    # 指标4: 成交额相对活跃度 (0-25) — 这里用 rise_pct 代理
     active_score = min(25, rise_pct * 0.5)
-    # 指标5: 天地板惩罚 (-10~0)
     td_penalty = min(0, -tian_de_ban * 3)
-
     score = max(0, min(100, ratio_score + limit_score + down_penalty + active_score + td_penalty))
 
     if score >= 75:
-        stage = "🎯 高潮一致"
-        position = "≤ 20% 只卖不买"
+        stage = "🎯 高潮一致"; position = "≤ 20% 只卖不买"
     elif score >= 50:
-        stage = "🔥 主升发酵"
-        position = "≥ 50% 重仓进攻"
+        stage = "🔥 主升发酵"; position = "≥ 50% 重仓进攻"
     elif score >= 25:
-        stage = "🧊 冰点试错"
-        position = "10-20% 小仓试探"
+        stage = "🧊 冰点试错"; position = "10-20% 小仓试探"
     else:
-        stage = "📉 退潮主跌"
-        position = "强制空仓"
+        stage = "📉 退潮主跌"; position = "强制空仓"
 
     return {
         "total": total, "up_count": up, "down_count": down, "flat_count": flat,
@@ -217,27 +239,24 @@ def _pd_to_num(s):
 
 def _find_mainline(spot_df, industry_df=None):
     """
-    找出主线板块 + 适合不同风格的候选股
-    返回 dict:
-      industry_top: [(行业, 涨跌幅, 成交额亿, 领涨股), ...]
-      candidates_duanxian: [短线候选股]
-      candidates_zhongxian: [中线候选股]
-      candidates_changxian: [长线候选股]
+    找出主线板块 + 适合不同风格的候选股（对缺失列容错）
     """
     if spot_df is None or spot_df.empty:
         return None
     df = spot_df.copy()
-    for col in ["涨跌幅", "成交额", "换手率", "振幅", "流通市值"]:
-        if col in df.columns:
+    HAS = {c: c in df.columns for c in
+           ["涨跌幅", "成交额", "换手率", "振幅", "流通市值", "总市值"]}
+
+    # 数值化
+    for col in ["涨跌幅", "成交额", "换手率", "振幅", "流通市值", "总市值"]:
+        if HAS.get(col):
             df[col] = _pd_to_num(df[col])
 
-    # ── 行业板块聚合（用行业成分分组，而不是单只样本股） ──
-    # 东方财富 spot 没有直接行业字段，用同花顺 industry summary 做排行
+    # ── 行业板块聚合 ──
     industry_top = []
     if industry_df is not None and not industry_df.empty:
         try:
             idf = industry_df.copy()
-            # 同花顺 industry summary 列名可能变，容错处理
             name_col = next((c for c in idf.columns if "名称" in c or "板块" in c), None)
             chg_col = next((c for c in idf.columns if "涨跌幅" in c or "涨幅" in c), None)
             amt_col = next((c for c in idf.columns if "成交额" in c), None)
@@ -245,48 +264,71 @@ def _find_mainline(spot_df, industry_df=None):
                 idf[chg_col] = _pd_to_num(idf[chg_col])
                 if amt_col:
                     idf[amt_col] = _pd_to_num(idf[amt_col])
-                top5 = idf.nlargest(5, chg_col)
-                for _, r in top5.iterrows():
-                    amt_yi = round(float(r[amt_col]) / 1e8, 1) if amt_col and r[amt_col] else None
+                for _, r in idf.nlargest(5, chg_col).iterrows():
+                    # 同花顺成交额已是亿单位
+                    amt_yi = round(float(r[amt_col]), 1) if amt_col and r[amt_col] else None
                     industry_top.append((str(r[name_col]), round(float(r[chg_col]), 2), amt_yi))
         except Exception as e:
             print(f"[👥大V榜] 行业聚合容错: {e}")
 
     # ── 候选股筛选 ──
-    df_valid = df.dropna(subset=["涨跌幅", "成交额", "换手率"])
-    df_valid = df_valid[(df_valid["成交额"] > 0) & (df_valid["涨跌幅"].between(-25, 25))]
+    valid_cond = df["涨跌幅"].between(-25, 25) & (df["成交额"] > 0) if HAS["成交额"] and HAS["涨跌幅"] else None
+    if valid_cond is None:
+        valid_cond = df["涨跌幅"].between(-25, 25) if HAS["涨跌幅"] else _pd_to_num([True] * len(df))
+    df_valid = df[valid_cond].dropna(subset=["涨跌幅"]) if HAS["涨跌幅"] else df.copy()
 
-    # 短线：市值 50-200亿 + 换手率 Top + 涨幅正 + 振幅大（活跃）
+    mv_col = "流通市值" if HAS.get("流通市值") else ("总市值" if HAS.get("总市值") else None)
+    use_turnover = HAS.get("换手率")
+
+    # 短线：优先按换手率排序（有换手率），否则按成交额
     cd = df_valid.copy()
-    if "流通市值" in cd.columns:
-        cd = cd[cd["流通市值"].between(50e8, 200e8)]
-    cd_short = cd[(cd["涨跌幅"] > 0) & (cd["换手率"] > 3)]
-    cd_short = cd_short.nlargest(10, "换手率")[["代码", "名称", "涨跌幅", "成交额", "换手率"]]
+    if mv_col:
+        cd = cd[cd[mv_col].between(50e8, 200e8)]
+    cd_short = cd[cd["涨跌幅"] > 0] if HAS["涨跌幅"] else cd
+    if use_turnover:
+        cd_short = cd_short[cd_short["换手率"] > 3] if "换手率" in cd_short.columns else cd_short
+        cd_short = cd_short.nlargest(10, "换手率")
+    elif HAS.get("成交额"):
+        cd_short = cd_short.nlargest(10, "成交额")
+    else:
+        cd_short = cd_short.head(10)
 
-    # 中线：市值 100-500亿 + 涨跌幅不极端（-10~+15）+ 成交额够
+    # 中线：市值 100-500亿，成交额够
     cm = df_valid.copy()
-    if "流通市值" in cm.columns:
-        cm = cm[cm["流通市值"].between(100e8, 500e8)]
-    cm_mid = cm[cm["涨跌幅"].between(-8, 12) & (cm["成交额"] > 1e8)]
-    cm_mid = cm_mid.nlargest(10, "成交额")[["代码", "名称", "涨跌幅", "成交额", "换手率"]]
+    if mv_col:
+        cm = cm[cm[mv_col].between(100e8, 500e8)]
+    cm_mid = cm[cm["涨跌幅"].between(-8, 12)] if HAS["涨跌幅"] else cm
+    if HAS.get("成交额"):
+        cm_mid = cm_mid[cm_mid["成交额"] > 1e8]
+        cm_mid = cm_mid.nlargest(10, "成交额")
+    else:
+        cm_mid = cm_mid.head(10)
 
-    # 长线：大市值龙头 + 成交额稳定（Top 市值 + 成交额）
+    # 长线：大市值 + 成交额 Top
     cl = df_valid.copy()
-    if "流通市值" in cl.columns:
-        cl = cl[cl["流通市值"] > 300e8]
-    cl_long = cl.nlargest(10, "成交额")[["代码", "名称", "涨跌幅", "成交额", "流通市值"]]
+    if mv_col:
+        cl = cl[cl[mv_col] > 300e8]
+    cl_long = cl.nlargest(10, mv_col) if mv_col else (
+        cl.nlargest(10, "成交额") if HAS.get("成交额") else cl.head(10))
 
-    # 格式化成交额 → 亿
-    def _fmt_yi(row_df, col="成交额"):
-        if col in row_df.columns:
-            row_df[col] = (row_df[col] / 1e8).round(2)
-        return row_df
+    def _pick_cols(df_in, cols):
+        avail = [c for c in cols if c in df_in.columns]
+        return df_in[avail].to_dict("records")
+
+    def _fmt(recs):
+        for r in recs:
+            for k, v in list(r.items()):
+                if isinstance(v, float) and v > 1e6:
+                    r[k] = round(v / 1e8, 2)
+                elif isinstance(v, float):
+                    r[k] = round(v, 2)
+        return recs
 
     return {
         "industry_top": industry_top,
-        "candidates_duanxian": _fmt_yi(cd_short).to_dict("records"),
-        "candidates_zhongxian": _fmt_yi(cm_mid).to_dict("records"),
-        "candidates_changxian": _fmt_yi(cl_long, "流通市值").to_dict("records"),
+        "candidates_duanxian": _fmt(_pick_cols(cd_short, ["代码", "名称", "涨跌幅", "成交额", "换手率"])),
+        "candidates_zhongxian": _fmt(_pick_cols(cm_mid, ["代码", "名称", "涨跌幅", "成交额", "换手率"])),
+        "candidates_changxian": _fmt(_pick_cols(cl_long, ["代码", "名称", "涨跌幅", "成交额", "流通市值"])),
     }
 
 
