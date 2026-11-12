@@ -230,14 +230,31 @@ def _extract_skill_for_author(author_id: int, app=None) -> str:
         conn = _get_conn(); cur = conn.cursor()
         cur.execute("SELECT id FROM wechat_vv_skills WHERE author_id=? ORDER BY version DESC LIMIT 1", (author_id,))
         existing = cur.fetchone()
+        new_v = (existing[0] + 1 if existing else 1)
         cur.execute(
-            "INSERT INTO wechat_vv_skills (author_id, skill_content, extracted_from, version) VALUES (?, ?, ?, ?)",
-            (author_id, result, "ids", (existing[0] + 1 if existing else 1))
+            "INSERT INTO wechat_vv_skills (author_id, skill_content, extracted_from, version) VALUES (?, ?, 'ai_extract', ?)",
+            (author_id, result, new_v)
         )
         cur.execute("UPDATE wechat_vv_authors SET skill_status='extracted', updated_at=CURRENT_TIMESTAMP WHERE id=?", (author_id,))
         conn.commit(); conn.close()
+        # 🆕 同步到 articles 资讯表
+        try:
+            _sql3_local = __import__("sqlite3")
+            from data.db import DB_PATH as _DB
+            conn2 = _sql3_local.connect(_DB); cur2 = conn2.cursor()
+            title = f"【Skill】{author_name} 大V思维框架 v{new_v} — AI自动提取"
+            cur2.execute(
+                """INSERT INTO articles (title, content, source, url, stock_code, stock_name, created_at)
+                   VALUES (?, ?, '大VSkill', NULL, '', ?, CURRENT_TIMESTAMP)""",
+                (title, result, author_name)
+            )
+            conn2.commit(); conn2.close()
+        except Exception as _e:
+            print(f"[📱Skill] AI提取写 articles 表失败: {_e}")
+        # 返回 (result, version) 让 UI 层拿到版本号
+        return result, new_v
 
-    return result
+    return result, 0
 
 
 def _apply_skill_to_analysis(author_id: int, market_context: str) -> str:
@@ -291,15 +308,15 @@ def build_wechat_vv_tab(parent, root=None, app=None):
     ttk.Label(toolbar, text="👥 大V管理:", font=("", 10, "bold")).pack(side=tk.LEFT)
 
     # 大V增删改按钮 (彩色 tk.Button 更醒目)
-    _btn_add  = tk.Button(toolbar, text="➕ 新增大V", width=10, bg="#43A047", fg="white",
+    _btn_add  = tk.Button(toolbar, text="➕ 新增大V", width=10, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#43A047", highlightthickness=2, bd=1,
                           font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda: _add_author())
-    _btn_edit = tk.Button(toolbar, text="✏️ 编辑大V", width=10, bg="#FB8C00", fg="white",
+    _btn_edit = tk.Button(toolbar, text="✏️ 编辑大V", width=10, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#FB8C00", highlightthickness=2, bd=1,
                           font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda: _edit_author())
-    _btn_del  = tk.Button(toolbar, text="🗑️ 删除大V", width=10, bg="#E53935", fg="white",
+    _btn_del  = tk.Button(toolbar, text="🗑️ 删除大V", width=10, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#E53935", highlightthickness=2, bd=1,
                           font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda: _delete_author())
-    _btn_crawl= tk.Button(toolbar, text="🕷️ 爬文章", width=8, bg="#1E88E5", fg="white",
+    _btn_crawl= tk.Button(toolbar, text="🕷️ 爬文章", width=8, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#1E88E5", highlightthickness=2, bd=1,
                           font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda: _crawl_current())
-    _btn_refr = tk.Button(toolbar, text="🔄 刷新", width=6, bg="#757575", fg="white",
+    _btn_refr = tk.Button(toolbar, text="🔄 刷新", width=6, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#757575", highlightthickness=2, bd=1,
                           font=("", 10), relief=tk.FLAT, cursor="hand2", command=lambda: _refresh_authors())
     for b in [_btn_add, _btn_edit, _btn_del, _btn_crawl, _btn_refr]:
         b.pack(side=tk.LEFT, padx=2, pady=2)
@@ -327,11 +344,35 @@ def build_wechat_vv_tab(parent, root=None, app=None):
 
     # ── 左侧: 大V列表 ──
     left_frame = ttk.Frame(paned, width=320); paned.add(left_frame, weight=1)
-    ttk.Label(left_frame, text="👥 大V列表", font=("", 11, "bold")).pack(anchor="w", padx=4, pady=(2, 4))
+    # 左侧顶栏: 标题 + 排序下拉
+    left_head = ttk.Frame(left_frame); left_head.pack(fill=tk.X, padx=4, pady=(2, 2))
+    ttk.Label(left_head, text="👥 大V列表", font=("", 11, "bold")).pack(side=tk.LEFT)
+    ttk.Label(left_head, text="排序:", font=("", 9)).pack(side=tk.RIGHT, padx=(4, 0))
+    sort_col_var = tk.StringVar(value="文章数▼")
+    sort_cb = ttk.Combobox(left_head, textvariable=sort_col_var, width=10, state="readonly",
+                           values=["文章数▼", "文章数▲", "名称A-Z", "名称Z-A", "分类", "Skill状态", "ID▼", "ID▲"])
+    sort_cb.pack(side=tk.RIGHT)
+    sort_cb.bind("<<ComboboxSelected>>", lambda _e: _refresh_authors())
+
     auth_cols = ("id", "name", "cat", "arts", "skill")
     auth_tree = ttk.Treeview(left_frame, columns=auth_cols, show="headings", height=20)
+    _sort_state = {"col": "arts", "reverse": True}  # 默认按文章数降序
+    _col_map = {"arts": "文章", "name": "名称", "cat": "分类", "skill": "Skill", "id": "#"}
+    def _on_header_click(col):
+        if _sort_state["col"] == col:
+            _sort_state["reverse"] = not _sort_state["reverse"]
+        else:
+            _sort_state["col"] = col
+            _sort_state["reverse"] = True if col in ("arts", "id") else False
+        _refresh_authors()
+        # 更新下拉显示
+        label = _col_map.get(col, col)
+        arrow = "▲" if _sort_state["reverse"] else "▼"
+        sort_col_var.set(f"{label}{arrow}")
+
     for c, t, w in [("id", "#", 30), ("name", "名称", 90), ("cat", "分类", 50), ("arts", "文章", 40), ("skill", "Skill", 70)]:
-        auth_tree.heading(c, text=t); auth_tree.column(c, width=w, anchor="center" if c != "name" else "w")
+        auth_tree.heading(c, text=f"{t} ⇅", command=lambda col=c: _on_header_click(col))
+        auth_tree.column(c, width=w, anchor="center" if c != "name" else "w")
     auth_tree.tag_configure("none", background="#FAFAFA")
     auth_tree.tag_configure("extracted", background="#E8F5E9")
     auth_tree.tag_configure("updated", background="#C8E6C9")
@@ -407,17 +448,80 @@ def build_wechat_vv_tab(parent, root=None, app=None):
     # === Tab 2: 🧠 Skill ===
     tab_skill = ttk.Frame(right_nb, padding=4)
     right_nb.add(tab_skill, text=" 🧠 Skill ")
-    skill_top = ttk.Frame(tab_skill); skill_top.pack(fill=tk.X, pady=(0, 4))
+
+    # 布局: PanedWindow (左: Skill 内容 | 右: 版本历史)
+    skill_paned = ttk.PanedWindow(tab_skill, orient=tk.HORIZONTAL); skill_paned.pack(fill=tk.BOTH, expand=True)
+
+    # --- 左: Skill 展示区 ---
+    skill_left = ttk.Frame(skill_paned); skill_paned.add(skill_left, weight=4)
+    skill_top = ttk.Frame(skill_left); skill_top.pack(fill=tk.X, pady=(0, 4))
     skill_status_lbl = ttk.Label(skill_top, text="", font=("", 10))
     skill_status_lbl.pack(side=tk.LEFT)
-    tk.Button(skill_top, text="🔍 提取 Skill", width=14, bg="#FF6F00", fg="white",
+    tk.Button(skill_top, text="🔍 AI提取Skill", width=14, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#FF6F00", highlightthickness=2, bd=1,
               font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
               command=lambda: _extract_skill_btn()).pack(side=tk.RIGHT, padx=2)
-    ttk.Button(skill_top, text="💾保存编辑", width=9, command=lambda: _save_skill_edit()).pack(side=tk.RIGHT, padx=1)
+    tk.Button(skill_top, text="✏️ 编辑弹窗", width=12, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#FB8C00", highlightthickness=2, bd=1,
+              font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
+              command=lambda: _open_skill_editor_dlg()).pack(side=tk.RIGHT, padx=2)
 
-    skill_text = tk.Text(tab_skill, wrap="word", font=("PingFang SC", 10), height=22,
-                         bg="#FFF8E1", relief=tk.SOLID, bd=1)
+    skill_text = tk.Text(skill_left, wrap="word", font=("PingFang SC", 10), height=22,
+                         bg="#FFF8E1", relief=tk.SOLID, bd=1, cursor="hand2")
     skill_text.pack(fill=tk.BOTH, expand=True)
+    # 双击 → 弹出编辑弹窗
+    skill_text.bind("<Double-1>", lambda _e: _open_skill_editor_dlg())
+    # 底部提示条
+    skill_hint = tk.Label(skill_left, text="💡 双击上面 Skill 内容 或 点「✏️ 编辑弹窗」→ 弹窗内可字体调节 + 保存到资讯表",
+                          bg="#FFF8E1", fg="#8D6E63", font=("", 9), anchor="w")
+    skill_hint.pack(fill=tk.X)
+
+    # --- 右: 版本历史列表 ---
+    skill_right = ttk.LabelFrame(skill_paned, text="📜 版本历史 (点任一版本切换)", padding=4)
+    skill_paned.add(skill_right, weight=1)
+    ver_cols = ("v", "source", "time", "len")
+    ver_tree = ttk.Treeview(skill_right, columns=ver_cols, show="headings", height=18)
+    for c, t, w in [("v", "版本", 40), ("source", "来源", 60), ("time", "时间", 90), ("len", "字数", 40)]:
+        ver_tree.heading(c, text=t); ver_tree.column(c, width=w, anchor="center")
+    ver_tree.tag_configure("current", background="#C8E6C9")
+    ver_vs = ttk.Scrollbar(skill_right, orient=tk.VERTICAL, command=ver_tree.yview)
+    ver_tree.configure(yscrollcommand=ver_vs.set)
+    ver_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); ver_vs.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def _refresh_versions():
+        """刷新右侧版本历史列表"""
+        for iid in ver_tree.get_children(): ver_tree.delete(iid)
+        if not _state["author_id"]: return
+        conn = _get_conn(); cur = conn.cursor()
+        cur.execute(
+            "SELECT id, version, extracted_from, created_at, LENGTH(skill_content) FROM wechat_vv_skills WHERE author_id=? ORDER BY version DESC",
+            (_state["author_id"],)
+        )
+        rows = cur.fetchall(); conn.close()
+        for rid, v, src, ct, ln in rows:
+            label = "AI" if src and src.startswith("ai") else ("手改" if src == "manual_edit" else src or "—")
+            ver_tree.insert("", "end", values=(f"v{v}", label, (ct or "")[:16], ln or 0))
+
+    def _on_ver_select(_evt=None):
+        """选中某个版本 → 把 skill_text 换成那个版本的内容"""
+        sel = ver_tree.selection()
+        if not sel or not _state["author_id"]: return
+        vals = ver_tree.item(sel[0], "values")
+        v_str = vals[0]  # "v3"
+        ver_num = int(v_str[1:])
+        conn = _get_conn(); cur = conn.cursor()
+        cur.execute(
+            "SELECT skill_content FROM wechat_vv_skills WHERE author_id=? AND version=?",
+            (_state["author_id"], ver_num)
+        )
+        row = cur.fetchone(); conn.close()
+        if not row: return
+        skill_text.config(state=tk.NORMAL); skill_text.delete("1.0", tk.END)
+        skill_text.insert("1.0", row[0]); skill_text.config(state=tk.DISABLED)
+        skill_status_lbl.config(text=f"✅ 切到 Skill v{ver_num} ({len(row[0])}字)")
+        # 高亮当前选中的
+        for iid in ver_tree.get_children(): ver_tree.item(iid, tags=())
+        ver_tree.item(sel[0], tags=("current",))
+
+    ver_tree.bind("<<TreeviewSelect>>", _on_ver_select)
 
     # === Tab 3: 🎯 思维分析 ===
     tab_analysis = ttk.Frame(right_nb, padding=4)
@@ -429,7 +533,7 @@ def build_wechat_vv_tab(parent, root=None, app=None):
     ana_btn_box = ttk.Frame(tab_analysis); ana_btn_box.pack(fill=tk.X)
     ana_status_lbl = ttk.Label(ana_btn_box, text="", font=("", 10))
     ana_status_lbl.pack(side=tk.LEFT)
-    tk.Button(ana_btn_box, text="🎯 用 Skill 分析", width=14, bg="#1565C0", fg="white",
+    tk.Button(ana_btn_box, text="🎯 用 Skill 分析", width=14, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#1565C0", highlightthickness=2, bd=1,
               font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
               command=lambda: _skill_analysis_btn()).pack(side=tk.RIGHT, padx=2)
 
@@ -441,24 +545,52 @@ def build_wechat_vv_tab(parent, root=None, app=None):
     _state = {"author_id": None}
 
     # ═══════════════════════════════════════════════════════
-    #  📦 刷新大V列表
+    #  📦 刷新大V列表 (带排序)
     # ═══════════════════════════════════════════════════════
+    def _apply_sort_from_combo():
+        """🆕 从下拉框选择 → 同步 _sort_state"""
+        sel = sort_col_var.get()
+        mapping = {
+            "文章数▼": ("arts", True), "文章数▲": ("arts", False),
+            "名称A-Z": ("name", False), "名称Z-A": ("name", True),
+            "分类": ("cat", False),
+            "Skill状态": ("skill", False),
+            "ID▼": ("id", True), "ID▲": ("id", False),
+        }
+        if sel in mapping:
+            _sort_state["col"], _sort_state["reverse"] = mapping[sel]
+
     def _refresh_authors():
+        # 🆕 如果排序下拉刚被改变, 同步状态
+        _apply_sort_from_combo()
         for iid in auth_tree.get_children():
             auth_tree.delete(iid)
         kw = search_var.get().strip()
         conn = _get_conn(); cur = conn.cursor()
         if kw:
             cur.execute(
-                "SELECT id, name, category, article_count, skill_status FROM wechat_vv_authors WHERE name LIKE ? OR wechat_id LIKE ? ORDER BY article_count DESC",
+                "SELECT id, name, category, article_count, skill_status FROM wechat_vv_authors WHERE name LIKE ? OR wechat_id LIKE ?",
                 (f"%{kw}%", f"%{kw}%")
             )
         else:
-            cur.execute("SELECT id, name, category, article_count, skill_status FROM wechat_vv_authors ORDER BY article_count DESC")
-        for aid, nm, cat, cnt, sk in cur.fetchall():
+            cur.execute("SELECT id, name, category, article_count, skill_status FROM wechat_vv_authors")
+        rows = cur.fetchall(); conn.close()
+        # 🆕 按 _sort_state 排序
+        col_idx_map = {"id": 0, "name": 1, "cat": 2, "arts": 3, "skill": 4}
+        idx = col_idx_map.get(_sort_state["col"], 3)
+        if _sort_state["col"] in ("arts", "id"):
+            # 数字排序
+            rows.sort(key=lambda r: r[idx] or 0, reverse=_sort_state["reverse"])
+        elif _sort_state["col"] == "skill":
+            # Skill 状态排序: extracted/updated 在 none 前
+            _skill_order = {"extracted": 0, "updated": 1, "none": 2}
+            rows.sort(key=lambda r: _skill_order.get(r[idx] or "none", 3), reverse=_sort_state["reverse"])
+        else:
+            # 文字排序
+            rows.sort(key=lambda r: (r[idx] or "").lower(), reverse=_sort_state["reverse"])
+        for aid, nm, cat, cnt, sk in rows:
             tag = sk if sk in ("extracted", "updated") else "none"
             auth_tree.insert("", "end", values=(aid, nm, cat, cnt, sk or "none"), tags=(tag,))
-        conn.close()
 
     # ═══════════════════════════════════════════════════════
     #  📦 刷新文章列表 + Skill
@@ -491,9 +623,11 @@ def build_wechat_vv_tab(parent, root=None, app=None):
             skill_text.insert("1.0", sk_row[0][0])
             skill_status_lbl.config(text=f"✅ Skill v{sk_row[0][1]} 已提取 ({len(sk_row[0][0])}字)")
         else:
-            skill_text.insert("1.0", "_(还没有 Skill, 点右上「🔍 提取 Skill」按钮让 AI 自动分析)_")
+            skill_text.insert("1.0", "_(还没有 Skill, 点右上「🔍 AI提取Skill」或双击内容)_")
             skill_status_lbl.config(text="⚠️ 还没有 Skill")
         skill_text.config(state=tk.DISABLED)
+        # 🆕 刷新版本历史
+        _refresh_versions()
 
     auth_tree.bind("<<TreeviewSelect>>", _on_author_select)
 
@@ -598,10 +732,10 @@ def build_wechat_vv_tab(parent, root=None, app=None):
                     if auth_tree.item(k, "values")[0] == aid:
                         auth_tree.selection_set(k); auth_tree.see(k); _on_author_select(); break
 
-        tk.Button(btns, text="💾 保存修改", width=14, bg="#2E7D32", fg="white",
+        tk.Button(btns, text="💾 保存修改", width=14, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#2E7D32", highlightthickness=2, bd=1,
                   font=("", 11, "bold"), relief=tk.FLAT, cursor="hand2",
                   command=_save).pack(side=tk.RIGHT, padx=4)
-        tk.Button(btns, text="❌ 取消", width=8, bg="#9E9E9E", fg="white",
+        tk.Button(btns, text="❌ 取消", width=8, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#9E9E9E", highlightthickness=2, bd=1,
                   font=("", 10), relief=tk.FLAT, cursor="hand2",
                   command=dlg.destroy).pack(side=tk.RIGHT, padx=4)
 
@@ -743,14 +877,13 @@ def build_wechat_vv_tab(parent, root=None, app=None):
         skill_text.insert("1.0", "_AI 正在分析中... (可能需要 20-60 秒)_"); skill_text.config(state=tk.DISABLED)
 
         def _bg():
-            result = _extract_skill_for_author(_state["author_id"], app=app)
+            result, new_v = _extract_skill_for_author(_state["author_id"], app=app)
             def _done():
                 skill_text.config(state=tk.NORMAL); skill_text.delete("1.0", tk.END)
                 if result:
                     skill_text.insert("1.0", result)
-                    skill_status_lbl.config(text=f"✅ Skill 提取成功 ({len(result)}字)")
-                    # 更新列表 skill 状态
-                    _refresh_authors()
+                    skill_status_lbl.config(text=f"✅ Skill 提取成功 v{new_v} ({len(result)}字) 【已同步到资讯表】")
+                    _refresh_authors(); _refresh_versions()
                 else:
                     skill_text.insert("1.0", "_AI 提取失败, 请检查 AI 代理是否启动 (端口 8787)_")
                     skill_status_lbl.config(text="❌ AI 提取失败")
@@ -759,25 +892,133 @@ def build_wechat_vv_tab(parent, root=None, app=None):
 
         threading.Thread(target=_bg, daemon=True).start()
 
-    def _save_skill_edit():
-        if not _state["author_id"]: return
-        # 先解锁读取, 再重新锁
-        skill_text.config(state=tk.NORMAL)
-        content = skill_text.get("1.0", tk.END).strip()
-        skill_text.config(state=tk.DISABLED)
-        if not content or content.startswith("_"):
-            return
+    def _save_skill_to_articles_table(author_id: int, author_name: str, content: str, version: int, note: str = ""):
+        """🆕 把 Skill 同步保存到 articles 资讯表 — 让主程序资讯流也能看到"""
+        try:
+            import sqlite3 as _sql3
+            conn = _sql3.connect(DB_PATH); cur = conn.cursor()
+            title = f"【Skill】{author_name} 大V思维框架 v{version}"
+            if note: title += f" — {note[:30]}"
+            cur.execute(
+                """INSERT INTO articles (title, content, source, url, stock_code, stock_name, created_at)
+                   VALUES (?, ?, '大VSkill', NULL, '', ?, CURRENT_TIMESTAMP)""",
+                (title, content, author_name)
+            )
+            conn.commit(); conn.close()
+            return True
+        except Exception as e:
+            print(f"[📱Skill] 保存到 articles 表失败: {e}")
+            return False
+
+    def _save_skill_edit_inline(content: str, source: str = "manual_edit", note: str = ""):
+        """统一的 Skill 保存逻辑 — 版本化 + 写 articles 表"""
+        if not _state["author_id"]: return None
+        if not content or content.startswith("_"): return None
         conn = _get_conn(); cur = conn.cursor()
+        cur.execute("SELECT name FROM wechat_vv_authors WHERE id=?", (_state["author_id"],))
+        nm = (cur.fetchone() or [""])[0]
         cur.execute("SELECT MAX(version) FROM wechat_vv_skills WHERE author_id=?", (_state["author_id"],))
         v = (cur.fetchone()[0] or 0) + 1
         cur.execute(
-            "INSERT INTO wechat_vv_skills (author_id, skill_content, extracted_from, version) VALUES (?, ?, 'manual_edit', ?)",
-            (_state["author_id"], content, v)
+            "INSERT INTO wechat_vv_skills (author_id, skill_content, extracted_from, version) VALUES (?, ?, ?, ?)",
+            (_state["author_id"], content, source, v)
         )
         cur.execute("UPDATE wechat_vv_authors SET skill_status='updated', updated_at=CURRENT_TIMESTAMP WHERE id=?", (_state["author_id"],))
         conn.commit(); conn.close()
-        skill_status_lbl.config(text=f"✅ Skill v{v} 已手动保存 ({len(content)}字)")
+        # 🆕 同步到 articles 资讯表
+        _save_skill_to_articles_table(_state["author_id"], nm, content, v, note)
+        # 刷新 UI
         _refresh_authors()
+        _refresh_versions()
+        return v
+
+    def _open_skill_editor_dlg():
+        """🆕 Skill 编辑弹窗 — 带字体调节 + 版本化 + 保存到资讯表"""
+        if not _state["author_id"]:
+            tk.messagebox.showwarning("提示", "请先选择左侧大V")
+            return
+        conn = _get_conn(); cur = conn.cursor()
+        cur.execute("SELECT name FROM wechat_vv_authors WHERE id=?", (_state["author_id"],))
+        author_name = (cur.fetchone() or [""])[0]
+        cur.execute("SELECT skill_content, version FROM wechat_vv_skills WHERE author_id=? ORDER BY version DESC LIMIT 1", (_state["author_id"],))
+        cur_sk = cur.fetchall(); conn.close()
+        init_content = (cur_sk[0][0] if cur_sk and cur_sk[0][0] and not cur_sk[0][0].startswith("_") else "")
+        cur_version = (cur_sk[0][1] if cur_sk else 0)
+
+        dlg = tk.Toplevel(root); dlg.title(f"✏️ 编辑 Skill — 【{author_name}】当前v{cur_version}"); dlg.geometry("880x680"); dlg.minsize(700, 520); dlg.transient(root); dlg.grab_set()
+
+        # ── 顶部工具栏: 字体调节 ──
+        toolbar = tk.Frame(dlg, bg="#F5F5F5"); toolbar.pack(fill=tk.X)
+        tk.Label(toolbar, text="  🔤 字体:", bg="#F5F5F5").pack(side=tk.LEFT, padx=(10, 2))
+        font_families = ["PingFang SC", "Heiti SC", "Songti SC", "STHeiti", "Menlo", "Courier"]
+        font_fam_var = tk.StringVar(value="PingFang SC")
+        fam_combo = ttk.Combobox(toolbar, textvariable=font_fam_var, values=font_families, width=12, state="readonly"); fam_combo.pack(side=tk.LEFT, padx=2)
+
+        tk.Label(toolbar, text="  字号:", bg="#F5F5F5").pack(side=tk.LEFT, padx=(8, 2))
+        font_size_var = tk.IntVar(value=12)
+        size_scale = ttk.Scale(toolbar, from_=8, to=28, orient=tk.HORIZONTAL, variable=font_size_var, length=140)
+        size_scale.pack(side=tk.LEFT, padx=2)
+        size_lbl = tk.Label(toolbar, text="12px", bg="#F5F5F5", width=5); size_lbl.pack(side=tk.LEFT)
+
+        tk.Label(toolbar, text="  背景:", bg="#F5F5F5").pack(side=tk.LEFT, padx=(8, 2))
+        bg_var = tk.StringVar(value="#FFFDE7")
+        bg_colors = ["#FFFDE7", "#FFFFFF", "#E8F5E9", "#E3F2FD", "#FFF3E0", "#F3E5F5", "#263238"]
+        for c in bg_colors:
+            tk.Button(toolbar, bg=c, width=2, relief=tk.RAISED, bd=1,
+                      command=lambda col=c: (bg_var.set(col), _apply_style())).pack(side=tk.LEFT, padx=1)
+
+        # 备注输入 (为什么保存这个版本)
+        tk.Label(toolbar, text="  📝 版本备注:", bg="#F5F5F5").pack(side=tk.RIGHT, padx=(4, 2))
+        note_var = tk.StringVar()
+        ttk.Entry(toolbar, textvariable=note_var, width=20).pack(side=tk.RIGHT, padx=2)
+
+        # ── 编辑区 ──
+        edit_text = tk.Text(dlg, wrap="word", font=(font_fam_var.get(), font_size_var.get()),
+                            bg=bg_var.get(), relief=tk.SOLID, bd=1, undo=True)
+        edit_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        if init_content: edit_text.insert("1.0", init_content)
+
+        def _apply_style():
+            edit_text.config(font=(font_fam_var.get(), font_size_var.get()), bg=bg_var.get())
+            size_lbl.config(text=f"{font_size_var.get()}px")
+        fam_combo.bind("<<ComboboxSelected>>", lambda _e: _apply_style())
+        size_scale.configure(command=lambda _v: (size_lbl.config(text=f"{int(float(_v))}px"), edit_text.config(font=(font_fam_var.get(), int(float(_v))))))
+
+        # ── 底部按钮 ──
+        btns = tk.Frame(dlg); btns.pack(fill=tk.X, padx=10, pady=(0, 10))
+        info_lbl = tk.Label(btns, text=f"💡 保存后将创建 v{cur_version + 1} (同时写入资讯表 articles)", fg="#616161")
+        info_lbl.pack(side=tk.LEFT)
+
+        def _do_save():
+            content = edit_text.get("1.0", tk.END).strip()
+            if not content:
+                tk.messagebox.showwarning("提示", "Skill 内容不能为空"); return
+            note = note_var.get().strip()
+            ver = _save_skill_edit_inline(content, source="manual_edit", note=note)
+            if ver:
+                # 更新主 Tab skill_text 显示新版本
+                skill_text.config(state=tk.NORMAL); skill_text.delete("1.0", tk.END)
+                skill_text.insert("1.0", content); skill_text.config(state=tk.DISABLED)
+                skill_status_lbl.config(text=f"✅ Skill 已保存: v{ver} ({len(content)}字) 【已同步到资讯表】")
+                # 提示
+                tk.messagebox.showinfo("✅ 保存成功",
+                    f"Skill 已保存为 v{ver}\n\n"
+                    f"📊 wechat_vv_skills 表: 新增 v{ver}\n"
+                    f"📰 articles 资讯表: 新增 1 条 (source='大VSkill')\n\n"
+                    f"主程序的「📚文章库」也能搜到这条 Skill 了!")
+                dlg.destroy()
+            else:
+                tk.messagebox.showerror("❌ 保存失败", "保存到数据库时出错")
+
+        tk.Button(btns, text="💾 保存为新版本", width=18, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#2E7D32", highlightthickness=2, bd=1,
+                  font=("", 11, "bold"), relief=tk.FLAT, cursor="hand2",
+                  command=_do_save).pack(side=tk.RIGHT, padx=4)
+        tk.Button(btns, text="🔄 用当前AI提取结果覆盖", width=18, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#FF6F00", highlightthickness=2, bd=1,
+                  font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
+                  command=lambda: (edit_text.delete("1.0", tk.END), edit_text.insert("1.0", skill_text.get("1.0", tk.END)))).pack(side=tk.RIGHT, padx=4)
+        tk.Button(btns, text="❌ 取消", width=8, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#9E9E9E", highlightthickness=2, bd=1,
+                  font=("", 10), relief=tk.FLAT, cursor="hand2",
+                  command=dlg.destroy).pack(side=tk.RIGHT, padx=4)
 
     def _skill_analysis_btn():
         if not _state["author_id"]:

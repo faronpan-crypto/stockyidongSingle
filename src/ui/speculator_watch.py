@@ -951,10 +951,10 @@ def show_speculator_watch(root=None, app=None):
     def _open_history_dialog():
         _show_snapshot_history(win, root)
 
-    tk.Button(header, text="💾 保存快照", width=10, bg="#2E7D32", fg="#FFFFFF",
+    tk.Button(header, text="💾 保存快照", width=10, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#2E7D32", highlightthickness=2, bd=1,
               font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
               command=_do_save_snapshot).pack(side=tk.LEFT, padx=4, pady=10)
-    tk.Button(header, text="📜 回看历史", width=10, bg="#6A1B9A", fg="#FFFFFF",
+    tk.Button(header, text="📜 回看历史", width=10, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#6A1B9A", highlightthickness=2, bd=1,
               font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
               command=_open_history_dialog).pack(side=tk.LEFT, padx=4, pady=10)
 
@@ -2212,7 +2212,7 @@ def _build_orderbook(parent, win, col=1):
 
     # 刷新按钮
     btn_row = tk.Frame(frm, bg="#1E1E1E"); btn_row.pack(fill=tk.X, pady=(4, 0))
-    refresh_btn = tk.Button(btn_row, text="🔄 刷新全球资产", bg="#FF6D00", fg="white",
+    refresh_btn = tk.Button(btn_row, text="🔄 刷新全球资产", bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#FF6D00", highlightthickness=2, bd=1,
                             font=("", 10, "bold"), padx=8, command=lambda: _refresh_global_assets(win))
     refresh_btn.pack(side=tk.RIGHT, padx=2)
 
@@ -7355,7 +7355,7 @@ def _show_vv_main(win):
     lib_btn_f = tk.Frame(tab_lib, bg="#121212"); lib_btn_f.pack(fill=tk.X, padx=10, pady=4)
     tk.Button(lib_btn_f, text="🔄 刷新", font=("", 10), padx=10,
               command=_refill_authors).pack(side=tk.LEFT, padx=4)
-    tk.Button(lib_btn_f, text="🗑️ 清空整库", font=("", 10), bg="#4A1C1C", fg="white", padx=10,
+    tk.Button(lib_btn_f, text="🗑️ 清空整库", font=("", 10), bg="#4A1C1C", fg="black", padx=10,
               command=lambda: (messagebox.showwarning("⚠️", "此功能暂不开放, 请手工删除 DB 文件") if
                                not messagebox.askyesno("确认", "确定清空所有大V文章? 无法恢复!")
                                else None)).pack(side=tk.RIGHT)
