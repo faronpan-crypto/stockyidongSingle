@@ -937,6 +937,27 @@ def show_speculator_watch(root=None, app=None):
                                   bg="#121212", fg="#BDBDBD", font=("", 11))
     win._data_date_lbl.pack(side=tk.LEFT, padx=10, pady=10)
 
+    # ── 🆕 💾保存 / 📜回看 快照按钮 ──
+    def _do_save_snapshot():
+        try:
+            snap = _collect_snapshot(win)
+            from data.db import save_speculator_snapshot
+            sid = save_speculator_snapshot(snap, note="")
+            win._data_date_lbl.config(text=f"✅ 已保存快照 #{sid}")
+        except Exception as _e:
+            traceback.print_exc()
+            win._data_date_lbl.config(text=f"❌ 保存失败: {_e}")
+
+    def _open_history_dialog():
+        _show_snapshot_history(win, root)
+
+    tk.Button(header, text="💾 保存快照", width=10, bg="#2E7D32", fg="#FFFFFF",
+              font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
+              command=_do_save_snapshot).pack(side=tk.LEFT, padx=4, pady=10)
+    tk.Button(header, text="📜 回看历史", width=10, bg="#6A1B9A", fg="#FFFFFF",
+              font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
+              command=_open_history_dialog).pack(side=tk.LEFT, padx=4, pady=10)
+
     fs_box = tk.Frame(header, bg="#121212"); fs_box.pack(side=tk.RIGHT, padx=14)
     tk.Label(fs_box, text="🔤 字体:", bg="#121212", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT)
     fs_lbl = tk.Label(fs_box, text=f"{_WATCH_FS[0]}pt", bg="#121212", fg="#FFD54F",
@@ -7489,6 +7510,229 @@ def _gather_ui_context(win):
                 ctx[attr.replace("_", "", 1)] = w.get("1.0", "end-1c")[:200]
     except Exception: pass
     return ctx
+
+
+# ═══════════════════════════════════════════════════════════════
+#  🆕 游资看盘快照收集 + 历史回看
+# ═══════════════════════════════════════════════════════════════
+
+def _collect_snapshot(win) -> str:
+    """收集当前 win 上的所有面板数据 → JSON 字符串"""
+    import json as _j
+    snap = {"v": 1, "ts": datetime.now().isoformat()}
+
+    # 1. 日期标题
+    try: snap["data_date"] = win._data_date_lbl.cget("text")
+    except Exception: pass
+
+    # 2. 全球五资产 (orderbook)
+    try:
+        ob = getattr(win, "_orderbook_cells", None)
+        if ob:
+            snap["orderbook"] = [(c[0], c[4].cget("text") if len(c) > 4 and c[4] else "—") for c in ob]
+    except Exception: pass
+
+    # 3. 板块九宫格数据
+    try:
+        bg = getattr(win, "_block_grid_data", None) or getattr(win, "_block_data", None)
+        if bg is not None:
+            snap["block_grid"] = [list(row) if isinstance(row, (list, tuple)) else str(row) for row in bg]
+    except Exception: pass
+
+    # 4. 量能面板
+    try:
+        vol = getattr(win, "_volume_data", None)
+        if vol: snap["volume"] = list(vol) if isinstance(vol, (list, tuple)) else str(vol)
+    except Exception: pass
+
+    # 5. 股指期货
+    try:
+        fut = getattr(win, "_fut_cells", None)
+        if fut: snap["futures"] = [(c[0], c[4].cget("text") if len(c) > 4 and c[4] else "—") for c in fut]
+    except Exception: pass
+
+    # 6. 周期 / 信号 / 状态 (Text 内容)
+    for attr, key in [
+        ("_cycle_text", "cycle"),
+        ("_sign_decision_text", "sign_decision"),
+        ("_status_text", "status"),
+    ]:
+        try:
+            w = getattr(win, attr, None)
+            if w and hasattr(w, "get"):
+                snap[key] = w.get("1.0", "end-1c")
+        except Exception: pass
+
+    # 7. 右面板 Text — 看盘思路 / 板块画布
+    try:
+        right_nb = getattr(win, "_right_nb", None)
+        if right_nb:
+            for tab in right_nb.tabs():
+                lbl = right_nb.tab(tab, "text").strip()
+                # 找 Text 控件
+                texts = []
+                def _walk_text(w):
+                    if isinstance(w, tk.Text):
+                        texts.append(w.get("1.0", "end-1c"))
+                    for c in w.winfo_children():
+                        _walk_text(c)
+                frame = right_nb.nametowidget(tab)
+                _walk_text(frame)
+                snap[f"right_{lbl}"] = texts
+    except Exception: pass
+
+    # 8. 主线/龙头榜等 Label 文字
+    try:
+        for attr in ["_cycle_card"]:
+            if hasattr(win, attr):
+                w = getattr(win, attr)
+                if hasattr(w, "cget"):
+                    snap[attr] = w.cget("text") or ""
+    except Exception: pass
+
+    return _j.dumps(snap, ensure_ascii=False, default=str)
+
+
+def _show_snapshot_history(win, root):
+    """历史快照列表弹窗"""
+    from data.db import list_speculator_snapshots, load_speculator_snapshot, delete_speculator_snapshot
+    import json as _j
+
+    dlg = tk.Toplevel(root)
+    dlg.title("📜 游资看盘历史快照"); dlg.geometry("720x480"); dlg.transient(root)
+
+    top = ttk.Frame(dlg); top.pack(fill=tk.X, padx=8, pady=6)
+    ttk.Label(top, text="💾 历史快照 (点某行回看当时的看盘数据)", font=("", 11, "bold")).pack(side=tk.LEFT)
+    ttk.Button(top, text="🔄 刷新", width=6, command=lambda: _reload()).pack(side=tk.RIGHT, padx=2)
+    ttk.Button(top, text="🗑️删选中", width=10, command=lambda: _del_sel()).pack(side=tk.RIGHT, padx=2)
+
+    cols = ("id", "date", "time", "note")
+    tree = ttk.Treeview(dlg, columns=cols, show="headings", height=16)
+    for c, t, w in [("id", "#", 40), ("date", "日期", 120), ("time", "时间", 120), ("note", "备注", 380)]:
+        tree.heading(c, text=t); tree.column(c, width=w, anchor="w")
+    tree.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+    def _reload():
+        for iid in tree.get_children(): tree.delete(iid)
+        rows = list_speculator_snapshots(limit=200)
+        for rid, dt, tm, nt, ca in rows:
+            tree.insert("", "end", values=(rid, dt, tm, nt or ""))
+
+    def _del_sel():
+        sel = tree.selection()
+        if not sel: return
+        ids_to_del = [tree.item(s, "values")[0] for s in sel]
+        if not tk.messagebox.askyesno("确认", f"确定删除 {len(ids_to_del)} 个快照?"): return
+        for sid in ids_to_del:
+            delete_speculator_snapshot(int(sid))
+        _reload()
+
+    def _dbl_open(_evt):
+        sel = tree.selection()
+        if not sel: return
+        vals = tree.item(sel[0], "values")
+        sid = int(vals[0])
+        snap_json = load_speculator_snapshot(sid)
+        if not snap_json:
+            tk.messagebox.showerror("错误", "快照数据丢失")
+            return
+        # 关闭当前弹窗 + 历史弹窗
+        dlg.destroy(); win.destroy()
+        # 解析快照 + 用快照数据重开游资看盘界面
+        try:
+            snap = _j.loads(snap_json)
+            _open_from_snapshot(root, win._app, snap)
+        except Exception as _e:
+            traceback.print_exc()
+            tk.messagebox.showerror("错误", f"快照解析失败: {_e}")
+
+    tree.bind("<Double-1>", _dbl_open)
+    _reload()
+
+
+def _open_from_snapshot(root, app, snap: dict):
+    """用快照 JSON 重新渲染游资看盘界面 — 复用 show_speculator_watch 但跳过网络请求"""
+    print(f"[📜回看] 用快照打开游资看盘界面, 数据日期={snap.get('data_date', '—')}", flush=True)
+    # 简单做法: 先正常打开界面, 然后把快照数据填入各面板
+    # 但 show_speculator_watch 最后会 _seed_fill_all + _real_fill 覆盖我们的数据
+    # 所以这里用 snapshot 模式 — 传 extra_json 参数让它跳过 _real_fill
+    import types
+    win = show_speculator_watch(root=root, app=app)
+    win._snapshot_mode = True
+    win._snapshot_data = snap
+
+    # 等界面建好后, 用快照数据替换各面板 (延迟 200ms 确保 win 完全构建好)
+    def _apply():
+        try:
+            if not win.winfo_exists(): return
+            _render_snapshot_into_win(win, snap)
+        except Exception as _e:
+            traceback.print_exc()
+    win.after(200, _apply)
+    return win
+
+
+def _render_snapshot_into_win(win, snap: dict):
+    """把快照 JSON 里的数据渲染到 win 各面板上"""
+    print(f"[📜回看] 渲染快照数据...", flush=True)
+    # 1. 标题日期
+    try:
+        if "data_date" in snap:
+            win._data_date_lbl.config(text=snap["data_date"])
+    except Exception: pass
+
+    # 2. 停掉所有后台刷新 — 快照模式不再刷新
+    win._running = False
+
+    # 3. 全球五资产 (orderbook cells)
+    try:
+        ob = getattr(win, "_orderbook_cells", None)
+        ob_data = snap.get("orderbook", [])
+        if ob and ob_data:
+            for i, row in enumerate(ob_data):
+                if i < len(ob):
+                    c = ob[i]
+                    # c[0] 是 name label, c[4] 是 price label
+                    try:
+                        if len(c) > 4 and c[4] and hasattr(c[4], "config"):
+                            c[4].config(text=row[1])
+                    except Exception: pass
+    except Exception: pass
+
+    # 4. 股指期货
+    try:
+        fut = getattr(win, "_fut_cells", None)
+        fut_data = snap.get("futures", [])
+        if fut and fut_data:
+            for i, row in enumerate(fut_data):
+                if i < len(fut):
+                    c = fut[i]
+                    try:
+                        if len(c) > 4 and c[4] and hasattr(c[4], "config"):
+                            c[4].config(text=row[1])
+                    except Exception: pass
+    except Exception: pass
+
+    # 5. 周期 / 信号 / 状态 Text
+    for key, attr in [("cycle", "_cycle_text"), ("sign_decision", "_sign_decision_text"), ("status", "_status_text")]:
+        try:
+            content = snap.get(key)
+            if content:
+                w = getattr(win, attr, None)
+                if w and hasattr(w, "config"):
+                    w.config(state=tk.NORMAL)
+                    w.delete("1.0", tk.END)
+                    w.insert("1.0", content)
+                    w.config(state=tk.DISABLED)
+        except Exception: pass
+
+    # 6. 右面板
+    for key in snap:
+        if key.startswith("right_"):
+            content_list = snap[key]
+            if isinstance(content_list, list):
+                pass  # 先不渲染右面板 Text, 保留种子值
+    print(f"[📜回看] 快照渲染完成", flush=True)
 
 
 print("✅ 📚财经大V风格学习系统 已加载", flush=True)

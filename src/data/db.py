@@ -223,9 +223,142 @@ def init_database():
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sentiment_history_date ON sentiment_history(snapshot_date)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sentiment_history_time ON sentiment_history(snapshot_time)')
+
+    # ── 🆕 大V微信相关表 ──
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS wechat_vv_authors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            wechat_id TEXT,
+            url TEXT,
+            avatar TEXT,
+            category TEXT DEFAULT '游资',
+            note TEXT,
+            article_count INTEGER DEFAULT 0,
+            skill_status TEXT DEFAULT 'none',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS wechat_vv_articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            author_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT,
+            url TEXT,
+            publish_time TEXT,
+            views INTEGER,
+            summary TEXT,
+            tags TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (author_id) REFERENCES wechat_vv_authors(id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_vv_articles_author ON wechat_vv_articles(author_id)')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS wechat_vv_skills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            author_id INTEGER NOT NULL,
+            skill_content TEXT,
+            extracted_from TEXT,
+            version INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (author_id) REFERENCES wechat_vv_authors(id) ON DELETE CASCADE
+        )
+    ''')
+
+    # ── 🆕 游资看盘快照表 ──
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS speculator_watch_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_time TEXT NOT NULL,
+            snapshot_date TEXT NOT NULL,
+            snapshot_json TEXT NOT NULL,
+            note TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_sws_date ON speculator_watch_snapshots(snapshot_date)')
+
     conn.commit()
     conn.close()
     return db_path
+
+
+# ==================== 🆕 大V微信辅助函数 ====================
+def ensure_wechat_vv_tables():
+    """确保大V微信相关表存在（幂等）"""
+    import sqlite3 as _sql3
+    conn = _sql3.connect(DB_PATH); cur = conn.cursor()
+    for sql in [
+        """CREATE TABLE IF NOT EXISTS wechat_vv_authors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, wechat_id TEXT, url TEXT, avatar TEXT, category TEXT DEFAULT '游资', note TEXT, article_count INTEGER DEFAULT 0, skill_status TEXT DEFAULT 'none', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""",
+        """CREATE TABLE IF NOT EXISTS wechat_vv_articles (id INTEGER PRIMARY KEY AUTOINCREMENT, author_id INTEGER NOT NULL, title TEXT NOT NULL, content TEXT, url TEXT, publish_time TEXT, views INTEGER, summary TEXT, tags TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (author_id) REFERENCES wechat_vv_authors(id) ON DELETE CASCADE)""",
+        """CREATE TABLE IF NOT EXISTS wechat_vv_skills (id INTEGER PRIMARY KEY AUTOINCREMENT, author_id INTEGER NOT NULL, skill_content TEXT, extracted_from TEXT, version INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (author_id) REFERENCES wechat_vv_authors(id) ON DELETE CASCADE)""",
+    ]:
+        try: cur.execute(sql)
+        except Exception: pass
+    conn.commit(); conn.close()
+
+
+def ensure_speculator_snapshot_table():
+    """确保游资看盘快照表存在（幂等）"""
+    import sqlite3 as _sql3
+    conn = _sql3.connect(DB_PATH); cur = conn.cursor()
+    try:
+        cur.execute("""CREATE TABLE IF NOT EXISTS speculator_watch_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, snapshot_time TEXT NOT NULL, snapshot_date TEXT NOT NULL, snapshot_json TEXT NOT NULL, note TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        conn.commit()
+    except Exception: pass
+    conn.close()
+
+
+def save_speculator_snapshot(snapshot_json_str: str, note: str = "") -> int:
+    """保存游资看盘快照，返回新 ID"""
+    import sqlite3 as _sql3
+    from datetime import datetime
+    ensure_speculator_snapshot_table()
+    now = datetime.now()
+    conn = _sql3.connect(DB_PATH); cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO speculator_watch_snapshots (snapshot_time, snapshot_date, snapshot_json, note) VALUES (?, ?, ?, ?)",
+        (now.strftime("%H:%M:%S"), now.strftime("%Y-%m-%d"), snapshot_json_str, note or "")
+    )
+    new_id = cur.lastrowid
+    conn.commit(); conn.close()
+    return new_id
+
+
+def list_speculator_snapshots(limit: int = 100) -> list:
+    """列出游资看盘快照（新→旧）"""
+    import sqlite3 as _sql3
+    ensure_speculator_snapshot_table()
+    conn = _sql3.connect(DB_PATH); cur = conn.cursor()
+    cur.execute(
+        "SELECT id, snapshot_date, snapshot_time, note, created_at FROM speculator_watch_snapshots ORDER BY snapshot_date DESC, snapshot_time DESC LIMIT ?",
+        (limit,)
+    )
+    rows = cur.fetchall(); conn.close()
+    return rows
+
+
+def load_speculator_snapshot(snapshot_id: int) -> str:
+    """加载单个快照的 JSON"""
+    import sqlite3 as _sql3
+    ensure_speculator_snapshot_table()
+    conn = _sql3.connect(DB_PATH); cur = conn.cursor()
+    cur.execute("SELECT snapshot_json FROM speculator_watch_snapshots WHERE id=?", (snapshot_id,))
+    row = cur.fetchall(); conn.close()
+    return row[0][0] if row else None
+
+
+def delete_speculator_snapshot(snapshot_id: int):
+    """删除快照"""
+    import sqlite3 as _sql3
+    ensure_speculator_snapshot_table()
+    conn = _sql3.connect(DB_PATH); cur = conn.cursor()
+    cur.execute("DELETE FROM speculator_watch_snapshots WHERE id=?", (snapshot_id,))
+    conn.commit(); conn.close()
 
 
 # ==================== 研判缓存 ====================

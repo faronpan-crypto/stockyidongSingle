@@ -402,6 +402,7 @@ from ui.tab_jianlou import JianLouMixin
 from ui.tab_chouma import ChouMaMixin
 from ui.tab_beta_alpha import BetaAlphaMixin
 from ui.tab_learning import LearningMixin
+from ui.tab_wechat_vv import WeChatVVMixin
 
 # Phase 5c: Builders/Nav/Spider/Realtime/Checks/Math/Getters/Trade/EmoDeep/Token/Schedule/Buttons
 from ui.tab_builders import BuildersMixin
@@ -444,7 +445,7 @@ from ui.tab_holding_check import HoldingCheckMixin
 from ui.tab_financial_check import FinancialCheckMixin
 import ui.stock_web_open as _web_open
 
-class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ChoiceMixin, ChouMaMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, EventCalendarMixin, ExportMixin, FileIoMixin, FinanceMixin, FinancialCheckMixin, FullLinkMixin, FormatMixin, GettersMixin, HoldingCheckMixin, HoldingsMixin, HotMixin, IfindMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, TechStageMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, TushareMixin, WarningMixin, WebMixin, WencaiMixin, YingmiMixin, ZhihuMixin, WordcloudMixin, BetaAlphaMixin):
+class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMixin, BuildersMixin, ButtonsMixin, CaochuanMixin, CangweiMixin, ChecksMixin, ChoiceMixin, ChouMaMixin, ConfigMixin, CrawlerMixin, DapanMixin, DatabaseMixin, DbSearchMixin, DefaultConfigMixin, EmoDeepMixin, EventCalendarMixin, ExportMixin, FileIoMixin, FinanceMixin, FinancialCheckMixin, FullLinkMixin, FormatMixin, GettersMixin, HoldingCheckMixin, HoldingsMixin, HotMixin, IfindMixin, IndicatorMixin, InnerClassMixin, JianLouMixin, KellyMixin, LeaderMixin, LearningMixin, MathMixin, MoneyFlowMixin, NavMixin, Nav2Mixin, NewsMixin, PipelineMixin, RealtimeMixin, RenderMixin, RestMixin, ScheduleMixin, ScreenshotMixin, SpiderReaderMixin, StockDetailMixin, TechStageMixin, ThreadMixin, TokenMixin, ToplevelMixin, TradeMixin, TushareMixin, WarningMixin, WebMixin, WencaiMixin, WeChatVVMixin, YingmiMixin, ZhihuMixin, WordcloudMixin, BetaAlphaMixin):
     # ═══════ 🌐 股票多站打开 (单击股票同时在多站打开) ═══════
     def _open_web_settings(self):
         _web_open.show_settings_dialog(self)
@@ -5909,6 +5910,16 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         learning_tab = ttk.Frame(crawler_control_notebook, padding=6)
         crawler_control_notebook.add(learning_tab, text="🎓学习")
         self._build_learning_tab(learning_tab)
+
+        # ── 📱 大V微信 Tab (🆕) ──
+        try:
+            vv_tab = ttk.Frame(crawler_control_notebook, padding=6)
+            crawler_control_notebook.add(vv_tab, text="📱大V微信")
+            self._build_wechat_vv_tab(vv_tab)
+            print("[📱大V微信] ✅ Tab 初始化完成", flush=True)
+        except Exception as _e:
+            import traceback; traceback.print_exc()
+            print(f"[📱大V微信] ❌ Tab 初始化失败: {_e}", flush=True)
 
 
         growth_top = ttk.Frame(growth_tab)
