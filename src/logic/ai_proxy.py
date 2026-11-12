@@ -158,9 +158,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
 
         cfg = PROVIDERS[provider_name]
-        api_key = os.environ.get(cfg["key_env"], "")
+        # 🔑 优先读 ai_config.json（持久化 + UI 可改），fallback 环境变量
+        api_key = ""
+        try:
+            _cfg_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "config", "ai_config.json")
+            if os.path.exists(_cfg_path):
+                with open(_cfg_path) as _f:
+                    _all_cfg = json.load(_f)
+                _p_cfg = (_all_cfg.get("providers") or {}).get(provider_name, {})
+                api_key = (_p_cfg.get("api_key") or "").strip()
+        except Exception:
+            pass
         if not api_key:
-            self._json(502, {"error": f"环境变量 {cfg['key_env']} 未配置"})
+            api_key = os.environ.get(cfg["key_env"], "")
+        if not api_key:
+            self._json(502, {"error": f"❌ 未配置 API Key！请在主界面打开 🤖AI 设置 或 ~/.zshrc 配置 {cfg['key_env']}"})
             return
 
         model = body.get("model", cfg["default_model"])

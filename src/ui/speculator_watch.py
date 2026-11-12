@@ -6149,87 +6149,57 @@ ARTICLE_LENGTHS = [
 
 
 def _robust_ai_call(prompt, system_prompt="", max_tokens=1500, win=None):
-    """AI 自动 fallback — 主 provider 失败循环尝试所有可用 provider"""
+    """AI fallback — 直接走本地代理 (localhost:8787)，不再直连 API"""
     import json as _j
     import requests as _req
     import os as _os
+    import hmac as _hmac, hashlib as _hashlib, secrets as _secrets
 
-    # 1️⃣ 先试主程序的 call_ai_model (用 active_provider)
-    callers = []
-    try:
-        from src.ui.tab_dapan import call_ai_model as _cai1; callers.append(_cai1)
-    except Exception: pass
-    if win is not None and hasattr(win, "_app") and getattr(win._app, "call_ai_model", None):
-        callers.append(win._app.call_ai_model)
+    # ⚡ 跳过 tab_dapan.call_ai_model —— 它先直连 api.deepseek.com timeout=60s，极慢
+    # 统一走 localhost:8787 代理（从 ai_config.json 或环境变量读 key）
 
-    for fn in callers:
-        try:
-            r = fn(prompt, system_prompt=system_prompt, max_tokens=max_tokens)
-            if r and isinstance(r, str) and len(r.strip()) > 20:
-                bad_words = ["402", "余额", "不足", "rate limit", "overloaded", "Error", "error"]
-                if not any(b in r[:100] for b in bad_words):
-                    return r  # ✅ 成功
-                print(f"[🤖AI] 主 provider 返回错误内容, 尝试 fallback...")
-        except Exception as e:
-            print(f"[🤖AI] 主 provider 异常: {e}")
-
-    # 2️⃣ 循环 ai_config.json 里所有 providers
+    providers_order = ["deepseek", "doubao", "ollama"]
     cfg_path = _os.path.join(_os.path.dirname(__file__), "..", "config", "ai_config.json")
     cfg_path = _os.path.abspath(cfg_path)
-    providers_order = ["deepseek", "doubao", "ollama"]
     try:
         with open(cfg_path, "r") as _f:
             cfg = _j.load(_f)
         cfg_providers = cfg.get("providers", {})
     except Exception as e:
-        print(f"[🤖AI] 无法读 ai_config.json: {e}")
-        return None
+        print(f"[🤖AI] 无法读 ai_config.json: {e}"); return None
 
     for pname in providers_order:
-        p = cfg_providers.get(pname)
+        p = cfg_providers.get(pname); 
         if not p: continue
-        api_key = (p.get("api_key") or "").strip()
-        # 🆕 代理模式 (localhost:8787) 不需要 config 里填 api_key —— 代理从环境变量读
-        _base = p.get("base_url", "")
-        _is_proxy = "8787" in _base or "ai_proxy" in _base.lower()
-        # ollama 不需要 key, 代理也不需要, 只有直连官方才需要 config 里有 key
-        if not api_key and pname != "ollama" and not _is_proxy: continue
-        if pname == "ollama":
+        base = (p.get("base_url") or "").rstrip("/")
+        if not base: continue
+        is_proxy = "8787" in base or "ai_proxy" in base.lower()
+        is_ollama = pname == "ollama"
+        if not is_proxy and not is_ollama:
+            continue  # 直连官方一律跳过，走代理
+        if is_ollama:
             try:
                 _req.get("http://localhost:11434/api/tags", timeout=2)
             except Exception:
-                continue  # ollama 没跑, 跳过
+                continue
 
-        base = p["base_url"].rstrip("/")
         ep = p.get("endpoint", "/chat/completions")
-        model = p["model"]
+        model = p.get("model")
         url = f"{base}{ep}"
         headers = {"Content-Type": "application/json"}
 
-        # 🆕 检测 localhost:8787 → 走代理协议 (加 X-Nonce + X-Proxy-Token)
-        _is_proxy = "8787" in base or "ai_proxy" in base.lower()
-        if _is_proxy:
-            try:
-                import hmac as _hmac, hashlib as _hashlib, secrets as _secrets
-                _secret_path = "/tmp/stock_ai_proxy.secret"
-                if _os.path.exists(_secret_path):
-                    _proxy_secret = open(_secret_path).read().strip()
-                    _nonce = _secrets.token_hex(8)
-                    _proxy_token = _hmac.new(
-                        _proxy_secret.encode(),
-                        ("ai_proxy" + _nonce).encode(),
-                        _hashlib.sha256).hexdigest()[:16]
-                    headers["X-Nonce"] = _nonce
-                    headers["X-Proxy-Token"] = _proxy_token
-                    print(f"[🤖AI] 走本地代理 8787 (provider={pname}, nonce={_nonce[:6]}...)")
-                else:
-                    print(f"[🤖AI] 代理 secret 文件不存在: {_secret_path}")
-                    continue
-            except Exception as _e:
-                print(f"[🤖AI] 代理签名失败: {_e}")
-                continue
-        elif api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        if is_proxy:
+            _secret_path = "/tmp/stock_ai_proxy.secret"
+            if not _os.path.exists(_secret_path):
+                print(f"[🤖AI] 代理 secret 不存在"); continue
+            _proxy_secret = open(_secret_path).read().strip()
+            _nonce = _secrets.token_hex(8)
+            _proxy_token = _hmac.new(
+                _proxy_secret.encode(),
+                ("ai_proxy" + _nonce).encode(),
+                _hashlib.sha256).hexdigest()[:16]
+            headers["X-Nonce"] = _nonce
+            headers["X-Proxy-Token"] = _proxy_token
 
         messages = []
         if system_prompt: messages.append({"role": "system", "content": system_prompt})
