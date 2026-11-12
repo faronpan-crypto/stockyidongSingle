@@ -8702,7 +8702,15 @@ class DapanMixin:
             except Exception as _e_idx:
                 import traceback; traceback.print_exc()
                 print(f"[指数趋势] tab创建失败: {_e_idx}", flush=True)
-            # ---- Tab 4: 🔌 API 接口清单 ----
+            # ---- Tab 4: 🔮 明天涨跌 (六形态概率分布 + 因子贡献 + 今日回看) ----
+            try:
+                tmr_tab = ttk.Frame(notebook)
+                notebook.add(tmr_tab, text="🔮 明天涨跌")
+                self._build_tomorrow_predict_tab(tmr_tab)
+            except Exception as _e_tmr:
+                import traceback; traceback.print_exc()
+                print(f"[明天涨跌] tab创建失败: {_e_tmr}", flush=True)
+            # ---- Tab 5: 🔌 API 接口清单 ----
             try:
                 _api_tab = ttk.Frame(notebook)
                 notebook.add(_api_tab, text="🔌 API 接口")
@@ -8713,6 +8721,426 @@ class DapanMixin:
             self._refresh_sentiment_zone_tabs_async()
         except Exception as e:
             ttk.Label(parent, text=f"情绪区间标签页创建失败: {e}", foreground="red").pack(expand=True)
+
+
+    def _build_tomorrow_predict_tab(self, parent):
+        """🔮 明天涨跌 Tab — 六形态概率分布 + 因子贡献 + 今日回看"""
+        import threading as _thr, queue as _q_mod
+        from ui.tab_index_pattern import fetch_kline, predict_next_day_pattern, predict_today_from_yesterday
+
+        # ═══════════════════════════════════════════════════════
+        # 🆕 内部容器 (parent 是 ttk.Frame 不支持 bg, 包一层 tk.Frame)
+        # ═══════════════════════════════════════════════════════
+        root = tk.Frame(parent, bg="#1a1a2e")
+        root.pack(fill=tk.BOTH, expand=True)
+
+        # ═══════════════════════════════════════════════════════
+        # 顶部工具栏
+        # ═══════════════════════════════════════════════════════
+        header = tk.Frame(root, bg="#1a1a2e")
+        header.pack(fill=tk.X, padx=10, pady=(10, 4))
+
+        tk.Label(header, text="🔮 明天涨跌 · 六形态推断",
+                 bg="#1a1a2e", fg="#FFD54F",
+                 font=("", 14, "bold")).pack(side=tk.LEFT, padx=4)
+
+        # 指数选择
+        idx_map = [("上证指数", "000001"), ("深成指", "399001"), ("创业板指", "399006")]
+        idx_names = [n for n, _ in idx_map]
+        idx_var = tk.StringVar(value="上证指数")
+        ttk.Combobox(header, values=idx_names, textvariable=idx_var,
+                     width=10, state="readonly").pack(side=tk.LEFT, padx=(12, 4))
+
+        # 状态标签
+        status_var = tk.StringVar(value="⏳ 加载中...")
+        tk.Label(header, textvariable=status_var,
+                 bg="#1a1a2e", fg="#78909C",
+                 font=("", 10)).pack(side=tk.RIGHT, padx=6)
+
+        # 刷新按钮
+        refresh_btn = tk.Button(header, text="🔄 刷新",
+                                bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+                                highlightbackground="#FFD54F", highlightthickness=2,
+                                font=("", 10, "bold"), cursor="hand2")
+        refresh_btn.pack(side=tk.RIGHT, padx=4)
+
+        # 今日回看按钮
+        review_btn = tk.Button(header, text="🔙 今日回看",
+                               bg="#FFFFFF", fg="black", activebackground="#FFF3E0",
+                               highlightbackground="#FB8C00", highlightthickness=2,
+                               font=("", 10, "bold"), cursor="hand2")
+        review_btn.pack(side=tk.RIGHT, padx=4)
+
+        # 内容 Canvas (可滚动)
+        _canvas = tk.Canvas(root, bg="#1a1a2e", highlightthickness=0, borderwidth=0)
+        _sb = ttk.Scrollbar(root, orient=tk.VERTICAL, command=_canvas.yview)
+        _sb.pack(side=tk.RIGHT, fill=tk.Y)
+        _canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
+        _canvas.configure(yscrollcommand=_sb.set)
+        body = tk.Frame(_canvas, bg="#1a1a2e")
+        _win_id = _canvas.create_window((0, 0), window=body, anchor="nw")
+
+        def _on_body_config(e):
+            _canvas.itemconfigure(_win_id, width=e.width)
+            _canvas.configure(scrollregion=_canvas.bbox("all"))
+        body.bind("<Configure>", _on_body_config)
+        _canvas.bind("<Configure>", lambda e: _canvas.itemconfigure(_win_id, width=e.width))
+
+        def _wheel(e): _canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+        _canvas.bind_all("<MouseWheel>", _wheel)
+
+        # ── 延迟初始化 (避免阻塞主界面) ──
+        _result_store = {"predict": None, "review": None, "df": None}
+
+        def _poll():
+            nonlocal _result_store
+            try:
+                while True:
+                    msg = _q.queue.get_nowait()
+                    if msg[0] == "init_done":
+                        _result_store["df"] = msg[1]
+                        status_var.set("🔄 正在推断明天形态...")
+                        refresh_btn.config(state="disabled")
+                        _thr.Thread(target=_predict_worker, args=(_current_code(),), daemon=True).start()
+                    elif msg[0] == "init_error":
+                        status_var.set(f"❌ 加载失败: {msg[1]}")
+                    elif msg[0] == "predict_done":
+                        _result_store["predict"] = msg[1]
+                        _render_predict(msg[1])
+                        refresh_btn.config(state="normal")
+                        status_var.set("✅ 推断完成")
+                    elif msg[0] == "predict_error":
+                        status_var.set(f"❌ 推断失败: {msg[1]}")
+                        refresh_btn.config(state="normal")
+                    elif msg[0] == "review_done":
+                        _render_review(msg[1])
+                        review_btn.config(state="normal")
+                        status_var.set("✅ 回看完成")
+                    elif msg[0] == "review_error":
+                        status_var.set(f"❌ 回看失败: {msg[1]}")
+                        review_btn.config(state="normal")
+            except _q_mod.Empty:
+                pass
+            root.after(400, _poll)
+
+        _q = _q_mod.Queue()
+        root.after(400, _poll)
+
+        # ── GIL 保护: 主线程先读好 tk 变量, 后台线程不能碰 StringVar ──
+        def _current_code():
+            """主线程安全地读取当前指数 code"""
+            try:
+                return dict(idx_map)[idx_var.get()]
+            except Exception:
+                return "000001"
+
+        def _init_worker(code):
+            try:
+                df = fetch_kline(code, kind="index", days=300)
+                _q.put(("init_done", df))
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                _q.put(("init_error", str(e)))
+
+        def _predict_worker(code):
+            try:
+                if _result_store["df"] is None:
+                    return
+                result = predict_next_day_pattern(_result_store["df"],
+                                                  code=code, app=self)
+                _q.put(("predict_done", result))
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                _q.put(("predict_error", str(e)))
+
+        def _review_worker(code):
+            try:
+                if _result_store["df"] is None:
+                    return
+                result = predict_today_from_yesterday(_result_store["df"],
+                                                       code=code, app=self)
+                _q.put(("review_done", result))
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                _q.put(("review_error", str(e)))
+
+        # ═══════════════════════════════════════════════════════
+        # 📊 渲染函数: 推断结果
+        # ═══════════════════════════════════════════════════════
+        def _clear_body():
+            for w in body.winfo_children():
+                w.destroy()
+
+        def _render_predict(result):
+            _clear_body()
+            if not result.get("ok"):
+                tk.Label(body, text=f"❌ {result.get('error')}",
+                         bg="#1a1a2e", fg="#EF5350", font=("", 14)).pack(pady=40)
+                return
+
+            probs = result["probs"]  # [(pattern, prob), ...] sorted desc
+            best = result["best"]
+            conf = result["confidence"]
+            state = result["today_state"]
+            contrib = result.get("factor_contrib", {})
+            reasons = result.get("reasons", [])
+
+            # 🎯 结论大字条
+            bar = tk.Frame(body, bg="#1a1a2e")
+            bar.pack(fill=tk.X, padx=4, pady=(6, 4))
+
+            emoji = "🟢" if "高走" in best else ("🔴" if "低走" in best else "⚪")
+            best_color = "#66BB6A" if "高走" in best else ("#EF5350" if "低走" in best else "#FFD54F")
+
+            # 左侧: 大圆结论
+            concl_fr = tk.Frame(bar, bg="#1a1a2e")
+            concl_fr.pack(side=tk.LEFT, padx=8)
+            tk.Label(concl_fr, text=f"{emoji}", bg="#1a1a2e",
+                     fg=best_color, font=("", 36)).pack(side=tk.LEFT)
+            concl_text = tk.Frame(concl_fr, bg="#1a1a2e")
+            concl_text.pack(side=tk.LEFT, padx=8)
+            tk.Label(concl_text, text="📅 明日开盘形态推断",
+                     bg="#1a1a2e", fg="#B0BEC5", font=("", 11)).pack(anchor="w")
+            tk.Label(concl_text, text=best, bg="#1a1a2e", fg=best_color,
+                     font=("", 22, "bold")).pack(anchor="w")
+
+            # 右侧: 置信度 + 胜率
+            stat_fr = tk.Frame(bar, bg="#1a1a2e")
+            stat_fr.pack(side=tk.RIGHT, padx=12)
+            tk.Label(stat_fr, text=f"置信度: {conf}", bg="#1a1a2e",
+                     fg="#FFD54F" if conf == "高" else ("#FF8A65" if conf == "中" else "#78909C"),
+                     font=("", 14, "bold")).pack(anchor="e")
+            tk.Label(stat_fr, text=f"胜率: {probs[0][1]*100:.1f}%", bg="#1a1a2e",
+                     fg="#B0BEC5", font=("", 12)).pack(anchor="e")
+
+            # ── 📊 概率分布条形图 ──
+            bar_fr = tk.LabelFrame(body, text="📊 六种形态概率分布",
+                                   bg="#1a1a2e", fg="#CE93D8", font=("", 11, "bold"))
+            bar_fr.pack(fill=tk.X, padx=4, pady=6)
+
+            max_p = max(p for _, p in probs)
+            for pattern, prob in probs:
+                row = tk.Frame(bar_fr, bg="#1a1a2e")
+                row.pack(fill=tk.X, padx=8, pady=2)
+                short = pattern[:4]
+                fg_c = "#66BB6A" if "高走" in pattern else ("#EF5350" if "低走" in pattern else "#FFD54F")
+                label_c = best_color if pattern == best else fg_c
+                tk.Label(row, text=f"{short}", width=8, bg="#1a1a2e", fg=label_c,
+                         font=("", 10, "bold" if pattern == best else "normal")).pack(side=tk.LEFT)
+                bar_len = int(prob / max_p * 180) if max_p > 0 else 0
+                bar_col = "#7B1FA2" if pattern == best else "#37474F"
+                tk.Frame(row, bg=bar_col, height=18,
+                         width=bar_len).pack(side=tk.LEFT, padx=2)
+                tk.Label(row, text=f"{prob*100:.1f}%", width=7,
+                         bg="#1a1a2e", fg=label_c,
+                         font=("", 10, "bold" if pattern == best else "normal")
+                         ).pack(side=tk.LEFT, padx=4)
+
+            # ── 📌 今日市场状态 (三列) ──
+            state_fr = tk.LabelFrame(body, text="📌 今日市场状态 (T日收盘)",
+                                     bg="#1a1a2e", fg="#64B5F6", font=("", 11, "bold"))
+            state_fr.pack(fill=tk.X, padx=4, pady=6)
+
+            def _state_cell(parent, label, val1, val2="", color="#B0BEC5"):
+                f = tk.Frame(parent, bg="#1a1a2e")
+                f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
+                tk.Label(f, text=label, bg="#1a1a2e", fg="#78909C", font=("", 9)).pack(anchor="w")
+                tk.Label(f, text=val1, bg="#1a1a2e", fg="#FFD54F",
+                         font=("", 16, "bold")).pack(anchor="w")
+                if val2:
+                    tk.Label(f, text=val2, bg="#1a1a2e", fg=color, font=("", 10)).pack(anchor="w")
+
+            ret_pct = state.get("ret_pct", 0)
+            ret_c = "#66BB6A" if ret_pct >= 0 else "#EF5350"
+            _state_cell(state_fr, "收盘价",
+                        f"{state['price']:.0f}", f"{ret_pct:+.2f}%", ret_c)
+            _state_cell(state_fr, "MA20 / MA60",
+                        f"{state['ma20']:.0f}", f"{state['ma60']:.0f}")
+            _state_cell(state_fr, "指数位置",
+                        state["pos_bucket"], f"({(state['price']-state['ma60'])/state['ma60']*100:+.1f}%)",
+                        "#66BB6A" if state["pos_bucket"] == "高位" else ("#EF5350" if state["pos_bucket"] == "低位" else "#FFD54F"))
+            _state_cell(state_fr, "量能",
+                        state["vol_bucket"], f"({state['vol_ratio']:.2f}x)")
+            _state_cell(state_fr, "MA5 动量",
+                        state["mom_bucket"])
+
+            # ── 🧩 因子贡献拆解 ──
+            if contrib:
+                fc_fr = tk.LabelFrame(body, text="🧩 因子贡献拆解 (每个因子给每个形态的加分)",
+                                       bg="#1a1a2e", fg="#A5D6A7", font=("", 11, "bold"))
+                fc_fr.pack(fill=tk.X, padx=4, pady=6)
+
+                fc_wrap = tk.Frame(fc_fr, bg="#1a1a2e")
+                fc_wrap.pack(fill=tk.X, padx=6, pady=6)
+
+                pattern_keys_full = [p for p, _ in probs]
+                pattern_keys_short = [p[:4] for p in pattern_keys_full]
+                factor_names = list(contrib.keys())
+
+                # 表头
+                tk.Label(fc_wrap, text="", width=9, bg="#1a1a2e").grid(row=0, column=0)
+                for j, pk in enumerate(pattern_keys_short):
+                    c = best_color if pk == best[:4] else "#B0BEC5"
+                    tk.Label(fc_wrap, text=pk, width=8, bg="#1a1a2e", fg=c,
+                             font=("", 9, "bold")).grid(row=0, column=j+1)
+
+                row_totals = {j: 0.0 for j in range(len(pattern_keys_short))}
+                for i, fn in enumerate(factor_names):
+                    tk.Label(fc_wrap, text=fn, width=9, bg="#1a1a2e", fg="#A5D6A7",
+                             font=("", 9)).grid(row=i+1, column=0, sticky="w")
+                    for j, pk in enumerate(pattern_keys_full):
+                        v = contrib[fn].get(pk, 0.0)
+                        row_totals[j] += v
+                        if v > 0.001:
+                            bg = "#4A148C" if pk == best else "#263238"
+                            fg = "#FFD54F" if pk == best else "#E0E0E0"
+                            tk.Label(fc_wrap, text=f"+{v*100:.0f}%", width=8, bg=bg, fg=fg,
+                                     font=("", 9, "bold")).grid(row=i+1, column=j+1)
+                        else:
+                            tk.Label(fc_wrap, text="·", width=8, bg="#1a1a2e", fg="#37474F"
+                                     ).grid(row=i+1, column=j+1)
+
+                # 合计行
+                tk.Label(fc_wrap, text="合计", width=9, bg="#1a1a2e", fg="#FFD54F",
+                         font=("", 9, "bold")).grid(row=len(factor_names)+1, column=0, sticky="w")
+                for j, pk in enumerate(pattern_keys_full):
+                    v = row_totals[j]
+                    bg = "#311B92" if pk == best else "#1a1a2e"
+                    fg = "#FFD54F" if pk == best else "#E0E0E0"
+                    tk.Label(fc_wrap, text=f"{v*100:.0f}%", width=8, bg=bg, fg=fg,
+                             font=("", 10, "bold")).grid(row=len(factor_names)+1, column=j+1)
+
+            # ── 💡 因子分析文字 ──
+            if reasons:
+                rsn_fr = tk.LabelFrame(body, text="💡 因子分析",
+                                        bg="#1a1a2e", fg="#FFD54F", font=("", 11, "bold"))
+                rsn_fr.pack(fill=tk.X, padx=4, pady=6)
+                for r in reasons:
+                    tk.Label(rsn_fr, text=r, bg="#1a1a2e", fg="#B0BEC5",
+                             font=("", 10), anchor="w").pack(fill=tk.X, padx=8, pady=2)
+
+            # ── ⚠️ 底部风险提示 ──
+            tk.Label(body, text="⚠️ 推断仅供参考, 股市有风险, 下注需谨慎! 条件概率≠确定性, 相似样本≥5才可信",
+                     bg="#1a1a2e", fg="#78909C", font=("", 9)).pack(pady=(12, 4))
+
+        # ═══════════════════════════════════════════════════════
+        # 📊 渲染函数: 今日回看 (覆盖渲染)
+        # ═══════════════════════════════════════════════════════
+        def _render_review(result):
+            _clear_body()
+            if not result.get("ok"):
+                tk.Label(body, text=f"❌ {result.get('error')}",
+                         bg="#1a1a2e", fg="#EF5350", font=("", 14)).pack(pady=40)
+                return
+
+            # 🎯 三卡对比 (昨天 → 推断 → 实际)
+            tk.Label(body, text=f"🔙 {result['actual_date']} · 今日回看 (用昨天收盘数据 → 推断今天走势)",
+                     bg="#1a1a2e", fg="#FF8A65", font=("", 13, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
+
+            wrap = tk.Frame(body, bg="#1a1a2e")
+            wrap.pack(fill=tk.X, padx=4, pady=4)
+
+            def _mini_card(parent, title, lines, highlight=None):
+                c = tk.Frame(parent, bg="#263238", highlightbackground=highlight or "#37474F",
+                             highlightthickness=2 if highlight else 1)
+                c.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
+                tk.Label(c, text=title, bg="#263238", fg="#78909C",
+                         font=("", 10)).pack(pady=(6, 2))
+                for t, c2, big in lines:
+                    sz = 18 if big else 11
+                    tk.Label(c, text=t, bg="#263238", fg=c2,
+                             font=("", sz, "bold" if big else "normal")).pack()
+                return c
+
+            ys = result["yesterday_state"]
+            _mini_card(wrap, f"📅 {ys['date']} 昨天",
+                       [(f"收盘 {ys['price']:.0f}", "#FFD54F", True),
+                        (f"位置{ys['pos_bucket']} · 量能{ys['vol_bucket']}", "#B0BEC5", False),
+                        (f"动量{ys['mom_bucket']}", "#78909C", False)])
+
+            predicted = result["predicted_best"]
+            pe_c = "#66BB6A" if "高走" in predicted else ("#EF5350" if "低走" in predicted else "#FFD54F")
+            _mini_card(wrap, "🔮 模型推断",
+                       [(f"{predicted}", pe_c, True),
+                        (f"胜率 {result['top1_prob']*100:.1f}%", "#B0BEC5", False),
+                        (f"置信度 {result['confidence']}", "#FFD54F", False)],
+                       highlight="#7B1FA2")
+
+            actual = result["actual_pattern"]
+            ac_c = "#66BB6A" if "高走" in actual else ("#EF5350" if "低走" in actual else "#FFD54F")
+            hit_c = "#66BB6A" if result["hit_top1"] else ("#FFD54F" if result["hit_top3"] else "#EF5350")
+            hit_t = "✅ Top1 命中" if result["hit_top1"] else ("🟡 Top3 命中" if result["hit_top3"] else "❌ 未命中")
+            _mini_card(wrap, f"📌 {result['actual_date']} 今天实际",
+                       [(f"{actual}", ac_c, True),
+                        (f"涨跌 {result['today_ret_pct']:+.2f}%", "#B0BEC5", False),
+                        (hit_t, hit_c, False)],
+                       highlight=hit_c)
+
+            # 📊 详细指标
+            mtr_fr = tk.LabelFrame(body, text="📊 评估指标",
+                                    bg="#1a1a2e", fg="#90CAF9", font=("", 11, "bold"))
+            mtr_fr.pack(fill=tk.X, padx=4, pady=6)
+
+            metrics = [
+                ("🎯 Top1 命中", "✅" if result["hit_top1"] else "❌",
+                 "#66BB6A" if result["hit_top1"] else "#EF5350"),
+                ("🥉 Top3 命中", "✅" if result["hit_top3"] else "❌",
+                 "#66BB6A" if result["hit_top3"] else "#EF5350"),
+                ("📈 推断胜率", f"{result['top1_prob']*100:.0f}%", "#FFD54F"),
+                ("🎲 实际概率", f"{result['actual_prob']*100:.0f}%", ac_c),
+                ("🏛️ 历史条件胜率",
+                 f"{result['historical_hit_rate']:.1f}%" if result['historical_hit_rate'] is not None else "N/A",
+                 "#64B5F6"),
+                ("👥 相似样本", f"{result['sim_count']} 个", "#B0BEC5"),
+            ]
+            for i, (k, v, c) in enumerate(metrics):
+                cell = tk.Frame(mtr_fr, bg="#2d2d4a", highlightbackground="#37474F", highlightthickness=1)
+                cell.grid(row=i // 3, column=i % 3, padx=4, pady=4, sticky="nsew")
+                mtr_fr.grid_columnconfigure(i % 3, weight=1)
+                tk.Label(cell, text=k, bg="#2d2d4a", fg="#78909C",
+                         font=("", 9)).pack(anchor="w", padx=8, pady=(6, 0))
+                tk.Label(cell, text=v, bg="#2d2d4a", fg=c,
+                         font=("", 14, "bold")).pack(anchor="w", padx=8, pady=(0, 6))
+
+            # 🔄 切回推断结果
+            tk.Button(body, text="↩️ 切回明天推断",
+                      bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+                      highlightbackground="#FFD54F", highlightthickness=2,
+                      font=("", 10, "bold"), cursor="hand2",
+                      command=lambda: _render_predict(_result_store["predict"]) if _result_store["predict"] else None
+                      ).pack(pady=8)
+
+        # ── 按钮绑定 ──
+        def _on_refresh():
+            _code = _current_code()
+            if _result_store["df"] is None:
+                _thr.Thread(target=_init_worker, args=(_code,), daemon=True).start()
+            else:
+                refresh_btn.config(state="disabled")
+                _thr.Thread(target=_predict_worker, args=(_code,), daemon=True).start()
+
+        def _on_review():
+            if _result_store["df"] is None:
+                status_var.set("⏳ 先等数据加载完...")
+                return
+            review_btn.config(state="disabled")
+            _thr.Thread(target=_review_worker, args=(_current_code(),), daemon=True).start()
+
+        def _on_idx_change(_e=None):
+            _result_store["df"] = None
+            _clear_body()
+            refresh_btn.config(state="disabled")
+            try: _cur_name = idx_var.get()  #主线程安全
+            except: _cur_name = ""
+            status_var.set(f"⏳ 切换到 {_cur_name} 加载中...")
+            _thr.Thread(target=_init_worker, args=(_current_code(),), daemon=True).start()
+
+        refresh_btn.config(command=_on_refresh)
+        review_btn.config(command=_on_review)
+        idx_var.trace_add("write", lambda *_: _on_idx_change())
+
+        # 自动初始化
+        _thr.Thread(target=_init_worker, args=(_current_code(),), daemon=True).start()
 
 
     def _build_emo_cycle_chart_tab(self, parent):

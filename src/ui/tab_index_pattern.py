@@ -549,7 +549,68 @@ def predict_next_day_pattern(df, code="000001", app=None):
     elif sh_pct < -1.5:
         scores["低开低走🔴"] += 0.05
 
-    # 归一化 + 输出
+    # ═══════════════════════════════════════════════════════
+    # 每个因子对每个形态的 raw score 贡献 (给 UI 展示用)
+    # ═══════════════════════════════════════════════════════
+    factor_contrib = {}  # factor_key → {pattern: delta}
+    # 大数法则
+    _fc1 = {p: (sim_count.get(p, 0) / sim_total * 0.40) if sim_total >= 5 else 0.0
+            for p in pattern_keys}
+    factor_contrib["①大数法则"] = _fc1
+
+    # 指数位置
+    _fc2 = {p: 0.0 for p in pattern_keys}
+    if ma60[-1] and ma20[-1]:
+        above_ma20 = price_t > ma20[-1]
+        above_ma60 = price_t > ma60[-1]
+        if above_ma20 and above_ma60:
+            _fc2["高开高走🟢"] = 0.12; _fc2["平走高🟢"] = 0.03
+        elif not above_ma20 and not above_ma60:
+            _fc2["低开低走🔴"] = 0.12; _fc2["高开低走🔴"] = 0.03
+        elif above_ma20 and not above_ma60:
+            _fc2["平走高🟢"] = 0.08; _fc2["低开高走🟢"] = 0.07
+        else:
+            _fc2["高开低走🔴"] = 0.07; _fc2["平走低🔴"] = 0.08
+    factor_contrib["②指数位置"] = _fc2
+
+    # 量能
+    _fc3 = {p: 0.0 for p in pattern_keys}
+    if vol_ratio_t > 0:
+        if vol_ratio_t > 1.5:
+            if ret_t >= 0:
+                _fc3["高开高走🟢"] = 0.10; _fc3["高开低走🔴"] = 0.05
+            else:
+                _fc3["低开高走🟢"] = 0.10; _fc3["平走高🟢"] = 0.05
+        elif vol_ratio_t < 0.6:
+            _fc3["低开高走🟢"] = 0.08; _fc3["平走高🟢"] = 0.07
+    factor_contrib["③量能"] = _fc3
+
+    # 动量
+    _fc4 = {p: 0.0 for p in pattern_keys}
+    if ma5_now and ma5_prev:
+        mom_pct = (ma5_now - ma5_prev) / ma5_prev * 100
+        if mom_pct > 0.5:
+            _fc4["高开高走🟢"] = 0.07; _fc4["平走高🟢"] = 0.03
+        elif mom_pct < -0.5:
+            _fc4["低开低走🔴"] = 0.07; _fc4["高开低走🔴"] = 0.03
+    factor_contrib["④动量"] = _fc4
+
+    # 情绪
+    _fc5 = {p: 0.0 for p in pattern_keys}
+    if sentiment_up is not None:
+        if sentiment_up > 0.65:
+            _fc5["高开高走🟢"] = 0.06; _fc5["平走高🟢"] = 0.04
+        elif sentiment_up < 0.35:
+            _fc5["低开低走🔴"] = 0.06; _fc5["高开低走🔴"] = 0.04
+    if sh_pct > 1.5:
+        _fc5["高开高走🟢"] += 0.05
+    elif sh_pct < -1.5:
+        _fc5["低开低走🔴"] += 0.05
+    factor_contrib["⑤情绪"] = _fc5
+
+    # ═══════════════════════════════════════════════════════
+    # 归一化 probs (6 因子加总 → 归一化)
+    # ═══════════════════════════════════════════════════════
     total_score = sum(scores.values())
     if total_score < 0.01:
         total_score = 0.01
@@ -567,6 +628,7 @@ def predict_next_day_pattern(df, code="000001", app=None):
         "best": best,
         "confidence": conf_level,
         "probs": sorted_p,
+        "factor_contrib": factor_contrib,  # 🆕 因子贡献拆解
         "reasons": reasons,
         "today_state": {
             "price": price_t, "ret_pct": ret_t,
@@ -579,6 +641,190 @@ def predict_next_day_pattern(df, code="000001", app=None):
             "sentiment_up": sentiment_up,
         }
     }
+
+
+def predict_today_from_yesterday(df, code="000001", app=None):
+    """
+    🔮 今日回看 — 用昨天(T-1)收盘数据推断今天(T)形态, 跟实际对比验证模型
+
+    返回:
+      - predicted: 完整推断结果 (best, probs, factor_contrib...)
+      - actual: 今天实际形态
+      - hit: bool — 推断第一名是否命中
+      - top3_hit: bool — 实际形态是否在 Top3 概率里
+      - accuracy: 模型历史回测胜率 (相似样本条件概率)
+    """
+    n = len(df)
+    if n < 61:
+        return {"ok": False, "error": "历史数据不足"}
+
+    # 用 yesterday 的状态做推断 (T-1 的所有值)
+    # 复用同一个 predict 函数的逻辑 — 把 df 去掉最后一行, 就相当于 "今天变成了昨天"
+    # 但更清晰的做法: 直接改 predict 的查询索引
+    import numpy as np
+    from collections import Counter
+
+    pattern_keys = ["高开高走🟢", "高开低走🔴", "低开高走🟢", "低开低走🔴",
+                    "平走高🟢", "平走低🔴"]
+    closes = df["close"].values.astype(float)
+    highs = df["high"].values.astype(float) if "high" in df.columns else closes.copy()
+    lows = df["low"].values.astype(float) if "low" in df.columns else closes.copy()
+    opens = df["open"].values.astype(float)
+    volumes = df["volume"].values.astype(float) if "volume" in df.columns else np.ones(n) * np.nan
+
+    def _bucket(val, lo, mid, hi):
+        if val <= lo: return -1
+        elif val <= mid: return 0
+        else: return 1
+
+    # ═══════════════════════════════════════════════════════
+    # 关键: 用 T-1 (昨天) 的状态
+    # ═══════════════════════════════════════════════════════
+    idx_yesterday = n - 2  # T-1
+    idx_today = n - 1      # T
+
+    ma20 = np.array([np.mean(closes[max(0, i-19):i+1]) for i in range(n)])
+    ma60 = np.array([np.mean(closes[max(0, i-59):i+1]) for i in range(n)])
+    vol_ma60 = np.array([np.mean(volumes[max(0, i-59):i+1]) if not np.isnan(volumes[i]) and volumes[i] > 0 else np.nan for i in range(n)])
+
+    # 昨天状态
+    price_y = closes[idx_yesterday]
+    pos_y = (price_y - ma60[idx_yesterday]) / ma60[idx_yesterday] * 100
+    pos_bucket_y = _bucket(pos_y, -3, 3, 3)
+    vol_ratio_y = volumes[idx_yesterday] / vol_ma60[idx_yesterday] if vol_ma60[idx_yesterday] and not np.isnan(volumes[idx_yesterday]) and volumes[idx_yesterday] > 0 else 1.0
+    vol_bucket_y = _bucket(vol_ratio_y, 0.7, 1.3, 1.3)
+    ma5_now_y = np.mean(closes[idx_yesterday-4:idx_yesterday+1]) if idx_yesterday >= 4 else price_y
+    ma5_prev_y = np.mean(closes[idx_yesterday-9:idx_yesterday-4]) if idx_yesterday >= 10 else ma5_now_y
+    mom_bucket_y = _bucket((ma5_now_y - ma5_prev_y) / ma5_prev_y * 100 if ma5_prev_y else 0, -0.3, 0.3, 0.3)
+    ret_y = (price_y - closes[idx_yesterday-1]) / closes[idx_yesterday-1] * 100 if idx_yesterday >= 1 else 0
+
+    # 实际今天形态
+    actual_pattern = str(df["pattern"].iloc[idx_today]) if "pattern" in df.columns else "未知"
+    price_today = closes[idx_today]
+    ret_today = (price_today - price_y) / price_y * 100
+
+    # ═══════════════════════════════════════════════════════
+    # 大数法则: 在历史 i=60..idx_yesterday-1 中找相似 (排除昨天和今天!)
+    # ═══════════════════════════════════════════════════════
+    scores = {p: 0.0 for p in pattern_keys}
+    reasons = []
+
+    sim_count = {p: 0.0 for p in pattern_keys}
+    sim_total = 0
+    for i in range(60, idx_yesterday):  # 到 idx_yesterday 为止 (不含昨天)
+        pos_i = (closes[i] - ma60[i]) / ma60[i] * 100 if ma60[i] else 0
+        pos_b_i = _bucket(pos_i, -3, 3, 3)
+        vol_ratio_i = volumes[i] / vol_ma60[i] if vol_ma60[i] and not np.isnan(volumes[i]) and volumes[i] > 0 else 1.0
+        vol_b_i = _bucket(vol_ratio_i, 0.7, 1.3, 1.3)
+        ma5_i = np.mean(closes[max(0, i-4):i+1])
+        ma5_p_i = np.mean(closes[max(0, i-9):i-4]) if i >= 10 else ma5_i
+        mom_b_i = _bucket((ma5_i - ma5_p_i) / ma5_p_i * 100 if ma5_p_i else 0, -0.3, 0.3, 0.3)
+        dist = abs(pos_b_i - pos_bucket_y) + abs(vol_b_i - vol_bucket_y) + abs(mom_b_i - mom_bucket_y)
+        if dist <= 2:
+            p_next = df["pattern"].iloc[i + 1]  # 历史上 i 的次日 (对应 "今天" 的角色)
+            if p_next in sim_count:
+                w = 1.0 / (1.0 + dist * 0.3)
+                sim_count[p_next] += w; sim_total += w
+
+    # 计算因子贡献 (跟 predict_next_day_pattern 一模一样的逻辑, 只是查询对象是昨天)
+    # 因子1 大数法则 (40%)
+    _fc1 = {p: (sim_count.get(p, 0) / sim_total * 0.40) if sim_total >= 5 else 0.0 for p in pattern_keys}
+    for p in pattern_keys: scores[p] += _fc1[p]
+    factor_contrib = {"①大数法则": _fc1}
+
+    top_sim = max(sim_count, key=sim_count.get) if sim_total >= 5 else None
+    if sim_total >= 5:
+        reasons.append(f"📊 找了 {int(sim_total)} 个历史相似状态 → 次日「{top_sim[:4]}」最高")
+    else:
+        reasons.append(f"📊 相似样本不足, 降级用整体分布")
+
+    # 因子2 指数位置 (15%)
+    above_ma20 = price_y > ma20[idx_yesterday]
+    above_ma60 = price_y > ma60[idx_yesterday]
+    _fc2 = {p: 0.0 for p in pattern_keys}
+    if ma60[idx_yesterday] and ma20[idx_yesterday]:
+        if above_ma20 and above_ma60:
+            _fc2["高开高走🟢"] = 0.12; _fc2["平走高🟢"] = 0.03
+        elif not above_ma20 and not above_ma60:
+            _fc2["低开低走🔴"] = 0.12; _fc2["高开低走🔴"] = 0.03
+        elif above_ma20 and not above_ma60:
+            _fc2["平走高🟢"] = 0.08; _fc2["低开高走🟢"] = 0.07
+        else:
+            _fc2["高开低走🔴"] = 0.07; _fc2["平走低🔴"] = 0.08
+    for p in pattern_keys: scores[p] += _fc2[p]
+    factor_contrib["②指数位置"] = _fc2
+
+    # 因子3 量能 (15%)
+    _fc3 = {p: 0.0 for p in pattern_keys}
+    if vol_ratio_y > 0:
+        if vol_ratio_y > 1.5:
+            if ret_y >= 0: _fc3["高开高走🟢"] = 0.10; _fc3["高开低走🔴"] = 0.05
+            else: _fc3["低开高走🟢"] = 0.10; _fc3["平走高🟢"] = 0.05
+        elif vol_ratio_y < 0.6:
+            _fc3["低开高走🟢"] = 0.08; _fc3["平走高🟢"] = 0.07
+    for p in pattern_keys: scores[p] += _fc3[p]
+    factor_contrib["③量能"] = _fc3
+
+    # 因子4 动量 (10%)
+    _fc4 = {p: 0.0 for p in pattern_keys}
+    mom_pct_y = (ma5_now_y - ma5_prev_y) / ma5_prev_y * 100 if ma5_prev_y else 0
+    if mom_pct_y > 0.5:
+        _fc4["高开高走🟢"] = 0.07; _fc4["平走高🟢"] = 0.03
+    elif mom_pct_y < -0.5:
+        _fc4["低开低走🔴"] = 0.07; _fc4["高开低走🔴"] = 0.03
+    for p in pattern_keys: scores[p] += _fc4[p]
+    factor_contrib["④动量"] = _fc4
+
+    # 归一化
+    total = sum(scores.values())
+    probs = {p: scores[p] / total if total > 0 else 1/6 for p in pattern_keys}
+    sorted_p = sorted(probs.items(), key=lambda x: -x[1])
+    best = sorted_p[0][0]
+    top3 = [p for p, _ in sorted_p[:3]]
+
+    # 判定
+    hit = (best == actual_pattern)
+    top3_hit = (actual_pattern in top3)
+    top1_prob = sorted_p[0][1]
+    top3_sum = sum(probs.get(p, 0) for p in top3)
+    actual_prob = probs.get(actual_pattern, 0)
+
+    # 回测胜率: 相似样本的条件概率分布中 "实际形态" 出现的频率
+    # 这就是模型的"理论胜率" — 历史上同样状态下, 发生这种形态的频率
+    historical_hit_rate = (sim_count.get(actual_pattern, 0) / sim_total * 100) if sim_total >= 5 else None
+
+    return {
+        "ok": True,
+        # 推断
+        "predicted_best": best,
+        "predicted_probs": sorted_p,
+        "factor_contrib": factor_contrib,
+        "confidence": "高" if top1_prob >= 0.30 else ("中" if top1_prob >= 0.22 else "低"),
+        # 实际
+        "actual_pattern": actual_pattern,
+        "actual_date": str(df["date"].iloc[idx_today])[:10] if "date" in df.columns else "今天",
+        "today_ret_pct": ret_today,
+        "yesterday_state": {
+            "date": str(df["date"].iloc[idx_yesterday])[:10] if "date" in df.columns else "昨天",
+            "price": price_y, "ret_pct": ret_y,
+            "ma20": ma20[idx_yesterday], "ma60": ma60[idx_yesterday],
+            "pos_bucket": ["低位", "中位", "高位"][pos_bucket_y + 1],
+            "vol_ratio": vol_ratio_y,
+            "vol_bucket": ["缩量", "平量", "放量"][vol_bucket_y + 1],
+            "mom_bucket": ["向下", "平", "向上"][mom_bucket_y + 1],
+        },
+        # 判定
+        "hit_top1": hit,
+        "hit_top3": top3_hit,
+        "top3_list": top3,
+        "actual_prob": actual_prob,
+        "top1_prob": top1_prob,
+        "top3_prob_sum": top3_sum,
+        "historical_hit_rate": historical_hit_rate,
+        "reasons": reasons,
+        "sim_count": int(sim_total),
+    }
+
 
 def show_index_pattern_analyzer(parent, app=None):
     """📈 指数日走势形态统计 — 独立弹窗"""
@@ -680,6 +926,12 @@ def show_index_pattern_analyzer(parent, app=None):
                             highlightbackground="#7B1FA2", highlightthickness=2,
                             font=("", 10, "bold"), cursor="hand2")
     predict_btn.pack(side=tk.RIGHT, padx=6)
+
+    review_btn = tk.Button(ctrl, text="🔙 今日回看", width=12,
+                           bg="#FFFFFF", fg="black", activebackground="#FFF3E0",
+                           highlightbackground="#FB8C00", highlightthickness=2,
+                           font=("", 10, "bold"), cursor="hand2")
+    review_btn.pack(side=tk.RIGHT, padx=6)
 
     # ── Notebook: 统计图 + 建议 + 每日明细 ──
     nb = ttk.Notebook(win)
@@ -1021,12 +1273,44 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
                 elif msg[0] == "done":
                     df, stats, label = msg[1], msg[2], msg[3]
                     print(f"[📊index_pattern] ✅ done: df={len(df)}行, label={label}", flush=True)
+                    _predict_store["df"] = df.copy()  # 🆕 存推断用 df
+                    try:
+                        if "(" in label and label.endswith(")"):
+                            _predict_store["name"] = label.rsplit("(", 1)[0]
+                            _predict_store["code"] = label.rsplit("(", 1)[1][:-1]
+                    except Exception:
+                        pass
                     _render_complete(df, stats, label)
+                    analyze_btn.config(state="normal")
                     return
                 elif msg[0] == "error":
                     print(f"[📊index_pattern] ❌ error: {msg[1]}", flush=True)
                     status_var.set(f"❌ {msg[1]}")
-                    analyze_btn.config(state="normal")
+                    analyze_btn.config(state="normal"); predict_btn.config(state="normal")
+                    return
+                elif msg[0] == "predict_done":
+                    result = msg[1]
+                    print(f"[📊index_pattern] 🔮 predict_done: best={result.get('best')}", flush=True)
+                    predict_btn.config(state="normal")
+                    status_var.set("🔮 推断完成")
+                    _show_predict_result(result)
+                    return
+                elif msg[0] == "predict_error":
+                    print(f"[📊index_pattern] ❌ predict_error: {msg[1]}", flush=True)
+                    predict_btn.config(state="normal")
+                    status_var.set(f"❌ 推断失败: {msg[1]}")
+                    return
+                elif msg[0] == "review_done":
+                    result = msg[1]
+                    print(f"[📊index_pattern] 🔙 review_done: hit_top1={result.get('hit_top1')}", flush=True)
+                    review_btn.config(state="normal")
+                    status_var.set("🔙 回看完成")
+                    _show_review_result(result)
+                    return
+                elif msg[0] == "review_error":
+                    print(f"[📊index_pattern] ❌ review_error: {msg[1]}", flush=True)
+                    review_btn.config(state="normal")
+                    status_var.set(f"❌ 回看失败: {msg[1]}")
                     return
         except _queue.Empty:
             try:
@@ -1036,7 +1320,6 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
                     print("[📊index_pattern] win 已销毁, 停止轮询", flush=True)
             except RuntimeError as _re:
                 print(f"[📊index_pattern] ⚠️ main loop 未就绪: {_re}", flush=True)
-                # 🆕 延迟重试 — 这是临时弹窗还没进 mainloop 的典型症状
                 try:
                     win.after(500, _poll)
                 except Exception:
@@ -1209,30 +1492,12 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
     analyze_btn.config(command=_on_analyze)
 
     # ── 🔮 明日推断 ──
-    # 存储完整 df (带 pattern 列), 推断需要
     _predict_store = {"df": None, "code": None, "name": None}
-
-    # 在 _render_complete 里自动存 df (那个地方最稳)
-    _old_render = _render_complete
-    def _render_with_store(df, stats, label_text):
-        _predict_store["df"] = df.copy()
-        # 从 label_text 里拆 name/code
-        try:
-            if "(" in label_text and label_text.endswith(")"):
-                _predict_store["name"] = label_text.rsplit("(", 1)[0]
-                _predict_store["code"] = label_text.rsplit("(", 1)[1][:-1]
-        except Exception:
-            pass
-        _old_render(df, stats, label_text)
-
-    # 把 done queue 里的 _render_complete 替换成存版本
-    # 直接在 _render_complete 函数头加 store 更简单 — 算了, 已经 wrap 好了
 
     def _predict_click():
         """🔮 点击推断按钮"""
         if _predict_store["df"] is None:
-            # 没数据 → 先触发 analyze
-            status_var.set("⚠️ 请先点「开始统计」或等自动统计完再推断")
+            status_var.set("⚠️ 请先等统计完再推断 (自动统计中...)")
             return
         predict_btn.config(state="disabled")
         status_var.set("🔮 计算明日形态概率...")
@@ -1254,13 +1519,549 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
 
     predict_btn.config(command=_predict_click)
 
-    # ── 扩展 _poll: 处理 predict_done / predict_error ──
-    # 先把原来 _poll 存一份, 然后 wrap 扩展
-    _old_poll_fn = None  # 占位 — 直接重写 _poll 里加分支
+    # ── 🔙 今日回看 ──
+    def _review_click():
+        """🔙 点击今日回看"""
+        if _predict_store["df"] is None:
+            status_var.set("⚠️ 请先等统计完再回看 (自动统计中...)")
+            return
+        review_btn.config(state="disabled")
+        status_var.set("🔙 对比昨天→今天 推断 vs 实际...")
+        win.update_idletasks()
 
-    # ── 在 _render_complete 里也存 df (更可靠) ──
-    # 找到 _render_complete 函数, 加一行 _predict_store["df"] = df.copy()
-    # 但 _render_complete 是局部函数, 可以直接改它的定义
+        def _rev_worker():
+            try:
+                result = predict_today_from_yesterday(
+                    _predict_store["df"],
+                    code=_predict_store["code"] or "000001",
+                    app=app
+                )
+                _q.put(("review_done", result))
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                _q.put(("review_error", str(e)))
+
+        threading.Thread(target=_rev_worker, daemon=True).start()
+
+    review_btn.config(command=_review_click)
+
+    def _show_review_result(result):
+        """🔙 弹出今日回看结果 — 推断 vs 实际 + 模型胜率"""
+        dlg = tk.Toplevel(win)
+        dlg.title(f"🔙 今日回看 — 昨天→今天 推断 vs 实际")
+        dlg.geometry("740x700")
+        dlg.configure(bg="#1a1a2e")
+        dlg.transient(win)
+        dlg.grab_set()
+
+        if not result.get("ok"):
+            tk.Label(dlg, text=f"❌ {result.get('error', '回看失败')}",
+                     bg="#1a1a2e", fg="#EF5350",
+                     font=("", 14)).pack(pady=40)
+            return
+
+        # 🎯 标题
+        head = tk.Frame(dlg, bg="#1a1a2e")
+        head.pack(fill=tk.X, pady=(14, 4))
+        tk.Label(head, text=f"🔙 {result['actual_date']} 今日回看",
+                 bg="#1a1a2e", fg="#FF8A65",
+                 font=("", 16, "bold")).pack()
+        tk.Label(head, text=f"用 {result['yesterday_state']['date']} 收盘数据 推断 {result['actual_date']} 走势",
+                 bg="#1a1a2e", fg="#78909C", font=("", 10)).pack(pady=(2, 6))
+
+        # ── 📊 三卡对比: 昨天 → 推断 → 实际 ──
+        compare = tk.Frame(dlg, bg="#1a1a2e")
+        compare.pack(fill=tk.X, padx=14, pady=6)
+
+        # 昨天状态卡
+        c1 = tk.Frame(compare, bg="#263238", width=220, highlightbackground="#546E7A", highlightthickness=1)
+        c1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=3)
+        tk.Label(c1, text="📅 昨天 (T-1)", bg="#263238", fg="#90CAF9",
+                 font=("", 11, "bold")).pack(pady=(8, 2))
+        ys = result["yesterday_state"]
+        tk.Label(c1, text=f"收盘: {ys['price']:.0f}", bg="#263238", fg="#E0E0E0",
+                 font=("", 14, "bold")).pack()
+        tk.Label(c1, text=f"{ys['ret_pct']:+.2f}%  位置{ys['pos_bucket']}",
+                 bg="#263238", fg="#B0BEC5", font=("", 10)).pack()
+        tk.Label(c1, text=f"量能{ys['vol_bucket']}({ys['vol_ratio']:.1f}x)  动量{ys['mom_bucket']}",
+                 bg="#263238", fg="#78909C", font=("", 9)).pack(pady=(0, 8))
+
+        # 箭头
+        tk.Label(compare, text="→", bg="#1a1a2e", fg="#FFD54F",
+                 font=("", 20, "bold")).pack(side=tk.LEFT, padx=4)
+
+        # 推断卡
+        predicted = result["predicted_best"]
+        pred_emoji = "🟢" if "高走" in predicted else ("🔴" if "低走" in predicted else "⚪")
+        pred_color = "#66BB6A" if "高走" in predicted else ("EF5350" if "低走" in predicted else "#FFD54F")
+        c2 = tk.Frame(compare, bg="#263238", width=220, highlightbackground="#7B1FA2", highlightthickness=2)
+        c2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=3)
+        tk.Label(c2, text="🔮 模型推断", bg="#263238", fg="#CE93D8",
+                 font=("", 11, "bold")).pack(pady=(8, 2))
+        tk.Label(c2, text=f"{pred_emoji} {predicted[:4]}", bg="#263238", fg=pred_color,
+                 font=("", 18, "bold")).pack()
+        tk.Label(c2, text=f"置信度 {result['confidence']}  胜率 {result['top1_prob']*100:.0f}%",
+                 bg="#263238", fg="#B0BEC5", font=("", 10)).pack()
+        tk.Label(c2, text=f"相似样本 {result['sim_count']} 个",
+                 bg="#263238", fg="#78909C", font=("", 9)).pack(pady=(0, 8))
+
+        tk.Label(compare, text="→", bg="#1a1a2e", fg="#FFD54F",
+                 font=("", 20, "bold")).pack(side=tk.LEFT, padx=4)
+
+        # 实际卡
+        actual = result["actual_pattern"]
+        actual_emoji = "🟢" if "高走" in actual else ("🔴" if "低走" in actual else "⚪")
+        actual_color = "#66BB6A" if "高走" in actual else ("EF5350" if "低走" in actual else "#FFD54F")
+        hit_color = "#66BB6A" if result["hit_top1"] else "#EF5350"
+        hit_text = "✅ 命中!" if result["hit_top1"] else ("🟡 Top3命中" if result["hit_top3"] else "❌ 未命中")
+        c3 = tk.Frame(compare, bg="#263238", width=220,
+                      highlightbackground=hit_color, highlightthickness=3)
+        c3.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=3)
+        tk.Label(c3, text="📌 今天实际", bg="#263238", fg="#FFD54F",
+                 font=("", 11, "bold")).pack(pady=(8, 2))
+        tk.Label(c3, text=f"{actual_emoji} {actual[:4]}", bg="#263238", fg=actual_color,
+                 font=("", 18, "bold")).pack()
+        tk.Label(c3, text=f"涨跌 {result['today_ret_pct']:+.2f}%",
+                 bg="#263238", fg="#B0BEC5", font=("", 10)).pack()
+        tk.Label(c3, text=hit_text,
+                 bg="#263238", fg=hit_color, font=("", 12, "bold")).pack(pady=(0, 6))
+
+        # ── 模型评估卡 ──
+        ev = tk.Frame(dlg, bg="#1a1a2e")
+        ev.pack(fill=tk.X, padx=14, pady=6)
+
+        # 评估指标
+        metrics = [
+            ("🎯 Top1 命中", "✅" if result["hit_top1"] else "❌", hit_color),
+            ("🥉 Top3 命中", "✅" if result["hit_top3"] else "❌", "#66BB6A" if result["hit_top3"] else "#EF5350"),
+            ("📈 推断胜率", f"{result['top1_prob']*100:.0f}%", "#FFD54F"),
+            ("🎲 实际概率", f"{result['actual_prob']*100:.0f}%", actual_color),
+            ("📊 Top3 概率和", f"{result['top3_prob_sum']*100:.0f}%", "#B0BEC5"),
+            ("🏛️ 历史条件胜率",
+             f"{result['historical_hit_rate']:.1f}%" if result['historical_hit_rate'] is not None else "N/A",
+             "#64B5F6"),
+        ]
+        for i, (k, v, c) in enumerate(metrics):
+            cell = tk.Frame(ev, bg="#2d2d4a", highlightbackground="#37474F", highlightthickness=1)
+            cell.grid(row=i // 3, column=i % 3, padx=4, pady=4, sticky="nsew")
+            ev.grid_columnconfigure(i % 3, weight=1)
+            tk.Label(cell, text=k, bg="#2d2d4a", fg="#78909C", font=("", 9)).pack(anchor="w", padx=8, pady=(6, 0))
+            tk.Label(cell, text=v, bg="#2d2d4a", fg=c, font=("", 14, "bold")).pack(anchor="w", padx=8, pady=(0, 6))
+
+        # ── 因子贡献拆解表 (跟推断弹窗一模一样) ──
+        contrib = result.get("factor_contrib", {})
+        if contrib:
+            fc_fr = tk.LabelFrame(dlg, text="🧩 因子贡献拆解", bg="#1a1a2e", fg="#CE93D8", font=("", 11, "bold"))
+            fc_fr.pack(fill=tk.X, padx=14, pady=6)
+            pattern_keys_full = [p for p, _ in result["predicted_probs"]]  # 概率排序
+            pattern_keys_short = [p[:4] for p in pattern_keys_full]
+            factor_names = list(contrib.keys())
+            fc_wrap = tk.Frame(fc_fr, bg="#1a1a2e")
+            fc_wrap.pack(fill=tk.X, padx=6, pady=4)
+            tk.Label(fc_wrap, text="", width=9, bg="#1a1a2e").grid(row=0, column=0)
+            for j, pk in enumerate(pattern_keys_short):
+                color = "#FFD54F" if pk == predicted[:4] else "#B0BEC5"
+                tk.Label(fc_wrap, text=pk, width=8, bg="#1a1a2e", fg=color,
+                         font=("", 9, "bold")).grid(row=0, column=j+1)
+            row_totals = {j: 0.0 for j in range(len(pattern_keys_short))}
+            for i, fn in enumerate(factor_names):
+                tk.Label(fc_wrap, text=fn, width=9, bg="#1a1a2e", fg="#A5D6A7",
+                         font=("", 9)).grid(row=i+1, column=0, sticky="w")
+                for j, pk in enumerate(pattern_keys_full):
+                    v = contrib[fn].get(pk, 0.0)
+                    row_totals[j] += v
+                    if v > 0.001:
+                        bg = "#4A148C" if pk == predicted else "#263238"
+                        fg = "#FFD54F" if pk == predicted else "#E0E0E0"
+                        tk.Label(fc_wrap, text=f"+{v*100:.0f}%", width=8, bg=bg, fg=fg,
+                                 font=("", 9, "bold")).grid(row=i+1, column=j+1)
+                    else:
+                        tk.Label(fc_wrap, text="·", width=8, bg="#1a1a2e", fg="#37474F"
+                                 ).grid(row=i+1, column=j+1)
+            tk.Label(fc_wrap, text="合计", width=9, bg="#1a1a2e", fg="#FFD54F",
+                     font=("", 9, "bold")).grid(row=len(factor_names)+1, column=0, sticky="w")
+            for j, pk in enumerate(pattern_keys_full):
+                v = row_totals[j]
+                bg = "#311B92" if pk == predicted else "#1a1a2e"
+                fg = "#FFD54F" if pk == predicted else "#E0E0E0"
+                tk.Label(fc_wrap, text=f"{v*100:.0f}%", width=8, bg=bg, fg=fg,
+                         font=("", 10, "bold")).grid(row=len(factor_names)+1, column=j+1)
+
+        # ── 实际形态在概率分布的位置 ──
+        actual_pos = next((i for i, (p, _) in enumerate(result["predicted_probs"]) if p.startswith(actual[:4])), -1)
+        if actual_pos >= 0:
+            pos_str = f"第 {actual_pos + 1} 名"
+            pos_color = "#66BB6A" if actual_pos < 3 else ("#FFD54F" if actual_pos == 3 else "#EF5350")
+        else:
+            pos_str = "不在预测列表中"
+            pos_color = "#EF5350"
+
+        hint_fr = tk.Frame(dlg, bg="#1a1a2e")
+        hint_fr.pack(fill=tk.X, padx=14, pady=(2, 10))
+        hints = [
+            f"📌 实际形态「{actual[:4]}」在概率分布中排名: {pos_str}  (概率 {result['actual_prob']*100:.1f}%)",
+            f"🏛️ 历史回测: 相似状态 {result['sim_count']} 个, 其中次日为「{actual[:4]}」的频率 = {result['historical_hit_rate']:.1f}%",
+        ]
+        if result["hit_top1"]:
+            hints.append(f"🎉 模型推断准确! 相似样本里的 Top1 就是实际发生的形态")
+        elif result["hit_top3"]:
+            hints.append(f"🟡 模型推断部分准确: 实际在 Top3 内, 但不是最优解")
+        else:
+            hints.append(f"❌ 模型这次没命中 — 可能受突发消息/板块异动影响 (条件概率本身就是分布, 不是确定性)")
+        for h in hints:
+            tk.Label(hint_fr, text=h, bg="#1a1a2e", fg="#B0BEC5",
+                     font=("", 9), anchor="w").pack(fill=tk.X)
+
+    def _show_predict_result(result):
+        """🔮 弹出推断结果窗口"""
+        dlg = tk.Toplevel(win)
+        dlg.title(f"🔮 明日形态推断 — {_predict_store['name'] or ''}")
+        dlg.geometry("720x640")
+        dlg.configure(bg="#1a1a2e")
+        dlg.transient(win)
+        dlg.grab_set()
+
+        # ═══════════════════════════════════════════════════════
+        # 🆕 帮助弹窗 — 点击 ❓ 显示详细说明
+        # ═══════════════════════════════════════════════════════
+        HELP_TEXT = """🔮 明日形态推断 — 完整说明
+═══════════════════════════════════════════════════════
+
+❶ 六种形态是什么意思？
+───────────────────────
+  🟢 = 阳线（收盘 > 开盘，当天买方占优）
+  🔴 = 阴线（收盘 < 开盘，当天卖方占优）
+
+  高开  = 今日开盘  > 昨日收盘 + 0.3%
+  低开  = 今日开盘  < 昨日收盘 - 0.3%
+  平开  = 开盘价在 ±0.3% 以内
+
+  高开高走🟢 / 高开低走🔴
+  低开高走🟢 / 低开低走🔴
+  平走高🟢   / 平走低🔴
+
+❷ 为什么"大数法则"第一名不是最终结论？
+──────────────────────────────────────────────────────
+  大数法则只占 40% 权重，是核心但不是全部。
+  最终结论 = 6 因子加权评分 归一化 取 argmax。
+
+  举个例子：今天上证指数
+  ┌─────────┬──────────┬──────────┬──────────┬─────────┐
+  │  形态    │ ①大数法则 │ ②指数位置 │ ③量能  │ ④动量  │
+  ├─────────┼──────────┼──────────┼──────────┼─────────┤
+  │ 平走高🟢 │ +13.8%   │   +0%    │  +0%    │   +0%   │
+  │ 低开低走🔴│  +4.8%   │ +12.0%   │  +0%    │   +0%   │
+  └─────────┴──────────┴──────────┴──────────┴─────────┘
+  平走高有大数支持，但空头排列（价<MA20<MA60）只给
+  低开低走打 12% 加成 → 低开低走胜出 3%。
+
+❸ 六大因子详解（按权重排序）
+──────────────────────────────────────────────────────
+  ① 大数法则 · 历史条件概率（权重 40%）
+    把今日状态拆 3 维度（位置 高/中/低、量能 缩/平/放、
+    动量 上/平/下），在全部 300 天历史里找"相似状态"
+    （距离 ≤ 2，约 12% 的日子），统计这些相似日子的
+    次日形态分布。越像的样本权重越高。
+
+    ⚠️ 这是最核心的因子，但不保证结论正确。比如今日
+    102 个相似状态里平走高占 34%，但低开低走也占 12%。
+
+  ② 指数位置 · MA 多空排列（权重 15%）
+    价 > MA20 > MA60 → 多头排列 → 高开高走 +12%, 平走高 +3%
+    价 < MA20 < MA60 → 空头排列 → 低开低走 +12%, 高开低走 +3%
+    MA20 < 价 < MA60 → 反弹期 → 平走高 +8%, 低开高走 +7%
+    价 < MA20 但 > MA60 → 回踩期 → 高开低走 +7%, 平走低 +8%
+
+  ③ 量能 · 相对均量（权重 15%）
+    今日量 / 60 日均量 > 1.5 倍（天量）
+      今日涨 → 高开高走 +10%, 高开低走 +5%（情绪延续）
+      今日跌 → 低开高走 +10%, 平走高 +5%（恐慌出清反弹）
+    < 0.6 倍（地量）→ 低开高走 +8%, 平走高 +7%（变盘信号）
+
+  ④ MA5 动量斜率（权重 10%）
+    MA5 最近 5 天 vs 再往前 5 天
+    斜率 > +0.5% → 高开高走 +7%, 平走高 +3%
+    斜率 < -0.5% → 低开低走 +7%, 高开低走 +3%
+
+  ⑤ 情绪 · 涨跌家数（权重 10%）
+    实时 up/(up+down)
+    > 65% 上涨 → 高开高走 +6%, 平走高 +4%
+    < 35% 上涨 → 低开低走 +6%, 高开低走 +4%
+    拿不到数据 → 跳过
+
+  ⑥ 实时大盘涨跌（辅助）
+    上证实时 pct > +1.5% → 高开高走 +5%
+    上证实时 pct < -1.5% → 低开低走 +5%
+
+❹ 置信度是怎么来的？
+──────────────────────────────────────────────────────
+  把各因子的得分加起来归一化得到 6 种形态的概率。
+  最高那个概率就是胜率。
+
+  ≥ 30% → 高置信度（多因子同向共振，值得重视）
+  ≥ 22% → 中置信度（有因子支持但有分歧）
+  < 22% → 低置信度（形态模糊，6 种都差不多）
+
+❺ 如何使用推断结果？
+──────────────────────────────────────────────────────
+  ✅ 置信度高 + 多个因子共振 → 可以做盘前预案
+  ✅ 大数法则 vs 指数位置冲突 → 以位置因子为准
+  ✅ 情绪因子拿不到 → 降低 10% 可信度
+  ❌ 低置信度 → 不做任何预判，等开盘 15 分钟再看
+
+❻ 局限性（必读！）
+──────────────────────────────────────────────────────
+  ⚠️ 这是条件概率推断，不是确定性预测
+  ⚠️ 没有考虑：美联储加息、IPO 密集、节假日效应
+  ⚠️ 相似样本 ≥ 5 个才可信，否则降级用整体分布
+  ⚠️ 回测验证：相似状态胜率 ≈ 28%（A股整体水平）
+  ⚠️ 股市有风险，下注需谨慎！
+
+═══════════════════════════════════════════════════════
+数据源：新浪日线(300天) + 新浪实时 + app 实例方法"""
+
+        def _open_help():
+            """弹出帮助说明 (带字体调节 + 背景色)"""
+            hd = tk.Toplevel(dlg)
+            hd.title("❓ 帮助 · 推断说明")
+            hd.geometry("780x620")
+            hd.configure(bg="#ECEFF1")
+            hd.transient(dlg)
+            hd.grab_set()
+
+            # 字体状态
+            _fs = [13]  # 列表存可变字体大小
+            _bg = ["#FFFFFF"]
+            _fg = ["#1A1A2E"]
+
+            def _apply_font():
+                try:
+                    st.configure(font=("", _fs[0]))
+                except Exception:
+                    pass
+
+            # 工具栏: A-/A+ + 背景色
+            bar = tk.Frame(hd, bg="#CFD8DC", height=32)
+            bar.pack(fill=tk.X)
+
+            tk.Label(bar, text="帮助说明字体:", bg="#CFD8DC",
+                     fg="#1A1A2E", font=("", 10)).pack(side=tk.LEFT, padx=8)
+
+            tk.Button(bar, text="A-", width=3,
+                      bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+                      highlightbackground="#546E7A", highlightthickness=1,
+                      font=("", 10, "bold"),
+                      command=lambda: (_fs.__setitem__(0, max(9, _fs[0] - 1)), _apply_font())
+                      ).pack(side=tk.LEFT, padx=2)
+
+            tk.Button(bar, text="A+", width=3,
+                      bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+                      highlightbackground="#546E7A", highlightthickness=1,
+                      font=("", 10, "bold"),
+                      command=lambda: (_fs.__setitem__(0, min(24, _fs[0] + 1)), _apply_font())
+                      ).pack(side=tk.LEFT, padx=2)
+
+            tk.Label(bar, text=f"({_fs[0]}pt)", bg="#CFD8DC", fg="#37474F",
+                     font=("", 9)).pack(side=tk.LEFT, padx=2)
+
+            # 背景色
+            tk.Label(bar, text=" 背景:", bg="#CFD8DC", fg="#1A1A2E",
+                     font=("", 10)).pack(side=tk.LEFT, padx=(14, 2))
+            for col, name in [("#FFFFFF", "白"), ("#F5F5F5", "浅灰"),
+                              ("#FFFDE7", "米黄"), ("#E3F2FD", "浅蓝"),
+                              ("#1A1A2E", "深色")]:
+                def _set_bg(c=col):
+                    _bg[0] = c
+                    _fg[0] = "#ECEFF1" if c == "#1A1A2E" else "#1A1A2E"
+                    try:
+                        st.configure(bg=_bg[0], fg=_fg[0])
+                        hd.configure(bg=_bg[0])
+                    except Exception:
+                        pass
+                tk.Button(bar, text=name, width=3,
+                          bg=col, fg="#1A1A2E" if col != "#1A1A2E" else "#FFFFFF",
+                          activebackground=col,
+                          highlightbackground="#546E7A", highlightthickness=1,
+                          font=("", 9), command=_set_bg
+                          ).pack(side=tk.LEFT, padx=1)
+
+            # 滚动文本
+            txt_frame = tk.Frame(hd, bg=_bg[0])
+            txt_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+            sb = tk.Scrollbar(txt_frame)
+            sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+            st = tk.Text(txt_frame, wrap="word", bg=_bg[0], fg=_fg[0],
+                         font=("", _fs[0]), borderwidth=0, padx=16, pady=12,
+                         yscrollcommand=sb.set)
+            st.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            sb.config(command=st.yview)
+
+            st.insert(tk.END, HELP_TEXT)
+            st.configure(state="disabled")
+
+        # 🎯 标题行 — 加 ❓ 按钮
+        head = tk.Frame(dlg, bg="#1a1a2e")
+        head.pack(fill=tk.X, pady=(14, 6))
+        tk.Label(head, text="🔮 明日开盘形态推断",
+                 bg="#1a1a2e", fg="#FFD54F",
+                 font=("", 16, "bold")).pack(side=tk.LEFT, padx=(14, 4))
+        tk.Button(head, text="❓", width=3,
+                  bg="#FFFFFF", fg="black", activebackground="#FFF9C4",
+                  highlightbackground="#FFD54F", highlightthickness=2,
+                  font=("", 12, "bold"), cursor="hand2",
+                  command=_open_help).pack(side=tk.LEFT, padx=4)
+        tk.Label(head, text="点此查看详细说明",
+                 bg="#1a1a2e", fg="#78909C", font=("", 9)).pack(side=tk.LEFT)
+
+        # 🎯 大结论
+        concl = tk.Frame(dlg, bg="#2d2d4a", highlightbackground="#7B1FA2", highlightthickness=2)
+        concl.pack(fill=tk.X, padx=14, pady=8)
+        emoji = "🟢" if "高走" in best else ("🔴" if "低走" in best else "⚪")
+        color = "#66BB6A" if "高走" in best else ("#EF5350" if "低走" in best else "#FFD54F")
+        tk.Label(concl, text=f"{emoji} {best[:4]}", bg="#2d2d4a", fg=color,
+                 font=("", 28, "bold")).pack(pady=(10, 0))
+        tk.Label(concl, text=f"置信度: {conf}  ·  胜率 {probs[0][1]*100:.0f}%",
+                 bg="#2d2d4a", fg="#B0BEC5", font=("", 12)).pack(pady=(0, 10))
+
+        # 📊 概率分布条形图
+        bar_fr = tk.LabelFrame(dlg, text="📊 6种形态概率分布", bg="#1a1a2e", fg="#FFD54F", font=("", 11, "bold"))
+        bar_fr.pack(fill=tk.X, padx=14, pady=8)
+        max_p = probs[0][1] if probs else 0.3
+        for pattern, prob in probs:
+            row = tk.Frame(bar_fr, bg="#1a1a2e")
+            row.pack(fill=tk.X, padx=10, pady=2)
+            tk.Label(row, text=pattern[:4], width=8, bg="#1a1a2e", fg="#E0E0E0",
+                     font=("", 10)).pack(side=tk.LEFT)
+            bar_w = int(prob / max_p * 380) if max_p > 0 else 0
+            bar_color = "#7B1FA2" if pattern == best else "#546E7A"
+            bar = tk.Frame(row, bg=bar_color, height=18, width=bar_w)
+            bar.pack(side=tk.LEFT)
+            tk.Label(row, text=f"{prob*100:.1f}%", width=7,
+                     bg="#1a1a2e", fg="#FFD54F" if pattern == best else "#B0BEC5",
+                     font=("", 10, "bold")).pack(side=tk.LEFT, padx=6)
+
+        # 🧩 因子贡献拆解表 — 让用户看清为什么是这个结论
+        contrib = result.get("factor_contrib", {})
+        if contrib:
+            fc_fr = tk.LabelFrame(dlg, text="🧩 因子贡献拆解 (每个因子给每个形态的加分)",
+                                   bg="#1a1a2e", fg="#CE93D8", font=("", 11, "bold"))
+            fc_fr.pack(fill=tk.X, padx=14, pady=6)
+
+            # 表头 + 网格布局
+            fc_wrap = tk.Frame(fc_fr, bg="#1a1a2e")
+            fc_wrap.pack(fill=tk.X, padx=6, pady=4)
+
+            pattern_keys = [p[:4] for p, _ in probs]  # 用概率分布里的顺序 (从高到低)
+            factor_names = list(contrib.keys())
+
+            # 第一格空白
+            tk.Label(fc_wrap, text="", width=9, bg="#1a1a2e").grid(row=0, column=0)
+            for j, pk in enumerate(pattern_keys):
+                color = "#FFD54F" if pk == best[:4] else "#B0BEC5"
+                tk.Label(fc_wrap, text=pk, width=8, bg="#1a1a2e", fg=color,
+                         font=("", 9, "bold")).grid(row=0, column=j+1)
+
+            # 数据行
+            row_totals = {j: 0.0 for j in range(len(pattern_keys))}
+            for i, fn in enumerate(factor_names):
+                tk.Label(fc_wrap, text=fn, width=9, bg="#1a1a2e", fg="#A5D6A7",
+                         font=("", 9)).grid(row=i+1, column=0, sticky="w")
+                for j, pk in enumerate(pattern_keys):
+                    # 找完整 key
+                    full_key = None
+                    for k in contrib[fn]:
+                        if k.startswith(pk): full_key = k; break
+                    v = contrib[fn].get(full_key, 0.0) if full_key else 0.0
+                    row_totals[j] += v
+                    if v > 0.001:
+                        cell_bg = "#4A148C" if pk == best[:4] else "#263238"
+                        cell_fg = "#FFD54F" if pk == best[:4] else "#E0E0E0"
+                        tk.Label(fc_wrap, text=f"+{v*100:.0f}%", width=8,
+                                 bg=cell_bg, fg=cell_fg, font=("", 9, "bold")
+                                 ).grid(row=i+1, column=j+1)
+                    else:
+                        tk.Label(fc_wrap, text="·", width=8, bg="#1a1a2e", fg="#37474F"
+                                 ).grid(row=i+1, column=j+1)
+
+            # 合计行
+            tk.Label(fc_wrap, text="合计", width=9, bg="#1a1a2e", fg="#FFD54F",
+                     font=("", 9, "bold")).grid(row=len(factor_names)+1, column=0, sticky="w")
+            for j, pk in enumerate(pattern_keys):
+                v = row_totals[j]
+                final_fg = "#FFD54F" if pk == best[:4] else "#E0E0E0"
+                tk.Label(fc_wrap, text=f"{v*100:.0f}%", width=8,
+                         bg="#311B92" if pk == best[:4] else "#1a1a2e",
+                         fg=final_fg, font=("", 10, "bold")
+                         ).grid(row=len(factor_names)+1, column=j+1)
+
+            # 💡 关键发现行
+            fc_hint = tk.Label(fc_fr, text="", bg="#1a1a2e", fg="#90CAF9",
+                               font=("", 9), wraplength=680, justify="left")
+            # 自动生成对比 hint
+            if len(pattern_keys) >= 2:
+                top1 = pattern_keys[0]; top2 = pattern_keys[1]
+                t1_total = row_totals[0]; t2_total = row_totals[1]
+                gap = (t1_total - t2_total) * 100
+                # 找出哪个因子贡献了最大差距
+                max_gap_factor = ""
+                max_gap_val = 0
+                for fn in factor_names:
+                    full1 = full2 = None
+                    for k in contrib[fn]:
+                        if k.startswith(top1): full1 = k
+                        if k.startswith(top2): full2 = k
+                    v1 = contrib[fn].get(full1, 0) if full1 else 0
+                    v2 = contrib[fn].get(full2, 0) if full2 else 0
+                    if v1 - v2 > max_gap_val:
+                        max_gap_val = v1 - v2
+                        max_gap_factor = fn
+                if gap > 0:
+                    fc_hint.config(text=f"💡 {top1} 胜出 {gap:.0f}% 主要来自「{max_gap_factor}」贡献 {max_gap_val*100:.0f}%")
+            fc_hint.pack(anchor="w", padx=8, pady=(2, 4))
+
+        # 📍 今日状态
+        state_fr = tk.LabelFrame(dlg, text="📍 今日市场状态 (T日)", bg="#1a1a2e", fg="#64B5F6", font=("", 11, "bold"))
+        state_fr.pack(fill=tk.X, padx=14, pady=6)
+        s = state
+        items = [
+            ("收盘价", f"{s['price']:.0f}  ({s['ret_pct']:+.2f}%)"),
+            ("MA20 / MA60", f"{s['ma20']:.0f} / {s['ma60']:.0f}"),
+            ("指数位置", s["pos_bucket"]),
+            ("量能", f"{s['vol_bucket']} ({s['vol_ratio']:.1f}x)"),
+            ("动量", s["mom_bucket"]),
+            ("上证涨跌", f"{s['sh_pct']:+.2f}%"),
+            ("情绪", f"{s['sentiment_up']*100:.0f}% 上涨" if s['sentiment_up'] is not None else "N/A"),
+        ]
+        for i, (k, v) in enumerate(items):
+            r = i // 3; c = i % 3
+            cell = tk.Frame(state_fr, bg="#1a1a2e")
+            cell.grid(row=r, column=c, padx=10, pady=4, sticky="w")
+            state_fr.grid_columnconfigure(c, weight=1)
+            tk.Label(cell, text=k, bg="#1a1a2e", fg="#78909C",
+                     font=("", 9)).pack(anchor="w")
+            tk.Label(cell, text=v, bg="#1a1a2e", fg="#E0E0E0",
+                     font=("", 11, "bold")).pack(anchor="w")
+
+        # 📋 因子分析
+        reason_fr = tk.LabelFrame(dlg, text="📋 因子分析 (按权重排列)", bg="#1a1a2e", fg="#A5D6A7", font=("", 11, "bold"))
+        reason_fr.pack(fill=tk.BOTH, expand=True, padx=14, pady=6)
+        text = tk.Text(reason_fr, bg="#0d0d1a", fg="#E0E0E0", font=("", 10),
+                      height=10, wrap="word", borderwidth=0, padx=10, pady=8)
+        sb = tk.Scrollbar(reason_fr, command=text.yview)
+        text.configure(yscrollcommand=sb.set)
+        text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        for r in reasons:
+            text.insert(tk.END, r + "\n\n")
+        text.configure(state="disabled")
+
+        # 底部
+        tip = tk.Label(dlg,
+                       text="⚠️ 推断仅供参考, 股市有风险, 下注需谨慎  |  回测验证: 相似状态胜率",
+                       bg="#1a1a2e", fg="#78909C", font=("", 9))
+        tip.pack(pady=4)
 
     # 下拉框切换 → 自动重跑 (macOS ttk.Combobox 用 <<ComboboxSelected>>)
     cb.bind("<<ComboboxSelected>>", lambda e: _on_analyze())
