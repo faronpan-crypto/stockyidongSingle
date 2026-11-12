@@ -278,37 +278,48 @@ def build_wechat_vv_tab(parent, root=None, app=None):
     """构建 📱大V微信 Tab 的全部 UI"""
     _seed_if_empty()
 
-    # ── 顶栏 ──
-    toolbar = ttk.Frame(parent); toolbar.pack(fill=tk.X, padx=6, pady=(6, 4))
-    ttk.Label(toolbar, text="🔍搜索:").pack(side=tk.LEFT)
+    # ── 顶栏 (上): 搜索 + 快捷操作 ──
+    toolbar = ttk.Frame(parent); toolbar.pack(fill=tk.X, padx=6, pady=(6, 0))
+    ttk.Label(toolbar, text="🔍搜索:", font=("", 10)).pack(side=tk.LEFT)
     search_var = tk.StringVar()
-    search_entry = ttk.Entry(toolbar, textvariable=search_var, width=18, font=("", 10))
+    search_entry = ttk.Entry(toolbar, textvariable=search_var, width=16, font=("", 10))
     search_entry.pack(side=tk.LEFT, padx=2)
-
-    ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
-    ttk.Label(toolbar, text="大V名称:").pack(side=tk.LEFT)
-    name_var = tk.StringVar()
-    ttk.Entry(toolbar, textvariable=name_var, width=14).pack(side=tk.LEFT, padx=2)
-    ttk.Label(toolbar, text="微信号:").pack(side=tk.LEFT, padx=(6, 0))
-    wxid_var = tk.StringVar()
-    ttk.Entry(toolbar, textvariable=wxid_var, width=14).pack(side=tk.LEFT, padx=2)
-    ttk.Label(toolbar, text="URL:").pack(side=tk.LEFT, padx=(6, 0))
-    url_var = tk.StringVar()
-    ttk.Entry(toolbar, textvariable=url_var, width=26).pack(side=tk.LEFT, padx=2)
+    search_entry.bind("<Return>", lambda _e: _refresh_authors())
+    ttk.Button(toolbar, text="🔎", width=2, command=lambda: _refresh_authors()).pack(side=tk.LEFT, padx=1)
 
     ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
-    cat_var = tk.StringVar(value="游资")
-    ttk.Label(toolbar, text="分类:").pack(side=tk.LEFT)
-    ttk.Combobox(toolbar, textvariable=cat_var, width=6, state="readonly",
-                 values=["游资", "价投", "量化", "宏观", "行业", "散户"]).pack(side=tk.LEFT, padx=2)
+    ttk.Label(toolbar, text="👥 大V管理:", font=("", 10, "bold")).pack(side=tk.LEFT)
 
-    # 按钮区 (右侧)
-    btn_box = ttk.Frame(toolbar); btn_box.pack(side=tk.RIGHT)
-    ttk.Button(btn_box, text="🔄刷新", width=6, command=lambda: _refresh_authors()).pack(side=tk.LEFT, padx=1)
-    ttk.Button(btn_box, text="🗑️删除", width=6, command=lambda: _delete_author()).pack(side=tk.LEFT, padx=1)
-    ttk.Button(btn_box, text="✏️编辑", width=6, command=lambda: _edit_author()).pack(side=tk.LEFT, padx=1)
-    ttk.Button(btn_box, text="➕新增", width=6, command=lambda: _add_author()).pack(side=tk.LEFT, padx=1)
-    ttk.Button(btn_box, text="🚀爬文章", width=8, command=lambda: _crawl_current()).pack(side=tk.LEFT, padx=1)
+    # 大V增删改按钮 (彩色 tk.Button 更醒目)
+    _btn_add  = tk.Button(toolbar, text="➕ 新增大V", width=10, bg="#43A047", fg="white",
+                          font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda: _add_author())
+    _btn_edit = tk.Button(toolbar, text="✏️ 编辑大V", width=10, bg="#FB8C00", fg="white",
+                          font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda: _edit_author())
+    _btn_del  = tk.Button(toolbar, text="🗑️ 删除大V", width=10, bg="#E53935", fg="white",
+                          font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda: _delete_author())
+    _btn_crawl= tk.Button(toolbar, text="🕷️ 爬文章", width=8, bg="#1E88E5", fg="white",
+                          font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda: _crawl_current())
+    _btn_refr = tk.Button(toolbar, text="🔄 刷新", width=6, bg="#757575", fg="white",
+                          font=("", 10), relief=tk.FLAT, cursor="hand2", command=lambda: _refresh_authors())
+    for b in [_btn_add, _btn_edit, _btn_del, _btn_crawl, _btn_refr]:
+        b.pack(side=tk.LEFT, padx=2, pady=2)
+
+    # ── 顶栏 (下): 新增大V输入表单 ──
+    form = ttk.LabelFrame(parent, text="➕ 新增大V — 填写下面字段后点绿色「新增大V」按钮", padding=4)
+    form.pack(fill=tk.X, padx=6, pady=4)
+    ttk.Label(form, text="大V名称*:", font=("", 10, "bold")).pack(side=tk.LEFT)
+    name_var = tk.StringVar()
+    ttk.Entry(form, textvariable=name_var, width=14).pack(side=tk.LEFT, padx=(2, 10))
+    ttk.Label(form, text="微信号:").pack(side=tk.LEFT)
+    wxid_var = tk.StringVar()
+    ttk.Entry(form, textvariable=wxid_var, width=14).pack(side=tk.LEFT, padx=(2, 10))
+    ttk.Label(form, text="分类:").pack(side=tk.LEFT)
+    cat_var = tk.StringVar(value="游资")
+    ttk.Combobox(form, textvariable=cat_var, width=6, state="readonly",
+                 values=["游资", "价投", "量化", "宏观", "行业", "散户"]).pack(side=tk.LEFT, padx=(2, 10))
+    ttk.Label(form, text="URL (公众号链接):").pack(side=tk.LEFT)
+    url_var = tk.StringVar()
+    ttk.Entry(form, textvariable=url_var, width=28).pack(side=tk.LEFT, padx=2)
 
     # ── 主区 PanedWindow ──
     paned = ttk.PanedWindow(parent, orient=tk.HORIZONTAL)
@@ -327,6 +338,24 @@ def build_wechat_vv_tab(parent, root=None, app=None):
     vs = ttk.Scrollbar(left_frame, orient=tk.VERTICAL, command=auth_tree.yview)
     auth_tree.configure(yscrollcommand=vs.set)
     auth_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); vs.pack(side=tk.RIGHT, fill=tk.Y)
+
+    # ── 🆕 右键菜单: 大V增删改 ──
+    auth_menu = tk.Menu(root, tearoff=0)
+    auth_menu.add_command(label="✏️ 编辑这个大V", command=lambda: _edit_author(), font=("", 10))
+    auth_menu.add_command(label="➕ 新增类似的大V", command=lambda: _add_author(), font=("", 10))
+    auth_menu.add_separator()
+    auth_menu.add_command(label="🗑️ 删除这个大V (及其文章)", command=lambda: _delete_author(), font=("", 10))
+    auth_menu.add_separator()
+    auth_menu.add_command(label="🕷️ 爬取这个大V的文章", command=lambda: _crawl_current(), font=("", 10))
+    auth_menu.add_command(label="🧠 提取这个大V的 Skill", command=lambda: (right_nb.select(tab_skill), _extract_skill_btn()), font=("", 10))
+    auth_menu.add_command(label="🎯 用这个大V Skill 分析", command=lambda: (right_nb.select(tab_analysis), None), font=("", 10))
+
+    def _auth_right_click(event):
+        sel = auth_tree.identify_row(event.y)
+        if sel:
+            auth_tree.selection_set(sel); auth_tree.focus(sel)
+        auth_menu.tk_popup(event.x_root, event.y_root)
+    auth_tree.bind("<Button-3>", _auth_right_click)
 
     # ── 右侧: Notebook (文章 | Skill | 分析) ──
     right_nb = ttk.Notebook(paned); paned.add(right_nb, weight=3)
@@ -494,50 +523,87 @@ def build_wechat_vv_tab(parent, root=None, app=None):
         if not sel: return
         aid = auth_tree.item(sel[0], "values")[0]
         conn = _get_conn(); cur = conn.cursor()
-        cur.execute("SELECT name, wechat_id, url, category, note FROM wechat_vv_authors WHERE id=?", (aid,))
-        row = cur.fetchall(); conn.close()
+        cur.execute("SELECT name, wechat_id, url, avatar, category, note, article_count, skill_status FROM wechat_vv_authors WHERE id=?", (aid,))
+        row = cur.fetchone(); conn.close()
         if not row: return
-        nm, wxid, u, cat, note = row[0]
+        nm, wxid, u, avatar, cat, note, cnt, sk = row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7]
+
         dlg = tk.Toplevel(root)
-        dlg.title(f"编辑大V: {nm}"); dlg.geometry("420x320"); dlg.transient(root)
-        _mk_entry(dlg, "名称:", 0, tk.StringVar(value=nm))
-        _mk_entry(dlg, "微信号:", 1, tk.StringVar(value=wxid or ""))
-        _mk_entry(dlg, "URL:", 2, tk.StringVar(value=u or ""))
-        _mk_entry(dlg, "分类:", 3, tk.StringVar(value=cat or "游资"))
-        _mk_entry(dlg, "备注:", 4, tk.StringVar(value=note or ""))
-        # 保存按钮
+        dlg.title(f"✏️ 编辑大V: {nm}"); dlg.geometry("560x440"); dlg.minsize(500, 400); dlg.transient(root)
+        dlg.grab_set()
+
+        # 顶部状态条 — 显示只读的统计信息
+        top_info = tk.Frame(dlg, bg="#E3F2FD"); top_info.pack(fill=tk.X, padx=8, pady=(8, 4))
+        tk.Label(top_info, text=f"📚 文章: {cnt}篇  |  🧠 Skill: {sk or 'none'}",
+                 bg="#E3F2FD", fg="#1565C0", font=("", 10)).pack(side=tk.LEFT, padx=10, pady=4)
+        tk.Label(top_info, text=f"(修改这些字段后点下面 💾 保存)",
+                 bg="#E3F2FD", fg="#616161", font=("", 9)).pack(side=tk.RIGHT, padx=10)
+
+        form = tk.Frame(dlg); form.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+        form.columnconfigure(1, weight=1)
+
+        # 用 StringVar 存值 — 这样 save 时直接取 var.get() 就行
+        v_name  = tk.StringVar(value=nm or "")
+        v_wxid  = tk.StringVar(value=wxid or "")
+        v_url   = tk.StringVar(value=u or "")
+        v_avt   = tk.StringVar(value=avatar or "")
+        v_cat   = tk.StringVar(value=cat or "游资")
+        v_note  = tk.StringVar(value=note or "")
+
+        def _row(parent, lbl, var, row, is_combo=False, combo_vals=None, is_text=False, text_h=5):
+            tk.Label(parent, text=lbl, font=("", 10, "bold")).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+            if is_text:
+                e = tk.Text(parent, wrap="word", height=text_h, font=("PingFang SC", 10)); e.grid(row=row, column=1, sticky="we", pady=4)
+                if var.get(): e.insert("1.0", var.get())
+                return e
+            elif is_combo:
+                e = ttk.Combobox(parent, textvariable=var, values=combo_vals or [], state="readonly", font=("", 10))
+                e.grid(row=row, column=1, sticky="we", pady=4); return e
+            else:
+                e = ttk.Entry(parent, textvariable=var, font=("", 10))
+                e.grid(row=row, column=1, sticky="we", pady=4); return e
+
+        _row(form, "大V名称*:", v_name, 0)
+        _row(form, "微信号:", v_wxid, 1)
+        _row(form, "分类:", v_cat, 2, is_combo=True, combo_vals=["游资", "价投", "量化", "宏观", "行业", "散户"])
+        _row(form, "头像URL:", v_avt, 3)
+        _row(form, "公众号URL:", v_url, 4)
+        _row(form, "备注:", v_note, 5, is_text=True, text_h=4)
+        note_text_widget = form.grid_slaves(row=5, column=1)[0]  # Text 控件引用
+
+        # 按钮行
+        btns = tk.Frame(dlg); btns.pack(fill=tk.X, padx=10, pady=8)
         def _save():
-            vals = [c.get() for c in dlg.winfo_children() if isinstance(c, ttk.Entry) or isinstance(c, tk.Entry)]
+            # 校验
+            name_val = v_name.get().strip()
+            if not name_val:
+                tk.messagebox.showwarning("提示", "大V名称不能为空"); return
+            # 取 note Text 内容
+            note_val = note_text_widget.get("1.0", tk.END).strip()
             conn2 = _get_conn(); cur2 = conn2.cursor()
             cur2.execute(
-                "UPDATE wechat_vv_authors SET name=?, wechat_id=?, url=?, category=?, note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (vals[0], vals[1], vals[2], vals[3], vals[4], aid)
+                """UPDATE wechat_vv_authors
+                   SET name=?, wechat_id=?, url=?, avatar=?, category=?, note=?, updated_at=CURRENT_TIMESTAMP
+                   WHERE id=?""",
+                (name_val, v_wxid.get().strip(), v_url.get().strip(), v_avt.get().strip(),
+                 v_cat.get().strip(), note_val, aid)
             )
             conn2.commit(); conn2.close()
-            dlg.destroy(); _refresh_authors()
-        ttk.Button(dlg, text="💾 保存", command=_save).grid(row=5, column=0, columnspan=2, pady=10)
+            dlg.destroy()
+            _refresh_authors()
+            # 如果正在编辑当前选中的大V, 刷新右侧
+            if _state["author_id"] == aid:
+                kids = auth_tree.get_children()
+                for k in kids:
+                    if auth_tree.item(k, "values")[0] == aid:
+                        auth_tree.selection_set(k); auth_tree.see(k); _on_author_select(); break
 
-    def _delete_author():
-        sel = auth_tree.selection()
-        if not sel: return
-        aid, nm = auth_tree.item(sel[0], "values")[0], auth_tree.item(sel[0], "values")[1]
-        if not tk.messagebox.askyesno("确认", f"确定删除大V【{nm}】及其所有文章和 Skill?"): return
-        conn = _get_conn(); cur = conn.cursor()
-        cur.execute("DELETE FROM wechat_vv_articles WHERE author_id=?", (aid,))
-        cur.execute("DELETE FROM wechat_vv_skills WHERE author_id=?", (aid,))
-        cur.execute("DELETE FROM wechat_vv_authors WHERE id=?", (aid,))
-        conn.commit(); conn.close()
-        _state["author_id"] = None
-        _refresh_authors()
-        # 清空右侧
-        for iid in art_tree.get_children(): art_tree.delete(iid)
-        art_count_lbl.config(text="请选择左侧大V")
-
-    def _mk_entry(parent, lbl, row, var):
-        ttk.Label(parent, text=lbl).grid(row=row, column=0, sticky="w", padx=8, pady=4)
-        e = ttk.Entry(parent, textvariable=var, width=38)
-        e.grid(row=row, column=1, padx=8, pady=4, sticky="we")
-        return e
+        tk.Button(btns, text="💾 保存修改", width=14, bg="#2E7D32", fg="white",
+                  font=("", 11, "bold"), relief=tk.FLAT, cursor="hand2",
+                  command=_save).pack(side=tk.RIGHT, padx=4)
+        tk.Button(btns, text="❌ 取消", width=8, bg="#9E9E9E", fg="white",
+                  font=("", 10), relief=tk.FLAT, cursor="hand2",
+                  command=dlg.destroy).pack(side=tk.RIGHT, padx=4)
 
     # ═══════════════════════════════════════════════════════
     #  📦 文章增删改 + 打开
