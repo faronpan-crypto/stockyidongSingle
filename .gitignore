@@ -53,3 +53,6 @@ src/data/tushare_token.json
 
 # 模块化源码下的运行时缓存 (只 track .py)
 src/data/*.json
+
+# 🔑 保密：AI API Key 配置（包含真实 key，不能提交）
+src/config/ai_config.json

@@ -498,6 +498,17 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             print(f"[👥大V榜❌] {e}", flush=True)
             _tb.print_exc()
 
+    def _show_ai_settings(self):
+        """🤖 AI 设置 — 统一入口（一次配置，全程序生效）"""
+        print("[🤖AI设置] 启动...", flush=True)
+        try:
+            from ui.ai_settings import _show_ai_settings_dialog
+            _show_ai_settings_dialog(self.root)
+        except Exception as e:
+            import traceback as _tb
+            print(f"[🤖AI设置❌] {e}", flush=True)
+            _tb.print_exc()
+
     def _attach_article_btn(self, dlg, ctx=None, focus_layer=None):
         """🔧 通用: 给任意弹窗底部加 📝 红色文章生成按钮
         
@@ -4830,6 +4841,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("🧊冰点修复", 9, self._show_emotion_freeze),
             ("🎯高抛低吸", 9, self._show_high_low_swing),
             ("👥大V榜", 8, self._show_top_gurus_dialog),
+            ("🤖AI设置", 8, self._show_ai_settings),
             ("🌍全球资产", 8, self._show_global_assets_dialog),
             ("🔧基础信息", 10, self._show_base_info_dialog),
         ]
