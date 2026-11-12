@@ -118,19 +118,20 @@ def _get_mainline_route_data():
         except Exception as e:
             print(f"[📈路线❌] 行业板块失败: {e}")
 
-        # ② 同花顺概念板块 Top 热点
+        # ② 同花顺概念板块 Top 热点（容错秒跳过）
         try:
             cdf = _ak.stock_board_concept_summary_ths()
             if cdf is not None and not cdf.empty:
                 cdf["涨跌幅"] = _pd.to_numeric(cdf["涨跌幅"], errors="coerce")
-                top8 = cdf.nlargest(8, "涨跌幅")
-                for _, r in top8.iterrows():
+                for _, r in cdf.nlargest(8, "涨跌幅").iterrows():
                     result["hot_themes"].append((
                         str(r.get("板块", "")),
                         round(float(r.get("涨跌幅", 0)), 2),
                     ))
         except Exception as e:
-            print(f"[📈路线❌] 概念板块失败: {e}")
+            # bs4 版本不够时跳过, 不打印 (太吵)
+            if "bs4" not in str(e).lower():
+                print(f"[📈路线] 概念板块跳过: {str(e)[:60]}")
 
         # ③ 宏观快速：纳指/美元（新浪）
         try:
@@ -401,9 +402,9 @@ AI 会用该大V的交易体系，结合当前板块数据进行专属分析
         text_widget.config(state=_tk.DISABLED)
         status_lbl.config(text=f"✅ {style['name']} 分析完成", fg=_GREEN)
 
-    # ── 真正的 AI 调用（后台线程中执行） ──
+    # ── 真正的 AI 调用（后台线程中执行）── 直接走代理，跳过 60s 直连 caller 链
     def _call_ai(style):
-        """走 _robust_ai_call，带实时板块数据作为上下文"""
+        """直接走 localhost:8787 代理（签名+20s timeout），避免 _robust_ai_call 的 60s 直连"""
         d = _get_mainline_route_data()
 
         # 构造数据上下文
@@ -472,17 +473,55 @@ AI 会用该大V的交易体系，结合当前板块数据进行专属分析
 
 ═══════════════════════════════════"""
 
-        # 走已有的 robust AI call（自动 fallback）
+        # ⚡ 直接走 localhost:8787 代理（签名 + 20s timeout），跳过 _robust_ai_call 的 60s 直连 caller 链
         try:
-            from ui.speculator_watch import _robust_ai_call
-            result = _robust_ai_call(
-                prompt,
-                system_prompt=style["system"],
-                max_tokens=2200,
-            )
-            if result and len(result.strip()) > 20:
-                return result
-            return "❌ AI 返回内容过短或为空，请检查 API Key 和代理连通性"
+            import requests as _req
+            import hmac as _hmac, hashlib as _hashlib, secrets as _secrets, os as _os
+
+            _secret_path = "/tmp/stock_ai_proxy.secret"
+            if not _os.path.exists(_secret_path):
+                return "❌ AI 代理 secret 文件不存在"
+            _proxy_secret = open(_secret_path).read().strip()
+            _nonce = _secrets.token_hex(8)
+            _proxy_token = _hmac.new(
+                _proxy_secret.encode(),
+                ("ai_proxy" + _nonce).encode(),
+                _hashlib.sha256).hexdigest()[:16]
+
+            messages = []
+            if style["system"]:
+                messages.append({"role": "system", "content": style["system"]})
+            messages.append({"role": "user", "content": prompt})
+
+            headers = {
+                "Content-Type": "application/json",
+                "X-Nonce": _nonce,
+                "X-Proxy-Token": _proxy_token,
+            }
+            body = {
+                "provider": "deepseek",
+                "model": "deepseek-chat",
+                "messages": messages,
+                "max_tokens": 2200,
+                "temperature": 0.3,
+            }
+
+            resp = _req.post("http://127.0.0.1:8787/v1/chat/completions",
+                             headers=headers, json=body, timeout=20)
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                    result = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if result and len(result.strip()) > 20:
+                        return result
+                    return "❌ AI 返回内容过短或为空"
+                except Exception as _e:
+                    return f"❌ AI 返回解析失败: {_e}"
+            else:
+                err_text = resp.text[:120]
+                if "88a6" in err_text or "invalid" in err_text.lower() or "Authentication" in err_text:
+                    return "🔑 DEEPSEEK_API_KEY 已过期！请更新 ~/.zshrc 中的 key 后重启代理和应用"
+                return f"❌ AI 代理返回 {resp.status_code}: {err_text}"
         except Exception as e:
             return f"❌ AI 调用异常: {e}"
 
