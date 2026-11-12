@@ -262,6 +262,12 @@ def _build_mainline_route_tab(parent_nb):
                highlightbackground=_ACCENT, highlightthickness=2,
                font=("TkDefaultFont", 9, "bold")).pack(side=_tk.LEFT, padx=3)
 
+    _tk.Button(ctrl_row, text="🔑更换 API Key", width=14,
+               command=lambda: _open_key_dialog(),
+               bg=_ACCENT, fg="white", activebackground="#C73E4E",
+               highlightbackground=_GOLD, highlightthickness=2,
+               font=("TkDefaultFont", 9, "bold")).pack(side=_tk.LEFT, padx=3)
+
     status_lbl = _tk.Label(ctrl_row, text="", bg=_BG, fg=_MUTED,
                            font=("TkDefaultFont", 9))
     status_lbl.pack(side=_tk.LEFT, padx=10)
@@ -532,7 +538,138 @@ AI 会用该大V的交易体系，结合当前板块数据进行专属分析
         except Exception:
             fn()
 
-    # 首次刷新一次数据
-    tab.after(300, _refresh_data)
+
+# ═══════════════════════════════════════════════════════
+# 🔑 一键换 Key（独立函数，不依赖 UI 状态）
+# ═══════════════════════════════════════════════════════
+def _open_key_dialog():
+    """弹出换 Key 窗口 → 写 ~/.zshrc → 重启代理"""
+    import re as _re, subprocess as _sp
+
+    win = _tk.Toplevel()
+    win.title("🔑 更换 DEEPSEEK_API_KEY")
+    win.configure(bg=_PANEL)
+    win.geometry("560x420")
+    win.transient()
+
+    _tk.Label(win, text="🔑  更换 DEEPSEEK_API_KEY",
+              bg=_PANEL, fg=_GOLD, font=("TkDefaultFont", 14, "bold")).pack(pady=(16, 6))
+
+    _tk.Label(win, text=(
+        "当前所有 AI 功能（AI 研判 / AI 写手 / 主线雷达 / 资讯AI等）\n"
+        "共用同一个 DEEPSEEK_API_KEY 环境变量。\n"
+        "代理 localhost:8787 从 ~/.zshrc 读取此 key 转发请求。"
+    ), bg=_PANEL, fg=_FG, justify=_tk.CENTER,
+        font=("TkDefaultFont", 10)).pack(padx=20, pady=4)
+
+    # 当前 key 显示（脱敏）
+    cur_key = ""
+    try:
+        for line in open(_os.path.expanduser("~/.zshrc")).readlines():
+            m = _re.search(r'DEEPSEEK_API_KEY="([^"]+)"', line)
+            if m:
+                cur_key = m.group(1); break
+    except Exception:
+        pass
+
+    masked = f"{cur_key[:8]}...{cur_key[-4:]}" if len(cur_key) > 12 else "(未配置)"
+    _tk.Label(win, text=f"当前 key:  {masked}  ({len(cur_key)} 字符)",
+              bg=_PANEL, fg=_MUTED, font=("TkDefaultFont", 9)).pack(pady=(10, 2))
+
+    # 新 key 输入
+    inp_frame = _tk.Frame(win, bg=_PANEL); inp_frame.pack(fill=_tk.X, padx=20, pady=10)
+    _tk.Label(inp_frame, text="新 Key:", bg=_PANEL, fg=_FG,
+              font=("TkDefaultFont", 10)).pack(anchor="w")
+    key_var = _tk.StringVar()
+    ent = _tk.Entry(inp_frame, textvariable=key_var, width=55, show="*",
+                    font=("TkDefaultFont", 11), bg="#FFFFFF", fg="black")
+    ent.pack(fill=_tk.X, pady=(4, 0))
+    ent.focus_set()
+
+    # 状态
+    status_var = _tk.StringVar(value="")
+    _tk.Label(win, textvariable=status_var, bg=_PANEL, fg=_MUTED,
+              font=("TkDefaultFont", 9), wraplength=500).pack(pady=6)
+
+    def _apply():
+        new_key = key_var.get().strip()
+        if not new_key:
+            status_var.set("❌ 请先粘贴新 key")
+            return
+        if not new_key.startswith("sk-") or len(new_key) < 20:
+            status_var.set("❌ key 格式不对，应该以 sk- 开头且较长")
+            return
+
+        status_var.set("⏳ 写入 ~/.zshrc ..."); win.update()
+
+        # 1) 改 ~/.zshrc
+        zshrc = _os.path.expanduser("~/.zshrc")
+        try:
+            content = open(zshrc).read()
+            pattern = r'(export DEEPSEEK_API_KEY=")([^"]+)(")'
+            if _re.search(pattern, content):
+                new_content = _re.sub(pattern, rf'\1{new_key}\3', content)
+                open(zshrc, "w").write(new_content)
+            else:
+                open(zshrc, "a").write(f'\nexport DEEPSEEK_API_KEY="{new_key}"\n')
+        except Exception as e:
+            status_var.set(f"❌ 写 ~/.zshrc 失败: {e}"); return
+
+        # 2) 重启代理进程
+        status_var.set("⏳ 重启 AI 代理 ..."); win.update()
+        try:
+            _sp.run(["pkill", "-9", "-f", "ai_proxy.py"], capture_output=True)
+            _time.sleep(1.2)
+        except Exception:
+            pass
+
+        # 3) 带新环境变量启动新代理
+        try:
+            env = _os.environ.copy()
+            env["DEEPSEEK_API_KEY"] = new_key
+            _sp.Popen(
+                ["/Library/Frameworks/Python.framework/Versions/3.11/bin/python3",
+                 "src/logic/ai_proxy.py"],
+                stdout=open("/tmp/ai_proxy.log", "w"),
+                stderr=_sp.STDOUT, env=env,
+                cwd="/Users/faronpan/Agent/stockyidong_project",
+            )
+            _time.sleep(1.5)
+        except Exception as e:
+            status_var.set(f"⚠️ 代理启动异常: {e}。但 ~/.zshrc 已更新。"); return
+
+        # 4) 验证新代理能不能用新 key
+        status_var.set("⏳ 验证新代理 ..."); win.update()
+        try:
+            import requests, hmac, hashlib, secrets
+            secret = open("/tmp/stock_ai_proxy.secret").read().strip()
+            nonce = secrets.token_hex(8)
+            ptoken = hmac.new(secret.encode(), ("ai_proxy"+nonce).encode(),
+                              hashlib.sha256).hexdigest()[:16]
+            h = {"Content-Type": "application/json", "X-Nonce": nonce, "X-Proxy-Token": ptoken}
+            b = {"provider": "deepseek", "model": "deepseek-chat", "max_tokens": 15,
+                 "messages": [{"role": "user", "content": "你好"}]}
+            r = requests.post("http://127.0.0.1:8787/v1/chat/completions",
+                              headers=h, json=b, timeout=10)
+            if r.status_code == 200:
+                status_var.set("✅ 新 key 已生效！点关闭后可以直接开始分析")
+                btn_ok.config(state=_tk.DISABLED)
+            elif "invalid" in r.text.lower() or "88a6" in r.text:
+                status_var.set("❌ 新 key 也是过期的，请再换一个")
+            else:
+                status_var.set(f"⚠️ 代理返回 {r.status_code}: {r.text[:120]}")
+        except Exception as e:
+            status_var.set(f"⚠️ 验证超时，但 ~/.zshrc 和代理都已更新 ({e})")
+
+    btn_row = _tk.Frame(win, bg=_PANEL); btn_row.pack(pady=8)
+    btn_ok = _tk.Button(btn_row, text="✅ 应用新 Key", command=_apply,
+                        bg="#66BB6A", fg="black", activebackground="#43A047",
+                        highlightbackground=_GOLD, highlightthickness=2,
+                        font=("TkDefaultFont", 11, "bold"), width=16)
+    btn_ok.pack(side=_tk.LEFT, padx=8)
+    _tk.Button(btn_row, text="关闭", command=win.destroy,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_MUTED, highlightthickness=1,
+               font=("TkDefaultFont", 10)).pack(side=_tk.LEFT, padx=8)
 
     return tab
