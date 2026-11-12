@@ -4889,6 +4889,17 @@ def _load_index_closes(index_code="sh000001", days=240):
             dates = [d.get("day", "") for d in data]
             ma60 = np.mean(closes[-60:])
             print(f"[👁️信号] 新浪真实数据 {index_code}: {len(closes)}根, 最新={closes[-1]:.2f}({dates[-1]}), MA60={ma60:.2f}", flush=True)
+            # 🆕 保存到本地缓存 (下次新浪失败时兜底)
+            try:
+                import sqlite3 as _sql3, json as _json
+                from data.db import DB_PATH as _DB
+                _conn = _sql3.connect(_DB); _cur = _conn.cursor()
+                _cur.execute("CREATE TABLE IF NOT EXISTS _sw_index_cache (code TEXT PRIMARY KEY, closes TEXT, updated_at TEXT)")
+                _cur.execute("REPLACE INTO _sw_index_cache VALUES (?, ?, CURRENT_TIMESTAMP)",
+                            (index_code, _json.dumps(closes.tolist())))
+                _conn.commit(); _conn.close()
+            except Exception:
+                pass
             return dates, closes
     except Exception as e:
         print(f"[👁️信号] 新浪拉指数日线失败: {e}", flush=True)
@@ -4898,21 +4909,40 @@ def _load_index_closes(index_code="sh000001", days=240):
         import akshare as ak
         # index_code 转 akshare 格式 (sh000001 → 000001, name="上证指数")
         pure = index_code[2:] if len(index_code) == 8 else index_code
-        # akshare 指数历史
-        df = ak.index_zh_a_hist(symbol=pure, period="daily", start_date="20250101", adjust="")
+        # ⚠️ 2026-11 akshare 接口签名已变, 不再有 adjust 参数!
+        df = ak.index_zh_a_hist(symbol=pure, period="daily", start_date="20240101")
         if df is not None and len(df) >= 60:
             closes = df["收盘"].astype(float).values
             dates = df["日期"].astype(str).tolist()
-            print(f"[👁️信号] akshare 兜底 {index_code}: {len(closes)}根, 最新={closes[-1]:.2f}", flush=True)
+            print(f"[👁️信号] akshare 兜底 {index_code}: {len(closes)}根, 最新={closes[-1]:.2f}, MA60={np.mean(closes[-60:]):.2f}", flush=True)
             return dates, closes
     except Exception as e:
         print(f"[👁️信号] akshare 兜底失败: {e}", flush=True)
 
-    # ── 终极兜底: 硬编码种子 + 明确标记 ──
+    # ── 终极兜底: 本地 SQLite 缓存 + 明确标记种子 ──
+    # 🆕 先试缓存 (数据库里存的最近一次真实 closes)
+    try:
+        import sqlite3 as _sql3
+        from data.db import DB_PATH as _DB
+        _conn = _sql3.connect(_DB); _cur = _conn.cursor()
+        _cur.execute("CREATE TABLE IF NOT EXISTS _sw_index_cache (code TEXT PRIMARY KEY, closes TEXT, updated_at TEXT)")
+        _cur.execute("SELECT closes, updated_at FROM _sw_index_cache WHERE code=?", (index_code,))
+        _row = _cur.fetchone(); _conn.close()
+        if _row and _row[0]:
+            import json as _json
+            _arr = _json.loads(_row[0])
+            if len(_arr) >= 60:
+                _cached = np.array(_arr, dtype=float)
+                print(f"[👁️信号] ⚠️ 用缓存 {index_code}: {len(_cached)}根, 最新={_cached[-1]:.2f}, MA60={np.mean(_cached[-60:]):.2f} ({_row[1] or '未知'})", flush=True)
+                return [f"💾缓存({_row[1] or '?'})"] * len(_cached), _cached
+    except Exception as _e:
+        print(f"[👁️信号] 缓存读取失败: {_e}", flush=True)
+
+    # 🎲 种子数据 — 明确标记, UI 上会显示红色警告
+    print(f"[👁️信号] 🚨 三层数据源全部失败! 只能用种子假数据 {index_code}, MA 信号不可信!", flush=True)
     rng = np.random.default_rng(42)
     closes = 3200 + np.cumsum(rng.normal(0.0, 15, 200))
-    closes_dates = [f"d{i}(种子)" for i in range(len(closes))]
-    print(f"[👁️信号] ⚠️ 用种子假数据 {index_code}! 所有MA信号不可信", flush=True)
+    closes_dates = [f"⚠️种子数据"] * len(closes)
     return closes_dates, closes
 
 

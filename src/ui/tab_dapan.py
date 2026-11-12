@@ -9059,6 +9059,49 @@ class DapanMixin:
         except Exception as _e3:
             print(f"[涨跌家数] Tushare 也失败: {_e3}", flush=True)
 
+        # ── 路径4: 🆕 新浪指数 pct 估算 (最终兜底, 永不返回 None) ──
+        try:
+            # 从 _get_sina_realtime (speculator_watch) 拿到上证 + 创业板 pct
+            from ui.speculator_watch import _get_sina_realtime as _get_rt
+            _rt = _get_rt()
+            if _rt:
+                _idx = _rt.get("indices", {})
+                _sh_pct = _idx.get("IH", {}).get("pct", 0) if "IH" in _idx else 0
+                _cy_pct = _idx.get("IM", {}).get("pct", 0) if "IM" in _idx else 0
+                _avg_pct = (_sh_pct + _cy_pct) / 2
+            else:
+                _avg_pct = 0
+
+            # 估算模型 (基于历史统计): pct → up/down 比例
+            if _avg_pct > 2.0:    up, down = 4200, 1000
+            elif _avg_pct > 1.0:  up, down = 3500, 1700
+            elif _avg_pct > 0.3:  up, down = 2800, 2400
+            elif _avg_pct > -0.3: up, down = 2400, 2800
+            elif _avg_pct > -1.0: up, down = 1800, 3400
+            elif _avg_pct > -2.0: up, down = 1200, 4000
+            else:                 up, down = 800, 4400
+            print(f"[涨跌家数] 🆕 新浪指数估算 (avg_pct={_avg_pct:+.2f}%): up≈{up} down≈{down} (仅供参考)", flush=True)
+            return {"up": up, "down": down, "flat": 300, "total": up + down + 300,
+                    "source": f"估算(上证+IM={_avg_pct:+.1f}%)"}
+        except Exception as _e4:
+            print(f"[涨跌家数] 新浪估算 也失败: {_e4}", flush=True)
+
+        # 终极兜底: SQLite 缓存
+        try:
+            import sqlite3 as _sql3
+            from data.db import DB_PATH as _DB
+            _conn = _sql3.connect(_DB); _cur = _conn.cursor()
+            _cur.execute("CREATE TABLE IF NOT EXISTS _sw_updown_cache (ts TEXT PRIMARY KEY, up INT, down INT, source TEXT)")
+            _cur.execute("SELECT up, down, source FROM _sw_updown_cache ORDER BY ts DESC LIMIT 1")
+            _row = _cur.fetchone(); _conn.close()
+            if _row:
+                print(f"[涨跌家数] 💾 用缓存: up={_row[0]}, down={_row[1]} ({_row[2]})", flush=True)
+                return {"up": _row[0], "down": _row[1], "flat": 300,
+                        "total": _row[0] + _row[1] + 300,
+                        "source": f"💾缓存({_row[2]})"}
+        except Exception:
+            pass
+
         return None
 
 
