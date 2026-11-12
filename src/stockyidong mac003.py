@@ -4846,6 +4846,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 ("🎯超跌", 8, self._show_oversold_dialog),
                 ("🎯机会", 7, self._show_jianlou),
                 ("🎯高抛低吸", 8, self._show_high_low_swing),
+                ("🔍多股对比", 8, self._show_multi_compare_dialog),
                 ("📊操盘阶段", 9, self._show_tech_stage_dialog),
                 ("💼持仓检测", 9, self._hc_open_dialog),
                 ("🌐多站设置", 9, self._open_web_settings),
