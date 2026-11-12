@@ -8016,8 +8016,27 @@ except Exception as e:
                   bg="#FFD54F", fg="#5D4037", font=("", 11, "bold"),
                   command=lambda: _show_logic_help(win)).pack(side=tk.RIGHT, padx=6)
 
-        # 控制栏 + 进度条
-        ctrl = ttk.Frame(win)
+        # ══════════════════════════════════════════════════
+        # 🆕 Notebook 包裹 — 原资金全景 Tab + 📈AI研判 Tab
+        # ══════════════════════════════════════════════════
+        nb_main = ttk.Notebook(win)
+        nb_main.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+
+        # Tab1: 原资金全景（所有现有内容 pack 到 tab_panorama）
+        tab_panorama = tk.Frame(nb_main); nb_main.add(tab_panorama, text="  📊 资金全景  ")
+
+        # Tab2: 📈 资金路线 · AI 研判
+        try:
+            from ui.mainline_route import _build_mainline_route_tab as _bmrt
+            _bmrt(nb_main)  # 内部会自动 nb_main.add(...)
+        except Exception as _e_nb:
+            import traceback as _tb_nb; _tb_nb.print_exc()
+            _err_tab = tk.Frame(nb_main); nb_main.add(_err_tab, text="  📈 AI研判(异常)  ")
+            tk.Label(_err_tab, text=f"❌ AI研判 Tab 加载失败: {_e_nb}",
+                     bg="white", fg="red").pack(padx=20, pady=20)
+
+        # 控制栏 + 进度条 (pack 到 tab_panorama)
+        ctrl = ttk.Frame(tab_panorama)
         ctrl.pack(fill=tk.X, padx=8, pady=(6, 2))
         scan_btn = ttk.Button(ctrl, text="🔄 扫描全市场", width=14)
         scan_btn.pack(side=tk.LEFT)
@@ -8027,8 +8046,8 @@ except Exception as e:
         prog_txt = tk.Label(ctrl, text="", font=("Microsoft YaHei", 10), fg="#555")
         prog_txt.pack(side=tk.LEFT)
 
-        # 主体 (全 pack, side=LEFT 并排)
-        body = tk.Frame(win); body.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        # 主体 (全 pack, side=LEFT 并排, pack 到 tab_panorama)
+        body = tk.Frame(tab_panorama); body.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
         # 上排
         top_row = tk.Frame(body); top_row.pack(fill=tk.BOTH, expand=True)
