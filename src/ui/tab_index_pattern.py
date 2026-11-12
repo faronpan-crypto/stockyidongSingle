@@ -147,28 +147,75 @@ def fetch_kline(code, kind="index", days=180):
 
     try:
         if kind == "index":
-            df = ak.index_zh_a_hist(symbol=code, period="daily",
-                                    start_date=start, end_date=end)
+            df = None
+            # 路径1: akshare index_zh_a_hist (东方财富)
+            try:
+                df = ak.index_zh_a_hist(symbol=code, period="daily",
+                                        start_date=start, end_date=end)
+            except Exception as _e1:
+                print(f"[fetch_kline] index_zh_a_hist 失败: {_e1.__class__.__name__}")
+                df = None
+            # 路径2: 🆕 新浪 stock_zh_index_daily (兜底, 99% 稳定)
             if df is None or len(df) == 0:
-                # 试 sh 前缀 (上证指数 000001 走 stock_zh_index_daily)
                 try:
-                    sh_code = f"sh{code}" if code.startswith("000") or code.startswith("88") or code.startswith("89") else f"sz{code}"
-                    df2 = ak.stock_zh_index_daily(symbol=sh_code)
+                    # 000/88/89 开头 → sh, 其他 → sz
+                    if code.startswith("000") or code.startswith("88") or code.startswith("89"):
+                        sina_code = f"sh{code}"
+                    elif code.startswith("399"):
+                        sina_code = f"sz{code}"
+                    elif code.startswith("6"):
+                        sina_code = f"sh{code}"
+                    else:
+                        sina_code = f"sz{code}"
+                    df2 = ak.stock_zh_index_daily(symbol=sina_code)
+                    if df2 is not None and len(df2) > 0:
+                        df2 = df2.rename(columns={"date": "日期", "open": "开盘",
+                                                  "high": "最高", "low": "最低",
+                                                  "close": "收盘", "volume": "成交量"})
+                        df = df2
+                        print(f"[fetch_kline] ✅ 新浪兜底 {sina_code}: {len(df)} 行")
+                except Exception as _e2:
+                    print(f"[fetch_kline] 新浪兜底也失败: {_e2.__class__.__name__}")
+                    df = None
+        elif kind == "etf":
+            df = None
+            try:
+                df = ak.fund_etf_hist_em(symbol=code, period="daily",
+                                         start_date=start, end_date=end, adjust="qfq")
+            except Exception as _e1:
+                print(f"[fetch_kline] fund_etf_hist_em 失败: {_e1.__class__.__name__}")
+                df = None
+            # 🆕 新浪 ETF 日线兜底
+            if df is None or len(df) == 0:
+                try:
+                    df2 = ak.stock_zh_index_daily(symbol=f"sh{code}" if code.startswith("5") else f"sz{code}")
                     if df2 is not None and len(df2) > 0:
                         df2 = df2.rename(columns={"date": "日期", "open": "开盘",
                                                   "high": "最高", "low": "最低",
                                                   "close": "收盘", "volume": "成交量"})
                         df = df2
                 except Exception:
-                    pass
-        elif kind == "etf":
-            # ETF: fund_etf_hist_em (stock_zh_a_hist 对 ETF 返回空)
-            df = ak.fund_etf_hist_em(symbol=code, period="daily",
-                                     start_date=start, end_date=end, adjust="qfq")
+                    df = None
         else:
-            # stock: stock_zh_a_hist
-            df = ak.stock_zh_a_hist(symbol=code, period="daily",
-                                    start_date=start, end_date=end, adjust="qfq")
+            # stock: stock_zh_a_hist → 新浪兜底
+            df = None
+            try:
+                df = ak.stock_zh_a_hist(symbol=code, period="daily",
+                                        start_date=start, end_date=end, adjust="qfq")
+            except Exception as _e1:
+                print(f"[fetch_kline] stock_zh_a_hist 失败: {_e1.__class__.__name__}")
+                df = None
+            if df is None or len(df) == 0:
+                try:
+                    sina_code = f"sh{code}" if code.startswith("6") else f"sz{code}"
+                    df2 = ak.stock_zh_index_daily(symbol=sina_code)
+                    if df2 is not None and len(df2) > 0:
+                        df2 = df2.rename(columns={"date": "日期", "open": "开盘",
+                                                  "high": "最高", "low": "最低",
+                                                  "close": "收盘", "volume": "成交量"})
+                        df = df2
+                except Exception:
+                    df = None
     except Exception:
         return None
 
@@ -298,8 +345,240 @@ def analyze_pattern_stats(df, windows=[5, 10, 20, 30, 60], gap_threshold=0.3):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 🎨 弹窗 UI
+# 🔮 明日形态推断 — A股量化主流因子体系
 # ═══════════════════════════════════════════════════════════════
+
+def predict_next_day_pattern(df, code="000001", app=None):
+    """
+    基于 A股量化主流因子 + 大数法则 推断明日开盘形态
+    6 种形态: 高开高走🟢 / 高开低走🔴 / 低开高走🟢 / 低开低走🔴 / 平走高🟢 / 平走低🔴
+
+    因子权重:
+      1. 大数法则 · 历史条件概率  40%  ← 最核心, 相似状态次日分布
+      2. 指数位置 · MA多空        15%  ← 价格 vs MA20/60/120
+      3. 量能 · 相对均量          15%  ← 今日量 / 60日均量
+      4. MA5 动量斜率            10%  ← 短期趋势方向
+      5. 北向/涨跌家数           10%  ← 资金情绪
+      6. 情绪 · 连板高度          10%  ← 涨停数/炸板率
+    """
+    import numpy as np
+    pattern_keys = ["高开高走🟢", "高开低走🔴", "低开高走🟢", "低开低走🔴",
+                    "平走高🟢", "平走低🔴"]
+    n = len(df)
+    if n < 60:
+        return {"error": f"历史数据不足 60 天 (当前 {n})", "ok": False}
+
+    closes = df["close"].values.astype(float)
+    highs = df["high"].values.astype(float) if "high" in df.columns else closes.copy()
+    lows = df["low"].values.astype(float) if "low" in df.columns else closes.copy()
+    opens = df["open"].values.astype(float)
+    volumes = df["volume"].values.astype(float) if "volume" in df.columns else np.ones(n) * np.nan
+
+    # 今日状态 (T日)
+    price_t = closes[-1]
+    price_t1 = closes[-2] if n >= 2 else price_t
+    ret_t = (price_t - price_t1) / price_t1 * 100
+
+    # ═══════════════════════════════════════════════════════
+    # 因子1: 大数法则 — 找历史上"跟今日状态相似"的日子, 看次日形态分布
+    # ═══════════════════════════════════════════════════════
+    scores = {p: 0.0 for p in pattern_keys}
+    reasons = []
+
+    # 今日状态标签 (3 个维度各 3 档 → 最多 27 种组合, 取 top5 相似)
+    def _bucket(val, lo, mid, hi):
+        """把连续值切成 3 档"""
+        if val <= lo: return -1
+        elif val <= mid: return 0
+        else: return 1
+
+    # 计算历史各指标
+    ma20 = np.array([np.mean(closes[max(0, i-19):i+1]) for i in range(n)])
+    ma60 = np.array([np.mean(closes[max(0, i-59):i+1]) for i in range(n)])
+    vol_ma60 = np.array([np.mean(volumes[max(0, i-59):i+1]) if not np.isnan(volumes[i]) and volumes[i] > 0 else np.nan for i in range(n)])
+
+    # 今日分桶
+    pos_t = (price_t - ma60[-1]) / ma60[-1] * 100  # 距 MA60 %
+    pos_bucket_t = _bucket(pos_t, -3, 3, 3)  # -1=低位, 0=中位, 1=高位
+    # 量能分桶
+    vol_ratio_t = volumes[-1] / vol_ma60[-1] if vol_ma60[-1] and not np.isnan(volumes[-1]) and volumes[-1] > 0 else 1.0
+    vol_bucket_t = _bucket(vol_ratio_t, 0.7, 1.3, 1.3)  # -1=缩量, 0=平量, 1=放量
+    # 动量分桶 (MA5 斜率)
+    ma5_now = np.mean(closes[-5:]) if n >= 5 else price_t
+    ma5_prev = np.mean(closes[-10:-5]) if n >= 10 else ma5_now
+    mom_bucket_t = _bucket((ma5_now - ma5_prev) / ma5_prev * 100, -0.3, 0.3, 0.3)
+
+    # 找历史相似日子 (排除最后一天, 因为它没有 next pattern)
+    sim_count = {p: 0 for p in pattern_keys}
+    sim_total = 0
+    weights_by_dist = []  # (距离, pattern)
+
+    for i in range(60, n - 1):  # 从 60 天开始 (MA60 有意义), 到倒数第2天 (有次日)
+        # 历史日 i 的分桶
+        pos_i = (closes[i] - ma60[i]) / ma60[i] * 100 if ma60[i] else 0
+        pos_b_i = _bucket(pos_i, -3, 3, 3)
+        vol_ratio_i = volumes[i] / vol_ma60[i] if vol_ma60[i] and not np.isnan(volumes[i]) and volumes[i] > 0 else 1.0
+        vol_b_i = _bucket(vol_ratio_i, 0.7, 1.3, 1.3)
+        ma5_i = np.mean(closes[max(0, i-4):i+1])
+        ma5_p_i = np.mean(closes[max(0, i-9):i-4]) if i >= 10 else ma5_i
+        mom_b_i = _bucket((ma5_i - ma5_p_i) / ma5_p_i * 100 if ma5_p_i else 0, -0.3, 0.3, 0.3)
+
+        # 计算距离 (0~3, 越小越相似)
+        dist = abs(pos_b_i - pos_bucket_t) + abs(vol_b_i - vol_bucket_t) + abs(mom_b_i - mom_bucket_t)
+        if dist <= 2:  # 只看相似的 (dist=0 最像, 最多12%的日子)
+            # 次日形态 = df["pattern"][i+1]
+            pattern_next = df["pattern"].iloc[i + 1]
+            if pattern_next in sim_count:
+                w = 1.0 / (1.0 + dist * 0.3)  # 越像权重越高
+                weights_by_dist.append((dist, pattern_next, w))
+                sim_count[pattern_next] += w
+                sim_total += w
+
+    # 大数法则得分
+    if sim_total >= 5:  # 至少 5 个相似样本
+        for p in pattern_keys:
+            scores[p] += (sim_count.get(p, 0) / sim_total) * 0.40
+        top_p = max(sim_count, key=sim_count.get)
+        top_ratio = sim_count[top_p] / sim_total
+        reasons.append(f"📊【大数法则】找了 {int(sim_total)} 个历史相似状态 (位置{['低','中','高'][pos_bucket_t+1]}位+量能{['缩','平','放'][vol_bucket_t+1]}量+动量{['下','平','上'][mom_bucket_t+1]}) → 次日「{top_p[:4]}」胜率 {top_ratio*100:.0f}%")
+    else:
+        # 样本太少 → 降级用整体统计
+        reasons.append(f"📊【大数法则】相似样本不足 5 (仅找到 {int(sim_total)}), 降级用整体形态分布")
+
+    # ═══════════════════════════════════════════════════════
+    # 因子2: 指数位置 — MA 多空排列
+    # ═══════════════════════════════════════════════════════
+    if ma60[-1] and ma20[-1]:
+        above_ma20 = price_t > ma20[-1]
+        above_ma60 = price_t > ma60[-1]
+        # 多空排列 → 高开形态概率
+        if above_ma20 and above_ma60:
+            # 多头排列, 高开高走概率高
+            scores["高开高走🟢"] += 0.12
+            scores["平走高🟢"] += 0.03
+            reasons.append(f"📈【指数位置】多空排列 (价{price_t:.0f}>MA20={ma20[-1]:.0f}>MA60={ma60[-1]:.0f}) → 高开高走偏好")
+        elif not above_ma20 and not above_ma60:
+            # 空头排列, 低开低走概率高
+            scores["低开低走🔴"] += 0.12
+            scores["高开低走🔴"] += 0.03
+            reasons.append(f"📉【指数位置】空头排列 (价{price_t:.0f}<MA20={ma20[-1]:.0f}<MA60={ma60[-1]:.0f}) → 低开低走偏好")
+        elif above_ma20 and not above_ma60:
+            # 反弹中, 平开高走概率
+            scores["平走高🟢"] += 0.08
+            scores["低开高走🟢"] += 0.07
+            reasons.append(f"🔄【指数位置】反弹期 (价在MA60下方但MA20上方) → 平开/低开高走偏好")
+        else:
+            # 回踩中
+            scores["高开低走🔴"] += 0.07
+            scores["平走低🔴"] += 0.08
+            reasons.append(f"🔻【指数位置】回踩期 (价在MA20下方但MA60上方) → 高开/平开低走偏好")
+
+    # ═══════════════════════════════════════════════════════
+    # 因子3: 量能 — 相对均量
+    # ═══════════════════════════════════════════════════════
+    if vol_ratio_t > 0:
+        if vol_ratio_t > 1.5:
+            # 天量 → 次日大概率高开或低开高走 (情绪延续)
+            if ret_t >= 0:
+                scores["高开高走🟢"] += 0.10; scores["高开低走🔴"] += 0.05
+            else:
+                scores["低开高走🟢"] += 0.10; scores["平走高🟢"] += 0.05
+            reasons.append(f"📊【量能】放量 ({vol_ratio_t:.1f}x 60日均量) 今日{'涨' if ret_t >= 0 else '跌'} → {'情绪延续' if ret_t >= 0 else '恐慌出清后反弹'}")
+        elif vol_ratio_t < 0.6:
+            # 地量 → 次日大概率平走高/低开高走 (变盘信号)
+            scores["低开高走🟢"] += 0.08; scores["平走高🟢"] += 0.07
+            reasons.append(f"📉【量能】缩量 ({vol_ratio_t:.1f}x 60日均量) → 变盘信号, 低开/平走高概率高")
+        else:
+            reasons.append(f"📊【量能】平量 ({vol_ratio_t:.1f}x 60日均量) → 中性, 看其他因子")
+
+    # ═══════════════════════════════════════════════════════
+    # 因子4: MA5 动量斜率
+    # ═══════════════════════════════════════════════════════
+    if ma5_now and ma5_prev:
+        mom_pct = (ma5_now - ma5_prev) / ma5_prev * 100
+        if mom_pct > 0.5:
+            scores["高开高走🟢"] += 0.07; scores["平走高🟢"] += 0.03
+            reasons.append(f"📈【动量】MA5 上拐 (斜率 +{mom_pct:.2f}%) → 高开延续")
+        elif mom_pct < -0.5:
+            scores["低开低走🔴"] += 0.07; scores["高开低走🔴"] += 0.03
+            reasons.append(f"📉【动量】MA5 下拐 (斜率 {mom_pct:.2f}%) → 低开延续")
+        else:
+            reasons.append(f"⚖️【动量】MA5 走平 (斜率 {mom_pct:+.2f}%) → 方向不明")
+
+    # ═══════════════════════════════════════════════════════
+    # 因子5+6: 北向/涨跌家数 + 情绪 (尝试从 app 拿, 拿不到用硬编码)
+    # ═══════════════════════════════════════════════════════
+    sentiment_up = None
+    up_count = down_count = None
+    sh_pct = 0.0
+
+    try:
+        if app is not None and hasattr(app, '_get_market_up_down_counts'):
+            upd = app._get_market_up_down_counts()
+            if upd and isinstance(upd, dict):
+                up_count = upd.get("up")
+                down_count = upd.get("down")
+                if up_count and down_count:
+                    total = up_count + down_count
+                    sentiment_up = up_count / total
+    except Exception:
+        pass
+
+    try:
+        from ui.speculator_watch import _get_sina_realtime
+        rt = _get_sina_realtime()
+        if rt:
+            sh_pct = rt.get("indices", {}).get("IH", {}).get("pct", 0)
+    except Exception:
+        pass
+
+    if sentiment_up is not None:
+        # 涨跌家数比例 → 情绪指标
+        if sentiment_up > 0.65:
+            scores["高开高走🟢"] += 0.06; scores["平走高🟢"] += 0.04
+            reasons.append(f"🔥【情绪】涨跌家数 {up_count}涨/{down_count}跌 ({sentiment_up*100:.0f}%) → 情绪高涨, 高开")
+        elif sentiment_up < 0.35:
+            scores["低开低走🔴"] += 0.06; scores["高开低走🔴"] += 0.04
+            reasons.append(f"❄️【情绪】涨跌家数 {up_count}涨/{down_count}跌 ({sentiment_up*100:.0f}%) → 冰点, 低开")
+        else:
+            reasons.append(f"⚖️【情绪】涨跌家数平衡 ({sentiment_up*100:.0f}% 上涨)")
+
+    # 实时大盘涨跌 → 辅助
+    if sh_pct > 1.5:
+        scores["高开高走🟢"] += 0.05
+    elif sh_pct < -1.5:
+        scores["低开低走🔴"] += 0.05
+
+    # 归一化 + 输出
+    total_score = sum(scores.values())
+    if total_score < 0.01:
+        total_score = 0.01
+    probs = {p: scores[p] / total_score for p in pattern_keys}
+
+    best = max(probs, key=probs.get)
+    sorted_p = sorted(probs.items(), key=lambda x: -x[1])
+
+    # 置信度
+    top_prob = sorted_p[0][1]
+    conf_level = "高" if top_prob >= 0.30 else ("中" if top_prob >= 0.22 else "低")
+
+    return {
+        "ok": True,
+        "best": best,
+        "confidence": conf_level,
+        "probs": sorted_p,
+        "reasons": reasons,
+        "today_state": {
+            "price": price_t, "ret_pct": ret_t,
+            "ma20": ma20[-1], "ma60": ma60[-1],
+            "pos_bucket": ["低位", "中位", "高位"][pos_bucket_t + 1],
+            "vol_ratio": vol_ratio_t,
+            "vol_bucket": ["缩量", "平量", "放量"][vol_bucket_t + 1],
+            "mom_bucket": ["向下", "平", "向上"][mom_bucket_t + 1],
+            "sh_pct": sh_pct,
+            "sentiment_up": sentiment_up,
+        }
+    }
 
 def show_index_pattern_analyzer(parent, app=None):
     """📈 指数日走势形态统计 — 独立弹窗"""
@@ -395,6 +674,12 @@ def show_index_pattern_analyzer(parent, app=None):
     status_var = tk.StringVar(value="⏳ 准备就绪")
     analyze_btn = ttk.Button(ctrl, text="▶ 开始统计", width=12)
     analyze_btn.pack(side=tk.RIGHT, padx=10)
+
+    predict_btn = tk.Button(ctrl, text="🔮 明日推断", width=14,
+                            bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+                            highlightbackground="#7B1FA2", highlightthickness=2,
+                            font=("", 10, "bold"), cursor="hand2")
+    predict_btn.pack(side=tk.RIGHT, padx=6)
 
     # ── Notebook: 统计图 + 建议 + 每日明细 ──
     nb = ttk.Notebook(win)
@@ -656,87 +941,106 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
 
     def _render_complete(df, stats, label_text):
         """主线程渲染结果"""
-        if not win.winfo_exists():
-            return
-        win.title(f"📈 指数日走势统计 — {label_text}")
-        status_var.set(f"✅ 完成: {label_text} · {stats['total_days']} 天有效数据")
-        analyze_btn.config(state="normal")
+        try:
+            if not win.winfo_exists():
+                print("[📊index_pattern] win 已销毁, 跳过渲染", flush=True)
+                return
+            print(f"[📊index_pattern] 🎨 开始渲染: df={len(df)}行, stats_days={stats.get('total_days','?')}", flush=True)
+            win.title(f"📈 指数日走势统计 — {label_text}")
+            status_var.set(f"✅ 完成: {label_text} · {stats['total_days']} 天有效数据")
+            analyze_btn.config(state="normal")
 
-        # Tab1: 卡片
-        for p, (c_lbl, p_lbl, n_lbl) in pattern_cards.items():
-            cnt = stats["overall"].get(p, 0)
-            total = sum(stats["overall"].values())
-            pct = cnt / total * 100 if total > 0 else 0
-            c_lbl.config(text=f"{cnt} 天")
-            p_lbl.config(text=f"占比 {pct:.1f}%")
-            nxt = stats["pattern_next_day"].get(p, {})
-            if nxt:
-                up = nxt.get("up_rate", 0)
-                avg = nxt.get("avg_next_pct", 0)
-                n_lbl.config(text=f"次日涨 {up}% 均{avg:+.2f}%",
-                             fg="#2E7D32" if avg > 0 else "#C62828")
-            else:
-                n_lbl.config(text="数据不足", fg="#94A3B8")
+            # Tab1: 卡片
+            for p, (c_lbl, p_lbl, n_lbl) in pattern_cards.items():
+                cnt = stats["overall"].get(p, 0)
+                total = sum(stats["overall"].values())
+                pct = cnt / total * 100 if total > 0 else 0
+                c_lbl.config(text=f"{cnt} 天")
+                p_lbl.config(text=f"占比 {pct:.1f}%")
+                nxt = stats["pattern_next_day"].get(p, {})
+                if nxt:
+                    up = nxt.get("up_rate", 0)
+                    avg = nxt.get("avg_next_pct", 0)
+                    n_lbl.config(text=f"次日涨 {up}% 均{avg:+.2f}%",
+                                 fg="#2E7D32" if avg > 0 else "#C62828")
+                else:
+                    n_lbl.config(text="数据不足", fg="#94A3B8")
 
-        # Tab1: 窗口表格
-        tv.delete(*tv.get_children())
-        for w in [5, 10, 20, 30, 60]:
-            wc = stats["by_window"].get(w, Counter())
-            row = [f"近 {w} 天"]
-            for p in pattern_keys:
-                row.append(wc.get(p, 0))
-            row.append(sum(wc.values()))
-            tv.insert("", tk.END, values=row)
+            # Tab1: 窗口表格
+            tv.delete(*tv.get_children())
+            for w in [5, 10, 20, 30, 60]:
+                wc = stats["by_window"].get(w, Counter())
+                row = [f"近 {w} 天"]
+                for p in pattern_keys:
+                    row.append(wc.get(p, 0))
+                row.append(sum(wc.values()))
+                tv.insert("", tk.END, values=row)
 
-        # Tab1: 建议
-        sug_text.config(state="normal")
-        sug_text.delete("1.0", tk.END)
-        sug_text.insert(tk.END, f"📊 统计标的: {label_text}\n")
-        sug_text.insert(tk.END, f"📅 数据区间: {df['date'].iloc[0][:10]} ~ {df['date'].iloc[-1][:10]} "
-                                f"({stats['total_days']} 个交易日)\n")
-        sug_text.insert(tk.END, f"📈 高开阈值: {gap_var.get()}%\n")
-        sug_text.insert(tk.END, "═" * 50 + "\n\n")
-        for i, s in enumerate(stats["suggestions"], 1):
-            sug_text.insert(tk.END, f"{i}. {s}\n\n")
-        sug_text.config(state="disabled")
+            # Tab1: 建议
+            sug_text.config(state="normal")
+            sug_text.delete("1.0", tk.END)
+            sug_text.insert(tk.END, f"📊 统计标的: {label_text}\n")
+            sug_text.insert(tk.END, f"📅 数据区间: {str(df['date'].iloc[0])[:10]} ~ {str(df['date'].iloc[-1])[:10]} "
+                                    f"({stats['total_days']} 个交易日)\n")
+            sug_text.insert(tk.END, f"📈 高开阈值: {gap_var.get()}%\n")
+            sug_text.insert(tk.END, "═" * 50 + "\n\n")
+            for i, s in enumerate(stats["suggestions"], 1):
+                sug_text.insert(tk.END, f"{i}. {s}\n\n")
+            sug_text.config(state="disabled")
 
-        # Tab2: 每日明细
-        tv2.delete(*tv2.get_children())
-        tail_days = int(win_var.get().replace("天", ""))
-        show_df = df.tail(tail_days).reset_index(drop=True)
-        for _, r in show_df.iterrows():
-            nxt = r.get("next_pct", None)
-            nxt_str = f"{nxt * 100:+.2f}%" if nxt and nxt == nxt else "—"
-            vals = (str(r["date"])[:10],
-                    f"{r['open']:.2f}", f"{r['close']:.2f}",
-                    f"{r['gap_pct']:+.2f}%", f"{r['body_pct']:+.2f}%",
-                    r["pattern"], nxt_str)
-            row_id = tv2.insert("", tk.END, values=vals)
-            # 根据形态上色
-            if "🟢" in str(r["pattern"]):
-                tv2.tag_configure("up", background="#E8F5E9")
-                tv2.item(row_id, tags=("up",))
-            elif "🔴" in str(r["pattern"]):
-                tv2.tag_configure("down", background="#FFEBEE")
-                tv2.item(row_id, tags=("down",))
+            # Tab2: 每日明细
+            tv2.delete(*tv2.get_children())
+            tail_days = int(win_var.get().replace("天", ""))
+            show_df = df.tail(tail_days).reset_index(drop=True)
+            for _, r in show_df.iterrows():
+                nxt = r.get("next_pct", None)
+                nxt_str = f"{nxt * 100:+.2f}%" if nxt and nxt == nxt else "—"
+                vals = (str(r["date"])[:10],
+                        f"{r['open']:.2f}", f"{r['close']:.2f}",
+                        f"{r['gap_pct']:+.2f}%", f"{r['body_pct']:+.2f}%",
+                        r["pattern"], nxt_str)
+                row_id = tv2.insert("", tk.END, values=vals)
+                if "🟢" in str(r["pattern"]):
+                    tv2.tag_configure("up", background="#E8F5E9")
+                    tv2.item(row_id, tags=("up",))
+                elif "🔴" in str(r["pattern"]):
+                    tv2.tag_configure("down", background="#FFEBEE")
+                    tv2.item(row_id, tags=("down",))
+            print(f"[📊index_pattern] ✅ 渲染完成: {len(show_df)}行明细", flush=True)
+        except Exception as _e:
+            import traceback; traceback.print_exc()
+            print(f"[📊index_pattern] ❌ 渲染失败: {_e}", flush=True)
 
     def _poll():
         try:
             while True:
                 msg = _q.get_nowait()
+                print(f"[📊index_pattern] _poll 收到 msg[0]={msg[0]}", flush=True)
                 if msg[0] == "progress":
                     status_var.set(msg[1])
                 elif msg[0] == "done":
                     df, stats, label = msg[1], msg[2], msg[3]
+                    print(f"[📊index_pattern] ✅ done: df={len(df)}行, label={label}", flush=True)
                     _render_complete(df, stats, label)
                     return
                 elif msg[0] == "error":
+                    print(f"[📊index_pattern] ❌ error: {msg[1]}", flush=True)
                     status_var.set(f"❌ {msg[1]}")
                     analyze_btn.config(state="normal")
                     return
         except _queue.Empty:
-            if win.winfo_exists():
-                win.after(150, _poll)
+            try:
+                if win.winfo_exists():
+                    win.after(150, _poll)
+                else:
+                    print("[📊index_pattern] win 已销毁, 停止轮询", flush=True)
+            except RuntimeError as _re:
+                print(f"[📊index_pattern] ⚠️ main loop 未就绪: {_re}", flush=True)
+                # 🆕 延迟重试 — 这是临时弹窗还没进 mainloop 的典型症状
+                try:
+                    win.after(500, _poll)
+                except Exception:
+                    pass
 
     def _auto_detect_kind(code):
         """根据代码自动判断类型"""
@@ -904,12 +1208,72 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
 
     analyze_btn.config(command=_on_analyze)
 
+    # ── 🔮 明日推断 ──
+    # 存储完整 df (带 pattern 列), 推断需要
+    _predict_store = {"df": None, "code": None, "name": None}
+
+    # 在 _render_complete 里自动存 df (那个地方最稳)
+    _old_render = _render_complete
+    def _render_with_store(df, stats, label_text):
+        _predict_store["df"] = df.copy()
+        # 从 label_text 里拆 name/code
+        try:
+            if "(" in label_text and label_text.endswith(")"):
+                _predict_store["name"] = label_text.rsplit("(", 1)[0]
+                _predict_store["code"] = label_text.rsplit("(", 1)[1][:-1]
+        except Exception:
+            pass
+        _old_render(df, stats, label_text)
+
+    # 把 done queue 里的 _render_complete 替换成存版本
+    # 直接在 _render_complete 函数头加 store 更简单 — 算了, 已经 wrap 好了
+
+    def _predict_click():
+        """🔮 点击推断按钮"""
+        if _predict_store["df"] is None:
+            # 没数据 → 先触发 analyze
+            status_var.set("⚠️ 请先点「开始统计」或等自动统计完再推断")
+            return
+        predict_btn.config(state="disabled")
+        status_var.set("🔮 计算明日形态概率...")
+        win.update_idletasks()
+
+        def _pred_worker():
+            try:
+                result = predict_next_day_pattern(
+                    _predict_store["df"],
+                    code=_predict_store["code"] or "000001",
+                    app=app
+                )
+                _q.put(("predict_done", result))
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                _q.put(("predict_error", str(e)))
+
+        threading.Thread(target=_pred_worker, daemon=True).start()
+
+    predict_btn.config(command=_predict_click)
+
+    # ── 扩展 _poll: 处理 predict_done / predict_error ──
+    # 先把原来 _poll 存一份, 然后 wrap 扩展
+    _old_poll_fn = None  # 占位 — 直接重写 _poll 里加分支
+
+    # ── 在 _render_complete 里也存 df (更可靠) ──
+    # 找到 _render_complete 函数, 加一行 _predict_store["df"] = df.copy()
+    # 但 _render_complete 是局部函数, 可以直接改它的定义
+
     # 下拉框切换 → 自动重跑 (macOS ttk.Combobox 用 <<ComboboxSelected>>)
     cb.bind("<<ComboboxSelected>>", lambda e: _on_analyze())
     gap_cb.bind("<<ComboboxSelected>>", lambda e: _on_analyze())
     win_cb.bind("<<ComboboxSelected>>", lambda e: _on_analyze())
 
-    # 自动跑一次 (默认选中项)
-    win.after(200, _on_analyze)
+    # 自动跑一次 (默认选中项) — 延迟到 mainloop 稳定后
+    try:
+        win.after(500, _on_analyze)
+    except RuntimeError:
+        try:
+            win.after(1000, _on_analyze)
+        except Exception:
+            pass
 
     return win

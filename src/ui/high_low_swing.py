@@ -860,7 +860,7 @@ def show_high_low_swing(parent, app=None):
                          ha="center", va="center", transform=_ax.transAxes,
                          fontsize=14, color="#EF5350")
                 _ax.set_xticks([]); _ax.set_yticks([])
-                _fig_widget.draw()
+                _safe_draw()
                 return
 
             closes = np.array(closes, dtype=float)
@@ -918,7 +918,7 @@ def show_high_low_swing(parent, app=None):
                           color="#FFD54F", fontsize=12, fontweight="bold", pad=10)
 
             _chart_status.config(text=f"✅ {n}根日线 | MA60={ma60_now:.0f}", fg="#66BB6A")
-            _fig_widget.draw_idle()
+            _safe_draw()
 
             # 更新速览卡片 (全部 5 项)
             _signal_labels["ma60"].config(
@@ -987,12 +987,30 @@ def show_high_low_swing(parent, app=None):
                      ha="center", va="center", transform=_ax.transAxes,
                      fontsize=12, color="#EF5350")
             _ax.set_xticks([]); _ax.set_yticks([])
-            _fig_widget.draw()
+            _safe_draw()
+
+    # 🆕 关闭标志位 — 避免 GIL 崩溃 (Fatal Python error PyEval_RestoreThread)
+    _closing = [False]
 
     def _on_mousewheel(e):
         canvas.yview_scroll(int(-e.delta / 120), "units")
     canvas.bind_all("<MouseWheel>", _on_mousewheel)
-    win.protocol("WM_DELETE_WINDOW", lambda: (canvas.unbind_all("<MouseWheel>"), win.destroy()))
+
+    def _safe_draw():
+        """安全 draw: 检查 _closing 标志 + widget 存在"""
+        if _closing[0] or _fig_widget is None:
+            return
+        try:
+            _fig_widget.draw_idle()
+        except Exception:
+            pass
+
+    def _on_close():
+        _closing[0] = True
+        canvas.unbind_all("<MouseWheel>")
+        win.destroy()
+
+    win.protocol("WM_DELETE_WINDOW", _on_close)
 
     # ── 右侧: 择时判断整合区 ──
     right_panel = tk.Frame(main_pw, bg=_BG_PANEL, width=290)  # 宽度减 50, 整体左移

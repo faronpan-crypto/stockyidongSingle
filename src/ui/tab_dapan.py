@@ -13509,31 +13509,49 @@ class DapanMixin:
                 ax3.grid(True, alpha=0.1, color="#666")
 
         def _redraw():
-            name = _idx_var.get(); symbol = INDEX_MAP.get(name, "sh000001")
-            try: days = int(_days_var.get())
-            except Exception: days = 180
-            _status.config(text=f"拉取 {name} ({symbol})...", fg="#42A5F5"); _wrap.update_idletasks()
-            data = self._fetch_index_daily(symbol, days)
-            if not data: _status.config(text="❌ 拉取失败", fg="#EF5350"); return
+            # 🆕 tk StringVar 不能在后台线程读! 已提前在主线程读好
+            name = _redraw.name
+            symbol = _redraw.symbol
+            days = _redraw.days
+            try:
+                _status.config(text=f"拉取 {name} ({symbol})...", fg="#42A5F5")
+                _wrap.update_idletasks()
+            except Exception:
+                pass
+            try:
+                data = self._fetch_index_daily(symbol, days)
+            except Exception as _e:
+                print(f"[🎯指数K] fetch 异常: {_e}")
+                data = None
+            if not data:
+                try: _status.config(text="❌ 拉取失败", fg="#EF5350")
+                except Exception: pass
+                return
 
             days_list = [d["day"] for d in data]
             closes = [float(d["close"]) for d in data]; opens = [float(d["open"]) for d in data]
             highs = [float(d["high"]) for d in data]; lows = [float(d["low"]) for d in data]
             volumes = [float(d.get("volume", 0)) for d in data]; x = list(range(len(closes)))
 
-            fig.clear()
-            gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 1], hspace=0.3)
-            ax = fig.add_subplot(gs[0], facecolor="#1E1E2E")
-            ax2 = fig.add_subplot(gs[1], facecolor="#1E1E2E", sharex=ax)
-            ax3 = fig.add_subplot(gs[2], facecolor="#1E1E2E", sharex=ax)
-            _draw_axes(ax, ax2, ax3, closes, opens, highs, lows, volumes, days_list, x, show_macd=True)
-            fig.suptitle(f"{name} 日K线图 ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=13, y=0.99)
-            _canvas.draw_idle()
+            try:
+                fig.clear()
+                gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 1], hspace=0.3)
+                ax = fig.add_subplot(gs[0], facecolor="#1E1E2E")
+                ax2 = fig.add_subplot(gs[1], facecolor="#1E1E2E", sharex=ax)
+                ax3 = fig.add_subplot(gs[2], facecolor="#1E1E2E", sharex=ax)
+                _draw_axes(ax, ax2, ax3, closes, opens, highs, lows, volumes, days_list, x, show_macd=True)
+                fig.suptitle(f"{name} 日K线图 ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=13, y=0.99)
+                _canvas.draw_idle()
+            except Exception as _e:
+                print(f"[🎯指数K] matplotlib 渲染异常: {_e}")
 
             last, prev = closes[-1], closes[-2] if len(closes) >= 2 else closes[-1]
             pct = (last - prev) / prev * 100 if prev else 0
-            _status.config(text=f"✅ {name}  收盘:{last:.2f}  {'+' if pct > 0 else ''}{pct:.2f}%  ({days_list[-1]})",
-                           fg="#EF5350" if pct >= 0 else "#66BB6A")
+            try:
+                _status.config(text=f"✅ {name}  收盘:{last:.2f}  {'+' if pct > 0 else ''}{pct:.2f}%  ({days_list[-1]})",
+                               fg="#EF5350" if pct >= 0 else "#66BB6A")
+            except Exception:
+                pass
 
             # 存数据给双击放大用
             _last_data["name"] = name; _last_data["symbol"] = symbol
@@ -13550,6 +13568,18 @@ class DapanMixin:
 
         # 绑定双击
         _canvas.get_tk_widget().bind("<Double-Button-1>", _show_large)
+
+        # 🆕 关键修复: tk StringVar 必须在主线程读! (之前后台线程读 → RuntimeError)
+        try:
+            _redraw.name = _idx_var.get()
+            _redraw.symbol = INDEX_MAP.get(_redraw.name, "sh000001")
+        except Exception:
+            _redraw.name = "上证指数"
+            _redraw.symbol = "sh000001"
+        try:
+            _redraw.days = int(_days_var.get())
+        except Exception:
+            _redraw.days = 180
 
         import threading as _th
         _th.Thread(target=_redraw, daemon=True).start()
@@ -30473,31 +30503,49 @@ AI 将基于实时市场数据生成深度分析报告
                 ax3.grid(True, alpha=0.1, color="#666")
 
         def _redraw():
-            name = _idx_var.get(); symbol = INDEX_MAP.get(name, "sh000001")
-            try: days = int(_days_var.get())
-            except Exception: days = 180
-            _status.config(text=f"拉取 {name} ({symbol})...", fg="#42A5F5"); _wrap.update_idletasks()
-            data = self._fetch_index_daily(symbol, days)
-            if not data: _status.config(text="❌ 拉取失败", fg="#EF5350"); return
+            # 🆕 tk StringVar 不能在后台线程读! 已提前在主线程读好
+            name = _redraw.name
+            symbol = _redraw.symbol
+            days = _redraw.days
+            try:
+                _status.config(text=f"拉取 {name} ({symbol})...", fg="#42A5F5")
+                _wrap.update_idletasks()
+            except Exception:
+                pass
+            try:
+                data = self._fetch_index_daily(symbol, days)
+            except Exception as _e:
+                print(f"[🎯指数K] fetch 异常: {_e}")
+                data = None
+            if not data:
+                try: _status.config(text="❌ 拉取失败", fg="#EF5350")
+                except Exception: pass
+                return
 
             days_list = [d["day"] for d in data]
             closes = [float(d["close"]) for d in data]; opens = [float(d["open"]) for d in data]
             highs = [float(d["high"]) for d in data]; lows = [float(d["low"]) for d in data]
             volumes = [float(d.get("volume", 0)) for d in data]; x = list(range(len(closes)))
 
-            fig.clear()
-            gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 1], hspace=0.3)
-            ax = fig.add_subplot(gs[0], facecolor="#1E1E2E")
-            ax2 = fig.add_subplot(gs[1], facecolor="#1E1E2E", sharex=ax)
-            ax3 = fig.add_subplot(gs[2], facecolor="#1E1E2E", sharex=ax)
-            _draw_axes(ax, ax2, ax3, closes, opens, highs, lows, volumes, days_list, x, show_macd=True)
-            fig.suptitle(f"{name} 日K线图 ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=13, y=0.99)
-            _canvas.draw_idle()
+            try:
+                fig.clear()
+                gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 1], hspace=0.3)
+                ax = fig.add_subplot(gs[0], facecolor="#1E1E2E")
+                ax2 = fig.add_subplot(gs[1], facecolor="#1E1E2E", sharex=ax)
+                ax3 = fig.add_subplot(gs[2], facecolor="#1E1E2E", sharex=ax)
+                _draw_axes(ax, ax2, ax3, closes, opens, highs, lows, volumes, days_list, x, show_macd=True)
+                fig.suptitle(f"{name} 日K线图 ({days_list[0]} ~ {days_list[-1]})", color="#FFF", fontsize=13, y=0.99)
+                _canvas.draw_idle()
+            except Exception as _e:
+                print(f"[🎯指数K] matplotlib 渲染异常: {_e}")
 
             last, prev = closes[-1], closes[-2] if len(closes) >= 2 else closes[-1]
             pct = (last - prev) / prev * 100 if prev else 0
-            _status.config(text=f"✅ {name}  收盘:{last:.2f}  {'+' if pct > 0 else ''}{pct:.2f}%  ({days_list[-1]})",
-                           fg="#EF5350" if pct >= 0 else "#66BB6A")
+            try:
+                _status.config(text=f"✅ {name}  收盘:{last:.2f}  {'+' if pct > 0 else ''}{pct:.2f}%  ({days_list[-1]})",
+                               fg="#EF5350" if pct >= 0 else "#66BB6A")
+            except Exception:
+                pass
 
             # 存数据给双击放大用
             _last_data["name"] = name; _last_data["symbol"] = symbol
@@ -30514,6 +30562,18 @@ AI 将基于实时市场数据生成深度分析报告
 
         # 绑定双击
         _canvas.get_tk_widget().bind("<Double-Button-1>", _show_large)
+
+        # 🆕 关键修复: tk StringVar 必须在主线程读! (之前后台线程读 → RuntimeError)
+        try:
+            _redraw.name = _idx_var.get()
+            _redraw.symbol = INDEX_MAP.get(_redraw.name, "sh000001")
+        except Exception:
+            _redraw.name = "上证指数"
+            _redraw.symbol = "sh000001"
+        try:
+            _redraw.days = int(_days_var.get())
+        except Exception:
+            _redraw.days = 180
 
         import threading as _th
         _th.Thread(target=_redraw, daemon=True).start()
