@@ -4,7 +4,7 @@
   "providers": {
     "deepseek": {
       "base_url": "http://127.0.0.1:8787",
-      "api_key": "",
+      "api_key": "sk-a2545234102d44079db11bb34f85a6e4",
       "model": "deepseek-chat",
       "mode": "chat",
       "temperature": 0.3,
@@ -14,7 +14,6 @@
     "doubao": {
       "base_url": "http://127.0.0.1:8787",
       "endpoint": "/v1/chat/completions",
-      "api_key": "",
       "model": "doubao-seedance-1-0-pro-250528",
       "mode": "chat",
       "temperature": 0.3,

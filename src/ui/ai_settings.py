@@ -43,32 +43,43 @@ def _write_config(cfg):
 
 def _restart_proxy():
     """kill + 重启 AI 代理（代理自己从 ai_config.json 读 key）"""
+    # 1) 杀老代理
     try:
         _sp.run(["pkill", "-9", "-f", "ai_proxy.py"], capture_output=True)
         _time.sleep(1.2)
     except Exception:
         pass
+    # 2) 绝对路径启动新代理（cwd + script 都绝对，避免相对路径问题）
     try:
+        _proxy_script = _os.path.join(_PROJ_ROOT, "logic", "ai_proxy.py")
+        if not _os.path.exists(_proxy_script):
+            _proxy_script = _os.path.join(_PROJ_ROOT, "src", "logic", "ai_proxy.py")
         env = _os.environ.copy()
+        # 💡 关键：显式传 DEEPSEEK_API_KEY 给子进程（兜底 config 读不到的情况）
+        cfg = _read_config()
+        dk = (cfg.get("providers", {}) or {}).get("deepseek", {}).get("api_key", "").strip()
+        if dk:
+            env["DEEPSEEK_API_KEY"] = dk
         _sp.Popen(
             ["/Library/Frameworks/Python.framework/Versions/3.11/bin/python3",
-             "src/logic/ai_proxy.py"],
+             _proxy_script],
             stdout=open("/tmp/ai_proxy.log", "w"),
             stderr=_sp.STDOUT, env=env,
             cwd=_PROJ_ROOT,
+            start_new_session=True,   # 让代理脱离父进程独立跑
         )
         _time.sleep(1.8)
     except Exception as e:
         return f"⚠️ 代理启动异常: {e}"
-    # 验证代理活着
+    # 3) 验证代理活着
     try:
         import requests
         r = requests.get("http://127.0.0.1:8787/health", timeout=3)
         if r.status_code == 200:
-            return "✅ 代理已重启"
+            return "✅ 代理已重启并运行"
     except Exception:
         pass
-    return "⚠️ 代理可能没起来，请手动重启后再试"
+    return "⚠️ 代理可能没起来，请手动: pkill -f ai_proxy && python3 src/logic/ai_proxy.py &"
 
 
 def _mask(k):
