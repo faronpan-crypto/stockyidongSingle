@@ -290,16 +290,83 @@ def _show_market_watch_dialog(parent_root=None):
     sites_canvas.pack(side=_tk.LEFT, fill=_tk.BOTH, expand=True)
     sites_scroll.pack(side=_tk.RIGHT, fill=_tk.Y)
 
-    # 按钮网格（2 列）
+    # 按钮网格（2 列）：点击 = 爬取网页 + AI 分析（浏览器自动跳开）
     _site_btns = []
+    _last_scraped = {"url": "", "title": "", "text": "", "ts": ""}
+
+    def _scrape_and_open_site(site):
+        """一键: 打开浏览器 + 后台爬取网页文字 + 准备分析"""
+        url = site["url"]
+        name = site["name"]
+        # 1) 浏览器打开（给用户看）
+        try: _wb.open(url)
+        except Exception: pass
+        # 2) 后台爬取
+        status_lbl.config(text=f"⏳ 爬取 {name} ({url[:35]}...)", fg=_GOLD)
+
+        def _w():
+            text_preview = ""
+            title = name
+            try:
+                import requests as _req
+                from bs4 import BeautifulSoup as _BS
+                headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"}
+                r = _req.get(url, headers=headers, timeout=10, verify=False)
+                r.encoding = r.apparent_encoding or r.encoding
+                if r.status_code == 200:
+                    soup = _BS(r.text, "html.parser")
+                    # 找 title
+                    if soup.title and soup.title.string: title = soup.title.string.strip()[:50]
+                    # 去 script/style/noscript
+                    for tag in soup(["script", "style", "noscript", "iframe"]): tag.decompose()
+                    # 取纯文本 + 去重空行
+                    lines = [l.strip() for l in soup.get_text("\n", strip=True).split("\n") if l.strip()]
+                    uniq = []
+                    for l in lines:
+                        if l not in uniq[-8:] and len(l) > 1:
+                            uniq.append(l)
+                    text_preview = "\n".join(uniq[:300])  # 最多 300 行给 AI
+                else:
+                    text_preview = f"(HTTP {r.status_code})"
+            except Exception as e:
+                text_preview = f"(爬取失败: {e})"
+
+            # 存到全局缓存
+            _last_scraped["url"] = url
+            _last_scraped["title"] = title
+            _last_scraped["text"] = text_preview
+            _last_scraped["ts"] = _dt.datetime.now().strftime("%H:%M:%S")
+
+            def _done():
+                if text_preview.startswith("("):
+                    status_lbl.config(text=f"⚠️ {name} 爬取 {text_preview[:40]}，已打开浏览器", fg=_GOLD)
+                else:
+                    status_lbl.config(text=f"✅ {name} 爬取成功 ({len(text_preview)}字)，点下方 🔍网页分析 即可", fg=_GREEN)
+                text_widget.config(state=_tk.NORMAL); text_widget.delete("1.0", "end")
+                text_widget.insert("end", (
+                    f"🌐 已爬取: {name}\n"
+                    f"🔗 {url}\n"
+                    f"🕐 {_last_scraped['ts']}  共 {len(text_preview)} 字\n"
+                    f"📄 标题: {title}\n"
+                    f"{'═'*40}\n\n"
+                    f"{text_preview[:1500]}\n\n"
+                    f"... (全文 {len(text_preview)} 字)\n\n"
+                    f"💡 点 [🔍 AI 分析网页] 把上面这些文字交给 AI 研判"
+                ))
+                text_widget.see("end"); text_widget.config(state=_tk.DISABLED)
+
+            _after(_done)
+
+        _th.Thread(target=_w, daemon=True).start()
+
     for i, s in enumerate(sites):
         row, col = divmod(i, 2)
         btn = _tk.Button(sites_inner, text=f"🌐 {s['name']}",
                          width=14,
-                         command=lambda u=s["url"]: _wb.open(u),
+                         command=lambda site=s: _scrape_and_open_site(site),
                          bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
                          highlightbackground=_BLUE, highlightthickness=1,
-                         font=("TkDefaultFont", 9))
+                         font=("TkDefaultFont", 9), cursor="hand2")
         btn.grid(row=row, column=col, padx=3, pady=2, sticky="we")
         _site_btns.append(btn)
 
@@ -396,15 +463,18 @@ def _show_market_watch_dialog(parent_root=None):
     btn_analyze_row = _tk.Frame(analyze_card, bg=_PANEL); btn_analyze_row.pack(fill=_tk.X, padx=6, pady=6)
 
     def _do_analyze(analyze_mode):
-        """analyze_mode: 'image' | 'comprehensive'"""
+        """analyze_mode: 'image' | 'comprehensive' | 'web'"""
         if analyze_mode == "image" and not img_path_var.get():
             _mb.showinfo("提示", "请先选择一张盘面截图 📷")
+            return
+        if analyze_mode == "web" and not _last_scraped.get("text"):
+            _mb.showinfo("提示", "请先在左侧点一个网站按钮（自动爬取）再分析 🌐")
             return
 
         text_widget.config(state=_tk.NORMAL); text_widget.delete("1.0", "end")
         text_widget.insert("end", "⏳ 正在分析...\n\n")
         text_widget.config(state=_tk.DISABLED)
-        btn1.config(state=_tk.DISABLED); btn2.config(state=_tk.DISABLED)
+        btn1.config(state=_tk.DISABLED); btn2.config(state=_tk.DISABLED); btn_web.config(state=_tk.DISABLED)
 
         def _w():
             _after(lambda: status_lbl.config(text="⏳ 拉取实时行情数据...", fg=_GOLD))
@@ -414,8 +484,12 @@ def _show_market_watch_dialog(parent_root=None):
             try:
                 from ui.mainline_route import _get_mainline_route_data
                 d = _get_mainline_route_data()
-                for i, (name, chg, amt, ld, ld_chg, ud) in enumerate(d.get("sectors", [])[:8], 1):
-                    sectors_info += f"  {i}. {name}  {chg:+.2f}%  成交{amt}亿  领涨{ld}({ld_chg:+.2f}%)\n"
+                for i, item in enumerate(d.get("sectors", [])[:8], 1):
+                    if len(item) == 6:
+                        n, chg, amt, ld, ld_chg, ud = item
+                    else:
+                        continue
+                    sectors_info += f"  {i}. {n}  {chg:+.2f}%  成交{amt}亿  领涨{ld}({ld_chg:+.2f}%)\n"
             except Exception as e:
                 sectors_info = f"（实时板块数据拉取失败: {e}）"
 
@@ -425,7 +499,7 @@ def _show_market_watch_dialog(parent_root=None):
             img_path = img_path_var.get()
             messages = []
             sys_prompt = (
-                "你是A股盘前/盘中/盘后分析师。综合盘面截图、实时行情、当前时间、"
+                "你是A股盘前/盘中/盘后分析师。综合盘面截图、实时行情、财经网页内容、当前时间、"
                 "财经资讯进行形势判断和接下来的走势预判。"
                 "输出中文，结构清晰，用 Emoji 增加可读性。"
             )
@@ -434,7 +508,27 @@ def _show_market_watch_dialog(parent_root=None):
             img_data_url = None
             user_text = f"🕐 当前时间: {ts_str}（{time_period}）\n\n📊 今日行业板块 TOP8:\n{sectors_info}\n\n"
 
-            if analyze_mode == "image" and img_path:
+            if analyze_mode == "web":
+                # 爬取网页模式 — 把爬下来的文字喂给 AI
+                scraped = _last_scraped.get("text", "")
+                stitle = _last_scraped.get("title", "")
+                surl = _last_scraped.get("url", "")
+                _after(lambda: status_lbl.config(text=f"⏳ 把网页文字喂给 AI ({len(scraped)}字)...", fg=_GOLD))
+                user_text += (
+                    f"🌐 【刚爬取的财经网页】\n"
+                    f"📄 标题: {stitle}\n"
+                    f"🔗 URL: {surl}\n"
+                    f"📝 网页正文文字 ({len(scraped)}字):\n{'─'*30}\n"
+                    f"{scraped[:4000]}\n{'─'*30}\n\n"
+                    "请重点分析网页里提到的: 热门板块、异动个股、资金流向、政策事件、"
+                    "行业利好利空、北向/游资动向。结合实时板块数据和当前时段，给出：\n"
+                    "1️⃣ 当前市场主线和最活跃板块\n"
+                    "2️⃣ 网页热度代表的情绪阶段（冰点/发酵/高潮/退潮）\n"
+                    "3️⃣ 接下来 1h / 1-2 日 走势预判\n"
+                    "4️⃣ 操作建议（主攻/观望/防守哪些板块）"
+                )
+                messages.append({"role": "user", "content": user_text})
+            elif analyze_mode == "image" and img_path:
                 _after(lambda: status_lbl.config(text="⏳ 图片转 base64 + AI 视觉识别...", fg=_GOLD))
                 try:
                     img_data_url = _img_to_data_url(img_path)
@@ -478,7 +572,7 @@ def _show_market_watch_dialog(parent_root=None):
                     text_widget.insert("end", header + result_text + "\n")
                     status_lbl.config(text=f"✅ AI 研判完成 ({len(result_text)}字)", fg=_GREEN)
                 text_widget.see("end"); text_widget.config(state=_tk.DISABLED)
-                btn1.config(state=_tk.NORMAL); btn2.config(state=_tk.NORMAL)
+                btn1.config(state=_tk.NORMAL); btn2.config(state=_tk.NORMAL); btn_web.config(state=_tk.NORMAL)
 
             _after(_show)
 
@@ -497,6 +591,13 @@ def _show_market_watch_dialog(parent_root=None):
                       highlightbackground=_ACCENT, highlightthickness=2,
                       font=("TkDefaultFont", 10, "bold"))
     btn2.pack(side=_tk.LEFT, padx=4)
+
+    btn_web = _tk.Button(btn_analyze_row, text="🔍 AI 分析网页",
+                          command=lambda: _do_analyze("web"), width=16,
+                          bg=_GREEN, fg="black", activebackground="#4CAF50",
+                          highlightbackground=_GOLD, highlightthickness=2,
+                          font=("TkDefaultFont", 10, "bold"))
+    btn_web.pack(side=_tk.LEFT, padx=4)
 
     # ═══════════════════════════════════════════════════════════
     # 右侧：主结果区 (左) + 历史面板 (右)
