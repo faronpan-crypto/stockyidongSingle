@@ -111,6 +111,36 @@ ETF_IDX_LIST = [
 class DapanMixin:
     """大盘分析 + 情绪周期相关方法"""
 
+    def _calc_emo_score_from_record(self, rec):
+        """从 emo_history 记录中提取 emo_score, None/0/空时用 pct+m2+m5 自算"""
+        _emo_raw = rec.get("emo_score")
+        if _emo_raw is not None and _emo_raw != 0 and _emo_raw != "":
+            try:
+                return int(float(_emo_raw))
+            except:
+                pass
+        # 🧮 自算基准分 50, 按涨跌幅+广度+五指数加减
+        _s = 50
+        _p = float(rec.get("pct", 0) or 0)
+        if _p > 1: _s += 20
+        elif _p > 0: _s += 8
+        elif _p < -1: _s -= 20
+        elif _p < 0: _s -= 8
+        _up = rec.get("m2_up") or rec.get("up")
+        _dn = rec.get("m2_down") or rec.get("dn")
+        if _up and _dn and _dn > 0:
+            _r = _up / _dn
+            if _r > 3: _s += 15
+            elif _r > 1.5: _s += 8
+            elif _r < 0.3: _s -= 15
+            elif _r < 0.7: _s -= 8
+        _m5 = float(rec.get("m5_avg", 0) or 0)
+        if _m5 > 2: _s += 10
+        elif _m5 > 0: _s += 4
+        elif _m5 < -2: _s -= 10
+        elif _m5 < 0: _s -= 4
+        return max(10, min(95, int(_s)))
+
 
     def _apply_ths_sentiment_trend_to_checkboxes(self, trend):
         """将 上行/震荡/下行 映射到开新仓流程中的两个勾选框。"""
@@ -2925,11 +2955,37 @@ class DapanMixin:
                         for _ed in sorted(_eh_fb.keys()):
                             if _ed > _latest_t10_fb and _ed not in _exist_dates_fb:
                                 _ev_fb = _eh_fb[_ed]
+                                # 🛠️ emo_score 自算: None/0/空 → 用 pct+m2+m5 推导
+                                _emo_raw = _ev_fb.get("emo_score")
+                                if _emo_raw is None or _emo_raw == 0 or _emo_raw == "":
+                                    _s = 50
+                                    _p = float(_ev_fb.get("pct", 0) or 0)
+                                    if _p > 1: _s += 20
+                                    elif _p > 0: _s += 8
+                                    elif _p < -1: _s -= 20
+                                    elif _p < 0: _s -= 8
+                                    _up = _ev_fb.get("m2_up") or _ev_fb.get("up")
+                                    _dn = _ev_fb.get("m2_down") or _ev_fb.get("dn")
+                                    if _up and _dn and _dn > 0:
+                                        _r = _up / _dn
+                                        if _r > 3: _s += 15
+                                        elif _r > 1.5: _s += 8
+                                        elif _r < 0.3: _s -= 15
+                                        elif _r < 0.7: _s -= 8
+                                    _m5 = float(_ev_fb.get("m5_avg", 0) or 0)
+                                    if _m5 > 2: _s += 10
+                                    elif _m5 > 0: _s += 4
+                                    elif _m5 < -2: _s -= 10
+                                    elif _m5 < 0: _s -= 4
+                                    _emo_val = max(10, min(95, int(_s)))
+                                else:
+                                    try: _emo_val = int(float(_emo_raw))
+                                    except: _emo_val = 50
                                 trend10.append({
                                     "full_date": _ed,
                                     "date": _ed[5:10],
                                     "pct": float(_ev_fb.get("pct", 0) or 0),
-                                    "emo": float(_ev_fb.get("emo_score", 50) or 50),
+                                    "emo": _emo_val,
                                     "zt": int(_ev_fb.get("zt", 0) or 0),
                                     "close": _ev_fb.get("close", 0),
                                 })
@@ -3230,6 +3286,8 @@ class DapanMixin:
             # 6. 近 N 日趋势 Canvas
             trend10 = data.get("trend10", [])
             self._dapan_trend_data = trend10  # 缓存, Canvas resize 时自动重绘
+            # 🆕 下拉框切换天数需要完整数据缓存
+            self._dapan_trend_data_full = getattr(self, '_dapan_trend_data_full', None) or trend10[:]
             try:
                 tc = self._dapan_trend_canvas
                 tc.delete("all")
@@ -3405,7 +3463,6 @@ class DapanMixin:
         path = self._dapan_snapshot_path()
         if not _os.path.exists(path):
             print("[大盘] 📂 无 snapshot, 显示占位符", flush=True)
-            # 没有 snapshot 时, 至少从 emo_history 渲染 10 日趋势
             self._render_trend_from_emo_history()
             return False
         try:
@@ -3413,6 +3470,10 @@ class DapanMixin:
                 data = _js.load(f)
             saved_at = data.get("_saved_at", "?")
             print(f"[大盘] 📂 读 snapshot 成功 (保存于 {saved_at}), 秒出", flush=True)
+            # ✅ 补真实日线 (snapshot 里 pct 可能全是 0.0 假数据!)
+            self._patch_snapshot_pct_with_real_data(data)
+            # ✅ 也加载 emo_history 完整 172 天数据 (供下拉框切换天数用)
+            self._load_full_emo_history_into_trend_cache(data)
             # snapshot 里 emo/hld 可能为空 (旧版本没写入), 从 trend10 推导
             if data and not data.get("emo") and data.get("trend10"):
                 _lt = data["trend10"][-1]
@@ -3457,6 +3518,116 @@ class DapanMixin:
         finally:
             self._dapan_redrawing = False
 
+    def _refresh_trend_by_combobox(self):
+        """🔧 下拉框切换天数时调用 — 从完整数据截取 + 重绘 Canvas"""
+        try:
+            _full = getattr(self, '_dapan_trend_data_full', None)
+            if not _full:
+                return
+            try:
+                _want = int(getattr(self, '_dapan_trend_days', 20))
+            except:
+                _want = 20
+            _show = _full[-_want:] if len(_full) > _want else _full
+            data = getattr(self, '_dapan_full_data', None)
+            if data:
+                data = dict(data)
+                data["trend10"] = _show
+                self._dapan_update_ui(data)
+                print(f"[🔧趋势] 切换 → {_want}天 (实际 {len(_show)} 条)", flush=True)
+        except Exception as _e:
+            print(f"[🔧趋势❌] Combobox 切换重绘失败: {_e}", flush=True)
+
+
+    def _patch_snapshot_pct_with_real_data(self, data):
+        """🆕 Snapshot 里 pct 可能全是假 0.0 — 拉 akshare 真实日线覆盖"""
+        try:
+            trend10 = data.get("trend10", [])
+            if not trend10:
+                return
+            # 先检查有多少 pct 是 0
+            zero_cnt = sum(1 for x in trend10 if abs(float(x.get("pct", 0) or 0)) < 0.001)
+            if zero_cnt == 0:
+                return  # 全是真实数据, 不用补
+            from ui._akshare_fetcher import fetch_index_daily as _fi
+            _df = _fi(symbol="sh000001", days=30)
+            if _df is None or len(_df) == 0:
+                print("[大盘] akshare 真实日线拉失败, snapshot pct 保留原值")
+                return
+            _real_map = {}
+            for _r in _df.itertuples(index=False):
+                _p = float(getattr(_r, "pct_chg", 0) or 0)
+                _c = float(getattr(_r, "close", 0) or 0)
+                if hasattr(_r.date, "strftime"):
+                    _k8 = _r.date.strftime("%Y%m%d")
+                else:
+                    _k8 = str(_r.date).replace("-", "")[:8]
+                _real_map[_k8] = {"pct": _p, "close": _c}
+            # 覆盖 trend10 里的假 pct
+            _patched = 0
+            for d in trend10:
+                _fd = d.get("full_date", "")
+                _k8 = _fd.replace("-", "")[:8] if _fd else ""
+                if _k8 in _real_map:
+                    d["pct"] = _real_map[_k8]["pct"]
+                    d["close"] = _real_map[_k8]["close"]
+                    _patched += 1
+            print(f"[大盘] 📈 snapshot 补真实日线: {_patched}/{len(trend10)} 天 pct 已覆盖")
+        except Exception as _e_patch:
+            print(f"[大盘❌] snapshot 补 pct 失败: {_e_patch}")
+
+    def _load_full_emo_history_into_trend_cache(self, data):
+        """🆕 加载 emo_history 完整数据到 _dapan_trend_data_full (供下拉框选天数)"""
+        import json as _js, os as _os
+        _path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
+        if not _os.path.exists(_path):
+            return
+        try:
+            with open(_path) as f:
+                hist = _js.load(f)
+            if not isinstance(hist, dict) or not hist:
+                return
+            # 拉真实日线补 pct
+            _real_map = {}
+            try:
+                from ui._akshare_fetcher import fetch_index_daily as _fi_full
+                _df = _fi_full(symbol="sh000001", days=400)
+                if _df is not None and len(_df) > 0:
+                    for _r in _df.itertuples(index=False):
+                        _p = float(getattr(_r, "pct_chg", 0) or 0)
+                        _c = float(getattr(_r, "close", 0) or 0)
+                        if hasattr(_r.date, "strftime"):
+                            _k8 = _r.date.strftime("%Y%m%d")
+                        else:
+                            _k8 = str(_r.date).replace("-", "")[:8]
+                        _real_map[_k8] = {"pct": _p, "close": _c}
+            except Exception:
+                pass
+            # 构建完整 trend10_all
+            sorted_dates = sorted(hist.keys())
+            _all = []
+            for d in sorted_dates:
+                v = hist[d]
+                if d in _real_map:
+                    _pct = _real_map[d]["pct"]
+                    _close = _real_map[d]["close"]
+                else:
+                    _pct = float(v.get("pct", 0) or 0)
+                    _close = v.get("close", 0)
+                _full_ymd = d[:4] + "-" + d[4:6] + "-" + d[6:8]
+                _all.append({
+                    "full_date": _full_ymd,
+                    "date": d[4:6] + "/" + d[6:8],
+                    "pct": _pct,
+                    "emo": self._calc_emo_score_from_record(v),
+                    "zt": int(v.get("zt", 0) or 0),
+                    "close": _close,
+                })
+            if _all:
+                self._dapan_trend_data_full = _all
+                print(f"[大盘] 📚 emo_history 完整 {len(_all)} 天已缓存 (下拉框可选10~{len(_all)}天)", flush=True)
+        except Exception as _e_full:
+            print(f"[大盘❌] 加载完整 emo_history 失败: {_e_full}")
 
     def _render_trend_from_emo_history(self):
         """从 emo_history.json + 新浪/akshare 真实上证日线 → 渲染 20 日趋势"""
@@ -3506,13 +3677,18 @@ class DapanMixin:
                     "full_date": _full_ymd,
                     "date": d[4:6] + "/" + d[6:8],
                     "pct": _pct,
-                    "emo": float(v.get("emo_score", 50) or 50),
+                    "emo": self._calc_emo_score_from_record(v),
                     "zt": int(v.get("zt", 0) or 0),
                     "close": _close,
                 })
 
-            # ✂️ 截断 20 天
-            trend10 = trend10[-20:] if len(trend10) > 20 else trend10
+            # ✂️ 截断 — 先保存完整数据, 再按当前下拉框选择的天数截取
+            self._dapan_trend_data_full = trend10[:]
+            try:
+                _want = int(getattr(self, '_dapan_trend_days', 20))
+            except:
+                _want = 20
+            trend10 = trend10[-_want:] if len(trend10) > _want else trend10
 
             if trend10:
                 last = trend10[-1]
@@ -9254,8 +9430,8 @@ class DapanMixin:
                 stage_raw = str(v.get("stage", v.get("cycle", "")))
                 stage = _re.sub(r'[^\u4e00-\u9fa5A-Za-z0-9 ]+', '', stage_raw).strip()
                 if not stage:
-                    # 从 emo_score 推断 stage
-                    es = float(v.get("emo_score", 50) or 50)
+                    # 从 emo_score 推断 stage (None 时自算)
+                    es = self._calc_emo_score_from_record(v)
                     if es >= 70: stage = "高潮"
                     elif es >= 55: stage = "发酵"
                     elif es >= 45: stage = "启动"
@@ -9266,7 +9442,7 @@ class DapanMixin:
                     "full_date": d,
                     "date": d[5:10],
                     "pct": float(v.get("pct", 0) or 0),
-                    "emo": float(v.get("emo_score", 50) or 50),
+                    "emo": self._calc_emo_score_from_record(v),
                     "zt": int(v.get("zt", 0) or 0),
                     "close": v.get("close", 0),
                     "stage": stage,
@@ -27864,11 +28040,37 @@ AI 将基于实时市场数据生成深度分析报告
                         for _ed in sorted(_eh_fb.keys()):
                             if _ed > _latest_t10_fb and _ed not in _exist_dates_fb:
                                 _ev_fb = _eh_fb[_ed]
+                                # 🛠️ emo_score 自算: None/0/空 → 用 pct+m2+m5 推导
+                                _emo_raw = _ev_fb.get("emo_score")
+                                if _emo_raw is None or _emo_raw == 0 or _emo_raw == "":
+                                    _s = 50
+                                    _p = float(_ev_fb.get("pct", 0) or 0)
+                                    if _p > 1: _s += 20
+                                    elif _p > 0: _s += 8
+                                    elif _p < -1: _s -= 20
+                                    elif _p < 0: _s -= 8
+                                    _up = _ev_fb.get("m2_up") or _ev_fb.get("up")
+                                    _dn = _ev_fb.get("m2_down") or _ev_fb.get("dn")
+                                    if _up and _dn and _dn > 0:
+                                        _r = _up / _dn
+                                        if _r > 3: _s += 15
+                                        elif _r > 1.5: _s += 8
+                                        elif _r < 0.3: _s -= 15
+                                        elif _r < 0.7: _s -= 8
+                                    _m5 = float(_ev_fb.get("m5_avg", 0) or 0)
+                                    if _m5 > 2: _s += 10
+                                    elif _m5 > 0: _s += 4
+                                    elif _m5 < -2: _s -= 10
+                                    elif _m5 < 0: _s -= 4
+                                    _emo_val = max(10, min(95, int(_s)))
+                                else:
+                                    try: _emo_val = int(float(_emo_raw))
+                                    except: _emo_val = 50
                                 trend10.append({
                                     "full_date": _ed,
                                     "date": _ed[5:10],
                                     "pct": float(_ev_fb.get("pct", 0) or 0),
-                                    "emo": float(_ev_fb.get("emo_score", 50) or 50),
+                                    "emo": _emo_val,
                                     "zt": int(_ev_fb.get("zt", 0) or 0),
                                     "close": _ev_fb.get("close", 0),
                                 })
@@ -28165,6 +28367,8 @@ AI 将基于实时市场数据生成深度分析报告
             # 6. 近 N 日趋势 Canvas
             trend10 = data.get("trend10", [])
             self._dapan_trend_data = trend10  # 缓存, Canvas resize 时自动重绘
+            # 🆕 下拉框切换天数需要完整数据缓存
+            self._dapan_trend_data_full = getattr(self, '_dapan_trend_data_full', None) or trend10[:]
             try:
                 tc = self._dapan_trend_canvas
                 tc.delete("all")
@@ -28339,7 +28543,6 @@ AI 将基于实时市场数据生成深度分析报告
         path = self._dapan_snapshot_path()
         if not _os.path.exists(path):
             print("[大盘] 📂 无 snapshot, 显示占位符", flush=True)
-            # 没有 snapshot 时, 至少从 emo_history 渲染 10 日趋势
             self._render_trend_from_emo_history()
             return False
         try:
@@ -28347,6 +28550,10 @@ AI 将基于实时市场数据生成深度分析报告
                 data = _js.load(f)
             saved_at = data.get("_saved_at", "?")
             print(f"[大盘] 📂 读 snapshot 成功 (保存于 {saved_at}), 秒出", flush=True)
+            # ✅ 补真实日线 (snapshot 里 pct 可能全是 0.0 假数据!)
+            self._patch_snapshot_pct_with_real_data(data)
+            # ✅ 也加载 emo_history 完整 172 天数据 (供下拉框切换天数用)
+            self._load_full_emo_history_into_trend_cache(data)
             # snapshot 里 emo/hld 可能为空 (旧版本没写入), 从 trend10 推导
             if data and not data.get("emo") and data.get("trend10"):
                 _lt = data["trend10"][-1]
@@ -28389,6 +28596,116 @@ AI 将基于实时市场数据生成深度分析报告
             pass
         finally:
             self._dapan_redrawing = False
+
+    def _refresh_trend_by_combobox(self):
+        """🔧 下拉框切换天数时调用 — 从完整数据截取 + 重绘 Canvas"""
+        try:
+            _full = getattr(self, '_dapan_trend_data_full', None)
+            if not _full:
+                return
+            try:
+                _want = int(getattr(self, '_dapan_trend_days', 20))
+            except:
+                _want = 20
+            _show = _full[-_want:] if len(_full) > _want else _full
+            data = getattr(self, '_dapan_full_data', None)
+            if data:
+                data = dict(data)
+                data["trend10"] = _show
+                self._dapan_update_ui(data)
+                print(f"[🔧趋势] 切换 → {_want}天 (实际 {len(_show)} 条)", flush=True)
+        except Exception as _e:
+            print(f"[🔧趋势❌] Combobox 切换重绘失败: {_e}", flush=True)
+
+    def _patch_snapshot_pct_with_real_data(self, data):
+        """🆕 Snapshot 里 pct 可能全是假 0.0 — 拉 akshare 真实日线覆盖"""
+        try:
+            trend10 = data.get("trend10", [])
+            if not trend10:
+                return
+            # 先检查有多少 pct 是 0
+            zero_cnt = sum(1 for x in trend10 if abs(float(x.get("pct", 0) or 0)) < 0.001)
+            if zero_cnt == 0:
+                return  # 全是真实数据, 不用补
+            from ui._akshare_fetcher import fetch_index_daily as _fi
+            _df = _fi(symbol="sh000001", days=30)
+            if _df is None or len(_df) == 0:
+                print("[大盘] akshare 真实日线拉失败, snapshot pct 保留原值")
+                return
+            _real_map = {}
+            for _r in _df.itertuples(index=False):
+                _p = float(getattr(_r, "pct_chg", 0) or 0)
+                _c = float(getattr(_r, "close", 0) or 0)
+                if hasattr(_r.date, "strftime"):
+                    _k8 = _r.date.strftime("%Y%m%d")
+                else:
+                    _k8 = str(_r.date).replace("-", "")[:8]
+                _real_map[_k8] = {"pct": _p, "close": _c}
+            # 覆盖 trend10 里的假 pct
+            _patched = 0
+            for d in trend10:
+                _fd = d.get("full_date", "")
+                _k8 = _fd.replace("-", "")[:8] if _fd else ""
+                if _k8 in _real_map:
+                    d["pct"] = _real_map[_k8]["pct"]
+                    d["close"] = _real_map[_k8]["close"]
+                    _patched += 1
+            print(f"[大盘] 📈 snapshot 补真实日线: {_patched}/{len(trend10)} 天 pct 已覆盖")
+        except Exception as _e_patch:
+            print(f"[大盘❌] snapshot 补 pct 失败: {_e_patch}")
+
+    def _load_full_emo_history_into_trend_cache(self, data):
+        """🆕 加载 emo_history 完整数据到 _dapan_trend_data_full (供下拉框选天数)"""
+        import json as _js, os as _os
+        _path = os.path.expanduser("~/.qclaw/workspace-agent-85985980/stockyidong_emo_history.json")
+        if not _os.path.exists(_path):
+            return
+        try:
+            with open(_path) as f:
+                hist = _js.load(f)
+            if not isinstance(hist, dict) or not hist:
+                return
+            # 拉真实日线补 pct
+            _real_map = {}
+            try:
+                from ui._akshare_fetcher import fetch_index_daily as _fi_full
+                _df = _fi_full(symbol="sh000001", days=400)
+                if _df is not None and len(_df) > 0:
+                    for _r in _df.itertuples(index=False):
+                        _p = float(getattr(_r, "pct_chg", 0) or 0)
+                        _c = float(getattr(_r, "close", 0) or 0)
+                        if hasattr(_r.date, "strftime"):
+                            _k8 = _r.date.strftime("%Y%m%d")
+                        else:
+                            _k8 = str(_r.date).replace("-", "")[:8]
+                        _real_map[_k8] = {"pct": _p, "close": _c}
+            except Exception:
+                pass
+            # 构建完整 trend10_all
+            sorted_dates = sorted(hist.keys())
+            _all = []
+            for d in sorted_dates:
+                v = hist[d]
+                if d in _real_map:
+                    _pct = _real_map[d]["pct"]
+                    _close = _real_map[d]["close"]
+                else:
+                    _pct = float(v.get("pct", 0) or 0)
+                    _close = v.get("close", 0)
+                _full_ymd = d[:4] + "-" + d[4:6] + "-" + d[6:8]
+                _all.append({
+                    "full_date": _full_ymd,
+                    "date": d[4:6] + "/" + d[6:8],
+                    "pct": _pct,
+                    "emo": self._calc_emo_score_from_record(v),
+                    "zt": int(v.get("zt", 0) or 0),
+                    "close": _close,
+                })
+            if _all:
+                self._dapan_trend_data_full = _all
+                print(f"[大盘] 📚 emo_history 完整 {len(_all)} 天已缓存 (下拉框可选10~{len(_all)}天)", flush=True)
+        except Exception as _e_full:
+            print(f"[大盘❌] 加载完整 emo_history 失败: {_e_full}")
 
     def _render_trend_from_emo_history(self):
         """从 emo_history.json + 新浪/akshare 真实上证日线 → 渲染 20 日趋势"""
@@ -28438,13 +28755,18 @@ AI 将基于实时市场数据生成深度分析报告
                     "full_date": _full_ymd,
                     "date": d[4:6] + "/" + d[6:8],
                     "pct": _pct,
-                    "emo": float(v.get("emo_score", 50) or 50),
+                    "emo": self._calc_emo_score_from_record(v),
                     "zt": int(v.get("zt", 0) or 0),
                     "close": _close,
                 })
 
-            # ✂️ 截断 20 天
-            trend10 = trend10[-20:] if len(trend10) > 20 else trend10
+            # ✂️ 截断 — 先保存完整数据, 再按当前下拉框选择的天数截取
+            self._dapan_trend_data_full = trend10[:]
+            try:
+                _want = int(getattr(self, '_dapan_trend_days', 20))
+            except:
+                _want = 20
+            trend10 = trend10[-_want:] if len(trend10) > _want else trend10
 
             if trend10:
                 last = trend10[-1]

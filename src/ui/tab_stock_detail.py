@@ -979,7 +979,46 @@ class StockDetailMixin:
                     win.geometry("1200x900")
             top = ttk.Frame(win, padding=4)
             top.pack(fill=tk.X)
-            # 添加只显示主图的选项
+            # === 🆕 下拉框控制栏 (快速预设, 改了自动重绘) ===
+            top_ctrl = ttk.Frame(top)
+            top_ctrl.pack(fill=tk.X, pady=(0, 4))
+            ttk.Label(top_ctrl, text="📈K线控制:", font=("Microsoft YaHei", 10, "bold")).pack(side=tk.LEFT, padx=(0, 6))
+
+            # 副图模式下拉框 (预设组合)
+            ttk.Label(top_ctrl, text="副图:").pack(side=tk.LEFT, padx=(0, 2))
+            subchart_mode_var = tk.StringVar(value="经典(VOL+MACD+KDJ)")
+            _SUB_MODES = [
+                "只看主图",
+                "经典(VOL+MACD+KDJ)",
+                "MACD+KDJ",
+                "MACD+BOLL",
+                "VOL+MACD",
+                "KDJ+BOLL",
+                "VOL+MACD+BOLL",
+                "自选(下方勾选)",
+            ]
+            ttk.Combobox(top_ctrl, textvariable=subchart_mode_var, values=_SUB_MODES,
+                         width=18, state="readonly").pack(side=tk.LEFT, padx=(0, 10))
+
+            # 支撑压力下拉框
+            ttk.Label(top_ctrl, text="支撑压力:").pack(side=tk.LEFT, padx=(0, 2))
+            sr_mode_var = tk.StringVar(value="开")
+            ttk.Combobox(top_ctrl, textvariable=sr_mode_var, values=["开", "关"],
+                         width=5, state="readonly").pack(side=tk.LEFT, padx=(0, 10))
+
+            # 买卖点下拉框
+            ttk.Label(top_ctrl, text="买卖点:").pack(side=tk.LEFT, padx=(0, 2))
+            bs_mode_var = tk.StringVar(value="开")
+            ttk.Combobox(top_ctrl, textvariable=bs_mode_var, values=["开", "关"],
+                         width=5, state="readonly").pack(side=tk.LEFT, padx=(0, 10))
+
+            # 胜率提示下拉框
+            ttk.Label(top_ctrl, text="胜率:").pack(side=tk.LEFT, padx=(0, 2))
+            bt_mode_var = tk.StringVar(value="开")
+            ttk.Combobox(top_ctrl, textvariable=bt_mode_var, values=["开", "关"],
+                         width=5, state="readonly").pack(side=tk.LEFT, padx=(0, 10))
+
+            # 📌 只显示主图的选项 (保留)
             main_only_var = tk.BooleanVar(value=False)
             ttk.Checkbutton(top, text="只显示主图", variable=main_only_var).pack(side=tk.LEFT, padx=(0, 10))
             # 添加显示支撑/压力线的选项
@@ -1000,11 +1039,50 @@ class StockDetailMixin:
                 ivars[code] = tk.BooleanVar(value=code in ("VOL", "MACD", "KDJ"))
             for code, lbl in opt_specs:
                 ttk.Checkbutton(top, text=lbl, variable=ivars[code]).pack(side=tk.LEFT, padx=3)
+
             # 🛒 买卖点 + 💡胜率提示
             show_bs_var = tk.BooleanVar(value=True)
             show_bt_var = tk.BooleanVar(value=True)
             ttk.Checkbutton(top, text="🛒买卖点", variable=show_bs_var).pack(side=tk.LEFT, padx=(10,3))
             ttk.Checkbutton(top, text="💡胜率提示", variable=show_bt_var).pack(side=tk.LEFT, padx=3)
+
+            # 🆕 下拉框预设 → 自动同步 Checkbutton + 触发重绘
+            _SUB_PRESETS = {
+                "只看主图":   None,  # 特殊: main_only=True
+                "经典(VOL+MACD+KDJ)": [("VOL",True),("MACD",True),("WR2",False),("KDJ",True),("BOLL",False)],
+                "MACD+KDJ":           [("VOL",False),("MACD",True),("WR2",False),("KDJ",True),("BOLL",False)],
+                "MACD+BOLL":          [("VOL",False),("MACD",True),("WR2",False),("KDJ",False),("BOLL",True)],
+                "VOL+MACD":           [("VOL",True),("MACD",True),("WR2",False),("KDJ",False),("BOLL",False)],
+                "KDJ+BOLL":           [("VOL",False),("MACD",False),("WR2",False),("KDJ",True),("BOLL",True)],
+                "VOL+MACD+BOLL":      [("VOL",True),("MACD",True),("WR2",False),("KDJ",False),("BOLL",True)],
+            }
+            def _sync_combobox_to_vars():
+                """下拉框改变 → 同步 Checkbutton → 自动重绘"""
+                try:
+                    _mode = subchart_mode_var.get()
+                    if _mode == "只看主图":
+                        main_only_var.set(True)
+                    elif _mode == "自选(下方勾选)":
+                        pass  # 用户自己调 Checkbutton
+                    else:
+                        main_only_var.set(False)
+                        for _k, _v in _SUB_PRESETS.get(_mode, []):
+                            ivars[_k].set(_v)
+                    # 支撑压力
+                    show_support_resistance_var.set(sr_mode_var.get() == "开")
+                    # 买卖点
+                    show_bs_var.set(bs_mode_var.get() == "开")
+                    # 胜率
+                    show_bt_var.set(bt_mode_var.get() == "开")
+                    # 触发重绘
+                    redraw()
+                except Exception as _e:
+                    print(f"[K线❌] 下拉框同步失败: {_e}", flush=True)
+
+            # 绑定所有下拉框
+            for _cb in top_ctrl.winfo_children():
+                if isinstance(_cb, ttk.Combobox):
+                    _cb.bind("<<ComboboxSelected>>", lambda _e: _sync_combobox_to_vars())
             # 🧠 操盘阶段分析按钮
             stage_result = [None]  # 可变容器存分析结果
             stage_bar_visible = [False]

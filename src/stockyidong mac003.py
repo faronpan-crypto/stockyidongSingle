@@ -900,7 +900,9 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         self._dapan_hld_col = {"red": "#C62828", "yellow": "#F57F17", "green": "#2E7D32", "gray": "#BDBDBD"}
 
         # ============ 顶部: 红绿灯 + 水温计 + 情绪周期 (一行) ============
-        top_bar = tk.Frame(dapan_tab, bg="#1A237E"); top_bar.pack(fill=tk.X, pady=(0, 3))
+        self._dapan_emo_top_bar = tk.Frame(dapan_tab, bg="#1A237E")
+        self._dapan_emo_top_bar.pack(fill=tk.X, pady=(0, 3))
+        top_bar = self._dapan_emo_top_bar
         # 左: 红绿灯文字
         tk.Label(top_bar, text="🇨🇳 A股综合", bg="#1A237E", fg="white",
                  font=("", 11, "bold")).pack(side=tk.LEFT, padx=8, pady=3)
@@ -966,12 +968,45 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         tk.Button(top_bar, text="🗓️ 暴涨暴跌", bg="#6A1B9A", fg="white", font=("", 9, "bold"),
                   padx=8, pady=0, cursor="hand2",
                   command=self._open_crash_rally_calendar).pack(side=tk.RIGHT, padx=6)
+        # 🔧 情绪面板收缩/展开按钮
+        self._dapan_emo_expanded = True  # 状态
+        self._dapan_emo_toggle_btn = tk.Button(
+            top_bar, text="▼情绪▼", bg="#1A237E", fg="#FFD54F",
+            font=("", 9, "bold"), padx=4, pady=0, cursor="hand2",
+            command=self._toggle_dapan_emo_panel)
+        self._dapan_emo_toggle_btn.pack(side=tk.RIGHT, padx=4)
 
+
+        # ============ 情绪趋势图 控制栏 (天数/模式 下拉框) ============
+        self._dapan_emo_trend_ctrl = tk.Frame(dapan_tab, bg="#CFD8DC", height=24)
+        self._dapan_emo_trend_ctrl.pack(fill=tk.X, pady=(0, 2))
+        self._dapan_emo_trend_ctrl.pack_propagate(False)
+        _ctrl = self._dapan_emo_trend_ctrl
+        # 标签
+        tk.Label(_ctrl, text="📈趋势图:", bg="#CFD8DC", fg="#1A237E",
+                 font=("", 9, "bold")).pack(side=tk.LEFT, padx=(6, 2), pady=2)
+        # 天数下拉框
+        tk.Label(_ctrl, text="天数:", bg="#CFD8DC", fg="#37474F",
+                 font=("", 9)).pack(side=tk.LEFT, padx=(4, 0), pady=2)
+        self._dapan_trend_days_var = tk.StringVar(value="20")
+        _days_cb = ttk.Combobox(_ctrl, textvariable=self._dapan_trend_days_var,
+                                 values=["10", "20", "30", "60", "全部"],
+                                 width=5, state="readonly", font=("", 9))
+        _days_cb.pack(side=tk.LEFT, padx=(2, 6), pady=2)
+        # 刷新按钮
+        _refresh_btn = tk.Button(_ctrl, text="🔄刷新", bg="#1565C0", fg="white",
+                                  font=("", 8, "bold"), padx=6, pady=0,
+                                  command=self._on_dapan_trend_days_change,
+                                  cursor="hand2", highlightthickness=0)
+        _refresh_btn.pack(side=tk.LEFT, padx=(0, 4), pady=2)
+        # 🔽下拉框切换时也触发刷新
+        _days_cb.bind("<<ComboboxSelected>>", lambda _e: self._on_dapan_trend_days_change())
 
         # ============ 10日情绪分 + 涨跌幅趋势条 (紧凑 Canvas) ============
-        trend_bar = tk.Frame(dapan_tab, bg="#ECEFF1", height=160)
-        trend_bar.pack(fill=tk.X, pady=(0, 3))
-        trend_bar.pack_propagate(False)
+        self._dapan_emo_trend_bar = tk.Frame(dapan_tab, bg="#ECEFF1", height=160)
+        self._dapan_emo_trend_bar.pack(fill=tk.X, pady=(0, 3))
+        self._dapan_emo_trend_bar.pack_propagate(False)
+        trend_bar = self._dapan_emo_trend_bar
         self._dapan_trend_canvas = tk.Canvas(trend_bar, bg="#ECEFF1", height=160,
                                               highlightthickness=1, highlightbackground="#B0BEC5")
         self._dapan_trend_canvas.pack(fill=tk.BOTH, expand=True)
@@ -983,8 +1018,10 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                                               fill="#90A4AE", font=("", 9))
 
         # ============ 情绪阶段可视化条 (明确标出当前位置) ============
-        emo_strip = tk.Frame(dapan_tab, bg="#424242", height=26); emo_strip.pack(fill=tk.X, pady=(0, 3))
-        emo_strip.pack_propagate(False)
+        self._dapan_emo_strip = tk.Frame(dapan_tab, bg="#424242", height=26)
+        self._dapan_emo_strip.pack(fill=tk.X, pady=(0, 3))
+        self._dapan_emo_strip.pack_propagate(False)
+        emo_strip = self._dapan_emo_strip
         self._dapan_emo_strip_canvas = tk.Canvas(emo_strip, bg="#424242", height=26,
                                                   highlightthickness=0)
         self._dapan_emo_strip_canvas.pack(fill=tk.BOTH, expand=True)
@@ -4831,12 +4868,33 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         # 左侧工具条:3 行 (按工作流排序: 大盘 → 选股 → 个股)
         toolbar_frame = ttk.Frame(left_frame)
         toolbar_frame.pack(fill=tk.X, pady=(0, 1))
-        toolbar_row1 = ttk.Frame(toolbar_frame)
-        toolbar_row1.pack(fill=tk.X, pady=(0, 1))
-        toolbar_row2 = ttk.Frame(toolbar_frame)
-        toolbar_row2.pack(fill=tk.X, pady=(0, 1))
-        toolbar_row3 = ttk.Frame(toolbar_frame)
-        toolbar_row3.pack(fill=tk.X)
+
+        # ── 折叠/展开 按钮 (默认展开 3 行) ──
+        self._toolbar_rows_expanded = True  # 状态
+        self._toolbar_row1 = None
+        self._toolbar_row2 = None
+        self._toolbar_row3 = None
+
+        toolbar_toggle_row = ttk.Frame(toolbar_frame)
+        toolbar_toggle_row.pack(fill=tk.X, pady=(0, 1))
+        self._toolbar_toggle_btn = tk.Button(
+            toolbar_toggle_row, text="▼ 工具栏 ▼  (5行展开)",
+            command=lambda: self._toggle_toolbar_rows(),
+            bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+            highlightbackground="#1565C0", highlightthickness=1,
+            font=("TkDefaultFont", 9))
+        self._toolbar_toggle_btn.pack(fill=tk.X)
+
+        self._toolbar_row1 = ttk.Frame(toolbar_frame)
+        self._toolbar_row1.pack(fill=tk.X, pady=(0, 1))
+        self._toolbar_row2 = ttk.Frame(toolbar_frame)
+        self._toolbar_row2.pack(fill=tk.X, pady=(0, 1))
+        self._toolbar_row3 = ttk.Frame(toolbar_frame)
+        self._toolbar_row3.pack(fill=tk.X, pady=(0, 1))
+        self._toolbar_row4 = ttk.Frame(toolbar_frame)
+        self._toolbar_row4.pack(fill=tk.X, pady=(0, 1))
+        self._toolbar_row5 = ttk.Frame(toolbar_frame)
+        self._toolbar_row5.pack(fill=tk.X)
         tp = 2
 
         # ── Row 1: 🌏 大盘 / 宏观 / 周期 (big picture first) ──
@@ -4859,7 +4917,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW1):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
-            ttk.Button(toolbar_row1, text=txt, width=w, command=cmd).pack(**_pad)
+            ttk.Button(self._toolbar_row1, text=txt, width=w, command=cmd).pack(**_pad)
         # Row1 末尾: 📝文章生成
         try:
             from ui.speculator_watch import _article_output_dialog as _aod1
@@ -4869,7 +4927,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                     _aod1(self.root, focus_layer="🌏 全球宏观·大盘看盘 (Row1)")
                 except Exception as _e:
                     print(f"[📝Row1❌] {_e}", flush=True); import traceback; traceback.print_exc()
-            _ROW1_ART = ttk.Button(toolbar_row1, text="📝文章", width=8, command=_click_row1)
+            _ROW1_ART = ttk.Button(self._toolbar_row1, text="📝文章", width=8, command=_click_row1)
             _ROW1_ART.pack(side=tk.RIGHT, padx=(4, 0))
             print("[📝Row1] ✅ ttk.Button 已创建", flush=True)
         except Exception as _ea1:
@@ -4903,7 +4961,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 except Exception as _e:
                     print(f"[🎯Row2❌] '{_t}': {_e}", flush=True)
                     import traceback; traceback.print_exc()
-            ttk.Button(toolbar_row2, text=txt, width=w, command=_wrap2).pack(**_pad)
+            ttk.Button(self._toolbar_row2, text=txt, width=w, command=_wrap2).pack(**_pad)
         # Row2 末尾: 📝文章生成
         try:
             from ui.speculator_watch import _article_output_dialog as _aod2
@@ -4913,7 +4971,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                     _aod2(self.root, focus_layer="🎯 选股·机会·ETF周期 (Row2)")
                 except Exception as _e:
                     print(f"[📝Row2❌] {_e}", flush=True); import traceback; traceback.print_exc()
-            _ROW2_ART = ttk.Button(toolbar_row2, text="📝文章", width=8, command=_click_row2)
+            _ROW2_ART = ttk.Button(self._toolbar_row2, text="📝文章", width=8, command=_click_row2)
             _ROW2_ART.pack(side=tk.RIGHT, padx=(4, 0))
             print("[📝Row2] ✅ ttk.Button 已创建", flush=True)
         except Exception as _ea2:
@@ -4933,7 +4991,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW3):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
-            ttk.Button(toolbar_row3, text=txt, width=w, command=cmd).pack(**_pad)
+            ttk.Button(self._toolbar_row3, text=txt, width=w, command=cmd).pack(**_pad)
         # Row3 末尾: 📝文章生成
         try:
             from ui.speculator_watch import _article_output_dialog as _aod3
@@ -4943,14 +5001,65 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                     _aod3(self.root, focus_layer="🔥 主力资金·个股分析 (Row3)")
                 except Exception as _e:
                     print(f"[📝Row3❌] {_e}", flush=True); import traceback; traceback.print_exc()
-            _ROW3_ART = ttk.Button(toolbar_row3, text="📝文章", width=8, command=_click_row3)
+            _ROW3_ART = ttk.Button(self._toolbar_row3, text="📝文章", width=8, command=_click_row3)
             _ROW3_ART.pack(side=tk.RIGHT, padx=(4, 0))
             print("[📝Row3] ✅ ttk.Button 已创建", flush=True)
         except Exception as _ea3:
             print(f"[📝Row3❌] 创建失败: {_ea3}", flush=True)
 
-        # Row4: 📰 资讯 / 外部数据源 (最低频, 可选)
-        # — 合并进 Row2/Row3 末尾, 不单独占一行 (太挤) —
+        # Row4: 📰 资讯 / 数据 / 回测 (中频)
+        try:
+            _ROW4 = [
+                ("📰突发新闻", 9, self.show_breaking_news_dialog),
+                ("🕷️爬虫阅读", 9, self.show_spider_reader),
+                ("🔥热门榜单", 9, self.show_hotlists_overview),
+                ("📊市场广度", 9, self.show_market_breadth_stats_dialog),
+                ("💡市场情绪", 9, self.show_market_sentiment_dialog),
+                ("📊回测", 6, self.show_backtest_dialog),
+                ("🗄️数据库", 8, self.show_unified_db_display),
+                ("🧠一键思考", 8, self.show_one_click_thinking),
+                ("🎲选股器", 7, self.show_stock_analysis_engine_dialog),
+            ]
+        except Exception as _e4:
+            print(f"[📰Row4❌] 按钮定义炸了: {_e4}", flush=True)
+            import traceback; traceback.print_exc()
+            _ROW4 = []
+        for _idx, (txt, w, cmd) in enumerate(_ROW4):
+            _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
+            def _wrap4(_c=cmd, _t=txt):
+                print(f"[📰Row4] 点击 '{_t}'", flush=True)
+                try: _c()
+                except Exception as _e:
+                    print(f"[📰Row4❌] '{_t}': {_e}", flush=True)
+                    import traceback; traceback.print_exc()
+            ttk.Button(self._toolbar_row4, text=txt, width=w, command=_wrap4).pack(**_pad)
+
+        # Row5: ⚙️ 设置 / 管理 / 低频工具
+        try:
+            _ROW5 = [
+                ("🕷️爬取", 6, self.show_web_crawler),
+                ("📊Tushare", 9, self.show_tushare_skills_dialog),
+                ("🤖AI配置", 8, self.show_ai_config),
+                ("📖问财技能", 9, self.show_iwencai_skillhub_dialog),
+                ("📋持仓管理", 9, self.show_stock_management_dialog),
+                ("💰基本面", 7, self.show_fundamental_analysis),
+                ("📈投资系统", 9, self.show_investment_system),
+                ("📰新闻数据", 9, self.show_news_data_dialog),
+                ("🎯策略", 6, self.show_quant_strategy_dialog),
+            ]
+        except Exception as _e5:
+            print(f"[⚙️Row5❌] 按钮定义炸了: {_e5}", flush=True)
+            import traceback; traceback.print_exc()
+            _ROW5 = []
+        for _idx, (txt, w, cmd) in enumerate(_ROW5):
+            _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
+            def _wrap5(_c=cmd, _t=txt):
+                print(f"[⚙️Row5] 点击 '{_t}'", flush=True)
+                try: _c()
+                except Exception as _e:
+                    print(f"[⚙️Row5❌] '{_t}': {_e}", flush=True)
+                    import traceback; traceback.print_exc()
+            ttk.Button(self._toolbar_row5, text=txt, width=w, command=_wrap5).pack(**_pad)
 
 
         # 快速爬取/文本控制标签页控件框(共用一块区域,可以切换)
@@ -6029,22 +6138,42 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         # 更新界面,显示右侧框架
         self._safe_update()
         # 创建右侧面板的PanedWindow,支持上下分割
-        right_paned = ttk.PanedWindow(right_frame, orient=tk.VERTICAL)
-        right_paned.pack(fill=tk.BOTH, expand=True)
+        self._right_paned = ttk.PanedWindow(right_frame, orient=tk.VERTICAL)
+        self._right_paned.pack(fill=tk.BOTH, expand=True)
         # 上半部分:情绪区间标签页(大盘结构与盘面指标)
-        holding_analysis_frame = ttk.LabelFrame(right_paned, text="情绪区间", padding=5)
-        right_paned.add(holding_analysis_frame, weight=10)
+        holding_analysis_frame = ttk.LabelFrame(self._right_paned, text="情绪区间", padding=5)
+        self._right_paned.add(holding_analysis_frame, weight=10)
         # 强制给情绪区间一个合理的初始高度, 防止 PanedWindow 初始 sash 位置太低
-        right_paned.after(200, lambda: right_paned.sashpos(0, 600))
+        # 🔧 初始收缩状态: sash 拉到底, 让 holding_analysis_frame (K线图) 占满
+        self._right_paned.after(300, self._init_collapse_result_panel)
         # 内容区域(使用标签页展示结构化指标)
         self.holding_analysis_container = ttk.Frame(holding_analysis_frame)
         self.holding_analysis_container.pack(fill=tk.BOTH, expand=True)
         self._build_sentiment_zone_tabs(self.holding_analysis_container)
-        # 下半部分:原有的分析结果和词云区域
-        bottom_right_frame = ttk.Frame(right_paned)
-        right_paned.add(bottom_right_frame, weight=1)
+        # 下半部分:原有的分析结果和词云区域 — 初始收缩, 让K线图占满
+        bottom_right_frame = ttk.Frame(self._right_paned)
+        self._right_paned.add(bottom_right_frame, weight=1)
+
+        # 🔧 分析结果功能块 收缩/展开 按钮 (常显, 放在最顶部)
+        self._result_panel_expanded = False  # 初始收缩!
+        self._result_toggle_btn = tk.Button(
+            bottom_right_frame,
+            text="▶ 分析结果功能块 (已收缩, 点展开看K线图全宽)",
+            bg="#FFD54F", fg="#1A237E",
+            font=("", 10, "bold"),
+            cursor="hand2", highlightthickness=0,
+            relief=tk.FLAT, bd=1, height=1,
+            command=self._toggle_result_panel)
+        self._result_toggle_btn.pack(fill=tk.X, pady=(2, 2))
+
+        # 📦 可收缩的内容容器 (初始不 pack = 收缩状态)
+        self._result_inner_frame = ttk.Frame(bottom_right_frame)
+        if self._result_panel_expanded:
+            self._result_inner_frame.pack(fill=tk.BOTH, expand=True)
+        result_inner = self._result_inner_frame
+
         # 顶部按钮框架 - 移到右边上方(先 pack 右侧「字体」区,避免窄屏时被挤到看不见)
-        button_frame = ttk.Frame(bottom_right_frame)
+        button_frame = ttk.Frame(result_inner)
         button_frame.pack(fill=tk.X, pady=(0, 10))
         # 右侧控制区域(字体大小等)- 先于左侧按钮 pack,保证始终可见
         right_control_area = ttk.Frame(button_frame)
@@ -6151,7 +6280,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         ai_question_button = ttk.Button(button_row2, text="AI提问", command=self.show_ai_question, width=10)
         ai_question_button.pack(side=tk.LEFT, padx=(0, 5))
         # 结果标签和按钮框架
-        result_header_frame = ttk.Frame(bottom_right_frame)
+        result_header_frame = ttk.Frame(result_inner)
         result_header_frame.pack(fill=tk.X, pady=(0, 5))
         result_label = ttk.Label(result_header_frame, text="股票分析结果:")
         result_label.pack(side=tk.LEFT, anchor=tk.W)
@@ -6161,7 +6290,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         ttk.Button(result_news_db_frame, text="保存到资讯DB", command=self.save_current_result_tab_to_news_db).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(result_news_db_frame, text="查看资讯DB", command=self.show_news_db_display).pack(side=tk.LEFT, padx=(0, 0))
         # 结果文本框改为多标签页(支持AI分析结果显示在新标签页)
-        self.result_notebook = ttk.Notebook(bottom_right_frame)
+        self.result_notebook = ttk.Notebook(result_inner)
         self.result_notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         # 创建默认结果标签页
         self.result_tabs = {}
@@ -6183,7 +6312,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         analysis_tab_id = self.create_result_tab("分析")
         self.analysis_tab_widget = self.result_tabs[analysis_tab_id]['widget']
         # 创建底部框架,包含词云和AI配置(水平布局)
-        bottom_frame = ttk.Frame(bottom_right_frame)
+        bottom_frame = ttk.Frame(result_inner)
         bottom_frame.pack(fill=tk.X, pady=(10, 0))
         # 词云显示区域(左侧)
         wordcloud_container = ttk.LabelFrame(bottom_frame, text="词云显示", padding=10)
@@ -6338,6 +6467,121 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         #     self.root.after(15000, self._th_reminder_tick)  # 延后 15s
         # except Exception:
         #     pass
+
+    def _toggle_toolbar_rows(self):
+        """🔧 工具栏折叠/展开: 收缩只保留 Row1 高频按钮, 展开恢复 5 行"""
+        try:
+            if self._toolbar_rows_expanded:
+                # 🔼 收缩: 隐藏 Row2~Row5, 只保留 Row1
+                for _r in [self._toolbar_row2, self._toolbar_row3,
+                           self._toolbar_row4, self._toolbar_row5]:
+                    if _r: _r.pack_forget()
+                self._toolbar_toggle_btn.config(text="▲ 工具栏 ▲  (已收缩, 5行→1行)")
+                self._toolbar_rows_expanded = False
+                print("[🔧工具栏] 收缩 ↓ (1行)", flush=True)
+            else:
+                # 🔽 展开: 恢复 Row1~Row5 共 5 行
+                for _r, _pad in [(self._toolbar_row1, (0,1)),
+                                 (self._toolbar_row2, (0,1)),
+                                 (self._toolbar_row3, (0,1)),
+                                 (self._toolbar_row4, (0,1)),
+                                 (self._toolbar_row5, (0,))]:
+                    if _r: _r.pack(fill=tk.X, pady=_pad)
+                self._toolbar_toggle_btn.config(text="▼ 工具栏 ▼  (5行展开)")
+                self._toolbar_rows_expanded = True
+                print("[🔧工具栏] 展开 ↑ (5行)", flush=True)
+        except Exception as _te:
+            print(f"[🔧工具栏❌] toggle 失败: {_te}", flush=True)
+
+    def _toggle_dapan_emo_panel(self):
+        """🔧 大盘情绪面板收缩/展开: 控制栏+趋势图+阶段条可隐藏, top_bar 一行常显"""
+        try:
+            if self._dapan_emo_expanded:
+                # 🔼 收缩: 隐藏控制栏+趋势图+阶段条, 只保留 top_bar 一行
+                for _w in ['_dapan_emo_trend_ctrl', '_dapan_emo_trend_bar', '_dapan_emo_strip']:
+                    _f = getattr(self, _w, None)
+                    if _f: _f.pack_forget()
+                self._dapan_emo_toggle_btn.config(text="▲情绪▲")
+                self._dapan_emo_expanded = False
+                print("[🗺️情绪面板] 收缩 ↓ (只留一行)", flush=True)
+            else:
+                # 🔽 展开: 恢复控制栏+top_bar+trend_bar+emo_strip
+                if hasattr(self, '_dapan_emo_top_bar') and self._dapan_emo_top_bar:
+                    self._dapan_emo_top_bar.pack(fill=tk.X, pady=(0, 3))
+                if hasattr(self, '_dapan_emo_trend_ctrl') and self._dapan_emo_trend_ctrl:
+                    self._dapan_emo_trend_ctrl.pack(fill=tk.X, pady=(0, 2))
+                if hasattr(self, '_dapan_emo_trend_bar') and self._dapan_emo_trend_bar:
+                    self._dapan_emo_trend_bar.pack(fill=tk.X, pady=(0, 3))
+                if hasattr(self, '_dapan_emo_strip') and self._dapan_emo_strip:
+                    self._dapan_emo_strip.pack(fill=tk.X, pady=(0, 3))
+                self._dapan_emo_toggle_btn.config(text="▼情绪▼")
+                self._dapan_emo_expanded = True
+                print("[🗺️情绪面板] 展开 ↑ (控制栏+趋势图+阶段条)", flush=True)
+        except Exception as _ee:
+            print(f"[🗺️情绪面板❌] toggle 失败: {_ee}", flush=True)
+
+    def _on_dapan_trend_days_change(self):
+        """🔧 天数下拉框切换 → 同步给 tab_dapan 并重绘"""
+        try:
+            _val = self._dapan_trend_days_var.get()
+            if _val == "全部":
+                _full = getattr(self, '_dapan_trend_data_full', None)
+                _want = len(_full) if _full else 20
+            else:
+                _want = int(_val)
+            self._dapan_trend_days = _want
+            self._refresh_trend_by_combobox()
+        except Exception as _e:
+            print(f"[🔧趋势❌] 下拉框切换失败: {_e}", flush=True)
+
+    def _toggle_result_panel(self):
+        """🔧 K线图弹窗右侧「分析结果功能块」收缩/展开"""
+        try:
+            if self._result_panel_expanded:
+                # 🔼 收缩: 隐藏 inner_frame, sash 拉满给 K 线图
+                if hasattr(self, '_result_inner_frame') and self._result_inner_frame:
+                    self._result_inner_frame.pack_forget()
+                try:
+                    rp = getattr(self, '_right_paned', None)
+                    if rp:
+                        rp.update_idletasks()
+                        _h = rp.winfo_height()
+                        rp.sashpos(0, max(_h - 35, 50))
+                except:
+                    pass
+                self._result_toggle_btn.config(
+                    text="▶ 分析结果功能块 (已收缩, 点展开)")
+                self._result_panel_expanded = False
+                print("[📊分析结果] 收缩 ↓ (K线图全宽)", flush=True)
+            else:
+                # 🔽 展开: pack inner_frame, sash 恢复 600px
+                if hasattr(self, '_result_inner_frame') and self._result_inner_frame:
+                    self._result_inner_frame.pack(fill=tk.BOTH, expand=True)
+                try:
+                    rp = getattr(self, '_right_paned', None)
+                    if rp:
+                        rp.update_idletasks()
+                        rp.sashpos(0, 600)
+                except:
+                    pass
+                self._result_toggle_btn.config(
+                    text="▼ 分析结果功能块 (展开中, 点收缩)")
+                self._result_panel_expanded = True
+                print("[📊分析结果] 展开 ↑", flush=True)
+        except Exception as _e:
+            print(f"[📊分析结果❌] toggle 失败: {_e}", flush=True)
+
+    def _init_collapse_result_panel(self):
+        """🔧 初始收缩: sash 拉到底, K线图区占满"""
+        try:
+            rp = getattr(self, '_right_paned', None)
+            if rp:
+                rp.update_idletasks()
+                _h = rp.winfo_height()
+                rp.sashpos(0, max(_h - 35, 50))
+                print(f"[📊分析结果] 初始收缩 → sashpos(0, {max(_h - 35, 50)})", flush=True)
+        except Exception as _e:
+            print(f"[📊分析结果❌] 初始收缩失败: {_e}", flush=True)
 
 def main():
     try:
