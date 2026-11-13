@@ -12,6 +12,7 @@ import tkinter.ttk as _ttk
 import tkinter.filedialog as _fd
 import tkinter.scrolledtext as _st
 import tkinter.messagebox as _mb
+import tkinter.simpledialog as _sd
 import threading as _th
 import time as _time
 import datetime as _dt
@@ -497,25 +498,270 @@ def _show_market_watch_dialog(parent_root=None):
                       font=("TkDefaultFont", 10, "bold"))
     btn2.pack(side=_tk.LEFT, padx=4)
 
+    # ═══════════════════════════════════════════════════════════
+    # 右侧：主结果区 (左) + 历史面板 (右)
+    # ═══════════════════════════════════════════════════════════
+    HISTORY_PATH = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                                 "config", "market_watch_history.json")
+
+    # 字体状态
+    _font_size = _tk.IntVar(value=11)
+
+    def _adjust_font(delta):
+        sz = max(8, min(24, _font_size.get() + delta))
+        _font_size.set(sz)
+        text_widget.config(font=("TkDefaultFont", sz))
+
+    # 历史存储
+    def _load_history():
+        try:
+            if _os.path.exists(HISTORY_PATH):
+                with open(HISTORY_PATH) as f:
+                    return _json.load(f)
+        except Exception:
+            pass
+        return []
+
+    def _save_history_item(meta_text, result_text):
+        h = _load_history()
+        item = {
+            "id": int(_time.time() * 1000),
+            "ts": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "meta": meta_text[:120],   # 短标题
+            "text": result_text[:8000],  # 完整内容（限长防止爆）
+            "full_len": len(result_text),
+        }
+        h.insert(0, item)
+        # 只留最近 50 条
+        h = h[:50]
+        try:
+            _os.makedirs(_os.path.dirname(HISTORY_PATH), exist_ok=True)
+            with open(HISTORY_PATH, "w") as f:
+                _json.dump(h, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            status_lbl.config(text=f"⚠️ 历史保存失败: {e}", fg=_ACCENT)
+            return
+        _refresh_history_list()
+
+    def _refresh_history_list():
+        listbox.delete(0, _tk.END)
+        for item in _load_history():
+            listbox.insert(_tk.END, f"[{item['ts']}] {item['meta'][:40]}")
+
+    def _open_history():
+        sel = listbox.curselection()
+        if not sel: return
+        idx = sel[0]
+        items = _load_history()
+        item = items[idx]
+        # 回填到 text_widget
+        text_widget.config(state=_tk.NORMAL); text_widget.delete("1.0", "end")
+        text_widget.insert("end", item["text"] + "\n")
+        text_widget.see("end"); text_widget.config(state=_tk.DISABLED)
+        status_lbl.config(text=f"📂 已打开历史: {item['ts']}  ({item['full_len']}字)", fg=_GREEN)
+
+    def _delete_history():
+        sel = listbox.curselection()
+        if not sel: return
+        if not _mb.askyesno("确认", "删除这条历史记录？"): return
+        idx = sel[0]
+        h = _load_history()
+        h.pop(idx)
+        try:
+            _os.makedirs(_os.path.dirname(HISTORY_PATH), exist_ok=True)
+            with open(HISTORY_PATH, "w") as f:
+                _json.dump(h, f, indent=2, ensure_ascii=False)
+            _refresh_history_list()
+        except Exception as e:
+            status_lbl.config(text=f"❌ 删除失败: {e}", fg=_ACCENT)
+
+    def _clear_all_history():
+        if not _mb.askyesno("确认", "清空所有历史记录？（不可恢复）"): return
+        try:
+            _os.makedirs(_os.path.dirname(HISTORY_PATH), exist_ok=True)
+            with open(HISTORY_PATH, "w") as f:
+                _json.dump([], f)
+            _refresh_history_list()
+        except Exception as e:
+            status_lbl.config(text=f"❌ 清空失败: {e}", fg=_ACCENT)
+
+    # 导出函数
+    def _export_txt():
+        content = text_widget.get("1.0", "end-1c").strip()
+        if not content: _mb.showinfo("提示", "结果区为空"); return
+        p = _fd.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("文本", "*.txt")],
+            initialfile=f"见盘分析_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+        if p:
+            with open(p, "w", encoding="utf-8") as f: f.write(content)
+            status_lbl.config(text=f"💾 TXT 已保存: {_os.path.basename(p)}", fg=_GREEN)
+
+    def _export_word():
+        content = text_widget.get("1.0", "end-1c").strip()
+        if not content: _mb.showinfo("提示", "结果区为空"); return
+        try:
+            from docx import Document
+            from docx.shared import Pt
+        except Exception:
+            _mb.showerror("错误", "未安装 python-docx: pip install python-docx"); return
+        p = _fd.asksaveasfilename(
+            defaultextension=".docx",
+            filetypes=[("Word", "*.docx")],
+            initialfile=f"见盘分析_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx")
+        if p:
+            doc = Document()
+            doc.add_heading("👁️ 见盘 AI 综合研判", level=1)
+            doc.add_paragraph(f"🕐 {ts_str} · {time_period}")
+            doc.add_paragraph("─" * 40)
+            for line in content.split("\n"):
+                if line.startswith("#"):
+                    doc.add_heading(line.lstrip("# "), level=2)
+                else:
+                    doc.add_paragraph(line)
+            for para in doc.paragraphs:
+                for run in para.runs:
+                    run.font.size = Pt(_font_size.get())
+            doc.save(p)
+            status_lbl.config(text=f"📄 Word 已保存: {_os.path.basename(p)}", fg=_GREEN)
+
+    def _export_pptx():
+        content = text_widget.get("1.0", "end-1c").strip()
+        if not content: _mb.showinfo("提示", "结果区为空"); return
+        try:
+            from pptx import Presentation
+            from pptx.util import Pt, Inches
+        except Exception:
+            _mb.showerror("错误", "未安装 python-pptx: pip install python-pptx"); return
+        p = _fd.asksaveasfilename(
+            defaultextension=".pptx",
+            filetypes=[("PowerPoint", "*.pptx")],
+            initialfile=f"见盘分析_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.pptx")
+        if p:
+            prs = Presentation()
+            # 封面
+            slide = prs.slides.add_slide(prs.slide_layouts[0])
+            slide.shapes.title.text = "👁️ 见盘 AI 综合研判"
+            slide.placeholders[1].text = f"🕐 {ts_str} · {time_period}"
+            # 内容页（按段落分页，每页 ≤ 20 行）
+            lines = content.split("\n")
+            PAGE = 20
+            for i in range(0, len(lines), PAGE):
+                chunk = lines[i:i+PAGE]
+                slide = prs.slides.add_slide(prs.slide_layouts[1])
+                slide.shapes.title.text = f"研判报告 · 第{i//PAGE + 1}页"
+                body = slide.placeholders[1]
+                tf = body.text_frame
+                tf.clear()
+                for j, ln in enumerate(chunk):
+                    para = tf.paragraphs[0] if j == 0 else tf.add_paragraph()
+                    para.text = ln
+                    for run in para.runs: run.font.size = Pt(18)
+            prs.save(p)
+            status_lbl.config(text=f"📊 PPT 已保存: {_os.path.basename(p)}", fg=_GREEN)
+
+    def _copy_to_clipboard():
+        content = text_widget.get("1.0", "end-1c").strip()
+        if not content: return
+        win.clipboard_clear()
+        win.clipboard_append(content)
+        status_lbl.config(text="📋 已复制到剪贴板", fg=_GREEN)
+
+    def _save_current():
+        content = text_widget.get("1.0", "end-1c").strip()
+        if not content: _mb.showinfo("提示", "结果区为空"); return
+        title = _sd.askstring("保存到历史", "给这次分析起个名字（可留空自动生成）:", parent=win)
+        title = (title or f"AI研判 {_dt.datetime.now().strftime('%H:%M')}").strip()
+        _save_history_item(title, content)
+        status_lbl.config(text=f"💾 已保存到历史: {title}", fg=_GREEN)
+
+    # ── 右侧内部布局：左主 / 右历史 ──
+    right_inner = _tk.Frame(right, bg=_PANEL); right_inner.pack(fill=_tk.BOTH, expand=True, padx=10, pady=(0, 6))
+
+    # 主区域（左）
+    main_area = _tk.Frame(right_inner, bg=_PANEL); main_area.pack(side=_tk.LEFT, fill=_tk.BOTH, expand=True)
+
+    # 工具栏（字体 + 保存导出）
+    toolbar = _tk.Frame(main_area, bg=_PANEL); toolbar.pack(fill=_tk.X, pady=(6, 4))
+    _tk.Label(toolbar, text="🔠 字体:", bg=_PANEL, fg=_MUTED,
+              font=("TkDefaultFont", 9)).pack(side=_tk.LEFT, padx=(0, 2))
+    _tk.Button(toolbar, text="A-", command=lambda: _adjust_font(-1), width=2,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_BLUE, highlightthickness=1,
+               font=("TkDefaultFont", 9, "bold")).pack(side=_tk.LEFT, padx=1)
+    _tk.Label(toolbar, textvariable=_font_size, bg=_PANEL, fg=_GOLD,
+              width=2, font=("TkDefaultFont", 9, "bold")).pack(side=_tk.LEFT)
+    _tk.Button(toolbar, text="A+", command=lambda: _adjust_font(1), width=2,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_BLUE, highlightthickness=1,
+               font=("TkDefaultFont", 9, "bold")).pack(side=_tk.LEFT, padx=1)
+
+    _tk.Frame(toolbar, bg=_PANEL, width=10).pack(side=_tk.LEFT)  # 间隔
+
+    _tk.Button(toolbar, text="💾 保存", command=_save_current,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_GOLD, highlightthickness=1,
+               font=("TkDefaultFont", 9)).pack(side=_tk.LEFT, padx=2)
+    _tk.Button(toolbar, text="📄 Word", command=_export_word,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_BLUE, highlightthickness=1,
+               font=("TkDefaultFont", 9)).pack(side=_tk.LEFT, padx=2)
+    _tk.Button(toolbar, text="📊 PPT", command=_export_pptx,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_BLUE, highlightthickness=1,
+               font=("TkDefaultFont", 9)).pack(side=_tk.LEFT, padx=2)
+    _tk.Button(toolbar, text="📋 复制", command=_copy_to_clipboard,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_BLUE, highlightthickness=1,
+               font=("TkDefaultFont", 9)).pack(side=_tk.LEFT, padx=2)
+
     # 结果文本区
-    text_widget = _st.ScrolledText(right, wrap=_tk.WORD,
+    text_widget = _st.ScrolledText(main_area, wrap=_tk.WORD,
                                    bg=_CARD, fg=_FG,
                                    font=("TkDefaultFont", 11),
                                    insertbackground=_FG, padx=14, pady=10,
                                    relief=_tk.FLAT, borderwidth=0)
-    text_widget.pack(fill=_tk.BOTH, expand=True, padx=10, pady=(0, 10))
+    text_widget.pack(fill=_tk.BOTH, expand=True, pady=4)
     text_widget.insert("end", (
         "👁️ 见盘 AI 综合研判\n"
         "═══════════════════\n\n"
-        "📷 方法一: 点左上方「📷 选择图片」→ 上传盘面截图（同花顺/东财/K线/涨停板等）\n"
-        "         → 点「📷 分析当前图片」→ AI 视觉识别图中所有文字和数字\n\n"
-        "🌐 方法二: 点左侧财经网站按钮（同花顺/东财/财联社...可自定义）\n"
-        "         浏览后再回来点「🤖 AI 综合研判」\n\n"
-        "🤖 AI 会结合: 图片+实时API+当前时间+交易时段 → 形势判断+预判\n"
-        "═══════════════════\n"
+        "📷 方法一: 点左上方「📷 选择图片」→ 上传盘面截图\n"
+        "         → 点「📷 分析当前图片」→ AI 视觉识别\n\n"
+        "🌐 方法二: 点左侧财经网站按钮 → 回来点「🤖 AI 综合研判」\n\n"
         f"🕐 当前: {ts_str} · {time_period}\n\n"
-        "💡 提示: 截图越清晰、信息越密集（比如涨停榜+K线+板块异动），AI 识别越准\n"
+        "💡 分析完成后可用顶部工具栏: A-/A+ 调字体、💾保存到历史、📄导Word、📊导PPT\n"
     ))
+
+    # 历史面板（右）
+    history_frame = _tk.LabelFrame(right_inner, text=" 🕘 历史分析 ",
+                                    bg=_PANEL, fg=_BLUE, width=260,
+                                    font=("TkDefaultFont", 10, "bold"))
+    history_frame.pack(side=_tk.RIGHT, fill=_tk.Y, padx=(8, 0))
+    history_frame.pack_propagate(False)
+
+    list_scroll = _tk.Scrollbar(history_frame); list_scroll.pack(side=_tk.RIGHT, fill=_tk.Y, padx=(0,4), pady=6)
+    listbox = _tk.Listbox(history_frame, bg=_CARD, fg=_FG, selectmode=_tk.SINGLE,
+                          font=("TkDefaultFont", 9), height=20,
+                          yscrollcommand=list_scroll.set, relief=_tk.FLAT, borderwidth=0)
+    listbox.pack(side=_tk.LEFT, fill=_tk.BOTH, expand=True, padx=(4,0), pady=6)
+    list_scroll.config(command=listbox.yview)
+
+    # 操作按钮
+    hist_btn_row = _tk.Frame(history_frame, bg=_PANEL); hist_btn_row.pack(fill=_tk.X, padx=4, pady=(0, 6))
+    _tk.Button(hist_btn_row, text="📂 打开", command=_open_history,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_GOLD, highlightthickness=1,
+               font=("TkDefaultFont", 9)).pack(side=_tk.LEFT, expand=True, fill=_tk.X, padx=1)
+    _tk.Button(hist_btn_row, text="🗑️ 删除", command=_delete_history,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_ACCENT, highlightthickness=1,
+               font=("TkDefaultFont", 9)).pack(side=_tk.LEFT, expand=True, fill=_tk.X, padx=1)
+    _tk.Button(hist_btn_row, text="🧹清空", command=_clear_all_history,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_MUTED, highlightthickness=1,
+               font=("TkDefaultFont", 9)).pack(side=_tk.LEFT, expand=True, fill=_tk.X, padx=1)
+
+    _refresh_history_list()
 
     # 底部状态栏
     status_lbl = _tk.Label(win, text="准备就绪 · 选图片或打开网站后开始",

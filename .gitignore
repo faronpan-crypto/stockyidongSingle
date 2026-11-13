@@ -56,3 +56,8 @@ src/data/*.json
 
 # 🔑 保密：AI API Key 配置（包含真实 key，不能提交）
 src/config/ai_config.json
+
+# 👁️ 见盘 历史/网站配置 (用户数据, 不入库)
+src/config/market_watch_history.json
+src/config/market_watch_sites.json
+src/config/ai_config.json
