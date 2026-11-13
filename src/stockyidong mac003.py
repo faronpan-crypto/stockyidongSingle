@@ -4909,7 +4909,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("🔥主线·资金", 10, self._show_mainline_capital_dialog),
             ("🧊冰点修复", 9, self._show_emotion_freeze),
             ("🎯高抛低吸", 9, self._show_high_low_swing),
-            ("👥大V榜", 8, self._show_top_gurus_dialog),
+            ("🎯交易体系", 9, self._show_top_gurus_dialog),
             ("👁️见盘", 8, self._show_market_watch),
             ("🤖AI设置", 8, self._show_ai_settings),
             ("🌍全球资产", 8, self._show_global_assets_dialog),
@@ -4940,7 +4940,6 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 ("🎯机会", 7, self._show_jianlou),
                 ("🔍多股对比", 8, self._show_multi_compare_dialog),
                 ("📊操盘阶段", 9, self._show_tech_stage_dialog),
-                ("💼持仓检测", 9, self._hc_open_dialog),
                 ("🪙筹码", 7, self._show_chouma),
                 ("📊融资盘", 8, self._show_margin_dialog),
                 ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
@@ -5011,12 +5010,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 ("📰突发新闻", 9, self.show_breaking_news_dialog),
                 ("🕷️爬虫阅读", 9, self.show_spider_reader),
                 ("🔥热门榜单", 9, self.show_hotlists_overview),
-                ("📊市场广度", 9, self.show_market_breadth_stats_dialog),
                 ("💡市场情绪", 9, self.show_market_sentiment_dialog),
-                ("📊回测", 6, self.show_backtest_dialog),
-                ("🗄️数据库", 8, self.show_unified_db_display),
-                ("🧠一键思考", 8, self.show_one_click_thinking),
-                ("🎲选股器", 7, self.show_stock_analysis_engine_dialog),
             ]
         except Exception as _e4:
             print(f"[📰Row4❌] 按钮定义炸了: {_e4}", flush=True)
@@ -5165,6 +5159,16 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                    command=self._show_quant_dialog, width=14).pack(**_tools_pad)
         ttk.Button(tools_row_f, text="🌪️ 金融危机",
                    command=self._show_crisis_dialog, width=14).pack(**_tools_pad)
+        # 从 Row4 迁移: 回测/数据库/一键思考/选股器 (低频功能)
+        tools_row_g = ttk.Frame(tools_frame); tools_row_g.pack(fill=tk.X, pady=2)
+        ttk.Button(tools_row_g, text="📊 回测",
+                   command=self.show_backtest_dialog, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_g, text="🗄️ 数据库",
+                   command=self.show_unified_db_display, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_g, text="🧠 一键思考",
+                   command=self.show_one_click_thinking, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_g, text="🎲 选股器",
+                   command=self.show_stock_analysis_engine_dialog, width=14).pack(**_tools_pad)
         # 将咨询分析、投资、系统、赌博、交易体系、交割单分析按钮移到交易标签页
         trading_buttons_frame = ttk.LabelFrame(trading_tab, text="交易功能", padding=3)
         trading_buttons_frame.pack(fill=tk.X, expand=False, pady=2)
