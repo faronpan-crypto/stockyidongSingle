@@ -22,6 +22,18 @@ from logic.crawlers import *  # TaogubaCrawler
 from logic.spot import *
 from logic.stock_names import *  # get_stock_name_by_code 等
 
+# ==================== 明日涨跌预测(Skill) ====================
+try:
+    from tomorrow_predict import (
+        StockPredictInput,
+        StockPredictResult,
+        batch_predict,
+        predict_tomorrow,
+    )
+    TOMORROW_PREDICT_AVAILABLE = True
+except ImportError:
+    TOMORROW_PREDICT_AVAILABLE = False
+
 from datetime import datetime, timedelta
 import re
 import json
