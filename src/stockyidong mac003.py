@@ -4907,7 +4907,6 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("👁️游资看盘", 7, self._show_speculator_watch),
             ("📺看盘", 7, self._show_realtime_market_dialog),
             ("🔥主线·资金", 10, self._show_mainline_capital_dialog),
-            ("🌪️金融危机", 9, self._show_crisis_dialog),
             ("🧊冰点修复", 9, self._show_emotion_freeze),
             ("🎯高抛低吸", 9, self._show_high_low_swing),
             ("👥大V榜", 8, self._show_top_gurus_dialog),
@@ -5160,6 +5159,12 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                    command=self._show_fed_analysis_dialog, width=14).pack(**_tools_pad)
         ttk.Button(tools_row_e, text="🌏 纳指套利",
                    command=self._show_etf_holiday_dialog, width=14).pack(**_tools_pad)
+        # 从 toolbar 迁移: 🤖量化总览 + 🌪️金融危机
+        tools_row_f = ttk.Frame(tools_frame); tools_row_f.pack(fill=tk.X, pady=2)
+        ttk.Button(tools_row_f, text="🤖 量化总览",
+                   command=self._show_quant_dialog, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_f, text="🌪️ 金融危机",
+                   command=self._show_crisis_dialog, width=14).pack(**_tools_pad)
         # 将咨询分析、投资、系统、赌博、交易体系、交割单分析按钮移到交易标签页
         trading_buttons_frame = ttk.LabelFrame(trading_tab, text="交易功能", padding=3)
         trading_buttons_frame.pack(fill=tk.X, expand=False, pady=2)
