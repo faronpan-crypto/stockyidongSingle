@@ -8055,6 +8055,16 @@ except Exception as e:
             tk.Label(_err_tab4, text=f"❌ 市场认识 Tab 加载失败: {_e_mv}",
                      bg="white", fg="red").pack(padx=20, pady=20)
 
+        # 🆕 Tab5: 🌟 大V观点 · 经济学家 / 投资大V / 商业大佬 / 游资心法
+        try:
+            from ui.mainline_dava_views import _build_dava_views_tab as _bdvt
+            _bdvt(nb_main, root=win)
+        except Exception as _e_dv:
+            import traceback as _tb_dv; _tb_dv.print_exc()
+            _err_tab5 = tk.Frame(nb_main); nb_main.add(_err_tab5, text="  🌟 大V观点(异常)  ")
+            tk.Label(_err_tab5, text=f"❌ 大V观点 Tab 加载失败: {_e_dv}",
+                     bg="white", fg="red").pack(padx=20, pady=20)
+
         # 控制栏 + 进度条 (pack 到 tab_panorama)
         ctrl = ttk.Frame(tab_panorama)
         ctrl.pack(fill=tk.X, padx=8, pady=(6, 2))

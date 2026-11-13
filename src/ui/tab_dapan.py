@@ -15698,6 +15698,16 @@ class DapanMixin:
         _th.Thread(target=_load, daemon=True).start()
         print("📊融资盘] 弹窗已打开", flush=True)
 
+    def _show_crisis_dialog(self):
+        """🌪️ 金融危机全景 — 世界/美国/日本/欧洲/南美非洲"""
+        try:
+            from ui.crisis_dialog import show_crisis_dialog
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            show_crisis_dialog(parent=root)
+        except Exception as _e:
+            import traceback as _tb; _tb.print_exc()
+            tk.messagebox.showerror("错误", f"金融危机弹窗加载失败: {_e}")
+
     def _show_global_assets_dialog(self):
         """🌍 全球五巨头资产全景 — 黄金/美元/美债/美股/石油 + 联动分析"""
         import tkinter as tk

@@ -4907,6 +4907,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("👁️游资看盘", 7, self._show_speculator_watch),
             ("📺看盘", 7, self._show_realtime_market_dialog),
             ("🔥主线·资金", 10, self._show_mainline_capital_dialog),
+            ("🌪️金融危机", 9, self._show_crisis_dialog),
             ("🧊冰点修复", 9, self._show_emotion_freeze),
             ("🎯高抛低吸", 9, self._show_high_low_swing),
             ("👥大V榜", 8, self._show_top_gurus_dialog),
@@ -4933,21 +4934,18 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         except Exception as _ea1:
             print(f"[📝Row1❌] 创建失败: {_ea1}", flush=True)
 
-        # Row2: 🎯 选股 / 机会 / ETF周期 (actionable)
+        # Row2: 🎯 选股 / 机会 / ETF (战术执行)
         try:
             _ROW2 = [
-                ("🎯超跌", 8, self._show_oversold_dialog),
+                ("🎯超跌", 7, self._show_oversold_dialog),
                 ("🎯机会", 7, self._show_jianlou),
                 ("🔍多股对比", 8, self._show_multi_compare_dialog),
                 ("📊操盘阶段", 9, self._show_tech_stage_dialog),
                 ("💼持仓检测", 9, self._hc_open_dialog),
-                ("🌐多站设置", 9, self._open_web_settings),
                 ("🪙筹码", 7, self._show_chouma),
                 ("📊融资盘", 8, self._show_margin_dialog),
                 ("🌀ETF周期", 9, self._show_etf_cycle_dialog),
                 ("📊ETF联动", 10, self._show_etf_link_dialog),
-                ("🎯量化预测", 10, self._show_quant_forecast_dialog),
-                ("🤖量化总览", 9, self._show_quant_dialog),
             ]
         except Exception as _e:
             print(f"[🎯Row2❌] 按钮定义炸了: {_e}", flush=True)
@@ -4977,17 +4975,18 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         except Exception as _ea2:
             print(f"[📝Row2❌] 创建失败: {_ea2}", flush=True)
 
-        # Row3: 💡 主力资金 / 个股分析 (深度)
+        # Row3: 💡 个股分析 / 技术指标 (深度分析)
         _ROW3 = [
             ("💡主力趋势", 8, self._show_main_trend_dialog),
-            ("🦅游资心法", 9, self._open_hotmoney_single_dialog),
+            ("🦅游资心法", 8, self._open_hotmoney_single_dialog),
             ("📊K线", 6, self.show_kline_dialog),
             ("📊深度技术", 8, self._show_stock_analysis_dialog),
             ("📐β-α", 6, self._show_beta_alpha),
             ("📈一目均衡", 7, self._show_ichimoku_kline_dialog),
             ("📈1minK", 7, self._show_1min_kline_dialog),
             ("⭐五星跟随", 8, self.show_five_star_follow_dialog),
-            ("🎁打折促销", 9, self._show_discount_dialog),
+            ("💼基本面", 8, self.show_fundamental_analysis),
+            ("📈投资系统", 9, self.show_investment_system),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW3):
             _pad = {"side": tk.LEFT, "padx": (0 if _idx == 0 else tp, 0)}
@@ -5034,17 +5033,16 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                     import traceback; traceback.print_exc()
             ttk.Button(self._toolbar_row4, text=txt, width=w, command=_wrap4).pack(**_pad)
 
-        # Row5: ⚙️ 设置 / 管理 / 低频工具
+        # Row5: ⚙️ 设置 / 数据 / 策略 (低频管理)
         try:
             _ROW5 = [
                 ("🕷️爬取", 6, self.show_web_crawler),
                 ("📊Tushare", 9, self.show_tushare_skills_dialog),
                 ("🤖AI配置", 8, self.show_ai_config),
                 ("📖问财技能", 9, self.show_iwencai_skillhub_dialog),
-                ("📋持仓管理", 9, self.show_stock_management_dialog),
-                ("💰基本面", 7, self.show_fundamental_analysis),
-                ("📈投资系统", 9, self.show_investment_system),
+                ("🌐多站设置", 9, self._open_web_settings),
                 ("📰新闻数据", 9, self.show_news_data_dialog),
+                ("🎲选股器", 7, self.show_stock_analysis_engine_dialog),
                 ("🎯策略", 6, self.show_quant_strategy_dialog),
             ]
         except Exception as _e5:
