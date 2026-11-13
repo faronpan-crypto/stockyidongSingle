@@ -20,6 +20,8 @@ import os as _os
 import base64 as _b64
 import webbrowser as _wb
 import io as _io
+import re as _re
+import tempfile as _tf_m  # 模块级（函数里也用 _tf）
 import hashlib as _hashlib
 import hmac as _hmac
 import secrets as _secrets
@@ -154,35 +156,114 @@ def _show_market_watch_dialog(parent_root=None):
     right = _tk.Frame(main, bg=_PANEL); right.pack(side=_tk.LEFT, fill=_tk.BOTH, expand=True)
 
     # ── 左侧：图片 + 网站按钮 ──
-    # ① 图片预览卡
-    img_card = _tk.LabelFrame(left, text=" 📷 盘面图片 ",
+    # ① 图片预览卡（支持：选文件 / 拖拽 / 粘贴 Cmd+V）
+    img_card = _tk.LabelFrame(left, text=" 📷 盘面图片 (拖/粘/选) ",
                                bg=_PANEL, fg=_BLUE,
                                font=("TkDefaultFont", 10, "bold"))
     img_card.pack(fill=_tk.X, padx=8, pady=8)
 
-    img_preview = _tk.Label(img_card, text="点下方按钮选择图片\n或拖入截图",
+    img_preview = _tk.Label(img_card,
+                            text="🖼️  把图片拖到这里\n或 Cmd+V 粘贴\n或点下方按钮选择",
                             bg="#0F3460", fg=_MUTED, width=30, height=10,
                             font=("TkDefaultFont", 9))
     img_preview.pack(padx=6, pady=6)
 
     img_path_var = _tk.StringVar(value="")
 
+    def _load_into_preview(img_obj, label_widget=img_preview):
+        """统一：PIL Image 对象 → 预览"""
+        from PIL import Image, ImageTk
+        img = img_obj.copy()
+        img.thumbnail((220, 220))
+        photo = ImageTk.PhotoImage(img)
+        label_widget.config(image=photo, text="", width=220, height=220, bg="#0F3460")
+        label_widget._photo = photo
+
+    def _set_image_from_path(path):
+        """文件路径 → 预览"""
+        if not path or not _os.path.exists(path):
+            status_lbl.config(text=f"❌ 图片文件不存在: {path}", fg=_ACCENT); return False
+        img_path_var.set(path)
+        try:
+            from PIL import Image
+            _load_into_preview(Image.open(path))
+            status_lbl.config(text=f"✅ 已加载: {_os.path.basename(path)}  ({_os.path.getsize(path)//1024}KB)", fg=_GREEN)
+            return True
+        except Exception as e:
+            status_lbl.config(text=f"⚠️ 预览失败: {e}，但可尝试直接分析", fg=_GOLD); return False
+
+    def _paste_from_clipboard():
+        """Cmd+V / Ctrl+V — 粘贴图片"""
+        try:
+            from PIL import ImageGrab
+            img = ImageGrab.grabclipboard()
+            if img is None:
+                status_lbl.config(text="⚠️ 剪贴板里没有图片（先截个图再粘贴）", fg=_GOLD); return
+            if isinstance(img, list):
+                # 剪贴板是文件引用（Finder 里 Cmd+C 图片文件）
+                for p in img:
+                    if isinstance(p, str) and _os.path.exists(p):
+                        if _set_image_from_path(p): return
+            # PIL Image → 存临时文件
+            tmp = _tf_m.NamedTemporaryFile(suffix=".png", delete=False)
+            img.save(tmp.name); tmp.close()
+            img_path_var.set(tmp.name)
+            _load_into_preview(img)
+            status_lbl.config(text=f"✅ 已粘贴图片 (来自剪贴板, 临时文件)", fg=_GREEN)
+        except Exception as e:
+            status_lbl.config(text=f"❌ 粘贴失败: {e}", fg=_ACCENT)
+
+    def _on_drop(event):
+        """tkinterdnd2 拖拽回调 — event.data = '{filename1} {filename2}'"""
+        try:
+            raw = event.data
+            # tkinterdnd2 返回的路径用空格分隔（或 {} 包裹）
+            paths = _re.findall(r'\{([^}]+)\}|(\S+)', raw)
+            found = None
+            for a, b in paths:
+                p = a or b
+                if p and _os.path.splitext(p)[1].lower() in ('.png','.jpg','.jpeg','.gif','.webp','.bmp'):
+                    found = p; break
+            if not found:
+                # 试试直接 raw 作为路径
+                ext = _os.path.splitext(raw.strip())[1].lower()
+                if ext in ('.png','.jpg','.jpeg','.gif','.webp','.bmp') and _os.path.exists(raw.strip()):
+                    found = raw.strip()
+            if found:
+                _set_image_from_path(found)
+            else:
+                status_lbl.config(text="⚠️ 请拖图片文件（png/jpg/gif/webp/bmp）", fg=_GOLD)
+        except Exception as e:
+            status_lbl.config(text=f"❌ 拖拽处理失败: {e}", fg=_ACCENT)
+            import traceback; traceback.print_exc()
+
+    # ── 绑定事件 ──
+    # 1) tkinterdnd2 拖拽（try import，没有就跳过）
+    _dnd_ok = False
+    try:
+        from tkinterdnd2 import DND_FILES, TkinterDnD
+        img_preview.drop_target_register(DND_FILES)
+        img_preview.dnd_bind('<<Drop>>', _on_drop)
+        img_card.drop_target_register(DND_FILES)
+        img_card.dnd_bind('<<Drop>>', _on_drop)
+        _dnd_ok = True
+    except Exception:
+        pass  # 没装 tkinterdnd2 就跳过拖拽
+
+    # 2) Cmd+V / Ctrl+V 粘贴（绑到整个窗口 + 预览区）
+    win.bind("<Control-v>", lambda e: _paste_from_clipboard())
+    win.bind("<Command-v>", lambda e: _paste_from_clipboard())
+    img_preview.bind("<Control-v>", lambda e: _paste_from_clipboard())
+    img_preview.bind("<Command-v>", lambda e: _paste_from_clipboard())
+
+    _drag_hint = "🟢 拖拽可用" if _dnd_ok else "⚪ 未装 tkinterdnd2 (pip install tkinterdnd2)"
+
     def _pick_image():
         p = _fd.askopenfilename(
             title="选择盘面截图",
-            filetypes=[("图片", "*.png *.jpg *.jpeg *.gif *.webp"), ("所有", "*.*")])
+            filetypes=[("图片", "*.png *.jpg *.jpeg *.gif *.webp *.bmp"), ("所有", "*.*")])
         if p:
-            img_path_var.set(p)
-            try:
-                from PIL import Image, ImageTk
-                img = Image.open(p); img.thumbnail((220, 220))
-                photo = ImageTk.PhotoImage(img)
-                img_preview.config(image=photo, text="", width=220, height=220)
-                img_preview._photo = photo
-                status_lbl.config(text=f"✅ 图片已加载: {os.path.basename(p)}", fg=_GREEN)
-            except Exception as e:
-                img_preview.config(text=f"预览失败: {e}", image="", width=30, height=10)
-                status_lbl.config(text=f"⚠️ 预览失败但可分析: {e}", fg=_GOLD)
+            _set_image_from_path(p)
 
     btn_row1 = _tk.Frame(img_card, bg=_PANEL); btn_row1.pack(fill=_tk.X, padx=6, pady=4)
     _tk.Button(btn_row1, text="📷 选择图片", command=_pick_image,
