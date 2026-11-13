@@ -385,38 +385,74 @@ AI 会用该大V的交易体系，结合当前板块数据进行专属分析
 
     def _run_single_style_ai(style):
         text_widget.config(state=_tk.NORMAL); text_widget.delete("1.0", "end")
-        text_widget.insert("end", f"⏳ [{style['icon']} {style['name']}] AI 分析中，请稍候...\n\n")
+        text_widget.insert("end", f"⏳ [{style['icon']} {style['name']}] 准备 AI 分析...\n")
         text_widget.config(state=_tk.DISABLED)
-        status_lbl.config(text=f"⏳ {style['name']} 正在分析...", fg=_GOLD)
+        status_lbl.config(text=f"⏳ {style['name']} 准备中...", fg=_GOLD)
 
         def _w():
             try:
+                import traceback as _tb
                 r = _call_ai(style)
                 _after(lambda: _show_single_result(style, r))
             except Exception as e:
-                import traceback; traceback.print_exc()
-                _after(lambda: _show_single_result(style, f"❌ AI 调用异常: {e}"))
+                import traceback as _tb
+                _tb.print_exc()
+                _after(lambda: _show_single_result(style,
+                    f"❌ 后台线程崩溃: {e}\n\n完整 traceback:\n{_tb.format_exc()}"[:2000]))
 
         _th.Thread(target=_w, daemon=True).start()
 
     def _show_single_result(style, result_text):
-        text_widget.config(state=_tk.NORMAL); text_widget.delete("1.0", "end")
-        text_widget.insert("end", f"{style['intro']}\n")
-        text_widget.insert("end", f"{'═'*50}\n\n")
-        text_widget.insert("end", result_text + "\n")
-        text_widget.see("end")
-        text_widget.config(state=_tk.DISABLED)
-        status_lbl.config(text=f"✅ {style['name']} 分析完成", fg=_GREEN)
+        """UI 更新也加 try/except — 任何崩溃都显示到界面"""
+        try:
+            text_widget.config(state=_tk.NORMAL); text_widget.delete("1.0", "end")
+            text_widget.insert("end", f"{style['intro']}\n")
+            text_widget.insert("end", f"{'═'*50}\n\n")
+            text_widget.insert("end", result_text + "\n")
+            text_widget.see("end")
+            text_widget.config(state=_tk.DISABLED)
+            # 显示状态
+            if result_text.startswith("❌") or result_text.startswith("🔑"):
+                status_lbl.config(text=f"{result_text[:80]}", fg=_ACCENT)
+            else:
+                status_lbl.config(text=f"✅ {style['name']} 分析完成", fg=_GREEN)
+        except Exception as e:
+            import traceback as _tb
+            _tb.print_exc()
+            status_lbl.config(text=f"❌ UI 更新异常: {e}", fg=_ACCENT)
+            try:
+                text_widget.config(state=_tk.NORMAL); text_widget.delete("1.0", "end")
+                text_widget.insert("end", f"❌ UI 更新崩溃: {e}\n\n{_tb.format_exc()}")
+                text_widget.config(state=_tk.DISABLED)
+            except Exception:
+                pass
 
-    # ── 真正的 AI 调用（后台线程中执行）── 直接走代理，跳过 60s 直连 caller 链
+    # ── 真正的 AI 调用（后台线程中执行） ──
     def _call_ai(style):
-        """直接走 localhost:8787 代理（签名+20s timeout），避免 _robust_ai_call 的 60s 直连"""
-        d = _get_mainline_route_data()
+        """直接走 localhost:8787 代理（签名+20s timeout）"""
+        # 💡 每一步都更新 UI 状态，让用户知道在干什么
+        _after(lambda: status_lbl.config(text=f"⏳ [{style['name']}] 拉板块数据...", fg=_GOLD))
 
-        # 构造数据上下文
+        try:
+            d = _get_mainline_route_data()
+        except Exception as e:
+            _after(lambda: status_lbl.config(text=f"❌ 板块数据拉取失败: {e}", fg=_ACCENT))
+            return f"❌ 板块数据拉取失败: {e}"
+
+        # 构造数据上下文 — 容错解包（字段数量可能变化）
+        _after(lambda: status_lbl.config(text=f"⏳ [{style['name']}] 解析数据上下文...", fg=_GOLD))
         sectors_lines = ""
-        for i, (name, chg, amt, ld, ld_chg, ud, lim) in enumerate(d.get("sectors", [])[:10], 1):
-            sectors_lines += f"  {i}. {name}  涨跌 {chg:+.2f}%  成交 {amt}亿  领涨 {ld}({ld_chg:+.2f}%)  {ud}\n"
+        for i, item in enumerate(d.get("sectors", [])[:10], 1):
+            try:
+                if len(item) == 6:
+                    name, chg, amt, ld, ld_chg, ud = item
+                elif len(item) == 7:
+                    name, chg, amt, ld, ld_chg, ud, _lim = item
+                else:
+                    continue
+                sectors_lines += f"  {i}. {name}  涨跌 {chg:+.2f}%  成交 {amt}亿  领涨 {ld}({ld_chg:+.2f}%)  {ud}\n"
+            except Exception:
+                continue
 
         themes_lines = ""
         for i, (name, chg) in enumerate(d.get("hot_themes", [])[:6], 1):
@@ -512,6 +548,8 @@ AI 会用该大V的交易体系，结合当前板块数据进行专属分析
                 "temperature": 0.3,
             }
 
+            _after(lambda: status_lbl.config(text=f"⏳ [{style['name']}] 请求 AI 代理 (localhost:8787)...", fg=_GOLD))
+
             resp = _req.post("http://127.0.0.1:8787/v1/chat/completions",
                              headers=headers, json=body, timeout=20)
             if resp.status_code == 200:
@@ -519,16 +557,20 @@ AI 会用该大V的交易体系，结合当前板块数据进行专属分析
                     data = resp.json()
                     result = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                     if result and len(result.strip()) > 20:
+                        _after(lambda: status_lbl.config(text=f"✅ [{style['name']}] AI 返回成功 ({len(result)}字)", fg=_GREEN))
                         return result
-                    return "❌ AI 返回内容过短或为空"
+                    return "❌ AI 返回内容过短或为空（可能是过滤了，换个大V试试）"
                 except Exception as _e:
                     return f"❌ AI 返回解析失败: {_e}"
             else:
-                err_text = resp.text[:120]
+                err_text = resp.text[:180]
                 if "88a6" in err_text or "invalid" in err_text.lower() or "Authentication" in err_text:
-                    return "🔑 DEEPSEEK_API_KEY 已过期！请更新 ~/.zshrc 中的 key 后重启代理和应用"
+                    return "🔑 DEEPSEEK_API_KEY 已过期！请点主界面 🤖AI设置 按钮更新 key"
+                if "未配置" in err_text or "环境变量" in err_text:
+                    return "🔑 代理没读到 API Key！点 🤖AI设置 保存并重启代理"
                 return f"❌ AI 代理返回 {resp.status_code}: {err_text}"
         except Exception as e:
+            import traceback; traceback.print_exc()
             return f"❌ AI 调用异常: {e}"
 
     # ── 线程安全的 after 调用 ──
