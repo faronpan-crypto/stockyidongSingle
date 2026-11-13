@@ -1,5 +1,5 @@
-"""AI/LLM"""
-import os, sys, re, json, time, threading, traceback, hashlib, urllib.parse
+"""AI/LLM — 统一代理调用"""
+import os, sys, re, json, time, threading, traceback, hashlib, hmac, random, urllib.parse
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog, scrolledtext
 try:
@@ -271,120 +271,124 @@ class AiMixin:
         ttk.Button(button_frame, text="提交", command=submit_question).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="取消", command=question_window.destroy).pack(side=tk.LEFT, padx=5)
 
-    def call_ai_model(self, prompt, system_prompt=None, config_override=None, max_tokens=None):
-        """调用AI模型(与富媒体 AI 分析使用同一套 active_provider 配置)"""
+    # ── 代理签名 (与 logic/ai_proxy.py 对应) ──
+    _PROXY_SECRET_FILE = "/tmp/stock_ai_proxy.secret"
+
+    def _get_proxy_secret(self):
         try:
-            # 使用AI配置管理器
-            if config_override:
-                provider_config = config_override
-            else:
-                provider_config = self.ai_config_manager.get_active_provider_config()
+            if os.path.exists(self._PROXY_SECRET_FILE):
+                return open(self._PROXY_SECRET_FILE).read().strip()
+        except Exception: pass
+        return ""
+
+    def _make_proxy_headers(self):
+        secret = self._get_proxy_secret()
+        nonce = hashlib.sha256(f"{random.random()}{time.time()}".encode()).hexdigest()[:16]
+        token = hmac.new(secret.encode(), ("ai_proxy" + nonce).encode(), hashlib.sha256).hexdigest()[:16] if secret else ""
+        return {"X-Nonce": nonce, "X-Proxy-Token": token}
+
+    def call_ai_model(self, prompt, system_prompt=None, config_override=None, max_tokens=None):
+        """统一 AI 调用 — 自动检测代理(localhost:8787)或直连真实 API"""
+        try:
+            provider_config = config_override or self.ai_config_manager.get_active_provider_config()
             if not provider_config:
                 return "错误: 未配置AI提供商"
-            api_key = provider_config.get("api_key", "")
-            if not api_key:
-                return "错误: 未配置API密钥"
+            provider = self.ai_config_manager.config.get("active_provider", "deepseek")
             base_url = provider_config.get("base_url", "")
             model = provider_config.get("model", "")
-            endpoint = provider_config.get("endpoint", "/chat/completions")
-            provider = self.ai_config_manager.config.get("active_provider", "deepseek")
-            # 构建URL
-            if provider == "deepseek":
-                url = f"{base_url.rstrip('/')}/chat/completions"
-            elif provider == "doubao":
-                # 豆包特殊处理
-                if provider_config.get("mode") == "content":
-                    url = f"{base_url}/api/v3/contents/generations/tasks"
-                else:
-                    url = f"{base_url.rstrip('/')}{endpoint if endpoint.startswith('/') else '/' + endpoint}"
-            else:
-                url = f"{base_url.rstrip('/')}{endpoint if endpoint.startswith('/') else '/' + endpoint}"
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
-            # 构建消息
+            is_proxy = "localhost" in base_url or "127.0.0.1" in base_url
+
             messages = []
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
-            data = {
-                "model": model,
-                "messages": messages,
-                "temperature": provider_config.get("temperature", 0.3)
-            }
+
+            data = {"model": model, "messages": messages,
+                    "temperature": provider_config.get("temperature", 0.3)}
             if max_tokens is not None:
                 data["max_tokens"] = int(max_tokens)
             elif provider_config.get("max_tokens"):
                 data["max_tokens"] = provider_config["max_tokens"]
-            # 超时:支持 (连接, 读取) 元组,避免长时间生成被截断
+
+            if is_proxy:
+                # ═══ 代理模式: localhost:8787, 代理自己从 ai_config.json 读 key ═══
+                url = f"{base_url.rstrip('/')}/v1/chat/completions"
+                data["provider"] = provider
+                headers = {"Content-Type": "application/json"}
+                headers.update(self._make_proxy_headers())
+            else:
+                # ═══ 直连模式: 需要 api_key ═══
+                api_key = provider_config.get("api_key", "") or os.environ.get(
+                    {"deepseek": "DEEPSEEK_API_KEY", "doubao": "DOUBAO_API_KEY"}.get(provider, "OPENAI_API_KEY"), "")
+                if not api_key:
+                    return ("❌ API Key 未配置\n"
+                            f"  当前: {provider} 直连模式\n"
+                            f"  请打开 🤖AI设置 → 切换到 localhost:8787 代理模式\n"
+                            f"  或在 ~/.zshrc 配置环境变量")
+                endpoint = provider_config.get("endpoint", "/chat/completions")
+                if provider == "doubao" and provider_config.get("mode") == "content":
+                    url = f"{base_url}/api/v3/contents/generations/tasks"
+                else:
+                    url = f"{base_url.rstrip('/')}{endpoint if endpoint.startswith('/') else '/' + endpoint}"
+                headers = {"Content-Type": "application/json",
+                           "Authorization": f"Bearer {api_key}"}
+
+            # ── 超时 + 重试 ──
             to = provider_config.get("timeout", 60)
             try:
                 to_f = float(to)
                 req_timeout = (min(45.0, to_f), max(to_f, 120.0)) if to_f < 120 else (45.0, to_f)
             except Exception:
                 req_timeout = (45, 180)
-            # 发送请求(带简单重试)
+
             import time as _time
-            last_err = None
-            response = None
+            last_err = response = None
             for attempt in range(3):
                 try:
                     response = requests.post(url, json=data, headers=headers, timeout=req_timeout)
                     break
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, OSError) as e:
                     last_err = e
-                    if attempt < 2:
-                        _time.sleep(2 + attempt * 2)
-                    else:
-                        return f"网络错误(已重试3次): {type(last_err).__name__}: {last_err}"
-            if response is None:
-                return f"网络错误: {last_err}"
+                    if attempt < 2: _time.sleep(2 + attempt * 2)
+                    else: return f"网络错误(已重试3次): {type(last_err).__name__}: {last_err}"
+            if response is None: return f"网络错误: {last_err}"
+
             if response.status_code == 200:
                 result = response.json()
-                # 处理不同提供商的响应格式
-                if provider == "doubao" and provider_config.get("mode") == "content":
-                    # 豆包content模式需要轮询任务状态
+                if provider == "doubao" and provider_config.get("mode") == "content" and not is_proxy:
                     task_id = result.get("id")
-                    if task_id:
-                        # 轮询任务状态
-                        task_url = f"{base_url}/api/v3/contents/generations/tasks/{task_id}"
-                        max_attempts = 30
-                        for _ in range(max_attempts):
-                            time.sleep(2)
-                            task_response = requests.get(task_url, headers=headers, timeout=60)
-                            if task_response.status_code == 200:
-                                task_result = task_response.json()
-                                if task_result.get("status") == "completed":
-                                    return task_result.get("result", {}).get("content", "")
-                                elif task_result.get("status") == "failed":
-                                    return f"任务失败: {task_result.get('error', '未知错误')}"
-                        return "任务超时"
-                    else:
-                        return "未获取到任务ID"
-                else:
-                    # 标准OpenAI格式
-                    return result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if not task_id: return "未获取到任务ID"
+                    task_url = f"{base_url}/api/v3/contents/generations/tasks/{task_id}"
+                    for _ in range(30):
+                        time.sleep(2)
+                        tr = requests.get(task_url, headers=headers, timeout=60)
+                        if tr.status_code == 200:
+                            trj = tr.json()
+                            if trj.get("status") == "completed":
+                                return trj.get("result", {}).get("content", "")
+                            if trj.get("status") == "failed":
+                                return f"任务失败: {trj.get('error')}"
+                    return "任务超时"
+                return result.get("choices", [{}])[0].get("message", {}).get("content", "")
             else:
-                # 402 / 余额不足 → 友好提示
                 err_txt = response.text or ""
-                if response.status_code == 402 or "insufficient_balance" in err_txt.lower() or "balance" in err_txt.lower():
-                    return (f"⚠️ AI 账户余额不足 (402)\n"
-                            f"   当前提供商: {provider}\n"
-                            f"   请到 AI 设置中更换 API Key 或充值\n"
-                            f"   也可以切换到其他已配置的提供商\n"
-                            f"   (设置 → AI 提供商管理)")
-                # 其他错误 → 简要错误信息 (避免把完整 response.text 抛到 UI)
+                if response.status_code == 502 and "未配置" in err_txt:
+                    return ("❌ 代理 API Key 未配置\n"
+                            "  请在 🤖AI设置 里填入 deepseek/doubao 的 API Key\n"
+                            "  代理会自动从 ai_config.json 读取")
+                if response.status_code == 401 and "签名" in err_txt:
+                    return ("❌ 代理签名校验失败\n"
+                            "  可能代理进程重启了, 请重启应用")
+                if response.status_code == 429:
+                    return "⚠️ 代理调用限额已达上限, 请稍后重试"
                 try:
-                    import json as _j
-                    _ej = _j.loads(err_txt)
-                    _emsg = _ej.get("error", {}).get("message", err_txt)
-                    _emsg = _emsg[:150]
+                    _ej = json.loads(err_txt)
+                    _emsg = _ej.get("error", {}).get("message", err_txt)[:200]
                 except Exception:
-                    _emsg = err_txt[:150]
-                return f"AI API 错误 ({response.status_code}): {_emsg}"
+                    _emsg = err_txt[:200]
+                return f"AI ({response.status_code}): {_emsg}"
         except Exception as e:
-            return f"AI 调用异常: {e!s}"
+            return f"AI 异常: {e!s}"
 
     def _open_ai_search(self, ai_site, query):
         """打开AI网站并进行搜索分析,结果复制到文本标签页"""
