@@ -1,0 +1,451 @@
+"""
+👁️ 见盘 · AI 综合研判窗口
+══════════════════════════════════════════
+功能:
+  ① 📷 图片上传 → AI 视觉识别（OCR + 盘面解读）
+  ② 🌐 财经网站快捷按钮（同花顺/东财/财联社/选股宝/韭研/choice... 可配置）
+  ③ 🤖 AI 综合研判: 图片+实时API+时间 → 形势判断+预判
+  ④ ⏰ 时间感知: 结合当前交易时段决定分析重点
+"""
+import tkinter as _tk
+import tkinter.ttk as _ttk
+import tkinter.filedialog as _fd
+import tkinter.scrolledtext as _st
+import tkinter.messagebox as _mb
+import threading as _th
+import time as _time
+import datetime as _dt
+import json as _json
+import os as _os
+import base64 as _b64
+import webbrowser as _wb
+import io as _io
+import hashlib as _hashlib
+import hmac as _hmac
+import secrets as _secrets
+
+_BG = "#1A1A2E"; _PANEL = "#16213E"; _CARD = "#0F3460"
+_FG = "#EAEAEA"; _MUTED = "#90A4AE"; _GOLD = "#FFD54F"
+_ACCENT = "#E94560"; _GREEN = "#66BB6A"; _BLUE = "#64B5F6"
+
+# ═══════════════════════════════════════════════════════
+# 🌐 网站列表（可配置在 market_watch_sites.json）
+# ═══════════════════════════════════════════════════════
+_DEFAULT_SITES = [
+    {"name": "同花顺·主页",     "url": "https://www.10jqka.com.cn/",         "desc": "综合门户·实时行情"},
+    {"name": "东方财富·主页",   "url": "https://www.eastmoney.com/",           "desc": "资金流向·Lof"},
+    {"name": "财联社·电报",     "url": "https://www.cls.cn/telegraph",        "desc": "7×24 快讯"},
+    {"name": "选股宝",          "url": "https://www.51zxg.com/",              "desc": "题材热度·连板梯队"},
+    {"name": "韭研公社",        "url": "https://www.jiuyangongshe.com/",      "desc": "深度研报·基本面"},
+    {"name": "同花顺·热股",     "url": "https://hot.10jqka.com.cn/",          "desc": "热股榜·异动"},
+    {"name": "雪球·热门",       "url": "https://xueqiu.com/hq",               "desc": "社区讨论·情绪"},
+    {"name": "淘股吧",          "url": "https://www.taoguba.com.cn/",         "desc": "游资一线·盘后"},
+    {"name": "Choice·金融终端",  "url": "https://www.choice.eastmoney.com/",    "desc": "专业数据·机构用"},
+    {"name": "华尔街见闻",       "url": "https://wallstreetcn.com/",           "desc": "全球财经·实时"},
+    {"name": "金十数据",         "url": "https://www.jin10.com/",              "desc": "日历·数据快报"},
+    {"name": "上交所·公告",      "url": "http://www.sse.com.cn/",              "desc": "官方公告·监管"},
+]
+
+_CFG_PATH = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                          "config", "market_watch_sites.json")
+
+
+def _load_sites():
+    try:
+        if _os.path.exists(_CFG_PATH):
+            with open(_CFG_PATH) as f:
+                return _json.load(f)
+    except Exception:
+        pass
+    return _DEFAULT_SITES
+
+
+def _save_sites(sites):
+    try:
+        with open(_CFG_PATH, "w") as f:
+            _json.dump(sites, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+# ═══════════════════════════════════════════════════════
+# 🔑 AI 代理调用（复用 ai_settings 里的签名模式）
+# ═══════════════════════════════════════════════════════
+def _ai_call(messages, max_tokens=1800, timeout=25):
+    """统一 AI 代理调用，支持 vision（image_url）"""
+    try:
+        import requests
+        secret_path = "/tmp/stock_ai_proxy.secret"
+        if not _os.path.exists(secret_path):
+            return None, "❌ AI 代理 secret 不存在"
+        secret = open(secret_path).read().strip()
+        nonce = _secrets.token_hex(8)
+        ptoken = _hmac.new(secret.encode(), ("ai_proxy" + nonce).encode(),
+                           _hashlib.sha256).hexdigest()[:16]
+        h = {"Content-Type": "application/json",
+             "X-Nonce": nonce, "X-Proxy-Token": ptoken}
+        b = {"provider": "deepseek", "model": "deepseek-chat",
+             "max_tokens": max_tokens, "messages": messages, "temperature": 0.3}
+        r = requests.post("http://127.0.0.1:8787/v1/chat/completions",
+                          headers=h, json=b, timeout=timeout)
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"], None
+        return None, f"❌ {r.status_code}: {r.text[:120]}"
+    except Exception as e:
+        return None, f"❌ AI 异常: {e}"
+
+
+def _img_to_data_url(img_path, max_size=(1280, 1280), quality=75):
+    """图片 → base64 data URL（压缩到合理大小）"""
+    try:
+        from PIL import Image
+        img = Image.open(img_path)
+        # 转 RGB 兼容 RGBA/PNG
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.thumbnail(max_size)
+        buf = _io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        return "data:image/jpeg;base64," + _b64.b64encode(buf.getvalue()).decode()
+    except Exception as e:
+        # PIL 不可用：直接 base64 原文件
+        with open(img_path, "rb") as f:
+            data = f.read()
+        ext = img_path.rsplit(".", 1)[-1].lower()
+        mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/jpeg")
+        return f"data:{mime};base64," + _b64.b64encode(data).decode()
+
+
+# ═══════════════════════════════════════════════════════
+# 🖥️ 窗口主入口
+# ═══════════════════════════════════════════════════════
+def _show_market_watch_dialog(parent_root=None):
+    win = _tk.Toplevel(parent_root)
+    win.title("👁️ 见盘 · AI 综合研判")
+    win.configure(bg=_BG)
+    win.geometry("1080x760")
+    try:
+        win.attributes("-topmost", True); win.attributes("-topmost", False)
+    except Exception:
+        pass
+
+    # Header
+    _tk.Label(win, text="👁️  见盘  ·  AI 综合研判",
+              bg=_BG, fg=_GOLD,
+              font=("TkDefaultFont", 14, "bold")).pack(pady=(12, 4))
+
+    now = _dt.datetime.now()
+    ts_str = now.strftime("%Y-%m-%d %H:%M")
+    # 交易时段判断
+    h, m = now.hour, now.minute
+    time_period = "盘前准备" if (h == 9 and m < 30) or h < 9 else \
+                  "早盘 9:30-11:30" if (h == 9 or h == 10 or (h == 11 and m <= 30)) else \
+                  "午休 11:30-13:00" if (h == 11 and m > 30) or (h == 12) else \
+                  "午盘 13:00-15:00" if (h >= 13 and h < 15) else \
+                  "盘后 15:00+"
+    _tk.Label(win, text=f"🕐 {ts_str}  |  时段: {time_period}",
+              bg=_BG, fg=_MUTED,
+              font=("TkDefaultFont", 10)).pack(pady=(0, 8))
+
+    # 主布局：左 图片+按钮 / 右 结果区
+    main = _tk.Frame(win, bg=_BG); main.pack(fill=_tk.BOTH, expand=True, padx=12, pady=4)
+    left = _tk.Frame(main, bg=_PANEL); left.pack(side=_tk.LEFT, fill=_tk.Y, padx=(0, 8))
+    right = _tk.Frame(main, bg=_PANEL); right.pack(side=_tk.LEFT, fill=_tk.BOTH, expand=True)
+
+    # ── 左侧：图片 + 网站按钮 ──
+    # ① 图片预览卡
+    img_card = _tk.LabelFrame(left, text=" 📷 盘面图片 ",
+                               bg=_PANEL, fg=_BLUE,
+                               font=("TkDefaultFont", 10, "bold"))
+    img_card.pack(fill=_tk.X, padx=8, pady=8)
+
+    img_preview = _tk.Label(img_card, text="点下方按钮选择图片\n或拖入截图",
+                            bg="#0F3460", fg=_MUTED, width=30, height=10,
+                            font=("TkDefaultFont", 9))
+    img_preview.pack(padx=6, pady=6)
+
+    img_path_var = _tk.StringVar(value="")
+
+    def _pick_image():
+        p = _fd.askopenfilename(
+            title="选择盘面截图",
+            filetypes=[("图片", "*.png *.jpg *.jpeg *.gif *.webp"), ("所有", "*.*")])
+        if p:
+            img_path_var.set(p)
+            try:
+                from PIL import Image, ImageTk
+                img = Image.open(p); img.thumbnail((220, 220))
+                photo = ImageTk.PhotoImage(img)
+                img_preview.config(image=photo, text="", width=220, height=220)
+                img_preview._photo = photo
+                status_lbl.config(text=f"✅ 图片已加载: {os.path.basename(p)}", fg=_GREEN)
+            except Exception as e:
+                img_preview.config(text=f"预览失败: {e}", image="", width=30, height=10)
+                status_lbl.config(text=f"⚠️ 预览失败但可分析: {e}", fg=_GOLD)
+
+    btn_row1 = _tk.Frame(img_card, bg=_PANEL); btn_row1.pack(fill=_tk.X, padx=6, pady=4)
+    _tk.Button(btn_row1, text="📷 选择图片", command=_pick_image,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_BLUE, highlightthickness=2,
+               font=("TkDefaultFont", 9, "bold")).pack(side=_tk.LEFT, padx=2)
+
+    sites = _load_sites()
+
+    # ② 网站快捷按钮（可滚动）
+    sites_card = _tk.LabelFrame(left, text=" 🌐 财经网站 ",
+                                bg=_PANEL, fg=_GOLD,
+                                font=("TkDefaultFont", 10, "bold"))
+    sites_card.pack(fill=_tk.BOTH, expand=True, padx=8, pady=(4, 8))
+
+    sites_canvas = _tk.Canvas(sites_card, bg=_PANEL, highlightthickness=0, width=260)
+    sites_scroll = _tk.Scrollbar(sites_card, orient="vertical", command=sites_canvas.yview)
+    sites_inner = _tk.Frame(sites_canvas, bg=_PANEL)
+    sites_inner.bind("<Configure>",
+                     lambda e: sites_canvas.configure(scrollregion=sites_canvas.bbox("all")))
+    sites_canvas.create_window((0, 0), window=sites_inner, anchor="nw")
+    sites_canvas.configure(yscrollcommand=sites_scroll.set)
+    sites_canvas.pack(side=_tk.LEFT, fill=_tk.BOTH, expand=True)
+    sites_scroll.pack(side=_tk.RIGHT, fill=_tk.Y)
+
+    # 按钮网格（2 列）
+    _site_btns = []
+    for i, s in enumerate(sites):
+        row, col = divmod(i, 2)
+        btn = _tk.Button(sites_inner, text=f"🌐 {s['name']}",
+                         width=14,
+                         command=lambda u=s["url"]: _wb.open(u),
+                         bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+                         highlightbackground=_BLUE, highlightthickness=1,
+                         font=("TkDefaultFont", 9))
+        btn.grid(row=row, column=col, padx=3, pady=2, sticky="we")
+        _site_btns.append(btn)
+
+    # 配置/添加按钮
+    btn_cfg_row = _tk.Frame(left, bg=_PANEL); btn_cfg_row.pack(fill=_tk.X, padx=8, pady=(0, 8))
+
+    def _open_site_config():
+        """编辑网站列表：增删改 + 保存"""
+        cfg_win = _tk.Toplevel(win); cfg_win.title("🌐 网站配置")
+        cfg_win.configure(bg=_PANEL); cfg_win.geometry("640x480")
+
+        cur_sites = _load_sites()
+        rows = []
+
+        list_frame = _tk.Frame(cfg_win, bg=_PANEL); list_frame.pack(fill=_tk.BOTH, expand=True, padx=10, pady=8)
+
+        _tk.Label(list_frame, text="名称", bg=_PANEL, fg=_GOLD,
+                  width=14, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0)
+        _tk.Label(list_frame, text="网址", bg=_PANEL, fg=_GOLD,
+                  width=32, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=1)
+        _tk.Label(list_frame, text="简介", bg=_PANEL, fg=_GOLD,
+                  width=18, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=2)
+
+        for i, s in enumerate(cur_sites):
+            e1 = _tk.Entry(list_frame, width=14); e1.insert(0, s["name"])
+            e2 = _tk.Entry(list_frame, width=34); e2.insert(0, s["url"])
+            e3 = _tk.Entry(list_frame, width=18); e3.insert(0, s.get("desc", ""))
+            e1.grid(row=i+1, column=0, padx=2, pady=1)
+            e2.grid(row=i+1, column=1, padx=2, pady=1)
+            e3.grid(row=i+1, column=2, padx=2, pady=1)
+            rows.append((e1, e2, e3))
+
+        def _save():
+            new_sites = []
+            for e1, e2, e3 in rows:
+                nm = e1.get().strip(); url = e2.get().strip(); dc = e3.get().strip()
+                if nm and url:
+                    new_sites.append({"name": nm, "url": url, "desc": dc})
+            _save_sites(new_sites)
+            # 刷新按钮
+            for b in _site_btns: b.destroy()
+            _site_btns.clear()
+            sites_inner.destroy()
+            sites_inner2 = _tk.Frame(sites_canvas, bg=_PANEL)
+            sites_inner2.bind("<Configure>",
+                              lambda e: sites_canvas.configure(scrollregion=sites_canvas.bbox("all")))
+            sites_canvas.create_window((0, 0), window=sites_inner2, anchor="nw")
+            for i, s in enumerate(new_sites):
+                row, col = divmod(i, 2)
+                btn = _tk.Button(sites_inner2, text=f"🌐 {s['name']}", width=14,
+                                 command=lambda u=s["url"]: _wb.open(u),
+                                 bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+                                 highlightbackground=_BLUE, highlightthickness=1,
+                                 font=("TkDefaultFont", 9))
+                btn.grid(row=row, column=col, padx=3, pady=2, sticky="we")
+                _site_btns.append(btn)
+            cfg_win.destroy()
+            status_lbl.config(text="✅ 网站列表已更新", fg=_GREEN)
+
+        def _add_new():
+            i = len(rows) + 1
+            e1 = _tk.Entry(list_frame, width=14); e2 = _tk.Entry(list_frame, width=34)
+            e3 = _tk.Entry(list_frame, width=18)
+            e1.grid(row=i, column=0, padx=2, pady=1)
+            e2.grid(row=i, column=1, padx=2, pady=1)
+            e3.grid(row=i, column=2, padx=2, pady=1)
+            rows.append((e1, e2, e3))
+
+        btn_row = _tk.Frame(cfg_win, bg=_PANEL); btn_row.pack(pady=10)
+        _tk.Button(btn_row, text="➕ 添加一行", command=_add_new,
+                   bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+                   highlightbackground=_BLUE, highlightthickness=1,
+                   font=("TkDefaultFont", 9)).pack(side=_tk.LEFT, padx=4)
+        _tk.Button(btn_row, text="💾 保存", command=_save,
+                   bg="#66BB6A", fg="black", activebackground="#43A047",
+                   highlightbackground=_GOLD, highlightthickness=2,
+                   font=("TkDefaultFont", 9, "bold"), width=10).pack(side=_tk.LEFT, padx=4)
+        _tk.Button(btn_row, text="关闭", command=cfg_win.destroy,
+                   bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+                   highlightbackground=_MUTED, highlightthickness=1,
+                   font=("TkDefaultFont", 9)).pack(side=_tk.LEFT, padx=4)
+
+    _tk.Button(btn_cfg_row, text="⚙️ 配置网站", command=_open_site_config,
+               bg="#FFFFFF", fg="black", activebackground="#F5F5F5",
+               highlightbackground=_BLUE, highlightthickness=1,
+               font=("TkDefaultFont", 9)).pack(side=_tk.LEFT, expand=True, fill=_tk.X, padx=2)
+
+    # ── 右侧：AI 综合研判结果 ──
+    analyze_card = _tk.LabelFrame(right, text=" 🤖 AI 综合研判 ",
+                                  bg=_PANEL, fg=_ACCENT,
+                                  font=("TkDefaultFont", 11, "bold"))
+    analyze_card.pack(fill=_tk.X, padx=10, pady=(10, 6))
+
+    btn_analyze_row = _tk.Frame(analyze_card, bg=_PANEL); btn_analyze_row.pack(fill=_tk.X, padx=6, pady=6)
+
+    def _do_analyze(analyze_mode):
+        """analyze_mode: 'image' | 'comprehensive'"""
+        if analyze_mode == "image" and not img_path_var.get():
+            _mb.showinfo("提示", "请先选择一张盘面截图 📷")
+            return
+
+        text_widget.config(state=_tk.NORMAL); text_widget.delete("1.0", "end")
+        text_widget.insert("end", "⏳ 正在分析...\n\n")
+        text_widget.config(state=_tk.DISABLED)
+        btn1.config(state=_tk.DISABLED); btn2.config(state=_tk.DISABLED)
+
+        def _w():
+            _after(lambda: status_lbl.config(text="⏳ 拉取实时行情数据...", fg=_GOLD))
+
+            # 1) 实时行情数据（复用 mainline_route 的）
+            sectors_info = ""
+            try:
+                from ui.mainline_route import _get_mainline_route_data
+                d = _get_mainline_route_data()
+                for i, (name, chg, amt, ld, ld_chg, ud) in enumerate(d.get("sectors", [])[:8], 1):
+                    sectors_info += f"  {i}. {name}  {chg:+.2f}%  成交{amt}亿  领涨{ld}({ld_chg:+.2f}%)\n"
+            except Exception as e:
+                sectors_info = f"（实时板块数据拉取失败: {e}）"
+
+            _after(lambda: status_lbl.config(text="⏳ 构造 AI prompt...", fg=_GOLD))
+
+            # 2) 构造 prompt + 消息
+            img_path = img_path_var.get()
+            messages = []
+            sys_prompt = (
+                "你是A股盘前/盘中/盘后分析师。综合盘面截图、实时行情、当前时间、"
+                "财经资讯进行形势判断和接下来的走势预判。"
+                "输出中文，结构清晰，用 Emoji 增加可读性。"
+            )
+            messages.append({"role": "system", "content": sys_prompt})
+
+            img_data_url = None
+            user_text = f"🕐 当前时间: {ts_str}（{time_period}）\n\n📊 今日行业板块 TOP8:\n{sectors_info}\n\n"
+
+            if analyze_mode == "image" and img_path:
+                _after(lambda: status_lbl.config(text="⏳ 图片转 base64 + AI 视觉识别...", fg=_GOLD))
+                try:
+                    img_data_url = _img_to_data_url(img_path)
+                    user_text += (
+                        "【盘面截图】请识别图片中的所有文字、指数、数字、K线形态、"
+                        "板块异动、涨跌幅榜等，结合时间和实时数据进行研判。\n"
+                    )
+                    # 先只发文本看情况，图片太大可能被拒绝
+                    messages.append({"role": "user", "content": [
+                        {"type": "text", "text": user_text},
+                        {"type": "image_url", "image_url": {"url": img_data_url}},
+                    ]})
+                except Exception as e:
+                    _after(lambda: status_lbl.config(text=f"⚠️ 图片转换失败: {e}，纯文本分析", fg=_GOLD))
+                    messages.append({"role": "user", "content": user_text})
+            else:
+                user_text += (
+                    "请结合当前时间点和板块强弱，给出：\n"
+                    "1️⃣ 当前形势判断\n"
+                    "2️⃣ 接下来 30min / 1h / 1-2 日 走势预判\n"
+                    "3️⃣ 可关注的主线板块和风险点\n"
+                    "4️⃣ 操作建议（买入/观望/减仓）\n"
+                )
+                messages.append({"role": "user", "content": user_text})
+
+            _after(lambda: status_lbl.config(text="⏳ 请求 AI 代理 (deepseek-chat)...", fg=_GOLD))
+
+            # 3) 调 AI
+            result_text, err = _ai_call(messages, max_tokens=2400)
+
+            def _show():
+                text_widget.config(state=_tk.NORMAL); text_widget.delete("1.0", "end")
+                if err:
+                    text_widget.insert("end", f"❌ AI 调用失败\n\n{err}")
+                    status_lbl.config(text=f"❌ AI 失败: {err[:80]}", fg=_ACCENT)
+                else:
+                    header = f"👁️ 【见盘 AI 综合研判】\n🕐 {ts_str} · {time_period}\n"
+                    if analyze_mode == "image":
+                        header += f"📷 已分析截图: {_os.path.basename(img_path) if img_path else '无'}\n"
+                    header += f"{'═'*50}\n\n"
+                    text_widget.insert("end", header + result_text + "\n")
+                    status_lbl.config(text=f"✅ AI 研判完成 ({len(result_text)}字)", fg=_GREEN)
+                text_widget.see("end"); text_widget.config(state=_tk.DISABLED)
+                btn1.config(state=_tk.NORMAL); btn2.config(state=_tk.NORMAL)
+
+            _after(_show)
+
+        _th.Thread(target=_w, daemon=True).start()
+
+    btn1 = _tk.Button(btn_analyze_row, text="📷 分析当前图片",
+                      command=lambda: _do_analyze("image"), width=16,
+                      bg=_BLUE, fg="black", activebackground="#4A9EE6",
+                      highlightbackground=_GOLD, highlightthickness=2,
+                      font=("TkDefaultFont", 10, "bold"))
+    btn1.pack(side=_tk.LEFT, padx=4)
+
+    btn2 = _tk.Button(btn_analyze_row, text="🤖 AI 综合研判（无图）",
+                      command=lambda: _do_analyze("comprehensive"), width=20,
+                      bg=_GOLD, fg="black", activebackground="#F0B429",
+                      highlightbackground=_ACCENT, highlightthickness=2,
+                      font=("TkDefaultFont", 10, "bold"))
+    btn2.pack(side=_tk.LEFT, padx=4)
+
+    # 结果文本区
+    text_widget = _st.ScrolledText(right, wrap=_tk.WORD,
+                                   bg=_CARD, fg=_FG,
+                                   font=("TkDefaultFont", 11),
+                                   insertbackground=_FG, padx=14, pady=10,
+                                   relief=_tk.FLAT, borderwidth=0)
+    text_widget.pack(fill=_tk.BOTH, expand=True, padx=10, pady=(0, 10))
+    text_widget.insert("end", (
+        "👁️ 见盘 AI 综合研判\n"
+        "═══════════════════\n\n"
+        "📷 方法一: 点左上方「📷 选择图片」→ 上传盘面截图（同花顺/东财/K线/涨停板等）\n"
+        "         → 点「📷 分析当前图片」→ AI 视觉识别图中所有文字和数字\n\n"
+        "🌐 方法二: 点左侧财经网站按钮（同花顺/东财/财联社...可自定义）\n"
+        "         浏览后再回来点「🤖 AI 综合研判」\n\n"
+        "🤖 AI 会结合: 图片+实时API+当前时间+交易时段 → 形势判断+预判\n"
+        "═══════════════════\n"
+        f"🕐 当前: {ts_str} · {time_period}\n\n"
+        "💡 提示: 截图越清晰、信息越密集（比如涨停榜+K线+板块异动），AI 识别越准\n"
+    ))
+
+    # 底部状态栏
+    status_lbl = _tk.Label(win, text="准备就绪 · 选图片或打开网站后开始",
+                           bg=_BG, fg=_MUTED,
+                           font=("TkDefaultFont", 10))
+    status_lbl.pack(fill=_tk.X, padx=14, pady=(4, 10))
+
+    def _after(fn):
+        try:
+            win.after(0, fn)
+        except Exception:
+            fn()
+
+    return win

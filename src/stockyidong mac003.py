@@ -509,6 +509,17 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             print(f"[🤖AI设置❌] {e}", flush=True)
             _tb.print_exc()
 
+    def _show_market_watch(self):
+        """👁️ 见盘 — 图片+网站+AI综合研判"""
+        print("[👁️见盘] 启动...", flush=True)
+        try:
+            from ui.market_watch import _show_market_watch_dialog
+            _show_market_watch_dialog(self.root)
+        except Exception as e:
+            import traceback as _tb
+            print(f"[👁️见盘❌] {e}", flush=True)
+            _tb.print_exc()
+
     def _attach_article_btn(self, dlg, ctx=None, focus_layer=None):
         """🔧 通用: 给任意弹窗底部加 📝 红色文章生成按钮
         
@@ -4841,6 +4852,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("🧊冰点修复", 9, self._show_emotion_freeze),
             ("🎯高抛低吸", 9, self._show_high_low_swing),
             ("👥大V榜", 8, self._show_top_gurus_dialog),
+            ("👁️见盘", 8, self._show_market_watch),
             ("🤖AI设置", 8, self._show_ai_settings),
             ("🌍全球资产", 8, self._show_global_assets_dialog),
             ("🔧基础信息", 10, self._show_base_info_dialog),
