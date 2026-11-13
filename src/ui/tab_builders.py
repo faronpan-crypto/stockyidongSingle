@@ -8035,6 +8035,26 @@ except Exception as e:
             tk.Label(_err_tab, text=f"❌ AI研判 Tab 加载失败: {_e_nb}",
                      bg="white", fg="red").pack(padx=20, pady=20)
 
+        # 🆕 Tab3: 📈 后续走势 · 三维度研判
+        try:
+            from ui.mainline_future_trend import _build_future_trend_tab as _bftt
+            _bftt(nb_main, root=win)
+        except Exception as _e_ft:
+            import traceback as _tb_ft; _tb_ft.print_exc()
+            _err_tab3 = tk.Frame(nb_main); nb_main.add(_err_tab3, text="  📈 后续走势(异常)  ")
+            tk.Label(_err_tab3, text=f"❌ 后续走势 Tab 加载失败: {_e_ft}",
+                     bg="white", fg="red").pack(padx=20, pady=20)
+
+        # 🆕 Tab4: 💡 市场认识 · 宏观逻辑 / 普通人策略
+        try:
+            from ui.mainline_market_view import _build_market_view_tab as _bmvt
+            _bmvt(nb_main, root=win)
+        except Exception as _e_mv:
+            import traceback as _tb_mv; _tb_mv.print_exc()
+            _err_tab4 = tk.Frame(nb_main); nb_main.add(_err_tab4, text="  💡 市场认识(异常)  ")
+            tk.Label(_err_tab4, text=f"❌ 市场认识 Tab 加载失败: {_e_mv}",
+                     bg="white", fg="red").pack(padx=20, pady=20)
+
         # 控制栏 + 进度条 (pack 到 tab_panorama)
         ctrl = ttk.Frame(tab_panorama)
         ctrl.pack(fill=tk.X, padx=8, pady=(6, 2))
