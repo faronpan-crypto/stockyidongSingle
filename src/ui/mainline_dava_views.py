@@ -1,26 +1,445 @@
 # -*- coding: utf-8 -*-
 """
-🌟 大V观点聚合 — 经济学家 / 投资大师 / 商业大佬 / 顶级基金经理
-数据来源: 微博 / 格隆汇 / Forisight / 澎湃新闻 / Oaktree Memos (2026年11月最新)
+🌟 名人堂 — 操盘手 / 投资家 / 无著述大佬 / 署名坑 / 阅读指南
+数据来源: 中信出版书单 / 上海高级金融学院 / 央视网 / 经济参考报 (2026-11-13)
 """
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext
+import webbrowser
 
+
+# ═══════════════════════════════════════════════════════════════
+# 📚 名人数据模型 (操盘手 vs 投资家 两派分开)
+# ═══════════════════════════════════════════════════════════════
+
+# --- 核心: 亲笔写过书的操盘手 ---
+TRADERS = [
+    {
+        "name": "杰西·利弗莫尔",
+        "name_en": "Jesse Livermore",
+        "years": "1877–1940",
+        "tagline": "投机之王 · 关键点买卖法 · 大起大落的一生",
+        "logic": "只做龙头, 金字塔加仓 (盈利后加仓), 严格止损 (亏10%必砍), 价格沿最小阻力线运动, 熊市赚的钱牛市全部亏回去",
+        "books": [
+            {"title": "《股票大作手操盘术》", "title_en": "How to Trade in Stocks", "year": "1940", "note": "唯一亲笔! 关键点买卖法、金字塔加仓", "url": "https://zh.wikipedia.org/wiki/杰西·利弗莫尔"},
+        ],
+        "pitfall": "《股票作手回忆录》(1923) 不是他写的 — 作者是记者 Edwin Lefèvre, 化名'拉里·利文斯顿'小说体评传",
+        "links": [("维基百科", "https://zh.wikipedia.org/wiki/杰西·利弗莫尔"), ("investopedia", "https://www.investopedia.com/terms/l/livermore.asp")],
+        "accent": "#FFCDD2",
+    },
+    {
+        "name": "安德烈·科斯托拉尼",
+        "name_en": "André Kostolany",
+        "years": "1906–1999",
+        "tagline": "德国股神 · 反周期大师 · 狗和主人比喻股市",
+        "logic": "股市=狗和主人: 狗跑在前面但最终回到主人身边; 反周期操作: 别人买时我卖; 经济是基础, 股市是狗; 长期看股市永远上涨; 不要做波段, 要做周期",
+        "books": [
+            {"title": "《大投机家》", "year": "1980s", "note": "一生13本, 全球约300万册", "url": "https://zh.wikipedia.org/wiki/安德烈·科斯托拉尼"},
+            {"title": "《大投机家的证券心理学》", "year": "—", "note": "\"趋势=资金+心理\"", "url": ""},
+        ],
+        "pitfall": "是川银藏《股市之神》≠ 科斯托拉尼《股市神猎手》 — 中译名误配经典坑",
+        "links": [("维基百科", "https://zh.wikipedia.org/wiki/安德烈·科斯托拉尼")],
+        "accent": "#FFE0B2",
+    },
+    {
+        "name": "是川银藏",
+        "name_en": "Ginzo Arikawa",
+        "years": "1897–1977",
+        "tagline": "日本股神 · 三年不买股 · 乌龟三原则",
+        "logic": "三年不买股, 研究三年才出手; 独立思考, 不看报纸不炒股; 买入: 所有人悲观时; 卖出: 所有人乐观时; 大赚小赔, 只买冷门股票",
+        "books": [
+            {"title": "《波乱的一生》", "title_en": "中译《股市之神》", "note": "乌龟三原则: 绝不追高/绝不买热门/绝不满仓", "url": "https://zh.wikipedia.org/wiki/是川银藏"},
+        ],
+        "pitfall": "中译《股市之神》≠ 科斯托拉尼《股市神猎手》 — 不同的人",
+        "links": [("维基百科", "https://zh.wikipedia.org/wiki/是川银藏")],
+        "accent": "#F8BBD0",
+    },
+    {
+        "name": "W.D. 江恩",
+        "name_en": "W. D. Gann",
+        "years": "1878–1955",
+        "tagline": "技术分析宗师 · 时间周期理论 · 争议最大的实战派",
+        "logic": "时间周期: 7天/30天/90天/1年/10年/60年; 几何图形+价格回撤1/2、1/3、2/3; 时间窗口是第一要素; 转折点=时间+价格共振; 星相和数字学辅助",
+        "books": [
+            {"title": "《江恩华尔街45年》", "title_en": "45 Years in Wall Street", "year": "1949", "note": "业绩可验证性争议很大", "url": "https://zh.wikipedia.org/wiki/江恩"},
+            {"title": "《股票行情的真谛》", "title_en": "The Truth of the Stock Tape", "url": ""},
+        ],
+        "pitfall": "著述最勤的一批实战者, 但其宣称的收益缺乏可验证记录 — 选书先明确想学什么",
+        "links": [("维基百科", "https://zh.wikipedia.org/wiki/江恩")],
+        "accent": "#D1C4E9",
+    },
+    {
+        "name": "尼古拉斯·达瓦斯",
+        "name_en": "Nicolas Darvas",
+        "years": "1920–1977",
+        "tagline": "箱体理论创始人 · 舞蹈演员转行 · 只看报价不看新闻",
+        "logic": "箱体突破: 价格在狭窄区间整理后放量突破; 量价配合: 放量突破+缩量回调; 金字塔加仓: 突破确认后逐步加仓; 严格止损: 跌破箱体下沿立即出场",
+        "books": [
+            {"title": "《我如何在股市赚了200万美元》", "title_en": "How I Made $2,000,000 in the Stock Market", "year": "1960", "note": "箱体理论开山之作", "url": "https://zh.wikipedia.org/wiki/尼古拉斯·达瓦斯"},
+        ],
+        "pitfall": "",
+        "links": [("维基百科", "https://zh.wikipedia.org/wiki/尼古拉斯·达瓦斯")],
+        "accent": "#B3E5FC",
+    },
+    {
+        "name": "维克托·斯波朗迪",
+        "name_en": "Victor Sperandeo",
+        "years": "—",
+        "tagline": "职业操盘原理 · 华尔街终结者",
+        "logic": "风险报酬比至少1:3才出手; 趋势=更高的高点+更高的低点; 三重移动平均线判断; 分批建仓分批止盈; 顺势交易不抄底",
+        "books": [
+            {"title": "《专业投机原理》", "title_en": "Trader Vic — Methods of a Wall Street Master", "year": "1993", "note": "被《巴伦周刊》称'华尔街终结者'", "url": "https://book.douban.com/subject/5980568/"},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣读书", "https://book.douban.com/subject/5980568/")],
+        "accent": "#C8E6C9",
+    },
+    {
+        "name": "马丁·舒华兹",
+        "name_en": "Martin Schwartz",
+        "years": "—",
+        "tagline": "全美交易冠军 · 纪律第一 · 每天100万美元",
+        "logic": "纪律第一: 每天止损不超1.5%; TICK指数+TRIN指标看市场内部结构; 短线快进快出; 开盘前30分钟黄金时间; 连亏3天休1天",
+        "books": [
+            {"title": "《交易冠军》", "title_en": "Pit Bull", "note": "全美交易大赛10次参赛9次冠军", "url": "https://book.douban.com/subject/1288208/"},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣读书", "https://book.douban.com/subject/1288208/")],
+        "accent": "#A5D6A7",
+    },
+    {
+        "name": "爱德华·索普",
+        "name_en": "Edward Thorp",
+        "years": "1932–",
+        "tagline": "量化对冲之父 · 算牌法发明者 · 数学思维战胜市场",
+        "logic": "凯利公式算最优下注比例; 统计套利: 配对交易/价差回归; 数学模型驱动无情绪; 市场低效处找统计优势; 期权定价和对冲",
+        "books": [
+            {"title": "《战胜一切市场的人》", "title_en": "A Man for All Markets", "year": "2017", "note": "数学家, 算牌法发明者, 量化投资源头", "url": "https://book.douban.com/subject/30169303/"},
+            {"title": "《打败庄家》", "title_en": "Beat the Dealer", "year": "1962", "note": "21点算牌法开山之作", "url": ""},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣读书", "https://book.douban.com/subject/30169303/"), ("维基百科", "https://zh.wikipedia.org/wiki/爱德华·索普")],
+        "accent": "#81D4FA",
+    },
+    {
+        "name": "亚历山大·埃尔德",
+        "name_en": "Alexander Elder",
+        "years": "1951–",
+        "tagline": "三重滤网系统 · 交易心理学 · 精神科医生转行",
+        "logic": "三重滤网: 周线(长期趋势)→日线(中期方向)→分钟线(入场时机); MACD柱判断多空力量; 盈亏比至少2:1; 纪律和心态>技术指标; 交易是马拉松不是百米冲刺",
+        "books": [
+            {"title": "《以交易为生》", "title_en": "Trading for a Living", "year": "1993", "note": "精神科医生转行, 心理/方法/资金三支柱", "url": "https://book.douban.com/subject/1339452/"},
+            {"title": "《走进我的交易室》", "title_en": "Come Into My Trading Room", "year": "2002", "url": ""},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣读书", "https://book.douban.com/subject/1339452/"), ("官网", "https://www.elder.com/")],
+        "accent": "#B2DFDB",
+    },
+    {
+        "name": "马克·道格拉斯",
+        "name_en": "Mark Douglas",
+        "years": "1947–2015",
+        "tagline": "交易心理学奠基者 · 概率思维 · 纪律是唯一解药",
+        "logic": "交易是概率游戏不是预测; 接受不确定性, 接受亏损是成本; 纪律对抗人性弱点; 输赢分布随机但胜率可算; 害怕亏损=过度交易=持续亏损; 心态>技术>资金管理",
+        "books": [
+            {"title": "《交易心理分析》", "title_en": "Trading in the Zone", "year": "2000", "note": "只谈信念结构, 交易心理学奠基", "url": "https://book.douban.com/subject/5437458/"},
+            {"title": "《自律的交易者》", "title_en": "The Disciplined Trader", "year": "1990", "url": ""},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣读书", "https://book.douban.com/subject/5437458/")],
+        "accent": "#C5CAE9",
+    },
+    {
+        "name": "乔治·索罗斯",
+        "name_en": "George Soros",
+        "years": "1930–",
+        "tagline": "反身性理论 · 量子基金 · 偏哲学不含赚钱技巧",
+        "logic": "反身性: 市场参与者的思维与市场现实相互影响, 永远处于动态不平衡; 易错性: 人类对世界的认知永远是局部和扭曲的; 不做短线, 押注宏观大逻辑",
+        "books": [
+            {"title": "《金融炼金术》", "title_en": "The Alchemy of Finance", "year": "1987", "note": "偏哲学, 不含具体赚钱技巧", "url": "https://book.douban.com/subject/1073250/"},
+            {"title": "《超越金融》", "title_en": "Soros on Soros", "year": "2010", "note": "比《金融炼金术》好懂得多", "url": ""},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣读书", "https://book.douban.com/subject/1073250/"), ("维基百科", "https://zh.wikipedia.org/wiki/乔治·索罗斯")],
+        "accent": "#EF9A9A",
+    },
+    {
+        "name": "迈克尔·斯坦哈特",
+        "name_en": "Michael Steinhardt",
+        "years": "1940–",
+        "tagline": "宏观对冲早期 · 最直白的一手自传",
+        "logic": "宏观对冲, 押注利率和汇率方向, 最直白的实战一手记录",
+        "books": [
+            {"title": "《No Bull: My Life In and Out of Markets》", "year": "2001", "note": "宏观对冲早期最直白的一手自传, 无中译", "url": ""},
+        ],
+        "pitfall": "",
+        "links": [("维基百科", "https://zh.wikipedia.org/wiki/迈克尔·斯坦哈特")],
+        "accent": "#FFCCBC",
+    },
+]
+
+
+# --- 介于操盘手和投资家之间 ---
+BETWEEN = [
+    {
+        "name": "威廉·欧奈尔",
+        "name_en": "William O'Neil",
+        "tagline": "CANSLIM 选股法 · 成长股技术派",
+        "logic": "CANSLIM: 当季+年增长率/机构持股/新产品新概念/股价在52周新高附近/领涨股/市场方向/小盘股优先; 技术面+基本面双筛选",
+        "books": [
+            {"title": "《笑傲股市》", "title_en": "How to Make Money in Stocks", "year": "1988", "url": "https://book.douban.com/subject/1397351/"},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣读书", "https://book.douban.com/subject/1397351/")],
+        "accent": "#FFF9C4",
+    },
+    {
+        "name": "理查德·怀科夫",
+        "name_en": "Richard D. Wyckoff",
+        "years": "1873–1934",
+        "tagline": "量价分析奠基者 · 吸筹派发模型",
+        "logic": "庄家吸筹-拉升-派发模型; 量价配合判断机构行为; 弹簧/UTAD/LPS 等关键形态; 目前仍被主力资金研究者奉为圣经",
+        "books": [
+            {"title": "《Wyckoff 方法》系列讲义", "note": "量价分析奠基, 无标准中译本", "url": ""},
+        ],
+        "pitfall": "",
+        "links": [("维基百科", "https://en.wikipedia.org/wiki/Richard_D._Wyckoff")],
+        "accent": "#FFF176",
+    },
+    {
+        "name": "范·K·撒普",
+        "name_en": "Van K. Tharp",
+        "tagline": "交易系统设计 · 头寸管理",
+        "logic": "期望值为正的系统设计; 头寸管理是核心 (凯利公式/最优F); 交易系统=市场+方法+头寸+心理; 把交易当概率游戏",
+        "books": [
+            {"title": "《通向金融王国的自由之路》", "title_en": "Trade Your Way to Financial Freedom", "note": "系统设计经典", "url": "https://book.douban.com/subject/1139611/"},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣读书", "https://book.douban.com/subject/1139611/")],
+        "accent": "#FFD54F",
+    },
+    {
+        "name": "拉里·威廉斯",
+        "name_en": "Larry R. Williams",
+        "tagline": "短线交易冠军 · 期货大赛冠军",
+        "logic": "R% 指标 (威廉指标); 期货短线交易; 年度收益114%; 以儿子命名的基金后来爆仓",
+        "books": [
+            {"title": "《短线交易秘诀》", "title_en": "Long-Term Secrets to Short-Term Trading", "url": "https://book.douban.com/subject/3279715/"},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣读书", "https://book.douban.com/subject/3279715/")],
+        "accent": "#FFB74D",
+    },
+]
+
+
+# --- 投资家 (基本面/估值) ---
+INVESTORS = [
+    {
+        "name": "本杰明·格雷厄姆",
+        "name_en": "Benjamin Graham",
+        "years": "1894–1976",
+        "tagline": "价值投资之父 · 巴菲特的老师",
+        "logic": "安全边际: 价格低于内在价值30%才买; 市场先生比喻; 分散投资; 买股票=买企业的一部分; 长期持有+股息回报",
+        "books": [
+            {"title": "《证券分析》", "title_en": "Security Analysis", "year": "1934", "note": "价值投资圣经, 与多德合著", "url": "https://book.douban.com/subject/5243782/"},
+            {"title": "《聪明的投资者》", "title_en": "The Intelligent Investor", "year": "1949", "note": "巴菲特推荐'最好的投资书'", "url": "https://book.douban.com/subject/5243787/"},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣-聪明的投资者", "https://book.douban.com/subject/5243787/")],
+        "accent": "#DCEDC8",
+    },
+    {
+        "name": "菲利普·费雪",
+        "name_en": "Philip Fisher",
+        "years": "1907–2004",
+        "tagline": "成长股投资之父 · 闲聊法",
+        "logic": "闲聊法: 向竞争对手/客户/供应商打听公司; 15要点: 公司是否有增长潜力/管理层是否优秀/研发投入等; 优秀公司长期持有",
+        "books": [
+            {"title": "《怎样选择成长股》", "title_en": "Common Stocks and Uncommon Profits", "year": "1958", "note": "成长股投资开山", "url": "https://book.douban.com/subject/1511024/"},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣读书", "https://book.douban.com/subject/1511024/")],
+        "accent": "#C5E1A5",
+    },
+    {
+        "name": "彼得·林奇",
+        "name_en": "Peter Lynch",
+        "years": "1944–",
+        "tagline": "麦哲伦基金经理 · 十年十倍",
+        "logic": "生活中发现好公司 (在超市看到的产品背后的公司); 快速增长期买入, 成熟期卖出; 10倍股理论; 不做宏观预测",
+        "books": [
+            {"title": "《彼得·林奇的成功投资》", "title_en": "One Up on Wall Street", "year": "1989", "url": "https://book.douban.com/subject/1070133/"},
+            {"title": "《战胜华尔街》", "title_en": "Beating the Street", "year": "1993", "url": "https://book.douban.com/subject/1070135/"},
+        ],
+        "pitfall": "中译名误配: 马尔基尔《漫步华尔街》≠ 林奇 One Up on Wall Street; 后者与帕特·多尔西《股市真规则》也常被混作一本",
+        "links": [("豆瓣-成功投资", "https://book.douban.com/subject/1070133/")],
+        "accent": "#9CCC65",
+    },
+    {
+        "name": "霍华德·马克斯",
+        "name_en": "Howard Marks",
+        "years": "1946–",
+        "tagline": "橡树资本创始人 · 周期思维",
+        "logic": "周期: 市场在恐惧和贪婪之间钟摆; 风险控制: 首先不要亏钱; 定期投资备忘录 (免费, 官网可下载); 另类投资 (不良债务/私募信贷)",
+        "books": [
+            {"title": "《投资最重要的事》", "title_en": "The Most Important Thing", "note": "必读!", "url": "https://book.douban.com/subject/1073248/"},
+            {"title": "《周期》", "title_en": "Mastering the Market Cycle", "year": "2018", "url": "https://book.douban.com/subject/30101822/"},
+        ],
+        "pitfall": "",
+        "links": [("橡树资本 Memos", "https://www.oaktreecapital.com/insights/memos"), ("豆瓣-周期", "https://book.douban.com/subject/30101822/")],
+        "accent": "#7CB342",
+    },
+    {
+        "name": "塞斯·卡拉曼",
+        "name_en": "Seth Klarman",
+        "years": "1957–",
+        "tagline": "安全边际投资 · Baupost 基金",
+        "logic": "深度价值, 安全边际, 事件驱动; 现金为王 (经常持有40%+现金); 逆向投资; 被誉为'年轻版巴菲特'",
+        "books": [
+            {"title": "《安全边际》", "title_en": "Margin of Safety", "year": "1991", "note": "已绝版, 无正式中文版, 二手超1000美元", "url": ""},
+        ],
+        "pitfall": "《安全边际》1991年出版后从未再版, 无正式中文版, 二手市场一本超1000美元",
+        "links": [("维基百科", "https://en.wikipedia.org/wiki/Seth_Klarman")],
+        "accent": "#558B2F",
+    },
+    {
+        "name": "瑞·达利欧",
+        "name_en": "Ray Dalio",
+        "years": "1949–",
+        "tagline": "桥水创始人 · 原则 · 去杠杆",
+        "logic": "经济机器是如何运行的 (30分钟视频); 漂亮去杠杆 vs 丑陋去杠杆; 长期债务周期+短期债务周期; 货币+信贷+支出=经济",
+        "books": [
+            {"title": "《原则》", "title_en": "Principles", "year": "2017", "url": "https://book.douban.com/subject/27608237/"},
+            {"title": "《债务危机》", "title_en": "Principles for Navigating Big Debt Crises", "year": "2018", "url": "https://book.douban.com/subject/30448294/"},
+        ],
+        "pitfall": "",
+        "links": [("经济机器如何运行", "https://www.youtube.com/watch?v=PHe0bXAIuk0"), ("豆瓣-债务危机", "https://book.douban.com/subject/30448294/")],
+        "accent": "#689F38",
+    },
+    {
+        "name": "纳西姆·塔勒布",
+        "name_en": "Nassim Nicholas Taleb",
+        "years": "1960–",
+        "tagline": "黑天鹅 · 反脆弱 · 厚尾分布",
+        "logic": "黑天鹅: 稀有但影响巨大的事件; 反脆弱: 从混乱和冲击中获益 (而非只是耐受); 肥尾分布: 极端事件概率比正态分布大得多; 杠铃策略: 90%低风险+10%高风险",
+        "books": [
+            {"title": "《黑天鹅》", "title_en": "The Black Swan", "year": "2007", "url": "https://book.douban.com/subject/3350363/"},
+            {"title": "《反脆弱》", "title_en": "Antifragile", "year": "2012", "note": "比《黑天鹅》更好", "url": "https://book.douban.com/subject/25888215/"},
+            {"title": "《随机漫步的傻瓜》", "title_en": "Fooled by Randomness", "year": "2001", "url": "https://book.douban.com/subject/1472485/"},
+        ],
+        "pitfall": "",
+        "links": [("豆瓣-反脆弱", "https://book.douban.com/subject/25888215/")],
+        "accent": "#8BC34A",
+    },
+]
+
+
+# --- 名气最大却没亲自写书的 ---
+NO_BOOKS = [
+    {"name": "巴菲特", "note": "只有历年《致股东的信》, 从无专著。中文市场所有'巴菲特著'都是他人编著。《滚雪球》是艾丽斯·施罗德的评传, 巴菲特没撰写过任何专业著作", "source": "中国经济网书评明确", "url": "https://www.berkshirehathaway.com/letters/letters.html"},
+    {"name": "德鲁肯米勒", "note": "索罗斯大弟子, 量子基金核心, 本人无系统著作, 思想全靠杰克·施瓦格《金融怪杰》访谈保存", "source": "《金融怪杰》(1989)", "url": ""},
+    {"name": "保罗·都铎·琼斯", "note": "Tudor Investment 创始人, 宏观对冲传奇, 无本人著作, 《金融怪杰》收录其访谈", "source": "《金融怪杰》(1989)", "url": ""},
+    {"name": "理查德·丹尼斯", "note": "海龟交易法创始人, 公开招募学员著名实验, 无本人系统著作", "source": "海龟交易法则相关书籍为他人整理", "url": ""},
+    {"name": "艾迪·塞柯塔", "note": "计算机化交易先驱, 量化鼻祖之一, 无本人专著, 《金融怪杰》有访谈", "source": "《金融怪杰》(1989)", "url": ""},
+    {"name": "布鲁斯·科夫纳", "note": "Caxton Associates 创始人, 宏观对冲大佬, 无本人系统著作, 《金融怪杰》收录", "source": "《金融怪杰》(1989)", "url": ""},
+    {"name": "吉姆·西蒙斯", "note": "文艺复兴科技创始人, 量化投资之王, 无著述。中文《征服市场的人》/繁体《洞悉市场的人》原书是《The Man Who Solved the Market》(2019), 作者《华尔街日报》记者 Gregory Zuckerman, 西蒙斯本人不配合采访", "source": "企鹅兰登书目 / 台湾馆藏目录", "url": "https://en.wikipedia.org/wiki/James_Simons"},
+    {"name": "徐翔", "note": "无本人著作, 流传的《我在泽熙学到的七堂课》为其前助理叶展所写", "source": "叶展《泽熙投资》", "url": ""},
+]
+
+
+# --- 署名坑 ---
+PITFALLS = [
+    {
+        "title": "《股票作手回忆录》不是利弗莫尔写的",
+        "desc": "1923年出版, 作者是记者 Edwin Lefèvre, 以化名'拉里·利文斯顿'写成小说体评传。中文书商常把两本书合并署名'利弗莫尔著', 严格说是错的。利弗莫尔唯一亲笔是1940年《操盘术》。",
+        "url": "https://zh.wikipedia.org/wiki/股票作手回忆录",
+    },
+    {
+        "title": "'思想在书里'≠'本人撰写成书'",
+        "desc": "《穷查理宝典》是芒格演讲汇编; 《邓普顿教你逆向投资》由其孙女劳伦·邓普顿执笔; 《巴菲特致股东的信》是信件汇编。书名冠名很容易误导读者以为是本人撰写。",
+        "url": "",
+    },
+    {
+        "title": "中译名误配经典",
+        "desc": "是川银藏《股市之神》≠ 科斯托拉尼《股市神猎手》; 马尔基尔《漫步华尔街》≠ 林奇 One Up on Wall Street(《彼得·林奇的成功投资》); 后者与帕特·多尔西《股市真规则》也常被混作一本。",
+        "url": "",
+    },
+    {
+        "title": "《征服市场的人》不是西蒙斯写的",
+        "desc": "原书《The Man Who Solved the Market》(2019), 作者是《华尔街日报》记者 Gregory Zuckerman。企鹅兰登书目和台湾馆藏目录均可查, 西蒙斯本人不配合采访。",
+        "url": "https://www.penguinrandomhouse.com/books/555382/the-man-who-solved-the-market-by-gregory-zuckerman/",
+    },
+    {
+        "title": "卡拉曼《安全边际》绝版了30年",
+        "desc": "1991年出版后从未再版, 无正式中文版。二手市场一本超1000美元, 是价值投资者的'圣杯'。",
+        "url": "",
+    },
+]
+
+
+# --- 实用阅读指南 ---
+READING_GUIDES = [
+    {
+        "topic": "📊 交易纪律与心理",
+        "path": [
+            ("《股票作手回忆录》", "当人性故事读, 市场最经典的教训书"),
+            ("→ 斯波朗迪《专业投机原理》", "风险报酬比+纪律, 职业操盘框架"),
+            ("→ 施瓦格《金融怪杰》", "17位交易冠军访谈录, 涵盖上面所有无著述大佬"),
+            ("→ 埃尔德《以交易为生》", "三重框架+心理三支柱"),
+            ("→ 道格拉斯《交易心理分析》", "概率思维+信念结构, 交易心理学集大成"),
+        ],
+        "url": "https://book.douban.com/subject/5980568/",
+    },
+    {
+        "topic": "🌍 宏观与风险",
+        "path": [
+            ("索罗斯《超越金融》", "比《金融炼金术》好懂得多, 反身性理论入门"),
+            ("→ 达利欧《债务危机》", "漂亮去杠杆vs丑陋去杠杆, 长期债务周期"),
+            ("→ 塔勒布《反脆弱》", "比《黑天鹅》更系统, 杠铃策略"),
+        ],
+        "url": "https://book.douban.com/subject/30448294/",
+    },
+    {
+        "topic": "💰 基本面/价值投资",
+        "path": [
+            ("格雷厄姆《聪明的投资者》", "价值投资入门, 安全边际+市场先生"),
+            ("→ 费雪《怎样选择成长股》", "闲聊法+成长股15要点"),
+            ("→ 林奇《彼得·林奇的成功投资》", "生活中发现10倍股, 最通俗的基本面书"),
+            ("→ 马克斯《投资最重要的事》", "周期思维+风险控制, 必读!"),
+        ],
+        "url": "https://book.douban.com/subject/1070133/",
+    },
+    {
+        "topic": "⚠️ 选书注意事项",
+        "path": [
+            ("别把'写过书'当成'操盘厉害'的代理变量", "业绩最硬的一批实战者(德鲁肯米勒/西蒙斯)恰恰都不写书"),
+            ("著述最勤的江恩", "其宣称的收益缺乏可验证记录"),
+            ("选书先明确想学什么", "交易纪律→心理书; 基本面→格雷厄姆系; 宏观→达利欧/塔勒布"),
+        ],
+        "url": "",
+    },
+]
+
+
+# ═══════════════════════════════════════════════════════════════
+# 🎨 UI 构建
+# ═══════════════════════════════════════════════════════════════
 
 def _build_dava_views_tab(nb_notebook, root=None):
-    """在主线资金 Notebook 里加: 🌟大V观点"""
+    """在主线资金 Notebook 里加: 🌟名人堂"""
     tab = tk.Frame(nb_notebook, bg="#FAFAFA")
-    nb_notebook.add(tab, text="  🌟 大V观点  ")
+    nb_notebook.add(tab, text="  🌟 名人堂  ")
 
     banner = tk.Frame(tab, bg="#E65100", height=44)
     banner.pack(fill=tk.X, padx=6, pady=(6, 4))
     banner.pack_propagate(False)
-    tk.Label(banner, text="🌟 大V观点聚合 · 经济学家 / 投资大师 / 商业大佬 / 顶级基金经理",
+    tk.Label(banner, text="🌟 名人堂 · 操盘手 vs 投资家 · 代表作/署名坑/阅读指南",
              font=("Microsoft YaHei", 12, "bold"),
              bg="#E65100", fg="white").pack(side=tk.LEFT, padx=14)
 
-    # 字体调节
+    # 字体 + 背景调节
     ctrl = tk.Frame(tab, bg="#FAFAFA")
     ctrl.pack(fill=tk.X, padx=6, pady=(0, 4))
     tk.Label(ctrl, text="🔧字体:", bg="#FAFAFA", fg="#555", font=("", 9)).pack(side=tk.LEFT)
@@ -33,7 +452,8 @@ def _build_dava_views_tab(nb_notebook, root=None):
     bg_cb = ttk.Combobox(ctrl, textvariable=bg_var, width=10, state="readonly",
                          values=["#FAFAFA", "#FFFFFF", "#FFF8E1", "#FFF3E0", "#E3F2FD", "#FCE4EC", "#1A1A2E"])
     bg_cb.pack(side=tk.LEFT, padx=4)
-    _date_lbl = tk.Label(ctrl, text="📅 数据截至: 2026-11-13", bg="#FAFAFA", fg="#999", font=("", 8))
+    _date_lbl = tk.Label(ctrl, text="📅 数据来源: 中信出版/上高金/央视网/经济参考报 2026-11-13",
+                         bg="#FAFAFA", fg="#999", font=("", 8))
     _date_lbl.pack(side=tk.RIGHT, padx=8)
 
     # 分类 Notebook
@@ -42,39 +462,74 @@ def _build_dava_views_tab(nb_notebook, root=None):
 
     refs = {"size_var": size_var, "bg_var": bg_var, "text_widgets": []}
 
-    # === 分类1: 经济学家 ===
-    t1 = tk.Frame(nb_inner, bg="#FAFAFA"); nb_inner.add(t1, text="  🎓 经济学家  ")
-    _make_person_card(t1, "张五常", "香港大学经济学院教授 · 新制度经济学之父", "产权·交易费用·《经济解释》",
-                      DAVA_ZHANGWCHANG, refs, "#FFE0B2")
-    _make_person_card(t1, "林毅夫", "北大新结构经济学研究院院长", "新结构·比较优势·有为政府",
-                      DAVA_LINYF, refs, "#FFCCBC")
-    _make_person_card(t1, "付鹏", "新火集团首席经济学家", "FICC+C·全球宏观·一人对冲基金",
-                      DAVA_FUPENG, refs, "#FFAB91")
+    def _make_scrollable_tab(parent, bg="#FAFAFA"):
+        """🆕 可滚动 Tab — Canvas + 滚动条 + 内部 Frame"""
+        outer = tk.Frame(parent, bg=bg)
+        canvas = tk.Canvas(outer, bg=bg, highlightthickness=0, bd=0)
+        vbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=bg)
+        inner_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        # 内部 Frame 宽度跟随 Canvas 宽度拉伸
+        def _on_canvas_config(e):
+            canvas.itemconfigure(inner_id, width=e.width)
+        canvas.bind("<Configure>", _on_canvas_config)
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.configure(yscrollcommand=vbar.set)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # 鼠标滚轮 (Windows/macOS)
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-event.delta / 120), "units")
+        def _on_mousewheel_linux_up(event): canvas.yview_scroll(-1, "units")
+        def _on_mousewheel_linux_down(event): canvas.yview_scroll(1, "units")
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        inner.bind("<MouseWheel>", _on_mousewheel)
+        # 让 inner 也能接收滚轮事件 (递归绑定子控件)
+        def _bind_wheel_recursive(w):
+            try: w.bind("<MouseWheel>", _on_mousewheel)
+            except Exception: pass
+            try: w.bind("<Button-4>", _on_mousewheel_linux_up)
+            except Exception: pass
+            try: w.bind("<Button-5>", _on_mousewheel_linux_down)
+            except Exception: pass
+            for child in w.winfo_children():
+                _bind_wheel_recursive(child)
+        inner.bind("<Configure>", lambda e: _bind_wheel_recursive(inner))
+        # 首次 render 后也绑定一次
+        outer.after(100, lambda: _bind_wheel_recursive(inner))
+        return inner
 
-    # === 分类2: 国际投资大师 ===
-    t2 = tk.Frame(nb_inner, bg="#FAFAFA"); nb_inner.add(t2, text="  🌍 国际投资大师  ")
-    _make_person_card(t2, "霍华德·马克斯", "橡树资本(Oaktree)创始人 · 投资备忘录", "周期·风险控制·AI泡沫？",
-                      DAVA_HOWARD, refs, "#B3E5FC")
+    # === Tab 1: 🎯 亲笔操盘手 ===
+    t1_outer = tk.Frame(nb_inner, bg="#FAFAFA"); nb_inner.add(t1_outer, text="  🎯 亲笔操盘手  ")
+    t1 = _make_scrollable_tab(t1_outer)
+    for person in TRADERS:
+        _make_person_card(t1, person, refs)
 
-    # === 分类3: 投资大V / 基金经理 ===
-    t3 = tk.Frame(nb_inner, bg="#FAFAFA"); nb_inner.add(t3, text="  💰 投资大V  ")
-    _make_person_card(t3, "张坤", "易方达基金 · 顶流基金经理", "蓝筹精选·白酒→科技·生意模式",
-                      DAVA_ZHANGKUN, refs, "#C8E6C9")
-    _make_person_card(t3, "银行螺丝钉", "指数基金定投专家", "日更估值·星级系统·养老定投",
-                      DAVA_SCREW, refs, "#A5D6A7")
+    # === Tab 2: ⚖️ 介于两派 ===
+    t2_outer = tk.Frame(nb_inner, bg="#FAFAFA"); nb_inner.add(t2_outer, text="  ⚖️ 介于两派  ")
+    t2 = _make_scrollable_tab(t2_outer)
+    for person in BETWEEN:
+        _make_person_card(t2, person, refs)
 
-    # === 分类4: 商业大佬 ===
-    t4 = tk.Frame(nb_inner, bg="#FAFAFA"); nb_inner.add(t4, text="  🚀 商业大佬  ")
-    _make_person_card(t4, "马斯克", "SpaceX/Tesla/xAI 创始人", "万亿富翁·400亿GPU债·太空算力",
-                      DAVA_MUSK, refs, "#81D4FA")
-    _make_person_card(t4, "稻盛和夫", "京瓷/KDDI 创始人 · 经营之圣", "阿米巴·敬天爱人·六项精进",
-                      DAVA_INAMORI, refs, "#F8BBD0")
+    # === Tab 3: 💰 投资家 ===
+    t3_outer = tk.Frame(nb_inner, bg="#FAFAFA"); nb_inner.add(t3_outer, text="  💰 投资家  ")
+    t3 = _make_scrollable_tab(t3_outer)
+    for person in INVESTORS:
+        _make_person_card(t3, person, refs)
 
-    # === 分类5: 热门榜单 ===
-    t5 = tk.Frame(nb_inner, bg="#FAFAFA"); nb_inner.add(t5, text="  📋 热门榜单  ")
-    _make_hot_list(t5, refs)
+    # === Tab 4: 🕊️ 名气大却无书 ===
+    t4 = tk.Frame(nb_inner, bg="#FAFAFA"); nb_inner.add(t4, text="  🕊️ 名气大却无书  ")
+    _make_no_books_tab(t4, refs)
 
-    # 绑定字体/背景调节
+    # === Tab 5: 🚨 署名坑 ===
+    t5 = tk.Frame(nb_inner, bg="#FAFAFA"); nb_inner.add(t5, text="  🚨 署名坑  ")
+    _make_pitfalls_tab(t5, refs)
+
+    # === Tab 6: 📖 阅读指南 ===
+    t6 = tk.Frame(nb_inner, bg="#FAFAFA"); nb_inner.add(t6, text="  📖 阅读指南  ")
+    _make_reading_guide_tab(t6, refs)
+
+    # 应用样式
     def _apply_style(_e=None):
         sz = size_var.get(); bg = bg_var.get()
         for tw in refs["text_widgets"]:
@@ -86,522 +541,219 @@ def _build_dava_views_tab(nb_notebook, root=None):
     return tab
 
 
-def _make_person_card(parent, name, title, tagline, content, refs, accent):
-    """人物卡片 — 标题 + 完整内容"""
+def _open_url(url):
+    """双击打开链接"""
+    if url:
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+
+
+def _make_book_row(parent, book):
+    """单行书籍卡片 — 书名+年份+备注+双击打开"""
+    row = tk.Frame(parent, bg=parent.cget("bg"))
+    row.pack(fill=tk.X, padx=6, pady=1)
+
+    # 书名 (蓝, 下划线可点击感)
+    title_txt = f"📖 {book['title']}"
+    if book.get("title_en"):
+        title_txt += f"  ({book['title_en']})"
+    if book.get("year"):
+        title_txt += f"  [{book['year']}]"
+    lbl = tk.Label(row, text=title_txt, bg=parent.cget("bg"),
+                   fg="#1565C0", font=("", 9, "underline"), cursor="hand2")
+    lbl.pack(side=tk.LEFT, anchor="w")
+
+    # 备注
+    if book.get("note"):
+        note_lbl = tk.Label(row, text=f" — {book['note']}", bg=parent.cget("bg"),
+                            fg="#616161", font=("", 8))
+        note_lbl.pack(side=tk.LEFT, anchor="w")
+
+    if book.get("url"):
+        lbl.bind("<Double-Button-1>", lambda e, u=book["url"]: _open_url(u))
+        lbl.config(fg="#1976D2")  # 蓝色表示可点击
+
+
+def _make_person_card(parent, person, refs):
+    """人物卡片 — 标题 + 逻辑 + 代表作 + 链接"""
+    accent = person.get("accent", "#FFF3E0")
     card = tk.Frame(parent, bg=accent, highlightthickness=1, highlightbackground=accent)
     card.pack(fill=tk.X, padx=4, pady=4)
 
+    # 标题行
     head = tk.Frame(card, bg=accent)
-    head.pack(fill=tk.X, padx=8, pady=(6, 2))
-    tk.Label(head, text=f"👤 {name}", font=("Microsoft YaHei", 11, "bold"),
-             bg=accent, fg="#BF360C").pack(side=tk.LEFT)
-    tk.Label(head, text=f"  ·  {title}", font=("", 9),
-             bg=accent, fg="#5D4037").pack(side=tk.LEFT)
-    tk.Label(head, text=f"  [{tagline}]", font=("", 8),
-             bg=accent, fg="#8D6E63").pack(side=tk.LEFT)
+    head.pack(fill=tk.X, padx=10, pady=(8, 2))
+    name_lbl = tk.Label(head, text=f"👤 {person['name']}", font=("Microsoft YaHei", 11, "bold"),
+                        bg=accent, fg="#BF360C")
+    name_lbl.pack(side=tk.LEFT)
+    if person.get("name_en"):
+        tk.Label(head, text=f"  ({person['name_en']})", font=("", 9),
+                 bg=accent, fg="#5D4037").pack(side=tk.LEFT)
+    if person.get("years"):
+        tk.Label(head, text=f"  {person['years']}", font=("", 8),
+                 bg=accent, fg="#8D6E63").pack(side=tk.LEFT)
+    tk.Label(head, text=f"  ·  {person['tagline']}", font=("", 9),
+             bg=accent, fg="#6D4C41").pack(side=tk.LEFT, padx=4)
 
+    # 内部内容区
     inner = tk.Frame(card, bg="#FAFAFA")
-    inner.pack(fill=tk.X, padx=4, pady=(0, 4))
+    inner.pack(fill=tk.X, padx=4, pady=(0, 6))
+
     st = scrolledtext.ScrolledText(inner, wrap=tk.WORD, font=("", 9), bg="#FAFAFA", fg="#212121",
-                                   bd=0, relief=tk.FLAT, padx=6, pady=4, spacing1=1, spacing3=3,
-                                   height=10)
+                                   bd=0, relief=tk.FLAT, padx=8, pady=6, spacing1=2, spacing3=4,
+                                   height=4)
     st.pack(fill=tk.X)
 
-    st.tag_configure("sub", font=("", 10, "bold"), foreground="#BF360C", spacing1=6)
-    st.tag_configure("bullet", foreground="#424242")
-    st.tag_configure("hot", foreground="#C62828", font=("", 9, "bold"))
-    st.tag_configure("info", foreground="#1565C0", font=("", 9, "bold"))
+    st.tag_configure("logic_sub", font=("", 9, "bold"), foreground="#BF360C", spacing1=4)
+    st.tag_configure("logic", foreground="#424242")
+    st.tag_configure("book_sub", font=("", 9, "bold"), foreground="#2E7D32", spacing1=4)
+    st.tag_configure("pitfall_sub", font=("", 9, "bold"), foreground="#C62828", spacing1=4)
+    st.tag_configure("pitfall", foreground="#6A1B9A", font=("", 8, "italic"))
+    st.tag_configure("link_sub", font=("", 9, "bold"), foreground="#1565C0", spacing1=4)
+
+    # 逻辑
+    st.insert(tk.END, "🧠 核心逻辑:\n", "logic_sub")
+    st.insert(tk.END, f"  {person['logic']}\n", "logic")
+
+    # 坑
+    if person.get("pitfall"):
+        st.insert(tk.END, "\n🚨 署名坑:\n", "pitfall_sub")
+        st.insert(tk.END, f"  {person['pitfall']}\n", "pitfall")
+
+    st.config(state=tk.DISABLED, height=3)
+    refs["text_widgets"].append(st)
+
+    # 书籍行 (独立 frame, 可双击)
+    if person.get("books"):
+        book_frame = tk.Frame(inner, bg="#FAFAFA")
+        book_frame.pack(fill=tk.X, pady=(2, 4))
+        tk.Label(book_frame, text="📚 代表作:", bg="#FAFAFA", fg="#2E7D32",
+                 font=("", 9, "bold")).pack(anchor="w", padx=6)
+        for book in person["books"]:
+            _make_book_row(book_frame, book)
+
+    # 链接行
+    if person.get("links"):
+        link_frame = tk.Frame(inner, bg="#FAFAFA")
+        link_frame.pack(fill=tk.X, pady=(0, 6))
+        for label, url in person["links"]:
+            if url:
+                lk = tk.Label(link_frame, text=f"  🔗 {label}", bg="#FAFAFA",
+                              fg="#1565C0", font=("", 8, "underline"), cursor="hand2")
+                lk.pack(side=tk.LEFT, padx=(6, 2))
+                lk.bind("<Double-Button-1>", lambda e, u=url: _open_url(u))
+
+    return card
+
+
+def _make_no_books_tab(parent, refs):
+    """名气大却没写书的 — 简洁卡片"""
+    st = scrolledtext.ScrolledText(parent, wrap=tk.WORD, font=("", 9), bg="#FAFAFA", fg="#212121",
+                                   bd=0, relief=tk.FLAT, padx=10, pady=8, spacing1=2, spacing3=4)
+    st.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+    st.tag_configure("h1", font=("", 11, "bold"), foreground="#C62828", spacing1=6, spacing3=4)
+    st.tag_configure("name", font=("", 10, "bold"), foreground="#1565C0")
+    st.tag_configure("note", foreground="#424242")
     st.tag_configure("src", foreground="#9E9E9E", font=("", 8, "italic"))
-    st.tag_configure("quote", foreground="#6A1B9A", font=("", 9, "italic"))
-    st.tag_configure("book", foreground="#2E7D32", font=("", 9, "bold"))
+    st.tag_configure("hint", foreground="#6A1B9A", font=("", 9))
     st.tag_configure("link", foreground="#1565C0", font=("", 9, "underline"))
 
-    for line in content.split("\n"):
-        _tag = None
-        if line.startswith("## "):
-            st.insert(tk.END, line[3:] + "\n", "sub")
-        elif line.startswith("🔥") or line.startswith("🚨") or line.startswith("⚠️"):
-            st.insert(tk.END, line + "\n", "hot")
-        elif line.startswith("💡") or line.startswith("📌") or line.startswith("✅"):
-            st.insert(tk.END, line + "\n", "info")
-        elif line.startswith("📖") or line.startswith("📚"):
-            st.insert(tk.END, line + "\n", "book")
-        elif line.startswith("🔗") or line.startswith("http"):
-            st.insert(tk.END, line + "\n", "link")
-        elif line.startswith("📅") or line.startswith("📰") or line.startswith("["):
-            st.insert(tk.END, line + "\n", "src")
-        elif line.startswith('"'):
-            st.insert(tk.END, line + "\n", "quote")
-        else:
-            st.insert(tk.END, line + "\n")
+    st.insert(tk.END, "🔥 业绩最硬的一批实战者恰恰都不写书\n", "h1")
+    st.insert(tk.END, "东西靠《金融怪杰》(1989, 杰克·施瓦格)访谈录留下来 — 共17位顶级交易员深度访谈\n\n", "hint")
+
+    for p in NO_BOOKS:
+        st.insert(tk.END, f"👤 {p['name']}\n", "name")
+        st.insert(tk.END, f"  {p['note']}\n", "note")
+        if p.get("source"):
+            st.insert(tk.END, f"  📅 来源: {p['source']}\n", "src")
+        if p.get("url"):
+            st.insert(tk.END, f"  🔗 {p['url']}  (双击打开)\n", "link")
+        st.insert(tk.END, "\n")
+
+    def _on_link_click(event):
+        stg = st.tag_nextrange("link", tk.SEL_FIRST)
+        if stg:
+            text = st.get(stg[0], stg[1])
+            url = text.strip().replace("🔗 ", "").replace(" (双击打开)", "")
+            if url.startswith("http"):
+                _open_url(url)
+    st.bind("<Double-Button-1>", _on_link_click)
+
     st.config(state=tk.DISABLED)
     refs["text_widgets"].append(st)
-    return st
 
 
-def _make_hot_list(parent, refs):
-    """热门榜单 — 综合排行"""
-    card = tk.Frame(parent, bg="#F1F8E9", highlightthickness=1, highlightbackground="#8BC34A")
+def _make_pitfalls_tab(parent, refs):
+    """署名坑 — 重点警示"""
+    card = tk.Frame(parent, bg="#FFEBEE", highlightthickness=1, highlightbackground="#EF9A9A")
     card.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
     inner = tk.Frame(card, bg="#FAFAFA")
     inner.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
     st = scrolledtext.ScrolledText(inner, wrap=tk.WORD, font=("", 9), bg="#FAFAFA", fg="#212121",
-                                   bd=0, relief=tk.FLAT, padx=8, pady=6, spacing1=2, spacing3=4)
+                                   bd=0, relief=tk.FLAT, padx=10, pady=8, spacing1=2, spacing3=5)
     st.pack(fill=tk.BOTH, expand=True)
 
-    st.tag_configure("h1", font=("", 12, "bold"), foreground="#33691E", spacing1=8, spacing3=4)
-    st.tag_configure("h2", font=("", 10, "bold"), foreground="#558B2F", spacing1=6)
-    st.tag_configure("rank", font=("", 9, "bold"), foreground="#C62828")
-    st.tag_configure("info", foreground="#1565C0")
+    st.tag_configure("h1", font=("", 12, "bold"), foreground="#C62828", spacing1=8, spacing3=4)
+    st.tag_configure("h2", font=("", 10, "bold"), foreground="#BF360C", spacing1=6)
+    st.tag_configure("p", foreground="#424242")
+    st.tag_configure("tip", foreground="#6A1B9A", font=("", 9))
+    st.tag_configure("link", foreground="#1565C0", font=("", 9, "underline"))
 
-    st.insert(tk.END, "## 🎯 2026年最值得关注的大V榜单\n\n", "h2")
-    st.insert(tk.END, "### 🎓 宏观经济学 Top 5\n\n", "h2")
-    _rank = [
-        ("🥇 林毅夫", "新结构经济学 · 北大 · 主张有效市场+有为政府"),
-        ("🥈 付鹏", "新火集团 · FICC+C全球宏观 · 一人对冲基金预言家"),
-        ("🥉 张五常", "产权经济学泰斗 · 《经济解释》四卷本"),
-        ("4️⃣ 吴敬琏", "改革派代表 · 市场活力=微观主体自主权+安全感"),
-        ("5️⃣ 张忆东", "海通国际 · A股慢牛 · 三座大山已推翻"),
-    ]
-    for r, d in _rank:
-        st.insert(tk.END, f"  {r}  —  {d}\n")
+    st.insert(tk.END, "🚨 三个最容易踩的署名坑\n\n", "h1")
+    for i, p in enumerate(PITFALLS, 1):
+        st.insert(tk.END, f"{i}. {p['title']}\n", "h2")
+        st.insert(tk.END, f"  {p['desc']}\n", "p")
+        if p.get("url"):
+            st.insert(tk.END, f"  🔗 {p['url']}  (双击打开)\n", "link")
+        st.insert(tk.END, "\n")
 
-    st.insert(tk.END, "\n### 💰 基金经理 Top 3 (2026年三季报后)\n\n", "h2")
-    _rank2 = [
-        ("🥇 张坤", "易方达 · 独管亚洲精选重仓台积电/SK海力士/三星电子/谷歌"),
-        ("🥈 谢治宇", "兴全合润 · 均衡风格代表"),
-        ("🥉 葛兰", "中欧医疗健康 · 医疗赛道顶流"),
-    ]
-    for r, d in _rank2:
-        st.insert(tk.END, f"  {r}  —  {d}\n")
-
-    st.insert(tk.END, "\n### 🌍 国际投资大师 (必读)\n\n", "h2")
-    _rank3 = [
-        ("🥇 霍华德·马克斯", "橡树资本 · 周期+风险 · 2026.11最新 memo: AI外行思考"),
-        ("🥈 巴菲特", "伯克希尔 · 2026年股东大会 · 日本五大商社加仓"),
-        ("🥉 达利欧", "桥水 · 原则 · 去杠杆/漂亮去杠杆"),
-    ]
-    for r, d in _rank3:
-        st.insert(tk.END, f"  {r}  —  {d}\n")
-
-    st.insert(tk.END, "\n### 🚀 商业大佬 (改变世界)\n\n", "h2")
-    _rank4 = [
-        ("🥇 马斯克", "万亿富翁 · SpaceX上市 · 400亿债务买GPU"),
-        ("🥈 黄仁勋", "英伟达 · AI算力垄断 · 季度营收300亿美"),
-        ("🥉 稻盛和夫", "经营之圣 · 阿米巴 · 敬天爱人"),
-    ]
-    for r, d in _rank4:
-        st.insert(tk.END, f"  {r}  —  {d}\n")
-
-    st.insert(tk.END, "\n### 📌 游资心法说明\n", "h2")
-    st.insert(tk.END, "  💡 炒股养家等游资心法观点已整合至「🔥主线资金 → 📈AI研判」Tab 的大V观点区\n")
-    st.insert(tk.END, "     与简放、徐泽林等 AI 风格分析师的观点放在一起, 方便对比参考\n\n", "info")
+    def _on_link_click(event):
+        stg = st.tag_nextrange("link", tk.SEL_FIRST)
+        if stg:
+            text = st.get(stg[0], stg[1])
+            url = text.strip().replace("🔗 ", "").replace(" (双击打开)", "")
+            if url.startswith("http"):
+                _open_url(url)
+    st.bind("<Double-Button-1>", _on_link_click)
 
     st.config(state=tk.DISABLED)
     refs["text_widgets"].append(st)
-    return st
 
 
-# ═══════════════════════════════════════════════════════════
-# 大V观点文本
-# ═══════════════════════════════════════════════════════════
-
-DAVA_ZHANGWCHANG = """📅 最新引用: 2026年8月 · 搜狐财经
-📰 来源: 搜狐 / 雪球 / 经济参考报
-
-## 👤 个人简介
-
-  张五常 · 香港大学经济学院教授 · 新制度经济学创始人之一
-  著作: 《经济解释》四卷本 (科学说需求/收入与成本/受价与觅价/制度的选择)
-  2019年正式从港大退休, 但仍活跃在公共讨论中
-
-## 🔥 核心贡献
-
-  📌 交易费用理论 — 解释企业为什么存在 (Coase定理的延伸)
-  📌 产权理论 — 产权清晰推动经济发展, 制度决定交易成本
-  📌 佃农理论 — 200年没人想明白的分成合约, 他用交易费用解释了
-
-## 📅 2026年最新观点
-
-  ⚠️ 市场的核心在于产权的清晰、契约的严肃以及价格信号的绝对自由
-  ⚠️ 当价格机制被行政之手无形冻结, 经济体便不可避免地陷入失重的迷茫
-
-  🔍 房地产: 土地财政的旧逻辑渐行渐远, 正从"买房即暴富"神话回归"大宗耐用消费品"
-  🔍 民企: 民间投资连续多月负区间滑行, 需给予微观主体足够的自主权与安全感
-  🔍 外资: 跨国资本在周期面前高度理性, 固定资产投资稳步回撤
-
-## 💡 经典思维方式
-
-  1. 成本-收益分析: 任何选择都有代价, 看放弃了什么
-  2. 激励-约束: 制度设计要让好人有好报, 坏人受约束
-  3. 供需关系: 价格是信号, 扭曲价格会扭曲资源配置
-  4. 边际递减: 多一单位带来的价值递减, 不要过度
-
-## 📖 代表书籍
-
-  📚 《经济解释》四卷本 (必读)
-  📚 《佃农理论》(芝加哥大学出版社)
-  📚 《卖桔者言》(散文集)
-  📚 《五常学经济》
-
-## 🔗 网络资源
-
-  🔗 维基百科 张五常
-  🔗 微信公众号 "张五常教授"
-"""
-
-DAVA_LINYF = """📅 最新专访: 2026年10月 · 中国经济网 / 2026年3月 · 人民网两会
-📰 来源: 上海证券报 / 人民网 / 中国经济学年会
-
-## 👤 个人简介
-
-  林毅夫 · 北京大学新结构经济学研究院院长 · 全国政协常委
-  新结构经济学创始人 · 世界银行前首席经济学家 (2008-2012)
-  芝加哥大学经济学博士 · 发展经济学权威
-
-## 🔥 核心贡献
-
-  📌 新结构经济学 — 经济发展应立足比较优势, 而非照搬西方模式
-  📌 有效市场 + 有为政府 — 市场是基础, 政府在结构变迁中发挥因势利导作用
-  📌 后来者优势 — 发展中国家通过引进消化吸收再创新, 实现比发达国家更快增长
-
-## 📅 2026年最新观点 (重磅)
-
-  🎯 十五五目标: 维持 5% 左右年均增速, 为 2035 年人均 GDP 中等发达国家奠基
-  🎯 大船优势: 中国是超大规模经济体 — 人才多/市场大/产业全/制度优
-  🎯 有效劳动: 老龄化 ≠ 经济减速, 劳动力质量 × 教育水平 = 有效劳动提高
-  🎯 银发经济: 老龄化催生新赛道, 供给侧调整 = 经济增长新来源
-
-  🔍 新质生产力: 传统产业 + 新兴产业都可发展新质生产力, 关键是数字化/智能化/绿色化
-  🔍 比较优势错位: 各地严格依据自身比较优势错位发展 → 避免重复建设
-  🔍 全球南方: 金砖国家GDP (PPP计) 已超过七国集团, 应主动推动全球治理改革
-
-## 💡 经典语录
-
-  "小船在风浪中起伏大, 大船只要做好自己的工作, 就能乘风破浪"
-  "挑战固然存在, 但中国的机遇更多"
-  "理论的功能是帮助人们认识世界、改造世界。如果一个理论不能解释我们观察到的现象, 就要反思并构建新的理论"
-
-## 📖 代表书籍
-
-  📚 《新结构经济学》(剑桥大学出版社, 2014)
-  📚 《繁荣的求索》(北大出版社, 2012)
-  📚 《解读中国经济》(北大出版社, 2014)
-  📚 《战胜命运》(与诺斯合著)
-
-## 🔗 网络资源
-
-  🔗 北京大学新结构经济学研究院官网
-  🔗 第26届中国经济学年会主旨演讲 (2026.10)
-"""
-
-DAVA_FUPENG = """📅 最新专访: 2026年11月13日 · Forisight News 6小时对话
-📰 来源: Forisight / 格隆汇 / 澎湃新闻
-
-## 👤 个人简介
-
-  付鹏 · 新火集团联合创始人 · 首席经济学家
-  "FICC+C" 框架提出者 — 固定收益/外汇/大宗商品/加密货币
-  前东北证券首席经济学家 · 前惠富投资合伙人
-  微博粉丝超百万, 以深度宏观分析和加密货币讨论闻名
-
-## 🔥 核心贡献
-
-  📌 FICC+C 框架 — 将加密货币正式纳入全球宏观资产配置
-  📌 利率作为独立宏观变量 — 跟踪美联储利率周期是核心
-  📌 一人对冲基金预言 — AI 让散户时代终结, 头部玩家才活得下去
-
-## 📅 2026年11月最新观点 (重磅)
-
-  🚨 "我对 BTC 没有信仰 — BTC 四年周期已经结束"
-  • 比特币从信仰变成资产, 机构入场后波动率大幅缩小
-  • 传统金融与加密世界的研究策略将无区别
-  • AI 让年轻人成为"一人对冲基金", 散户时代即将结束
-
-  📌 全球配置:
-  • FICC+C 多资产策略正在推出 — 固定收益+外汇+大宗商品+数字资产
-  • 哑铃配置: 底层类现金/红利股, 上层 Alpha 押注科技
-  • 不认同"股市是经济的晴雨表" — 股市 = 估值+价值+制度性红利
-
-  📌 中产阶级建议:
-  • 优先还房贷 (降低负债)
-  • 半退休"老登们": 股息红利是好选择
-  • Beta 资产跟着巴菲特风格走, Alpha 押注改变生产力的
-
-  💡 "K型经济对应 K型流动性 — 现在是流动性分层阶段"
-  💡 "赚钱是靠周期, 不是靠预测"
-
-## 📖 代表书籍 / 专栏
-
-  📚 微博长文《BTC 四年周期已结束》(2026.11)
-  📚 Forisight 专访《FICC+C 框架详解》(2026.11)
-  📚 《信用债投资指南》
-
-## 🔗 网络资源
-
-  🔗 微博 @付鹏 North
-  🔗 Forisight News
-  🔗 格隆汇专栏
-"""
-
-DAVA_HOWARD = """📅 最新备忘录: 2026年11月11日 《A Layman Thinks About AI》
-📰 来源: Oaktree Capital Memos (官网中文译本)
-
-## 👤 个人简介
-
-  霍华德·马克斯 (Howard Marks) · 橡树资本 (Oaktree Capital) 联合创始人
-  管理规模超 2000 亿美元 · 《投资最重要的事》作者
-  以定期投资备忘录闻名 — 每次发布都引发全球投资界关注
-  被巴菲特称为"我第一时间读的备忘录"
-
-## 🔥 核心贡献
-
-  📌 投资备忘录 — 定期发布的深度思考 (免费, 官网可下载)
-  📌 周期思维 — 市场在恐惧和贪婪之间钟摆式摆动
-  📌 风险控制 — "首先, 不要亏钱; 其次, 永远不要忘记第一条"
-  📌 另类投资 — 不良债务/私募信贷/困境投资
-
-## 📅 2026年11月最新备忘录 (重磅)
-
-  备忘录标题: 《A Layman Thinks About AI》 (AI 外行思考)
-  继 2025.12 《是泡沫吗?》 和 2026.2 《AI 高歌猛进》之后, 第三次讨论 AI
-
-  🎯 核心问题: "AI 为用户创造的价值, 能否支撑数万亿美元的基础设施投资?"
-
-  📌 三个判断维度:
-  1. 技术本身能实现什么? (AI 潜力可能被低估)
-  2. 企业资本开支能产生足够回报吗? (尚无定论)
-  3. 投资者为股票和债券支付的价格合理吗? (需谨慎)
-
-  📌 债务警示: 2026 年全球 AI 相关债务发行已接近 6000 亿美元
-  • 约 4000 亿进入美国投资级债券市场 (占全年 1/5 新增供应)
-  • 云厂商持续举债 → 可能推高其他借款人的资本成本
-
-  💡 核心方法论 (马克斯的"好问题清单"):
-  1. 要获得合理回报, 需要多少假设同时成立?
-  2. 如果核心假设错了, 最大可能亏损是多少?
-  3. 当前价格已经反映了多少乐观预期?
-  4. 这项投资会让组合更多元化, 还是放大现有风险?
-
-  🎯 "最重要的是知道自己不知道什么" — 这是马克斯反复强调的
-
-## 📖 代表书籍
-
-  📚 《投资最重要的事》(The Most Important Thing) — 必读!
-  📚 《周期》(Mastering the Market Cycle)
-  📚 《投资备忘录全集》(官网可免费下载全部历史备忘录)
-
-## 🔗 网络资源
-
-  🔗 橡树资本官网 Memos 专区 (全中文译本)
-  🔗 微信公众号 "橡树资本 Oaktree"
-  🔗 播客《The Memo by Howard Marks》(Art19)
-"""
-
-DAVA_ZHANGKUN = """📅 最新三季报: 2026年10月27日 · 易方达基金
-📰 来源: 澎湃新闻 / 21世纪经济报道 / 易方达官方
-
-## 👤 个人简介
-
-  张坤 · 易方达基金 · 顶流基金经理
-  管理规模约 293 亿元 · 代表作: 易方达蓝筹精选 / 亚洲精选
-  以长期持有、深度研究、重仓消费蓝筹闻名
-  被称为"中国版巴菲特" · 坚持"生意模式+竞争壁垒"选股框架
-
-## 🔥 2026年三季度调仓 (重要!)
-
-  🚨 独管产品 (亚洲精选) — 重仓全球 AI 半导体:
-  • 台积电 (TSM) · SK海力士 · 三星电子 · 阿斯麦 · 科天半导体
-  • 谷歌 (GOOGL) 新进前十, 大幅增持 244%
-  • 阿里巴巴退出前十, 富途控股减仓 75%
-
-  📌 共管产品 (蓝筹精选) — 历史首次买 AI 股后又减持电子:
-  • 二季度建仓中芯国际/东山精密 → 三季度双双退出前十
-  • 新易盛 (光模块) 新进前十, 增持 176%
-  • 川投能源 (水电) 新进前十, 增持 20.94%
-  • 白酒: 茅台/泸州老窖/山西汾酒继续收缩 (去白酒路线清晰)
-  • 阿里巴巴唯一明显加仓
-
-  📌 卸任: 9月30日卸任易方达优质企业三年持有, 交棒张琦
-
-## 📅 2026年三季报观点
-
-  💡 "生意模式 (产生充沛自由现金流) + 竞争壁垒 (显著领先地位)" 依然最重要
-  💡 "长期向上的经济是企业长期成长的土壤 — 基础概率影响5-10年后公司价值"
-  💡 "居民端预期各项指标仍未见起色 — 消费者信心指数从 110 降到 90, 呈 L 型"
-  💡 "生育率不断下行, 新生儿 2025 年跌破 800 万 — 需避免周期性问题演变成结构性问题"
-  💡 "经济持续保持活力的前提: 每一代人要相信自己会比上一代人生活得更好"
-  💡 "比引导预期更有效的是: 政府资产负债表扩张"
-
-  ⚠️ AI 板块判断:
-  • 三季度 AI 科技板块局部泡沫特征突出
-  • 涨价链公司和国产半导体被用远期空间法定价 — 忽视潜在周期性
-  • 但底层模型能力跨越式发展, 是整个 AI 产业第一性原理
-  • 选择公司的重要标准: 产业链地位的不可替代性
-
-## 📌 三季报关键数据
-
-  • 易方达蓝筹精选期末规模: 189.33 亿元 (减 14.83 亿)
-  • 三季度净值: -4.58% (跑赢基准 -4.02%)
-  • 隐形重仓股: 北方华创/寒武纪/中际旭创/江丰电子 (首次买入)
-
-## 📖 代表理念
-
-  📚 《巴菲特致股东信》(张坤每年推荐)
-  📚 《聪明的投资者》
-  📚 《竞争战略》(波特)
-
-## 🔗 网络资源
-
-  🔗 易方达基金官网 (定期报告可下载)
-  🔗 雪球 @张坤粉丝团
-"""
-
-DAVA_SCREW = """📅 最新: 2026年10月 · 日更估值第3000+期
-📰 来源: 银行螺丝钉 微博 / 公众号
-
-## 👤 个人简介
-
-  银行螺丝钉 · 指数基金定投专家 · 日更估值 3000+ 期 (从2014年起)
-  五星级估值系统创始人 · 《指数基金投资指南》《定投十年财务自由》作者
-  目标: 日更估值 10000 期 (已过 30%)
-
-## 📅 2026年市场观察
-
-  🔥 5月 A股回到 3.6-3.7 星 — 整体不再低估
-  📌 小盘成长风格达高估, 需谨慎
-  📌 其他风格多在正常估值区间
-  💡 高估品种分批止盈, 资金转 365 天等债券稳健策略
-
-## 📌 螺丝钉星级系统
-
-  • 1⭐ 极度高估 · 2⭐ 高估 · 3⭐ 正常 · 4⭐ 低估 · 5⭐ 极度低估
-  • 每天日更指数估值表 (沪深300/中证500/创业板/纳斯达克...)
-  • 雷打不动, 3000+ 期不间断
-
-## 🎯 定投三原则
-
-  1️⃣ 低估买入, 正常持有, 高估卖出
-  2️⃣ 分不同风格指数分散配置 (宽基/行业/海外)
-  3️⃣ 定投 + 大跌加仓, 目标年化 8-12%
-
-## 📌 养老投资指南 (2026年新书)
-
-  • 养老三支柱: 基本养老 + 企业年金 + 个人养老金
-  • 个人养老金账户: 适合高收入/高个税人群 (税递延划算)
-  • 养老 FOF: 选目标日期 FOF (如"XX养老目标2045"), 自动调整股债比
-  • 指数基金自配: 分散风格 + 定期再平衡 (股涨减/跌加)
-
-## 📖 代表书籍
-
-  📚 《指数基金投资指南》(2017)
-  📚 《定投十年财务自由》(2019)
-  📚 《个人养老金投资指南》(2026.3 新书!)
-
-## 🔗 网络资源
-
-  🔗 微信公众号 "银行螺丝钉" (每天推送估值表)
-  🔗 微博 @银行螺丝钉
-"""
-
-DAVA_MUSK = """📅 最新: 2026年10-11月
-📰 来源: 环球人物 / 证券时报 / 新浪财经
-
-## 👤 个人简介
-
-  马斯克 (Elon Musk) · 万亿富翁 (全球首位)
-  SpaceX 创始人/CEO · Tesla CEO · xAI 创始人
-  SpaceX 2026年6月纳斯达克上市 (SPCX) · 估值 1.77 万亿美元
-  持 SpaceX 41% + Tesla 2600 亿美股权
-
-## 🚀 2026年关键事件
-
-  📌 SpaceX 上市 (6月) — 美股史上最大 IPO, 募资 750 亿美元
-  📌 财富突破万亿美元 — 人类历史首位万亿富翁
-  📌 400 亿美元债务融资 — 全部用于采购 GPU (三季度资本开支 195 亿, 84% 砸 AI)
-  📌 SpaceX 合并 xAI — 轨道数据中心战略 (星链 + xAI 超级智能)
-
-## 📌 AI 算力军备竞赛
-
-  🚨 每赚 1 美元就要再投 2.18 美元进算力 — 烧钱速度远快于赚钱
-  🚨 SpaceX 三季度资本开支 195 亿 → 其中 164 亿砸 AI 业务 (84%)
-  🚨 SI 超级智能业务收入 75.6 亿 → 同比增长 830%
-
-  🎯 马斯克判断:
-  • 未来几周债务市场几乎完全切断资金渠道
-  • 没有 AI 数据中心外独立收入的公司 → 200 多个新云服务商将面临死亡整合
-  • 太空将在 2-3 年内成为 AI 算力成本最低的场所
-    (恒定太阳能 + 无土地/散热成本)
-
-## 📌 商业版图 (全部上市公司)
-
-  • SpaceX (SPCX): 火箭 + 星链 + xAI (已合并) → 轨道数据中心
-  • Tesla (TSLA): Robotaxi + 储能 → 德州获准 L4 自动驾驶
-  • Neuralink: 脑机接口 → 估值 90 亿美元
-
-## 💡 投资启示
-
-  📌 马斯克财富 = 市场对未来能力的预支 (现金占比 < 0.1%)
-  📌 所有资产高度集中, 随时可能因股价剧烈波动
-  📌 每次他都在押注改变文明的方向 — 跨行星物种 / 超级智能 / 人机共生
-
-## 🔗 网络资源
-
-  🔗 SpaceX 官网
-  🔗 X (Twitter) @ElonMusk (最常更新)
-"""
-
-DAVA_INAMORI = """📅 最新: 2026年10月 · 京瓷官方
-📰 来源: 稻盛和夫官方网站 / 盛和塾
-
-## 👤 个人简介
-
-  稻盛和夫 (Inamori Kazuo) · 经营之圣 · 京瓷/KDDI 创始人
-  27 岁创办京瓷 (Kyocera) · 52 岁创办 KDDI (日本第二大电信)
-  78 岁临危受命破产的日本航空 (JAL), 1 年重回世界 500 强
-  京瓷 50 年不亏损的奇迹 — 被称为"日本版巴菲特"
-
-## 📖 2026年新书出版
-
-  📚 《经营之心: 助力企业的"心"领导》文库版 (2026.10)
-  • 统率众人 / 拓展事业 / 激活组织 / 开拓未来 四层面
-  • 47 条经营语录 — 京瓷/KDDI/JAL 实践浓缩
-  📚 《阿米巴经营》20 周年精装珍藏版 (2026.10)
-
-## 🔧 京瓷现任 CEO 演进阿米巴 (2026)
-
-  📌 佐久田浩 (现任京瓷 CEO) 推 "演进阿米巴"
-  • 集团层面设立"经营计划办公室" (全局视角)
-  • 聚焦: 业务领域 / 投资决策 / 资本配置 (ROIC 管理)
-  • 决定 M&A / R&D / 新业务方向
-
-## 💡 核心哲学
-
-  1️⃣ 六项精进 (成就每个人):
-     • 付出不亚于任何人的努力
-     • 要谦虚, 不要骄傲
-     • 要每天反省
-     • 活着, 就要感谢
-     • 积善行, 思利他
-     • 不要有感性的烦恼
-
-  2️⃣ 敬天爱人: 敬畏上天, 关爱众人 — 经营的最高理念
-
-  3️⃣ 人人都是经营者: 把公司分成小单元 (阿米巴), 让每个员工感受到自己也是经营者
-
-  💡 "企业管理本质上是心态管理, 经营者的心态决定整个组织的命运"
-
-## 📖 代表书籍
-
-  📚 《阿米巴经营》(核心必读)
-  📚 《活法》(人生哲学)
-  📚 《干法》(工作方法)
-  📚 《经营之心》(2026 新书)
-  📚 《利他的经营》
-
-## 🔗 网络资源
-
-  🔗 京瓷官方 (2026.10 新书发布)
-  🔗 盛和塾 (中国) 官方
-  🔗 稻盛和夫公益基金会
-"""
+def _make_reading_guide_tab(parent, refs):
+    """实用阅读指南"""
+    st = scrolledtext.ScrolledText(parent, wrap=tk.WORD, font=("", 9), bg="#FAFAFA", fg="#212121",
+                                   bd=0, relief=tk.FLAT, padx=10, pady=8, spacing1=2, spacing3=5)
+    st.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+    st.tag_configure("h1", font=("", 12, "bold"), foreground="#1565C0", spacing1=8, spacing3=4)
+    st.tag_configure("h2", font=("", 10, "bold"), foreground="#2E7D32", spacing1=6)
+    st.tag_configure("step", foreground="#BF360C", font=("", 9, "bold"))
+    st.tag_configure("desc", foreground="#616161")
+    st.tag_configure("hint", foreground="#6A1B9A", font=("", 9, "italic"))
+
+    st.insert(tk.END, "📖 不太顺耳但更实用的判断: 别把'写过书'当成'操盘厉害'的代理变量\n\n", "h1")
+    st.insert(tk.END, "业绩最硬的一批实战者恰恰都不写书 — 德鲁肯米勒/都铎·琼斯/西蒙斯\n", "hint")
+    st.insert(tk.END, "反过来, 著述最勤的江恩, 其宣称的收益缺乏可验证记录\n\n", "hint")
+    st.insert(tk.END, "所以选书先明确想学什么:\n\n")
+
+    for guide in READING_GUIDES:
+        st.insert(tk.END, f"🔶 {guide['topic']}\n", "h2")
+        for i, (step, desc) in enumerate(guide["path"], 1):
+            st.insert(tk.END, f"  {step}\n", "step")
+            if desc:
+                st.insert(tk.END, f"      → {desc}\n", "desc")
+        st.insert(tk.END, "\n")
+
+    # 底部免责
+    st.insert(tk.END, "═" * 50 + "\n", "hint")
+    st.insert(tk.END, "📅 数据来源: 中信出版书单 / 上海高级金融学院 / 央视网 / 经济参考报 (2026-11-13)\n", "desc")
+    st.insert(tk.END, "  收益/名次数字多为传记与媒体口径, 非经审计净值序列, 不宜横向比较\n\n", "desc")
+    st.insert(tk.END, "⚠️ 免责声明: 以上内容基于公开数据, 仅供参考, 不构成投资建议\n", "hint")
+
+    st.config(state=tk.DISABLED)
+    refs["text_widgets"].append(st)

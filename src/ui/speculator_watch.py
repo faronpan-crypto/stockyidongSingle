@@ -6747,6 +6747,247 @@ def _vv_get_conn():
     return conn
 
 
+# ═══════════════════════════════════════════════════════════════════
+# 🌱 种子初始化 — 12 位世界级投资大师画像
+# ═══════════════════════════════════════════════════════════════════
+
+_SEED_GURUS = [
+    {
+        "author": "巴菲特",
+        "style_summary": "价值投资集大成者, 买优秀公司长期持有, 护城河+管理层+安全边际, 不做波段不预测市场",
+        "typical_patterns": [
+            "好公司=护城河+优秀管理层+高ROE",
+            "安全边际: 价格低于内在价值才买入",
+            "长期持有优质公司, 穿越牛熊",
+            "不懂不做, 能力圈原则",
+            "别人贪婪我恐惧, 别人恐惧我贪婪",
+            "关注自由现金流和股东回报",
+            "消费垄断型企业优先",
+        ],
+        "keywords": [["价值投资", 10.0], ["护城河", 9.5], ["长期持有", 9.0], ["安全边际", 8.8],
+                    ["管理层", 8.5], ["ROE", 8.0], ["自由现金流", 7.5], ["能力圈", 7.2],
+                    ["消费垄断", 7.0], ["复利", 6.8], ["股东回报", 6.5], ["不预测", 6.0]],
+        "common_market_tags": "消费,金融,保险,消费品,可口可乐,伯克希尔",
+    },
+    {
+        "author": "芒格",
+        "style_summary": "多元思维模型, 巴菲特幕后军师, 理性思考者, 追求常识真理, 厌恶愚蠢胜过追求聪明",
+        "typical_patterns": [
+            "多元思维模型: 数学+物理+生物+心理学",
+            "护城河分5种: 品牌/网络效应/转换成本/成本优势/规模",
+            "理性比聪明更重要",
+            "逆向思维: 反过来想, 总是反过来想",
+            "避免人类心理偏见导致的决策错误",
+            "以合理价格买入伟大公司",
+            "等待最佳击球机会",
+        ],
+        "keywords": [["多元思维", 10.0], ["护城河", 9.5], ["逆向思维", 9.0], ["理性", 8.8],
+                    ["心理偏见", 8.5], ["常识", 8.0], ["击球机会", 7.5], ["伟大公司", 7.2],
+                    ["避免犯错", 7.0], ["复利", 6.8], ["延迟满足", 6.5], ["集中投资", 6.0]],
+        "common_market_tags": "价值,消费,金融,理性",
+    },
+    {
+        "author": "利弗莫尔",
+        "style_summary": "投机之王, 趋势交易鼻祖, 追随龙头, 金字塔加仓, 严格止损, 大起大落的一生",
+        "typical_patterns": [
+            "只做龙头股, 领涨板块",
+            "金字塔加仓: 盈利后加仓, 亏损不加仓",
+            "严格止损: 亏损10%必须砍仓",
+            "市场只有一个方向: 趋势方向",
+            "价格沿最小阻力线运动",
+            "关键点突破: 新高/新低是信号",
+            "熊市赚的钱, 牛市全部亏回去",
+            "独立思考, 不跟风",
+        ],
+        "keywords": [["趋势", 10.0], ["龙头", 9.5], ["金字塔加仓", 9.0], ["止损", 8.8],
+                    ["关键点", 8.5], ["最小阻力", 8.0], ["投机", 7.5], ["独立思考", 7.2],
+                    ["价格信号", 7.0], ["板块轮动", 6.8], ["量价配合", 6.5], ["不预测", 6.0]],
+        "common_market_tags": "趋势,投机,龙头,短线,突破",
+    },
+    {
+        "author": "科斯托拉尼",
+        "style_summary": "德国股神, 反周期大师, 逆向思考, 狗和主人的关系比喻股市, 大起大落才是赚钱机会",
+        "typical_patterns": [
+            "股市=狗和主人: 狗跑在前面但最终回到主人身边",
+            "反周期操作: 别人买时我卖, 别人卖时我买",
+            "大起大落才是赚钱的机会",
+            "经济是基础, 股市是狗",
+            "长期看股市永远上涨",
+            "不要做波段, 要做周期",
+            "80%的人在熊市底部割肉",
+        ],
+        "keywords": [["反周期", 10.0], ["逆向思考", 9.5], ["狗和主人", 9.0], ["周期", 8.8],
+                    ["大起大落", 8.5], ["经济基础", 8.0], ["长期上涨", 7.5], ["波段", 7.2],
+                    ["割肉", 7.0], ["机会", 6.8], ["心理", 6.5], ["牛市", 6.0]],
+        "common_market_tags": "周期,逆向,德国,欧洲,宏观",
+    },
+    {
+        "author": "是川银藏",
+        "style_summary": "日本股神, 三年不买股原则, 独立思考不跟风, 大赚小赔, 从70日元到300亿日元",
+        "typical_patterns": [
+            "三年不买股, 研究三年才出手",
+            "独立思考, 不看报纸不炒股",
+            "买入时机: 所有人都悲观时",
+            "卖出时机: 所有人都乐观时",
+            "大赚小赔, 不做小波动",
+            "只买冷门股票",
+            "股票是企业的所有权凭证",
+        ],
+        "keywords": [["独立思考", 10.0], ["三年不买", 9.5], ["大赚小赔", 9.0], ["反周期", 8.8],
+                    ["冷门股", 8.5], ["悲观买入", 8.0], ["乐观卖出", 7.5], ["企业所有权", 7.2],
+                    ["不跟风", 7.0], ["长期", 6.8], ["研究", 6.5], ["日本", 6.0]],
+        "common_market_tags": "价值,周期,日本,独立",
+    },
+    {
+        "author": "江恩",
+        "style_summary": "技术分析大师, 时间周期理论, 几何图形, 预测精准, 时间是第一要素",
+        "typical_patterns": [
+            "时间周期: 7天/30天/90天/1年/10年/60年",
+            "几何图形: 正方形/三角形/圆形",
+            "价格回撤位: 1/2, 1/3, 2/3",
+            "时间窗口: 重要高低点间隔",
+            "星相和数字学辅助预测",
+            "趋势线和角度线(1x1线)",
+            "市场转折点=时间+价格共振",
+        ],
+        "keywords": [["时间周期", 10.0], ["几何", 9.5], ["预测", 9.0], ["时间窗口", 8.8],
+                    ["回撤", 8.5], ["角度线", 8.0], ["共振", 7.5], ["转折点", 7.2],
+                    ["技术分析", 7.0], ["图形", 6.8], ["数字学", 6.5], ["星相", 6.0]],
+        "common_market_tags": "技术分析,周期,时间,预测",
+    },
+    {
+        "author": "达瓦斯",
+        "style_summary": "箱体突破大师, 量价配合, 金字塔加仓, 用舞蹈演员的敏锐在华尔街谋生",
+        "typical_patterns": [
+            "箱体突破: 价格在狭窄区间整理后放量突破",
+            "量价配合: 放量突破+缩量回调",
+            "金字塔加仓: 突破确认后逐步加仓",
+            "严格止损: 跌破箱体下沿立即出场",
+            "只做强势股, 远离弱势股",
+            "关注板块效应",
+            "形态先于消息",
+        ],
+        "keywords": [["箱体", 10.0], ["突破", 9.5], ["量价", 9.0], ["金字塔", 8.8],
+                    ["止损", 8.5], ["强势股", 8.0], ["缩量回调", 7.5], ["板块", 7.2],
+                    ["形态", 7.0], ["放量", 6.8], ["区间", 6.5], ["技术", 6.0]],
+        "common_market_tags": "技术分析,突破,短线,箱体",
+    },
+    {
+        "author": "斯波朗迪",
+        "style_summary": "维克多·斯波朗迪, 职业操盘原理, 趋势管理专家, 以风险报酬比为核心",
+        "typical_patterns": [
+            "风险报酬比至少1:3才出手",
+            "趋势定义: 更高的高点, 更高的低点",
+            "三重移动平均线判断趋势",
+            "动能配合价格确认",
+            "分批建仓, 分批止盈",
+            "机械交易系统, 去除情绪",
+            "顺势交易, 不抄底摸顶",
+        ],
+        "keywords": [["风险报酬比", 10.0], ["趋势", 9.5], ["职业操盘", 9.0], ["移动平均", 8.8],
+                    ["动能", 8.5], ["分批", 8.0], ["机械系统", 7.5], ["顺势", 7.2],
+                    ["止损", 7.0], ["不抄底", 6.8], ["三重均线", 6.5], ["风险管理", 6.0]],
+        "common_market_tags": "趋势,技术,风险管理,职业",
+    },
+    {
+        "author": "舒华兹",
+        "style_summary": "马丁·舒华兹, 四届全美交易冠军, 短线交易大师, 纪律第一, 每天赚100万美元",
+        "typical_patterns": [
+            "纪律第一: 每天止损额不超过1.5%",
+            "关注市场内部结构: 涨跌家数/新高新低",
+            "关键指标: TICK指数, TRIN指标",
+            "短线节奏: 快进快出, 持仓不超几天",
+            "开盘前30分钟是黄金时间",
+            "绝不逆势交易",
+            "连亏3天休息1天",
+        ],
+        "keywords": [["纪律", 10.0], ["止损", 9.5], ["短线", 9.0], ["TICK", 8.8],
+                    ["TRIN", 8.5], ["开盘", 8.0], ["内部结构", 7.5], ["逆势", 7.2],
+                    ["连亏休息", 7.0], ["冠军", 6.8], ["日内", 6.5], ["市场宽度", 6.0]],
+        "common_market_tags": "短线,日内,交易冠军,纪律",
+    },
+    {
+        "author": "索普",
+        "style_summary": "爱德华·索普, 量化对冲基金之父, 凯利公式应用, 统计套利, 数学思维战胜市场",
+        "typical_patterns": [
+            "凯利公式计算最优下注比例",
+            "统计套利: 配对交易/价差回归",
+            "数学模型驱动, 无情绪决策",
+            "市场低效处寻找统计优势",
+            "分散化降低回撤",
+            "期权定价和对冲",
+            "赌徒不输的秘密: 退出机制",
+        ],
+        "keywords": [["凯利公式", 10.0], ["量化", 9.5], ["统计套利", 9.0], ["数学", 8.8],
+                    ["配对交易", 8.5], ["期权", 8.0], ["对冲", 7.5], ["分散", 7.2],
+                    ["市场低效", 7.0], ["退出", 6.8], ["模型", 6.5], ["概率", 6.0]],
+        "common_market_tags": "量化,对冲,期权,数学",
+    },
+    {
+        "author": "埃尔德",
+        "style_summary": "亚历山大·埃尔德, 三重屏幕交易系统, 交易心理学大师, 纪律和心态是成功关键",
+        "typical_patterns": [
+            "三重屏幕: 长期趋势(周线)→中期方向(日线)→入场时机(分钟线)",
+            "MACD柱判断多空力量",
+            "盈亏比至少2:1",
+            "纪律和心态>技术指标",
+            "交易是马拉松, 不是百米冲刺",
+            "分析师常亏, 交易者常赚",
+            "每年检讨一次交易系统",
+        ],
+        "keywords": [["三重屏幕", 10.0], ["MACD", 9.5], ["交易心理", 9.0], ["纪律", 8.8],
+                    ["盈亏比", 8.5], ["马拉松", 8.0], ["分析师vs交易者", 7.5], ["系统", 7.2],
+                    ["长期趋势", 7.0], ["中期方向", 6.8], ["入场时机", 6.5], ["检讨", 6.0]],
+        "common_market_tags": "技术分析,心理,三重屏幕,MACD",
+    },
+    {
+        "author": "道格拉斯",
+        "style_summary": "马克·道格拉斯, 交易心理学集大成者, 概率思维, 接受不确定性, 纪律是唯一解药",
+        "typical_patterns": [
+            "交易是概率游戏, 不是预测游戏",
+            "接受不确定性, 接受亏损是成本",
+            "纪律是唯一能对抗人性弱点的武器",
+            "输赢分布是随机的, 但胜率是可计算的",
+            "害怕亏损=过度交易=持续亏损",
+            "客观看待市场, 市场不会让你快乐或痛苦",
+            "心态>技术>资金管理",
+        ],
+        "keywords": [["概率思维", 10.0], ["不确定性", 9.5], ["纪律", 9.0], ["心理学", 8.8],
+                    ["接受亏损", 8.5], ["客观", 8.0], ["人性弱点", 7.5], ["过度交易", 7.2],
+                    ["胜率", 7.0], ["期望值", 6.8], ["心态", 6.5], ["随机", 6.0]],
+        "common_market_tags": "交易心理,概率,纪律,心态",
+    },
+]
+
+
+def _vv_init_seed_gurus():
+    """🌱 首次打开时把 12 位世界级大师画像注入 author_profiles"""
+    import json as _j
+    from datetime import datetime
+    conn = _vv_get_conn()
+    try:
+        existing = {r[0] for r in conn.execute("SELECT author FROM author_profiles").fetchall()}
+        now = datetime.now().isoformat()
+        cnt = 0
+        for g in _SEED_GURUS:
+            if g["author"] in existing:
+                continue  # 不覆盖用户可能已编辑的画像
+            conn.execute("""INSERT INTO author_profiles
+                (author, article_count, style_summary, typical_patterns,
+                 keywords, common_market_tags, updated_at)
+                VALUES (?,?,?,?,?,?,?)""",
+                (g["author"], 0, g["style_summary"],
+                 _j.dumps(g["typical_patterns"], ensure_ascii=False),
+                 _j.dumps(g["keywords"], ensure_ascii=False),
+                 g["common_market_tags"], now))
+            cnt += 1
+        conn.commit()
+        if cnt:
+            print(f"[📚大V] 🌱 初始化种子大师画像: +{cnt} 位", flush=True)
+    finally:
+        conn.close()
+
+
 def _vv_insert(author, source, pub_date, raw_content, extracted_json=None,
                style_summary="", logic_patterns="", tags="", market_tags="", embedding=""):
     """插入一篇文章"""
@@ -6775,13 +7016,25 @@ def _vv_insert(author, source, pub_date, raw_content, extracted_json=None,
 
 
 def _vv_list_authors():
-    """列所有作者 (文章数倒序)"""
+    """列所有作者 — 先 author_profiles, LEFT JOIN author_articles 计数"""
     conn = _vv_get_conn()
     try:
-        rows = conn.execute("""SELECT author, COUNT(*) as cnt,
+        rows = conn.execute("""SELECT p.author,
+            COALESCE(a.cnt, p.article_count, 0) as cnt,
+            COALESCE(GROUP_CONCAT(DISTINCT a.style_summary), p.style_summary) as styles
+            FROM author_profiles p
+            LEFT JOIN (SELECT author, COUNT(*) as cnt, style_summary
+                       FROM author_articles GROUP BY author) a
+            ON a.author = p.author
+            GROUP BY p.author
+            ORDER BY cnt DESC, p.author ASC""").fetchall()
+        # 再加上只在 author_articles 里有、但 profile 没有的作者 (兜底)
+        extra = conn.execute("""SELECT author, COUNT(*) as cnt,
             GROUP_CONCAT(DISTINCT style_summary) as styles
-            FROM author_articles GROUP BY author ORDER BY cnt DESC""").fetchall()
-        return [dict(r) for r in rows]
+            FROM author_articles
+            WHERE author NOT IN (SELECT author FROM author_profiles)
+            GROUP BY author ORDER BY cnt DESC""").fetchall()
+        return [dict(r) for r in rows] + [dict(r) for r in extra]
     finally:
         conn.close()
 
@@ -7140,6 +7393,9 @@ def _show_vv_main(win):
     import tkinter as tk
     from tkinter import scrolledtext, filedialog, messagebox
     import ttk
+
+    # 🌱 首次打开时注入 12 位世界级大师画像
+    _vv_init_seed_gurus()
 
     dlg = tk.Toplevel(win); dlg.configure(bg="#121212")
     dlg.title("📚 财经大V风格学习库")
