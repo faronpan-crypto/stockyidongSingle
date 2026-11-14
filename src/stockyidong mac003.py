@@ -520,6 +520,17 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             print(f"[👁️见盘❌] {e}", flush=True)
             _tb.print_exc()
 
+    def _show_market_read(self):
+        """📖 见文 — 文本/URL → AI 风格化写文章"""
+        print("[📖见文] 启动...", flush=True)
+        try:
+            from ui.market_read import _show_market_read_dialog
+            _show_market_read_dialog(self.root)
+        except Exception as e:
+            import traceback as _tb
+            print(f"[📖见文❌] {e}", flush=True)
+            _tb.print_exc()
+
     def _attach_article_btn(self, dlg, ctx=None, focus_layer=None):
         """🔧 通用: 给任意弹窗底部加 📝 红色文章生成按钮
         
@@ -535,6 +546,12 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
 
     def __init__(self, root):
         self.root = root
+        # ⚠️ 必须最先初始化，否则 UI 设置面板 (L6421/6444) 会因变量未定义而崩溃
+        self.font_size = 16
+        self.font_family = "PingFang SC" if sys.platform == "darwin" else "Microsoft YaHei"
+        self.row_height = 34
+        self.tv_bg = "#ffffff"      # Treeview 背景色 (可调节)
+        self.tv_bg_alt = "#f8fafc"  # 隔行背景色
         # 安全更新窗口方法 - macOS上直接跳过
         def _safe_update():
             try:
@@ -819,42 +836,32 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             _style.configure("TRadiobutton", font=_ui_font)
             _style.configure("TNotebook.Tab", font=_ui_font)
             _style.configure("TCombobox", font=_ui_font)
-            _style.configure("TButton", foreground="#111827", background="#e5e7eb", padding=(5, 3))
+            _style.configure("TButton", foreground="#000000", background="#ffffff", padding=(5, 3))
             # 与自持仓标签页下方股票格子 tk.Label 一致:TkDefaultFont 13
             _style.configure(
                 "HoldingToolbar.TButton",
                 font=("TkDefaultFont", 13),
-                foreground="#111827",
-                background="#e5e7eb",
+                foreground="#000000",
+                background="#ffffff",
                 padding=(2, 2),
             )
             _style.map(
                 "HoldingToolbar.TButton",
-                background=[("active", "#d1d5db"), ("pressed", "#9ca3af"), ("disabled", "#f3f4f6")],
-                foreground=[
-                    ("active", "#000000"),
-                    ("pressed", "#000000"),
-                    ("disabled", "#000000"),
-                ],
+                background=[("active", "#f3f4f6"), ("pressed", "#e5e7eb"), ("disabled", "#fafafa")],
+                # ⚠️ ttk.Style.map 不支持 "normal" state，默认用 configure 的值
+                foreground=[("active", "#000000"), ("pressed", "#000000"), ("disabled", "#000000")],
             )
             _style.map(
                 "TButton",
-                background=[("active", "#d1d5db"), ("pressed", "#9ca3af"), ("disabled", "#f3f4f6")],
-                foreground=[
-                    ("active", "#000000"),
-                    ("pressed", "#000000"),
-                    ("disabled", "#000000"),
-                ],
+                background=[("active", "#f3f4f6"), ("pressed", "#e5e7eb"), ("disabled", "#fafafa")],
+                # ⚠️ ttk.Style.map 不支持 "normal" state，默认用 configure 的值
+                foreground=[("active", "#000000"), ("pressed", "#000000"), ("disabled", "#000000")],
             )
             _style.configure("TLabel", foreground="#111827")
             # ── 🆕 Treeview 全局加大加粗 + 板块颜色 tag ──
             # macOS clam 主题下必须显式给 font=(), 否则用系统默认 11 号超小
-            # self.font_size 在 L6101 已初始化为 16
+            # font_size/font_family/row_height/tv_bg/tv_bg_alt 已在 __init__ 最开头初始化，这里用 _ui_font 覆盖 font_family
             self.font_family = _ui_font[0]
-            self.font_size = getattr(self, 'font_size', 16)   # ← 默认 16 bold
-            self.row_height = 34
-            self.tv_bg = "#ffffff"   # Treeview 背景色 (可调节)
-            self.tv_bg_alt = "#f8fafc"  # 隔行背景色
             _tv_font = (self.font_family, self.font_size, "bold")
             _style.configure("Treeview",
                 font=_tv_font, rowheight=self.row_height,
@@ -4906,6 +4913,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("全", 3, self.show_market_situation),
             ("📺看盘", 7, self._show_realtime_market_dialog),
             ("👁️见盘", 6, self._show_market_watch),
+            ("📖见文", 6, self._show_market_read),
             ("🔥主线·资金", 10, self._show_mainline_capital_dialog),
             ("🧊冰点修复", 9, self._show_emotion_freeze),
             ("🌍全球资产", 8, self._show_global_assets_dialog),
@@ -4936,7 +4944,8 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 ("👁️游资看盘", 8, self._show_speculator_watch),
                 ("🦅游资心法", 8, self._open_hotmoney_single_dialog),
                 ("🎯超跌", 7, self._show_oversold_dialog),
-                ("🎯机会", 7, self._show_jianlou),
+                ("🎯机会K", 8, self._show_jianlou),
+                ("🪙筹码K", 8, self._show_chouma),
                 ("🎯交易体系", 9, self._show_top_gurus_dialog),
                 ("📊操盘阶段", 9, self._show_tech_stage_dialog),
             ]
@@ -4997,14 +5006,13 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         except Exception as _ea3:
             print(f"[📝Row3❌] 创建失败: {_ea3}", flush=True)
 
-        # Row4: 📰 资讯·情绪·筹码 (信息层)
+        # Row4: 📰 资讯·情绪 (信息层)
         try:
             _ROW4 = [
                 ("📰突发新闻", 9, self.show_breaking_news_dialog),
                 ("🕷️爬虫阅读", 9, self.show_spider_reader),
                 ("🔥热门榜单", 9, self.show_hotlists_overview),
                 ("💡市场情绪", 9, self.show_market_sentiment_dialog),
-                ("🪙筹码", 7, self._show_chouma),
                 ("📊融资盘", 8, self._show_margin_dialog),
             ]
         except Exception as _e4:
@@ -6457,8 +6465,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         self.text_notebook.bind('<<NotebookTabChanged>>', lambda e: self.update_text_input_reference())
         # 创建右键菜单
         self.create_context_menu()
-        # 初始化变量
-        self.font_size = 16
+        # 初始化变量 (font_size/font_family 已在 __init__ 最开头初始化)
         self.search_positions = []
         self.current_search_index = -1
         self.last_analysis_result = ""

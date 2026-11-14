@@ -14,7 +14,7 @@ import datetime
 def _build_future_trend_tab(nb_notebook, root=None):
     """🆕 在给定 Notebook 里加 Tab: 📈后续走势"""
     tab = tk.Frame(nb_notebook, bg="#FAFAFA")
-    nb_notebook.add(tab, text="  📈 后续走势  ")
+    nb_notebook.add(tab, text="📈后续走势")
 
     # Banner
     banner = tk.Frame(tab, bg="#1565C0", height=48)

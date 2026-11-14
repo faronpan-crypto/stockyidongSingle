@@ -430,7 +430,7 @@ READING_GUIDES = [
 def _build_dava_views_tab(nb_notebook, root=None):
     """在主线资金 Notebook 里加: 🌟名人堂"""
     tab = tk.Frame(nb_notebook, bg="#FAFAFA")
-    nb_notebook.add(tab, text="  🌟 名人堂  ")
+    nb_notebook.add(tab, text="🌟名人堂")
 
     banner = tk.Frame(tab, bg="#E65100", height=44)
     banner.pack(fill=tk.X, padx=6, pady=(6, 4))

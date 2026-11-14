@@ -160,7 +160,7 @@ def _build_mainline_route_tab(parent_nb):
     在 parent_nb (ttk.Notebook) 中 add 一个 Tab，返回 tab frame
     """
     tab = _ttk.Frame(parent_nb)
-    parent_nb.add(tab, text="  📈 资金路线·AI研判  ")
+    parent_nb.add(tab, text="📈AI研判")
 
     # ── 内部用 tk.Frame 包（ttk 不支持 bg） ──
     root = _tk.Frame(tab, bg=_BG)

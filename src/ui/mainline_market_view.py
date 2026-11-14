@@ -11,7 +11,7 @@ from tkinter import ttk, scrolledtext
 def _build_market_view_tab(nb_notebook, root=None):
     """在主线资金 Notebook 里加 Tab4: 💡市场认识"""
     tab = tk.Frame(nb_notebook, bg="#FAFAFA")
-    nb_notebook.add(tab, text="  💡 市场认识  ")
+    nb_notebook.add(tab, text="💡市场认识")
 
     # Banner
     banner = tk.Frame(tab, bg="#6A1B9A", height=48)

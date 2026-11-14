@@ -6183,9 +6183,13 @@ def _robust_ai_call(prompt, system_prompt="", max_tokens=1500, win=None):
             except Exception:
                 continue
 
-        ep = p.get("endpoint", "/chat/completions")
+        # 代理统一用 /v1/chat/completions, 不管配置里的 endpoint
+        if is_proxy:
+            url = f"{base}/v1/chat/completions"
+        else:
+            ep = p.get("endpoint", "/chat/completions")
+            url = f"{base}{ep}"
         model = p.get("model")
-        url = f"{base}{ep}"
         headers = {"Content-Type": "application/json"}
 
         if is_proxy:
@@ -6212,7 +6216,7 @@ def _robust_ai_call(prompt, system_prompt="", max_tokens=1500, win=None):
             "temperature": p.get("temperature", 0.3),
             "stream": False,
         }
-        if _is_proxy:
+        if is_proxy:
             body["provider"] = pname  # 🆕 代理需要知道路由到哪个 provider
 
         try:
