@@ -5455,10 +5455,12 @@ def _quick_open_daily_kline(parent, code6, name, embed_frame=None, stock_list=No
             _hover_win.configure(bg="#263238", highlightbackground="#FFD54F", highlightthickness=1)
             tk.Label(_hover_win, text=text, bg="#263238", fg="white", font=("", 9),
                      justify=tk.LEFT, padx=8, pady=4).pack()
-            # 定位: 鼠标位置右下角
-            mx = dlg.winfo_pointerx() - dlg.winfo_rootx() + 18
-            my = dlg.winfo_pointery() - dlg.winfo_rooty() + 18
-            _hover_win.geometry(f"+{mx}+{my}")
+            # 🎯 固定在屏幕绝对右上角 (10px 边距, 永不被挡)
+            _hover_win.update_idletasks()
+            _tw = _hover_win.winfo_reqwidth()
+            _th = _hover_win.winfo_reqheight()
+            _sw = _hover_win.winfo_screenwidth()
+            _hover_win.geometry(f"+{max(0,_sw-_tw-10)}+10")
             _hover_win.deiconify()
             _hover_win.lift()
         except Exception:

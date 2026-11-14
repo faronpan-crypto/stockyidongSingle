@@ -1828,13 +1828,15 @@ class CrashRallyCalendarApp:
             self._hover_tip.destroy()
         except Exception:
             pass
-        x = root.winfo_pointerx() + 20
-        y = root.winfo_pointery() + 20
         tip = tk.Toplevel(root)
         tip.wm_overrideredirect(True)
-        tip.wm_geometry(f"+{x}+{y}")
         tk.Label(tip, text=text, bg="#FFD700", fg="#000", font=FONT_SMALL,
                  padx=6, pady=2).pack()
+        tip.update_idletasks()
+        # 🎯 固定在屏幕绝对右上角 (10px 边距, 永不被挡)
+        _tw = tip.winfo_reqwidth(); _th = tip.winfo_reqheight()
+        _sw = tip.winfo_screenwidth()
+        tip.wm_geometry(f"+{max(0,_sw-_tw-10)}+10")
         self._hover_tip = tip
 
     def _hide_hover_tip(self):

@@ -1014,15 +1014,16 @@ class ChouMaMixin:
             _period_var.set("day")
             _reload_and_draw()
 
-            # ── 可移动浮窗 ──
+            # ── 可移动浮窗 (初始固定屏幕绝对右上角) ──
             float_win = tk.Toplevel(dlg)
             float_win.overrideredirect(True)
             float_win.configure(bg=_BG_PANEL)
             float_win.attributes("-topmost", True)
-            dlg.update_idletasks()
-            bx = embed_frame.winfo_rootx() + 8
-            by = embed_frame.winfo_rooty() + 8
-            float_win.geometry(f"+{bx}+{by}")
+            float_win.update_idletasks()
+            # 🎯 屏幕绝对右上角 (永不被挡, 后续可拖动)
+            _tw = 260; _th = 160  # 预估
+            _sw = float_win.winfo_screenwidth()
+            float_win.geometry(f"+{max(0,_sw-_tw-10)}+10")
             _active_float_wins.append(float_win)
 
             title_bar = tk.Frame(float_win, bg=_BG_TOOLBAR, height=28)

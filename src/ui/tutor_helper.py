@@ -1029,15 +1029,17 @@ def _mk_hover_tip(widget, tip_text):
     tip_win = {"win": None, "text": ""}
 
     def enter(e):
-        x = widget.winfo_rootx() + 20
-        y = widget.winfo_rooty() + widget.winfo_height() + 5
         tip_win["win"] = tw = tk.Toplevel(widget)
         tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
         tk.Label(tw, text=tip_text, bg=PALETTE["sun"], fg=PALETTE["text"],
                  font=("Microsoft YaHei", 10), padx=8, pady=4,
                  relief="solid", bd=1, justify="left",
                  wraplength=320).pack()
+        tw.update_idletasks()
+        # 🎯 固定在屏幕绝对右上角 (10px 边距, 永不被挡)
+        _tw = tw.winfo_reqwidth(); _th = tw.winfo_reqheight()
+        _sw = tw.winfo_screenwidth()
+        tw.wm_geometry(f"+{max(0,_sw-_tw-10)}+10")
 
     def leave(e):
         if tip_win["win"]:

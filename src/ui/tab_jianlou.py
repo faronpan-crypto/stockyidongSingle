@@ -960,16 +960,16 @@ class JianLouMixin:
             kline_title.config(text=f"📊 {name} ({sina_code})")
             embed_frame.update_idletasks()
 
-            # ── 可移动浮窗 ──
+            # ── 可移动浮窗 (初始固定屏幕绝对右上角) ──
             float_win = tk.Toplevel(dlg)
             float_win.overrideredirect(True)  # 去掉窗口边框
             float_win.configure(bg=_BG_PANEL)
             float_win.attributes("-topmost", True)
-            # 放到 embed_frame 附近 (右下)
-            dlg.update_idletasks()
-            bx = embed_frame.winfo_rootx() + 8
-            by = embed_frame.winfo_rooty() + 8
-            float_win.geometry(f"+{bx}+{by}")
+            # 🎯 屏幕绝对右上角 (永不被挡, 后续可拖动)
+            float_win.update_idletasks()
+            _tw = 260; _th = 180  # 预估
+            _sw = float_win.winfo_screenwidth()
+            float_win.geometry(f"+{max(0,_sw-_tw-10)}+10")
 
             # 标题栏 (可拖动)
             title_bar = tk.Frame(float_win, bg=_BG_TOOLBAR, height=28)

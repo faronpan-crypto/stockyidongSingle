@@ -4171,16 +4171,11 @@ class CangweiMixin:
                                  font=("", 10), justify="left", padx=10, pady=8,
                                  anchor="w").pack()
                         _hw[0].update_idletasks()
-                        _mx = chart_frame.winfo_pointerx()
-                        _my = chart_frame.winfo_pointery()
-                        # 防止 tooltip 超出屏幕底部, 自动向上偏移
-                        _scr_h = _hw[0].winfo_screenheight()
+                        # 🎯 固定在屏幕绝对右上角 (10px 边距, 永不被挡)
                         _tw = _hw[0].winfo_reqwidth()
                         _th = _hw[0].winfo_reqheight()
-                        _gx = min(_mx + 15, _hw[0].winfo_screenwidth() - _tw - 10)
-                        _gy = _my + 15
-                        if _gy + _th > _scr_h: _gy = _my - _th - 10
-                        _hw[0].geometry(f"+{_gx}+{_gy}")
+                        _sw = _hw[0].winfo_screenwidth()
+                        _hw[0].geometry(f"+{max(0,_sw-_tw-10)}+10")
                         _hw[0].lift()
                     except Exception as _e:
                         print(f"[hover tooltip] 异常: {_e}")

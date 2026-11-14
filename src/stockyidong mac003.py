@@ -546,6 +546,32 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
 
     def __init__(self, root):
         self.root = root
+        # 🕵️ DEBUG: 拦截所有 Toplevel 创建和 geometry 设置, 找出那个神秘的鼠标浮窗
+        import traceback as _tb_dbg
+        _orig_toplevel_init = tk.Toplevel.__init__
+        _orig_toplevel_geom = tk.Toplevel.geometry
+        def _dbg_tl_init(self2, *a, **kw):
+            _orig_toplevel_init(self2, *a, **kw)
+            try:
+                _parent_title = ""
+                if a and hasattr(a[0], 'title'):
+                    try: _parent_title = a[0].title()[:30]
+                    except: pass
+                _stack = " > ".join(f"{f.filename.split('/')[-1]}:{f.lineno}" for f in _tb_dbg.extract_stack()[-4:-1])
+                print(f"🪟🪟🪟 NEW TOPLEVEL parent=[{_parent_title}] {_stack}", flush=True)
+            except: pass
+        def _dbg_tl_geom(self2, *a, **kw):
+            if a and isinstance(a[0], str) and '+' in a[0]:
+                try:
+                    _title = self2.title()[:30] if hasattr(self2, 'title') else ""
+                    _pos = a[0]
+                    if _pos.startswith('+'):
+                        _stack = " > ".join(f"{f.filename.split('/')[-1]}:{f.lineno}" for f in _tb_dbg.extract_stack()[-5:-1])
+                        print(f"📍 GEOMETRY [{_title}] {_pos} ← {_stack}", flush=True)
+                except: pass
+            return _orig_toplevel_geom(self2, *a, **kw)
+        tk.Toplevel.__init__ = _dbg_tl_init
+        tk.Toplevel.geometry = _dbg_tl_geom
         # ⚠️ 必须最先初始化，否则 UI 设置面板 (L6421/6444) 会因变量未定义而崩溃
         self.font_size = 16
         self.font_family = "PingFang SC" if sys.platform == "darwin" else "Microsoft YaHei"

@@ -1706,8 +1706,12 @@ class StockDetailMixin:
                             for w in hover_tt.winfo_children(): w.destroy()
                             tk.Label(hover_tt, text=text, bg="#263238", fg="#FFFFFF",
                                      font=("", 10, "bold"), padx=10, pady=6, justify=tk.LEFT).pack()
-                        mx = win.winfo_pointerx(); my = win.winfo_pointery()
-                        hover_tt.geometry(f"+{mx+15}+{my+15}")
+                        # 🎯 固定在屏幕绝对右上角 (10px 边距, 永不被挡)
+                        hover_tt.update_idletasks()
+                        _tw = hover_tt.winfo_reqwidth()
+                        _th = hover_tt.winfo_reqheight()
+                        _sw = hover_tt.winfo_screenwidth()
+                        hover_tt.geometry(f"+{max(0,_sw-_tw-10)}+10")
                     except Exception:
                         if hover_tt: hover_tt.destroy(); hover_tt = None
                 canvas.mpl_connect("motion_notify_event", _on_motion)

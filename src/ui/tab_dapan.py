@@ -19083,9 +19083,12 @@ AI 将基于实时市场数据生成深度分析报告
             tip = tk.Toplevel(self.root); tip.overrideredirect(True); tip.configure(bg="#263238")
             tip.attributes("-topmost", True)
             setattr(self, f"_{source}_stamp_hover", tip)
-        x = self.root.winfo_rootx() + event.x_root - self.root.winfo_pointerx() + 12
-        y = self.root.winfo_rooty() + event.y_root - self.root.winfo_pointery() + 12
-        tip.geometry(f"+{max(0, x)}+{max(0, y)}")
+        # 🎯 固定在屏幕绝对右上角 (10px 边距, 永不被挡)
+        tip.update_idletasks()
+        _tw = tip.winfo_reqwidth()
+        _th = tip.winfo_reqheight()
+        _sw = tip.winfo_screenwidth()
+        tip.geometry(f"+{max(0,_sw-_tw-10)}+10")
         for w in tip.winfo_children(): w.destroy()
         tk.Label(tip, text=f"📌 {item['name']} ({item['code']})", bg="#263238", fg="#42A5F5",
                  font=("Helvetica", 11, "bold")).pack(anchor="w", padx=10, pady=(6, 2))

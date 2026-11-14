@@ -3723,8 +3723,12 @@ def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None,
                         _inner_f = tk.Frame(hover_tt, bg=_inner_bg); _inner_f.pack(padx=3, pady=3, fill=tk.BOTH, expand=True)
                         tk.Label(_inner_f, text=text, bg=_inner_bg, fg=_text_fg,
                                  font=("", 10, "bold"), padx=10, pady=6, justify=tk.LEFT).pack()
-                    mx = win.winfo_pointerx(); my = win.winfo_pointery()
-                    hover_tt.geometry(f"+{mx+15}+{my+15}")
+                    # 🎯 固定在屏幕绝对右上角 (10px 边距, 永不被挡)
+                    hover_tt.update_idletasks()
+                    _tw = hover_tt.winfo_reqwidth()
+                    _th = hover_tt.winfo_reqheight()
+                    _sw = hover_tt.winfo_screenwidth()
+                    hover_tt.geometry(f"+{max(0,_sw-_tw-10)}+10")
                 except Exception:
                     if hover_tt: hover_tt.destroy(); hover_tt = None
             canvas.mpl_connect("motion_notify_event", _on_motion)
