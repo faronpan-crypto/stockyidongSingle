@@ -544,26 +544,26 @@ class MartinMixin:
                     import time; time.sleep(2)
         return None
 
-    def _ak_hist_with_retry(self, code, max_retries=2, timeout=8):
-        """带重试的 akshare 日线拉取 — 东方财富 → 腾讯兜底"""
+    def _ak_hist_with_retry(self, code, max_retries=2, timeout=6):
+        """带重试的 akshare 日线拉取 — 东方财富 → 腾讯兜底 (单只超时 6 秒)"""
         import time
         # 先试东方财富
         for attempt in range(max_retries):
             try:
-                h = ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
+                h = ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq",
+                                       timeout=timeout)
                 if h is not None and len(h) >= 30:
                     return h
             except Exception as e:
-                print(f"[🎯Martin] hist EM 尝试 {attempt+1}/{max_retries} 失败: {str(e)[:40]}", flush=True)
+                print(f"[🎯Martin] hist EM {code} 尝试 {attempt+1}/{max_retries}: {str(e)[:30]}", flush=True)
                 if attempt < max_retries - 1:
-                    time.sleep(1)
+                    time.sleep(0.5)
 
         # 东方财富挂了 → 腾讯兜底
         try:
-            h2 = ak.stock_zh_a_hist_tx(symbol=code, adjust="qfq")
+            h2 = ak.stock_zh_a_hist_tx(symbol=code, adjust="qfq", timeout=timeout)
             if h2 is not None and len(h2) >= 30:
-                print(f"[🎯Martin] hist 腾讯兜底成功 ({len(h2)}行)", flush=True)
-                # 转列名统一
+                print(f"[🎯Martin] hist 腾讯兜底成功 {code} ({len(h2)}行)", flush=True)
                 rename_map = {}
                 for c in h2.columns:
                     cl = str(c).lower()
@@ -575,7 +575,7 @@ class MartinMixin:
                     elif "volume" in cl or "成交量" in str(c): rename_map[c] = "volume"
                 return h2.rename(columns=rename_map)
         except Exception as e2:
-            print(f"[🎯Martin] hist 腾讯兜底也失败: {str(e2)[:40]}", flush=True)
+            print(f"[🎯Martin] hist 腾讯也失败 {code}: {str(e2)[:30]}", flush=True)
 
         return None
 
@@ -606,12 +606,78 @@ class MartinMixin:
                                   values=["持仓股", "自选股", "涨停池", "连板池", "热门板块", "全市场"])
         pool_combo.pack(side=tk.LEFT)
 
-        # 手动输入代码
-        tk.Label(tb1, text="  或手动输入代码:", font=("", 10), bg="#1a1a3e", fg="#B0BEC5").pack(side=tk.LEFT, padx=(10, 2))
+        # ── 股票快速选择 Combobox (可编辑 + 多池聚合) ──
+        tk.Label(tb1, text="  🎯 快速选股:", font=("", 10), bg="#1a1a3e", fg="#B0BEC5").pack(side=tk.LEFT, padx=(10, 2))
         manual_var = tk.StringVar()
-        manual_entry = tk.Entry(tb1, textvariable=manual_var, width=10, font=("", 10))
-        manual_entry.pack(side=tk.LEFT)
-        tk.Button(tb1, text="📊 分析这只", font=("", 10, "bold"),
+        quick_combo = ttk.Combobox(tb1, textvariable=manual_var, width=28, state="normal",
+                                    font=("", 10))
+        quick_combo.pack(side=tk.LEFT)
+
+        def _rebuild_quick_combo():
+            """聚合多池到 combobox (代码 名称 格式)"""
+            all_items = []
+            seen = set()
+
+            def _add(pool_name, prefix):
+                try:
+                    items = self._get_stock_pool(pool_name, kw)
+                    for code, name in items[:25]:  # 每池最多25只
+                        if code and code not in seen:
+                            seen.add(code)
+                            label = f"{code} {name}" if name else code
+                            all_items.append(f"[{prefix}] {label}")
+                except Exception:
+                    pass
+
+            # 有网的才拉: 持仓/自选 (本地, 秒出), 涨停/热门 (需要网络, 失败就跳过)
+            _add("持仓股", "持")
+            _add("自选股", "选")
+            try:
+                _add("涨停池", "板")
+            except Exception:
+                pass
+            try:
+                _add("热门板块", "热")
+            except Exception:
+                pass
+
+            # 演示/经典票兜底 (永远有)
+            demos = [
+                ("600519", "贵州茅台"), ("000858", "五粮液"), ("300750", "宁德时代"),
+                ("002594", "比亚迪"), ("601318", "中国平安"), ("600036", "招商银行"),
+                ("000333", "美的集团"), ("601888", "中国中免"), ("600900", "长江电力"),
+                ("300059", "东方财富"), ("002415", "海康威视"), ("601012", "隆基绿能"),
+                ("600276", "恒瑞医药"), ("000651", "格力电器"), ("600030", "中信证券"),
+                ("601899", "紫金矿业"), ("002230", "科大讯飞"), ("300760", "迈瑞医疗"),
+                ("000568", "泸州老窖"), ("600309", "万华化学"),
+            ]
+            for c, n in demos:
+                if c not in seen:
+                    seen.add(c)
+                    all_items.append(f"[典] {c} {n}")
+
+            # 历史分析过的
+            hist = getattr(self, "_martin_history", [])
+            for code, name in hist[-10:]:
+                if code and code not in seen:
+                    seen.add(code)
+                    all_items.append(f"[史] {code} {name}")
+
+            quick_combo["values"] = all_items
+
+        # 初始化 + 后台补网络池
+        _rebuild_quick_combo()
+
+        def _bg_refresh_combo():
+            import time; time.sleep(0.8)  # 等网络池拉完
+            try:
+                kw.after(0, _rebuild_quick_combo)
+            except Exception:
+                pass
+
+        threading.Thread(target=_bg_refresh_combo, daemon=True).start()
+
+        tk.Button(tb1, text="📊 分析", font=("", 10, "bold"),
                   bg="#FF9800", fg="white", relief=tk.FLAT, padx=8,
                   command=lambda: self._analyze_manual_code(
                       manual_var.get().strip(), kline_host, analysis_host,
@@ -661,30 +727,46 @@ class MartinMixin:
                              ))
         scan_btn.pack(side=tk.RIGHT, padx=12, pady=4)
 
-        # ── 主体: 左列表 + 右K线 ──
-        body = tk.Frame(kw, bg="#0f0f23")
-        body.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        # ── 主体: PanedWindow 左右可拖拽分隔 ──
+        pw = tk.PanedWindow(kw, orient=tk.HORIZONTAL, bg="#1a1a3e",
+                            sashwidth=6, sashrelief=tk.FLAT,
+                            handlepad=2)
+        pw.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
 
-        # 左: 选股列表
-        left = tk.Frame(body, bg="#1a1a3e", width=540)
-        left.pack(side=tk.LEFT, fill=tk.Y)
-        left.pack_propagate(False)
+        # ═══ 左: 选股列表 (默认 520px, 可拖宽拖窄) ═══
+        left = tk.Frame(pw, bg="#1a1a3e", width=520)
+        pw.add(left, width=520)
 
         status_lbl = tk.Label(left, text="👉 选股票来源 → 点 🔍 扫描, 或直接输入代码回车",
                               font=("", 10), bg="#1a1a3e", fg="#78909C", wraplength=520,
                               justify=tk.LEFT)
         status_lbl.pack(fill=tk.X, pady=(8, 4), padx=8)
 
-        cols = ("代码", "名称", "涨幅%", "成交(亿)", "ADR%", "形态", "评分", "支撑/备注")
-        tv = ttk.Treeview(left, columns=cols, show="headings", height=38)
-        for c, w in zip(cols, (75, 95, 55, 60, 55, 80, 45, 110)):
-            tv.heading(c, text=c)
-            tv.column(c, width=w, anchor=tk.CENTER)
-        tv.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        # Treeview + 水平滚动条 (所有列都可拖拽宽度)
+        tv_frame = tk.Frame(left, bg="#1a1a3e")
+        tv_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
 
-        # 右: K线 + 分析
-        right = tk.Frame(body, bg="#0f0f23")
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0))
+        cols = ("代码", "名称", "涨幅%", "成交(亿)", "ADR%", "形态", "评分", "支撑/备注")
+        tv = ttk.Treeview(tv_frame, columns=cols, show="headings", height=36)
+        # 每列 stretch=False → 可手动拖宽度; 最小 widths 保证可见
+        for c, w, min_w in [("代码", 75, 60), ("名称", 100, 70), ("涨幅%", 60, 45),
+                             ("成交(亿)", 65, 50), ("ADR%", 60, 45), ("形态", 85, 60),
+                             ("评分", 50, 35), ("支撑/备注", 120, 80)]:
+            tv.heading(c, text=c)
+            tv.column(c, width=w, minwidth=min_w, stretch=False, anchor=tk.CENTER)
+
+        vsb = ttk.Scrollbar(tv_frame, orient=tk.VERTICAL, command=tv.yview)
+        hsb = ttk.Scrollbar(tv_frame, orient=tk.HORIZONTAL, command=tv.xview)
+        tv.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        tv.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        tv_frame.grid_rowconfigure(0, weight=1)
+        tv_frame.grid_columnconfigure(0, weight=1)
+
+        # ═══ 右: K线 + 分析 (可拖宽) ═══
+        right = tk.Frame(pw, bg="#0f0f23")
+        pw.add(right)
 
         kline_host = tk.Frame(right, bg="#0f0f23")
         kline_host.pack(fill=tk.BOTH, expand=True)
@@ -714,7 +796,7 @@ class MartinMixin:
                                           float(acc_var.get()) if acc_var.get() else 100000,
                                           float(risk_var.get()) if risk_var.get() else 0.5)
 
-        manual_entry.bind("<Return>", _on_enter)
+        quick_combo.bind("<Return>", _on_enter)
 
         # 环境检查 (后台)
         def _env_bg():
@@ -729,206 +811,318 @@ class MartinMixin:
         threading.Thread(target=_env_bg, daemon=True).start()
         print("[🎯Martin] 弹窗已打开", flush=True)
 
-    def _analyze_manual_code(self, code, kline_host, analysis_host, acc, risk):
-        """手动输入代码 → 直接在 K 线区显示 Martin 分析"""
-        if not code:
+    def _analyze_manual_code(self, raw, kline_host, analysis_host, acc, risk):
+        """
+        解析输入 → 提取代码 → 显示 Martin 分析
+        支持格式: "600519" / "600519 茅台" / "[典] 600519 贵州茅台" / "[持] 000858 五粮液"
+        """
+        if not raw:
             return
-        code = code.strip()
-        print(f"[🎯Martin] 手动分析 {code}", flush=True)
-        # 先清空列表
-        for it in getattr(self, '_martin_last_tv_children', []):
-            try: it.delete()
-            except: pass
-        self._show_martin_kline(code, "", kline_host, analysis_host, acc, risk)
+        raw = raw.strip()
+        # 提取 6 位代码: 找第一个连续 6 位数字
+        import re
+        m = re.search(r'(\d{6})', raw)
+        if not m:
+            print(f"[🎯Martin] 无法解析代码: {raw}", flush=True)
+            tk.Label(kline_host, text=f"❌ 无法识别代码: {raw}", font=("", 11),
+                     bg="#0f0f23", fg="#EF5350").pack(pady=60)
+            return
+        code = m.group(1)
+        # 提取名称 (可选, 代码后面的非数字部分)
+        name = ""
+        rest = raw[m.end():].strip()
+        rest = re.sub(r'^[\s\]]+', '', rest)  # 去掉前导空格和 ]
+        if rest:
+            name = rest.split()[0] if rest.split() else rest
+
+        print(f"[🎯Martin] 分析 {code} {name}", flush=True)
+
+        # 记录历史
+        if not hasattr(self, "_martin_history"):
+            self._martin_history = []
+        # 避免重复
+        self._martin_history = [(c, n) for c, n in self._martin_history if c != code]
+        self._martin_history.append((code, name))
+        # 最多保留 20 只
+        self._martin_history = self._martin_history[-20:]
+
+        # 显示 K 线 + 分析
+        self._show_martin_kline(code, name, kline_host, analysis_host, acc, risk)
 
     # ═══════════════════════════════════════════════════════
     # ❓ 帮助弹窗 — Martin 操盘方法完整介绍
     # ═══════════════════════════════════════════════════════
 
     def _show_martin_help(self, parent=None):
-        """显示 Martin Luk 动量操盘系统完整说明"""
+        """显示 Martin Luk 动量操盘系统完整说明 — 2列 + 字体可调节 + 默认大2号"""
         help_win = tk.Toplevel(parent)
         help_win.title("❓ Martin Luk 操盘方法完整介绍")
-        help_win.geometry("820x680")
+        help_win.geometry("1200x800")
         help_win.configure(bg="#1a1a3e")
 
-        # ── 顶部标题 ──
-        tk.Label(help_win, text="🎯 Martin Luk 动量操盘方法",
-                font=("", 16, "bold"), bg="#1a1a3e", fg="#FFD54F").pack(pady=(12, 2))
-        tk.Label(help_win, text="27% 胜率 × 7:1 盈亏比 = 年赚 969% | 2025 美国投资锦标赛冠军",
-                font=("", 10), bg="#1a1a3e", fg="#B0BEC5").pack(pady=(0, 8))
+        # ── 字体大小变量 (默认 +2: 12号) ──
+        font_size = tk.IntVar(value=12)
+        base_body = tk.StringVar(value="")  # 动态 font 字符串, 每次调节重建
 
-        # ── 可滚动文本 ──
-        canvas = tk.Canvas(help_win, bg="#1a1a3e", highlightthickness=0)
-        sb = ttk.Scrollbar(help_win, orient=tk.VERTICAL, command=canvas.yview)
-        frame = tk.Frame(canvas, bg="#1a1a3e")
-        frame.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=frame, anchor="nw", width=800)
-        canvas.configure(yscrollcommand=sb.set)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-        sb.pack(side=tk.RIGHT, fill=tk.Y, pady=(0, 10))
+        def _fonts(sz):
+            """根据字号返回 4 种 font 元组"""
+            return {
+                "title": ("", sz + 4, "bold"),
+                "subtitle": ("", sz + 1, "bold"),
+                "section": ("", sz, "bold"),
+                "body": ("", sz),
+                "rule": ("", sz),
+                "highlight": ("", sz, "bold"),
+                "foot": ("", sz - 1),
+            }
 
-        # 鼠标滚轮绑定
-        def _on_mousewheel(e):
-            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # ── 顶部: 标题 + 字体调节 ──
+        top = tk.Frame(help_win, bg="#1a1a3e")
+        top.pack(fill=tk.X, pady=(10, 0))
 
-        # ── 内容生成器 ──
-        def _sec(title, color="#FFD54F"):
-            tk.Label(frame, text=title, font=("", 12, "bold"), bg="#1a1a3e", fg=color).pack(anchor="w", pady=(14, 4), padx=4)
+        tk.Label(top, text="🎯 Martin Luk 动量操盘方法",
+                font=_fonts(font_size.get())["title"],
+                bg="#1a1a3e", fg="#FFD54F").pack(side=tk.LEFT, padx=12)
+        tk.Label(top, text="27%胜率 × 7:1盈亏比 = 年赚969%",
+                font=_fonts(font_size.get())["body"],
+                bg="#1a1a3e", fg="#B0BEC5").pack(side=tk.LEFT, padx=6)
 
-        def _body(text):
-            tk.Label(frame, text=text, font=("", 10), bg="#1a1a3e", fg="#ECEFF1",
-                     wraplength=770, justify=tk.LEFT).pack(anchor="w", padx=8)
+        # 字体调节
+        ft = tk.Frame(top, bg="#1a1a3e")
+        ft.pack(side=tk.RIGHT, padx=15)
+        tk.Label(ft, text="🔤 字体:", font=("", 10),
+                 bg="#1a1a3e", fg="#B0BEC5").pack(side=tk.LEFT, padx=(0, 4))
 
-        def _rule(text):
-            tk.Label(frame, text=f"  • {text}", font=("", 10), bg="#1a1a3e", fg="#B0BEC5",
-                     wraplength=770, justify=tk.LEFT).pack(anchor="w", padx=8)
+        def _change_font(delta):
+            new_sz = max(8, min(20, font_size.get() + delta))
+            font_size.set(new_sz)
+            _rebuild_body()
 
-        def _highlight(text):
-            tk.Label(frame, text=text, font=("", 10, "bold"), bg="#1a1a3e", fg="#66BB6A",
-                     wraplength=770, justify=tk.LEFT).pack(anchor="w", padx=8, pady=2)
+        tk.Button(ft, text="A-", font=("", 10, "bold"), width=3,
+                  bg="#37474F", fg="white", relief=tk.FLAT,
+                  command=lambda: _change_font(-1)).pack(side=tk.LEFT, padx=2)
+        tk.Label(ft, textvariable=font_size, width=3, anchor="center",
+                 font=("", 10), bg="#1a1a3e", fg="#FFD54F").pack(side=tk.LEFT)
+        tk.Button(ft, text="A+", font=("", 10, "bold"), width=3,
+                  bg="#37474F", fg="white", relief=tk.FLAT,
+                  command=lambda: _change_font(1)).pack(side=tk.LEFT, padx=2)
+        tk.Button(ft, text="重置", font=("", 9), width=4,
+                  bg="#37474F", fg="white", relief=tk.FLAT,
+                  command=lambda: (font_size.set(12), _rebuild_body())
+                  ).pack(side=tk.LEFT)
 
-        # ── 1. 核心理念 ──
-        _sec("🧠 核心理念 — 先想亏多少, 再想赚多少", "#42A5F5")
-        _body("Martin Luk (香港交易员), 2025 美国投资锦标赛冠军 (年收益 969%)。"
-              "他的方法来自瑞典交易员 Qullamaggie, 核心是:")
-        _highlight("  一笔交易能赚多少没法预测, 能亏多少可以自己定")
-        _body("所以他只挑止损能放得很近的地方买, 看错了马上认亏, 看对了就多拿。\n"
-              "2025 年他: 亏钱单平均 -2%, 赚钱单平均 +14% → 盈亏比 7:1\n"
-              "五笔里亏将近四笔, 但赚一笔抵得上亏七笔 → 正期望")
+        # ── 2列主体 ──
+        body_wrap = tk.Frame(help_win, bg="#1a1a3e")
+        body_wrap.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # ── 2. 技术指标 ──
-        _sec("📈 技术指标 (只用 4 样)", "#66BB6A")
-        _rule("EMA (指数移动均线): 9 / 21 / 50 / 150 — 所有周期统一参数")
-        _rule("AVWAP (锚定成交量加权均价): 从指定K线开始累计, 看价格回踩支撑")
-        _rule("成交额 (股价×成交量): 他看的是成交了多少钱, 不是多少股")
-        _rule("ADR (Average Daily Range): 平均每天振幅 % — 判断波动性")
-        _body("   🟡 指标在本程序 K 线图上的对应颜色:")
-        _body("   EMA9=黄色  EMA21=绿色  EMA50=蓝色  EMA150=紫色  AVWAP=橙色虚线")
+        col_left = tk.Frame(body_wrap, bg="#1a1a3e")
+        col_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        col_right = tk.Frame(body_wrap, bg="#1a1a3e")
+        col_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
 
-        # ── 3. 三种买法 ──
-        _sec("🎯 三种买法 (2025 年一半以上是回调)", "#FF7043")
+        def _make_scrollable(parent):
+            """创建带滚动条的容器 frame"""
+            outer = tk.Frame(parent, bg="#1a1a3e")
+            outer.pack(fill=tk.BOTH, expand=True)
+            cv = tk.Canvas(outer, bg="#1a1a3e", highlightthickness=0)
+            sb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=cv.yview)
+            inner = tk.Frame(cv, bg="#1a1a3e")
+            inner.bind("<Configure>", lambda _e: cv.configure(scrollregion=cv.bbox("all")))
+            cv.create_window((0, 0), window=inner, anchor="nw")
+            cv.configure(yscrollcommand=sb.set)
+            cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            sb.pack(side=tk.RIGHT, fill=tk.Y)
+            return cv, inner
 
-        _body("📉 ① 回调 Pullback — 最常用的买法")
-        _rule("趋势向上: EMA9 > EMA21 > EMA50, 且均线都在往上走")
-        _rule("位置要早: 股价从高点回落后, 离均线不远 (不是连涨几周后的高位)")
-        _rule("支撑到位: 至少回到 EMA9, 最好同时踩 EMA21 / AVWAP / 前高前低")
-        _rule("几样支撑叠在一起最好 — 多拨人都在这里买")
-        _highlight("  ✅ 回到 EMA21 胜率 > 只回 EMA9 (但强股不给那么深)")
+        cv_L, frm_L = _make_scrollable(col_left)
+        cv_R, frm_R = _make_scrollable(col_right)
 
-        _body("🚀 ② 突破 Breakout")
-        _rule("整理时间: 至少 1-2 周 (横得越久突破越有力)")
-        _rule("波动收窄: K 线贴着 EMA9, 振幅逐渐缩小")
-        _rule("Inside Day: 今天高低点都在前一天范围内 (蓄势信号)")
-        _rule("位置: 股价在 AVWAP 上方")
-        _highlight("  ✅ 不等冲过整理区上沿, 过前一天高点就买 — 止损更近")
+        def _on_mousewheel_L(e): cv_L.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        def _on_mousewheel_R(e): cv_R.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        frm_L.bind_all("<MouseWheel>", _on_mousewheel_L)
+        frm_R.bind_all("<MouseWheel>", _on_mousewheel_R)
 
-        _body("⚡ ③ EP 跳空 (Earnings / News Gap)")
-        _rule("触发: 财报/重大消息 → 开盘跳空高开 (通常 ≥5%) + 巨量 (≥2x)")
-        _rule("买法改进 (2025 年版): 不等开盘区间高点突破, 先砸回来再买")
-        _rule("假突破太多: 先跌破开盘区间低点再涨回来的, 成功率更高")
+        def _all_children(w):
+            out = list(w.winfo_children())
+            for c in out:
+                out.extend(_all_children(c))
+            return out
 
-        # ── 4. 选股流程 ──
-        _sec("🔍 选股流程 — 怎么找到这些票", "#AB47BC")
-        _body("本程序提供 6 种股票来源:")
-        _rule("持仓股: 你的本地持仓 (秒出, 无网络)")
-        _rule("自选股: 自选组 1-3 全部")
-        _rule("涨停池 / 连板池: akshare 实时抓")
-        _rule("热门板块: 涨得最凶的板块龙头")
-        _rule("全市场: 需 AKShare 稳定, 建议闭市后跑")
-        _highlight("  ✅ 最快路径: 直接输入股票代码 (如 600519), 回车即分析")
+        # ── 构建内容 (延迟定义, 字体变化时重建) ──
+        def _build_content(frame_container):
+            """在 frame_container 上填充全部内容, 返回两个 inner frame"""
+            fl = frame_container[0]  # frm_L
+            fr = frame_container[1]  # frm_R
 
-        # ── 5. 止损与仓位 ──
-        _sec("🛑 止损 / 📦 仓位 (马丁系统的命根子)", "#EF5350")
-        _body("止损规则 (60-70% 单子用当日最低点):")
-        _rule("优先: 当日最低价下方 (通常 1-3% 距离)")
-        _rule("太远: 改用触发买入那根 K 线的最低点")
-        _rule("上限: ADR 的一半, 且最多 5% — 超过 3% 一般放弃")
-        _highlight("  ⚠️ 下单前先把止损定好 — 这一条他从来不破例")
+            def _sec(f, title, color="#FFD54F"):
+                tk.Label(f, text=title, font=_fonts(font_size.get())["section"],
+                         bg="#1a1a3e", fg=color).pack(anchor="w", pady=(14, 4), padx=4)
 
-        _body("仓位计算 (倒推法):")
-        _rule("风险金额 = 账户 × 0.5% (例: 10万账户 → 每单最多亏 500 元)")
-        _rule("每股风险 = 买入价 - 止损价")
-        _rule("买多少股 = 风险金额 ÷ 每股风险")
-        _rule("总仓位通常 25-30%, 小盘股 20% 以下")
-        _highlight("  ✅ 止损越窄 → 同样风险能买的股越多 → 仓位自动放大")
+            def _body(f, text):
+                tk.Label(f, text=text, font=_fonts(font_size.get())["body"],
+                         bg="#1a1a3e", fg="#ECEFF1", wraplength=550,
+                         justify=tk.LEFT).pack(anchor="w", padx=8)
 
-        # ── 6. 止盈 ──
-        _sec("🎯 止盈 (没有固定规则, 分几步卖)", "#26A69A")
-        _rule("第一批: 至少 3R/5R 才卖 (每次只卖 15%, 不贪一把)")
-        _rule("保本止损: 日线 EMA9 升到买入价以上 → 止损移到保本")
-        _rule("跟踪止盈: 剩余仓位用日线 EMA9 跟踪 (提前挂单在 EMA9 下方)")
-        _rule("加速卖出: 比 EMA9 高出 15-20%, 或突然放巨量大涨")
-        _highlight("  💡 行情顺的时候他拿很久 — 2025 年大单子第一批多是涨 15R 才卖")
+            def _rule(f, text):
+                tk.Label(f, text=f"  • {text}", font=_fonts(font_size.get())["rule"],
+                         bg="#1a1a3e", fg="#B0BEC5", wraplength=550,
+                         justify=tk.LEFT).pack(anchor="w", padx=8)
 
-        # ── 7. 市场环境判断 ──
-        _sec("🌐 市场环境 (最重要的! 形态再漂亮也没用)", "#FFCA28")
-        _rule("① 自己的单子: 新开的仓连续被止损 → 少做, 把每笔风险往下调")
-        _rule("② 指数: 上证/创业板 EMA9/21 多头排列时最适合出手")
-        _rule("③ 观察名单: 强股 (>EMA50>EMA150) 往下掉的越来越多 → 行情变差")
-        _highlight("  ⛔ 连涨了几个星期没回调 → 不能再大量开新仓, 多卖少买")
+            def _hl(f, text):
+                tk.Label(f, text=text, font=_fonts(font_size.get())["highlight"],
+                         bg="#1a1a3e", fg="#66BB6A", wraplength=550,
+                         justify=tk.LEFT).pack(anchor="w", padx=8, pady=2)
 
-        # ── 8. 操作流程 ──
-        _sec("📋 日常操作流程", "#5C6BC0")
-        _body("盘前 (15 分钟):")
-        _rule("扫盘前跳空股票 (如果做 EP 跳空)")
-        _rule("预判今天关键支撑位在哪 (EMA9/21/AVWAP)")
-        _rule("检查环境: 指数 EMA9/21 方向")
-        _body("开盘后 (第一个小时最关键):")
-        _rule("等股价急砸到支撑 → V 型反转弹回 → 过前一根 K 线高点就买")
-        _rule("5分钟内用 1 分钟图, 1小时内用 5 分钟图, 之后 15 分钟图")
-        _rule("买完立刻挂止损单 (自动卖出)")
-        _body("盘中 & 收盘:")
-        _rule("被打掉但形态还在 → 可以再买")
-        _rule("新仓连亏 3-4 笔 → 当天停手, 明天再说")
-        _rule("收盘复盘: 标记哪些形态有效, 哪些失败")
+            # ═══════════ 左列: 核心理念 + 指标 + 三种买法 + 选股流程 ═══════════
+            _sec(fl, "🧠 核心理念 — 先想亏多少, 再想赚多少", "#42A5F5")
+            _body(fl, "Martin Luk (香港交易员), 2025 美国投资锦标赛冠军 (年收益 969%)。"
+                     "方法来自瑞典交易员 Qullamaggie。")
+            _hl(fl, "  一笔交易能赚多少没法预测, 能亏多少可以自己定")
+            _body(fl, "只挑止损能放得很近的地方买, 看错马上认亏, 看对多拿。"
+                     "亏钱单平均 -2%, 赚钱单平均 +14% → 盈亏比 7:1。"
+                     "五笔亏四笔, 但赚一笔抵七笔 → 正期望。")
 
-        # ── 9. 成功案例 ──
-        _sec("🏆 成功案例", "#EC407A")
+            _sec(fl, "📈 技术指标 (只用 4 样)", "#66BB6A")
+            _rule(fl, "EMA (指数均线): 9 / 21 / 50 / 150 — 所有周期统一参数")
+            _rule(fl, "AVWAP (锚定成交量加权均价): 从指定K线累计, 看价格回踩")
+            _rule(fl, "成交额 (股价×成交量): 看成交了多少钱, 不是多少股")
+            _rule(fl, "ADR (Average Daily Range): 平均每天振幅 % — 波动性")
+            _body(fl, "K线图颜色: EMA9=黄 EMA21=绿 EMA50=蓝 EMA150=紫 AVWAP=橙虚线")
 
-        _body("① AMPX (2025.9) — 回调买法, 赚 24R + 23R")
-        _rule("8月8日财报放巨量冲高回落 → 回落整理 5 周")
-        _rule("AVWAP 起点设在 8月8日高点 → 9月11日股价回踩踩住")
-        _rule("开盘第一分钟砸到支撑, 第二分钟拉回去 → 7.57 买入")
-        _rule("止损 7.42 (-1.98%, 很窄)")
-        _rule("一周后涨到 11+ → 9月18日卖一成 (24R)")
-        _rule("9月24日清仓 (23R), 卖完又涨 40%")
+            _sec(fl, "🎯 三种买法 (一半以上是回调)", "#FF7043")
+            _body(fl, "📉 ① 回调 Pullback — 最常用")
+            _rule(fl, "趋势向上: EMA9 > EMA21 > EMA50, 且均线往上走")
+            _rule(fl, "位置早: 从高点回落不久, 还在均线上方不远")
+            _rule(fl, "支撑到位: 至少回 EMA9, 最好踩 EMA21 / AVWAP / 前高前低")
+            _rule(fl, "几样支撑叠在一起最好 — 多拨人都在这里买")
+            _hl(fl, "  ✅ 回 EMA21 胜率 > 只回 EMA9 (强股不给深回调)")
 
-        _body("② SOFI (2024.11) — 突破买法, 赚 6R + 19R")
-        _rule("从 7 涨到 11, 横了一周 (整理时间够)")
-        _rule("最后 3 天贴 EMA9 回落, inside day 信号")
-        _rule("11月5日开盘 6-7 分钟过前一天高点 → 11.16 买入")
-        _rule("止损 10.94 (-1.97%)")
-        _rule("3 天后涨到 12.52 → 卖 1/8 (6R)")
-        _rule("一直拿到 12月9日收在 EMA9 下 → 全部卖出 (19R)")
+            _body(fl, "🚀 ② 突破 Breakout")
+            _rule(fl, "整理至少 1-2 周 (横得越久突破越有力)")
+            _rule(fl, "波动收窄: K 线贴着 EMA9, 振幅逐渐缩小")
+            _rule(fl, "Inside Day: 今天高低都在前一天范围内 (蓄势)")
+            _rule(fl, "位置在 AVWAP 上方")
+            _hl(fl, "  ✅ 不等冲过整理区上沿, 过前一天高点就买 — 止损更近")
 
-        _body("③ Planet Labs (2025.9) — EP 跳空 + 先砸后买, 赚 23R + 27R")
-        _rule("财报高开 18%, 冲 8.22 然后砸到 7.29 (跌破开盘价)")
-        _rule("横住一根 5 分钟 K → 下一根涨过前高 → 买入")
-        _rule("止损改放在触发 K 最低点 (-2.38%)")
-        _rule("当天收 9.66 (+48%), 拿了 3 周")
-        _rule("9月23日卖 12% (23R), 9月29日清仓 (27R), 卖完又涨 30%")
+            _body(fl, "⚡ ③ EP 跳空 (财报/消息)")
+            _rule(fl, "触发: 财报/重大消息 → 跳空高开 ≥5% + 巨量 ≥2x")
+            _rule(fl, "2025版改进: 不等开盘突破, 先砸回来再买")
+            _rule(fl, "先跌破开盘区间低点再涨回来的, 成功率更高")
 
-        # ── 10. 注意事项 ──
-        _sec("⚠️ 注意事项 & 他自己踩过的坑", "#FF5722")
-        _rule("2025年12月他自己回撤 26.6% — 因为行情震荡来回打脸, 多空反复切换")
-        _rule("85 笔交易里一半不该做 — 连亏之后应该停手, 而不是赌气换方向")
-        _rule("连涨几个月后不要追 — 他在高位清掉了所有单子, 正确")
-        _rule("宽止损 (>3%) 宁可不做 — 风险收益比太差, 会拖累整体期望")
-        _rule("强股不给深回调就试 EMA9 — 但如果连续被打止损, 说明你选的股不对")
-        _highlight("  💎 终极心法: 形态再漂亮也没有市场环境重要")
+            _sec(fl, "🔍 选股流程", "#AB47BC")
+            _body(fl, "本程序提供 6 种股票来源:")
+            _rule(fl, "持仓股 / 自选股 / 涨停池 / 连板池 / 热门板块 / 全市场")
+            _hl(fl, "  ✅ 最快路径: 直接输入代码 (如 600519), 回车即分析")
 
-        # ── 11. 学习链接 ──
-        _sec("🔗 原文链接", "#8D6E63")
-        _body("知乎原文 (完整操盘方法披露):")
-        _body("  https://zhuanlan.zhihu.com/p/2098724684871345451")
-        _body("(本文整理自该长文, 版权归原作者所有)")
+            # ═══════════ 右列: 止损仓位 + 止盈 + 环境 + 操作流程 + 案例 + 注意 + 链接 ═══════════
+            _sec(fr, "🛑 止损 / 📦 仓位 (命根子)", "#EF5350")
+            _body(fr, "止损 (60-70% 单子用当日最低点):")
+            _rule(fr, "优先: 当日最低价下方 (通常 1-3%)")
+            _rule(fr, "太远: 触发买入K线最低点")
+            _rule(fr, "上限: ADR一半 且 ≤5% — 超 3% 一般放弃")
+            _hl(fr, "  ⚠️ 下单前先定好止损 — 这一条他从来不破例")
 
-        # ── 底部关闭按钮 ──
-        tk.Button(help_win, text="✅ 我知道了", font=("", 11, "bold"),
+            _body(fr, "仓位计算 (倒推法):")
+            _rule(fr, "风险金额 = 账户 × 0.5% (10万账户 → 每单最多亏 500 元)")
+            _rule(fr, "每股风险 = 买入价 - 止损价")
+            _rule(fr, "买多少股 = 风险金额 ÷ 每股风险")
+            _rule(fr, "总仓位 25-30%, 小盘股 20% 以下")
+            _hl(fr, "  ✅ 止损越窄 → 同风险买得越多 → 仓位自动放大")
+
+            _sec(fr, "🎯 止盈 (分几步卖)", "#26A69A")
+            _rule(fr, "第一批: 至少 3R/5R 才卖 (每次只卖 15%)")
+            _rule(fr, "保本止损: EMA9 升到买入价 → 止损移到保本")
+            _rule(fr, "跟踪止盈: 剩余仓位用 EMA9 跟踪")
+            _rule(fr, "加速卖: 比 EMA9 高 15-20%, 或突然巨量大涨")
+            _hl(fr, "  💡 行情顺的时候他拿很久 — 2025 大单子第一批多是 15R 才卖")
+
+            _sec(fr, "🌐 市场环境 (最重要!)", "#FFCA28")
+            _rule(fr, "① 自己的单子: 连被止损 → 少做, 风险往下调")
+            _rule(fr, "② 指数: 上证/创业板 EMA9/21 多头排列最适合出手")
+            _rule(fr, "③ 观察名单: 强股往下掉越来越多 → 行情变差")
+            _hl(fr, "  ⛔ 连涨几星期没回调 → 不要大量开新仓, 多卖少买")
+
+            _sec(fr, "📋 日常操作流程", "#5C6BC0")
+            _body(fr, "盘前 15 分钟:")
+            _rule(fr, "预判支撑位 (EMA9/21/AVWAP)")
+            _rule(fr, "扫盘前跳空 (做 EP 跳空时)")
+            _rule(fr, "检查指数 EMA9/21 方向")
+            _body(fr, "开盘后 (1小时最关键):")
+            _rule(fr, "急砸到支撑 → V 型反转 → 过前一根K高点就买")
+            _rule(fr, "5分钟内用 1分图, 1小时内用 5分图, 之后 15分图")
+            _rule(fr, "买完立刻挂止损单")
+            _body(fr, "盘中 & 收盘:")
+            _rule(fr, "被打掉但形态还在 → 可以再买")
+            _rule(fr, "连亏 3-4 笔 → 当天停手")
+            _rule(fr, "收盘复盘标记哪些有效")
+
+            _sec(fr, "🏆 成功案例", "#EC407A")
+            _body(fr, "① AMPX (2025.9) 回调 赚 24R+23R")
+            _rule(fr, "8月8日财报冲高回落 → 整理 5 周 → AVWAP 起点在高点")
+            _rule(fr, "9月11日回踩支撑, 第一分钟砸, 第二分钟拉 → 7.57 买")
+            _rule(fr, "止损 7.42 (-1.98%), 一周涨到 11+")
+
+            _body(fr, "② SOFI (2024.11) 突破 赚 6R+19R")
+            _rule(fr, "从 7→11 横一周 → inside day → 过前高 11.16 买")
+            _rule(fr, "止损 10.94 (-1.97%), 拿到 EMA9 跌破全卖")
+
+            _body(fr, "③ Planet Labs (2025.9) EP跳空 赚 23R+27R")
+            _rule(fr, "高开 18% 砸到开盘价下 → 横住 5 分钟K → 下一根过前高")
+            _rule(fr, "当天收 9.66 (+48%), 拿了 3 周")
+
+            _sec(fr, "⚠️ 注意事项", "#FF5722")
+            _rule(fr, "2025.12 他自己回撤 26.6% — 震荡行情来回打脸")
+            _rule(fr, "85 笔一半不该做 — 连亏应停手而非赌气")
+            _rule(fr, "宽止损 (>3%) 宁可不做")
+            _hl(fr, "  💎 终极心法: 形态再漂亮也没有市场环境重要")
+
+            _sec(fr, "🔗 原文链接", "#8D6E63")
+            _body(fr, "知乎原文 (完整操盘方法披露):")
+            _body(fr, "  https://zhuanlan.zhihu.com/p/2098724684871345451")
+            _body(fr, "  (本文整理自该长文, 版权归原作者所有)")
+
+        def _clear_frame(f):
+            for c in f.winfo_children():
+                c.destroy()
+
+        def _rebuild_body():
+            """字体变化时: 清空两列 → 重建"""
+            _clear_frame(frm_L)
+            _clear_frame(frm_R)
+            _clear_frame(top)
+            # 重建顶部 (字号随 font_size 变)
+            tk.Label(top, text="🎯 Martin Luk 动量操盘方法",
+                    font=_fonts(font_size.get())["title"],
+                    bg="#1a1a3e", fg="#FFD54F").pack(side=tk.LEFT, padx=12)
+            tk.Label(top, text="27%胜率 × 7:1盈亏比 = 年赚969%",
+                    font=_fonts(font_size.get())["body"],
+                    bg="#1a1a3e", fg="#B0BEC5").pack(side=tk.LEFT, padx=6)
+            ft_new = tk.Frame(top, bg="#1a1a3e")
+            ft_new.pack(side=tk.RIGHT, padx=15)
+            tk.Label(ft_new, text="🔤 字体:", font=("", 10),
+                     bg="#1a1a3e", fg="#B0BEC5").pack(side=tk.LEFT, padx=(0, 4))
+            tk.Button(ft_new, text="A-", font=("", 10, "bold"), width=3,
+                      bg="#37474F", fg="white", relief=tk.FLAT,
+                      command=lambda: _change_font(-1)).pack(side=tk.LEFT, padx=2)
+            tk.Label(ft_new, textvariable=font_size, width=3, anchor="center",
+                     font=("", 10), bg="#1a1a3e", fg="#FFD54F").pack(side=tk.LEFT)
+            tk.Button(ft_new, text="A+", font=("", 10, "bold"), width=3,
+                      bg="#37474F", fg="white", relief=tk.FLAT,
+                      command=lambda: _change_font(1)).pack(side=tk.LEFT, padx=2)
+            tk.Button(ft_new, text="重置", font=("", 9), width=4,
+                      bg="#37474F", fg="white", relief=tk.FLAT,
+                      command=lambda: (font_size.set(12), _rebuild_body())
+                      ).pack(side=tk.LEFT)
+            _build_content((frm_L, frm_R))
+
+        _build_content((frm_L, frm_R))
+
+        # ── 底部关闭 ──
+        close_bar = tk.Frame(help_win, bg="#1a1a3e")
+        close_bar.pack(fill=tk.X, pady=(0, 10))
+        tk.Button(close_bar, text="✅ 我知道了", font=_fonts(font_size.get())["section"],
                   bg="#4CAF50", fg="white", relief=tk.FLAT, padx=30, pady=6,
-                  command=help_win.destroy).pack(pady=(6, 12))
+                  command=help_win.destroy).pack()
 
     def _check_market_env_safe(self):
         """检查市场环境 (用A股指数)"""
@@ -997,7 +1191,7 @@ class MartinMixin:
                 total = len(pool)
 
                 for idx, (code, name_from_pool) in enumerate(pool):
-                    if idx % 10 == 0 or idx == total - 1:
+                    if idx % 5 == 0 or idx == total - 1:
                         kw.after(0, lambda i=idx, n=total: status_lbl.configure(
                             text=f"🔄 {i+1}/{n} — 分析中... (已出 {len(results)} 只)"))
 
@@ -1076,23 +1270,50 @@ class MartinMixin:
                                 if amt_y > 0:
                                     amt_y_est = amt_y
 
-                        results.append({
+                        item = {
                             "code": code, "name": display_name or "",
                             "pct_chg": pct_chg, "amount_yi": amt_y_est,
                             "adr_pct": cur_adr, "pattern": best,
-                        })
+                        }
+                        results.append(item)
+
+                        # ⚡ 实时追加到 Treeview (边扫边出)
+                        def _append_one(it=item):
+                            if it["pattern"]["score"] < 40:
+                                return  # 低分等最后排完再一次性填
+                            pmap = {"pullback": "📉回调", "breakout": "🚀突破", "ep_gap": "⚡EP跳空"}
+                            sup = ""
+                            if it["pattern"]["type"] == "pullback":
+                                sup = f"EMA={it['pattern'].get('support_level','')}"
+                            elif it["pattern"]["type"] == "breakout":
+                                sup = f"前高={it['pattern'].get('consolidation_high','')}"
+                            else:
+                                sup = f"高开={it['pattern'].get('gap_pct',0)*100:.0f}%"
+                            tv.insert("", tk.END, values=(
+                                it["code"], it["name"], f"{it['pct_chg']:+.2f}",
+                                f"{it['amount_yi']:.1f}", f"{it['adr_pct']:.1f}",
+                                pmap.get(it["pattern"]["type"], it["pattern"]["type"]),
+                                it["pattern"]["score"], sup,
+                            ))
+
+                        kw.after(0, _append_one)
 
                         # 全市场每50只停1秒, 防封
                         if pool_name == "全市场" and idx % 50 == 0 and idx > 0:
                             import time; time.sleep(1)
 
-                    except Exception:
+                    except Exception as e:
+                        print(f"[🎯Martin] 跳过 {code}: {str(e)[:50]}", flush=True)
                         continue
 
+                # ── 全部扫完: 按分数排序 → 重排 Treeview ──
                 results.sort(key=lambda x: x["pattern"]["score"], reverse=True)
                 self._martin_results_cache = results
 
-                def _fill():
+                def _fill_final():
+                    # 先清空临时追加的 (只留最终Top60)
+                    for it in tv.get_children():
+                        tv.delete(it)
                     for r in results[:60]:
                         pmap = {"pullback": "📉回调", "breakout": "🚀突破", "ep_gap": "⚡EP跳空"}
                         sup = ""
@@ -1110,9 +1331,10 @@ class MartinMixin:
                         ))
                     self._martin_last_tv_children = tv.get_children()
                     status_lbl.configure(
-                        text=f"✅ 扫描完成 — [{pool_name}] 共 {len(pool)} 只 → 识别 {len(results)} 只形态候选")
+                        text=f"✅ 扫描完成 — [{pool_name}] 共 {len(pool)} 只 → 识别 {len(results)} 只形态候选",
+                        fg="#4CAF50")
 
-                kw.after(0, _fill)
+                kw.after(0, _fill_final)
 
             except Exception as e:
                 err = traceback.format_exc()
