@@ -914,13 +914,16 @@ def _get_ak_blocks():
         return None
 
 
-def show_speculator_watch(root=None, app=None):
+def show_speculator_watch(root=None, app=None, parent_frame=None):
     """游资看盘主入口 — app=主程序self, 所有刷新优先读 app 现成数据秒出"""
     print(f"[👁️看盘] 被调用, app={'有' if app else '无'}", flush=True)
-    win = tk.Toplevel(root) if root else tk.Tk()
-    win.title("👁️ 游资看盘界面 — 2×3 六区")
-    win.geometry("1850x1000")
-    win.minsize(1600, 900)
+    if parent_frame is not None:
+        win = parent_frame
+    else:
+        win = tk.Toplevel(root) if root else tk.Tk()
+        win.title("👁️ 游资看盘界面 — 2×3 六区")
+        win.geometry("1850x1000")
+        win.minsize(1600, 900)
     win._app = app
     win._running = True
 

@@ -7994,15 +7994,19 @@ except Exception as e:
             "-5~-3%": int(((pct <= -3) & (pct > -5)).sum()),
             "低于-5%": int((pct <= -5).sum()),
         }
-    def _show_mainline_capital_dialog(self):
+    def _show_mainline_capital_dialog(self, parent_frame=None):
         """🔥 主线·资金迁移 —— 资金流向全景 (pack-only + 进度条 + 龙头双击K线)"""
         import threading
         import numpy as np
 
-        win = self._safe_toplevel(self.root)
-        win.title("🔥 主线·资金迁移 · 主力资金流向全景")
-        win.geometry("1400x820")
-        win.transient(self.root)
+        if parent_frame is not None:
+            win = parent_frame
+            win.configure(bg="#000000")
+        else:
+            win = self._safe_toplevel(self.root)
+            win.title("🔥 主线·资金迁移 · 主力资金流向全景")
+            win.geometry("1400x820")
+            win.transient(self.root)
         C_UP = "#EF5350"; C_DN = "#66BB6A"
 
         # Banner

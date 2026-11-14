@@ -15371,24 +15371,24 @@ class DapanMixin:
             print(f"[📊股票比价❌] {e}", flush=True)
             _tb.print_exc()
 
-    def _show_stock_analysis_dialog(self):
+    def _show_stock_analysis_dialog(self, parent_frame=None):
         """📊 股票分析 — 左侧主流方法 + 右侧纯 K 线图, lazy import"""
         import traceback as _tb
         print("[📊股票分析] 按钮被点击!", flush=True)
         try:
             from ui.stock_analysis import show_stock_analysis_dialog as _sa
             ai_fn = getattr(self, 'call_ai_model', None)
-            _sa(getattr(self, 'root', None) or getattr(self, '_root', None), call_ai_fn=ai_fn)
+            _sa(getattr(self, 'root', None) or getattr(self, '_root', None), call_ai_fn=ai_fn, parent_frame=parent_frame)
         except Exception as e:
             print(f"[📊股票分析❌] {e}", flush=True); _tb.print_exc()
 
-    def _show_speculator_watch(self):
+    def _show_speculator_watch(self, parent_frame=None):
         """👁️ 游资看盘界面 — lazy import, 2×3 六区布局"""
         import traceback as _tb
         print("[👁️看盘] 按钮被点击!", flush=True)
         try:
             from ui.speculator_watch import show_speculator_watch as _sw
-            _sw(getattr(self, 'root', None) or getattr(self, '_root', None), app=self)
+            _sw(getattr(self, 'root', None) or getattr(self, '_root', None), app=self, parent_frame=parent_frame)
         except Exception as e:
             print(f"[👁️看盘❌] {e}", flush=True); _tb.print_exc()
 
@@ -15402,7 +15402,7 @@ class DapanMixin:
         except Exception as e:
             print(f"[🎯高抛低吸❌] {e}", flush=True); _tb.print_exc()
 
-    def _show_margin_dialog(self):
+    def _show_margin_dialog(self, parent_frame=None):
         """📊 融资盘全景 — Tushare + AKShare, 3890只个股两融"""
         import tkinter as tk
         import tkinter.ttk as ttk
@@ -15412,12 +15412,16 @@ class DapanMixin:
         import pandas as pd
 
         root = getattr(self, 'root', None) or getattr(self, '_root', None)
-        dlg = tk.Toplevel(root)
-        dlg.title("📊 融资盘全景 — Margin Trading Dashboard")
-        dlg.geometry("1100x780")
-        dlg.configure(bg="#121212")
-        dlg.transient(root)
-        dlg.minsize(1000, 700)
+        if parent_frame is not None:
+            dlg = parent_frame
+            dlg.configure(bg="#121212")
+        else:
+            dlg = tk.Toplevel(root)
+            dlg.title("📊 融资盘全景 — Margin Trading Dashboard")
+            dlg.geometry("1100x780")
+            dlg.configure(bg="#121212")
+            dlg.transient(root)
+            dlg.minsize(1000, 700)
 
         # ── 顶部信息栏 ──
         header = tk.Frame(dlg, bg="#1E1E2E", height=55)
@@ -15708,7 +15712,7 @@ class DapanMixin:
             import traceback as _tb; _tb.print_exc()
             tk.messagebox.showerror("错误", f"金融危机弹窗加载失败: {_e}")
 
-    def _show_global_assets_dialog(self):
+    def _show_global_assets_dialog(self, parent_frame=None):
         """🌍 全球五巨头资产全景 — 黄金/美元/美债/美股/石油 + 联动分析"""
         import tkinter as tk
         import tkinter.ttk as ttk
@@ -15731,8 +15735,12 @@ class DapanMixin:
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
             root = getattr(self, 'root', None) or getattr(self, '_root', None)
-            dlg = tk.Toplevel(root)
-            dlg.title("🌍 全球五巨头资产全景 — Global Macro Dashboard")
+            if parent_frame is not None:
+                dlg = parent_frame
+                dlg.configure(bg="#0a1628")
+            else:
+                dlg = tk.Toplevel(root)
+                dlg.title("🌍 全球五巨头资产全景 — Global Macro Dashboard")
             dlg.geometry("1200x820")
             dlg.configure(bg="#121212")
             dlg.transient(root)
@@ -16521,8 +16529,208 @@ AI 将基于实时市场数据生成深度分析报告
             _tb.print_exc()
 
 
-    def _show_realtime_market_dialog(self):
-        """📺 实时看盘 — A股盘中 + 全球资产 + 量化深度分析"""
+    def _show_combined_realtime_dialog(self):
+        """📺 实时看盘 — 看盘 + 主力趋势 双 Tab 合并弹窗"""
+        import tkinter as tk
+        import tkinter.ttk as ttk
+        print("[📺实时] 组合弹窗 被调用!", flush=True)
+        try:
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            dlg = tk.Toplevel(root)
+            dlg.title("📺 实时 — 看盘 + 主力趋势")
+            dlg.geometry("1300x900")
+            dlg.configure(bg="#121212")
+            dlg.transient(root)
+            try:
+                dlg.state("zoomed")
+            except Exception:
+                try: dlg.attributes("-zoomed", True)
+                except Exception: pass
+
+            # ═══════ Notebook 两个 Tab ═══════
+            nb = ttk.Notebook(dlg)
+            nb.pack(fill=tk.BOTH, expand=True)
+
+            # Tab 1: 📺 看盘 (嵌入模式, 函数自己拉数据是异步的)
+            tab1 = tk.Frame(nb, bg="#121212")
+            nb.add(tab1, text=" 📺 看盘 ")
+            self._show_realtime_market_dialog(parent_frame=tab1)
+
+            # Tab 2: 💡 主力趋势 (嵌入模式)
+            tab2 = tk.Frame(nb, bg="#ffffff")
+            nb.add(tab2, text=" 💡 主力趋势 ")
+            self._show_main_trend_dialog(parent_frame=tab2)
+
+            print("[📺实时] ✅ 组合弹窗已打开", flush=True)
+
+        except Exception as e:
+            print(f"[📺实时] ❌ 异常: {e}", flush=True)
+            import traceback as _tb
+            _tb.print_exc()
+
+
+    def _show_combined_jianpan_dialog(self):
+        """👁️ 见盘综合 — 见盘+游资+主线+冰点+全球 五合一 Tab"""
+        import tkinter as tk
+        import tkinter.ttk as ttk
+        print("[👁️见盘综合] 组合弹窗 被调用!", flush=True)
+        try:
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            dlg = tk.Toplevel(root)
+            dlg.title("👁️ 见盘综合 — 5 合一")
+            dlg.geometry("1400x900")
+            dlg.configure(bg="#121212")
+            dlg.transient(root)
+            try:
+                dlg.state("zoomed")
+            except Exception:
+                try: dlg.attributes("-zoomed", True)
+                except Exception: pass
+
+            # ═══════ Notebook 五个 Tab ═══════
+            nb = ttk.Notebook(dlg)
+            nb.pack(fill=tk.BOTH, expand=True)
+
+            # Tab 1: 👁️ 见盘 (AI 综合研判)
+            tab1 = tk.Frame(nb, bg="#1a1a2e")
+            nb.add(tab1, text=" 👁️ 见盘 ")
+            try:
+                self._show_market_watch(parent_frame=tab1)
+            except Exception as _e:
+                print(f"[👁️见盘综合] Tab1 加载失败: {_e}", flush=True)
+
+            # Tab 2: 🦅 游资看盘
+            tab2 = tk.Frame(nb, bg="#121212")
+            nb.add(tab2, text=" 🦅 游资看盘 ")
+            try:
+                self._show_speculator_watch(parent_frame=tab2)
+            except Exception as _e:
+                print(f"[👁️见盘综合] Tab2 加载失败: {_e}", flush=True)
+
+            # Tab 3: 🔥 主线·资金
+            tab3 = tk.Frame(nb, bg="#000000")
+            nb.add(tab3, text=" 🔥 主线·资金 ")
+            try:
+                self._show_mainline_capital_dialog(parent_frame=tab3)
+            except Exception as _e:
+                print(f"[👁️见盘综合] Tab3 加载失败: {_e}", flush=True)
+
+            # Tab 4: 🧊 冰点修复
+            tab4 = tk.Frame(nb, bg="#121212")
+            nb.add(tab4, text=" 🧊 冰点修复 ")
+            try:
+                self._show_emotion_freeze(parent_frame=tab4)
+            except Exception as _e:
+                print(f"[👁️见盘综合] Tab4 加载失败: {_e}", flush=True)
+
+            # Tab 5: 🌍 全球资产
+            tab5 = tk.Frame(nb, bg="#0a1628")
+            nb.add(tab5, text=" 🌍 全球资产 ")
+            try:
+                self._show_global_assets_dialog(parent_frame=tab5)
+            except Exception as _e:
+                print(f"[👁️见盘综合] Tab5 加载失败: {_e}", flush=True)
+
+            print("[👁️见盘综合] ✅ 5 Tab 组合弹窗已打开", flush=True)
+
+        except Exception as e:
+            print(f"[👁️见盘综合] ❌ 异常: {e}", flush=True)
+            import traceback as _tb
+            _tb.print_exc()
+
+
+    def _show_combined_jishu_dialog(self):
+        """🪙 技术筹码K线综合 — 游资心法+超跌+机会K+筹码K+深度技术+融资盘 六合一 Tab"""
+        import tkinter as tk
+        import tkinter.ttk as ttk
+        print("[🪙技术综合] 组合弹窗 被调用!", flush=True)
+        try:
+            root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            dlg = tk.Toplevel(root)
+            dlg.title("🪙 技术筹码K线 — 6 合一")
+            dlg.geometry("1400x900")
+            dlg.configure(bg="#121212")
+            dlg.transient(root)
+            try:
+                dlg.state("zoomed")
+            except Exception:
+                try: dlg.attributes("-zoomed", True)
+                except Exception: pass
+
+            # ═══════ Notebook 六个 Tab ═══════
+            nb = ttk.Notebook(dlg)
+            nb.pack(fill=tk.BOTH, expand=True)
+
+            # Tab 1: 🦅 游资心法 (交互式, 放启动按钮)
+            tab1 = tk.Frame(nb, bg="#121212")
+            nb.add(tab1, text=" 🦅 游资心法 ")
+            try:
+                _tk = tk
+                _mb = tk.messagebox if hasattr(tk, 'messagebox') else None
+                # 提示 + 启动按钮
+                hdr = _tk.Frame(tab1, bg="#121212"); hdr.pack(fill=_tk.X, pady=40)
+                _tk.Label(hdr, text="🦅 游资心法 — 选择股票 → 7 位游资评分",
+                         bg="#121212", fg="#FFD54F", font=("", 16, "bold")).pack()
+                _tk.Label(hdr, text="点击下方按钮打开游资心法选股弹窗",
+                         bg="#121212", fg="#888", font=("", 11)).pack(pady=10)
+                _tk.Button(hdr, text="🚀 打开游资心法", bg="#FF6F00", fg="white",
+                          font=("", 12, "bold"), relief=_tk.FLAT, padx=20, pady=10,
+                          command=self._open_hotmoney_single_dialog).pack(pady=8)
+            except Exception as _e:
+                print(f"[🪙技术综合] Tab1 加载失败: {_e}", flush=True)
+
+            # Tab 2: 🎯 超跌
+            tab2 = tk.Frame(nb, bg="#121212")
+            nb.add(tab2, text=" 🎯 超跌 ")
+            try:
+                self._show_oversold_dialog(parent_frame=tab2)
+            except Exception as _e:
+                print(f"[🪙技术综合] Tab2 加载失败: {_e}", flush=True)
+
+            # Tab 3: 🎯 机会K
+            tab3 = tk.Frame(nb, bg="#0a1628")
+            nb.add(tab3, text=" 🎯 机会K ")
+            try:
+                self._show_jianlou(parent_frame=tab3)
+            except Exception as _e:
+                print(f"[🪙技术综合] Tab3 加载失败: {_e}", flush=True)
+
+            # Tab 4: 🪙 筹码K
+            tab4 = tk.Frame(nb, bg="#0a1628")
+            nb.add(tab4, text=" 🪙 筹码K ")
+            try:
+                self._show_chouma(parent_frame=tab4)
+            except Exception as _e:
+                print(f"[🪙技术综合] Tab4 加载失败: {_e}", flush=True)
+
+            # Tab 5: 📊 深度技术
+            tab5 = tk.Frame(nb, bg="#ECEFF1")
+            nb.add(tab5, text=" 📊 深度技术 ")
+            try:
+                self._show_stock_analysis_dialog(parent_frame=tab5)
+            except Exception as _e:
+                print(f"[🪙技术综合] Tab5 加载失败: {_e}", flush=True)
+
+            # Tab 6: 📊 融资盘
+            tab6 = tk.Frame(nb, bg="#121212")
+            nb.add(tab6, text=" 📊 融资盘 ")
+            try:
+                self._show_margin_dialog(parent_frame=tab6)
+            except Exception as _e:
+                print(f"[🪙技术综合] Tab6 加载失败: {_e}", flush=True)
+
+            print("[🪙技术综合] ✅ 6 Tab 组合弹窗已打开", flush=True)
+
+        except Exception as e:
+            print(f"[🪙技术综合] ❌ 异常: {e}", flush=True)
+            import traceback as _tb
+            _tb.print_exc()
+
+
+    def _show_realtime_market_dialog(self, parent_frame=None):
+        """📺 实时看盘 — A股盘中 + 全球资产 + 量化深度分析
+        parent_frame: 可选，传入则嵌入到该容器而非自建 Toplevel
+        """
         import tkinter as tk
         import tkinter.ttk as ttk
         import threading as _th
@@ -16532,12 +16740,18 @@ AI 将基于实时市场数据生成深度分析报告
         print("[📺看盘] 被调用!", flush=True)
         try:
             root = getattr(self, 'root', None) or getattr(self, '_root', None)
-            dlg = tk.Toplevel(root)
-            dlg.title("📺 实时看盘 — Realtime Market Dashboard")
-            dlg.geometry("1200x860")
-            dlg.configure(bg="#121212")
-            dlg.transient(root)
-            dlg.minsize(1000, 700)
+            if parent_frame is not None:
+                # 嵌入模式: 所有子组件塞进 parent_frame
+                dlg = parent_frame
+                dlg.configure(bg="#121212")
+            else:
+                # 独立弹窗模式 (原行为)
+                dlg = tk.Toplevel(root)
+                dlg.title("📺 实时看盘 — Realtime Market Dashboard")
+                dlg.geometry("1200x860")
+                dlg.configure(bg="#121212")
+                dlg.transient(root)
+                dlg.minsize(1000, 700)
 
             _font = ("Helvetica", 11)
             _big = ("Helvetica", 22, "bold")
@@ -17210,7 +17424,7 @@ AI 将基于实时市场数据生成深度分析报告
             print(f"[📺看盘] ❌ 异常: {e}", flush=True)
             _tb.print_exc()
 
-    def _show_oversold_dialog(self):
+    def _show_oversold_dialog(self, parent_frame=None):
         """🎯 超跌分析 — 个股超跌评分 + 板块联动 + 全球资产机会"""
         import tkinter as tk
         import tkinter.ttk as ttk
@@ -17221,12 +17435,16 @@ AI 将基于实时市场数据生成深度分析报告
         print("[🎯超跌] 被调用!", flush=True)
         try:
             root = getattr(self, 'root', None) or getattr(self, '_root', None)
-            dlg = tk.Toplevel(root)
-            dlg.title("🎯 超跌分析 — Oversold Stock Analyzer")
-            dlg.geometry("1250x880")
-            dlg.configure(bg="#121212")
-            dlg.transient(root)
-            dlg.minsize(1000, 700)
+            if parent_frame is not None:
+                dlg = parent_frame
+                dlg.configure(bg="#121212")
+            else:
+                dlg = tk.Toplevel(root)
+                dlg.title("🎯 超跌分析 — Oversold Stock Analyzer")
+                dlg.geometry("1250x880")
+                dlg.configure(bg="#121212")
+                dlg.transient(root)
+                dlg.minsize(1000, 700)
 
             _font = ("Helvetica", 11)
             _big = ("Helvetica", 22, "bold")
@@ -65638,8 +65856,10 @@ AI 将基于实时市场数据生成深度分析报告
         win.protocol("WM_DELETE_WINDOW", win.destroy)
 
 
-    def _show_main_trend_dialog(self):
-        """💡 主力趋势: K 线主图 + MA/MACD/KDJ/BOLL/RSI/OBV 叠加 + 副图切换 + hover 评分"""
+    def _show_main_trend_dialog(self, parent_frame=None):
+        """💡 主力趋势: K 线主图 + MA/MACD/KDJ/BOLL/RSI/OBV 叠加 + 副图切换 + hover 评分
+        parent_frame: 可选，传入则嵌入到该容器而非自建 Toplevel
+        """
         import traceback as _tb
         try:
             import tkinter as tk
@@ -65649,13 +65869,19 @@ AI 将基于实时市场数据生成深度分析报告
             from matplotlib import gridspec
             from matplotlib.figure import Figure
 
-            win = self._safe_toplevel(self.root)
-            win.title("💡 主力趋势分析 (MA · MACD · KDJ · BOLL · RSI · OBV)")
-            try:
-                win.state("zoomed")
-            except Exception:
-                try: win.attributes("-zoomed", True)
-                except Exception: win.geometry("1300x900")
+            if parent_frame is not None:
+                # 嵌入模式
+                win = parent_frame
+            else:
+                # 独立弹窗模式 (原行为)
+                root = getattr(self, 'root', None) or getattr(self, '_root', None)
+                win = tk.Toplevel(root)
+                win.title("💡 主力趋势分析 (MA · MACD · KDJ · BOLL · RSI · OBV)")
+                try:
+                    win.state("zoomed")
+                except Exception:
+                    try: win.attributes("-zoomed", True)
+                    except Exception: win.geometry("1300x900")
 
             # ─── 指数 + ETF 列表 ───
             INDEX_LIST = [

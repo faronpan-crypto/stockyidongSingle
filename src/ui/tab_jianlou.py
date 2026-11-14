@@ -861,14 +861,18 @@ def _c6_to_sina(c6):
 class JianLouMixin:
     """机会扫描器 mixin"""
 
-    def _show_jianlou(self):
+    def _show_jianlou(self, parent_frame=None):
         import tkinter as tk
         from tkinter import ttk
 
-        dlg = tk.Toplevel(getattr(self, "win", None) or self.root)
-        dlg.title("🎯 机会扫描")
-        dlg.geometry("1440x860")
-        dlg.configure(bg=_BG_DEEP)
+        if parent_frame is not None:
+            dlg = parent_frame
+            dlg.configure(bg=_BG_DEEP)
+        else:
+            dlg = tk.Toplevel(getattr(self, "win", None) or self.root)
+            dlg.title("🎯 机会扫描")
+            dlg.geometry("1440x860")
+            dlg.configure(bg=_BG_DEEP)
 
         # ── 顶栏 ──
         top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=42); top.pack(fill=tk.X)

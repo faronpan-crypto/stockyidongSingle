@@ -376,17 +376,21 @@ def _scan_universe(df_spot=None, watchlist_pool=None):
 #  UI 主体
 # ═══════════════════════════════════════════════════════════
 
-def show_emotion_freeze(root=None, app=None):
+def show_emotion_freeze(root=None, app=None, parent_frame=None):
     """🧊 情绪冰点修复扫描器主函数"""
 
     import pandas as pd
 
-    dlg = tk.Toplevel(root)
-    dlg.title("🧊 情绪冰点修复 — 跌停翘板 / 冰期反转扫描器")
-    dlg.geometry("1480x880")
-    dlg.configure(bg=_BG_DEEP)
-    dlg.transient(root)
-    dlg.minsize(1200, 720)
+    if parent_frame is not None:
+        dlg = parent_frame
+        dlg.configure(bg=_BG_DEEP)
+    else:
+        dlg = tk.Toplevel(root)
+        dlg.title("🧊 情绪冰点修复 — 跌停翘板 / 冰期反转扫描器")
+        dlg.geometry("1480x880")
+        dlg.configure(bg=_BG_DEEP)
+        dlg.transient(root)
+        dlg.minsize(1200, 720)
 
     # ── 顶栏 ──
     top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=48); top.pack(fill=tk.X)

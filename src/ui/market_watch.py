@@ -123,15 +123,19 @@ def _img_to_data_url(img_path, max_size=(1280, 1280), quality=75):
 # ═══════════════════════════════════════════════════════
 # 🖥️ 窗口主入口
 # ═══════════════════════════════════════════════════════
-def _show_market_watch_dialog(parent_root=None):
-    win = _tk.Toplevel(parent_root)
-    win.title("👁️ 见盘 · AI 综合研判")
-    win.configure(bg=_BG)
-    win.geometry("1080x760")
-    try:
-        win.attributes("-topmost", True); win.attributes("-topmost", False)
-    except Exception:
-        pass
+def _show_market_watch_dialog(parent_root=None, parent_frame=None):
+    if parent_frame is not None:
+        win = parent_frame
+        win.configure(bg=_BG)
+    else:
+        win = _tk.Toplevel(parent_root)
+        win.title("👁️ 见盘 · AI 综合研判")
+        win.configure(bg=_BG)
+        win.geometry("1080x760")
+        try:
+            win.attributes("-topmost", True); win.attributes("-topmost", False)
+        except Exception:
+            pass
 
     # Header
     _tk.Label(win, text="👁️  见盘  ·  AI 综合研判",
