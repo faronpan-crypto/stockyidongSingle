@@ -1,0 +1,1356 @@
+# ═══════════════════════════════════════════════════════════════
+# 🎯 Martin Luk 动量交易操盘系统
+# ═══════════════════════════════════════════════════════════════
+#
+# 【核心理念】
+#   一笔交易能赚多少没法预测, 能亏多少可以自己定
+#   只挑止损能放得很近的地方买, 看错马上认亏, 看对多拿
+#   亏损单平均 2%, 盈利单平均 14% — 盈亏比 7:1
+#   27% 胜率 × 7:1 盈亏比 = 正期望
+#
+# 【技术指标 (仅3样)】
+#   1. EMA 9 / 21 / 50 / 150 — 指数移动平均线 (所有周期统一)
+#   2. AVWAP — 锚定成交量加权均价
+#   3. 成交额 (股价×成交量) — 不看股数, 看成交了多少钱
+#   + ADR (Average Daily Range) — 平均日内振幅 %
+#
+# 【三种买法】
+#   ① 回调 Pullback (一半以上单子):
+#      趋势向上 + 位置早(首次回调) + 支撑到位(EMA9/21/AVWAP/前高前低/缺口)
+#   ② 突破 Breakout:
+#      整理1-2周+ 波动收窄贴EMA9 + inside day + AVWAP上方
+#   ③ EP跳空 Earnings Gap:
+#      财报等消息跳空高开 ≥5% + 放量 ≥2x
+#
+# 【止损/仓位】
+#   止损 = min(当日最低, 触发K最低) — 上限 ADR/2 且 ≤5%
+#   仓位 = (账户 × 0.5%) / (入场价 - 止损价)
+#   多数仓位 25-30%, 小盘 20% 以下
+#
+# 【止盈】
+#   至少 3R/5R 才卖第一批 (每次15%)
+#   日线 EMA9 升到入场价 → 止损移到保本
+#   剩余用日线 EMA9 跟踪, 提前挂单在 EMA9 下方
+#   比 EMA9 高出 15-20% 再卖一些
+#
+# 【环境判断】
+#   ① 自己的单子 — 连亏就停 / 减风险
+#   ② 指数 (QQQ/IWM or 上证/创业板) — EMA9/21 向上最好
+#   ③ 观察名单强弱分布 — 强(>EMA50>EMA150) vs 弱
+#   → 形态再漂亮也没有市场环境重要
+#
+# ═══════════════════════════════════════════════════════════════
+
+import tkinter as tk
+from tkinter import ttk
+import pandas as pd
+import numpy as np
+import threading
+import traceback
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    import akshare as ak
+    AKSHARE_OK = True
+except ImportError:
+    AKSHARE_OK = False
+
+
+class MartinMixin:
+    """🎯 Martin Luk 动量操盘系统 Mixin"""
+
+    # ═══════════════════════════════════════════════════════
+    # 📊 技术指标 (静态方法, 方便单元测试)
+    # ═══════════════════════════════════════════════════════
+
+    @staticmethod
+    def _ema(series, n):
+        """指数移动平均线"""
+        s = pd.Series(series, dtype=float)
+        return s.ewm(span=float(n), adjust=False).mean().values
+
+    @staticmethod
+    def _avwap(high, low, close, volume, anchor_idx):
+        """锚定成交量加权均价 (从 anchor_idx 开始累计)"""
+        h = np.asarray(high, dtype=float)
+        l = np.asarray(low, dtype=float)
+        c = np.asarray(close, dtype=float)
+        v = np.asarray(volume, dtype=float)
+        typical = (h + l + c) / 3
+        n = len(c)
+        vwap = np.full(n, np.nan)
+        cum_vol = 0.0
+        cum_pv = 0.0
+        for i in range(anchor_idx, n):
+            cum_vol += v[i]
+            cum_pv += typical[i] * v[i]
+            if cum_vol > 0:
+                vwap[i] = cum_pv / cum_vol
+        return vwap
+
+    @staticmethod
+    def _adr(high, low, close, period=20):
+        """Average Daily Range — 平均日内振幅百分比"""
+        h = np.asarray(high, dtype=float)
+        l = np.asarray(low, dtype=float)
+        c = np.asarray(close, dtype=float)
+        prev_close = np.roll(c, 1)
+        tr = np.maximum(h - l, np.maximum(np.abs(h - prev_close), np.abs(l - prev_close)))
+        tr[0] = h[0] - l[0]
+        atr = pd.Series(tr).rolling(period).mean().values
+        adr_pct = np.where(c > 0, atr / c * 100, 0.0)
+        return adr_pct
+
+    # ═══════════════════════════════════════════════════════
+    # 🔍 三种买法形态识别
+    # ═══════════════════════════════════════════════════════
+
+    @staticmethod
+    def _detect_pullback(ema9, ema21, ema50, close, avwap, recent_high_idx):
+        """
+        📉 回调形态 (Pullback) — Martin 一半以上的单子
+        条件: 趋势向上 + 位置早 + 支撑到位
+        """
+        n = len(close)
+        if n < 60:
+            return None
+
+        cur_price = close[-1]
+        cur_ema9 = ema9[-1]
+        cur_ema21 = ema21[-1]
+        cur_ema50 = ema50[-1]
+        cur_avwap = avwap[-1] if not np.isnan(avwap[-1]) else None
+
+        # 条件1: 趋势向上 (EMA9 > EMA21 > EMA50, 且 EMA9/21 向上走)
+        e9_slope = np.polyfit(range(-5, 0), ema9[-5:], 1)[0]
+        e21_slope = np.polyfit(range(-5, 0), ema21[-5:], 1)[0]
+        trend_up = (cur_ema9 > cur_ema21 > cur_ema50) and (e9_slope > 0) and (e21_slope > 0)
+
+        if not trend_up:
+            return None
+
+        # 条件2: 股价从近期高点回落 (不是新高)
+        recent_high = np.max(close[-20:])
+        pullback_depth = (recent_high - cur_price) / recent_high
+        if pullback_depth < 0.02:
+            return None
+
+        # 条件3: 回调到支撑区
+        near_ema9 = abs(cur_price - cur_ema9) / cur_ema9 < 0.02
+        near_ema21 = abs(cur_price - cur_ema21) / cur_ema21 < 0.02
+        near_avwap = cur_avwap and abs(cur_price - cur_avwap) / cur_avwap < 0.02
+
+        if not (near_ema9 or near_ema21 or near_avwap):
+            return None
+
+        # 评分
+        score = 0
+        reasons = []
+        score += 30; reasons.append("EMA9>EMA21>EMA50 趋势向上")
+        if near_ema9:
+            score += 15; reasons.append("踩到EMA9支撑")
+        if near_ema21:
+            score += 25; reasons.append("踩到EMA21支撑 (胜率更高)")
+        if near_avwap:
+            score += 20; reasons.append("踩到AVWAP支撑")
+        if cur_avwap and cur_price > cur_avwap:
+            score += 10; reasons.append("AVWAP上方回踩")
+        if pullback_depth > 0.08:
+            score += 5; reasons.append(f"回调较深 {pullback_depth*100:.0f}%")
+
+        return {
+            "type": "pullback",
+            "score": min(score, 100),
+            "reasons": reasons,
+            "support_level": round(cur_ema9 if near_ema9 else cur_ema21, 2),
+            "pullback_depth": pullback_depth,
+        }
+
+    @staticmethod
+    def _detect_breakout(close, high, low, volume, avwap, ema9):
+        """
+        🚀 突破形态 (Breakout)
+        条件: 整理1-2周+ 波动收窄 + inside day + AVWAP上方
+        """
+        n = len(close)
+        if n < 30:
+            return None
+
+        cur_price = close[-1]
+        cur_avwap = avwap[-1] if not np.isnan(avwap[-1]) else None
+
+        # 波动收窄: 最近5天 std < 前10天 std × 0.7
+        vol_recent = np.std(close[-5:])
+        vol_prev = np.std(close[-15:-5])
+        vol_narrowing = vol_recent < vol_prev * 0.7 if vol_prev > 0 else False
+
+        # 整理时间: 最近15天振幅 ≤ 15%
+        recent_range = np.max(high[-15:]) - np.min(low[-15:])
+        recent_avg = np.mean(close[-15:])
+        range_pct = recent_range / recent_avg
+        consolidating = range_pct <= 0.18
+
+        # Inside Day: 今天高低点在昨天范围内
+        inside_day = False
+        if len(high) >= 2:
+            inside_day = high[-1] < high[-2] and low[-1] > low[-2]
+
+        # 股价在 AVWAP 上方
+        above_avwap = cur_avwap is not None and cur_price > cur_avwap
+
+        # K线贴着 EMA9 (±2%)
+        near_ema9 = abs(cur_price - ema9[-1]) / ema9[-1] < 0.025
+
+        # 必须至少满足整理+收窄
+        if not (consolidating and vol_narrowing):
+            return None
+
+        score = 0
+        reasons = []
+        if consolidating:
+            score += 20; reasons.append(f"整理区振幅 {range_pct*100:.1f}%")
+        if vol_narrowing:
+            score += 20; reasons.append("波动收窄蓄势")
+        if inside_day:
+            score += 25; reasons.append("Inside Day 信号")
+        if above_avwap:
+            score += 20; reasons.append("AVWAP上方")
+        if near_ema9:
+            score += 15; reasons.append("贴着EMA9")
+
+        if score < 30:
+            return None
+
+        return {
+            "type": "breakout",
+            "score": min(score, 100),
+            "reasons": reasons,
+            "consolidation_high": round(np.max(high[-15:]), 2),
+            "consolidation_low": round(np.min(low[-15:]), 2),
+        }
+
+    @staticmethod
+    def _detect_ep_gap(open_, prev_close, volume, avg_volume_20):
+        """
+        ⚡ EP 跳空形态 (Earnings / News Gap)
+        条件: 高开 ≥5% + 放量 ≥2x
+        """
+        if prev_close <= 0:
+            return None
+        gap_pct = (open_ - prev_close) / prev_close
+        vol_ratio = volume / avg_volume_20 if avg_volume_20 > 0 else 0
+
+        if gap_pct < 0.03 or vol_ratio < 1.5:
+            return None
+
+        score = 0
+        reasons = []
+        if gap_pct >= 0.10:
+            score += 50; reasons.append(f"高开 {gap_pct*100:.1f}% (≥10% 强信号)")
+        elif gap_pct >= 0.05:
+            score += 35; reasons.append(f"高开 {gap_pct*100:.1f}%")
+        else:
+            score += 20; reasons.append(f"高开 {gap_pct*100:.1f}%")
+
+        if vol_ratio >= 3:
+            score += 50; reasons.append(f"放量 {vol_ratio:.1f}x (巨量)")
+        elif vol_ratio >= 2:
+            score += 30; reasons.append(f"放量 {vol_ratio:.1f}x")
+        else:
+            score += 15; reasons.append(f"量比 {vol_ratio:.1f}x")
+
+        return {
+            "type": "ep_gap",
+            "score": min(score, 100),
+            "reasons": reasons,
+            "gap_pct": gap_pct,
+            "vol_ratio": vol_ratio,
+        }
+
+    # ═══════════════════════════════════════════════════════
+    # 💰 止损 / 仓位 / 止盈 计算器
+    # ═══════════════════════════════════════════════════════
+
+    @staticmethod
+    def _calc_stop_loss(entry_price, day_low, trigger_k_low, adr_pct,
+                        max_stop_loss_pct=0.05):
+        """
+        Martin 止损规则:
+        - 优先用当日最低点 (60-70% 的单子)
+        - 太远就用触发K最低点
+        - 上限: ADR一半 且 ≤5% (通常 3% 以上就放弃)
+        """
+        candidates = []
+        if day_low and day_low < entry_price:
+            dist = (entry_price - day_low) / entry_price
+            candidates.append(("当日最低点", round(day_low, 2), dist))
+        if trigger_k_low and trigger_k_low < entry_price:
+            dist = (entry_price - trigger_k_low) / entry_price
+            candidates.append(("触发K最低点", round(trigger_k_low, 2), dist))
+
+        if not candidates:
+            return None
+
+        adr_half = (adr_pct / 100) / 2 if adr_pct else 0.025
+        upper_pct = min(adr_half, max_stop_loss_pct)
+
+        # 选: 不超过上限中最低的止损 (给更多空间)
+        valid = [c for c in candidates if c[2] <= upper_pct]
+        if valid:
+            best = min(valid, key=lambda x: x[2])  # 距离小的优先 (风险更可控)
+        else:
+            best = min(candidates, key=lambda x: x[2])
+
+        return {
+            "method": best[0],
+            "stop_price": best[1],
+            "distance_pct": round(best[2] * 100, 2),
+            "r_multiple": 1.0,
+            "warning": "⚠️ 止损偏宽 (>3%)" if best[2] > 0.03 else "",
+        }
+
+    @staticmethod
+    def _calc_position_size(account_value, risk_pct, entry_price, stop_price):
+        """
+        倒推仓位法:
+        风险金额 = 账户 × 风险%  (通常 0.5%)
+        每股风险 = 入场价 - 止损价
+        股数 = 风险金额 / 每股风险
+        """
+        if stop_price >= entry_price:
+            return None
+        risk_amount = account_value * risk_pct
+        per_share = entry_price - stop_price
+        shares = int(risk_amount / per_share)
+        if shares <= 0:
+            return None
+        pos_value = shares * entry_price
+        return {
+            "account_value": account_value,
+            "risk_pct": risk_pct,
+            "risk_amount": round(risk_amount, 2),
+            "per_share_risk": round(per_share, 2),
+            "shares": shares,
+            "position_value": round(pos_value, 2),
+            "position_pct": round(pos_value / account_value * 100, 1),
+        }
+
+    @staticmethod
+    def _calc_r_targets(entry_price, stop_price, targets_r=(3, 5, 15)):
+        """R 倍数止盈目标 (1R = 入场价-止损价 的距离)"""
+        if stop_price >= entry_price:
+            return []
+        risk = entry_price - stop_price
+        return [
+            {"r": r, "price": round(entry_price + risk * r, 2),
+             "gain_pct": round(risk * r / entry_price * 100, 1)}
+            for r in targets_r
+        ]
+
+    # ═══════════════════════════════════════════════════════
+    # 🌐 市场环境判断
+    # ═══════════════════════════════════════════════════════
+
+    @staticmethod
+    def _score_one_index(ema9_val, ema21_val, ema50_val):
+        """单指数 EMA 得分"""
+        if ema9_val <= 0 or ema21_val <= 0:
+            return 0
+        s = 0
+        if ema9_val > ema21_val > ema50_val:
+            s += 40  # 完美多头排列
+        elif ema9_val > ema21_val:
+            s += 20  # 短期金叉
+        return s
+
+    # ═══════════════════════════════════════════════════════
+    # 🔌 股票数据源 (持仓/自选/涨停/热门等)
+    # ═══════════════════════════════════════════════════════
+
+    def _get_stock_pool(self, pool_name, kw=None):
+        """
+        根据 pool_name 返回 [(code, name), ...] 列表
+        支持: holdings, watchlist, zt_pool, lianban, hot_plate, full_market, manual
+        """
+        results = []
+
+        # ── 1. 持仓股 ──
+        if pool_name == "持仓股":
+            hs = getattr(self, "holding_stocks", []) or []
+            # 多组持仓合并 (持仓1~8组)
+            for gi in range(2, 9):
+                hg = getattr(self, f"holding_stocks_{gi}", None)
+                if hg:
+                    hs = list(hs) + list(hg)
+            if not hs:
+                # 尝试从配置加载 group 1
+                try:
+                    if hasattr(self, '_load_holdings_from_config'):
+                        self._load_holdings_from_config(group_index=1, display_only=False)
+                        hs = getattr(self, "holding_stocks", []) or []
+                except Exception:
+                    pass
+            if not hs:
+                # 尝试从 config.json 兜底
+                try:
+                    import json, os
+                    config_path = getattr(self, '_config_path', None)
+                    if not config_path:
+                        config_path = os.path.join(os.path.expanduser("~"), ".stockyidong_holdings.json")
+                    if os.path.isfile(config_path):
+                        with open(config_path, "r", encoding="utf-8") as f:
+                            cfg = json.load(f)
+                        for gi_str in ["1", "2", "3"]:
+                            g = cfg.get(f"group_{gi_str}", [])
+                            if isinstance(g, list):
+                                hs.extend(g)
+                except Exception:
+                    pass
+            # 去空 + 去重
+            seen_codes = set()
+            for h in hs:
+                if not h:
+                    continue
+                if isinstance(h, dict):
+                    c = h.get("code", "")
+                    n = h.get("name", "")
+                    if c and c not in seen_codes:
+                        seen_codes.add(c); results.append((c, n))
+                elif isinstance(h, (list, tuple)) and len(h) >= 2:
+                    c, n = str(h[0]), str(h[1]) if len(h) > 1 else ""
+                    if c and c not in seen_codes:
+                        seen_codes.add(c); results.append((c, n))
+                elif isinstance(h, str):
+                    c = h.strip()
+                    if c and c not in seen_codes:
+                        seen_codes.add(c); results.append((c, ""))
+            if not results:
+                # 加几个A股常见票做兜底演示
+                results = [("600519", "贵州茅台"), ("000858", "五粮液"),
+                           ("300750", "宁德时代"), ("002594", "比亚迪")]
+
+        # ── 2. 自选股 ──
+        elif pool_name == "自选股":
+            for gi in [1, 2, 3]:
+                hg = getattr(self, f"holding_stocks_{gi}", None)
+                if hg:
+                    for h in hg:
+                        if not h:
+                            continue
+                        if isinstance(h, dict):
+                            results.append((h.get("code", ""), h.get("name", "")))
+                        elif isinstance(h, (list, tuple)) and len(h) >= 2:
+                            results.append((h[0], h[1]))
+                        elif isinstance(h, str):
+                            results.append((h, ""))
+
+        # ── 3. 涨停池 ──
+        elif pool_name == "涨停池":
+            if not AKSHARE_OK:
+                if kw:
+                    kw.after(0, lambda: None)
+                return results
+            try:
+                today = pd.Timestamp.now().strftime("%Y%m%d")
+                zt_df = ak.stock_zt_pool_em(date=today)
+                if zt_df is not None and not zt_df.empty:
+                    for _, row in zt_df.iterrows():
+                        code = str(row.get("代码", row.get("code", "")))
+                        name = str(row.get("名称", row.get("name", "")))
+                        if code:
+                            results.append((code, name))
+            except Exception as e:
+                print(f"[🎯Martin] 涨停池获取失败: {e}", flush=True)
+
+        # ── 4. 连板池 ──
+        elif pool_name == "连板池":
+            if not AKSHARE_OK:
+                return results
+            try:
+                today = pd.Timestamp.now().strftime("%Y%m%d")
+                lb_df = ak.stock_zt_pool_zbgc_em(date=today)
+                if lb_df is not None and not lb_df.empty:
+                    for _, row in lb_df.iterrows():
+                        code = str(row.get("代码", row.get("code", "")))
+                        name = str(row.get("名称", row.get("name", "")))
+                        if code:
+                            results.append((code, name))
+            except Exception as e:
+                print(f"[🎯Martin] 连板池获取失败: {e}", flush=True)
+
+        # ── 5. 热门板块领涨 ──
+        elif pool_name == "热门板块":
+            if not AKSHARE_OK:
+                return results
+            try:
+                try:
+                    concept = ak.stock_board_concept_name_em()
+                except Exception:
+                    concept = None
+                if concept is None or concept.empty:
+                    try:
+                        concept = ak.stock_board_industry_name_em()
+                    except Exception:
+                        concept = None
+                if concept is not None and not concept.empty:
+                    concept = concept.sort_values("涨跌幅", ascending=False).head(15)
+                    seen = set()
+                    for _, row in concept.iterrows():
+                        bname = str(row.get("板块名称", row.get("name", "")))
+                        try:
+                            members = ak.stock_board_concept_cons_em(symbol=bname) if "概念" in pool_name else ak.stock_board_industry_cons_em(symbol=bname)
+                            if members is not None and not members.empty:
+                                members = members.sort_values("涨跌幅", ascending=False).head(3)
+                                for _, m in members.iterrows():
+                                    code = str(m.get("代码", ""))
+                                    if code and code not in seen:
+                                        seen.add(code)
+                                        results.append((code, str(m.get("名称", ""))))
+                        except Exception:
+                            continue
+            except Exception as e:
+                print(f"[🎯Martin] 热门板块获取失败: {e}", flush=True)
+
+        # ── 6. 全市场 (取 spot 后不过滤, 让后续筛选来做) ──
+        elif pool_name == "全市场":
+            if not AKSHARE_OK:
+                return results
+            try:
+                df = self._ak_spot_with_retry(max_retries=3)
+                if df is not None and not df.empty:
+                    for _, row in df.iterrows():
+                        code = str(row.get("代码", ""))
+                        name = str(row.get("名称", ""))
+                        if code and not "ST" in name:
+                            results.append((code, name))
+            except Exception as e:
+                print(f"[🎯Martin] 全市场获取失败: {e}", flush=True)
+
+        return results
+
+    def _ak_spot_with_retry(self, max_retries=3, timeout=10):
+        """带重试的 akshare 实时行情拉取"""
+        for attempt in range(max_retries):
+            try:
+                df = ak.stock_zh_a_spot_em()
+                if df is not None and not df.empty:
+                    return df
+            except Exception as e:
+                print(f"[🎯Martin] spot 尝试 {attempt+1}/{max_retries} 失败: {e}", flush=True)
+                if attempt < max_retries - 1:
+                    import time; time.sleep(2)
+        return None
+
+    def _ak_hist_with_retry(self, code, max_retries=2, timeout=8):
+        """带重试的 akshare 日线拉取 — 东方财富 → 腾讯兜底"""
+        import time
+        # 先试东方财富
+        for attempt in range(max_retries):
+            try:
+                h = ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
+                if h is not None and len(h) >= 30:
+                    return h
+            except Exception as e:
+                print(f"[🎯Martin] hist EM 尝试 {attempt+1}/{max_retries} 失败: {str(e)[:40]}", flush=True)
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+
+        # 东方财富挂了 → 腾讯兜底
+        try:
+            h2 = ak.stock_zh_a_hist_tx(symbol=code, adjust="qfq")
+            if h2 is not None and len(h2) >= 30:
+                print(f"[🎯Martin] hist 腾讯兜底成功 ({len(h2)}行)", flush=True)
+                # 转列名统一
+                rename_map = {}
+                for c in h2.columns:
+                    cl = str(c).lower()
+                    if "date" in cl or "日期" in str(c): rename_map[c] = "date"
+                    elif "open" in cl or "开盘" in str(c): rename_map[c] = "open"
+                    elif "close" in cl or "收盘" in str(c): rename_map[c] = "close"
+                    elif "high" in cl or "最高" in str(c): rename_map[c] = "high"
+                    elif "low" in cl or "最低" in str(c): rename_map[c] = "low"
+                    elif "volume" in cl or "成交量" in str(c): rename_map[c] = "volume"
+                return h2.rename(columns=rename_map)
+        except Exception as e2:
+            print(f"[🎯Martin] hist 腾讯兜底也失败: {str(e2)[:40]}", flush=True)
+
+        return None
+
+    # ═══════════════════════════════════════════════════════
+    # 🎯 主弹窗入口 (重写版)
+    # ═══════════════════════════════════════════════════════
+
+    def _show_martin_dialog(self):
+        """🎯 Martin Luk 动量操盘系统 — 主入口"""
+        print("[🎯Martin] 启动...", flush=True)
+        root = getattr(self, 'root', None)
+        kw = tk.Toplevel(root)
+        kw.title("🎯 Martin Luk 动量操盘 | 27%胜率 × 7:1盈亏比 | 年赚969%")
+        kw.geometry("1480x920")
+        kw.configure(bg="#0f0f23")
+
+        # ── 顶部: 第1行 — 股票来源 + 手动输入 ──
+        tb1 = tk.Frame(kw, bg="#1a1a3e")
+        tb1.pack(fill=tk.X)
+
+        tk.Label(tb1, text="🎯 Martin Luk 动量操盘",
+                font=("", 14, "bold"), bg="#1a1a3e", fg="#FFD54F").pack(side=tk.LEFT, padx=(12, 10), pady=6)
+
+        # 股票来源下拉框
+        tk.Label(tb1, text="📂 股票来源:", font=("", 10), bg="#1a1a3e", fg="#B0BEC5").pack(side=tk.LEFT, padx=(15, 2))
+        pool_var = tk.StringVar(value="持仓股")
+        pool_combo = ttk.Combobox(tb1, textvariable=pool_var, width=10, state="readonly",
+                                  values=["持仓股", "自选股", "涨停池", "连板池", "热门板块", "全市场"])
+        pool_combo.pack(side=tk.LEFT)
+
+        # 手动输入代码
+        tk.Label(tb1, text="  或手动输入代码:", font=("", 10), bg="#1a1a3e", fg="#B0BEC5").pack(side=tk.LEFT, padx=(10, 2))
+        manual_var = tk.StringVar()
+        manual_entry = tk.Entry(tb1, textvariable=manual_var, width=10, font=("", 10))
+        manual_entry.pack(side=tk.LEFT)
+        tk.Button(tb1, text="📊 分析这只", font=("", 10, "bold"),
+                  bg="#FF9800", fg="white", relief=tk.FLAT, padx=8,
+                  command=lambda: self._analyze_manual_code(
+                      manual_var.get().strip(), kline_host, analysis_host,
+                      float(acc_var.get()) if acc_var.get() else 100000,
+                      float(risk_var.get()) if risk_var.get() else 0.5
+                  )).pack(side=tk.LEFT, padx=4)
+
+        # ❓ 帮助按钮
+        tk.Button(tb1, text="❓", font=("", 12, "bold"),
+                  bg="#1a1a3e", fg="#FFD54F", relief=tk.FLAT, cursor="hand2",
+                  command=lambda: self._show_martin_help(kw)).pack(side=tk.RIGHT, padx=(4, 4), pady=6)
+
+        # 环境标签
+        env_lbl = tk.Label(tb1, text="🌐 环境: 检查中...", font=("", 10),
+                           bg="#1a1a3e", fg="#9E9E9E")
+        env_lbl.pack(side=tk.RIGHT, padx=15)
+
+        # ── 顶部: 第2行 — 参数 ──
+        tb2 = tk.Frame(kw, bg="#16213e")
+        tb2.pack(fill=tk.X)
+
+        tk.Label(tb2, text="📋 参数:", font=("", 10, "bold"), bg="#16213e", fg="#FFD54F").pack(side=tk.LEFT, padx=(12, 2), pady=4)
+
+        acc_var = tk.StringVar(value="100000")
+        risk_var = tk.StringVar(value="0.5")
+        mc_var = tk.StringVar(value="5")
+        amt_var = tk.StringVar(value="3000")
+        adr_var = tk.StringVar(value="2.5")
+        for label, var, w in [("账户(万):", acc_var, 8), ("风险%:", risk_var, 6),
+                              ("市值≥(亿):", mc_var, 6), ("成交≥(万):", amt_var, 8),
+                              ("ADR≥(%):", adr_var, 6)]:
+            tk.Label(tb2, text=label, font=("", 10), bg="#16213e", fg="#B0BEC5").pack(side=tk.LEFT, padx=(10, 2))
+            tk.Entry(tb2, textvariable=var, width=w, font=("", 10)).pack(side=tk.LEFT)
+
+        # 扫描按钮
+        scan_btn = tk.Button(tb2, text="🔍 扫描分析", font=("", 10, "bold"),
+                             bg="#4CAF50", fg="white", relief=tk.FLAT, padx=14,
+                             command=lambda: self._run_martin_scan_new(
+                                 kw, tv, status_lbl,
+                                 pool_var.get(),
+                                 float(mc_var.get()) if mc_var.get() else 0,
+                                 float(amt_var.get()) if amt_var.get() else 0,
+                                 float(adr_var.get()) if adr_var.get() else 0,
+                                 float(acc_var.get()) if acc_var.get() else 100000,
+                                 float(risk_var.get()) if risk_var.get() else 0.5,
+                                 kline_host, analysis_host
+                             ))
+        scan_btn.pack(side=tk.RIGHT, padx=12, pady=4)
+
+        # ── 主体: 左列表 + 右K线 ──
+        body = tk.Frame(kw, bg="#0f0f23")
+        body.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+
+        # 左: 选股列表
+        left = tk.Frame(body, bg="#1a1a3e", width=540)
+        left.pack(side=tk.LEFT, fill=tk.Y)
+        left.pack_propagate(False)
+
+        status_lbl = tk.Label(left, text="👉 选股票来源 → 点 🔍 扫描, 或直接输入代码回车",
+                              font=("", 10), bg="#1a1a3e", fg="#78909C", wraplength=520,
+                              justify=tk.LEFT)
+        status_lbl.pack(fill=tk.X, pady=(8, 4), padx=8)
+
+        cols = ("代码", "名称", "涨幅%", "成交(亿)", "ADR%", "形态", "评分", "支撑/备注")
+        tv = ttk.Treeview(left, columns=cols, show="headings", height=38)
+        for c, w in zip(cols, (75, 95, 55, 60, 55, 80, 45, 110)):
+            tv.heading(c, text=c)
+            tv.column(c, width=w, anchor=tk.CENTER)
+        tv.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+
+        # 右: K线 + 分析
+        right = tk.Frame(body, bg="#0f0f23")
+        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0))
+
+        kline_host = tk.Frame(right, bg="#0f0f23")
+        kline_host.pack(fill=tk.BOTH, expand=True)
+
+        analysis_host = tk.Frame(right, bg="#1a1a3e", height=180)
+        analysis_host.pack(fill=tk.X, pady=(6, 0))
+        analysis_host.pack_propagate(False)
+
+        # 点击 → K线
+        def _on_select(_e=None):
+            sel = tv.selection()
+            if not sel:
+                return
+            vals = tv.item(sel[0], "values")
+            self._show_martin_kline(vals[0], vals[1], kline_host, analysis_host,
+                                    float(acc_var.get()) if acc_var.get() else 100000,
+                                    float(risk_var.get()) if risk_var.get() else 0.5)
+
+        tv.bind("<<TreeviewSelect>>", _on_select)
+        tv.bind("<Double-1>", _on_select)
+
+        # 手动输入: 回车触发
+        def _on_enter(_e):
+            code = manual_var.get().strip()
+            if code:
+                self._analyze_manual_code(code, kline_host, analysis_host,
+                                          float(acc_var.get()) if acc_var.get() else 100000,
+                                          float(risk_var.get()) if risk_var.get() else 0.5)
+
+        manual_entry.bind("<Return>", _on_enter)
+
+        # 环境检查 (后台)
+        def _env_bg():
+            try:
+                r = self._check_market_env_safe()
+                kw.after(0, lambda: env_lbl.configure(
+                    text=f"🌐 环境: {r['status']}", fg=r['color']))
+            except Exception as e:
+                kw.after(0, lambda: env_lbl.configure(
+                    text=f"🌐 环境: 检查失败", fg="#EF5350"))
+
+        threading.Thread(target=_env_bg, daemon=True).start()
+        print("[🎯Martin] 弹窗已打开", flush=True)
+
+    def _analyze_manual_code(self, code, kline_host, analysis_host, acc, risk):
+        """手动输入代码 → 直接在 K 线区显示 Martin 分析"""
+        if not code:
+            return
+        code = code.strip()
+        print(f"[🎯Martin] 手动分析 {code}", flush=True)
+        # 先清空列表
+        for it in getattr(self, '_martin_last_tv_children', []):
+            try: it.delete()
+            except: pass
+        self._show_martin_kline(code, "", kline_host, analysis_host, acc, risk)
+
+    # ═══════════════════════════════════════════════════════
+    # ❓ 帮助弹窗 — Martin 操盘方法完整介绍
+    # ═══════════════════════════════════════════════════════
+
+    def _show_martin_help(self, parent=None):
+        """显示 Martin Luk 动量操盘系统完整说明"""
+        help_win = tk.Toplevel(parent)
+        help_win.title("❓ Martin Luk 操盘方法完整介绍")
+        help_win.geometry("820x680")
+        help_win.configure(bg="#1a1a3e")
+
+        # ── 顶部标题 ──
+        tk.Label(help_win, text="🎯 Martin Luk 动量操盘方法",
+                font=("", 16, "bold"), bg="#1a1a3e", fg="#FFD54F").pack(pady=(12, 2))
+        tk.Label(help_win, text="27% 胜率 × 7:1 盈亏比 = 年赚 969% | 2025 美国投资锦标赛冠军",
+                font=("", 10), bg="#1a1a3e", fg="#B0BEC5").pack(pady=(0, 8))
+
+        # ── 可滚动文本 ──
+        canvas = tk.Canvas(help_win, bg="#1a1a3e", highlightthickness=0)
+        sb = ttk.Scrollbar(help_win, orient=tk.VERTICAL, command=canvas.yview)
+        frame = tk.Frame(canvas, bg="#1a1a3e")
+        frame.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=frame, anchor="nw", width=800)
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        sb.pack(side=tk.RIGHT, fill=tk.Y, pady=(0, 10))
+
+        # 鼠标滚轮绑定
+        def _on_mousewheel(e):
+            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # ── 内容生成器 ──
+        def _sec(title, color="#FFD54F"):
+            tk.Label(frame, text=title, font=("", 12, "bold"), bg="#1a1a3e", fg=color).pack(anchor="w", pady=(14, 4), padx=4)
+
+        def _body(text):
+            tk.Label(frame, text=text, font=("", 10), bg="#1a1a3e", fg="#ECEFF1",
+                     wraplength=770, justify=tk.LEFT).pack(anchor="w", padx=8)
+
+        def _rule(text):
+            tk.Label(frame, text=f"  • {text}", font=("", 10), bg="#1a1a3e", fg="#B0BEC5",
+                     wraplength=770, justify=tk.LEFT).pack(anchor="w", padx=8)
+
+        def _highlight(text):
+            tk.Label(frame, text=text, font=("", 10, "bold"), bg="#1a1a3e", fg="#66BB6A",
+                     wraplength=770, justify=tk.LEFT).pack(anchor="w", padx=8, pady=2)
+
+        # ── 1. 核心理念 ──
+        _sec("🧠 核心理念 — 先想亏多少, 再想赚多少", "#42A5F5")
+        _body("Martin Luk (香港交易员), 2025 美国投资锦标赛冠军 (年收益 969%)。"
+              "他的方法来自瑞典交易员 Qullamaggie, 核心是:")
+        _highlight("  一笔交易能赚多少没法预测, 能亏多少可以自己定")
+        _body("所以他只挑止损能放得很近的地方买, 看错了马上认亏, 看对了就多拿。\n"
+              "2025 年他: 亏钱单平均 -2%, 赚钱单平均 +14% → 盈亏比 7:1\n"
+              "五笔里亏将近四笔, 但赚一笔抵得上亏七笔 → 正期望")
+
+        # ── 2. 技术指标 ──
+        _sec("📈 技术指标 (只用 4 样)", "#66BB6A")
+        _rule("EMA (指数移动均线): 9 / 21 / 50 / 150 — 所有周期统一参数")
+        _rule("AVWAP (锚定成交量加权均价): 从指定K线开始累计, 看价格回踩支撑")
+        _rule("成交额 (股价×成交量): 他看的是成交了多少钱, 不是多少股")
+        _rule("ADR (Average Daily Range): 平均每天振幅 % — 判断波动性")
+        _body("   🟡 指标在本程序 K 线图上的对应颜色:")
+        _body("   EMA9=黄色  EMA21=绿色  EMA50=蓝色  EMA150=紫色  AVWAP=橙色虚线")
+
+        # ── 3. 三种买法 ──
+        _sec("🎯 三种买法 (2025 年一半以上是回调)", "#FF7043")
+
+        _body("📉 ① 回调 Pullback — 最常用的买法")
+        _rule("趋势向上: EMA9 > EMA21 > EMA50, 且均线都在往上走")
+        _rule("位置要早: 股价从高点回落后, 离均线不远 (不是连涨几周后的高位)")
+        _rule("支撑到位: 至少回到 EMA9, 最好同时踩 EMA21 / AVWAP / 前高前低")
+        _rule("几样支撑叠在一起最好 — 多拨人都在这里买")
+        _highlight("  ✅ 回到 EMA21 胜率 > 只回 EMA9 (但强股不给那么深)")
+
+        _body("🚀 ② 突破 Breakout")
+        _rule("整理时间: 至少 1-2 周 (横得越久突破越有力)")
+        _rule("波动收窄: K 线贴着 EMA9, 振幅逐渐缩小")
+        _rule("Inside Day: 今天高低点都在前一天范围内 (蓄势信号)")
+        _rule("位置: 股价在 AVWAP 上方")
+        _highlight("  ✅ 不等冲过整理区上沿, 过前一天高点就买 — 止损更近")
+
+        _body("⚡ ③ EP 跳空 (Earnings / News Gap)")
+        _rule("触发: 财报/重大消息 → 开盘跳空高开 (通常 ≥5%) + 巨量 (≥2x)")
+        _rule("买法改进 (2025 年版): 不等开盘区间高点突破, 先砸回来再买")
+        _rule("假突破太多: 先跌破开盘区间低点再涨回来的, 成功率更高")
+
+        # ── 4. 选股流程 ──
+        _sec("🔍 选股流程 — 怎么找到这些票", "#AB47BC")
+        _body("本程序提供 6 种股票来源:")
+        _rule("持仓股: 你的本地持仓 (秒出, 无网络)")
+        _rule("自选股: 自选组 1-3 全部")
+        _rule("涨停池 / 连板池: akshare 实时抓")
+        _rule("热门板块: 涨得最凶的板块龙头")
+        _rule("全市场: 需 AKShare 稳定, 建议闭市后跑")
+        _highlight("  ✅ 最快路径: 直接输入股票代码 (如 600519), 回车即分析")
+
+        # ── 5. 止损与仓位 ──
+        _sec("🛑 止损 / 📦 仓位 (马丁系统的命根子)", "#EF5350")
+        _body("止损规则 (60-70% 单子用当日最低点):")
+        _rule("优先: 当日最低价下方 (通常 1-3% 距离)")
+        _rule("太远: 改用触发买入那根 K 线的最低点")
+        _rule("上限: ADR 的一半, 且最多 5% — 超过 3% 一般放弃")
+        _highlight("  ⚠️ 下单前先把止损定好 — 这一条他从来不破例")
+
+        _body("仓位计算 (倒推法):")
+        _rule("风险金额 = 账户 × 0.5% (例: 10万账户 → 每单最多亏 500 元)")
+        _rule("每股风险 = 买入价 - 止损价")
+        _rule("买多少股 = 风险金额 ÷ 每股风险")
+        _rule("总仓位通常 25-30%, 小盘股 20% 以下")
+        _highlight("  ✅ 止损越窄 → 同样风险能买的股越多 → 仓位自动放大")
+
+        # ── 6. 止盈 ──
+        _sec("🎯 止盈 (没有固定规则, 分几步卖)", "#26A69A")
+        _rule("第一批: 至少 3R/5R 才卖 (每次只卖 15%, 不贪一把)")
+        _rule("保本止损: 日线 EMA9 升到买入价以上 → 止损移到保本")
+        _rule("跟踪止盈: 剩余仓位用日线 EMA9 跟踪 (提前挂单在 EMA9 下方)")
+        _rule("加速卖出: 比 EMA9 高出 15-20%, 或突然放巨量大涨")
+        _highlight("  💡 行情顺的时候他拿很久 — 2025 年大单子第一批多是涨 15R 才卖")
+
+        # ── 7. 市场环境判断 ──
+        _sec("🌐 市场环境 (最重要的! 形态再漂亮也没用)", "#FFCA28")
+        _rule("① 自己的单子: 新开的仓连续被止损 → 少做, 把每笔风险往下调")
+        _rule("② 指数: 上证/创业板 EMA9/21 多头排列时最适合出手")
+        _rule("③ 观察名单: 强股 (>EMA50>EMA150) 往下掉的越来越多 → 行情变差")
+        _highlight("  ⛔ 连涨了几个星期没回调 → 不能再大量开新仓, 多卖少买")
+
+        # ── 8. 操作流程 ──
+        _sec("📋 日常操作流程", "#5C6BC0")
+        _body("盘前 (15 分钟):")
+        _rule("扫盘前跳空股票 (如果做 EP 跳空)")
+        _rule("预判今天关键支撑位在哪 (EMA9/21/AVWAP)")
+        _rule("检查环境: 指数 EMA9/21 方向")
+        _body("开盘后 (第一个小时最关键):")
+        _rule("等股价急砸到支撑 → V 型反转弹回 → 过前一根 K 线高点就买")
+        _rule("5分钟内用 1 分钟图, 1小时内用 5 分钟图, 之后 15 分钟图")
+        _rule("买完立刻挂止损单 (自动卖出)")
+        _body("盘中 & 收盘:")
+        _rule("被打掉但形态还在 → 可以再买")
+        _rule("新仓连亏 3-4 笔 → 当天停手, 明天再说")
+        _rule("收盘复盘: 标记哪些形态有效, 哪些失败")
+
+        # ── 9. 成功案例 ──
+        _sec("🏆 成功案例", "#EC407A")
+
+        _body("① AMPX (2025.9) — 回调买法, 赚 24R + 23R")
+        _rule("8月8日财报放巨量冲高回落 → 回落整理 5 周")
+        _rule("AVWAP 起点设在 8月8日高点 → 9月11日股价回踩踩住")
+        _rule("开盘第一分钟砸到支撑, 第二分钟拉回去 → 7.57 买入")
+        _rule("止损 7.42 (-1.98%, 很窄)")
+        _rule("一周后涨到 11+ → 9月18日卖一成 (24R)")
+        _rule("9月24日清仓 (23R), 卖完又涨 40%")
+
+        _body("② SOFI (2024.11) — 突破买法, 赚 6R + 19R")
+        _rule("从 7 涨到 11, 横了一周 (整理时间够)")
+        _rule("最后 3 天贴 EMA9 回落, inside day 信号")
+        _rule("11月5日开盘 6-7 分钟过前一天高点 → 11.16 买入")
+        _rule("止损 10.94 (-1.97%)")
+        _rule("3 天后涨到 12.52 → 卖 1/8 (6R)")
+        _rule("一直拿到 12月9日收在 EMA9 下 → 全部卖出 (19R)")
+
+        _body("③ Planet Labs (2025.9) — EP 跳空 + 先砸后买, 赚 23R + 27R")
+        _rule("财报高开 18%, 冲 8.22 然后砸到 7.29 (跌破开盘价)")
+        _rule("横住一根 5 分钟 K → 下一根涨过前高 → 买入")
+        _rule("止损改放在触发 K 最低点 (-2.38%)")
+        _rule("当天收 9.66 (+48%), 拿了 3 周")
+        _rule("9月23日卖 12% (23R), 9月29日清仓 (27R), 卖完又涨 30%")
+
+        # ── 10. 注意事项 ──
+        _sec("⚠️ 注意事项 & 他自己踩过的坑", "#FF5722")
+        _rule("2025年12月他自己回撤 26.6% — 因为行情震荡来回打脸, 多空反复切换")
+        _rule("85 笔交易里一半不该做 — 连亏之后应该停手, 而不是赌气换方向")
+        _rule("连涨几个月后不要追 — 他在高位清掉了所有单子, 正确")
+        _rule("宽止损 (>3%) 宁可不做 — 风险收益比太差, 会拖累整体期望")
+        _rule("强股不给深回调就试 EMA9 — 但如果连续被打止损, 说明你选的股不对")
+        _highlight("  💎 终极心法: 形态再漂亮也没有市场环境重要")
+
+        # ── 11. 学习链接 ──
+        _sec("🔗 原文链接", "#8D6E63")
+        _body("知乎原文 (完整操盘方法披露):")
+        _body("  https://zhuanlan.zhihu.com/p/2098724684871345451")
+        _body("(本文整理自该长文, 版权归原作者所有)")
+
+        # ── 底部关闭按钮 ──
+        tk.Button(help_win, text="✅ 我知道了", font=("", 11, "bold"),
+                  bg="#4CAF50", fg="white", relief=tk.FLAT, padx=30, pady=6,
+                  command=help_win.destroy).pack(pady=(6, 12))
+
+    def _check_market_env_safe(self):
+        """检查市场环境 (用A股指数)"""
+        if not AKSHARE_OK:
+            return {"status": "⚪ 环境未知 (无AKShare)", "color": "#9E9E9E"}
+        try:
+            df_sh = ak.stock_zh_index_daily_em(symbol="sh000001")
+            df_cy = ak.stock_zh_index_daily_em(symbol="sz399006")
+
+            def _score(df):
+                if df is None or df.empty or len(df) < 60:
+                    return 0
+                closes = df["close"].astype(float).values
+                e9 = self._ema(closes, 9)[-1]
+                e21 = self._ema(closes, 21)[-1]
+                e50 = self._ema(closes, 50)[-1]
+                return self._score_one_index(e9, e21, e50)
+
+            total = _score(df_sh) + _score(df_cy)
+            if total >= 60:
+                return {"status": "🟢 环境友好 (趋势向上)", "color": "#4CAF50"}
+            elif total >= 30:
+                return {"status": "🟡 中性偏多 (轻仓试错)", "color": "#FFD54F"}
+            else:
+                return {"status": "🔴 环境偏空 (少做或观望)", "color": "#EF5350"}
+        except Exception:
+            return {"status": "⚪ 环境未知", "color": "#9E9E9E"}
+
+    # ═══════════════════════════════════════════════════════
+    # 🔍 选股扫描 (后台线程)
+    # ═══════════════════════════════════════════════════════
+
+    def _run_martin_scan_new(self, kw, tv, status_lbl,
+                              pool_name, min_mc_yi, min_amt_wan, min_adr_pct,
+                              account_value, risk_pct,
+                              kline_host=None, analysis_host=None):
+        """执行 Martin 风格选股 — 支持多数据源"""
+        for it in tv.get_children():
+            tv.delete(it)
+
+        def _scan():
+            if not AKSHARE_OK:
+                kw.after(0, lambda: status_lbl.configure(text="❌ AKShare 未安装"))
+                return
+            try:
+                kw.after(0, lambda: status_lbl.configure(
+                    text=f"📂 加载 [{pool_name}] 股票池..."))
+                pool = self._get_stock_pool(pool_name, kw)
+                if not pool:
+                    kw.after(0, lambda: status_lbl.configure(
+                        text=f"⚠️ [{pool_name}] 股票池为空, 检查网络或数据源"))
+                    return
+
+                # 全市场额外基础过滤 (spot 取市值/成交额)
+                spot_cache = {}
+                if pool_name == "全市场":
+                    df_spot = self._ak_spot_with_retry(max_retries=3)
+                    if df_spot is not None and not df_spot.empty:
+                        for _, row in df_spot.iterrows():
+                            spot_cache[str(row.get("代码", ""))] = row
+
+                kw.after(0, lambda: status_lbl.configure(
+                    text=f"✅ [{pool_name}] 共 {len(pool)} 只, 开始分析 (会自动跳过无法连接的)"))
+
+                results = []
+                total = len(pool)
+
+                for idx, (code, name_from_pool) in enumerate(pool):
+                    if idx % 10 == 0 or idx == total - 1:
+                        kw.after(0, lambda i=idx, n=total: status_lbl.configure(
+                            text=f"🔄 {i+1}/{n} — 分析中... (已出 {len(results)} 只)"))
+
+                    try:
+                        # 全市场基础过滤 (用 spot)
+                        if pool_name == "全市场" and spot_cache:
+                            row = spot_cache.get(code)
+                            if row is not None:
+                                mc_col = "流通市值" if "流通市值" in row.index else "总市值"
+                                mc_yi = float(row.get(mc_col, 0)) / 1e8
+                                amt_y = float(row.get("成交额", 0)) / 1e8
+                                if mc_yi < min_mc_yi or amt_y * 10000 < min_amt_wan:
+                                    continue
+
+                        # 拉K线 (带重试)
+                        h = self._ak_hist_with_retry(code, max_retries=2)
+                        if h is None or len(h) < 60:
+                            continue
+
+                        col_map = {}
+                        for c in h.columns:
+                            cl = str(c).lower()
+                            if "日期" in c or "date" in cl: col_map[c] = "date"
+                            elif "开盘" in c or "open" in cl: col_map[c] = "open"
+                            elif "收盘" in c or "close" in cl: col_map[c] = "close"
+                            elif "最高" in c or "high" in cl: col_map[c] = "high"
+                            elif "最低" in c or "low" in cl: col_map[c] = "low"
+                            elif "成交量" in c or "volume" in cl: col_map[c] = "volume"
+                        h = h.rename(columns=col_map).tail(120)
+                        for col in ["open", "close", "high", "low", "volume"]:
+                            if col not in h.columns:
+                                continue
+
+                        closes = h["close"].astype(float).values
+                        opens = h["open"].astype(float).values
+                        highs = h["high"].astype(float).values
+                        lows = h["low"].astype(float).values
+                        vols = h["volume"].astype(float).values
+                        n = len(closes)
+
+                        ema9 = self._ema(closes, 9)
+                        ema21 = self._ema(closes, 21)
+                        ema50 = self._ema(closes, 50)
+                        adr_arr = self._adr(highs, lows, closes, 20)
+                        cur_adr = adr_arr[-1]
+                        cur_price = closes[-1]
+
+                        if cur_adr < min_adr_pct or cur_price <= ema21[-1]:
+                            continue
+
+                        anchor = np.argmax(highs[-30:]) + n - 30
+                        avwap = self._avwap(highs, lows, closes, vols, anchor)
+
+                        best = None
+                        pb = self._detect_pullback(ema9, ema21, ema50, closes, avwap, anchor)
+                        bk = self._detect_breakout(closes, highs, lows, vols, avwap, ema9)
+                        avg_v = np.mean(vols[-20:]) if n >= 20 else vols[-1]
+                        gp = self._detect_ep_gap(opens[-1], closes[-2] if n >= 2 else closes[-1],
+                                                 vols[-1], avg_v)
+                        for p in [pb, bk, gp]:
+                            if p and (best is None or p["score"] > best["score"]):
+                                best = p
+
+                        if best is None:
+                            continue
+
+                        # 从 spot 拿补充信息, 或用 K 线数据
+                        pct_chg = (closes[-1] / closes[-2] - 1) * 100 if n >= 2 else 0
+                        amt_y_est = float(vols[-1] * closes[-1]) / 1e8 if n >= 1 else 0
+                        display_name = name_from_pool
+                        if pool_name == "全市场" and spot_cache:
+                            row = spot_cache.get(code)
+                            if row is not None:
+                                display_name = str(row.get("名称", name_from_pool)) or name_from_pool
+                                amt_y = float(row.get("成交额", 0)) / 1e8
+                                if amt_y > 0:
+                                    amt_y_est = amt_y
+
+                        results.append({
+                            "code": code, "name": display_name or "",
+                            "pct_chg": pct_chg, "amount_yi": amt_y_est,
+                            "adr_pct": cur_adr, "pattern": best,
+                        })
+
+                        # 全市场每50只停1秒, 防封
+                        if pool_name == "全市场" and idx % 50 == 0 and idx > 0:
+                            import time; time.sleep(1)
+
+                    except Exception:
+                        continue
+
+                results.sort(key=lambda x: x["pattern"]["score"], reverse=True)
+                self._martin_results_cache = results
+
+                def _fill():
+                    for r in results[:60]:
+                        pmap = {"pullback": "📉回调", "breakout": "🚀突破", "ep_gap": "⚡EP跳空"}
+                        sup = ""
+                        if r["pattern"]["type"] == "pullback":
+                            sup = f"EMA={r['pattern'].get('support_level','')}"
+                        elif r["pattern"]["type"] == "breakout":
+                            sup = f"前高={r['pattern'].get('consolidation_high','')}"
+                        else:
+                            sup = f"高开={r['pattern'].get('gap_pct',0)*100:.0f}%"
+                        tv.insert("", tk.END, values=(
+                            r["code"], r["name"], f"{r['pct_chg']:+.2f}",
+                            f"{r['amount_yi']:.1f}", f"{r['adr_pct']:.1f}",
+                            pmap.get(r["pattern"]["type"], r["pattern"]["type"]),
+                            r["pattern"]["score"], sup,
+                        ))
+                    self._martin_last_tv_children = tv.get_children()
+                    status_lbl.configure(
+                        text=f"✅ 扫描完成 — [{pool_name}] 共 {len(pool)} 只 → 识别 {len(results)} 只形态候选")
+
+                kw.after(0, _fill)
+
+            except Exception as e:
+                err = traceback.format_exc()
+                kw.after(0, lambda: status_lbl.configure(
+                    text=f"❌ 扫描异常: {str(e)[:80]}"))
+                print(f"[🎯Martin] 扫描异常:\n{err}", flush=True)
+
+        threading.Thread(target=_scan, daemon=True).start()
+
+    # ═══════════════════════════════════════════════════════
+    # 📈 K 线弹窗 (带完整 Martin 指标)
+    # ═══════════════════════════════════════════════════════
+
+    def _show_martin_kline(self, code, name, kline_host, analysis_host,
+                           account_value, risk_pct):
+        """显示 Martin 风格 K 线图 + 完整交易计划"""
+        # 清空
+        for w in kline_host.winfo_children():
+            w.destroy()
+        for w in analysis_host.winfo_children():
+            w.destroy()
+
+        if not AKSHARE_OK:
+            tk.Label(kline_host, text="❌ AKShare 未安装", font=("", 12),
+                     bg="#0f0f23", fg="#EF5350").pack(pady=60)
+            return
+
+        try:
+            # 用带重试+腾讯兜底的版本
+            h = self._ak_hist_with_retry(code, max_retries=2)
+            if h is None or len(h) < 60:
+                tk.Label(kline_host, text="❌ 拉取失败 (东方财富/腾讯都连不上), 稍后再试", font=("", 11),
+                         bg="#0f0f23", fg="#EF5350").pack(pady=60)
+                print(f"[🎯Martin] K线双源都失败 {code}", flush=True)
+                return
+
+            col_map = {}
+            for c in h.columns:
+                cl = str(c).lower()
+                if "日期" in c or "date" in cl: col_map[c] = "date"
+                elif "开盘" in c or "open" in cl: col_map[c] = "open"
+                elif "收盘" in c or "close" in cl: col_map[c] = "close"
+                elif "最高" in c or "high" in cl: col_map[c] = "high"
+                elif "最低" in c or "low" in cl: col_map[c] = "low"
+                elif "成交量" in c or "volume" in cl: col_map[c] = "volume"
+                elif "成交额" in c or "amount" in cl: col_map[c] = "amount"
+            h = h.rename(columns=col_map).tail(120).reset_index(drop=True)
+
+            closes = h["close"].astype(float).values
+            opens = h["open"].astype(float).values
+            highs = h["high"].astype(float).values
+            lows = h["low"].astype(float).values
+            vols = h["volume"].astype(float).values
+            n = len(closes)
+
+            # 指标
+            ema9 = self._ema(closes, 9)
+            ema21 = self._ema(closes, 21)
+            ema50 = self._ema(closes, 50)
+            ema150 = self._ema(closes, 150)
+            adr_arr = self._adr(highs, lows, closes, 20)
+            cur_adr = adr_arr[-1]
+
+            anchor = np.argmax(highs[-30:]) + n - 30
+            avwap = self._avwap(highs, lows, closes, vols, anchor)
+
+            # 形态
+            pb = self._detect_pullback(ema9, ema21, ema50, closes, avwap, anchor)
+            bk = self._detect_breakout(closes, highs, lows, vols, avwap, ema9)
+            avg_v = np.mean(vols[-20:]) if n >= 20 else vols[-1]
+            gp = self._detect_ep_gap(opens[-1], closes[-2] if n >= 2 else closes[-1],
+                                     vols[-1], avg_v)
+            patterns = [p for p in [pb, bk, gp] if p]
+            best = max(patterns, key=lambda x: x["score"]) if patterns else None
+
+            # ── matplotlib ──
+            import matplotlib
+            matplotlib.use("TkAgg")
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            import matplotlib.patches as mpatches
+
+            fig = Figure(figsize=(11, 7), facecolor="#0f0f23", dpi=100)
+            ax = fig.add_subplot(211, facecolor="#1a1a3e")
+            ax_vol = fig.add_subplot(212, facecolor="#1a1a3e")
+
+            x = np.arange(n)
+            colors_candle = ["#EF5350" if closes[i] >= opens[i] else "#42A5F5" for i in range(n)]
+
+            # 蜡烛
+            for i in range(n):
+                ax.plot([x[i], x[i]], [lows[i], highs[i]], color=colors_candle[i], linewidth=0.5)
+                body_bot = min(opens[i], closes[i])
+                body_h = max(abs(closes[i] - opens[i]), 0.01)
+                ax.add_patch(mpatches.Rectangle(
+                    (x[i] - 0.3, body_bot), 0.6, body_h,
+                    facecolor=colors_candle[i], edgecolor=colors_candle[i]))
+
+            # EMA
+            ax.plot(x, ema9, color="#FFD54F", lw=1.2, label="EMA9", alpha=0.9)
+            ax.plot(x, ema21, color="#66BB6A", lw=1.2, label="EMA21", alpha=0.9)
+            ax.plot(x, ema50, color="#42A5F5", lw=1.2, label="EMA50", alpha=0.9)
+            v150 = ~np.isnan(ema150)
+            if np.any(v150):
+                ax.plot(x[v150], ema150[v150], color="#AB47BC", lw=1.0, label="EMA150", alpha=0.9)
+
+            # AVWAP
+            vw = ~np.isnan(avwap)
+            if np.any(vw):
+                ax.plot(x[vw], avwap[vw], color="#FF7043", lw=1.5, linestyle="--",
+                        label="AVWAP", alpha=0.9)
+                ax.annotate("AVWAP起点", xy=(anchor, highs[anchor]),
+                           color="#FF7043", fontsize=7, ha="center",
+                           xytext=(0, -15), textcoords="offset points")
+
+            # 标题
+            parts = [f"{code} {name}"]
+            if best:
+                pt = {"pullback": "📉回调", "breakout": "🚀突破", "ep_gap": "⚡EP跳空"}.get(
+                    best["type"], best["type"])
+                parts.append(f"| {pt} 评分 {best['score']}")
+            ax.set_title("  ".join(parts), color="white", fontsize=11, fontweight="bold")
+
+            # 网格/颜色
+            ax.tick_params(colors="#B0BEC5", labelsize=8)
+            for s in ax.spines.values():
+                s.set_color("#37474F")
+            ax.grid(True, color="#37474F", lw=0.3, alpha=0.5)
+            ax.legend(loc="upper left", fontsize=7, facecolor="#1a1a3e",
+                      edgecolor="#37474F", labelcolor="white")
+
+            # 成交额
+            amt_yi = h["amount"].astype(float).values / 1e8 if "amount" in h.columns else vols * closes / 1e8
+            ax_vol.bar(x, amt_yi, color=colors_candle, width=0.6)
+            ax_vol.set_ylabel("成交额(亿)", color="#B0BEC5", fontsize=8)
+            ax_vol.tick_params(colors="#B0BEC5", labelsize=8)
+            for s in ax_vol.spines.values():
+                s.set_color("#37474F")
+            ax_vol.grid(True, color="#37474F", lw=0.3, alpha=0.3)
+
+            fig.tight_layout()
+            canvas = FigureCanvasTkAgg(fig, master=kline_host)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+            # ── 分析面板 ──
+            self._fill_martin_analysis(
+                analysis_host, code, name, closes, ema9, ema21, ema50, ema150,
+                avwap, cur_adr, best, account_value, risk_pct, highs, lows
+            )
+
+        except Exception as e:
+            import traceback
+            tk.Label(kline_host, text=f"K线失败: {str(e)[:80]}", font=("", 11),
+                     bg="#0f0f23", fg="#EF5350").pack(pady=40)
+            print(f"[🎯Martin] K线异常:\n{traceback.format_exc()}", flush=True)
+
+    def _fill_martin_analysis(self, host, code, name, closes, ema9, ema21, ema50, ema150,
+                               avwap, adr_pct, pattern, acc, risk_pct, highs, lows):
+        """填充分析面板 — 左形态 | 中指标 | 右交易计划"""
+        host.configure(bg="#1a1a3e")
+        cur = closes[-1]
+
+        # ── 左: 形态识别 ──
+        L = tk.Frame(host, bg="#1a1a3e")
+        L.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=6, pady=6)
+        tk.Label(L, text="📊 形态识别", font=("", 10, "bold"),
+                bg="#1a1a3e", fg="#FFD54F").pack(anchor="w")
+        if pattern:
+            pt = {"pullback": "📉 回调", "breakout": "🚀 突破", "ep_gap": "⚡ EP跳空"}.get(
+                pattern["type"], pattern["type"])
+            tk.Label(L, text=f"{pt}  评分 {pattern['score']}/100", font=("", 10, "bold"),
+                    bg="#1a1a3e", fg="#4CAF50").pack(anchor="w", pady=(2, 2))
+            for r in pattern.get("reasons", []):
+                tk.Label(L, text=f"• {r}", font=("", 9),
+                        bg="#1a1a3e", fg="#90A4AE").pack(anchor="w")
+        else:
+            tk.Label(L, text="未识别到标准形态 (可参考支撑/止损手动判断)",
+                    font=("", 9), bg="#1a1a3e", fg="#78909C", wraplength=280,
+                    justify=tk.LEFT).pack(anchor="w", pady=5)
+
+        # ── 中: 指标数值 ──
+        M = tk.Frame(host, bg="#1a1a3e")
+        M.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=6, pady=6)
+        tk.Label(M, text="📈 指标数值", font=("", 10, "bold"),
+                bg="#1a1a3e", fg="#FFD54F").pack(anchor="w")
+        lines = [f"当前价: {cur:.2f}"]
+        for label, val in [("EMA9", ema9[-1]), ("EMA21", ema21[-1]), ("EMA50", ema50[-1])]:
+            lines.append(f"{label}: {val:.2f} {'🟢' if cur > val else '🔴'}")
+        v150 = ema150[-1] if not np.isnan(ema150[-1]) else None
+        if v150:
+            lines.append(f"EMA150:{v150:.2f} {'🟢' if cur > v150 else '🔴'}")
+        vwap_v = avwap[-1] if not np.isnan(avwap[-1]) else None
+        if vwap_v:
+            lines.append(f"AVWAP: {vwap_v:.2f} {'🟢' if cur > vwap_v else '🔴'}")
+        lines.append(f"ADR(20): {adr_pct:.1f}%")
+        for line in lines:
+            tk.Label(M, text=line, font=("", 9),
+                    bg="#1a1a3e", fg="#ECEFF1").pack(anchor="w")
+
+        # ── 右: 交易计划 ──
+        R = tk.Frame(host, bg="#1a1a3e")
+        R.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=6, pady=6)
+        tk.Label(R, text="💰 交易计划", font=("", 10, "bold"),
+                bg="#1a1a3e", fg="#FFD54F").pack(anchor="w")
+
+        # 止损
+        sl = self._calc_stop_loss(cur, lows[-1], lows[-2] if len(lows) >= 2 else lows[-1], adr_pct)
+        if sl:
+            sl_color = "#4CAF50" if sl["distance_pct"] <= 3 else (
+                "#FFD54F" if sl["distance_pct"] <= 5 else "#EF5350")
+            tk.Label(R, text=f"🛑 止损 {sl['stop_price']:.2f} ({sl['distance_pct']:.2f}%)",
+                    font=("", 10, "bold"), bg="#1a1a3e", fg=sl_color).pack(anchor="w")
+            tk.Label(R, text=f"   {sl['method']}", font=("", 9),
+                    bg="#1a1a3e", fg="#78909C").pack(anchor="w")
+            if sl.get("warning"):
+                tk.Label(R, text=sl["warning"], font=("", 9),
+                        bg="#1a1a3e", fg="#FFD54F").pack(anchor="w")
+
+            # 仓位
+            pos = self._calc_position_size(acc, risk_pct, cur, sl["stop_price"])
+            if pos:
+                tk.Label(R, text=f"📦 {pos['shares']}股 × {cur:.2f} = {pos['position_value']:.0f}",
+                        font=("", 9), bg="#1a1a3e", fg="#ECEFF1").pack(anchor="w", pady=(3, 0))
+                tk.Label(R, text=f"   仓位 {pos['position_pct']:.1f}% | 风险 {pos['risk_amount']:.0f}",
+                        font=("", 9), bg="#1a1a3e", fg="#78909C").pack(anchor="w")
+
+            # 止盈
+            tk.Label(R, text="🎯 R倍止盈:", font=("", 9),
+                    bg="#1a1a3e", fg="#FFD54F").pack(anchor="w", pady=(3, 0))
+            for tp in self._calc_r_targets(cur, sl["stop_price"]):
+                tk.Label(R, text=f"   {tp['r']}R→{tp['price']:.2f} (+{tp['gain_pct']:.1f}%)",
+                        font=("", 9), bg="#1a1a3e", fg="#66BB6A").pack(anchor="w")
+        else:
+            tk.Label(R, text="❌ 无法计算止损", font=("", 10),
+                    bg="#1a1a3e", fg="#EF5350").pack(anchor="w", pady=10)
+
+        # ── 底部: Martin 心法 ──
+        tip_text = "💡 Martin心法: 止损越窄, 同样风险能买的越多 | 形态再漂亮也没有市场环境重要 | 连亏就停, 少做"
+        tip = tk.Label(host, text=tip_text, font=("", 8), bg="#1a1a3e", fg="#546E7A")
+        tip.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=(0, 4))
