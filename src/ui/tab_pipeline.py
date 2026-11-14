@@ -272,17 +272,13 @@ class PipelineMixin:
                 self.pipeline_lock.release()
         threading.Thread(target=pipeline_thread, daemon=True).start()
 
-    def show_one_click_thinking(self, parent_frame=None):
-        """打开一键思考界面 — 独立弹窗 或 嵌入 parent_frame"""
+    def show_one_click_thinking(self):
+        """打开一键思考界面"""
         try:
-            if parent_frame is not None:
-                win = parent_frame
-                win.configure(bg="#f0f2f5")
-            else:
-                win = self._safe_toplevel(self.root)
-                win.title("一键思考工作台")
-                win.geometry("1400x800")
-                win.transient(self.root)
+            win = self._safe_toplevel(self.root)
+            win.title("一键思考工作台")
+            win.geometry("1400x800")
+            win.transient(self.root)
             win.resizable(True, True)
             # 存储窗口状态
             win._is_minimized = False

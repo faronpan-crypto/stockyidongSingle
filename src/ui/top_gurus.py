@@ -335,17 +335,13 @@ def _find_mainline(spot_df, industry_df=None):
 # ═══════════════════════════════════════════════════════
 # 🖥️ UI 层
 # ═══════════════════════════════════════════════════════
-def _show_top_gurus_dialog(self, parent_frame=None):
-    """👥 大V榜 主窗口 — 独立弹窗 或 嵌入 parent_frame"""
-    if parent_frame is not None:
-        win = parent_frame
-        win.configure(bg=_BG)
-    else:
-        win = _tk.Toplevel(getattr(self, 'root', None) or self)
-        win.title("👥 大V榜 · A股交易体系总览")
-        win.geometry("1160x820")
-        win.configure(bg=_BG)
-        win.minsize(900, 600)
+def _show_top_gurus_dialog(self):
+    """👥 大V榜 主窗口"""
+    win = _tk.Toplevel(getattr(self, 'root', None) or self)
+    win.title("👥 大V榜 · A股交易体系总览")
+    win.geometry("1160x820")
+    win.configure(bg=_BG)
+    win.minsize(900, 600)
 
     # ── 顶部标题栏 ──
     top = _tk.Frame(win, bg=_PANEL)

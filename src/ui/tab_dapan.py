@@ -15356,7 +15356,7 @@ class DapanMixin:
             print(f"[💰比价❌] {e}", flush=True)
             _tb.print_exc()
 
-    def _show_stock_compare_dialog(self, parent_frame=None):
+    def _show_stock_compare_dialog(self):
         """📊 同板块股票横向对比 — lazy import"""
         import traceback as _tb
         print("[📊股票比价] 按钮被点击!", flush=True)
@@ -15366,20 +15366,19 @@ class DapanMixin:
             # 双击行弹游资心法
             hot_fn = getattr(self, '_open_hotmoney_single_dialog', None)
             _sc(getattr(self, 'root', None) or getattr(self, '_root', None),
-                call_ai_fn=ai_fn, hotmoney_fn=hot_fn, parent_frame=parent_frame)
+                call_ai_fn=ai_fn, hotmoney_fn=hot_fn)
         except Exception as e:
             print(f"[📊股票比价❌] {e}", flush=True)
             _tb.print_exc()
 
-    def _show_stock_analysis_dialog(self, parent_frame=None):
+    def _show_stock_analysis_dialog(self):
         """📊 股票分析 — 左侧主流方法 + 右侧纯 K 线图, lazy import"""
         import traceback as _tb
         print("[📊股票分析] 按钮被点击!", flush=True)
         try:
             from ui.stock_analysis import show_stock_analysis_dialog as _sa
             ai_fn = getattr(self, 'call_ai_model', None)
-            _sa(getattr(self, 'root', None) or getattr(self, '_root', None), call_ai_fn=ai_fn,
-                parent_frame=parent_frame)
+            _sa(getattr(self, 'root', None) or getattr(self, '_root', None), call_ai_fn=ai_fn)
         except Exception as e:
             print(f"[📊股票分析❌] {e}", flush=True); _tb.print_exc()
 
@@ -15738,10 +15737,10 @@ class DapanMixin:
             else:
                 dlg = tk.Toplevel(root)
                 dlg.title("🌍 全球五巨头资产全景 — Global Macro Dashboard")
-                dlg.geometry("1200x820")
-                dlg.configure(bg="#121212")
-                dlg.transient(root)
-                dlg.minsize(1100, 750)
+            dlg.geometry("1200x820")
+            dlg.configure(bg="#121212")
+            dlg.transient(root)
+            dlg.minsize(1100, 750)
 
             # ── 全局字体调节 ──
             font_size = tk.IntVar(value=14)  # 🔥 默认 14 号大字
@@ -16658,120 +16657,6 @@ AI 将基于实时市场数据生成深度分析报告
 
         except Exception as e:
             print(f"[👁️见盘综合] ❌ 异常: {e}", flush=True)
-            import traceback as _tb
-            _tb.print_exc()
-
-
-    def _show_combined_deep_dialog(self):
-        """📊 深度分析三合一 — 深度技术 + 基本面 + 板块个股对比"""
-        import tkinter as tk
-        import tkinter.ttk as ttk
-        print("[📊深度综合] 组合弹窗 被调用!", flush=True)
-        try:
-            root = getattr(self, 'root', None) or getattr(self, '_root', None)
-            dlg = tk.Toplevel(root)
-            dlg.title("📊 深度分析 — 技术 + 基本面 + 板块对比")
-            dlg.geometry("1400x900")
-            dlg.configure(bg="#ECEFF1")
-            dlg.transient(root)
-            try:
-                dlg.state("zoomed")
-            except Exception:
-                try: dlg.attributes("-zoomed", True)
-                except Exception: pass
-
-            nb = ttk.Notebook(dlg)
-            nb.pack(fill=tk.BOTH, expand=True)
-
-            # Tab 1: 📊 深度技术 (原 "📊深度技术" 按钮)
-            tab1 = tk.Frame(nb, bg="#ECEFF1")
-            nb.add(tab1, text=" 📊 深度技术 ")
-            try:
-                self._show_stock_analysis_dialog(parent_frame=tab1)
-            except Exception as _e:
-                print(f"[📊深度综合] Tab1 深度技术 加载失败: {_e}", flush=True)
-
-            # Tab 2: 💼 基本面 (原 "💼基本面" 按钮)
-            tab2 = tk.Frame(nb, bg="white")
-            nb.add(tab2, text=" 💼 基本面 ")
-            try:
-                self.show_fundamental_analysis(parent_frame=tab2)
-            except Exception as _e:
-                print(f"[📊深度综合] Tab2 基本面 加载失败: {_e}", flush=True)
-
-            # Tab 3: 📊 板块个股对比 (原 "📊板块个股分析" 按钮)
-            tab3 = tk.Frame(nb, bg="#F5F5F5")
-            nb.add(tab3, text=" 📊 板块个股对比 ")
-            try:
-                self._show_stock_compare_dialog(parent_frame=tab3)
-            except Exception as _e:
-                print(f"[📊深度综合] Tab3 板块对比 加载失败: {_e}", flush=True)
-
-            print("[📊深度综合] ✅ 3 Tab 组合弹窗已打开", flush=True)
-
-        except Exception as e:
-            print(f"[📊深度综合] ❌ 异常: {e}", flush=True)
-            import traceback as _tb
-            _tb.print_exc()
-
-
-    def _show_combined_system_dialog(self):
-        """🎯 交易体系综合 — 体系+投资系统+一键思考+通胀通缩 四合一 Tab"""
-        import tkinter as tk
-        import tkinter.ttk as ttk
-        print("[🎯体系综合] 组合弹窗 被调用!", flush=True)
-        try:
-            root = getattr(self, 'root', None) or getattr(self, '_root', None)
-            dlg = tk.Toplevel(root)
-            dlg.title("🎯 交易体系综合 — 体系 + 投资 + 思考 + 宏观")
-            dlg.geometry("1400x900")
-            dlg.configure(bg="#ECEFF1")
-            dlg.transient(root)
-            try:
-                dlg.state("zoomed")
-            except Exception:
-                try: dlg.attributes("-zoomed", True)
-                except Exception: pass
-
-            nb = ttk.Notebook(dlg)
-            nb.pack(fill=tk.BOTH, expand=True)
-
-            # Tab 1: 🎯 交易体系 (大V榜)
-            tab1 = tk.Frame(nb, bg="#F5F5F5")
-            nb.add(tab1, text=" 🎯 交易体系 ")
-            try:
-                self._show_top_gurus_dialog(parent_frame=tab1)
-            except Exception as _e:
-                print(f"[🎯体系综合] Tab1 交易体系 加载失败: {_e}", flush=True)
-
-            # Tab 2: 📈 投资系统
-            tab2 = tk.Frame(nb, bg="#ECEFF1")
-            nb.add(tab2, text=" 📈 投资系统 ")
-            try:
-                self.show_investment_system(parent_frame=tab2)
-            except Exception as _e:
-                print(f"[🎯体系综合] Tab2 投资系统 加载失败: {_e}", flush=True)
-
-            # Tab 3: 🧠 一键思考
-            tab3 = tk.Frame(nb, bg="#f0f2f5")
-            nb.add(tab3, text=" 🧠 一键思考 ")
-            try:
-                self.show_one_click_thinking(parent_frame=tab3)
-            except Exception as _e:
-                print(f"[🎯体系综合] Tab3 一键思考 加载失败: {_e}", flush=True)
-
-            # Tab 4: 📉 通胀通缩
-            tab4 = tk.Frame(nb, bg="#0d1117")
-            nb.add(tab4, text=" 📉 通胀通缩 ")
-            try:
-                self._show_inflation_dialog(parent_frame=tab4)
-            except Exception as _e:
-                print(f"[🎯体系综合] Tab4 通胀通缩 加载失败: {_e}", flush=True)
-
-            print("[🎯体系综合] ✅ 4 Tab 组合弹窗已打开", flush=True)
-
-        except Exception as e:
-            print(f"[🎯体系综合] ❌ 异常: {e}", flush=True)
             import traceback as _tb
             _tb.print_exc()
 
@@ -64895,7 +64780,7 @@ AI 将基于实时市场数据生成深度分析报告
             'detail': detail_parts,
         }
 
-    def _show_inflation_dialog(self, parent_frame=None):
+    def _show_inflation_dialog(self):
         """📉 通缩通胀分析弹窗 (付鹏资产负债表框架)"""
         import tkinter as tk
         from tkinter import ttk, messagebox
@@ -64904,16 +64789,12 @@ AI 将基于实时市场数据生成深度分析报告
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
         import matplotlib.pyplot as plt
 
-        if parent_frame is not None:
-            win = parent_frame
-            win.configure(bg="#0d1117")
-        else:
-            win = self._safe_toplevel(self.root)
-            win.title("📉 通缩通胀分析 · 资产负债表思维")
-            try: win.state("zoomed")
-            except Exception:
-                try: win.attributes("-zoomed", True)
-                except Exception: win.geometry("1280x860")
+        win = self._safe_toplevel(self.root)
+        win.title("📉 通缩通胀分析 · 资产负债表思维")
+        try: win.state("zoomed")
+        except Exception:
+            try: win.attributes("-zoomed", True)
+            except Exception: win.geometry("1280x860")
 
         # ════════════════════════════════════════
         # 顶部: 标题 + ❓解释按钮

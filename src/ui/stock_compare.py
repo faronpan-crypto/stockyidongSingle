@@ -441,7 +441,7 @@ def _get_name(tsc: str) -> str:
 
 
 # ========== UI 弹窗 ==========
-def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None, parent_frame=None):
+def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None):
     """📊 股票比价弹窗
     hotmoney_fn: 双击行时的回调 hotmoney_fn(parent_win, auto_code, auto_name)
                   默认 None, 不弹游资心法"""
@@ -451,15 +451,11 @@ def show_stock_compare_dialog(parent_win=None, call_ai_fn=None, hotmoney_fn=None
     import webbrowser
     import time
 
-    if parent_frame is not None:
-        win = parent_frame
-        win.configure(bg="#F5F5F5")
-    else:
-        win = tk.Toplevel(parent_win) if parent_win else tk.Tk()
-        win.title("📊 同板块股票横向对比")
-        win.geometry("1280x860")
-        win.minsize(1000, 720)
-        win.configure(bg="#F5F5F5")
+    win = tk.Toplevel(parent_win) if parent_win else tk.Tk()
+    win.title("📊 同板块股票横向对比")
+    win.geometry("1280x860")
+    win.minsize(1000, 720)
+    win.configure(bg="#F5F5F5")
 
     # ===== 顶栏 =====
     top = tk.Frame(win, bg="#263238"); top.pack(fill=tk.X)
