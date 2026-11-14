@@ -1872,22 +1872,14 @@ def _calc_dupont(fund: Dict) -> Dict:
 
 # ========= UI 弹窗 =========
 def show_stock_analysis_dialog(parent_win=None, call_ai_fn=None, auto_code=None, auto_name=None,
-                              holdings=None, dapan_data=None, parent_frame=None):
+                              holdings=None, dapan_data=None):
     import tkinter as tk
     from tkinter import ttk, messagebox
     import webbrowser, numpy as np
 
-    if parent_frame is not None:
-        win = parent_frame
-        win.configure(bg="#ECEFF1")
-    elif parent_win:
-        win = tk.Toplevel(parent_win)
-        win.title("📊 单票深度分析 — 六大流派 25+ 方法 + K线辅助线"); win.geometry("1420x900"); win.minsize(1180, 780)
-        win.configure(bg="#ECEFF1")
-    else:
-        win = tk.Tk()
-        win.title("📊 单票深度分析 — 六大流派 25+ 方法 + K线辅助线"); win.geometry("1420x900"); win.minsize(1180, 780)
-        win.configure(bg="#ECEFF1")
+    win = tk.Toplevel(parent_win) if parent_win else tk.Tk()
+    win.title("📊 单票深度分析 — 六大流派 25+ 方法 + K线辅助线"); win.geometry("1420x900"); win.minsize(1180, 780)
+    win.configure(bg="#ECEFF1")
 
     # ===== 顶栏 =====
     top = tk.Frame(win, bg="#283593"); top.pack(fill=tk.X)

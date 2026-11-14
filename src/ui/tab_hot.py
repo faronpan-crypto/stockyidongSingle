@@ -4447,124 +4447,62 @@ class HotMixin:
                 tk.Label(switch_f, text="代码/名称", bg="#1A237E", fg="#B0BEC5", font=("", 7)).pack(side=tk.LEFT)
 
                 def _switch_stock():
-                    """解析选择器 → 找到目标股票 → 重新算游资心法 → 刷新弹窗"""
+                    """解析选择器 → 找到目标股票 → 重新算游资心法 → 刷新当前弹窗 K 线"""
                     target_code = None; target_name = None; target_tsc = None
+                    print(f"  🦅 _switch_stock START: manual='{ent.get()}', combo='{cb.get() if cb else 'N/A'}'", flush=True)
                     # 1) 优先看 Entry (手输代码或名称)
                     manual = ent.get().strip()
                     combo_val = cb.get() if cb else ""
                     search = manual or combo_val
-                    if not search: return
+                    print(f"  🦅 _switch_stock search='{search}'", flush=True)
+                    if not search:
+                        print("  🦅 _switch_stock 空, return", flush=True)
+                        return
                     # 2) 先从 search 里正则抽 6 位 code (万能!)
                     import re as _re_sw
                     _m_sw = _re_sw.search(r"(\d{6})", search)
                     if _m_sw:
                         target_code = _m_sw.group(1)
+                        print(f"  🦅 _switch_stock 抽出 code={target_code}", flush=True)
                     # 2b) 从已扫描的 _line_data 里找 code 匹配
                     if target_code:
                         for _rd in tree._line_data.values():
                             c = str(_rd.get("code", "")); t = str(_rd.get("ts_code", ""))
                             if c == target_code or t and t.startswith(target_code):
                                 target_name = str(_rd.get("name", "")); target_tsc = t
+                                print(f"  🦅 _switch_stock 2b: tree._line_data 匹配 name={target_name}, tsc={target_tsc}", flush=True)
                                 break
                     # 2c) 从 combo 值里也找名字 (strip [tag])
                     if not target_name:
                         _m_n = _re_sw.match(r"([^(\[]+)", search)
                         if _m_n: target_name = _m_n.group(1).strip()
+                        print(f"  🦅 _switch_stock 2c: 名字='{target_name}'", flush=True)
                     # 3) 推断市场后缀 (ts_code)
                     if target_code and not target_tsc:
                         mc = target_code
                         if mc.startswith(("6","9","5")): target_tsc = mc + ".SH"
                         elif mc.startswith(("0","3","2")): target_tsc = mc + ".SZ"
                         elif mc.startswith(("4","8","9")): target_tsc = mc + ".BJ"
+                        print(f"  🦅 _switch_stock 3: 推断 tsc={target_tsc}", flush=True)
                     if not target_tsc:
                         import tkinter.messagebox as _mb
                         _mb.showinfo("提示", f"没找到股票: {search}\n请输入6位代码或名称")
+                        print(f"  🦅 _switch_stock ❌ 没找到 target_tsc, return", flush=True)
                         return
-                    # 构造新 data (先只放基础字段, 后续线程里补)
-                    new_data = {"name": target_name, "code": target_code, "ts_code": target_tsc,
-                                    "group": data.get("group", "-"), "price": None,
-                                    "turnover": None, "amount": None}
-                    # 如果是已扫描过的, 把基础行情带上
-                    for _rd in tree._line_data.values():
-                        if _rd.get("ts_code") == target_tsc:
-                            new_data["price"] = _rd.get("price")
-                            new_data["turnover"] = _rd.get("turnover")
-                            break
-                    # ⚡ 不改当前弹窗 → 直接开一个新弹窗, 两个并排可对比
-                    # self._open_hotmoney_single_dialog(auto_code=...) 会走完整的
-                    #   tushare daily → daily_basic → 情绪引擎 → 7位游资评分 → 完整弹窗
-                    # 不 destroy 当前 top → 用户可同时看多只股票的游资心法
-                    self.root.after(0, lambda: self._open_hotmoney_single_dialog(
-                        auto_code=target_code, auto_name=target_name or target_code))
-                    return
-
-                    # --- 以下老代码保留但不再走 ---
-                    _ = new_data  # 静默引用
-                    # 复用 _calc_and_open 的逻辑: 后台线程拉K线+情绪+评分 → 开新弹窗
-                    def _bg_calc():
-                        import json as _js3
-                        import os as _os3
-                        import subprocess as _sp3
-                        _pro3 = _ts_pro.pro_api()
-                        _today3 = _dt_now.now().strftime("%Y%m%d")
-                        try:
-                            _cal3 = _pro3.trade_cal(exchange="SSE", start_date="20250601",
-                                                    end_date=_today3, is_open="1")
-                            _latest3 = _cal3["cal_date"].max() if len(_cal3) else _today3
-                        except: _latest3 = _today3
-                        tsc3 = target_tsc
-                        print(f"  🦅 切换股票: {tsc3}, latest={_latest3}", flush=True)
-                        try:
-                            df_k3 = _pro3.daily(ts_code=tsc3, start_date="20250601", end_date=_latest3)
-                            print(f"  🦅 daily OK: {len(df_k3)} rows", flush=True)
-                        except Exception as e:
-                            print(f"  🦅 daily FAIL: {str(e)[:80]}", flush=True); df_k3 = None
-                        # 情绪引擎
-                        emo3 = None; emo_stage3 = "震荡"
-                        skill_py3 = _os3.path.expanduser("~/.qclaw/workspace-ek2hwmmwwhxi3mz3/skills/情绪周期流/scripts/情绪周期流_engine.py")
-                        if _os3.path.exists(skill_py3):
-                            try:
-                                    r3 = _sp3.run(["python3", skill_py3, "--market", "--json"],
-                                              capture_output=True, text=True, timeout=8)
-                                    if r3.returncode == 0 and r3.stdout.strip(): emo3 = _js3.loads(r3.stdout.strip())
-                            except: pass
-                        emo_stage3 = emo3.get("emotion_stage", emo3.get("stage", "震荡")) if emo3 else "震荡"
-                        scores3 = {}; kline3 = None; price3 = new_data.get("price")
-                        if df_k3 is not None and len(df_k3) >= 30:
-                            df_k3 = df_k3.sort_values("trade_date")
-                            cl3 = df_k3["close"].astype(float).tolist()
-                            hi3 = df_k3["high"].astype(float).tolist()
-                            lo3 = df_k3["low"].astype(float).tolist()
-                            vo3 = df_k3["vol"].astype(float).tolist()
-                            op3 = df_k3["open"].astype(float).tolist()
-                            m5_3 = sum(cl3[-5:])/5 if len(cl3)>=5 else cl3[-1]
-                            m10_3 = sum(cl3[-10:])/10 if len(cl3)>=10 else cl3[-1]
-                            m20_3 = sum(cl3[-20:])/20 if len(cl3)>=20 else cl3[-1]
-                            price3 = cl3[-1]
-                            vr3 = vo3[-1]/(sum(vo3[-20:])/20) if len(vo3)>=20 and sum(vo3[-20:])>0 else 1.0
-                            dma3 = (price3 - m20_3)/m20_3*100
-                            pct3_3 = (price3 - max(cl3[-60:]))/max(cl3[-60:])*100 if len(cl3)>=60 else 0
-                            kline3 = (cl3, hi3, lo3, vo3, op3, tsc3)
-                            for nm, fn, desc in [(n,f,d) for (n,f,d,_) in HOTMONEY]:
-                                    sc3, dims3, phi3 = fn(cl3, hi3, lo3, vo3, op3, vr3, dma3, pct3_3,
-                                                     m5_3, m10_3, m20_3, None, None, None)
-                                    if emo3 and emo_stage3 != "震荡":
-                                        sch3 = TRA_TO_SCHOOL.get(nm, "")
-                                    if sch3 in ("情绪周期流", "龙头战法流", "低吸反包流"):
-                                        if emo_stage3 in ("冰点", "退潮"):
-                                            sc3 -= 15; dims3.append((f"情绪{emo_stage3}", "🔴", "-15"))
-                                        elif emo_stage3 in ("发酵", "高潮"):
-                                            sc3 += 12; dims3.append((f"情绪{emo_stage3}", "🟢", "+12"))
-                                        elif emo_stage3 == "启动":
-                                            sc3 += 5; dims3.append(("情绪启动", "🟡", "+5"))
-                                    scores3[nm] = {"score": max(0,min(100,sc3)), "dims": dims3, "phi": phi3, "desc": desc}
-                        new_data["scores"] = scores3
-                        new_data["kline_data"] = kline3
-                        new_data["price"] = price3
-                        new_data["emo_stage"] = emo_stage3
-                        # 刷新 UI: 重新开弹窗
-                        win.after(0, lambda: _open_hm_detail(new_data))
-                    _th.Thread(target=_bg_calc, daemon=True).start()
+                    # ⚡ 正确路径: 标记当前 top 需要被替换 → 后台拉新数据 → override 路径 destroy + 重建
+                    self._hm_replace_top = top  # 标记: 数据拉好后 destroy 这个 top
+                    print(f"  🦅 _switch_stock → _run_hotmoney_single_analysis({target_code}, {target_name})", flush=True)
+                    try:
+                        # _run_hotmoney_single_analysis 会: 拉K线 → 算分 → 存 _hm_single_override → 调 _show_hotmoney_check
+                        self._run_hotmoney_single_analysis(
+                            target_code, target_name or target_code,
+                            HM_LIST, TRA_TO_SCHOOL)
+                        print(f"  🦅 _switch_stock ✅ _run_hotmoney_single_analysis 已调起 (后台线程)", flush=True)
+                    except Exception as _e:
+                        import traceback as _tb_sw
+                        print(f"  🦅 _switch_stock ❌: {_e}", flush=True)
+                        _tb_sw.print_exc()
+                        self._hm_replace_top = None  # 清理标记
 
                 tk.Button(switch_f, text="▶ 确认", command=_switch_stock, bg="#FFD54F",
                           fg="#1A237E", font=("", 9, "bold"), relief=tk.FLAT, padx=8, pady=1).pack(side=tk.LEFT, padx=(2,0))
@@ -5771,8 +5709,15 @@ class HotMixin:
             # ⚠️ 注意: 不能用 win 当 parent (它马上要被销毁), 用 self.root
             # 先开完整弹窗, 再关扫描弹窗 (顺序不能反!)
             def _do_open():
+                # 如果有需要替换的旧弹窗 (游资心法全解内部 ▶确认 切换场景)
+                old_top = getattr(self, '_hm_replace_top', None)
+                self._hm_replace_top = None
                 _open_hm_detail(ov)   # 先开完整弹窗 (内部会创建 Toplevel)
-                win.destroy()         # 再关扫描弹窗
+                if old_top and old_top.winfo_exists():
+                    try: old_top.destroy()  # 再关旧的详情弹窗
+                    except Exception: pass
+                try: win.destroy()         # 最后关扫描弹窗 (可能已被旧_top 替换逻辑跳过)
+                except Exception: pass
             self.root.after(50, _do_open)
             return
 

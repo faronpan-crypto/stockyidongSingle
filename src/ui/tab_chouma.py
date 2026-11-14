@@ -551,18 +551,14 @@ def _draw_chip_distribution(ax, bin_centers, chips, cur_price=None, cm=None, hei
 class ChouMaMixin:
     """🪙 筹码分析器 mixin — 和 JianLouMixin 独立"""
 
-    def _show_chouma(self, parent_frame=None):
+    def _show_chouma(self):
         import tkinter as tk
         from tkinter import ttk
 
-        if parent_frame is not None:
-            dlg = parent_frame
-            dlg.configure(bg=_BG_DEEP)
-        else:
-            dlg = tk.Toplevel(getattr(self, "win", None) or self.root)
-            dlg.title("🪙 筹码分析")
-            dlg.geometry("1440x860")
-            dlg.configure(bg=_BG_DEEP)
+        dlg = tk.Toplevel(getattr(self, "win", None) or self.root)
+        dlg.title("🪙 筹码分析")
+        dlg.geometry("1440x860")
+        dlg.configure(bg=_BG_DEEP)
 
         # ── 顶栏 ──
         top = tk.Frame(dlg, bg=_BG_TOOLBAR, height=42); top.pack(fill=tk.X)
