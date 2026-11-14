@@ -7728,6 +7728,7 @@ class CangweiMixin:
                     highs = df_k["high"].astype(float).values
                     lows = df_k["low"].astype(float).values
                     closes = df_k["close"].astype(float).values
+                    volumes = df_k["vol"].astype(float).values if "vol" in df_k.columns else np.zeros_like(closes)
                     # 计算均线
                     ma5 = pd.Series(closes).rolling(5).mean().values
                     ma10 = pd.Series(closes).rolling(10).mean().values
@@ -7779,6 +7780,62 @@ class CangweiMixin:
                         canvas.draw()
                         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
                         kline_fig_container[0] = canvas
+                        # === 🆕 鼠标 hover tooltip (屏幕绝对右上角, 永不被遮) ===
+                        _hover_win = [None]
+                        def _hover_tip(event):
+                            if not event.inaxes or event.inaxes != ax:
+                                if _hover_win[0]:
+                                    try: _hover_win[0].destroy()
+                                    except: pass
+                                    _hover_win[0] = None
+                                return
+                            i = int(round(event.xdata))
+                            if i < 0 or i >= n:
+                                if _hover_win[0]:
+                                    try: _hover_win[0].destroy()
+                                    except: pass
+                                    _hover_win[0] = None
+                                return
+                            c, o, h, l = closes[i], opens[i], highs[i], lows[i]
+                            v = volumes[i] if 'volumes' in dir() else 0
+                            d = dates.iloc[i].strftime("%Y-%m-%d")
+                            chg_pct = (c / closes[i-1] - 1) * 100 if i > 0 else 0
+                            ma5_v = float(ma5[i]) if not np.isnan(ma5[i]) else 0
+                            ma10_v = float(ma10[i]) if not np.isnan(ma10[i]) else 0
+                            ma20_v = float(ma20[i]) if not np.isnan(ma20[i]) else 0
+                            lines = [
+                                f"📅 {d}",
+                                f"开 {o:.2f}  收 {c:.2f}  {'📈' if c>=o else '📉'} {chg_pct:+.2f}%",
+                                f"高 {h:.2f}  低 {l:.2f}  振幅 {(h-l)/c*100:.2f}%",
+                                f"量 {int(v):,}",
+                                f"MA5={ma5_v:.2f}  MA10={ma10_v:.2f}  MA20={ma20_v:.2f}",
+                            ]
+                            text = "\n".join(lines)
+                            if _hover_win[0]:
+                                try: _hover_win[0].destroy()
+                                except: pass
+                            try:
+                                _hover_win[0] = tk.Toplevel(kw)
+                                _hover_win[0].withdraw()
+                                _hover_win[0].overrideredirect(True)
+                                _hover_win[0].configure(bg="#263238", highlightbackground="#FFD54F", highlightthickness=1)
+                                tk.Label(_hover_win[0], text=text, bg="#263238", fg="white", font=("", 9),
+                                         justify=tk.LEFT, padx=8, pady=4).pack()
+                                _hover_win[0].update_idletasks()
+                                _tw = _hover_win[0].winfo_reqwidth()
+                                _sw = _hover_win[0].winfo_screenwidth()
+                                _hover_win[0].geometry(f"+{max(0,_sw-_tw-10)}+10")
+                                _hover_win[0].deiconify()
+                                _hover_win[0].lift()
+                            except Exception:
+                                _hover_win[0] = None
+                        def _hover_leave(_e):
+                            if _hover_win[0]:
+                                try: _hover_win[0].destroy()
+                                except: pass
+                                _hover_win[0] = None
+                        canvas.mpl_connect("motion_notify_event", _hover_tip)
+                        canvas.mpl_connect("axes_leave_event", _hover_leave)
                     kw.after(0, _do_draw)
                 except Exception as e:
                     kw.after(0, lambda e=e: loading.config(text=f"❌ 拉K线失败: {e}"))
