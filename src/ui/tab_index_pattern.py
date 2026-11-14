@@ -849,17 +849,21 @@ def predict_today_from_yesterday(df, code="000001", app=None):
     }
 
 
-def show_index_pattern_analyzer(parent, app=None):
-    """📈 指数日走势形态统计 — 独立弹窗"""
+def show_index_pattern_analyzer(parent, app=None, parent_frame=None):
+    """📈 指数日走势形态统计 — 独立弹窗 或 嵌入 parent_frame"""
     import threading
     import queue as _queue
     from datetime import datetime as _DT
 
-    win = tk.Toplevel(parent)
-    win.title("📈 指数日走势形态统计 — 做 T 指南")
-    win.geometry("960x780")
-    win.configure(bg="#F8FAFC")
-    win.transient(parent)
+    if parent_frame is not None:
+        win = parent_frame
+        win.configure(bg="#F8FAFC")
+    else:
+        win = tk.Toplevel(parent)
+        win.title("📈 指数日走势形态统计 — 做 T 指南")
+        win.geometry("960x780")
+        win.configure(bg="#F8FAFC")
+        win.transient(parent)
 
     # ── 顶栏: 选择标的 + 时间窗口 + 阈值 ──
     top = tk.Frame(win, bg="#1565C0", height=56)

@@ -1350,12 +1350,16 @@ class AnalysisMixin:
             error_detail = traceback.format_exc()
             return f"OCR回退分析失败: {e!s}\n\n错误详情:\n{error_detail}"
 
-    def show_fundamental_analysis(self):
+    def show_fundamental_analysis(self, parent_frame=None):
         """基本面分析弹窗:输入股票名,生成财务分析模型与行业对比(杜邦、财务比率、DCF、行业对比、事件驱动)。"""
-        win = self._safe_toplevel(self.root)
-        win.title("基本面分析")
-        win.geometry("1000x750")
-        win.transient(self.root)
+        if parent_frame is not None:
+            win = parent_frame
+            win.configure(bg="white")
+        else:
+            win = self._safe_toplevel(self.root)
+            win.title("基本面分析")
+            win.geometry("1000x750")
+            win.transient(self.root)
         main = ttk.Frame(win, padding=10)
         main.pack(fill=tk.BOTH, expand=True)
         ttk.Label(main, text="基本面分析:财务分析模型 + 行业对比 + 事件驱动", font=("TkDefaultFont", 12, "bold")).pack(pady=(0, 8))

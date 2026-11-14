@@ -4578,13 +4578,17 @@ class RestMixin:
         except Exception as e:
             print(f"打开链接失败: {e}")
 
-    def show_investment_system(self):
-        """打开投资系统界面"""
+    def show_investment_system(self, parent_frame=None):
+        """打开投资系统界面 — 独立弹窗 或 嵌入 parent_frame"""
         try:
-            win = self._safe_toplevel(self.root)
-            win.title("投资系统工作台")
-            win.geometry("1200x720")
-            win.transient(self.root)
+            if parent_frame is not None:
+                win = parent_frame
+                win.configure(bg="#ECEFF1")
+            else:
+                win = self._safe_toplevel(self.root)
+                win.title("投资系统工作台")
+                win.geometry("1200x720")
+                win.transient(self.root)
             # 投资系统选项
             system_options = {
                 "价值投资": "本杰明·格雷厄姆和沃伦·巴菲特的价值投资体系,关注企业内在价值、安全边际、长期持有",

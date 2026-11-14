@@ -3263,7 +3263,7 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
 # 🔍 多股并排对比 — 网格 mini K线 + MA5/10/20/60
 # ═══════════════════════════════════════════════
 
-def _show_multi_kline_comparison(parent_root, app=None):
+def _show_multi_kline_comparison(parent_root, app=None, parent_frame=None):
     """多标的并排对比 K 线图 — 支持多周期 + MACD 副图"""
     import requests, json as _json, threading
     import numpy as np
@@ -3283,11 +3283,15 @@ def _show_multi_kline_comparison(parent_root, app=None):
         messagebox.showerror("缺少依赖", "需要 matplotlib")
         return
 
-    dlg = tk.Toplevel(parent_root)
-    dlg.title("🔍 多股并排对比 (MA+VW-MACD, 多周期)")
-    dlg.geometry("1440x940")
-    dlg.configure(bg=_BG_DEEP)
-    dlg.minsize(1000, 700)
+    if parent_frame is not None:
+        dlg = parent_frame
+        dlg.configure(bg=_BG_DEEP)
+    else:
+        dlg = tk.Toplevel(parent_root)
+        dlg.title("🔍 多股并排对比 (MA+VW-MACD, 多周期)")
+        dlg.geometry("1440x940")
+        dlg.configure(bg=_BG_DEEP)
+        dlg.minsize(1000, 700)
 
     # ── 周期配置 (scale → 新浪参数, 周K=240日线本地聚合) ──
     _PERIODS = [

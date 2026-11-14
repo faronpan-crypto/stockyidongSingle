@@ -163,13 +163,17 @@ INVESTMENT_INSIGHT = """
 # 🎨 弹窗 UI
 # ═══════════════════════════════════════════════════════════════
 
-def show_emh_panel(parent, app=None):
-    """💡 有效市场假说知识面板"""
-    win = tk.Toplevel(parent)
-    win.title('💡 有效市场假说 (EMH) — 理论与应用')
-    win.geometry('1020x760')
-    win.configure(bg='#FAFAFA')
-    win.transient(parent)
+def show_emh_panel(parent, app=None, parent_frame=None):
+    """💡 有效市场假说知识面板 — 独立弹窗 或 嵌入 parent_frame"""
+    if parent_frame is not None:
+        win = parent_frame
+        win.configure(bg='#FAFAFA')
+    else:
+        win = tk.Toplevel(parent)
+        win.title('💡 有效市场假说 (EMH) — 理论与应用')
+        win.geometry('1020x760')
+        win.configure(bg='#FAFAFA')
+        win.transient(parent)
 
     # ══ 顶栏 ══
     top = tk.Frame(win, bg='#1A237E', height=52)
