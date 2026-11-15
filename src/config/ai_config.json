@@ -17,8 +17,7 @@
       "model": "doubao-seedance-1-0-pro-250528",
       "mode": "chat",
       "temperature": 0.3,
-      "timeout": 60.0,
-      "api_key": ""
+      "timeout": 60.0
     },
     "ollama": {
       "base_url": "http://localhost:11434",

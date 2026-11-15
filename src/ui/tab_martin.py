@@ -1055,14 +1055,13 @@ class MartinMixin:
         # 存 watchlist 数据 (sina_code 转换映射)
         tv2_data = []  # [(c6, sina, name, buy100, sell100, signals_count, status)]
 
-        # ── Tab 3: 🪙 筹码K 列表 ──
-        tab3 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab3, text="🪙 筹码K")
+        # ── Tab 3: 📊 主流板块 (今日概念板块前3成分股) ──
+        tab3 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab3, text="📊 主流板块")
         tv3_frame = tk.Frame(tab3, bg="#1a1a3e")
         tv3_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
-        cols3 = ("代码", "名称", "吸筹%", "派发%", "筹码状态", "信号")
+        cols3 = ("板块", "代码", "名称", "现价", "涨跌%")
         tv3 = ttk.Treeview(tv3_frame, columns=cols3, show="headings", height=28)
-        for c, w in [("代码", 80), ("名称", 120), ("吸筹%", 65),
-                     ("派发%", 65), ("筹码状态", 80), ("信号", 120)]:
+        for c, w in [("板块", 130), ("代码", 80), ("名称", 120), ("现价", 70), ("涨跌%", 70)]:
             tv3.heading(c, text=c); tv3.column(c, width=w, anchor=tk.CENTER, stretch=False)
         vsb3 = ttk.Scrollbar(tv3_frame, orient=tk.VERTICAL, command=tv3.yview)
         tv3.configure(yscrollcommand=vsb3.set)
@@ -1070,7 +1069,7 @@ class MartinMixin:
         vsb3.grid(row=0, column=1, sticky="ns")
         tv3_frame.grid_rowconfigure(0, weight=1)
         tv3_frame.grid_columnconfigure(0, weight=1)
-        tv3_data = []  # [(c6, sina, name, ...)]
+        tv3_data = []  # [(c6, sina, name, block, price, chg), ...]
 
         # ── Tab 4: 📯 淘股吧 热股 (复用主窗口 self._taoguba_stamp_data) ──
         tab4 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab4, text="📯 淘股吧")
@@ -1385,9 +1384,9 @@ class MartinMixin:
                                           float(risk_var.get()) if risk_var.get() else 0.5)
         quick_combo.bind("<Return>", _on_enter)
 
-        # ── 后台加载: 机会K watchlist + 筹码K watchlist ──
+        # ── 后台加载: 机会K watchlist + 主流前3板块 ──
         def _load_jc_bg():
-            """机会K + 筹码K 股票池并行加载 (只拿列表, 不做完整扫描)"""
+            """机会K watchlist + 概念板块前3成分股 并行加载"""
             try:
                 # 1) 机会K - 复用 tab_jianlou 的 watchlist
                 try:
@@ -1397,18 +1396,87 @@ class MartinMixin:
                     print(f"[🎯Martin] jianlou watchlist fail: {e}", flush=True)
                     jl_pool = []
 
-                # 2) 筹码K - 复用 tab_chouma 的
-                try:
-                    from ui.tab_chouma import _load_chouma_watchlist as _cm_load
-                    cm_pool = _cm_load()  # [(c6, sina, name), ...]
-                except Exception:
-                    try:
-                        from ui.tab_jianlou import _load_watchlist as _cm_load
-                        cm_pool = _cm_load()
-                    except Exception:
-                        cm_pool = []
+                # 2) 主流板块 - 东财概念板块前3, 失败则硬编码热点龙头
+                cm_pool = []  # [(c6, sina, name, block_name), ...]
+                _EM_HOT = {
+                    "🔬半导体": [
+                        ("688256", "寒武纪"), ("688041", "海光信息"), ("688981", "中芯国际"),
+                        ("002371", "北方华创"), ("603501", "韦尔股份"), ("688012", "中微公司"),
+                        ("603986", "兆易创新"), ("688008", "澜起科技"), ("002049", "紫光国微"),
+                        ("600460", "士兰微"),
+                    ],
+                    "🔗CPO/光模块": [
+                        ("300308", "中际旭创"), ("300502", "新易盛"), ("002281", "光迅科技"),
+                        ("300394", "天孚通信"), ("000988", "华工科技"), ("603083", "剑桥科技"),
+                        ("688048", "长光华芯"), ("300548", "博创科技"), ("300620", "光库科技"),
+                    ],
+                    "🤖机器人": [
+                        ("002747", "埃斯顿"), ("300124", "汇川技术"), ("601689", "拓普集团"),
+                        ("002050", "三花智控"), ("603728", "鸣志电器"), ("688017", "绿的谐波"),
+                        ("688165", "埃夫特"), ("002367", "康力电梯"), ("002472", "双环传动"),
+                    ],
+                    "📱电子/消费": [
+                        ("002475", "立讯精密"), ("002241", "歌尔股份"), ("300433", "蓝思科技"),
+                        ("002938", "鹏鼎控股"), ("600183", "生益科技"), ("002384", "东山精密"),
+                        ("002463", "沪电股份"), ("002600", "领益智造"), ("300207", "欣旺达"),
+                        ("601138", "工业富联"),
+                    ],
+                }
 
-                # 3) 并行拉基础行情 (只拿现价/涨跌幅, 不做信号扫描)
+                # 2a) 尝试东财实时板块排行
+                try:
+                    import akshare as ak
+                    import pandas as pd
+                    df_concept = pd.DataFrame()
+                    try:
+                        df_concept = ak.stock_board_concept_name_em()
+                    except Exception:
+                        try: df_concept = ak.stock_board_industry_name_em()
+                        except Exception: pass
+                    if not df_concept.empty:
+                        pct_col = next((c for c in df_concept.columns
+                                       if "涨跌幅" in str(c) and "额" not in str(c)), None)
+                        if pct_col:
+                            df_concept = df_concept.sort_values(pct_col, ascending=False)
+                        top3 = df_concept.head(3)
+                        name_col = "板块名称" if "板块名称" in top3.columns else top3.columns[0]
+                        for _, row in top3.iterrows():
+                            bname = str(row[name_col]).strip()
+                            if not bname or bname == "nan": continue
+                            try:
+                                df_cons = (ak.stock_board_concept_cons_em(symbol=bname)
+                                           or ak.stock_board_industry_cons_em(symbol=bname))
+                            except Exception:
+                                continue
+                            if df_cons is None or df_cons.empty: continue
+                            code_col = next((c for c in df_cons.columns
+                                             if "代码" in str(c) and "名称" not in str(c)), None)
+                            name_col2 = next((c for c in df_cons.columns
+                                              if "名称" in str(c)), None)
+                            if not code_col: continue
+                            for _, r2 in df_cons.head(15).iterrows():
+                                c6 = str(r2[code_col]).strip()
+                                if len(c6) != 6 or not c6.isdigit(): continue
+                                nm = str(r2.get(name_col2, c6)).strip() if name_col2 else c6
+                                sina = ("sh" if c6.startswith(("60","68","90"))
+                                        else "sz" if c6.startswith(("00","30","20"))
+                                        else "bj") + c6
+                                cm_pool.append((c6, sina, nm, bname))
+                        print(f"[🎯Martin] 主流板块(实时): {len(cm_pool)} 只", flush=True)
+                except Exception as e:
+                    print(f"[🎯Martin] 东财板块接口不可用({e}), 切换硬编码热点池", flush=True)
+
+                # 2b) 硬编码 fallback (东财不可用或 cm_pool 为空时生效)
+                if not cm_pool:
+                    print(f"[🎯Martin] 使用硬编码热点池: 半导体/CPO/机器人/电子", flush=True)
+                    for bname, stocks in _EM_HOT.items():
+                        for c6, nm in stocks:
+                            sina = ("sh" if c6.startswith(("60","68","90"))
+                                    else "sz" if c6.startswith(("00","30","20"))
+                                    else "bj") + c6
+                            cm_pool.append((c6, sina, nm, bname))
+
+                # 3) 并行拉基础行情 (只拿现价/涨跌幅/换手率/成交额)
                 def _hq_map(codes_sina):
                     try:
                         from ui.tab_jianlou import _fetch_hq_batch
@@ -1417,29 +1485,26 @@ class MartinMixin:
                         return {}
 
                 jl_sinas = [s for _, s, _ in jl_pool]
-                cm_sinas = [s for _, s, _ in cm_pool]
+                cm_sinas = [s for _, s, _, _ in cm_pool] if cm_pool else []
                 hq_jl = _hq_map(jl_sinas)
                 hq_cm = _hq_map(cm_sinas)
 
-                # 4) 填 tab2 (机会K 列表, 简化版: 只显示买入/卖出分占位, 不做完整扫描)
+                # 4) 填 tab2 (机会K 列表, 简化版)
                 jl_rows = []
                 for c6, sina, tag in jl_pool:
                     hq = hq_jl.get(sina, {})
                     nm = hq.get("name", c6)
-                    buy = sell = 50  # 默认中性 (完整扫描要拉日K+计算, 太重)
+                    buy = sell = 50  # 默认中性
                     status = "🟢买入机会" if buy > sell else ("🔴卖出警告" if sell > buy else "⚪中性")
                     jl_rows.append((c6, sina, nm, buy, sell, 0, status))
 
-                # 5) 填 tab3 (筹码K 列表)
+                # 5) 填 tab3 (主流板块成分股, 5列)
                 cm_rows = []
-                for item in cm_pool:
-                    if len(item) == 3:
-                        c6, sina, nm = item
-                    else:
-                        c6, sina = item[0], item[1]; nm = hq_cm.get(sina, c6)
+                for c6, sina, nm, bname in cm_pool:
                     hq = hq_cm.get(sina, {})
-                    absorb, dist = 0, 0  # 筹码扫描要拉日K, 简化版留空
-                    cm_rows.append((c6, sina, nm, absorb, dist, "待扫描", ""))
+                    price = hq.get("price", 0)
+                    chg = hq.get("chg", 0)
+                    cm_rows.append((c6, sina, nm, bname, price, chg))
 
                 # 6) 回主线程填充
                 kw.after(0, lambda: _fill_tv2(jl_rows))
@@ -1449,19 +1514,20 @@ class MartinMixin:
                 import traceback
                 print(f"[🎯Martin] JC watchlist 加载异常: {e}\n{traceback.format_exc()}", flush=True)
                 kw.after(0, lambda: status_lbl.configure(
-                    text=f"⚠️ 机会K/筹码K watchlist 加载失败, 请先在主界面打开一次机会K/筹码K"))
+                    text=f"⚠️ 机会K/主流板块 加载失败"))
 
         def _fill_tv2(rows):
             for r in rows:
                 tv2_data.append(r)
                 tv2.insert("", "end", values=(r[0], r[2], r[3], r[4], r[5], r[6]))
-            status_lbl.configure(text=f"✅ 机会K {len(rows)} 只 | 筹码K 加载中...")
+            status_lbl.configure(text=f"✅ 机会K {len(rows)} 只 | 主流板块 加载中...")
 
         def _fill_tv3(rows):
             for r in rows:
                 tv3_data.append(r)
-                tv3.insert("", "end", values=(r[0], r[2], r[3], r[4], r[5], r[6]))
-            status_lbl.configure(text=f"✅ 机会K {len(tv2_data)} 只 | 筹码K {len(rows)} 只 | 选股Tab点🔍扫描")
+                # cols3 = (板块, 代码, 名称, 现价, 涨跌%)
+                tv3.insert("", "end", values=(r[3], r[0], r[2], r[4], r[5]))
+            status_lbl.configure(text=f"✅ 机会K {len(tv2_data)} 只 | 主流板块 {len(rows)} 只 | 选股Tab点🔍扫描")
 
         threading.Thread(target=_load_jc_bg, daemon=True).start()
 
@@ -1476,7 +1542,7 @@ class MartinMixin:
                     text=f"🌐 环境: 检查失败", fg="#EF5350"))
 
         threading.Thread(target=_env_bg, daemon=True).start()
-        print("[🎯Martin] 弹窗已打开 (3 tab: 选股/机会K/筹码K)", flush=True)
+        print("[🎯Martin] 弹窗已打开 (3 tab: 选股/机会K/主流板块)", flush=True)
 
     def _analyze_manual_code(self, raw, kline_host, analysis_host, acc, risk):
         """
