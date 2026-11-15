@@ -771,6 +771,9 @@ class MartinMixin:
         # 工具栏 (独立在 kline_host 上方, 永不被挤)
         self._mk_toolbar = tk.Frame(right, bg="#0f0f23")
         self._mk_toolbar.pack(fill=tk.X, pady=(2, 2))
+        # 占位提示 (选股票后会被替换成指标按钮)
+        tk.Label(self._mk_toolbar, text="📊 K线指标:  ⚠️ 请先双击左边列表选股票",
+                 font=("", 10), bg="#0f0f23", fg="#78909C").pack(side=tk.LEFT, padx=6)
 
         kline_host = tk.Frame(right, bg="#0f0f23")
         kline_host.pack(fill=tk.BOTH, expand=True)
@@ -1875,31 +1878,23 @@ class MartinMixin:
         except Exception:
             pass
 
-        # 重绘分析面板
+        # 重绘分析面板 (一次搞定)
         if analysis_host is not None:
             for w in analysis_host.winfo_children():
                 w.destroy()
-            self._fill_martin_analysis(
-                analysis_host, d["code"], d["name"], closes,
-                d["ema9"], d["ema21"], d["ema50"], d["ema150"],
-                d["avwap"], d["adr_arr"][-1], None,
-                account_value, risk_pct, highs, lows
-            )
-            # 再算一次形态 (因为 closes 已变)
             anchor = d["anchor"]
-            pb = self._detect_pullback(d["ema9"], d["ema21"], d["ema50"], closes, d["avwap"], anchor)
             avg_v = np.mean(d["vols"][-20:]) if n >= 20 else d["vols"][-1]
+            pb = self._detect_pullback(d["ema9"], d["ema21"], d["ema50"], closes, d["avwap"], anchor)
             bk = self._detect_breakout(closes, highs, lows, d["vols"], d["avwap"], d["ema9"])
             gp = self._detect_ep_gap(opens[-1], closes[-2] if n >= 2 else closes[-1], d["vols"][-1], avg_v)
             patterns = [p for p in [pb, bk, gp] if p]
             best = max(patterns, key=lambda x: x["score"]) if patterns else None
-            if best:
-                self._fill_martin_analysis(
-                    analysis_host, d["code"], d["name"], closes,
-                    d["ema9"], d["ema21"], d["ema50"], d["ema150"],
-                    d["avwap"], d["adr_arr"][-1], best,
-                    account_value, risk_pct, highs, lows
-                )
+            self._fill_martin_analysis(
+                analysis_host, d["code"], d["name"], closes,
+                d["ema9"], d["ema21"], d["ema50"], d["ema150"],
+                d["avwap"], d["adr_arr"][-1], best,
+                account_value, risk_pct, highs, lows
+            )
 
     def _fill_martin_analysis(self, host, code, name, closes, ema9, ema21, ema50, ema150,
                                avwap, adr_pct, pattern, acc, risk_pct, highs, lows):
