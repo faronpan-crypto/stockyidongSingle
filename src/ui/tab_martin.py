@@ -771,9 +771,12 @@ class MartinMixin:
         # 工具栏 (独立在 kline_host 上方, 永不被挤)
         self._mk_toolbar = tk.Frame(right, bg="#0f0f23")
         self._mk_toolbar.pack(fill=tk.X, pady=(2, 2))
-        # 占位提示 (选股票后会被替换成指标按钮)
-        tk.Label(self._mk_toolbar, text="📊 K线指标:  ⚠️ 请先双击左边列表选股票",
+        # 占位提示 (选股票后会被替换成指标勾选行)
+        tk.Label(self._mk_toolbar, text="📊 K线指标:  ⚠️ 请先选股票 (下拉回车 / 双击列表)",
                  font=("", 10), bg="#0f0f23", fg="#78909C").pack(side=tk.LEFT, padx=6)
+
+        # 指标勾选列表 (直接嵌在工具栏, 勾选即时重绘)
+        self._mk_ind_checks = {}
 
         kline_host = tk.Frame(right, bg="#0f0f23")
         kline_host.pack(fill=tk.BOTH, expand=True)
@@ -1488,17 +1491,51 @@ class MartinMixin:
                     "OBV": False,
                 }
 
-            # ── 工具栏 (直接用顶部那个, 永远可见) ──
+            # ── 工具栏: 一排 Checkbutton, 勾选即时重绘 ──
             tb = self._mk_toolbar
-            tk.Label(tb, text="📊 K线指标:", font=("", 10, "bold"),
-                     bg="#0f0f23", fg="#FFD54F").pack(side=tk.LEFT, padx=(6, 4))
-            tk.Button(tb, text="⚙️ 指标设置", font=("", 9),
-                      bg="#455A64", fg="white", relief=tk.FLAT, padx=10,
-                      command=lambda: self._mk_indicator_dialog(tb)).pack(side=tk.LEFT, padx=4)
-            # 当前勾选状态速览
-            active = [k for k, v in self._mk_indicators.items() if v]
-            tk.Label(tb, text=f"✅ 已开: {', '.join(active) if active else '(无)'}",
-                     font=("", 9), bg="#0f0f23", fg="#81C784").pack(side=tk.LEFT, padx=8)
+
+            # 定义指标清单: (显示名, 内部key)
+            main_inds = [("EMA", "EMA"), ("AVWAP", "AVWAP"), ("MA5/10", "MA5/10"),
+                         ("MA20/60", "MA20/60"), ("BOLL", "BOLL")]
+            sub_inds = [("成交额", "成交额"), ("MACD", "MACD"), ("KDJ", "KDJ"),
+                        ("RSI", "RSI"), ("ATR", "ATR"), ("OBV", "OBV")]
+
+            tk.Label(tb, text="📊主图:", font=("", 9, "bold"),
+                     bg="#0f0f23", fg="#FFD54F").pack(side=tk.LEFT, padx=(4, 2))
+
+            def _mk_cb(label, key):
+                var = tk.BooleanVar(value=self._mk_indicators.get(key, False))
+                self._mk_ind_checks[key] = var
+                def _toggle(_v=var, _k=key):
+                    self._mk_indicators[_k] = _v.get()
+                    self._mk_redraw(kline_host, self._mk_analysis_host,
+                                    self._mk_account, self._mk_risk)
+                cb = tk.Checkbutton(tb, text=label, variable=var, command=_toggle,
+                                    font=("", 9), bg="#0f0f23", fg="#ECEFF1",
+                                    activebackground="#0f0f23", activeforeground="#FFD54F",
+                                    selectcolor="#455A64", bd=0, highlightthickness=0)
+                cb.pack(side=tk.LEFT, padx=1)
+
+            for lab, key in main_inds:
+                _mk_cb(lab, key)
+
+            tk.Label(tb, text="  副图:", font=("", 9, "bold"),
+                     bg="#0f0f23", fg="#66BB6A").pack(side=tk.LEFT, padx=(10, 2))
+            for lab, key in sub_inds:
+                _mk_cb(lab, key)
+
+            # 右侧重置默认按钮
+            def _reset_inds():
+                for k, v in self._mk_indicators.items():
+                    self._mk_indicators[k] = k in ["EMA", "AVWAP", "成交额"]
+                for k, var in self._mk_ind_checks.items():
+                    var.set(self._mk_indicators[k])
+                self._mk_redraw(kline_host, self._mk_analysis_host,
+                                self._mk_account, self._mk_risk)
+
+            tk.Button(tb, text="🔄默认", font=("", 8),
+                      bg="#546E7A", fg="white", relief=tk.FLAT, padx=6,
+                      command=_reset_inds).pack(side=tk.RIGHT, padx=4)
 
             # ── 初始绘制 ──
             self._mk_redraw(kline_host, analysis_host, account_value, risk_pct)
