@@ -784,6 +784,10 @@ class MartinMixin:
         analysis_host = tk.Frame(right, bg="#1a1a3e", height=180)
         analysis_host.pack(fill=tk.X, pady=(6, 0))
         analysis_host.pack_propagate(False)
+        self._mk_analysis_host = analysis_host  # 立即存, 防 None
+        self._mk_account = 100000
+        self._mk_risk = 0.5
+        self._mk_data = None
 
         # 点击 → K线
         def _on_select(_e=None):
@@ -1423,12 +1427,16 @@ class MartinMixin:
             return
 
         try:
-            # 清空 kline_host (保留工具栏在外面)
+            # 清空 kline_host + analysis_host (工具栏在外面独立)
             for w in kline_host.winfo_children():
                 w.destroy()
-            # 刷新工具栏
             for w in self._mk_toolbar.winfo_children():
                 w.destroy()
+            ah = getattr(self, "_mk_analysis_host", None)
+            if ah is not None and ah.winfo_exists():
+                for w in ah.winfo_children():
+                    try: w.destroy()
+                    except Exception: pass
 
             h = self._ak_hist_with_retry(code, max_retries=2)
             if h is None or len(h) < 60:
@@ -1916,9 +1924,13 @@ class MartinMixin:
             pass
 
         # 重绘分析面板 (一次搞定)
-        if analysis_host is not None:
-            for w in analysis_host.winfo_children():
-                w.destroy()
+        ah = analysis_host or getattr(self, "_mk_analysis_host", None)
+        if ah is not None and ah.winfo_exists():
+            try:
+                for w in ah.winfo_children():
+                    w.destroy()
+            except Exception:
+                pass
             anchor = d["anchor"]
             avg_v = np.mean(d["vols"][-20:]) if n >= 20 else d["vols"][-1]
             pb = self._detect_pullback(d["ema9"], d["ema21"], d["ema50"], closes, d["avwap"], anchor)
@@ -1927,7 +1939,7 @@ class MartinMixin:
             patterns = [p for p in [pb, bk, gp] if p]
             best = max(patterns, key=lambda x: x["score"]) if patterns else None
             self._fill_martin_analysis(
-                analysis_host, d["code"], d["name"], closes,
+                ah, d["code"], d["name"], closes,
                 d["ema9"], d["ema21"], d["ema50"], d["ema150"],
                 d["avwap"], d["adr_arr"][-1], best,
                 account_value, risk_pct, highs, lows
