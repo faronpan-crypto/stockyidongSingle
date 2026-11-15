@@ -12223,8 +12223,47 @@ except Exception as e:
         C_UP="#EF5350"; C_DN="#66BB6A"
 
         banner = tk.Frame(win, bg="#5D4037", height=50); banner.pack(fill=tk.X); banner.pack_propagate(False)
-        tk.Label(banner, text="🎯 量化预测 · 市场走势 5 维闭环 (数据-模型-验证)",
-                 font=("Microsoft YaHei",12,"bold"),bg="#5D4037",fg="#FFF3E0").pack(side=tk.LEFT,padx=14,pady=10)
+        tk.Label(banner, text="🎯 布鲁斯大盘择时 · T+1 明日走势预测",
+                 font=("Microsoft YaHei",14,"bold"),bg="#5D4037",fg="#FFF3E0").pack(side=tk.LEFT,padx=14,pady=10)
+
+        # ═══════════════════════════════════════════════════════════════
+        # 🎯 顶部 T+1 预测大面板 (醒目结论)
+        # ═══════════════════════════════════════════════════════════════
+        t1_frame = tk.Frame(win, bg="#263238", height=110)
+        t1_frame.pack(fill=tk.X, padx=8, pady=(6, 4)); t1_frame.pack_propagate(False)
+
+        # 左侧: 明日预测结论 (大字号)
+        t1_left = tk.Frame(t1_frame, bg="#263238"); t1_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=12, pady=6)
+        tk.Label(t1_left, text="📅 T+1 明日大盘预测", font=("",10), bg="#263238", fg="#B0BEC5").pack(anchor="w")
+        t1_verdict = tk.Label(t1_left, text="⏳ 请点 [🔄布鲁斯扫描] 开始预测...",
+                              font=("Microsoft YaHei", 22, "bold"), bg="#263238", fg="#FFB74D")
+        t1_verdict.pack(anchor="w", pady=(2, 0))
+        t1_reason = tk.Label(t1_left, text="", font=("",9), bg="#263238", fg="#90A4AE", wraplength=700, justify=tk.LEFT)
+        t1_reason.pack(anchor="w")
+
+        # 右侧: 加权打分圆环 (四个维度)
+        t1_right = tk.Frame(t1_frame, bg="#263238"); t1_right.pack(side=tk.RIGHT, padx=12, pady=6)
+        t1_score = tk.Label(t1_right, text="--", font=("Menlo", 32, "bold"), bg="#263238", fg="#FFB74D")
+        t1_score.pack()
+        tk.Label(t1_right, text="综合分 (0-100)", font=("",9), bg="#263238", fg="#90A4AE").pack()
+
+        # 底部: 四维度小标签
+        dim_frame = tk.Frame(t1_frame, bg="#263238"); dim_frame.pack(side=tk.RIGHT, padx=(0,6), pady=4)
+        t1_dims = {}
+        for _name, _key, _col in [("趋势动量","trend","#64B5F6"),("量价配合","volume","#81C784"),
+                                   ("广度扩散","breadth","#BA68C8"),("资金情绪","capital","#FF8A65")]:
+            _cf = tk.Frame(dim_frame, bg="#263238")
+            _cf.pack(side=tk.TOP, anchor="e", pady=1)
+            tk.Label(_cf, text=f"{_name}:", font=("",9), bg="#263238", fg="#B0BEC5").pack(side=tk.LEFT)
+            _lbl = tk.Label(_cf, text="--", font=("Menlo",11,"bold"), bg="#263238", fg=_col, width=6, anchor="e")
+            _lbl.pack(side=tk.LEFT, padx=(2,0))
+            t1_dims[_key] = _lbl
+
+        # 预测日期标签
+        t1_date_lbl = tk.Label(t1_frame, text="", font=("",9), bg="#263238", fg="#78909C")
+        t1_date_lbl.place(relx=0.0, rely=1.0, anchor="sw", x=14, y=-4)
+
+        # ═══════════════════════════════════════════════════════════════
 
         # 🔥 新增: 📝 写文章按钮 — 传所有量化预测数据
         def _open_quant_article():
@@ -12299,7 +12338,213 @@ except Exception as e:
                  bg="#5D4037",fg="#FFCCBC").pack(side=tk.LEFT,pady=12)
 
         ctrl = ttk.Frame(win); ctrl.pack(fill=tk.X,padx=8,pady=(6,2))
-        scan_btn = ttk.Button(ctrl, text="🔄 量化扫描", width=14); scan_btn.pack(side=tk.LEFT)
+        scan_btn = ttk.Button(ctrl, text="🔄 布鲁斯扫描", width=14); scan_btn.pack(side=tk.LEFT)
+
+        def _run_t1_scan():
+            """🎯 T+1 明日大盘预测核心引擎 — 4维度加权打分"""
+            import threading as _th
+            def _bg():
+                scan_btn.config(state=tk.DISABLED)
+                status_var.set("⏳ 扫描中: 拉取指数+广度+资金数据...")
+                try:
+                    from datetime import datetime, timedelta
+                    import numpy as np
+
+                    target = date_var.get().strip() or None
+                    data = self._scan_quant_forecast_data(target_date=target)
+
+                    # —— 解析指数数据 (上证/深成/创业板) ——
+                    idx_scores = []
+                    trend_score = 50; volume_score = 50
+                    for _nm, _d in data.get("index", {}).items():
+                        if "_err" in _d: continue
+                        idx_scores.append(_d.get("quant_score", 50))
+                        trend_score = _d.get("trend_score", 50)
+                    avg_idx = float(np.mean(idx_scores)) if idx_scores else 50
+
+                    # —— 广度打分 (从 data["breadth"] 提取) ——
+                    breadth_score = 50
+                    br = data.get("breadth", {})
+                    red_pct = br.get("red_pct")
+                    limit_up = br.get("limit_up")
+                    limit_dn = br.get("limit_dn")
+                    trin = br.get("trin")
+                    mcl = br.get("mcl")
+                    # 广度子项
+                    if red_pct is not None:
+                        if red_pct > 65: breadth_score += 15
+                        elif red_pct < 35: breadth_score -= 15
+                    if limit_up and limit_dn is not None:
+                        if limit_up > limit_dn * 3: breadth_score += 10
+                        elif limit_dn > limit_up * 2: breadth_score -= 15
+                    if trin is not None:
+                        if trin < 0.7: breadth_score += 10
+                        elif trin > 1.5: breadth_score -= 15
+                    if mcl is not None:
+                        if mcl > 0: breadth_score += 10
+                        else: breadth_score -= 10
+                    breadth_score = max(0, min(100, breadth_score))
+
+                    # —— 资金情绪打分 ——
+                    capital_score = 50
+                    cap = data.get("capital", data.get("fund_flow", {}))
+                    # 北向资金
+                    try:
+                        if "north_net" in cap:
+                            nn = cap["north_net"]
+                            if nn and isinstance(nn, (int, float)):
+                                if nn > 50: capital_score += 15
+                                elif nn < -50: capital_score -= 15
+                    except Exception: pass
+                    # 两融余额变化
+                    try:
+                        if "margin_chg" in cap:
+                            mc = cap["margin_chg"]
+                            if mc and isinstance(mc, (int, float)):
+                                if mc > 0: capital_score += 10
+                                else: capital_score -= 10
+                    except Exception: pass
+                    # 涨停连板高度 (从 breadth)
+                    try:
+                        lb = br.get("max_board") or br.get("lianban_height")
+                        if lb and isinstance(lb, (int, float)):
+                            if lb >= 5: capital_score += 10
+                            elif lb <= 2: capital_score -= 5
+                    except Exception: pass
+                    capital_score = max(0, min(100, capital_score))
+
+                    # —— 量价配合 (简化: MA20 斜率 + 成交额变化) ——
+                    try:
+                        # 用上证 MA20 斜率
+                        sh = data.get("index", {}).get("上证指数", {})
+                        if sh and "closes" in sh:
+                            closes = sh["closes"]
+                            if len(closes) >= 25:
+                                ma20_arr = np.convolve(closes[-25:], np.ones(20)/20, mode="valid")
+                                if len(ma20_arr) >= 2:
+                                    slope = (ma20_arr[-1] - ma20_arr[-2]) / ma20_arr[-2] * 1000  # %
+                                    if slope > 0.5: volume_score += 15
+                                    elif slope < -0.5: volume_score -= 15
+                    except Exception: pass
+                    volume_score = max(0, min(100, volume_score))
+
+                    # —— 四维度输出 ——
+                    def _upd_dims():
+                        t1_dims["trend"].config(text=f"{trend_score:.0f}")
+                        t1_dims["volume"].config(text=f"{volume_score:.0f}")
+                        t1_dims["breadth"].config(text=f"{breadth_score:.0f}")
+                        t1_dims["capital"].config(text=f"{capital_score:.0f}")
+                    win.after(0, _upd_dims)
+
+                    # —— 综合加权 (趋势40% + 广度25% + 资金20% + 量价15%) ——
+                    composite = (trend_score*0.40 + breadth_score*0.25
+                                 + capital_score*0.20 + volume_score*0.15)
+                    composite = max(0, min(100, composite))
+
+                    # —— T+1 结论判定 ——
+                    if composite >= 70:
+                        verdict = "🟢 明日看涨 (强势)"
+                        color = "#66BB6A"
+                        reason_parts = []
+                        if trend_score >= 60: reason_parts.append("趋势动量多头排列")
+                        if breadth_score >= 60: reason_parts.append("市场广度扩散良好")
+                        if capital_score >= 60: reason_parts.append("资金情绪偏暖")
+                        if volume_score >= 60: reason_parts.append("量价配合健康")
+                        reason = " | ".join(reason_parts)
+                    elif composite >= 55:
+                        verdict = "🟡 明日偏震荡 (中性偏强)"
+                        color = "#FFA726"
+                        reason = "多空因素交织, 注意板块轮动"
+                    elif composite >= 45:
+                        verdict = "⚪ 明日中性 (观望)"
+                        color = "#FFCC80"
+                        reason = "信号不明确, 建议轻仓观望"
+                    elif composite >= 30:
+                        verdict = "🟠 明日偏弱 (谨慎)"
+                        color = "#EF5350"
+                        reason = "广度走弱/资金流出, 注意风控"
+                    else:
+                        verdict = "🔴 明日看跌 (风险)"
+                        color = "#D32F2F"
+                        reason_parts = []
+                        if trend_score <= 40: reason_parts.append("趋势破位")
+                        if breadth_score <= 40: reason_parts.append("广度扩散不足")
+                        if capital_score <= 40: reason_parts.append("资金情绪恐慌")
+                        if volume_score <= 40: reason_parts.append("量价背离")
+                        reason = " | ".join(reason_parts)
+
+                    # —— 回主线程更新 UI ——
+                    tdate = data.get("td", "--")
+                    try:
+                        tdate_disp = datetime.strptime(str(tdate),"%Y%m%d").strftime("%Y-%m-%d")
+                        t1_date_lbl.config(text=f"📅 基于 {tdate_disp} 收盘数据 → 预测 T+1")
+                    except Exception:
+                        t1_date_lbl.config(text=f"📅 target_date={tdate}")
+
+                    def _upd_top():
+                        t1_score.config(text=f"{composite:.0f}", fg=color)
+                        t1_verdict.config(text=verdict, fg=color)
+                        t1_reason.config(text=f"📊 综合分 {composite:.0f}/100 | {reason}")
+                    win.after(0, _upd_top)
+
+                    status_var.set(f"✅ 扫描完成 | 综合分 {composite:.0f} | 结论: {verdict}")
+
+                    # —— 更新 Tab1 宽广度卡 ——
+                    def _upd_breadth():
+                        if red_pct is not None: b_vars["红盘率 (上涨占比)"].config(text=f"{red_pct:.1f}%", fg="#333")
+                        if limit_up is not None: b_vars["涨停家数"].config(text=str(limit_up), fg=C_UP)
+                        if limit_dn is not None: b_vars["跌停家数"].config(text=str(limit_dn), fg=C_DN)
+                        if trin is not None:
+                            _c = C_UP if trin < 0.8 else (C_DN if trin > 1.3 else "#333")
+                            b_vars["TRIN 广度指数"].config(text=f"{trin:.2f}", fg=_c)
+                        if mcl is not None:
+                            b_vars["MCL"].config(text=f"{mcl:.1f}", fg=C_UP if mcl > 0 else C_DN)
+                            b_vars["MCL 趋势"].config(text="金叉↑ 多头" if mcl > 0 else "死叉↓ 空头",
+                                                        fg="#1565C0" if mcl > 0 else C_DN)
+                    win.after(0, _upd_breadth)
+
+                    # —— 更新 Tab2 三大指数表 ——
+                    def _upd_idx():
+                        for item in tree_i.get_children(): tree_i.delete(item)
+                        for nm, d in data.get("index", {}).items():
+                            if "_err" in d: continue
+                            tree_i.insert("", "end", values=(
+                                nm,
+                                f"{d.get('close',0):.2f}",
+                                f"{d.get('pct_chg',0):+.2f}%",
+                                f"{d.get('ma20',0):.2f}",
+                                f"{d.get('ma60',0):.2f}",
+                                f"{d.get('ma250',0):.2f}",
+                                f"{d.get('rsi',50):.1f}",
+                                f"{d.get('quant_score',50):.0f}",
+                            ))
+                        # 技术评分卡
+                        try:
+                            avg_ma = float(np.mean([d.get("arr_score",50) for d in data["index"].values() if "_err" not in d]))
+                            avg_macd = float(np.mean([d.get("macd_score",50) for d in data["index"].values() if "_err" not in d]))
+                            avg_rsi = float(np.mean([d.get("rsi",50) for d in data["index"].values() if "_err" not in d]))
+                            avg_q = float(np.mean([d.get("quant_score",50) for d in data["index"].values() if "_err" not in d]))
+                            sc_vars["MA20/60/250 排列"].config(text=f"{avg_ma:.0f}", fg=C_UP if avg_ma>60 else C_DN if avg_ma<40 else "#333")
+                            sc_vars["MACD 方向"].config(text=f"{avg_macd:.0f}", fg=C_UP if avg_macd>60 else C_DN if avg_macd<40 else "#333")
+                            sc_vars["RSI14"].config(text=f"{avg_rsi:.0f}", fg=C_UP if avg_rsi>60 else C_DN if avg_rsi<40 else "#333")
+                            sc_vars["综合分"].config(text=f"{avg_q:.0f}", fg="#B71C1C")
+                        except Exception as _e2:
+                            print(f"[布鲁斯] 技术评分更新失败: {_e2}", flush=True)
+                    win.after(0, _upd_idx)
+
+                    print(f"[布鲁斯] T+1预测: {verdict} | 综合{composite:.0f} | 趋势{trend_score:.0f} 量价{volume_score:.0f} 广度{breadth_score:.0f} 资金{capital_score:.0f}", flush=True)
+
+                except Exception as e:
+                    import traceback; traceback.print_exc()
+                    status_var.set(f"❌ 扫描失败: {e}")
+                    t1_verdict.config(text=f"❌ 扫描失败", fg="#EF5350")
+                    t1_reason.config(text=str(e)[:120])
+                finally:
+                    win.after(0, lambda: scan_btn.config(state=tk.NORMAL))
+
+            _th.Thread(target=_bg, daemon=True).start()
+
+        scan_btn.config(command=_run_t1_scan)
         # 🆕 日期选择器: 默认空 = 最近交易日, 可手动指定
         tk.Label(ctrl, text="📅日期:", font=("",10)).pack(side=tk.LEFT,padx=(12,2))
         date_var = tk.StringVar(value="")
