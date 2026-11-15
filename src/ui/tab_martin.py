@@ -763,7 +763,7 @@ class MartinMixin:
         return None
 
     def _ak_hist_with_retry(self, code, max_retries=2, timeout=6):
-        """带重试的 akshare 日线拉取 — 东方财富 → 腾讯兜底 (单只超时 6 秒)"""
+        """带重试的 akshare 日线拉取 — 东方财富 → 腾讯 → 新浪 (3层兜底)"""
         import time
         # 先试东方财富
         for attempt in range(max_retries):
@@ -794,6 +794,39 @@ class MartinMixin:
                 return h2.rename(columns=rename_map)
         except Exception as e2:
             print(f"[🎯Martin] hist 腾讯也失败 {code}: {str(e2)[:30]}", flush=True)
+
+        # 最后兜底: 新浪 (stock_zh_a_hist_sina 或 stock_zh_a_daily)
+        try:
+            # 新浪接口 (备选 stock_zh_a_hist_163 网易)
+            h3 = None
+            for api_name, api_kwargs in [
+                ("stock_zh_a_daily", {"symbol": f"sh{code}" if code.startswith(("6", "9")) else f"sz{code}",
+                                       "adjust": "qfq"}),
+                ("stock_zh_a_hist_sina", {"symbol": code, "period": "daily", "adjust": "qfq"}),
+                ("stock_zh_a_hist_163", {"symbol": code, "start_date": "", "end_date": "", "adjust": "qfq"}),
+            ]:
+                try:
+                    fn = getattr(ak, api_name, None)
+                    if fn is None:
+                        continue
+                    h3 = fn(timeout=timeout, **{k: v for k, v in api_kwargs.items() if k != "timeout"})
+                    if h3 is not None and len(h3) >= 30:
+                        print(f"[🎯Martin] hist 兜底 {api_name} 成功 {code} ({len(h3)}行)", flush=True)
+                        # 统一列名
+                        rename_map = {}
+                        for c in h3.columns:
+                            cl = str(c).lower()
+                            if "date" in cl or "日期" in str(c): rename_map[c] = "date"
+                            elif "open" in cl or "开盘" in str(c): rename_map[c] = "open"
+                            elif "close" in cl or "收盘" in str(c): rename_map[c] = "close"
+                            elif "high" in cl or "最高" in str(c): rename_map[c] = "high"
+                            elif "low" in cl or "最低" in str(c): rename_map[c] = "low"
+                            elif "volume" in cl or "成交量" in str(c): rename_map[c] = "volume"
+                        return h3.rename(columns=rename_map)
+                except Exception as _e3:
+                    continue
+        except Exception as _e3b:
+            print(f"[🎯Martin] hist 新浪/网易兜底也失败 {code}", flush=True)
 
         return None
 
@@ -961,16 +994,20 @@ class MartinMixin:
                               justify=tk.LEFT)
         status_lbl.pack(fill=tk.X, pady=(6, 2), padx=8)
 
-        # Notebook
+        # Notebook (紧凑布局: 8 tab 要一排放得下)
         style_nb = ttk.Style()
         try:
             style_nb.theme_use("clam")
             style_nb.configure("TNotebook", background="#1a1a3e", borderwidth=0)
             style_nb.configure("TNotebook.Tab", background="#2a2a4e", foreground="#B0BEC5",
-                               padding=(14, 5), font=("", 10, "bold"))
+                               padding=(8, 3), font=("", 9))
             style_nb.map("TNotebook.Tab",
                          background=[("selected", "#FFD54F")],
                          foreground=[("selected", "#0f0f23")])
+            try:
+                style_nb.configure("TNotebook.Tab", focuscolor="none")
+            except Exception:
+                pass
         except Exception:
             pass
 
