@@ -22,6 +22,19 @@ from logic.crawlers import *  # TaogubaCrawler
 from logic.spot import *
 from logic.stock_names import *  # get_stock_name_by_code 等
 
+# ═══ 数据库研判缓存 (系统研判弹窗使用) ═══
+try:
+    from data.db import (
+        load_fresh_judgment_cache,
+        save_judgment_cache_snapshot,
+        JUDGMENT_CACHE_TTL_SECONDS,
+    )
+except ImportError:
+    # fallback 空壳 — 不让弹窗直接炸
+    JUDGMENT_CACHE_TTL_SECONDS = 3 * 3600
+    def load_fresh_judgment_cache(*a, **kw): return None, None
+    def save_judgment_cache_snapshot(*a, **kw): return
+
 # ==================== 明日涨跌预测(Skill) ====================
 try:
     from tomorrow_predict import (

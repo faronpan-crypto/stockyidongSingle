@@ -5147,84 +5147,83 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ttk.Label(fund_frame, text=f"❌ 基金持仓加载失败: {_fe}").pack(pady=20)
         # ── 工具 Tab 按钮 ──
         tools_row_a = ttk.Frame(tools_frame); tools_row_a.pack(fill=tk.X, pady=2)
-        _tools_pad = {"side": tk.LEFT, "padx": 2, "pady": 2, "fill": tk.X, "expand": True}
-        ttk.Button(tools_row_a, text="🏛️ 机构公私募", command=self._show_institution_dialog, width=14).pack(**_tools_pad)
-        ttk.Button(tools_row_a, text="📊 机构重仓追踪", command=self._show_institution_holdings, width=14).pack(**_tools_pad)
-        ttk.Button(tools_row_a, text="🎯 量化因子体系", command=self._show_factor_catalog_dialog, width=14).pack(**_tools_pad)
-        ttk.Button(tools_row_a, text="📚 机构知识体系", command=self._show_institution_knowledge_dialog, width=14).pack(**_tools_pad)
+        _tools_pad = {"side": tk.LEFT, "padx": 2, "pady": 2}
+        ttk.Button(tools_row_a, text="🏛️ 机构公私募", command=self._show_institution_dialog).pack(**_tools_pad)
+        ttk.Button(tools_row_a, text="📊 机构重仓追踪", command=self._show_institution_holdings).pack(**_tools_pad)
+        ttk.Button(tools_row_a, text="🎯 量化因子体系", command=self._show_factor_catalog_dialog).pack(**_tools_pad)
+        ttk.Button(tools_row_a, text="📚 机构知识体系", command=self._show_institution_knowledge_dialog).pack(**_tools_pad)
         # 从左侧工具栏迁移过来的 3 个按钮
         tools_row_b = ttk.Frame(tools_frame); tools_row_b.pack(fill=tk.X, pady=2)
-        ttk.Button(tools_row_b, text="🔔 信号检测", command=self.show_signal_all_holdings_detection, width=14).pack(**_tools_pad)
-        ttk.Button(tools_row_b, text="🔄 回测/回撤分析", command=self.show_backtest_dialog, width=14).pack(**_tools_pad)
-        ttk.Button(tools_row_b, text="🔍 新闻搜索", command=self.launch_keyword_search_app, width=14).pack(**_tools_pad)
-        ttk.Button(tools_row_b, text="📋 操盘面板", command=self._show_caochuan_panel, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_b, text="🔔 信号检测", command=self.show_signal_all_holdings_detection).pack(**_tools_pad)
+        ttk.Button(tools_row_b, text="🔄 回测/回撤分析", command=self.show_backtest_dialog).pack(**_tools_pad)
+        ttk.Button(tools_row_b, text="🔍 新闻搜索", command=self.launch_keyword_search_app).pack(**_tools_pad)
+        ttk.Button(tools_row_b, text="📋 操盘面板", command=self._show_caochuan_panel).pack(**_tools_pad)
         # 从 toolbar_row1 迁入的按钮
         tools_row_c = ttk.Frame(tools_frame); tools_row_c.pack(fill=tk.X, pady=2)
-        ttk.Button(tools_row_c, text="📋自选股管理", command=self.show_stock_management_dialog, width=14).pack(**_tools_pad)
-        ttk.Button(tools_row_c, text="🔍最新N条分析", command=self.analyze_latest_n_stocks, width=14).pack(**_tools_pad)
+        ttk.Button(tools_row_c, text="📋自选股管理", command=self.show_stock_management_dialog).pack(**_tools_pad)
+        ttk.Button(tools_row_c, text="🔍最新N条分析", command=self.analyze_latest_n_stocks).pack(**_tools_pad)
         ttk.Button(tools_row_c, text="🌱成长扫描",
                    command=lambda: crawler_control_notebook.select(growth_tab),
                    width=14).pack(**_tools_pad)
         # AI用量监控 + 批量股票分析 + 龙虎榜 + 通缩通胀 (从 toolbar_row1 迁入)
         tools_row_d = ttk.Frame(tools_frame); tools_row_d.pack(fill=tk.X, pady=2)
         ttk.Button(tools_row_d, text="📉 通缩通胀",
-                   command=self._show_inflation_dialog, width=14).pack(**_tools_pad)
+                   command=self._show_inflation_dialog).pack(**_tools_pad)
         ttk.Button(tools_row_d, text="📊 AI用量监控",
-                   command=self._show_ai_usage_dialog, width=14).pack(**_tools_pad)
+                   command=self._show_ai_usage_dialog).pack(**_tools_pad)
         ttk.Button(tools_row_d, text="📊 批量股票分析",
-                   command=self.show_batch_stock_analyzer, width=14).pack(**_tools_pad)
+                   command=self.show_batch_stock_analyzer).pack(**_tools_pad)
         ttk.Button(tools_row_d, text="🐉 龙虎榜",
-                   command=self.show_top_list_dialog, width=14).pack(**_tools_pad)
+                   command=self.show_top_list_dialog).pack(**_tools_pad)
         # 宏观/全球类 (从 toolbar_row1 迁入)
         tools_row_e = ttk.Frame(tools_frame); tools_row_e.pack(fill=tk.X, pady=2)
         ttk.Button(tools_row_e, text="🏛️ 美联储",
-                   command=self._show_fed_analysis_dialog, width=14).pack(**_tools_pad)
+                   command=self._show_fed_analysis_dialog).pack(**_tools_pad)
         ttk.Button(tools_row_e, text="🌏 纳指套利",
-                   command=self._show_etf_holiday_dialog, width=14).pack(**_tools_pad)
+                   command=self._show_etf_holiday_dialog).pack(**_tools_pad)
         # 从 Row4 迁移: 回测/数据库/一键思考 (低频功能)
         tools_row_g = ttk.Frame(tools_frame); tools_row_g.pack(fill=tk.X, pady=2)
         ttk.Button(tools_row_g, text="📊 回测",
-                   command=self.show_backtest_dialog, width=14).pack(**_tools_pad)
+                   command=self.show_backtest_dialog).pack(**_tools_pad)
         ttk.Button(tools_row_g, text="🗄️ 数据库",
-                   command=self.show_unified_db_display, width=14).pack(**_tools_pad)
+                   command=self.show_unified_db_display).pack(**_tools_pad)
         ttk.Button(tools_row_g, text="🧠 一键思考",
-                   command=self.show_one_click_thinking, width=14).pack(**_tools_pad)
+                   command=self.show_one_click_thinking).pack(**_tools_pad)
         # 五星跟随 (低频, 主工具栏没放)
         tools_row_h = ttk.Frame(tools_frame); tools_row_h.pack(fill=tk.X, pady=2)
         ttk.Button(tools_row_h, text="⭐ 五星跟随",
-                   command=self.show_five_star_follow_dialog, width=14).pack(**_tools_pad)
+                   command=self.show_five_star_follow_dialog).pack(**_tools_pad)
         # 多站设置 + 新闻数据 (管理类, 主工具栏没放)
         tools_row_i = ttk.Frame(tools_frame); tools_row_i.pack(fill=tk.X, pady=2)
         ttk.Button(tools_row_i, text="🌐 多站设置",
-                   command=self._open_web_settings, width=14).pack(**_tools_pad)
+                   command=self._open_web_settings).pack(**_tools_pad)
         ttk.Button(tools_row_i, text="📰 新闻数据",
-                   command=self.show_news_data_dialog, width=14).pack(**_tools_pad)
+                   command=self.show_news_data_dialog).pack(**_tools_pad)
         ttk.Button(tools_row_i, text="🔧 基础信息",
-                   command=self._show_base_info_dialog, width=14).pack(**_tools_pad)
+                   command=self._show_base_info_dialog).pack(**_tools_pad)
         # 将咨询分析、投资、系统、赌博、交易体系、交割单分析按钮移到交易标签页
         trading_buttons_frame = ttk.LabelFrame(trading_tab, text="交易功能", padding=3)
         trading_buttons_frame.pack(fill=tk.X, expand=False, pady=2)
-        _tf_pad = {"side": tk.LEFT, "padx": 1, "pady": 1, "fill": tk.X, "expand": True}
-        _tf_w = 11
+        _tf_pad = {"side": tk.LEFT, "padx": 1, "pady": 1}
         # 买入信号标签:当日有买入信号时显示"本买"红色字
         self.buy_signal_label = ttk.Label(trading_buttons_frame, text="", font=("TkDefaultFont", 12, "bold"), foreground="red")
         self.buy_signal_label.pack(fill=tk.X, pady=(0, 1))
         trade_row_a = ttk.Frame(trading_buttons_frame)
         trade_row_a.pack(fill=tk.X, pady=1)
-        ttk.Button(trade_row_a, text="📊 持仓实时", command=self.show_holding_realtime_stats, width=_tf_w).pack(**_tf_pad)
-        ttk.Button(trade_row_a, text="📋 粘贴实时", command=self.show_paste_realtime_stats, width=_tf_w).pack(**_tf_pad)
-        ttk.Button(trade_row_a, text="🛗 坐电梯", command=self.show_elevator_dialog, width=_tf_w).pack(**_tf_pad)
+        ttk.Button(trade_row_a, text="📊 持仓实时", command=self.show_holding_realtime_stats).pack(**_tf_pad)
+        ttk.Button(trade_row_a, text="📋 粘贴实时", command=self.show_paste_realtime_stats).pack(**_tf_pad)
+        ttk.Button(trade_row_a, text="🛗 坐电梯", command=self.show_elevator_dialog).pack(**_tf_pad)
         trade_row_b = ttk.Frame(trading_buttons_frame)
         trade_row_b.pack(fill=tk.X, pady=1)
-        ttk.Button(trade_row_b, text="💼 咨询分析", command=self.show_consultation_analysis, width=_tf_w).pack(**_tf_pad)
-        ttk.Button(trade_row_b, text="💰 投资", command=self.show_investment_analysis, width=_tf_w).pack(**_tf_pad)
-        ttk.Button(trade_row_b, text="📊 系统", command=self.show_investment_system, width=_tf_w).pack(**_tf_pad)
+        ttk.Button(trade_row_b, text="💼 咨询分析", command=self.show_consultation_analysis).pack(**_tf_pad)
+        ttk.Button(trade_row_b, text="💰 投资", command=self.show_investment_analysis).pack(**_tf_pad)
+        ttk.Button(trade_row_b, text="📊 系统", command=self.show_investment_system).pack(**_tf_pad)
         trade_row_c = ttk.Frame(trading_buttons_frame)
         trade_row_c.pack(fill=tk.X, pady=1)
-        ttk.Button(trade_row_c, text="🎲 赌博", command=self.show_gambling_analysis, width=_tf_w).pack(**_tf_pad)
-        ttk.Button(trade_row_c, text="📋 图文分析", command=self.show_delivery_analysis, width=_tf_w).pack(**_tf_pad)
-        ttk.Button(trade_row_c, text="📈 交易体系", command=self.show_trading_system, width=_tf_w).pack(**_tf_pad)
-        ttk.Button(trade_row_c, text="📑 基本面", command=self.show_fundamental_analysis, width=_tf_w).pack(**_tf_pad)
+        ttk.Button(trade_row_c, text="🎲 赌博", command=self.show_gambling_analysis).pack(**_tf_pad)
+        ttk.Button(trade_row_c, text="📋 图文分析", command=self.show_delivery_analysis).pack(**_tf_pad)
+        ttk.Button(trade_row_c, text="📈 交易体系", command=self.show_trading_system).pack(**_tf_pad)
+        ttk.Button(trade_row_c, text="📑 基本面", command=self.show_fundamental_analysis).pack(**_tf_pad)
         # 第四行:预警开关(拆两行,避免左侧被挤出可视区)
         alert_switch_row1 = ttk.Frame(trading_buttons_frame)
         alert_switch_row1.pack(fill=tk.X, pady=(3, 1))
@@ -5285,7 +5284,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         sector_index_frame = ttk.Frame(alert_switch_row2)
         sector_index_frame.pack(side=tk.LEFT, padx=4)
         ttk.Label(sector_index_frame, text="板块指数:", font=("TkDefaultFont", 10)).pack(side=tk.LEFT, padx=(0, 3))
-        self.sector_index_combo = ttk.Combobox(sector_index_frame, width=14, state="readonly")
+        self.sector_index_combo = ttk.Combobox(sector_index_frame, state="readonly")
         self.sector_index_combo.pack(side=tk.LEFT, padx=(0, 3))
         self._load_sector_index_list()  # 加载板块指数列表
         self.sector_index_combo['values'] = self.sector_index_list

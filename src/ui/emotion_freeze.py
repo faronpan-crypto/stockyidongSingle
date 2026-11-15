@@ -373,6 +373,205 @@ def _scan_universe(df_spot=None, watchlist_pool=None):
 
 
 # ═══════════════════════════════════════════════════════════
+#  📅 历史回溯数据层 (纯函数, 不依赖 UI)
+# ═══════════════════════════════════════════════════════════
+
+def _fetch_market_breadth_hist(target_date_str):
+    """📅 历史回溯: 自选池日线还原某天涨跌家数 (迷你样本)
+
+    遍历自选股池 ~200 只, 拉日线取 target_date 那天的涨跌幅,
+    统计涨跌停/涨跌家数作为迷你样本大盘冰点判定。
+    迷你样本阈值放宽 (原全市场阈值需 ~5000 只)。
+
+    Args:
+      target_date_str : "YYYY-MM-DD"
+
+    Returns:
+      同 _fetch_market_breadth 的 dict 格式
+    """
+    result = dict(limit_down=0, limit_up=0, down_count=0, up_count=0,
+                  flat_count=0, ratio=None, total=0, freeze_flag=False,
+                  source=f"历史回溯@{target_date_str}", raw_df=None)
+    try:
+        import pandas as pd
+        from datetime import timedelta
+        import akshare as ak
+
+        from ui.tab_jianlou import _load_watchlist
+        pool = _load_watchlist()
+        if not pool:
+            return result
+
+        target = pd.Timestamp(target_date_str)
+        start = (target - timedelta(days=120)).strftime("%Y%m%d")
+        end   = target.strftime("%Y%m%d")
+
+        limit_down = limit_up = down_count = up_count = flat_count = 0
+        scanned = 0
+
+        for c6, sina, tag in pool[:200]:
+            try:
+                code6 = str(c6).zfill(6)
+                df = ak.stock_zh_a_hist(symbol=code6, period="daily",
+                                        start_date=start, end_date=end, adjust="qfq")
+                if df is None or len(df) < 2:
+                    continue
+                df = df.copy()
+                df["_d"] = pd.to_datetime(df.iloc[:, 0], errors="coerce")
+                df = df.dropna(subset=["_d"])
+                df = df[df["_d"] <= target]
+                if len(df) == 0:
+                    continue
+                last = df.iloc[-1]
+                pct_col = next((c for c in df.columns if "涨跌幅" in c), None)
+                if pct_col is None:
+                    continue
+                pct = float(last[pct_col])
+                scanned += 1
+                if pct <= E3_LIMIT_DOWN_PCT: limit_down += 1
+                if pct >= 9.5: limit_up += 1
+                if pct < 0: down_count += 1
+                elif pct > 0: up_count += 1
+                else: flat_count += 1
+            except Exception:
+                continue
+
+        if scanned == 0:
+            return result
+
+        result["limit_down"] = limit_down
+        result["limit_up"]   = limit_up
+        result["down_count"] = down_count
+        result["up_count"]   = up_count
+        result["flat_count"] = flat_count
+        result["total"]      = scanned
+        result["source"]     = f"历史@{target_date_str} (自选池{scanned}只)"
+        ratio = round(limit_up / max(limit_down, 1), 2) if limit_down else None
+        result["ratio"] = ratio
+
+        # 迷你样本阈值放宽
+        flags = [
+            limit_down >= 3,
+            limit_up / max(limit_down, 1) <= 2.0 if limit_down else False,
+            down_count >= int(scanned * 0.6),
+        ]
+        result["freeze_flag"] = sum(flags) >= 2
+        print(f"[🧊hist✅] {target_date_str}: 跌停{limit_down} 涨停{limit_up} "
+              f"跌{down_count}/{scanned} freeze={result['freeze_flag']}")
+    except Exception as e:
+        print(f"[🧊hist❌] {e}")
+        import traceback; traceback.print_exc()
+
+    return result
+
+
+def _fetch_margin_trend_hist(target_date_str, days=10):
+    """📅 历史回溯: 两融余额截至 target_date 的连续下降天数"""
+    result = dict(consecutive_down=0, trend="unknown", recent_values=[],
+                  freeze_flag=False, source="empty")
+    try:
+        import pandas as pd
+        import akshare as ak
+        from datetime import timedelta
+
+        target = pd.Timestamp(target_date_str)
+        df_sh = ak.macro_china_market_margin_sh()
+        df_sz = ak.macro_china_market_margin_sz()
+        if df_sh is None or df_sz is None:
+            return result
+
+        def _pick_col(df):
+            for pref in ["融资融券余额", "融资余额"]:
+                if pref in df.columns:
+                    return pref
+            return None
+
+        col_sh = _pick_col(df_sh); col_sz = _pick_col(df_sz)
+        if not col_sh or not col_sz:
+            return result
+
+        def _to_ts(df):
+            date_col = df.columns[0]
+            df = df.copy()
+            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df = df.dropna(subset=[date_col])
+            df = df[df[date_col] <= target]
+            df = df.sort_values(date_col)
+            return df, date_col
+
+        df_sh, _ = _to_ts(df_sh)
+        df_sz, _ = _to_ts(df_sz)
+        if len(df_sh) < 2 or len(df_sz) < 2:
+            return result
+
+        sh_vals = pd.to_numeric(df_sh[col_sh], errors="coerce").dropna().astype(float).tolist()[-days:]
+        sz_vals = pd.to_numeric(df_sz[col_sz], errors="coerce").dropna().astype(float).tolist()[-days:]
+        n = min(len(sh_vals), len(sz_vals))
+        if n < 2:
+            return result
+        total = [sh_vals[-n:][i] + sz_vals[-n:][i] for i in range(n)]
+
+        consecutive = 0
+        for i in range(n - 1, 0, -1):
+            if total[i] < total[i - 1]:
+                consecutive += 1
+            else:
+                break
+
+        result["consecutive_down"] = consecutive
+        result["recent_values"] = [round(v / 1e8, 2) for v in total]
+        result["trend"] = "down" if consecutive >= 3 else (
+            "up" if consecutive == 0 and total[-1] > total[-2] else "flat")
+        result["freeze_flag"] = consecutive >= E2_MARGIN_CONSECUTIVE_DAYS
+        result["source"] = f"沪深两融截至{target_date_str}"
+        print(f"[🧊margin_hist✅] 截至{target_date_str}: {consecutive}天连降")
+    except Exception as e:
+        print(f"[🧊margin_hist❌] {e}")
+
+    return result
+
+
+def _inject_hist_pct(universe, target_dt):
+    """历史模式: 给 universe 注入 target_dt 当天真实涨跌幅 (就地修改)"""
+    try:
+        import pandas as pd
+        import akshare as ak
+        from datetime import timedelta
+        target = pd.Timestamp(target_dt)
+        start = (target - timedelta(days=120)).strftime("%Y%m%d")
+        end = target.strftime("%Y%m%d")
+        if not hasattr(universe, 'iterrows') or len(universe) == 0:
+            return
+        code_col = next((c for c in universe.columns if '代码' in c), None)
+        if code_col is None:
+            return
+        for idx, row in universe.iterrows():
+            code6 = str(row[code_col]).zfill(6)
+            try:
+                df = ak.stock_zh_a_hist(symbol=code6, period="daily",
+                                        start_date=start, end_date=end, adjust="qfq")
+                if df is None or len(df) < 2:
+                    continue
+                df = df.copy()
+                df["_d"] = pd.to_datetime(df.iloc[:, 0], errors="coerce")
+                df = df.dropna(subset=["_d"])
+                df = df[df["_d"] <= target]
+                if len(df) == 0:
+                    continue
+                last = df.iloc[-1]
+                pct_col = next((c for c in df.columns if "涨跌幅" in c), None)
+                if pct_col:
+                    universe.at[idx, "涨跌幅"] = float(last[pct_col])
+                close_col = next((c for c in df.columns if "收盘" in c), None)
+                if close_col:
+                    universe.at[idx, "最新价"] = float(last[close_col])
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"[🧊inject_hist_pct❌] {e}")
+
+
+# ═══════════════════════════════════════════════════════════
 #  UI 主体
 # ═══════════════════════════════════════════════════════════
 
@@ -420,6 +619,30 @@ def show_emotion_freeze(root=None, app=None, parent_frame=None):
                               bg=_BG_PANEL, fg=_FG_PURPLE, activebackground=_BG_CARD,
                               font=("TkDefaultFont", 11), relief=tk.FLAT, padx=8, pady=3)
     ai_prompt_btn.pack(side=tk.LEFT, padx=4)
+
+    # ── 📅 历史回溯日期选择 (Step1b: 纯 UI 控件, 不动下面结构) ──
+    tk.Label(top, text="  📅", bg=_BG_TOOLBAR, fg=_FG_DIM,
+             font=("TkDefaultFont", 12)).pack(side=tk.LEFT, padx=(10, 1))
+    date_var = tk.StringVar(value="")  # 空 = 实时模式
+    date_entry = tk.Entry(top, textvariable=date_var, width=11,
+                          font=("TkDefaultFont", 11), justify="center",
+                          bg=_BG_PANEL, fg=_FG_GOLD, insertbackground=_FG_GOLD,
+                          relief=tk.FLAT, bd=1)
+    date_entry.pack(side=tk.LEFT, padx=1)
+
+    def _quick_date(offset):
+        from datetime import datetime, timedelta
+        d = datetime.now() + timedelta(days=offset)
+        while d.weekday() >= 5:
+            d += timedelta(days=-1 if offset <= 0 else 1)
+        date_var.set(d.strftime("%Y-%m-%d"))
+
+    tk.Button(top, text="📅今天", command=lambda: _quick_date(0),
+              bg=_BG_PANEL, fg=_FG_CYAN, font=("TkDefaultFont", 10),
+              relief=tk.FLAT, padx=5, pady=2, cursor="hand2").pack(side=tk.LEFT, padx=1)
+    tk.Button(top, text="✖清除", command=lambda: (date_var.set(""), _run_scan()),
+              bg=_BG_PANEL, fg=_FG_DIM, font=("TkDefaultFont", 10),
+              relief=tk.FLAT, padx=5, pady=2, cursor="hand2").pack(side=tk.LEFT, padx=1)
 
     # ── 情绪温度计仪表盘 (顶栏下方) ──
     gauge = tk.Frame(dlg, bg=_BG_PANEL, height=64); gauge.pack(fill=tk.X)
@@ -503,36 +726,50 @@ def show_emotion_freeze(root=None, app=None, parent_frame=None):
     # ── 扫描核心逻辑 ──
     def _run_scan():
         scan_btn.config(state=tk.DISABLED, text="⏳ 扫描中...")
-        status.config(text="⏳ E1 大盘情绪冰点判定...", fg=_FG_DIM)
+        # 读取日期模式 — Step1c: 实时/历史两条路径
+        target_dt = date_var.get().strip()
+        is_hist = bool(target_dt)
+        mode_tag = f"📅历史@{target_dt}" if is_hist else "⚡实时"
+        status.config(text=f"⏳ [{mode_tag}] E1 大盘情绪冰点判定...", fg=_FG_DIM)
 
         def _bg():
             try:
-                # 1. E1: 大盘情绪
-                breadth = _fetch_market_breadth()
-                dlg.after(0, lambda: _update_gauge_e1(breadth))
+                # 1. E1: 大盘情绪 (实时 or 历史)
+                if is_hist:
+                    breadth = _fetch_market_breadth_hist(target_dt)
+                else:
+                    breadth = _fetch_market_breadth()
+                dlg.after(0, lambda b=breadth: _update_gauge_e1(b))
 
-                status.config(text="⏳ E2 两融余额趋势...")
-                margin = _fetch_margin_trend()
-                dlg.after(0, lambda: _update_gauge_e2(margin))
+                status.config(text=f"⏳ [{mode_tag}] E2 两融余额趋势...")
+                if is_hist:
+                    margin = _fetch_margin_trend_hist(target_dt)
+                else:
+                    margin = _fetch_margin_trend()
+                dlg.after(0, lambda m=margin: _update_gauge_e2(m))
 
                 # 2. U: 选股池
-                status.config(text="⏳ U1-U6 选股池过滤...")
+                status.config(text=f"⏳ [{mode_tag}] U1-U6 选股池过滤...")
                 from ui.tab_jianlou import _load_watchlist
                 watchlist = _load_watchlist()
                 universe, u_filters = _scan_universe(
-                    df_spot=breadth.get("raw_df"),
+                    df_spot=None if is_hist else breadth.get("raw_df"),
                     watchlist_pool=watchlist
                 )
-                dlg.after(0, lambda: _populate_candidates(universe, u_filters))
+                # 历史模式: 给自选池注入 target_dt 真实涨跌幅
+                if is_hist and len(universe) > 0:
+                    _inject_hist_pct(universe, target_dt)
+                dlg.after(0, lambda u=universe, f=u_filters: _populate_candidates(u, f))
 
                 # 3. E3: 个股恐慌 (跌停/深跌)
-                status.config(text="⏳ E3 个股恐慌判定...")
+                status.config(text=f"⏳ [{mode_tag}] E3 个股恐慌判定...")
                 freeze_list, risk_signals = _check_entry_exit(universe, breadth, margin)
-                dlg.after(0, lambda: _populate_freeze(freeze_list))
-                dlg.after(0, lambda: _populate_risk(risk_signals))
+                dlg.after(0, lambda fl=freeze_list: _populate_freeze(fl))
+                dlg.after(0, lambda rs=risk_signals: _populate_risk(rs))
 
+                tag = f"[{mode_tag}] "
                 dlg.after(0, lambda: status.config(
-                    text=f"✅ 扫描完成 | 冰点触发 {len(freeze_list)}只 | 候选 {len(universe)}只",
+                    text=f"✅ {tag}扫描完成 | 冰点触发 {len(freeze_list)}只 | 候选 {len(universe)}只",
                     fg=_FG_GOLD))
             except Exception as e:
                 traceback.print_exc()

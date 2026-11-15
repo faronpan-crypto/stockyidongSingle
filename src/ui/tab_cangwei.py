@@ -6605,23 +6605,36 @@ class CangweiMixin:
                 df = _try_sina()
             return df
         def _parse_code(raw):
-            """解析输入 → (code, name)"""
+            """解析输入 → (code, name) — 安全 import + fallback"""
             raw = raw.strip()
             if not raw:
                 return None, None
-            # 全局字典:STOCK_CODES_DICT[code] = name, STOCK_NAME_TO_CODE[name] = code
+            # 安全获取全局字典 (可能未被初始化)
+            _cd = {}; _nc = {}
+            try:
+                from screen_stocks_by_tech import STOCK_CODES_DICT as _scd, load_stock_names as _lsn
+                if _scd is None:
+                    try: _lsn()
+                    except Exception: pass
+                    from screen_stocks_by_tech import STOCK_CODES_DICT as _scd2
+                    if _scd2 and isinstance(_scd2, dict): _scd = _scd2
+                if _scd and isinstance(_scd, dict):
+                    _cd = _scd
+                    _nc = {v: k for k, v in _cd.items()}
+            except Exception:
+                pass
             # 先尝试:6位数字 → 当代码查字典
             if raw.isdigit() and len(raw) == 6:
-                return raw, STOCK_CODES_DICT.get(raw, raw)
+                return raw, _cd.get(raw, raw)
             # 输入是股票名称 → 反查代码
-            if raw in STOCK_NAME_TO_CODE:
-                return STOCK_NAME_TO_CODE[raw], raw
+            if raw in _nc:
+                return _nc[raw], raw
             # 输入是代码但可能带前缀/后缀 → 提取6位数字
             import re as _re
             m = _re.search(r"(\d{6})", raw)
             if m:
                 code6 = m.group(1)
-                return code6, STOCK_CODES_DICT.get(code6, code6)
+                return code6, _cd.get(code6, code6)
             return None, None
         def _draw_chart(df, stock_name, cost=None):
             """画四图K线"""
