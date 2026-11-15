@@ -1804,6 +1804,71 @@ class MartinMixin:
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self._mk_canvas = canvas
 
+        # ── 鼠标 hover tooltip (固定屏幕右上) ──
+        hover_ttl = [None]   # 用 list 存状态, 避免 nonlocal 复杂嵌套
+        hover_ttl_lbl = [None]
+
+        def _mk_hover_motion(event):
+            try:
+                if event.inaxes is None or event.xdata is None:
+                    if hover_ttl[0]: hover_ttl[0].destroy(); hover_ttl[0] = None
+                    return
+                idx = int(round(event.xdata))
+                if idx < 0 or idx >= n:
+                    if hover_ttl[0]: hover_ttl[0].destroy(); hover_ttl[0] = None
+                    return
+                date_str = str(d["h"]["date"].iloc[idx])
+                o, c, h, l = opens[idx], closes[idx], highs[idx], lows[idx]
+                pct = (c / closes[idx - 1] - 1) * 100 if idx >= 1 and closes[idx - 1] else 0
+                amp = (h - l) / o * 100 if o else 0
+                vol_y = vols[idx] * c / 1e8
+
+                lines = [
+                    f"📅 {date_str}",
+                    f"开 {o:.2f}  收 {c:.2f}",
+                    f"高 {h:.2f}  低 {l:.2f}",
+                    f"涨跌 {pct:+.2f}%  振幅 {amp:.1f}%",
+                    f"成交额 {vol_y:.1f}亿",
+                ]
+                parts = []
+                if not np.isnan(d["ema9"][idx]): parts.append(f"E9={d['ema9'][idx]:.2f}")
+                if not np.isnan(d["ema21"][idx]): parts.append(f"E21={d['ema21'][idx]:.2f}")
+                if not np.isnan(d["ema50"][idx]): parts.append(f"E50={d['ema50'][idx]:.2f}")
+                if parts: lines.append("  ".join(parts))
+                if not np.isnan(d["avwap"][idx]):
+                    lines.append(f"AVWAP={d['avwap'][idx]:.2f}")
+                text = "\n".join(lines)
+
+                if hover_ttl[0] is None:
+                    hover_ttl[0] = tk.Toplevel(canvas.get_tk_widget())
+                    hover_ttl[0].overrideredirect(True)
+                    hover_ttl[0].attributes("-topmost", True)
+                    hover_ttl[0].configure(bg="#FFD54F", padx=1, pady=1)
+                    bg = tk.Frame(hover_ttl[0], bg="#1a1a3e")
+                    bg.pack(fill=tk.BOTH, expand=True)
+                    hover_ttl_lbl[0] = tk.Label(bg, text="", font=("Menlo", 11),
+                                                bg="#1a1a3e", fg="#ECEFF1", justify=tk.LEFT,
+                                                anchor="w", padx=10, pady=6)
+                    hover_ttl_lbl[0].pack(fill=tk.BOTH, expand=True)
+
+                hover_ttl_lbl[0].configure(text=text)
+                hover_ttl[0].lift()
+                hover_ttl[0].update_idletasks()
+                tw = hover_ttl[0].winfo_reqwidth()
+                sw = hover_ttl[0].winfo_screenwidth()
+                hover_ttl[0].geometry(f"+{max(0, sw - tw - 10)}+10")
+            except Exception:
+                if hover_ttl[0]: hover_ttl[0].destroy(); hover_ttl[0] = None
+
+        def _mk_hover_leave(event):
+            if hover_ttl[0]: hover_ttl[0].destroy(); hover_ttl[0] = None
+
+        try:
+            canvas.mpl_connect("motion_notify_event", _mk_hover_motion)
+            canvas.mpl_connect("axes_leave_event", _mk_hover_leave)
+        except Exception:
+            pass
+
         # 重绘分析面板
         if analysis_host is not None:
             for w in analysis_host.winfo_children():
