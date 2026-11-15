@@ -1226,11 +1226,17 @@ class MartinMixin:
         # Tab6/7/8: 持仓自选 / 涨停热门 / 经典票
         def _on_select_tab6(_e=None):
             sel = tv6.selection()
-            if not sel: return
+            if not sel:
+                print(f"[🎯Martin] Tab6: selection empty", flush=True)
+                return
             idx = tv6.index(sel[0])
+            print(f"[🎯Martin] Tab6: idx={idx}, tv6_data_len={len(tv6_data)}", flush=True)
             if idx < len(tv6_data):
                 c6, nm = tv6_data[idx]
+                print(f"[🎯Martin] Tab6 点击: code={c6} name={nm}", flush=True)
                 self._show_martin_kline(c6, nm, *_build_args())
+            else:
+                print(f"[🎯Martin] Tab6: idx {idx} out of range", flush=True)
 
         def _on_select_tab7(_e=None):
             sel = tv7.selection()
@@ -2059,6 +2065,7 @@ class MartinMixin:
 
         try:
             h = self._ak_hist_with_retry(code, max_retries=2)
+            print(f"[🎯Martin] _ak_hist_with_retry({code}) 返回: {'None' if h is None else f'{len(h)}行'}", flush=True)
             if h is None or len(h) < 60:
                 tk.Label(kline_host, text="❌ 拉取失败 (东方财富/腾讯都连不上)", font=("", 11),
                          bg="#0f0f23", fg="#EF5350").pack(pady=60)
