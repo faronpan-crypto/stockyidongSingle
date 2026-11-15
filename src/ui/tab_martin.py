@@ -768,6 +768,10 @@ class MartinMixin:
         right = tk.Frame(pw, bg="#0f0f23")
         pw.add(right)
 
+        # 工具栏 (独立在 kline_host 上方, 永不被挤)
+        self._mk_toolbar = tk.Frame(right, bg="#0f0f23")
+        self._mk_toolbar.pack(fill=tk.X, pady=(2, 2))
+
         kline_host = tk.Frame(right, bg="#0f0f23")
         kline_host.pack(fill=tk.BOTH, expand=True)
 
@@ -1413,6 +1417,13 @@ class MartinMixin:
             return
 
         try:
+            # 清空 kline_host (保留工具栏在外面)
+            for w in kline_host.winfo_children():
+                w.destroy()
+            # 刷新工具栏
+            for w in self._mk_toolbar.winfo_children():
+                w.destroy()
+
             h = self._ak_hist_with_retry(code, max_retries=2)
             if h is None or len(h) < 60:
                 tk.Label(kline_host, text="❌ 拉取失败", font=("", 11),
@@ -1474,15 +1485,13 @@ class MartinMixin:
                     "OBV": False,
                 }
 
-            # ── 工具栏 ──
-            tb = tk.Frame(kline_host, bg="#0f0f23")
-            tb.pack(fill=tk.X, pady=(0, 4))
-            self._mk_toolbar = tb
+            # ── 工具栏 (直接用顶部那个, 永远可见) ──
+            tb = self._mk_toolbar
             tk.Label(tb, text="📊 K线指标:", font=("", 10, "bold"),
                      bg="#0f0f23", fg="#FFD54F").pack(side=tk.LEFT, padx=(6, 4))
             tk.Button(tb, text="⚙️ 指标设置", font=("", 9),
                       bg="#455A64", fg="white", relief=tk.FLAT, padx=10,
-                      command=lambda: self._mk_indicator_dialog(kline_host)).pack(side=tk.LEFT, padx=4)
+                      command=lambda: self._mk_indicator_dialog(tb)).pack(side=tk.LEFT, padx=4)
             # 当前勾选状态速览
             active = [k for k, v in self._mk_indicators.items() if v]
             tk.Label(tb, text=f"✅ 已开: {', '.join(active) if active else '(无)'}",
@@ -1649,11 +1658,8 @@ class MartinMixin:
         if analysis_host is None:
             analysis_host = self._mk_analysis_host
 
-        # 只销毁 matplotlib canvas, 保留工具栏 (用引用判断)
-        tb = getattr(self, "_mk_toolbar", None)
+        # 只销毁 kline_host 内部 (canvas), 工具栏在外面独立不碰
         for w in list(kline_host.winfo_children()):
-            if tb is not None and w == tb:
-                continue
             try:
                 w.destroy()
             except Exception:
