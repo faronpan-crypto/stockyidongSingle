@@ -795,24 +795,26 @@ class MartinMixin:
         except Exception as e2:
             print(f"[🎯Martin] hist 腾讯也失败 {code}: {str(e2)[:30]}", flush=True)
 
-        # 最后兜底: 新浪 (stock_zh_a_hist_sina 或 stock_zh_a_daily)
+        # 最后兜底: 新浪 (stock_zh_a_daily) / 网易 (stock_zh_a_hist_163)
         try:
-            # 新浪接口 (备选 stock_zh_a_hist_163 网易)
             h3 = None
-            for api_name, api_kwargs in [
+            for api_name, api_kwargs, has_timeout in [
+                # stock_zh_a_daily 没有 timeout 参数!
                 ("stock_zh_a_daily", {"symbol": f"sh{code}" if code.startswith(("6", "9")) else f"sz{code}",
-                                       "adjust": "qfq"}),
-                ("stock_zh_a_hist_sina", {"symbol": code, "period": "daily", "adjust": "qfq"}),
-                ("stock_zh_a_hist_163", {"symbol": code, "start_date": "", "end_date": "", "adjust": "qfq"}),
+                                       "adjust": "qfq"}, False),
+                ("stock_zh_a_hist_163", {"symbol": code, "adjust": "qfq",
+                                          "start_date": "20200101", "end_date": ""}, True),
             ]:
                 try:
                     fn = getattr(ak, api_name, None)
                     if fn is None:
                         continue
-                    h3 = fn(timeout=timeout, **{k: v for k, v in api_kwargs.items() if k != "timeout"})
+                    if has_timeout:
+                        h3 = fn(timeout=timeout, **api_kwargs)
+                    else:
+                        h3 = fn(**api_kwargs)  # 不支持 timeout
                     if h3 is not None and len(h3) >= 30:
                         print(f"[🎯Martin] hist 兜底 {api_name} 成功 {code} ({len(h3)}行)", flush=True)
-                        # 统一列名
                         rename_map = {}
                         for c in h3.columns:
                             cl = str(c).lower()
@@ -824,9 +826,10 @@ class MartinMixin:
                             elif "volume" in cl or "成交量" in str(c): rename_map[c] = "volume"
                         return h3.rename(columns=rename_map)
                 except Exception as _e3:
+                    print(f"[🎯Martin] hist {api_name} 失败 {code}: {str(_e3)[:50]}", flush=True)
                     continue
         except Exception as _e3b:
-            print(f"[🎯Martin] hist 新浪/网易兜底也失败 {code}", flush=True)
+            print(f"[🎯Martin] hist 新浪/网易兜底也失败 {code}: {str(_e3b)[:50]}", flush=True)
 
         return None
 
