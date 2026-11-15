@@ -1066,6 +1066,54 @@ class MartinMixin:
         tv5_frame.grid_columnconfigure(0, weight=1)
         tv5_data = []  # 同 tv4_data
 
+        # ── Tab 6: 👤 持仓自选 (快速选股) ──
+        tab6 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab6, text="👤 持仓自选")
+        tv6_frame = tk.Frame(tab6, bg="#1a1a3e")
+        tv6_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        cols6 = ("代码", "名称", "池来源")
+        tv6 = ttk.Treeview(tv6_frame, columns=cols6, show="headings", height=28)
+        for c, w in [("代码", 90), ("名称", 140), ("池来源", 100)]:
+            tv6.heading(c, text=c); tv6.column(c, width=w, anchor=tk.CENTER, stretch=False)
+        vsb6 = ttk.Scrollbar(tv6_frame, orient=tk.VERTICAL, command=tv6.yview)
+        tv6.configure(yscrollcommand=vsb6.set)
+        tv6.grid(row=0, column=0, sticky="nsew")
+        vsb6.grid(row=0, column=1, sticky="ns")
+        tv6_frame.grid_rowconfigure(0, weight=1)
+        tv6_frame.grid_columnconfigure(0, weight=1)
+        tv6_data = []
+
+        # ── Tab 7: 🔥 涨停热门 ──
+        tab7 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab7, text="🔥 涨停热门")
+        tv7_frame = tk.Frame(tab7, bg="#1a1a3e")
+        tv7_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        cols7 = ("代码", "名称", "池来源")
+        tv7 = ttk.Treeview(tv7_frame, columns=cols7, show="headings", height=28)
+        for c, w in [("代码", 90), ("名称", 140), ("池来源", 100)]:
+            tv7.heading(c, text=c); tv7.column(c, width=w, anchor=tk.CENTER, stretch=False)
+        vsb7 = ttk.Scrollbar(tv7_frame, orient=tk.VERTICAL, command=tv7.yview)
+        tv7.configure(yscrollcommand=vsb7.set)
+        tv7.grid(row=0, column=0, sticky="nsew")
+        vsb7.grid(row=0, column=1, sticky="ns")
+        tv7_frame.grid_rowconfigure(0, weight=1)
+        tv7_frame.grid_columnconfigure(0, weight=1)
+        tv7_data = []
+
+        # ── Tab 8: ⭐ 经典演示票 ──
+        tab8 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab8, text="⭐ 经典票")
+        tv8_frame = tk.Frame(tab8, bg="#1a1a3e")
+        tv8_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        cols8 = ("代码", "名称", "板块")
+        tv8 = ttk.Treeview(tv8_frame, columns=cols8, show="headings", height=28)
+        for c, w in [("代码", 90), ("名称", 140), ("板块", 100)]:
+            tv8.heading(c, text=c); tv8.column(c, width=w, anchor=tk.CENTER, stretch=False)
+        vsb8 = ttk.Scrollbar(tv8_frame, orient=tk.VERTICAL, command=tv8.yview)
+        tv8.configure(yscrollcommand=vsb8.set)
+        tv8.grid(row=0, column=0, sticky="nsew")
+        vsb8.grid(row=0, column=1, sticky="ns")
+        tv8_frame.grid_rowconfigure(0, weight=1)
+        tv8_frame.grid_columnconfigure(0, weight=1)
+        tv8_data = []
+
         # ═══ 右: K线 + 分析 (可拖宽) ═══
         right = tk.Frame(pw, bg="#0f0f23")
         pw.add(right)
@@ -1134,6 +1182,101 @@ class MartinMixin:
 
         tv4.bind("<<TreeviewSelect>>", _on_select_tab4); tv4.bind("<Double-1>", _on_select_tab4)
         tv5.bind("<<TreeviewSelect>>", _on_select_tab5); tv5.bind("<Double-1>", _on_select_tab5)
+
+        # Tab6/7/8: 持仓自选 / 涨停热门 / 经典票
+        def _on_select_tab6(_e=None):
+            sel = tv6.selection()
+            if not sel: return
+            idx = tv6.index(sel[0])
+            if idx < len(tv6_data):
+                c6, nm = tv6_data[idx]
+                self._show_martin_kline(c6, nm, *_build_args())
+
+        def _on_select_tab7(_e=None):
+            sel = tv7.selection()
+            if not sel: return
+            idx = tv7.index(sel[0])
+            if idx < len(tv7_data):
+                c6, nm = tv7_data[idx]
+                self._show_martin_kline(c6, nm, *_build_args())
+
+        def _on_select_tab8(_e=None):
+            sel = tv8.selection()
+            if not sel: return
+            idx = tv8.index(sel[0])
+            if idx < len(tv8_data):
+                c6, nm = tv8_data[idx]
+                self._show_martin_kline(c6, nm, *_build_args())
+
+        tv6.bind("<<TreeviewSelect>>", _on_select_tab6); tv6.bind("<Double-1>", _on_select_tab6)
+        tv7.bind("<<TreeviewSelect>>", _on_select_tab7); tv7.bind("<Double-1>", _on_select_tab7)
+        tv8.bind("<<TreeviewSelect>>", _on_select_tab8); tv8.bind("<Double-1>", _on_select_tab8)
+
+        # ── Tab8 经典票 (主线程直接填, 永远有) ──
+        _demo_pool = [
+            ("600519", "贵州茅台", "白酒"), ("000858", "五粮液", "白酒"),
+            ("300750", "宁德时代", "新能源"), ("002594", "比亚迪", "新能源"),
+            ("601318", "中国平安", "保险"), ("600036", "招商银行", "银行"),
+            ("000333", "美的集团", "家电"), ("601888", "中国中免", "消费"),
+            ("600900", "长江电力", "公用事业"), ("300059", "东方财富", "券商"),
+            ("002415", "海康威视", "安防"), ("601012", "隆基绿能", "光伏"),
+            ("600276", "恒瑞医药", "医药"), ("000651", "格力电器", "家电"),
+            ("600030", "中信证券", "券商"), ("601899", "紫金矿业", "有色金属"),
+            ("002230", "科大讯飞", "AI"), ("300760", "迈瑞医疗", "医疗器械"),
+            ("000568", "泸州老窖", "白酒"), ("600309", "万华化学", "化工"),
+        ]
+        for c, n, s in _demo_pool:
+            tv8.insert("", "end", values=(c, n, s))
+            tv8_data.append((c, n))
+
+        # ── Tab6 持仓自选 (本地, 秒出, 主线程直接填) ──
+        try:
+            def _fill_pool(tv_w, tv_data_list, pool_name, label_prefix, limit=40):
+                try:
+                    items = self._get_stock_pool(pool_name, kw)
+                    count = 0
+                    for code, name in items[:limit]:
+                        if code:
+                            tv_w.insert("", "end", values=(code, name or code, label_prefix))
+                            tv_data_list.append((code, name or code))
+                            count += 1
+                    return count
+                except Exception:
+                    return 0
+
+            c6_h = _fill_pool(tv6, tv6_data, "持仓股", "持仓")
+            c6_s = _fill_pool(tv6, tv6_data, "自选股", "自选")
+            print(f"[🎯Martin] Tab6 持仓 {c6_h} + 自选 {c6_s}", flush=True)
+        except Exception as _e6:
+            print(f"[🎯Martin] Tab6 填充跳过: {_e6}", flush=True)
+
+        # ── Tab7 涨停热门 (需要网络, 后台线程) ──
+        def _fill_tab7_bg():
+            try:
+                # 涨停池 (有网才拉)
+                try:
+                    items_zt = self._get_stock_pool("涨停池", kw)
+                    for code, name in items_zt[:30]:
+                        kw.after(0, lambda c=code, n=name: (
+                            tv7.insert("", "end", values=(c, n or c, "涨停")),
+                            tv7_data.append((c, n or c))))
+                except Exception:
+                    pass
+
+                # 热门板块 (有网才拉)
+                try:
+                    items_hot = self._get_stock_pool("热门板块", kw)
+                    for code, name in items_hot[:30]:
+                        kw.after(0, lambda c=code, n=name: (
+                            tv7.insert("", "end", values=(c, n or c, "热门板块")),
+                            tv7_data.append((c, n or c))))
+                except Exception:
+                    pass
+
+            except Exception as _e7:
+                print(f"[🎯Martin] Tab7 后台填充异常: {_e7}", flush=True)
+
+        threading.Thread(target=_fill_tab7_bg, daemon=True).start()
 
         # ── 立即填充 Tab4/Tab5 (如果主窗口已经有 stamp_data) ──
         def _fill_stamp_tv(tv_widget, data_list, stamp_data):
