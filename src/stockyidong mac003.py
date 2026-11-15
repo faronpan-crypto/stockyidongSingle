@@ -4940,6 +4940,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             ("全", 3, self.show_market_situation),
             ("📺实时", 7, self._show_combined_realtime_dialog),
             ("👁️见盘", 6, self._show_combined_jianpan_dialog),
+            ("🎯布鲁斯分析", 9, self._show_quant_forecast_dialog),
             ("🌍全球资产", 9, self._show_global_assets_dialog),
             ("📖见文", 6, self._show_market_read),
             ("🤖AI设置", 8, self._show_ai_settings),
