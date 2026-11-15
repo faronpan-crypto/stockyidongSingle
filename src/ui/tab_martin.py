@@ -1400,8 +1400,8 @@ class MartinMixin:
 
     def _show_martin_kline(self, code, name, kline_host, analysis_host,
                            account_value, risk_pct):
-        """显示 Martin 风格 K 线图 + 完整交易计划"""
-        # 清空
+        """显示 Martin 风格 K 线图 + 完整交易计划 + 指标工具栏"""
+        # 清空 (但保留工具栏!)
         for w in kline_host.winfo_children():
             w.destroy()
         for w in analysis_host.winfo_children():
@@ -1413,12 +1413,10 @@ class MartinMixin:
             return
 
         try:
-            # 用带重试+腾讯兜底的版本
             h = self._ak_hist_with_retry(code, max_retries=2)
             if h is None or len(h) < 60:
-                tk.Label(kline_host, text="❌ 拉取失败 (东方财富/腾讯都连不上), 稍后再试", font=("", 11),
+                tk.Label(kline_host, text="❌ 拉取失败", font=("", 11),
                          bg="#0f0f23", fg="#EF5350").pack(pady=60)
-                print(f"[🎯Martin] K线双源都失败 {code}", flush=True)
                 return
 
             col_map = {}
@@ -1445,102 +1443,392 @@ class MartinMixin:
             ema21 = self._ema(closes, 21)
             ema50 = self._ema(closes, 50)
             ema150 = self._ema(closes, 150)
+            sma5 = self._sma(closes, 5)
+            sma10 = self._sma(closes, 10)
+            sma20 = self._sma(closes, 20)
+            sma60 = self._sma(closes, 60)
             adr_arr = self._adr(highs, lows, closes, 20)
-            cur_adr = adr_arr[-1]
 
             anchor = np.argmax(highs[-30:]) + n - 30
             avwap = self._avwap(highs, lows, closes, vols, anchor)
 
-            # 形态
-            pb = self._detect_pullback(ema9, ema21, ema50, closes, avwap, anchor)
-            bk = self._detect_breakout(closes, highs, lows, vols, avwap, ema9)
-            avg_v = np.mean(vols[-20:]) if n >= 20 else vols[-1]
-            gp = self._detect_ep_gap(opens[-1], closes[-2] if n >= 2 else closes[-1],
-                                     vols[-1], avg_v)
-            patterns = [p for p in [pb, bk, gp] if p]
-            best = max(patterns, key=lambda x: x["score"]) if patterns else None
-
-            # ── matplotlib ──
-            import matplotlib
-            matplotlib.use("TkAgg")
-            from matplotlib.figure import Figure
-            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-            import matplotlib.patches as mpatches
-
-            fig = Figure(figsize=(11, 7), facecolor="#0f0f23", dpi=100)
-            ax = fig.add_subplot(211, facecolor="#1a1a3e")
-            ax_vol = fig.add_subplot(212, facecolor="#1a1a3e")
-
-            x = np.arange(n)
-            colors_candle = ["#EF5350" if closes[i] >= opens[i] else "#42A5F5" for i in range(n)]
-
-            # 蜡烛
-            for i in range(n):
-                ax.plot([x[i], x[i]], [lows[i], highs[i]], color=colors_candle[i], linewidth=0.5)
-                body_bot = min(opens[i], closes[i])
-                body_h = max(abs(closes[i] - opens[i]), 0.01)
-                ax.add_patch(mpatches.Rectangle(
-                    (x[i] - 0.3, body_bot), 0.6, body_h,
-                    facecolor=colors_candle[i], edgecolor=colors_candle[i]))
-
-            # EMA
-            ax.plot(x, ema9, color="#FFD54F", lw=1.2, label="EMA9", alpha=0.9)
-            ax.plot(x, ema21, color="#66BB6A", lw=1.2, label="EMA21", alpha=0.9)
-            ax.plot(x, ema50, color="#42A5F5", lw=1.2, label="EMA50", alpha=0.9)
-            v150 = ~np.isnan(ema150)
-            if np.any(v150):
-                ax.plot(x[v150], ema150[v150], color="#AB47BC", lw=1.0, label="EMA150", alpha=0.9)
-
-            # AVWAP
-            vw = ~np.isnan(avwap)
-            if np.any(vw):
-                ax.plot(x[vw], avwap[vw], color="#FF7043", lw=1.5, linestyle="--",
-                        label="AVWAP", alpha=0.9)
-                ax.annotate("AVWAP起点", xy=(anchor, highs[anchor]),
-                           color="#FF7043", fontsize=7, ha="center",
-                           xytext=(0, -15), textcoords="offset points")
-
-            # 标题
-            parts = [f"{code} {name}"]
-            if best:
-                pt = {"pullback": "📉回调", "breakout": "🚀突破", "ep_gap": "⚡EP跳空"}.get(
-                    best["type"], best["type"])
-                parts.append(f"| {pt} 评分 {best['score']}")
-            ax.set_title("  ".join(parts), color="white", fontsize=11, fontweight="bold")
-
-            # 网格/颜色
-            ax.tick_params(colors="#B0BEC5", labelsize=8)
-            for s in ax.spines.values():
-                s.set_color("#37474F")
-            ax.grid(True, color="#37474F", lw=0.3, alpha=0.5)
-            ax.legend(loc="upper left", fontsize=7, facecolor="#1a1a3e",
-                      edgecolor="#37474F", labelcolor="white")
-
-            # 成交额
-            amt_yi = h["amount"].astype(float).values / 1e8 if "amount" in h.columns else vols * closes / 1e8
-            ax_vol.bar(x, amt_yi, color=colors_candle, width=0.6)
-            ax_vol.set_ylabel("成交额(亿)", color="#B0BEC5", fontsize=8)
-            ax_vol.tick_params(colors="#B0BEC5", labelsize=8)
-            for s in ax_vol.spines.values():
-                s.set_color("#37474F")
-            ax_vol.grid(True, color="#37474F", lw=0.3, alpha=0.3)
-
-            fig.tight_layout()
-            canvas = FigureCanvasTkAgg(fig, master=kline_host)
-            canvas.draw()
-            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-            # ── 分析面板 ──
-            self._fill_martin_analysis(
-                analysis_host, code, name, closes, ema9, ema21, ema50, ema150,
-                avwap, cur_adr, best, account_value, risk_pct, highs, lows
+            # 缓存所有数据 (供重绘用)
+            self._mk_data = dict(
+                code=code, name=name, n=n, h=h,
+                opens=opens, closes=closes, highs=highs, lows=lows, vols=vols,
+                ema9=ema9, ema21=ema21, ema50=ema50, ema150=ema150,
+                sma5=sma5, sma10=sma10, sma20=sma20, sma60=sma60,
+                avwap=avwap, anchor=anchor,
+                adr_arr=adr_arr,
             )
+            self._mk_account = account_value
+            self._mk_risk = risk_pct
+            self._mk_analysis_host = analysis_host
+            self._mk_toolbar = None  # 稍后存工具栏 frame
+            # 默认开启的指标
+            if not hasattr(self, "_mk_indicators") or not self._mk_indicators:
+                self._mk_indicators = {
+                    "EMA": True, "AVWAP": True, "成交额": True,
+                    "MA5/10": False, "MA20/60": False, "BOLL": False,
+                    "MACD": False, "KDJ": False, "RSI": False, "ATR": False,
+                    "OBV": False,
+                }
+
+            # ── 工具栏 ──
+            tb = tk.Frame(kline_host, bg="#0f0f23")
+            tb.pack(fill=tk.X, pady=(0, 4))
+            self._mk_toolbar = tb
+            tk.Label(tb, text="📊 K线指标:", font=("", 10, "bold"),
+                     bg="#0f0f23", fg="#FFD54F").pack(side=tk.LEFT, padx=(6, 4))
+            tk.Button(tb, text="⚙️ 指标设置", font=("", 9),
+                      bg="#455A64", fg="white", relief=tk.FLAT, padx=10,
+                      command=lambda: self._mk_indicator_dialog(kline_host)).pack(side=tk.LEFT, padx=4)
+            # 当前勾选状态速览
+            active = [k for k, v in self._mk_indicators.items() if v]
+            tk.Label(tb, text=f"✅ 已开: {', '.join(active) if active else '(无)'}",
+                     font=("", 9), bg="#0f0f23", fg="#81C784").pack(side=tk.LEFT, padx=8)
+
+            # ── 初始绘制 ──
+            self._mk_redraw(kline_host, analysis_host, account_value, risk_pct)
+
+            # 形态分析面板在 redraw 里已经画了
+            return
 
         except Exception as e:
             import traceback
             tk.Label(kline_host, text=f"K线失败: {str(e)[:80]}", font=("", 11),
                      bg="#0f0f23", fg="#EF5350").pack(pady=40)
             print(f"[🎯Martin] K线异常:\n{traceback.format_exc()}", flush=True)
+
+    def _sma(self, arr, period):
+        """简单移动平均"""
+        out = np.full(len(arr), np.nan)
+        for i in range(period - 1, len(arr)):
+            out[i] = np.mean(arr[i - period + 1:i + 1])
+        return out
+
+    def _boll(self, closes, period=20, k=2):
+        """布林带"""
+        mid = self._sma(closes, period)
+        std = np.full(len(closes), np.nan)
+        for i in range(period - 1, len(closes)):
+            std[i] = np.std(closes[i - period + 1:i + 1])
+        return mid, mid + k * std, mid - k * std
+
+    def _macd(self, closes, fast=12, slow=26, signal=9):
+        """MACD"""
+        ema_fast = self._ema(closes, fast)
+        ema_slow = self._ema(closes, slow)
+        dif = ema_fast - ema_slow
+        dea = self._ema(dif, signal)
+        macd_hist = 2 * (dif - dea)
+        return dif, dea, macd_hist
+
+    def _rsi(self, closes, period=14):
+        """RSI"""
+        deltas = np.diff(closes, prepend=closes[0])
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        out = np.full(len(closes), np.nan)
+        for i in range(period, len(closes)):
+            avg_gain = np.mean(gains[i - period + 1:i + 1])
+            avg_loss = np.mean(losses[i - period + 1:i + 1])
+            if avg_loss == 0:
+                out[i] = 100
+            else:
+                out[i] = 100 - 100 / (1 + avg_gain / avg_loss)
+        return out
+
+    def _kdj(self, highs, lows, closes, n=9, m1=3, m2=3):
+        """KDJ"""
+        rsv = np.full(len(closes), np.nan)
+        for i in range(n - 1, len(closes)):
+            hh = np.max(highs[i - n + 1:i + 1])
+            ll = np.min(lows[i - n + 1:i + 1])
+            rsv[i] = (closes[i] - ll) / (hh - ll) * 100 if hh != ll else 50
+        k = np.full(len(closes), 50.0)
+        d = np.full(len(closes), 50.0)
+        j = np.full(len(closes), 50.0)
+        for i in range(1, len(closes)):
+            if not np.isnan(rsv[i]):
+                k[i] = (m1 - 1) / m1 * k[i - 1] + 1 / m1 * rsv[i]
+                d[i] = (m2 - 1) / m2 * d[i - 1] + 1 / m2 * k[i]
+                j[i] = 3 * k[i] - 2 * d[i]
+            else:
+                k[i] = k[i - 1]; d[i] = d[i - 1]; j[i] = j[i - 1]
+        return k, d, j
+
+    def _atr(self, highs, lows, closes, period=14):
+        """ATR"""
+        prev_close = np.roll(closes, 1); prev_close[0] = closes[0]
+        tr = np.maximum(highs - lows,
+                        np.maximum(np.abs(highs - prev_close), np.abs(lows - prev_close)))
+        atr = np.full(len(tr), np.nan)
+        for i in range(period - 1, len(tr)):
+            atr[i] = np.mean(tr[i - period + 1:i + 1])
+        return atr, tr
+
+    def _obv(self, closes, vols):
+        """OBV"""
+        obv = np.zeros(len(closes))
+        for i in range(1, len(closes)):
+            if closes[i] > closes[i - 1]:
+                obv[i] = obv[i - 1] + vols[i]
+            elif closes[i] < closes[i - 1]:
+                obv[i] = obv[i - 1] - vols[i]
+            else:
+                obv[i] = obv[i - 1]
+        return obv
+
+    def _mk_indicator_dialog(self, parent):
+        """指标勾选弹窗"""
+        win = tk.Toplevel(parent)
+        win.title("📊 Martin K线指标设置")
+        win.configure(bg="#1a1a3e")
+        win.geometry("420x560")
+        win.attributes("-topmost", True)
+        win.grab_set()
+
+        tk.Label(win, text="🎯 勾选要显示在 K 线图上的指标", font=("", 13, "bold"),
+                 bg="#1a1a3e", fg="#FFD54F").pack(pady=(14, 10))
+
+        checks = {}
+        groups = [
+            ("— 主图叠加 —", ["EMA", "AVWAP", "MA5/10", "MA20/60", "BOLL"], "#FFD54F"),
+            ("— 副图指标 —", ["成交额", "MACD", "KDJ", "RSI", "ATR", "OBV"], "#66BB6A"),
+        ]
+        for title, items, color in groups:
+            tk.Label(win, text=title, font=("", 10, "bold"), bg="#1a1a3e", fg=color).pack(anchor="w", padx=20, pady=(8, 2))
+            for name in items:
+                var = tk.BooleanVar(value=self._mk_indicators.get(name, False))
+                c = tk.Checkbutton(win, text=name, variable=var,
+                                   font=("", 11), bg="#1a1a3e", fg="#ECEFF1",
+                                   activebackground="#1a1a3e", activeforeground="#FFD54F",
+                                   selectcolor="#455A64")
+                c.pack(anchor="w", padx=30, pady=1)
+                checks[name] = var
+
+        def _apply():
+            for k, v in checks.items():
+                self._mk_indicators[k] = v.get()
+            win.destroy()
+            # 找到 kline_host 重绘 (向上找两级: PanedWindow.right → kline_host)
+            try:
+                host = parent
+                self._mk_redraw(host, None,
+                                getattr(self, "_mk_account", 100000),
+                                getattr(self, "_mk_risk", 0.5))
+            except Exception as e:
+                print(f"[🎯Martin] redraw err: {e}", flush=True)
+
+        def _reset_default():
+            for k, v in checks.items():
+                checks[k].set(k in ["EMA", "AVWAP", "成交额"])
+
+        btns = tk.Frame(win, bg="#1a1a3e")
+        btns.pack(pady=14)
+        tk.Button(btns, text="✅ 应用", font=("", 11, "bold"),
+                  bg="#4CAF50", fg="white", relief=tk.FLAT, padx=20,
+                  command=_apply).pack(side=tk.LEFT, padx=6)
+        tk.Button(btns, text="🔄 默认", font=("", 11),
+                  bg="#78909C", fg="white", relief=tk.FLAT, padx=14,
+                  command=_reset_default).pack(side=tk.LEFT, padx=6)
+        tk.Button(btns, text="❌ 取消", font=("", 11),
+                  bg="#546E7A", fg="white", relief=tk.FLAT, padx=14,
+                  command=win.destroy).pack(side=tk.LEFT, padx=6)
+
+    def _mk_redraw(self, kline_host, analysis_host, account_value, risk_pct):
+        """根据 self._mk_indicators 重绘 K 线图"""
+        self._mk_account = account_value
+        self._mk_risk = risk_pct
+        d = self._mk_data
+        if d is None:
+            return
+
+        # 用缓存的 analysis_host
+        if analysis_host is None:
+            analysis_host = self._mk_analysis_host
+
+        # 只销毁 matplotlib canvas, 保留工具栏 (用引用判断)
+        tb = getattr(self, "_mk_toolbar", None)
+        for w in list(kline_host.winfo_children()):
+            if tb is not None and w == tb:
+                continue
+            try:
+                w.destroy()
+            except Exception:
+                pass
+
+        import matplotlib
+        matplotlib.use("TkAgg")
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        import matplotlib.patches as mpatches
+
+        ind = self._mk_indicators
+        n = d["n"]; x = np.arange(n)
+
+        # 数副图: 成交额/MACD/KDJ/RSI/ATR/OBV
+        sub_list = []
+        if ind.get("成交额"): sub_list.append("成交额")
+        if ind.get("MACD"): sub_list.append("MACD")
+        if ind.get("KDJ"): sub_list.append("KDJ")
+        if ind.get("RSI"): sub_list.append("RSI")
+        if ind.get("ATR"): sub_list.append("ATR")
+        if ind.get("OBV"): sub_list.append("OBV")
+
+        n_axes = 1 + max(len(sub_list), 1)  # 主图 + 至少 1 个副图(成交额或空)
+        fig_h = 2.2 + n_axes * 1.2
+
+        fig = Figure(figsize=(11, fig_h), facecolor="#0f0f23", dpi=100)
+        gs = fig.add_gridspec(n_axes, 1, height_ratios=[3] + [1] * (n_axes - 1),
+                              hspace=0.08)
+
+        ax_main = fig.add_subplot(gs[0], facecolor="#1a1a3e")
+        ax_subs = {}
+        for i, name in enumerate(sub_list):
+            ax_subs[name] = fig.add_subplot(gs[i + 1], facecolor="#1a1a3e", sharex=ax_main)
+
+        closes = d["closes"]; opens = d["opens"]
+        highs = d["highs"]; lows = d["lows"]; vols = d["vols"]
+        colors_candle = ["#EF5350" if closes[i] >= opens[i] else "#42A5F5" for i in range(n)]
+
+        # 蜡烛
+        for i in range(n):
+            ax_main.plot([x[i], x[i]], [lows[i], highs[i]], color=colors_candle[i], linewidth=0.5)
+            body_bot = min(opens[i], closes[i])
+            body_h = max(abs(closes[i] - opens[i]), 0.01)
+            ax_main.add_patch(mpatches.Rectangle(
+                (x[i] - 0.3, body_bot), 0.6, body_h,
+                facecolor=colors_candle[i], edgecolor=colors_candle[i]))
+
+        # 主图叠加
+        if ind.get("EMA"):
+            ax_main.plot(x, d["ema9"], color="#FFD54F", lw=1.2, label="EMA9")
+            ax_main.plot(x, d["ema21"], color="#66BB6A", lw=1.2, label="EMA21")
+            ax_main.plot(x, d["ema50"], color="#42A5F5", lw=1.2, label="EMA50")
+            v = ~np.isnan(d["ema150"])
+            if np.any(v):
+                ax_main.plot(x[v], d["ema150"][v], color="#AB47BC", lw=1.0, label="EMA150")
+
+        if ind.get("AVWAP"):
+            vw = ~np.isnan(d["avwap"])
+            if np.any(vw):
+                ax_main.plot(x[vw], d["avwap"][vw], color="#FF7043", lw=1.5, linestyle="--", label="AVWAP")
+
+        if ind.get("MA5/10"):
+            ax_main.plot(x, d["sma5"], color="#FFF176", lw=0.9, label="MA5")
+            ax_main.plot(x, d["sma10"], color="#80DEEA", lw=0.9, label="MA10")
+        if ind.get("MA20/60"):
+            ax_main.plot(x, d["sma20"], color="#CE93D8", lw=0.9, label="MA20")
+            ax_main.plot(x, d["sma60"], color="#BCAAA4", lw=0.9, label="MA60")
+
+        if ind.get("BOLL"):
+            mid, up, lo = self._boll(closes)
+            ax_main.plot(x, mid, color="#FFEB3B", lw=0.8, label="BOLL中轨")
+            ax_main.plot(x, up, color="#FF9800", lw=0.7, linestyle=":")
+            ax_main.plot(x, lo, color="#FF9800", lw=0.7, linestyle=":")
+            ax_main.fill_between(x, up, lo, alpha=0.08, color="#FF9800")
+
+        # 主图标题 + 样式
+        ax_main.set_title(f'{d["code"]} {d["name"]}', color="white", fontsize=11, fontweight="bold")
+        ax_main.legend(loc="upper left", fontsize=7, facecolor="#1a1a3e",
+                       edgecolor="#37474F", labelcolor="white")
+        ax_main.tick_params(colors="#B0BEC5", labelsize=8, labelbottom=False)
+        for s in ax_main.spines.values(): s.set_color("#37474F")
+        ax_main.grid(True, color="#37474F", lw=0.3, alpha=0.4)
+
+        # 副图
+        def _style_sub(ax, ylabel):
+            ax.tick_params(colors="#B0BEC5", labelsize=8)
+            if ax != list(ax_subs.values())[-1]:
+                ax.tick_params(labelbottom=False)
+            for s in ax.spines.values(): s.set_color("#37474F")
+            ax.grid(True, color="#37474F", lw=0.3, alpha=0.3)
+            ax.set_ylabel(ylabel, color="#B0BEC5", fontsize=8)
+
+        if "成交额" in ax_subs:
+            amt = d["vols"] * closes / 1e8
+            ax_subs["成交额"].bar(x, amt, color=colors_candle, width=0.6)
+            _style_sub(ax_subs["成交额"], "成交额(亿)")
+
+        if "MACD" in ax_subs:
+            dif, dea, hist = self._macd(closes)
+            hc = ["#EF5350" if v >= 0 else "#42A5F5" for v in hist]
+            ax_subs["MACD"].bar(x, hist, color=hc, width=0.6, alpha=0.8)
+            ax_subs["MACD"].plot(x, dif, color="#FFD54F", lw=0.9, label="DIF")
+            ax_subs["MACD"].plot(x, dea, color="#66BB6A", lw=0.9, label="DEA")
+            _style_sub(ax_subs["MACD"], "MACD")
+            ax_subs["MACD"].legend(fontsize=7, loc="upper left", facecolor="#1a1a3e",
+                                   edgecolor="#37474F", labelcolor="white")
+
+        if "KDJ" in ax_subs:
+            k_v, d_v, j_v = self._kdj(highs, lows, closes)
+            ax_subs["KDJ"].plot(x, k_v, color="#FFD54F", lw=0.9, label="K")
+            ax_subs["KDJ"].plot(x, d_v, color="#66BB6A", lw=0.9, label="D")
+            ax_subs["KDJ"].plot(x, j_v, color="#AB47BC", lw=0.8, linestyle="--", label="J")
+            ax_subs["KDJ"].axhline(80, color="#EF5350", lw=0.5, linestyle=":")
+            ax_subs["KDJ"].axhline(20, color="#42A5F5", lw=0.5, linestyle=":")
+            _style_sub(ax_subs["KDJ"], "KDJ")
+            ax_subs["KDJ"].legend(fontsize=7, loc="upper left", facecolor="#1a1a3e",
+                                  edgecolor="#37474F", labelcolor="white")
+
+        if "RSI" in ax_subs:
+            rsi = self._rsi(closes)
+            ax_subs["RSI"].plot(x, rsi, color="#FFD54F", lw=0.9)
+            ax_subs["RSI"].axhline(70, color="#EF5350", lw=0.5, linestyle=":")
+            ax_subs["RSI"].axhline(30, color="#42A5F5", lw=0.5, linestyle=":")
+            _style_sub(ax_subs["RSI"], "RSI(14)")
+
+        if "ATR" in ax_subs:
+            atr_v, _ = self._atr(highs, lows, closes)
+            ax_subs["ATR"].plot(x, atr_v, color="#AB47BC", lw=0.9)
+            _style_sub(ax_subs["ATR"], "ATR")
+
+        if "OBV" in ax_subs:
+            obv_v = self._obv(closes, vols)
+            ax_subs["OBV"].plot(x, obv_v, color="#26C6DA", lw=0.9)
+            _style_sub(ax_subs["OBV"], "OBV")
+
+        # X 轴日期 (最后一个副图)
+        if sub_list:
+            last_ax = list(ax_subs.values())[-1]
+            h_dates = d["h"]["date"].astype(str).values
+            step = max(1, n // 12)
+            last_ax.set_xticks(x[::step])
+            last_ax.set_xticklabels([h_dates[i][-5:] for i in x[::step]], rotation=30, fontsize=7, color="#B0BEC5")
+
+        fig.tight_layout()
+        canvas = FigureCanvasTkAgg(fig, master=kline_host)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self._mk_canvas = canvas
+
+        # 重绘分析面板
+        if analysis_host is not None:
+            for w in analysis_host.winfo_children():
+                w.destroy()
+            self._fill_martin_analysis(
+                analysis_host, d["code"], d["name"], closes,
+                d["ema9"], d["ema21"], d["ema50"], d["ema150"],
+                d["avwap"], d["adr_arr"][-1], None,
+                account_value, risk_pct, highs, lows
+            )
+            # 再算一次形态 (因为 closes 已变)
+            anchor = d["anchor"]
+            pb = self._detect_pullback(d["ema9"], d["ema21"], d["ema50"], closes, d["avwap"], anchor)
+            avg_v = np.mean(d["vols"][-20:]) if n >= 20 else d["vols"][-1]
+            bk = self._detect_breakout(closes, highs, lows, d["vols"], d["avwap"], d["ema9"])
+            gp = self._detect_ep_gap(opens[-1], closes[-2] if n >= 2 else closes[-1], d["vols"][-1], avg_v)
+            patterns = [p for p in [pb, bk, gp] if p]
+            best = max(patterns, key=lambda x: x["score"]) if patterns else None
+            if best:
+                self._fill_martin_analysis(
+                    analysis_host, d["code"], d["name"], closes,
+                    d["ema9"], d["ema21"], d["ema50"], d["ema150"],
+                    d["avwap"], d["adr_arr"][-1], best,
+                    account_value, risk_pct, highs, lows
+                )
 
     def _fill_martin_analysis(self, host, code, name, closes, ema9, ema21, ema50, ema150,
                                avwap, adr_pct, pattern, acc, risk_pct, highs, lows):
