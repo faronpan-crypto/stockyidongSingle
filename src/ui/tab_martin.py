@@ -1032,6 +1032,40 @@ class MartinMixin:
         tv3_frame.grid_columnconfigure(0, weight=1)
         tv3_data = []  # [(c6, sina, name, ...)]
 
+        # ── Tab 4: 📯 淘股吧 热股 (复用主窗口 self._taoguba_stamp_data) ──
+        tab4 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab4, text="📯 淘股吧")
+        tv4_frame = tk.Frame(tab4, bg="#1a1a3e")
+        tv4_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        cols4 = ("代码", "名称", "现价", "涨跌%", "提及次数", "来源")
+        tv4 = ttk.Treeview(tv4_frame, columns=cols4, show="headings", height=28)
+        for c, w in [("代码", 80), ("名称", 110), ("现价", 65),
+                     ("涨跌%", 65), ("提及次数", 70), ("来源", 100)]:
+            tv4.heading(c, text=c); tv4.column(c, width=w, anchor=tk.CENTER, stretch=False)
+        vsb4 = ttk.Scrollbar(tv4_frame, orient=tk.VERTICAL, command=tv4.yview)
+        tv4.configure(yscrollcommand=vsb4.set)
+        tv4.grid(row=0, column=0, sticky="nsew")
+        vsb4.grid(row=0, column=1, sticky="ns")
+        tv4_frame.grid_rowconfigure(0, weight=1)
+        tv4_frame.grid_columnconfigure(0, weight=1)
+        tv4_data = []  # [(c6, name), ...] 直接对应 row dict
+
+        # ── Tab 5: 🧭 韭研公社 热股 (复用主窗口 self._jiuyan_stamp_data) ──
+        tab5 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab5, text="🧭 韭研公社")
+        tv5_frame = tk.Frame(tab5, bg="#1a1a3e")
+        tv5_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        cols5 = ("代码", "名称", "现价", "涨跌%", "提及次数", "来源")
+        tv5 = ttk.Treeview(tv5_frame, columns=cols5, show="headings", height=28)
+        for c, w in [("代码", 80), ("名称", 110), ("现价", 65),
+                     ("涨跌%", 65), ("提及次数", 70), ("来源", 100)]:
+            tv5.heading(c, text=c); tv5.column(c, width=w, anchor=tk.CENTER, stretch=False)
+        vsb5 = ttk.Scrollbar(tv5_frame, orient=tk.VERTICAL, command=tv5.yview)
+        tv5.configure(yscrollcommand=vsb5.set)
+        tv5.grid(row=0, column=0, sticky="nsew")
+        vsb5.grid(row=0, column=1, sticky="ns")
+        tv5_frame.grid_rowconfigure(0, weight=1)
+        tv5_frame.grid_columnconfigure(0, weight=1)
+        tv5_data = []  # 同 tv4_data
+
         # ═══ 右: K线 + 分析 (可拖宽) ═══
         right = tk.Frame(pw, bg="#0f0f23")
         pw.add(right)
@@ -1074,6 +1108,68 @@ class MartinMixin:
         tv.bind("<<TreeviewSelect>>", _on_select_tab1); tv.bind("<Double-1>", _on_select_tab1)
         tv2.bind("<<TreeviewSelect>>", _on_select_tab2); tv2.bind("<Double-1>", _on_select_tab2)
         tv3.bind("<<TreeviewSelect>>", _on_select_tab3); tv3.bind("<Double-1>", _on_select_tab3)
+
+        # Tab4/5: 淘股吧/韭研 (从主窗口 stamp_data 读 dict → 新浪code转6位)
+        def _sina_to_c6(sina_code):
+            """sh600519 → 600519"""
+            import re
+            m = re.search(r"(\d{6})", str(sina_code))
+            return m.group(1) if m else str(sina_code)
+
+        def _on_select_tab4(_e=None):
+            sel = tv4.selection()
+            if not sel: return
+            idx = tv4.index(sel[0])
+            if idx < len(tv4_data):
+                c6, nm = tv4_data[idx]
+                self._show_martin_kline(c6, nm, *_build_args())
+
+        def _on_select_tab5(_e=None):
+            sel = tv5.selection()
+            if not sel: return
+            idx = tv5.index(sel[0])
+            if idx < len(tv5_data):
+                c6, nm = tv5_data[idx]
+                self._show_martin_kline(c6, nm, *_build_args())
+
+        tv4.bind("<<TreeviewSelect>>", _on_select_tab4); tv4.bind("<Double-1>", _on_select_tab4)
+        tv5.bind("<<TreeviewSelect>>", _on_select_tab5); tv5.bind("<Double-1>", _on_select_tab5)
+
+        # ── 立即填充 Tab4/Tab5 (如果主窗口已经有 stamp_data) ──
+        def _fill_stamp_tv(tv_widget, data_list, stamp_data):
+            """把 stamp_data (dict list) 填到 Treeview, 返回 [(c6, name)]"""
+            out = []
+            for item in stamp_data[:80]:  # 最多 80 只
+                try:
+                    code = item.get("code", "")
+                    name = item.get("name", "")
+                    c6 = _sina_to_c6(code)
+                    price = item.get("price", item.get("close", 0))
+                    chg = item.get("chg", item.get("pct_chg", 0))
+                    freq = item.get("freq", item.get("count", item.get("mentions", 0)))
+                    src = item.get("source", item.get("src", ""))
+                    if not name:
+                        name = code
+                    tv_widget.insert("", "end", values=(
+                        c6, name,
+                        f"{price:.2f}" if price else "-",
+                        f"{chg:+.2f}%" if chg else "-",
+                        freq, src[:10]))
+                    out.append((c6, name))
+                except Exception:
+                    continue
+            return out
+
+        # 主线程立即尝试 (stamp_data 可能主窗口已经加载好了)
+        try:
+            tg_data = getattr(self, "_taoguba_stamp_data", []) or []
+            jy_data = getattr(self, "_jiuyan_stamp_data", []) or []
+            if tg_data:
+                tv4_data.extend(_fill_stamp_tv(tv4, tv4_data, tg_data))
+            if jy_data:
+                tv5_data.extend(_fill_stamp_tv(tv5, tv5_data, jy_data))
+        except Exception as _e:
+            print(f"[🎯Martin] stamp_data 直接填充跳过: {_e}", flush=True)
 
         # 手动输入: 回车触发
         def _on_enter(_e):
