@@ -1823,24 +1823,24 @@ class MartinMixin:
                                edgecolor="#37474F", labelcolor="white", ncol=3)
 
                 # ── 副图 MACD/KDJ/RSI/CCI ──
-                for idx, (name, data, ylabel) in enumerate(subplots_main):
+                for idx, (sub_name, data, ylabel) in enumerate(subplots_main):
                     ax = axes[idx + 1]
-                    if name == "MACD":
+                    if sub_name == "MACD":
                         ax.bar(x, hist, color=["#EF5350" if v >= 0 else "#42A5F5" for v in hist],
                                width=0.6)
                         ax.plot(x, dif, color="#EF5350", lw=0.9, label="DIF")
                         ax.plot(x, dea, color="#42A5F5", lw=0.9, label="DEA")
-                    elif name == "KDJ":
+                    elif sub_name == "KDJ":
                         ax.plot(x, data[0], color="#EF5350", lw=0.9, label="K")
                         ax.plot(x, data[1], color="#42A5F5", lw=0.9, label="D")
                         ax.plot(x, data[2], color="#FFD54F", lw=0.9, label="J", alpha=0.8)
                         ax.axhline(80, color="#555", ls="--", lw=0.5)
                         ax.axhline(20, color="#555", ls="--", lw=0.5)
-                    elif name == "RSI":
+                    elif sub_name == "RSI":
                         ax.plot(x, data[0], color="#42A5F5", lw=1.0, label="RSI14")
                         ax.axhline(70, color="#EF5350", ls="--", lw=0.5, alpha=0.6)
                         ax.axhline(30, color="#66BB6A", ls="--", lw=0.5, alpha=0.6)
-                    elif name == "CCI":
+                    elif sub_name == "CCI":
                         ax.plot(x, data[0], color="#AB47BC", lw=1.0, label="CCI")
                         ax.axhline(100, color="#EF5350", ls="--", lw=0.5, alpha=0.6)
                         ax.axhline(-100, color="#66BB6A", ls="--", lw=0.5, alpha=0.6)
