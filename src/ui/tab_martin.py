@@ -951,28 +951,43 @@ class MartinMixin:
                             handlepad=2)
         pw.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
 
-        # ═══ 左: 选股列表 (默认 520px, 可拖宽拖窄) ═══
-        left = tk.Frame(pw, bg="#1a1a3e", width=520)
-        pw.add(left, width=520)
+        # ═══ 左: Notebook 三 tab (默认 540px, 可拖宽拖窄) ═══
+        left = tk.Frame(pw, bg="#1a1a3e", width=540)
+        pw.add(left, width=540)
 
-        status_lbl = tk.Label(left, text="👉 选股票来源 → 点 🔍 扫描, 或直接输入代码回车",
-                              font=("", 10), bg="#1a1a3e", fg="#78909C", wraplength=520,
+        # 统一状态标签 (放在 Notebook 上面)
+        status_lbl = tk.Label(left, text="👉 选股Tab点🔍扫描 | 机会K/筹码K Tab自动加载持仓龙头",
+                              font=("", 10), bg="#1a1a3e", fg="#78909C", wraplength=530,
                               justify=tk.LEFT)
-        status_lbl.pack(fill=tk.X, pady=(8, 4), padx=8)
+        status_lbl.pack(fill=tk.X, pady=(6, 2), padx=8)
 
-        # Treeview + 水平滚动条 (所有列都可拖拽宽度)
-        tv_frame = tk.Frame(left, bg="#1a1a3e")
+        # Notebook
+        style_nb = ttk.Style()
+        try:
+            style_nb.theme_use("clam")
+            style_nb.configure("TNotebook", background="#1a1a3e", borderwidth=0)
+            style_nb.configure("TNotebook.Tab", background="#2a2a4e", foreground="#B0BEC5",
+                               padding=(14, 5), font=("", 10, "bold"))
+            style_nb.map("TNotebook.Tab",
+                         background=[("selected", "#FFD54F")],
+                         foreground=[("selected", "#0f0f23")])
+        except Exception:
+            pass
+
+        nb = ttk.Notebook(left)
+        nb.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
+
+        # ── Tab 1: Martin 选股列表 ──
+        tab1 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab1, text="🎯 Martin选股")
+        tv_frame = tk.Frame(tab1, bg="#1a1a3e")
         tv_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
-
         cols = ("代码", "名称", "涨幅%", "成交(亿)", "ADR%", "形态", "评分", "支撑/备注")
-        tv = ttk.Treeview(tv_frame, columns=cols, show="headings", height=36)
-        # 每列 stretch=False → 可手动拖宽度; 最小 widths 保证可见
+        tv = ttk.Treeview(tv_frame, columns=cols, show="headings", height=28)
         for c, w, min_w in [("代码", 75, 60), ("名称", 100, 70), ("涨幅%", 60, 45),
                              ("成交(亿)", 65, 50), ("ADR%", 60, 45), ("形态", 85, 60),
                              ("评分", 50, 35), ("支撑/备注", 120, 80)]:
             tv.heading(c, text=c)
             tv.column(c, width=w, minwidth=min_w, stretch=False, anchor=tk.CENTER)
-
         vsb = ttk.Scrollbar(tv_frame, orient=tk.VERTICAL, command=tv.yview)
         hsb = ttk.Scrollbar(tv_frame, orient=tk.HORIZONTAL, command=tv.xview)
         tv.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
@@ -981,6 +996,41 @@ class MartinMixin:
         hsb.grid(row=1, column=0, sticky="ew")
         tv_frame.grid_rowconfigure(0, weight=1)
         tv_frame.grid_columnconfigure(0, weight=1)
+
+        # ── Tab 2: 🎯 机会K 列表 ──
+        tab2 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab2, text="🎯 机会K")
+        tv2_frame = tk.Frame(tab2, bg="#1a1a3e")
+        tv2_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        cols2 = ("代码", "名称", "买入分", "卖出分", "信号数", "状态")
+        tv2 = ttk.Treeview(tv2_frame, columns=cols2, show="headings", height=28)
+        for c, w in [("代码", 80), ("名称", 120), ("买入分", 70),
+                     ("卖出分", 70), ("信号数", 60), ("状态", 100)]:
+            tv2.heading(c, text=c); tv2.column(c, width=w, anchor=tk.CENTER, stretch=False)
+        vsb2 = ttk.Scrollbar(tv2_frame, orient=tk.VERTICAL, command=tv2.yview)
+        tv2.configure(yscrollcommand=vsb2.set)
+        tv2.grid(row=0, column=0, sticky="nsew")
+        vsb2.grid(row=0, column=1, sticky="ns")
+        tv2_frame.grid_rowconfigure(0, weight=1)
+        tv2_frame.grid_columnconfigure(0, weight=1)
+        # 存 watchlist 数据 (sina_code 转换映射)
+        tv2_data = []  # [(c6, sina, name, buy100, sell100, signals_count, status)]
+
+        # ── Tab 3: 🪙 筹码K 列表 ──
+        tab3 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab3, text="🪙 筹码K")
+        tv3_frame = tk.Frame(tab3, bg="#1a1a3e")
+        tv3_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        cols3 = ("代码", "名称", "吸筹%", "派发%", "筹码状态", "信号")
+        tv3 = ttk.Treeview(tv3_frame, columns=cols3, show="headings", height=28)
+        for c, w in [("代码", 80), ("名称", 120), ("吸筹%", 65),
+                     ("派发%", 65), ("筹码状态", 80), ("信号", 120)]:
+            tv3.heading(c, text=c); tv3.column(c, width=w, anchor=tk.CENTER, stretch=False)
+        vsb3 = ttk.Scrollbar(tv3_frame, orient=tk.VERTICAL, command=tv3.yview)
+        tv3.configure(yscrollcommand=vsb3.set)
+        tv3.grid(row=0, column=0, sticky="nsew")
+        vsb3.grid(row=0, column=1, sticky="ns")
+        tv3_frame.grid_rowconfigure(0, weight=1)
+        tv3_frame.grid_columnconfigure(0, weight=1)
+        tv3_data = []  # [(c6, sina, name, ...)]
 
         # ═══ 右: K线 + 分析 (可拖宽) ═══
         right = tk.Frame(pw, bg="#0f0f23")
@@ -993,18 +1043,37 @@ class MartinMixin:
         analysis_host.pack(fill=tk.X, pady=(6, 0))
         analysis_host.pack_propagate(False)
 
-        # 点击 → K线
-        def _on_select(_e=None):
-            sel = tv.selection()
-            if not sel:
-                return
-            vals = tv.item(sel[0], "values")
-            self._show_martin_kline(vals[0], vals[1], kline_host, analysis_host,
-                                    float(acc_var.get()) if acc_var.get() else 100000,
-                                    float(risk_var.get()) if risk_var.get() else 0.5)
+        # ═══ 统一点击处理: 所有 tab 的点击 → 右边 Martin K 线 ═══
+        def _build_args():
+            return (kline_host, analysis_host,
+                    float(acc_var.get()) if acc_var.get() else 100000,
+                    float(risk_var.get()) if risk_var.get() else 0.5)
 
-        tv.bind("<<TreeviewSelect>>", _on_select)
-        tv.bind("<Double-1>", _on_select)
+        def _on_select_tab1(_e=None):
+            sel = tv.selection()
+            if not sel: return
+            vals = tv.item(sel[0], "values")
+            self._show_martin_kline(vals[0], vals[1], *_build_args())
+
+        def _on_select_tab2(_e=None):
+            sel = tv2.selection()
+            if not sel: return
+            idx = tv2.index(sel[0])
+            if idx < len(tv2_data):
+                c6, _sina, name = tv2_data[idx][0], tv2_data[idx][1], tv2_data[idx][2]
+                self._show_martin_kline(c6, name, *_build_args())
+
+        def _on_select_tab3(_e=None):
+            sel = tv3.selection()
+            if not sel: return
+            idx = tv3.index(sel[0])
+            if idx < len(tv3_data):
+                c6, _sina, name = tv3_data[idx][0], tv3_data[idx][1], tv3_data[idx][2]
+                self._show_martin_kline(c6, name, *_build_args())
+
+        tv.bind("<<TreeviewSelect>>", _on_select_tab1); tv.bind("<Double-1>", _on_select_tab1)
+        tv2.bind("<<TreeviewSelect>>", _on_select_tab2); tv2.bind("<Double-1>", _on_select_tab2)
+        tv3.bind("<<TreeviewSelect>>", _on_select_tab3); tv3.bind("<Double-1>", _on_select_tab3)
 
         # 手动输入: 回车触发
         def _on_enter(_e):
@@ -1013,8 +1082,87 @@ class MartinMixin:
                 self._analyze_manual_code(code, kline_host, analysis_host,
                                           float(acc_var.get()) if acc_var.get() else 100000,
                                           float(risk_var.get()) if risk_var.get() else 0.5)
-
         quick_combo.bind("<Return>", _on_enter)
+
+        # ── 后台加载: 机会K watchlist + 筹码K watchlist ──
+        def _load_jc_bg():
+            """机会K + 筹码K 股票池并行加载 (只拿列表, 不做完整扫描)"""
+            try:
+                # 1) 机会K - 复用 tab_jianlou 的 watchlist
+                try:
+                    from ui.tab_jianlou import _load_watchlist as _jl_load
+                    jl_pool = _jl_load()  # [(c6, sina, tag), ...]
+                except Exception as e:
+                    print(f"[🎯Martin] jianlou watchlist fail: {e}", flush=True)
+                    jl_pool = []
+
+                # 2) 筹码K - 复用 tab_chouma 的
+                try:
+                    from ui.tab_chouma import _load_chouma_watchlist as _cm_load
+                    cm_pool = _cm_load()  # [(c6, sina, name), ...]
+                except Exception:
+                    try:
+                        from ui.tab_jianlou import _load_watchlist as _cm_load
+                        cm_pool = _cm_load()
+                    except Exception:
+                        cm_pool = []
+
+                # 3) 并行拉基础行情 (只拿现价/涨跌幅, 不做信号扫描)
+                def _hq_map(codes_sina):
+                    try:
+                        from ui.tab_jianlou import _fetch_hq_batch
+                        return _fetch_hq_batch(list(set(codes_sina)))
+                    except Exception:
+                        return {}
+
+                jl_sinas = [s for _, s, _ in jl_pool]
+                cm_sinas = [s for _, s, _ in cm_pool]
+                hq_jl = _hq_map(jl_sinas)
+                hq_cm = _hq_map(cm_sinas)
+
+                # 4) 填 tab2 (机会K 列表, 简化版: 只显示买入/卖出分占位, 不做完整扫描)
+                jl_rows = []
+                for c6, sina, tag in jl_pool:
+                    hq = hq_jl.get(sina, {})
+                    nm = hq.get("name", c6)
+                    buy = sell = 50  # 默认中性 (完整扫描要拉日K+计算, 太重)
+                    status = "🟢买入机会" if buy > sell else ("🔴卖出警告" if sell > buy else "⚪中性")
+                    jl_rows.append((c6, sina, nm, buy, sell, 0, status))
+
+                # 5) 填 tab3 (筹码K 列表)
+                cm_rows = []
+                for item in cm_pool:
+                    if len(item) == 3:
+                        c6, sina, nm = item
+                    else:
+                        c6, sina = item[0], item[1]; nm = hq_cm.get(sina, c6)
+                    hq = hq_cm.get(sina, {})
+                    absorb, dist = 0, 0  # 筹码扫描要拉日K, 简化版留空
+                    cm_rows.append((c6, sina, nm, absorb, dist, "待扫描", ""))
+
+                # 6) 回主线程填充
+                kw.after(0, lambda: _fill_tv2(jl_rows))
+                kw.after(0, lambda: _fill_tv3(cm_rows))
+
+            except Exception as e:
+                import traceback
+                print(f"[🎯Martin] JC watchlist 加载异常: {e}\n{traceback.format_exc()}", flush=True)
+                kw.after(0, lambda: status_lbl.configure(
+                    text=f"⚠️ 机会K/筹码K watchlist 加载失败, 请先在主界面打开一次机会K/筹码K"))
+
+        def _fill_tv2(rows):
+            for r in rows:
+                tv2_data.append(r)
+                tv2.insert("", "end", values=(r[0], r[2], r[3], r[4], r[5], r[6]))
+            status_lbl.configure(text=f"✅ 机会K {len(rows)} 只 | 筹码K 加载中...")
+
+        def _fill_tv3(rows):
+            for r in rows:
+                tv3_data.append(r)
+                tv3.insert("", "end", values=(r[0], r[2], r[3], r[4], r[5], r[6]))
+            status_lbl.configure(text=f"✅ 机会K {len(tv2_data)} 只 | 筹码K {len(rows)} 只 | 选股Tab点🔍扫描")
+
+        threading.Thread(target=_load_jc_bg, daemon=True).start()
 
         # 环境检查 (后台)
         def _env_bg():
@@ -1022,12 +1170,12 @@ class MartinMixin:
                 r = self._check_market_env_safe()
                 kw.after(0, lambda: env_lbl.configure(
                     text=f"🌐 环境: {r['status']}", fg=r['color']))
-            except Exception as e:
+            except Exception:
                 kw.after(0, lambda: env_lbl.configure(
                     text=f"🌐 环境: 检查失败", fg="#EF5350"))
 
         threading.Thread(target=_env_bg, daemon=True).start()
-        print("[🎯Martin] 弹窗已打开", flush=True)
+        print("[🎯Martin] 弹窗已打开 (3 tab: 选股/机会K/筹码K)", flush=True)
 
     def _analyze_manual_code(self, raw, kline_host, analysis_host, acc, risk):
         """
