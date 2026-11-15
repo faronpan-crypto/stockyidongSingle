@@ -16566,14 +16566,14 @@ AI 将基于实时市场数据生成深度分析报告
 
 
     def _show_combined_jianpan_dialog(self):
-        """👁️ 见盘综合 — 见盘+游资+主线+冰点+全球 五合一 Tab"""
+        """👁️ 见盘综合 — 见盘+游资+主线+冰点 四合一 Tab (全球资产已独立成按钮)"""
         import tkinter as tk
         import tkinter.ttk as ttk
         print("[👁️见盘综合] 组合弹窗 被调用!", flush=True)
         try:
             root = getattr(self, 'root', None) or getattr(self, '_root', None)
             dlg = tk.Toplevel(root)
-            dlg.title("👁️ 见盘综合 — 5 合一")
+            dlg.title("👁️ 见盘综合 — 7 合一")
             dlg.geometry("1400x900")
             dlg.configure(bg="#121212")
             dlg.transient(root)
@@ -16583,7 +16583,7 @@ AI 将基于实时市场数据生成深度分析报告
                 try: dlg.attributes("-zoomed", True)
                 except Exception: pass
 
-            # ═══════ Notebook 八个 Tab ═══════
+            # ═══════ Notebook 七个 Tab ═══════
             nb = ttk.Notebook(dlg)
             nb.pack(fill=tk.BOTH, expand=True)
 
@@ -16619,41 +16619,33 @@ AI 将基于实时市场数据生成深度分析报告
             except Exception as _e:
                 print(f"[👁️见盘综合] Tab4 冰点修复 加载失败: {_e}", flush=True)
 
-            # Tab 5: 🌍 全球资产
-            tab5 = tk.Frame(nb, bg="#0a1628")
-            nb.add(tab5, text=" 🌍 全球资产 ")
-            try:
-                self._show_global_assets_dialog(parent_frame=tab5)
-            except Exception as _e:
-                print(f"[👁️见盘综合] Tab5 全球资产 加载失败: {_e}", flush=True)
-
-            # Tab 6: 📊 指数统计 (从高抛低吸迁入)
-            tab6 = tk.Frame(nb, bg="#F8FAFC")
-            nb.add(tab6, text=" 📊 指数统计 ")
+            # Tab 5: 📊 指数统计 (原 Tab6)
+            tab5 = tk.Frame(nb, bg="#F8FAFC")
+            nb.add(tab5, text=" 📊 指数统计 ")
             try:
                 from ui.tab_index_pattern import show_index_pattern_analyzer as _sip
-                _sip(root, app=self, parent_frame=tab6)
+                _sip(root, app=self, parent_frame=tab5)
             except Exception as _e:
-                print(f"[👁️见盘综合] Tab6 指数统计 加载失败: {_e}", flush=True)
+                print(f"[👁️见盘综合] Tab5 指数统计 加载失败: {_e}", flush=True)
 
-            # Tab 7: 🔍 多股对比 (从 Row5 迁入)
-            tab7 = tk.Frame(nb, bg="#0d1117")
-            nb.add(tab7, text=" 🔍 多股对比 ")
+            # Tab 6: 🔍 多股对比 (原 Tab7)
+            tab6 = tk.Frame(nb, bg="#0d1117")
+            nb.add(tab6, text=" 🔍 多股对比 ")
             try:
-                self._show_multi_compare_dialog(parent_frame=tab7)
+                self._show_multi_compare_dialog(parent_frame=tab6)
             except Exception as _e:
-                print(f"[👁️见盘综合] Tab7 多股对比 加载失败: {_e}", flush=True)
+                print(f"[👁️见盘综合] Tab6 多股对比 加载失败: {_e}", flush=True)
 
-            # Tab 8: 💡 有效市场 (从高抛低吸迁入)
-            tab8 = tk.Frame(nb, bg="#FAFAFA")
-            nb.add(tab8, text=" 💡 有效市场 ")
+            # Tab 7: 💡 有效市场 (原 Tab8)
+            tab7 = tk.Frame(nb, bg="#FAFAFA")
+            nb.add(tab7, text=" 💡 有效市场 ")
             try:
                 from ui.tab_emh import show_emh_panel as _se
-                _se(root, app=self, parent_frame=tab8)
+                _se(root, app=self, parent_frame=tab7)
             except Exception as _e:
-                print(f"[👁️见盘综合] Tab8 有效市场 加载失败: {_e}", flush=True)
+                print(f"[👁️见盘综合] Tab7 有效市场 加载失败: {_e}", flush=True)
 
-            print("[👁️见盘综合] ✅ 8 Tab 组合弹窗已打开 (🦅游资首 + 📊指数统计 + 🔍多股对比 + 💡有效市场)", flush=True)
+            print("[👁️见盘综合] ✅ 7 Tab 组合弹窗已打开 (🦅游资首 + 📊指数统计 + 🔍多股对比 + 💡有效市场)", flush=True)
 
         except Exception as e:
             print(f"[👁️见盘综合] ❌ 异常: {e}", flush=True)
