@@ -1276,48 +1276,64 @@ class MartinMixin:
             tv8_data.append((c, n))
 
         # ── Tab6 持仓自选 (本地, 秒出, 主线程直接填) ──
+        def _ensure_code_first(tup):
+            """确保 (code, name) 顺序, code 必须是 6 位数字"""
+            import re
+            a, b = tup[0], tup[1] if len(tup) > 1 else ""
+            # 如果 a 不是 6 位纯数字, 但 b 是, 就交换
+            if not re.match(r"^\d{6}$", str(a)) and re.match(r"^\d{6}$", str(b)):
+                return (str(b), str(a))
+            return (str(a), str(b))
+
         try:
             def _fill_pool(tv_w, tv_data_list, pool_name, label_prefix, limit=40):
                 try:
                     items = self._get_stock_pool(pool_name, kw)
                     count = 0
-                    for code, name in items[:limit]:
-                        if code:
-                            tv_w.insert("", "end", values=(code, name or code, label_prefix))
-                            tv_data_list.append((code, name or code))
-                            count += 1
+                    for raw in items[:limit]:
+                        code, name = _ensure_code_first(raw)
+                        if not code:
+                            continue
+                        tv_w.insert("", "end", values=(code, name or code, label_prefix))
+                        tv_data_list.append((code, name or code))
+                        count += 1
                     return count
-                except Exception:
+                except Exception as e:
+                    print(f"[🎯Martin] _fill_pool {pool_name} 异常: {e}", flush=True)
                     return 0
 
             c6_h = _fill_pool(tv6, tv6_data, "持仓股", "持仓")
             c6_s = _fill_pool(tv6, tv6_data, "自选股", "自选")
             print(f"[🎯Martin] Tab6 持仓 {c6_h} + 自选 {c6_s}", flush=True)
+            # 打印前 3 条验证顺序
+            for i in range(min(3, len(tv6_data))):
+                c, n = tv6_data[i]
+                print(f"[🎯Martin] Tab6 验证 #{i}: code={c} name={n}", flush=True)
         except Exception as _e6:
-            print(f"[🎯Martin] Tab6 填充跳过: {_e6}", flush=True)
+            import traceback
+            print(f"[🎯Martin] Tab6 填充跳过: {_e6}\n{traceback.format_exc()}", flush=True)
 
         # ── Tab7 涨停热门 (需要网络, 后台线程) ──
+        import re as _re
+        def _ec(tup):
+            """ensure code first"""
+            a, b = str(tup[0]), str(tup[1]) if len(tup) > 1 else ""
+            if not _re.match(r"^\d{6}$", a) and _re.match(r"^\d{6}$", b):
+                return (b, a)
+            return (a, b)
+
         def _fill_tab7_bg():
             try:
-                # 涨停池 (有网才拉)
-                try:
-                    items_zt = self._get_stock_pool("涨停池", kw)
-                    for code, name in items_zt[:30]:
-                        kw.after(0, lambda c=code, n=name: (
-                            tv7.insert("", "end", values=(c, n or c, "涨停")),
-                            tv7_data.append((c, n or c))))
-                except Exception:
-                    pass
-
-                # 热门板块 (有网才拉)
-                try:
-                    items_hot = self._get_stock_pool("热门板块", kw)
-                    for code, name in items_hot[:30]:
-                        kw.after(0, lambda c=code, n=name: (
-                            tv7.insert("", "end", values=(c, n or c, "热门板块")),
-                            tv7_data.append((c, n or c))))
-                except Exception:
-                    pass
+                for pool_name, label in [("涨停池", "涨停"), ("热门板块", "热门板块")]:
+                    try:
+                        items = self._get_stock_pool(pool_name, kw)
+                        for raw in items[:30]:
+                            code, name = _ec(raw)
+                            kw.after(0, lambda c=code, n=name, l=label: (
+                                tv7.insert("", "end", values=(c, n or c, l)),
+                                tv7_data.append((c, n or c))))
+                    except Exception:
+                        pass
 
             except Exception as _e7:
                 print(f"[🎯Martin] Tab7 后台填充异常: {_e7}", flush=True)
