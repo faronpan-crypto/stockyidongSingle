@@ -2288,11 +2288,33 @@ class MartinMixin:
                 n_axes = 1 + len(subplots_main) + 1  # 主图 + 副图 + 成交
                 height_ratios = [3] + [1.2] * len(subplots_main) + [1]
 
+                # ── 🎯 情绪周期动态背景色 (与主界面持仓Tab联动) ──
+                _ec_var = getattr(self, 'emotion_cycle_var', None)
+                _cycle = _ec_var.get() if _ec_var else None
+                if _cycle == "上行":     # 绿色背景 (看多)
+                    bg_fig = "#E8F5E9"; bg_ax = "#E8F5E9"
+                    leg_bg = "#C8E6C9"; leg_fg = "#1B5E20"
+                    spine_c = "#81C784"; grid_c = "#A5D6A7"
+                    tick_c = "#388E3C"
+                    cloud_up = "#66BB6A"; cloud_dn = "#2E7D32"  # 多云更亮绿
+                elif _cycle == "下行":   # 红色背景 (看空)
+                    bg_fig = "#FFEBEE"; bg_ax = "#FFEBEE"
+                    leg_bg = "#FFCDD2"; leg_fg = "#B71C1C"
+                    spine_c = "#EF9A9A"; grid_c = "#E57373"
+                    tick_c = "#C62828"
+                    cloud_up = "#EF5350"; cloud_dn = "#B71C1C"  # 空云更深红
+                else:                    # 震荡/默认 深色背景
+                    bg_fig = "#0f0f23"; bg_ax = "#1a1a3e"
+                    leg_bg = "#1a1a3e"; leg_fg = "white"
+                    spine_c = "#37474F"; grid_c = "#37474F"
+                    tick_c = "#B0BEC5"
+                    cloud_up = "#26A69A"; cloud_dn = "#EF5350"
+
                 fig = Figure(figsize=(13, 3 + 1.2 * n_axes),
-                             facecolor="#0f0f23", dpi=95)
+                             facecolor=bg_fig, dpi=95)
                 gs = fig.add_gridspec(n_axes, 1, height_ratios=height_ratios,
                                       hspace=0.15)
-                axes = [fig.add_subplot(gs[i], facecolor="#1a1a3e") for i in range(n_axes)]
+                axes = [fig.add_subplot(gs[i], facecolor=bg_ax) for i in range(n_axes)]
                 ax_main = axes[0]
 
                 # ── 主图: 蜡烛 ──
@@ -2335,12 +2357,12 @@ class MartinMixin:
                                              np.where(va & vb, np.maximum(span_a, span_b), np.nan),
                                              np.where(va & vb, np.minimum(span_a, span_b), np.nan),
                                              where=(span_a >= span_b),
-                                             color="#26A69A", alpha=0.15)  # 多云
+                                             color=cloud_up, alpha=0.25)  # 多云
                         ax_main.fill_between(x,
                                              np.where(va & vb, np.maximum(span_a, span_b), np.nan),
                                              np.where(va & vb, np.minimum(span_a, span_b), np.nan),
                                              where=(span_a < span_b),
-                                             color="#EF5350", alpha=0.15)  # 空云
+                                             color=cloud_dn, alpha=0.25)  # 空云
                     vt = ~np.isnan(tenkan); vk = ~np.isnan(kijun)
                     if np.any(vt):
                         ax_main.plot(x[vt], tenkan[vt], color="#26C6DA", lw=0.9,
@@ -2359,13 +2381,13 @@ class MartinMixin:
                     pt = {"pullback": "📉回调", "breakout": "🚀突破", "ep_gap": "⚡EP跳空"}.get(
                         best["type"], best["type"])
                     parts.append(f"| {pt} 评分 {best['score']}")
-                ax_main.set_title("  ".join(parts), color="white", fontsize=11, fontweight="bold")
-                ax_main.tick_params(colors="#B0BEC5", labelsize=8)
+                ax_main.set_title("  ".join(parts), color=leg_fg, fontsize=11, fontweight="bold")
+                ax_main.tick_params(colors=tick_c, labelsize=8)
                 for s in ax_main.spines.values():
-                    s.set_color("#37474F")
-                ax_main.grid(True, color="#37474F", lw=0.3, alpha=0.5)
-                ax_main.legend(loc="upper left", fontsize=7, facecolor="#1a1a3e",
-                               edgecolor="#37474F", labelcolor="white", ncol=3)
+                    s.set_color(spine_c)
+                ax_main.grid(True, color=grid_c, lw=0.3, alpha=0.5)
+                ax_main.legend(loc="upper left", fontsize=7, facecolor=leg_bg,
+                               edgecolor=spine_c, labelcolor=leg_fg, ncol=3)
 
                 # ── 副图 MACD/KDJ/RSI/CCI ──
                 for idx, (sub_name, data, ylabel) in enumerate(subplots_main):
@@ -2389,29 +2411,29 @@ class MartinMixin:
                         ax.plot(x, data[0], color="#AB47BC", lw=1.0, label="CCI")
                         ax.axhline(100, color="#EF5350", ls="--", lw=0.5, alpha=0.6)
                         ax.axhline(-100, color="#66BB6A", ls="--", lw=0.5, alpha=0.6)
-                    ax.set_ylabel(ylabel, color="#B0BEC5", fontsize=8)
-                    ax.tick_params(colors="#B0BEC5", labelsize=8)
+                    ax.set_ylabel(ylabel, color=tick_c, fontsize=8)
+                    ax.tick_params(colors=tick_c, labelsize=8)
                     for s in ax.spines.values():
-                        s.set_color("#37474F")
-                    ax.grid(True, color="#37474F", lw=0.3, alpha=0.3)
-                    ax.legend(loc="upper left", fontsize=7, facecolor="#1a1a3e",
-                              edgecolor="#37474F", labelcolor="white")
+                        s.set_color(spine_c)
+                    ax.grid(True, color=grid_c, lw=0.3, alpha=0.3)
+                    ax.legend(loc="upper left", fontsize=7, facecolor=leg_bg,
+                              edgecolor=spine_c, labelcolor=leg_fg)
 
                 # ── 最后一个轴: 成交额 ──
                 ax_vol = axes[-1]
                 ax_vol.bar(x, amt_yi, color=colors_candle, width=0.6)
-                ax_vol.set_ylabel("成交(亿)", color="#B0BEC5", fontsize=8)
-                ax_vol.tick_params(colors="#B0BEC5", labelsize=8)
+                ax_vol.set_ylabel("成交(亿)", color=tick_c, fontsize=8)
+                ax_vol.tick_params(colors=tick_c, labelsize=8)
                 for s in ax_vol.spines.values():
-                    s.set_color("#37474F")
-                ax_vol.grid(True, color="#37474F", lw=0.3, alpha=0.3)
+                    s.set_color(spine_c)
+                ax_vol.grid(True, color=grid_c, lw=0.3, alpha=0.3)
 
                 # 日期轴 (只在最底部)
                 tick_step = max(1, n // 10)
                 ax_vol.set_xticks(x[::tick_step])
                 try:
                     ax_vol.set_xticklabels([str(d)[:10] for d in dates[::tick_step]],
-                                           color="#B0BEC5", fontsize=7, rotation=30)
+                                           color=tick_c, fontsize=7, rotation=30)
                 except Exception:
                     pass
                 for a in axes[:-1]:
