@@ -2263,6 +2263,10 @@ class MartinMixin:
             _mk_chk(chk_frame, "RSI", var_rsi, "#42A5F5")
             _mk_chk(chk_frame, "CCI", var_cci, "#AB47BC")
 
+            # 🎯 情绪背景开关 (默认 OFF, 因为主界面可能自动设为"下行")
+            var_emo_bg = tk.BooleanVar(value=False)
+            _mk_chk(chk_frame, "🎨情绪背景", var_emo_bg, "#FFB74D")
+
             # ── matplotlib: 动态布局 ──
             import matplotlib
             matplotlib.use("TkAgg")
@@ -2288,22 +2292,25 @@ class MartinMixin:
                 n_axes = 1 + len(subplots_main) + 1  # 主图 + 副图 + 成交
                 height_ratios = [3] + [1.2] * len(subplots_main) + [1]
 
-                # ── 🎯 情绪周期动态背景色 (与主界面持仓Tab联动) ──
-                _ec_var = getattr(self, 'emotion_cycle_var', None)
-                _cycle = _ec_var.get() if _ec_var else None
+                # ── 🎯 情绪周期动态背景色 (🎨情绪背景勾选后才联动) ──
+                _cycle = None
+                if var_emo_bg.get():
+                    _ec_var = getattr(self, 'emotion_cycle_var', None)
+                    _cycle = _ec_var.get() if _ec_var else None
+
                 if _cycle == "上行":     # 绿色背景 (看多)
                     bg_fig = "#E8F5E9"; bg_ax = "#E8F5E9"
                     leg_bg = "#C8E6C9"; leg_fg = "#1B5E20"
                     spine_c = "#81C784"; grid_c = "#A5D6A7"
                     tick_c = "#388E3C"
-                    cloud_up = "#66BB6A"; cloud_dn = "#2E7D32"  # 多云更亮绿
+                    cloud_up = "#66BB6A"; cloud_dn = "#2E7D32"
                 elif _cycle == "下行":   # 红色背景 (看空)
                     bg_fig = "#FFEBEE"; bg_ax = "#FFEBEE"
                     leg_bg = "#FFCDD2"; leg_fg = "#B71C1C"
                     spine_c = "#EF9A9A"; grid_c = "#E57373"
                     tick_c = "#C62828"
-                    cloud_up = "#EF5350"; cloud_dn = "#B71C1C"  # 空云更深红
-                else:                    # 震荡/默认 深色背景
+                    cloud_up = "#EF5350"; cloud_dn = "#B71C1C"
+                else:                    # 默认 深色背景 (🎨情绪背景没勾 or 震荡)
                     bg_fig = "#0f0f23"; bg_ax = "#1a1a3e"
                     leg_bg = "#1a1a3e"; leg_fg = "white"
                     spine_c = "#37474F"; grid_c = "#37474F"
