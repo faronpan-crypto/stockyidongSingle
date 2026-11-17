@@ -13480,6 +13480,631 @@ def _show_help_popup(parent, key):
     # 关闭按钮
     ttk.Button(body, text="关闭", command=w.destroy).pack(pady=(12, 0))
 
+    # ═══════════════════════════════════════════════════════════
+    # 💰 价格提醒系统 (买入价/卖出价到价弹窗)
+    # ═══════════════════════════════════════════════════════════
+
+    def _alert_file_path(self):
+        """提醒数据 JSON 文件路径"""
+        return os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "..", "data", "price_alerts.json")
+
+    def _load_price_alerts(self):
+        """从 JSON 加载提醒列表"""
+        import uuid
+        _path = self._alert_file_path()
+        try:
+            if os.path.exists(_path):
+                with open(_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    # 容错: 确保每条有全部字段
+                    for a in data:
+                        a.setdefault("id", str(uuid.uuid4())[:8])
+                        a.setdefault("enabled", True)
+                        a.setdefault("triggered_buy", False)
+                        a.setdefault("triggered_sell", False)
+                        a.setdefault("note", "")
+                        a.setdefault("buy_price", 0)
+                        a.setdefault("sell_price", 0)
+                    return data
+        except Exception as e:
+            print(f"[💰提醒] 加载 JSON 失败: {e}", flush=True)
+        return []
+
+    def _save_price_alerts(self, alerts):
+        """保存提醒列表到 JSON"""
+        _path = self._alert_file_path()
+        try:
+            os.makedirs(os.path.dirname(_path), exist_ok=True)
+            with open(_path, "w", encoding="utf-8") as f:
+                json.dump(alerts, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            print(f"[💰提醒] 保存 JSON 失败: {e}", flush=True)
+            return False
+
+    def _fetch_realtime_prices(self, codes_6):
+        """腾讯行情批量拉取: [6位代码] → {code6: {"price": float, "pct": float, "name": str}}"""
+        if not codes_6:
+            return {}
+        import re as _re
+        # 6位代码 → 新浪前缀
+        def _sina(c6):
+            if c6.startswith(("600","601","603","605","688")): return f"sh{c6}"
+            if c6.startswith(("000","001","002","003","300","301")): return f"sz{c6}"
+            return None
+        sina_codes = [_sina(c) for c in codes_6 if _sina(c)]
+        if not sina_codes:
+            return {}
+        try:
+            import requests as _req
+            batch_size = 40
+            result = {}
+            for bi in range(0, len(sina_codes), batch_size):
+                batch = sina_codes[bi:bi + batch_size]
+                r = _req.get(f"https://qt.gtimg.cn/q={','.join(batch)}", timeout=8,
+                             headers={"User-Agent": "Mozilla/5.0", "Referer": "https://gu.qq.com/"})
+                for seg in r.text.strip().split(";"):
+                    if "=" not in seg or '"' not in seg:
+                        continue
+                    var_part, val_part = seg.split("=", 1)
+                    sina_code = var_part.split("_")[-1]
+                    m = _re.search(r"(\d{6})", sina_code)
+                    c6 = m.group(1) if m else sina_code
+                    fields = val_part.strip('"').split("~")
+                    if len(fields) < 5: continue
+                    name = fields[1] or fields[2] or ""
+                    try:
+                        now = float(fields[3]) if fields[3] else 0.0
+                        close = float(fields[4]) if fields[4] else 0.0
+                        pct = (now - close) / close * 100 if close > 0 else 0.0
+                    except:
+                        now = 0.0; pct = 0.0
+                    result[c6] = {"price": round(now, 2), "pct": round(pct, 2), "name": name}
+            return result
+        except Exception as e:
+            print(f"[💰提醒] 腾讯行情拉取失败: {e}", flush=True)
+            return {}
+
+    def _start_price_alert_monitor(self):
+        """启动后台价格提醒监控定时器 (每 15s 检查一次)"""
+        if getattr(self, "_price_alert_monitoring", False):
+            return
+        self._price_alert_monitoring = True
+        self._price_alert_poll_count = 0
+        self._price_alert_popup_active = False
+        print("[💰提醒] ✅ 监控定时器启动 (每15s检查)", flush=True)
+        self._poll_price_alerts()
+
+    def _stop_price_alert_monitor(self):
+        """停止监控"""
+        self._price_alert_monitoring = False
+        self._price_alert_next_id = None
+        print("[💰提醒] ⏹ 监控定时器停止", flush=True)
+
+    def _poll_price_alerts(self):
+        """定时轮询: 拉取行情 → 检查到价 → 触发提醒"""
+        if not getattr(self, "_price_alert_monitoring", False):
+            return
+        try:
+            alerts = getattr(self, "_price_alerts_cache", None)
+            if alerts is None:
+                alerts = self._load_price_alerts()
+                self._price_alerts_cache = alerts
+            # 取启用中的提醒
+            enabled = [a for a in alerts if a.get("enabled", True)]
+            if enabled:
+                codes = [a["code"] for a in enabled if a.get("code")]
+                prices = self._fetch_realtime_prices(codes)
+                self._price_alert_poll_count += 1
+                # 每 20 轮 (5 min) 打印一次状态
+                if self._price_alert_poll_count % 20 == 0:
+                    print(f"[💰提醒] 轮询 #{self._price_alert_poll_count}: "
+                          f"启用 {len(enabled)} 只, 拉到 {len(prices)} 只行情", flush=True)
+
+                # 检查触发
+                triggered_events = []  # [(alert, direction, current_price)]
+                changed = False
+                for alert in enabled:
+                    c6 = alert.get("code", "")
+                    rt = prices.get(c6)
+                    if not rt:
+                        continue
+                    cur_price = rt["price"]
+                    buy_p = float(alert.get("buy_price", 0) or 0)
+                    sell_p = float(alert.get("sell_price", 0) or 0)
+                    name = rt.get("name", alert.get("name", ""))
+                    alert["name"] = name  # 更新名称
+
+                    # 买入触发: 现价 ≤ 买入价 (往下到)
+                    if buy_p > 0 and cur_price > 0 and cur_price <= buy_p and not alert.get("triggered_buy", False):
+                        alert["triggered_buy"] = True
+                        alert["last_triggered_buy_price"] = cur_price
+                        alert["last_triggered_buy_time"] = time.strftime("%H:%M:%S")
+                        triggered_events.append((alert, "buy", cur_price))
+                        changed = True
+
+                    # 卖出触发: 现价 ≥ 卖出价 (往上到)
+                    if sell_p > 0 and cur_price > 0 and cur_price >= sell_p and not alert.get("triggered_sell", False):
+                        alert["triggered_sell"] = True
+                        alert["last_triggered_sell_price"] = cur_price
+                        alert["last_triggered_sell_time"] = time.strftime("%H:%M:%S")
+                        triggered_events.append((alert, "sell", cur_price))
+                        changed = True
+
+                if changed:
+                    self._save_price_alerts(alerts)
+                    self._price_alerts_cache = alerts
+
+                if triggered_events and not getattr(self, "_price_alert_popup_active", False):
+                    self.root.after(0, lambda evts=triggered_events: self._show_price_alert_trigger_popup(evts))
+        except Exception as e:
+            print(f"[💰提醒] 轮询异常: {e}", flush=True)
+
+        # 下一轮定时器 (15s)
+        if getattr(self, "_price_alert_monitoring", False):
+            self._price_alert_next_id = self.root.after(15000, self._poll_price_alerts)
+
+    def _show_price_alert_trigger_popup(self, triggered_events):
+        """到价提醒弹窗 (醒目 TopLevel)"""
+        self._price_alert_popup_active = True
+        w = tk.Toplevel(self.root)
+        w.title("💰 价格提醒 — 到价啦!")
+        w.configure(bg="#B71C1C")
+        w.geometry("720x480")
+        w.attributes("-topmost", True)
+        try: w.lift(); w.focus_force()
+        except: pass
+
+        def _on_close():
+            self._price_alert_popup_active = False
+            w.destroy()
+
+        w.protocol("WM_DELETE_WINDOW", _on_close)
+
+        # 🎨 红色顶栏 + 闪烁效果
+        header = tk.Frame(w, bg="#B71C1C", height=64)
+        header.pack(fill=tk.X)
+        tk.Label(header, text="🔔 价格到价提醒!", bg="#B71C1C", fg="white",
+                 font=("Microsoft YaHei", 20, "bold")).pack(side=tk.LEFT, padx=24, pady=14)
+        tk.Label(header, text=f"{time.strftime('%H:%M:%S')}", bg="#B71C1C", fg="#FFEBEE",
+                 font=("", 14)).pack(side=tk.RIGHT, padx=24, pady=20)
+
+        body = tk.Frame(w, bg="#263238")
+        body.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # 表格
+        cols = ("code", "name", "direction", "trigger", "current", "pct", "note")
+        tv = ttk.Treeview(body, columns=cols, show="headings", height=12)
+        for c, t, w_ in [("code","代码",70),("name","名称",100),("direction","方向",80),
+                         ("trigger","触发价",85),("current","现价",85),("pct","距触发",80),("note","备注",180)]:
+            tv.heading(c, text=t)
+            tv.column(c, width=w_, anchor=tk.CENTER, stretch=True)
+        vsb = ttk.Scrollbar(body, orient="vertical", command=tv.yview)
+        tv.configure(yscrollcommand=vsb.set)
+        tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        tv.tag_configure("buy", background="#1B5E20", foreground="#A5D6A7")
+        tv.tag_configure("sell", background="#B71C1C", foreground="#FFCDD2")
+
+        # 填充
+        for alert, direction, cur in triggered_events:
+            c6 = alert.get("code", "")
+            name = alert.get("name", "")
+            buy_p = float(alert.get("buy_price", 0) or 0)
+            sell_p = float(alert.get("sell_price", 0) or 0)
+            note = alert.get("note", "")[:16]
+            if direction == "buy":
+                trig = buy_p
+                tag = "buy"
+                dir_text = "🟢买入"
+                # 距触发: 现价 <= 买入价, 差值 = 触发价 - 现价
+                diff = trig - cur
+                diff_pct = diff / max(trig, 0.01) * 100
+                diff_disp = f"低 {diff:.2f} ({diff_pct:.1f}%)"
+            else:
+                trig = sell_p
+                tag = "sell"
+                dir_text = "🔴卖出"
+                diff = cur - trig
+                diff_pct = diff / max(trig, 0.01) * 100
+                diff_disp = f"高 {diff:.2f} ({diff_pct:.1f}%)"
+            tv.insert("", "end", values=(c6, name, dir_text, f"{trig:.2f}", f"{cur:.2f}", diff_disp, note), tags=(tag,))
+
+        # 底部按钮
+        btn_frame = tk.Frame(w, bg="#263238")
+        btn_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        def _mark_handled():
+            """标记为已处理 (重置 triggered 标记, 继续监控)"""
+            alerts = self._load_price_alerts()
+            for alert, direction, _cur in triggered_events:
+                for a in alerts:
+                    if a.get("id") == alert.get("id"):
+                        if direction == "buy":
+                            a["triggered_buy"] = False
+                        else:
+                            a["triggered_sell"] = False
+            self._save_price_alerts(alerts)
+            self._price_alerts_cache = alerts
+            _on_close()
+
+        def _snooze():
+            """忽略本次 (保持 triggered, 不弹了 — 等用户手动重置)"""
+            _on_close()
+
+        ttk.Button(btn_frame, text="✅ 标记已处理 (重置)", command=_mark_handled).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="📊 全部看K线",
+                   command=lambda: (self._price_alert_open_all_kline(triggered_events), _mark_handled())
+                   ).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="🔕 忽略本次 (不再提醒)", command=_snooze).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="关闭", command=_on_close).pack(side=tk.RIGHT, padx=4)
+
+        # 播放系统提示音 (异步)
+        try:
+            import threading as _th
+            def _beep():
+                for _ in range(3):
+                    try: self.root.bell()
+                    except: pass
+                    time.sleep(0.3)
+            _th.Thread(target=_beep, daemon=True).start()
+        except: pass
+
+    def _price_alert_open_all_kline(self, events):
+        """批量打开 K 线"""
+        for alert, _dir, _cur in events:
+            try:
+                c6 = alert.get("code", "")
+                name = alert.get("name", "")
+                if c6:
+                    self.root.after(100, lambda c=c6, n=name: self._show_kline_or_analyze(c, n))
+            except Exception:
+                pass
+
+    def _show_price_alert_dialog(self):
+        """💰 价格提醒主弹窗 (添加/删除/管理所有提醒)"""
+        if hasattr(self, "_price_alert_window") and self._price_alert_window:
+            if self._price_alert_window.winfo_exists():
+                self._price_alert_window.deiconify()
+                self._price_alert_window.lift()
+                return
+            self._price_alert_window = None
+
+        import uuid as _uuid
+        w = self._safe_toplevel(self.root)
+        w.title("💰 价格提醒管理")
+        w.geometry("1100x680")
+        w.transient(getattr(self, 'root', None))
+        w.configure(bg="#1a1a3e")
+        w.minsize(900, 550)
+        try: w.grab_set()
+        except: pass
+        self._price_alert_window = w
+
+        alerts = self._load_price_alerts()
+        self._price_alerts_cache = alerts
+
+        def _on_close():
+            if self._price_alert_window:
+                self._price_alert_window.destroy()
+            self._price_alert_window = None
+
+        w.protocol("WM_DELETE_WINDOW", _on_close)
+
+        # ── 顶部: 添加提醒表单 ──
+        add_frame = tk.LabelFrame(w, text="➕ 添加提醒", bg="#1a1a3e", fg="#FFD54F",
+                                   font=("", 11, "bold"), padx=10, pady=8)
+        add_frame.pack(fill=tk.X, padx=10, pady=(10, 6))
+
+        tk.Label(add_frame, text="代码:", bg="#1a1a3e", fg="white", font=("", 11)).grid(row=0, column=0, sticky="w", padx=3)
+        code_var = tk.StringVar()
+        code_entry = ttk.Entry(add_frame, textvariable=code_var, width=10, font=("", 11))
+        code_entry.grid(row=0, column=1, padx=3)
+        tk.Label(add_frame, text="(6位, 如 600519)", bg="#1a1a3e", fg="#888", font=("", 9)).grid(row=0, column=2, sticky="w")
+
+        tk.Label(add_frame, text="名称:", bg="#1a1a3e", fg="white", font=("", 11)).grid(row=0, column=3, sticky="w", padx=(12, 3))
+        name_var = tk.StringVar()
+        ttk.Entry(add_frame, textvariable=name_var, width=10, font=("", 11)).grid(row=0, column=4, padx=3)
+
+        tk.Label(add_frame, text="买入价≤:", bg="#1a1a3e", fg="#A5D6A7", font=("", 11)).grid(row=0, column=5, sticky="w", padx=(12, 3))
+        buy_var = tk.StringVar()
+        ttk.Entry(add_frame, textvariable=buy_var, width=8, font=("", 11)).grid(row=0, column=6, padx=3)
+
+        tk.Label(add_frame, text="卖出价≥:", bg="#1a1a3e", fg="#FFCDD2", font=("", 11)).grid(row=0, column=7, sticky="w", padx=(12, 3))
+        sell_var = tk.StringVar()
+        ttk.Entry(add_frame, textvariable=sell_var, width=8, font=("", 11)).grid(row=0, column=8, padx=3)
+
+        tk.Label(add_frame, text="备注:", bg="#1a1a3e", fg="white", font=("", 11)).grid(row=0, column=9, sticky="w", padx=(12, 3))
+        note_var = tk.StringVar()
+        ttk.Entry(add_frame, textvariable=note_var, width=14, font=("", 11)).grid(row=0, column=10, padx=3)
+
+        # 快捷填充: 从主界面持仓/自选里选
+        def _quick_fill(code6):
+            """根据代码自动填充名称 (如果能查到)"""
+            code_var.set(code6)
+            try:
+                rt = self._fetch_realtime_prices([code6])
+                info = rt.get(code6)
+                if info:
+                    name_var.set(info.get("name", ""))
+            except: pass
+
+        def _lookup_code():
+            """自动补全名称"""
+            c = code_var.get().strip()
+            if c and len(c) == 6:
+                try:
+                    rt = self._fetch_realtime_prices([c])
+                    info = rt.get(c)
+                    if info:
+                        name_var.set(info.get("name", ""))
+                except: pass
+
+        ttk.Button(add_frame, text="🔍查名", width=6, command=_lookup_code).grid(row=0, column=11, padx=(6, 3))
+
+        def _add_alert():
+            c = code_var.get().strip()
+            nm = name_var.get().strip()
+            b = buy_var.get().strip()
+            s = sell_var.get().strip()
+            nt = note_var.get().strip()
+            if not c or len(c) != 6 or not c.isdigit():
+                messagebox.showwarning("提示", "请输入 6 位数字代码", parent=w); return
+            buy_p = float(b) if b else 0
+            sell_p = float(s) if s else 0
+            if buy_p <= 0 and sell_p <= 0:
+                messagebox.showwarning("提示", "买入价或卖出价至少填一个", parent=w); return
+            # 自动补名
+            if not nm:
+                try:
+                    rt = self._fetch_realtime_prices([c])
+                    nm = rt.get(c, {}).get("name", c)
+                except: nm = c
+            new_item = {
+                "id": str(_uuid.uuid4())[:8],
+                "code": c, "name": nm,
+                "buy_price": buy_p, "sell_price": sell_p,
+                "note": nt,
+                "enabled": True,
+                "triggered_buy": False, "triggered_sell": False,
+            }
+            alerts.append(new_item)
+            self._save_price_alerts(alerts)
+            self._price_alerts_cache = alerts
+            # 清空输入
+            code_var.set(""); name_var.set(""); buy_var.set(""); sell_var.set(""); note_var.set("")
+            _refresh_table()
+
+        ttk.Button(add_frame, text="✅ 添加", command=_add_alert).grid(row=0, column=12, padx=(12, 0))
+
+        # ── 中间: 表格 ──
+        cols = ("sel", "code", "name", "buy", "sell", "cur", "pct", "stat", "note")
+        tv_frame = tk.Frame(w, bg="#1a1a3e")
+        tv_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
+
+        tv = ttk.Treeview(tv_frame, columns=cols, show="headings", height=18)
+        for c, t, w_, an in [("sel","✓",32,"center"),("code","代码",72,"center"),
+                             ("name","名称",110,"w"),("buy","买入≤",82,"center"),
+                             ("sell","卖出≥",82,"center"),("cur","现价",78,"center"),
+                             ("pct","%",62,"center"),("stat","状态",120,"center"),
+                             ("note","备注",180,"w")]:
+            tv.heading(c, text=t); tv.column(c, width=w_, anchor=an, stretch=True)
+        vsb = ttk.Scrollbar(tv_frame, orient="vertical", command=tv.yview)
+        tv.configure(yscrollcommand=vsb.set)
+        tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        tv.tag_configure("enabled", foreground="#E0E0E0")
+        tv.tag_configure("disabled", foreground="#666666")
+        tv.tag_configure("buy_hit", background="#1B5E20", foreground="#A5D6A7")
+        tv.tag_configure("sell_hit", background="#B71C1C", foreground="#FFCDD2")
+
+        def _refresh_table():
+            """刷新表格 + 拉取实时行情"""
+            for iid in tv.get_children():
+                tv.delete(iid)
+            # 拉行情
+            codes = [a["code"] for a in alerts if a.get("code")]
+            prices = self._fetch_realtime_prices(codes) if codes else {}
+            for i, alert in enumerate(alerts):
+                c6 = alert.get("code", "")
+                nm = alert.get("name", "")
+                buy_p = float(alert.get("buy_price", 0) or 0)
+                sell_p = float(alert.get("sell_price", 0) or 0)
+                note = alert.get("note", "")
+                enabled = alert.get("enabled", True)
+                rt = prices.get(c6, {})
+                cur = rt.get("price", 0)
+                pct = rt.get("pct", 0)
+                # 状态
+                triggered_buy = alert.get("triggered_buy", False)
+                triggered_sell = alert.get("triggered_sell", False)
+                if not enabled:
+                    stat = "⚪ 已禁用"
+                    tag = "disabled"
+                elif triggered_buy and triggered_sell:
+                    stat = "🔴🟢 买卖都已触发"
+                    tag = "sell_hit"
+                elif triggered_buy:
+                    stat = "🟢 买入已触发"
+                    tag = "buy_hit"
+                elif triggered_sell:
+                    stat = "🔴 卖出已触发"
+                    tag = "sell_hit"
+                elif buy_p > 0 and cur > 0 and cur <= buy_p:
+                    stat = "🎯 可买 (现价≤买入)"
+                    tag = "buy_hit"
+                elif sell_p > 0 and cur > 0 and cur >= sell_p:
+                    stat = "🎯 可卖 (现价≥卖出)"
+                    tag = "sell_hit"
+                else:
+                    stat = "🟢 监控中"
+                    tag = "enabled"
+                # 更新名称
+                if rt.get("name") and rt["name"] != nm:
+                    alert["name"] = rt["name"]
+                buy_disp = f"{buy_p:.2f}" if buy_p > 0 else "-"
+                sell_disp = f"{sell_p:.2f}" if sell_p > 0 else "-"
+                cur_disp = f"{cur:.2f}" if cur > 0 else "-"
+                pct_disp = f"{pct:+.2f}%" if cur > 0 else "-"
+                # 第一列: 勾选 (用 ☑/☐ 字符)
+                mark = "☑" if enabled else "☐"
+                tv.insert("", "end", iid=str(i),
+                          values=(mark, c6, nm, buy_disp, sell_disp, cur_disp, pct_disp, stat, note[:20]),
+                          tags=(tag,))
+            self._save_price_alerts(alerts)
+            self._price_alerts_cache = alerts
+
+        # 点击行切换启用/禁用
+        def _on_click_row(evt):
+            sel = tv.selection()
+            if not sel: return
+            iid = sel[0]
+            idx = int(iid)
+            if 0 <= idx < len(alerts):
+                alerts[idx]["enabled"] = not alerts[idx].get("enabled", True)
+                _refresh_table()
+
+        # 双击编辑
+        def _on_double_click(evt):
+            sel = tv.selection()
+            if not sel: return
+            iid = sel[0]
+            idx = int(iid)
+            if 0 <= idx < len(alerts):
+                a = alerts[idx]
+                _edit_alert_inline(idx, a)
+
+        tv.bind("<<TreeviewSelect>>", lambda e: _on_click_row(e))
+        tv.bind("<Double-1>", _on_double_click)
+
+        def _edit_alert_inline(idx, a):
+            """弹窗编辑某一条"""
+            edit_win = tk.Toplevel(w)
+            edit_win.title(f"编辑 {a.get('code','')} {a.get('name','')}")
+            edit_win.geometry("380x240")
+            edit_win.configure(bg="#1a1a3e")
+            edit_win.transient(w)
+            edit_win.grab_set()
+
+            def _row(parent, label, var, row):
+                tk.Label(parent, text=label, bg="#1a1a3e", fg="white", font=("", 11)).grid(row=row, column=0, sticky="w", padx=6, pady=4)
+                ttk.Entry(parent, textvariable=var, width=22, font=("", 11)).grid(row=row, column=1, padx=6, pady=4, sticky="w")
+
+            cv = tk.StringVar(value=a.get("code", ""))
+            nv = tk.StringVar(value=a.get("name", ""))
+            bv = tk.StringVar(value=str(a.get("buy_price", 0) or ""))
+            sv = tk.StringVar(value=str(a.get("sell_price", 0) or ""))
+            ntv = tk.StringVar(value=a.get("note", ""))
+
+            _row(edit_win, "代码", cv, 0)
+            _row(edit_win, "名称", nv, 1)
+            _row(edit_win, "买入价≤", bv, 2)
+            _row(edit_win, "卖出价≥", sv, 3)
+            _row(edit_win, "备注", ntv, 4)
+
+            def _save():
+                a["code"] = cv.get().strip()
+                a["name"] = nv.get().strip()
+                try: a["buy_price"] = float(bv.get()) if bv.get().strip() else 0
+                except: a["buy_price"] = 0
+                try: a["sell_price"] = float(sv.get()) if sv.get().strip() else 0
+                except: a["sell_price"] = 0
+                a["note"] = ntv.get().strip()
+                self._save_price_alerts(alerts)
+                self._price_alerts_cache = alerts
+                _refresh_table()
+                edit_win.destroy()
+
+            btn_frame = tk.Frame(edit_win, bg="#1a1a3e"); btn_frame.grid(row=5, column=0, columnspan=2, pady=10)
+            ttk.Button(btn_frame, text="保存", command=_save, width=10).pack(side=tk.LEFT, padx=6)
+            ttk.Button(btn_frame, text="取消", command=edit_win.destroy, width=10).pack(side=tk.LEFT, padx=6)
+
+        # ── 底部按钮栏 ──
+        btn_bar = tk.Frame(w, bg="#1a1a3e")
+        btn_bar.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        def _delete_selected():
+            sel = tv.selection()
+            if not sel:
+                messagebox.showinfo("提示", "请先点选要删除的行", parent=w); return
+            if not messagebox.askyesno("确认", f"删除选中的 {len(sel)} 条?", parent=w): return
+            idxs = sorted([int(i) for i in sel], reverse=True)
+            for i in idxs:
+                if 0 <= i < len(alerts):
+                    alerts.pop(i)
+            self._save_price_alerts(alerts)
+            self._price_alerts_cache = alerts
+            _refresh_table()
+
+        def _reset_triggered():
+            """重置所有已触发的标记 (让监控重新到价就弹)"""
+            cnt = 0
+            for a in alerts:
+                if a.get("triggered_buy") or a.get("triggered_sell"):
+                    a["triggered_buy"] = False
+                    a["triggered_sell"] = False
+                    cnt += 1
+            if cnt == 0:
+                messagebox.showinfo("提示", "没有已触发的提醒", parent=w); return
+            self._save_price_alerts(alerts)
+            self._price_alerts_cache = alerts
+            _refresh_table()
+            messagebox.showinfo("完成", f"已重置 {cnt} 条已触发提醒", parent=w)
+
+        def _disable_all():
+            for a in alerts:
+                a["enabled"] = False
+            self._save_price_alerts(alerts)
+            self._price_alerts_cache = alerts
+            _refresh_table()
+
+        def _enable_all():
+            for a in alerts:
+                a["enabled"] = True
+            self._save_price_alerts(alerts)
+            self._price_alerts_cache = alerts
+            _refresh_table()
+
+        ttk.Button(btn_bar, text="🗑️ 删除选中", command=_delete_selected).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btn_bar, text="🔄 重置已触发", command=_reset_triggered).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btn_bar, text="✅ 全部启用", command=_enable_all).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btn_bar, text="⚪ 全部禁用", command=_disable_all).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btn_bar, text="🔄 刷新行情", command=_refresh_table).pack(side=tk.LEFT, padx=3)
+
+        # 右侧: 监控开关 + 状态
+        monitor_var = tk.BooleanVar(value=getattr(self, "_price_alert_monitoring", False))
+
+        def _toggle_monitor():
+            if monitor_var.get():
+                self._start_price_alert_monitor()
+            else:
+                self._stop_price_alert_monitor()
+
+        mon_frame = tk.Frame(btn_bar, bg="#1a1a3e")
+        mon_frame.pack(side=tk.RIGHT, padx=6)
+        ttk.Checkbutton(mon_frame, text="🔔 后台监控 (每15s)", variable=monitor_var,
+                        command=_toggle_monitor).pack(side=tk.RIGHT, padx=3)
+
+        # 数量统计
+        enabled_cnt = sum(1 for a in alerts if a.get("enabled", True))
+        tk.Label(btn_bar, text=f"📊 共 {len(alerts)} 只, 启用 {enabled_cnt} 只",
+                 bg="#1a1a3e", fg="#90CAF9", font=("", 10)).pack(side=tk.RIGHT, padx=10)
+
+        # 首次刷新
+        _refresh_table()
+
+        # 如果有启用的提醒, 默认启动监控
+        if enabled_cnt > 0 and not getattr(self, "_price_alert_monitoring", False):
+            self.root.after(1000, self._start_price_alert_monitor)
+
+        print(f"[💰提醒] 主弹窗打开: {len(alerts)} 只提醒", flush=True)
+
+
 def _section_card(parent, title, color, content):
     """帮助弹窗内的彩色分区卡片"""
     card = tk.Frame(parent, bg="white", highlightthickness=1, highlightbackground="#E0E0E0")

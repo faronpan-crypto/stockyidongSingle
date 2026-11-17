@@ -4968,6 +4968,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         try:
             _ROW2 = [
                 ("🦅游资心法", 8, self._open_hotmoney_single_dialog),
+                ("💰提醒", 6, self._show_price_alert_dialog),
                 ("🎯Martin操盘", 10, self._show_martin_dialog),
                 ("🎯高抛低吸", 8, self._show_high_low_swing),
                 ("🎯超跌", 7, self._show_oversold_dialog),
@@ -6710,6 +6711,17 @@ def main():
             except Exception as e:
                 print(f"自动打开数据表窗口失败: {e}")
         print(f"🚀 about to enter mainloop at {__import__('time').time()}", flush=True)
+        # 自动恢复价格提醒监控 (如果有启用的提醒)
+        try:
+            def _auto_start_price_alert():
+                alerts = app._load_price_alerts() if hasattr(app, '_load_price_alerts') else []
+                _enabled = sum(1 for a in alerts if a.get("enabled", True))
+                if _enabled > 0:
+                    print(f"[💰提醒] 自动恢复监控: {_enabled} 只提醒待监控", flush=True)
+                    app._start_price_alert_monitor()
+            root.after(3000, _auto_start_price_alert)
+        except Exception as _pe:
+            print(f"[💰提醒] 自动恢复失败 (忽略): {_pe}", flush=True)
         # 主窗口显示后, 不再自动后台加载大盘最新数据 — 用户明确反馈"启动不需要自动联网"
         # 需要时点大盘分析 Tab 右上角 🔄 按钮手动触发 (与程序启动零联网纪律一致)
         # try:
