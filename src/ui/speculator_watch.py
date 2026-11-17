@@ -957,6 +957,57 @@ def show_speculator_watch(root=None, app=None, parent_frame=None):
     tk.Button(header, text="💾 保存快照", width=10, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#2E7D32", highlightthickness=2, bd=1,
               font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
               command=_do_save_snapshot).pack(side=tk.LEFT, padx=4, pady=10)
+
+    # 🆕 🔄 刷新所有数据按钮
+    def _do_refresh_all():
+        """重跑所有刷新函数, 刷新按钮按下所有数据重新获取"""
+        print("[👁️看盘] 🔄 用户手动刷新!", flush=True)
+        # 先清缓存 (让 akshare/tushare 重新拉)
+        try:
+            _AK_SPOT_CACHE["time"] = 0
+            _AK_BLOCK_CACHE["time"] = 0
+            _TUSHARE_DAILY_CACHE["time"] = 0
+            _TUSHARE_SB_CACHE["time"] = 0
+        except Exception:
+            pass
+        # 顶栏显示"刷新中..."
+        if hasattr(win, '_data_date_lbl'):
+            win._data_date_lbl.config(text="🔄 刷新中...", fg="#FFD54F")
+
+        def _bg_reload():
+            import threading as _th2
+            import time as _t2
+            jobs = [
+                ("sign_decision", _refresh_sign_decision),
+                ("blocks", _refresh_all_blocks),
+                ("volume", _refresh_volume),
+                ("cycle", _refresh_cycle),
+                ("status", _refresh_status),
+                ("futures", _refresh_futures),
+                ("limitup", _load_limitup_dropdown),
+                ("analysis", _refresh_watch_analysis),
+                ("orderbook", _load_orderbook),
+                ("block_canvas", _refresh_block_canvas),
+            ]
+            for _n, _f in jobs:
+                t0 = _t2.time()
+                try:
+                    _f(win)
+                    print(f"[👁️看盘] 🔄 {_n} ✅ ({_t2.time()-t0:.1f}s)", flush=True)
+                except Exception as _e:
+                    print(f"[👁️看盘] 🔄 {_n} ❌ {_e}", flush=True)
+            # akshare 也重拉
+            try:
+                _get_ak_blocks(); _get_ak_spot()
+                win.after(0, lambda: _refresh_all_blocks(win))
+            except Exception:
+                pass
+            print("[👁️看盘] 🔄 ✅ 全部刷新完成!", flush=True)
+        _th2.Thread(target=_bg_reload, daemon=True).start()
+
+    tk.Button(header, text="🔄 刷新", width=8, bg="#1565C0", fg="#FFFFFF", activebackground="#1976D2", bd=1,
+              font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
+              command=_do_refresh_all).pack(side=tk.LEFT, padx=4, pady=10)
     tk.Button(header, text="📜 回看历史", width=10, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#6A1B9A", highlightthickness=2, bd=1,
               font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
               command=_open_history_dialog).pack(side=tk.LEFT, padx=4, pady=10)
@@ -1067,7 +1118,11 @@ def show_speculator_watch(root=None, app=None, parent_frame=None):
     right_nb.add(tab_canvas, text=" 🗂️ 板块画布 ")
     _build_block_canvas_panel(tab_canvas, win)
 
-    win.protocol("WM_DELETE_WINDOW", lambda: (setattr(win, "_running", False), win.destroy()))
+    # 嵌入模式 (Frame) 没有 protocol, 跳过
+    try:
+        win.protocol("WM_DELETE_WINDOW", lambda: (setattr(win, "_running", False), win.destroy()))
+    except Exception:
+        pass  # parent_frame 嵌入模式 (Frame 不是 Toplevel, 无 protocol)
 
     print("[👁️看盘] 六区构建完成, 立刻填充本地数据...", flush=True)
 
