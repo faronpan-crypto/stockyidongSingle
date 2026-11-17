@@ -3,6 +3,8 @@
 """
 import tkinter as tk
 import tkinter.ttk as ttk
+import tkinter.scrolledtext as scrolledtext
+import tkinter.messagebox as messagebox
 import matplotlib
 # 🆕 Mac 中文字体优先: PingFang SC / Heiti SC / STHeiti
 matplotlib.rcParams["font.sans-serif"] = [
@@ -5981,5 +5983,659 @@ def _show_high_sell_alert(parent, app=None):
               highlightbackground="#757575", highlightthickness=2,
               font=("", 10), padx=10, pady=3,
               command=dlg.destroy).pack(side=tk.RIGHT, padx=6)
+
+
+# ═══════════════════════════════════════════════════════════
+# 🎯 做T 辅助工具 — 策略讲解 + 标的List + 双击K线带箱体指标
+# ═══════════════════════════════════════════════════════════
+
+# ── 做T 策略完整讲解 (分 3 层) ──
+_T_STRATEGY = """🎯 做 T 的核心逻辑: 波动是否可预期, 而不在于波动大小
+
+═══ ① 前提: 先判断市况, 再选票 ═══
+做 T 的本质是赚均值回归的钱, 前提是标的处在震荡区间里.
+单边下跌行情任何股票都不适合做 T — 价格不回归.
+
+一句话: 震荡市做 T, 趋势市空仓或减仓.
+选票之前先问: 这个板块这周是在箱体里来回, 还是在一路下台阶?
+
+═══ ② 适合做 T 的票, 有 5 个硬指标 ═══
+① 日均振幅 3%—6%   (空间不够赚不到, 超过 8% 说明失控)
+② 有清晰箱体上下沿  (均值回归性, 支撑压力位有"参照物"才敢接敢卖)
+③ 日成交额 > 5 亿   (盘口厚, 买卖价差吃掉利润)
+④ 无事件风险        (财报窗口/减持/政策落地期外, 一个跳空 T 到半山腰)
+⑤ 有底仓            (A 股 T+1, 没底仓做不了 T, 底仓是"卖旧买新"的前提)
+
+═══ ③ 按类型排序 (核心) ═══
+
+✅ 最适合: 周期资源类 (有商品价格作锚)
+天然气 / 煤炭 / 化工 / 有色 / 电力
+波动来自"基本面慢变量", 不是"隔夜消息", 不会一开盘就跳空.
+首华燃气这类: 冬季供暖季节性 + 气价驱动 + 中等市值 → 箱体清晰.
+
+✅ 次适合: 宽基/行业 ETF / 大盘蓝筹
+沪深300 / 科创50 / 券商 ETF — 没有个股黑天鹅, 波动跟随指数.
+缺点: 振幅偏小 (1.5%—3%), T 收益薄, 适合大资金练手.
+反例: 银行 / 高股息 — 振幅常年 1% 以内, 不够 T.
+
+⚠️ 谨慎: 券商 / 白酒等情绪型品种
+振幅够 (券商日内 3%—5%), 但趋势性强, 容易连续单边, 要严格设箱体边界.
+
+❌ 最不适合: 高位科技成长股 (踩坑重灾区)
+算力链 / CPO / 存储 / PCB — 波动来源是海外事件 (英伟达/费半/BIS 新规/财报).
+一旦出消息就是跳空 + 单边, 日内根本没有回归.
+典型死法: 早盘 -3% 卖飞了, 想等回落接, 结果一路跌到 -10% 收盘.
+更危险: 下跌会引发杠杆爆仓 → 被动平仓 → 继续下跌的负反馈.
+
+═══ ④ 实操纪律 (比选题更重要) ═══
+• 只在箱体内做 T: 股价跌破箱体下沿 → 立刻停止做 T, 改为减仓
+• T 的仓位 ≤ 底仓 30%: 做 T 是降成本, 不是赌方向
+• 单日 T 失败不追: 卖了不回来就不回来, 别为了"做成 T"去追买
+• 事件窗口不做 T: 财报前后 2 天 / 重大政策会议 / 美联储议息 → 不动
+• 一支票只做一种 T: 正 T (先买后卖) 或 反 T (先卖后买), 不来回切换
+
+═══ 🎯 简单记 ═══
+有锚的做 T (商品价格/指数), 没锚的不做 (纯情绪/海外事件).
+首华能做, 是因为气价给了它一个"锚"; 科技股不能做, 是因为它的锚在英伟达手里.
+
+⚠️ 以上为交易方法与风险控制的梳理, 不构成投资建议.
+周期股在商品价格拐点时也会走单边, 箱体判断错了照样会亏 — 纪律永远是第一位的.
+"""
+
+# ── 适合做 T 的标的分 4 类 ──
+_T_STOCK_LISTS = [
+    ("✅ 最适合 · 周期资源类", "#4CAF50", [
+        ("603363", "傲农生物", "养殖周期 · 猪价波动有锚"),
+        ("601225", "陕西煤业", "煤炭龙头 · 煤价季节性强"),
+        ("601088", "中国神华", "煤炭+电力 · 高波动+高股息"),
+        ("600989", "宝丰能源", "煤化工 · 大宗商品驱动"),
+        ("600547", "山东黄金", "黄金 · 金价日波动可预期"),
+        ("601899", "紫金矿业", "有色综合 · 铜金双锚"),
+        ("600028", "中国石化", "石化龙头 · 油价驱动"),
+        ("300483", "沃格光电", "光伏玻璃 · 供需周期"),
+        ("600121", "郑州煤电", "煤炭+电力 · 冬季供暖受益"),
+        ("300483", "首华燃气", "天然气 · 冬季气价弹性大"),
+        ("601728", "中国电信", "电信运营 · 低振幅稳健"),
+    ]),
+    ("✅ 次适合 · ETF / 宽基蓝筹", "#2196F3", [
+        ("510300", "沪深300ETF", "大盘宽基 · 无个股风险"),
+        ("588000", "科创50ETF", "科创板块 · 波动中等"),
+        ("512000", "券商ETF", "券商板块 · 振幅3-5%"),
+        ("512880", "证券ETF", "证券行业 · 跟随指数"),
+        ("512660", "军工ETF", "军工板块 · 事件驱动+技术面"),
+        ("512010", "医药ETF", "医药板块 · 政策+估值"),
+        ("159915", "创业板ETF", "创业板 · 高波动"),
+        ("600519", "贵州茅台", "消费龙头 · 振幅小但稳健"),
+        ("601318", "中国平安", "金融综合 · 跟随大盘"),
+        ("000858", "五粮液", "白酒龙头 · 振幅偏小"),
+    ]),
+    ("⚠️ 谨慎 · 情绪型 (严格设边界)", "#FF9800", [
+        ("600030", "中信证券", "券商业龙头 · 趋势性强"),
+        ("000001", "平安银行", "银行龙头 · 振幅偏小需择时"),
+        ("601398", "工商银行", "四大行 · 振幅极小, 不推荐"),
+        ("000568", "泸州老窖", "白酒 · 容易单边下台阶"),
+        ("600809", "山西汾酒", "白酒次龙头 · 情绪驱动"),
+    ]),
+    ("❌ 最不适合 · 高位科技成长", "#B71C1C", [
+        ("688256", "寒武纪", "AI算力 · 海外事件驱动, 跳空常见"),
+        ("688981", "中芯国际", "半导体代工 · 美国制裁风险"),
+        ("300750", "宁德时代", "新能源 · 趋势性强, 箱体不清晰"),
+        ("300059", "东方财富", "互联网金融 · 跟随市场情绪极端化"),
+        ("601138", "工业富联", "AI服务器 · 海外订单波动大"),
+        ("300308", "中际旭创", "CPO光模块 · 英伟达周期, 跳空王"),
+        ("688012", "中微公司", "半导体设备 · 美国禁令风险"),
+        ("688008", "澜起科技", "存储芯片 · BIS新规影响"),
+    ]),
+]
+
+
+def show_t_zero_helper(parent, app=None):
+    """🎯 做 T 辅助工具对话框 — 策略讲解 + 分类List + 双击K线带箱体通道"""
+    w = tk.Toplevel(parent)
+    w.title("🎯 做 T 辅助工具 · 策略 · 标的 · 箱体指标")
+    w.configure(bg=_BG_DEEP)
+    try: w.state("zoomed")
+    except: w.geometry("1400x880")
+
+    # ══ 顶部 Tab 切换 ══
+    nb = ttk.Notebook(w)
+    nb.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
+
+    # ─── Tab1: 📖 策略讲解 ───
+    tab1 = tk.Frame(nb, bg=_BG_DEEP); nb.add(tab1, text="📖 做T策略讲解")
+    st = scrolledtext.ScrolledText(tab1, font=("Menlo", 12), wrap=tk.WORD,
+                                    bg="#0a0a12", fg="#ddd", relief=tk.FLAT, padx=14, pady=14)
+    st.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+    st.tag_configure("title", foreground="#FFD54F", font=("", 14, "bold"))
+    st.tag_configure("h1", foreground="#4ECDC4", font=("", 12, "bold"))
+    st.tag_configure("good", foreground="#4CAF50")
+    st.tag_configure("warn", foreground="#FF9800")
+    st.tag_configure("bad", foreground="#E57373")
+    for line in _T_STRATEGY.split("\n"):
+        if line.startswith("═══") and "①" in line: st.insert(tk.END, line + "\n\n", "h1")
+        elif line.startswith("═══") and "②" in line: st.insert(tk.END, line + "\n\n", "h1")
+        elif line.startswith("═══") and "③" in line: st.insert(tk.END, line + "\n\n", "h1")
+        elif line.startswith("═══") and "④" in line: st.insert(tk.END, line + "\n\n", "h1")
+        elif line.startswith("═══ 🎯"): st.insert(tk.END, line + "\n\n", "title")
+        elif line.startswith("✅"): st.insert(tk.END, line + "\n", "good")
+        elif line.startswith("⚠️"): st.insert(tk.END, line + "\n", "warn")
+        elif line.startswith("❌"): st.insert(tk.END, line + "\n", "bad")
+        elif line.startswith("•"): st.insert(tk.END, line + "\n", "warn")
+        else: st.insert(tk.END, line + "\n")
+    st.config(state=tk.DISABLED)
+
+    # ─── Tab2: 📋 分类标的 List (双击打开 K 线) ───
+    tab2 = tk.Frame(nb, bg=_BG_DEEP); nb.add(tab2, text="📋 适合做T的标的List")
+
+    # 左侧: Treeview 列表
+    left = tk.Frame(tab2, bg=_BG_DEEP); left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 4), pady=8)
+    right = tk.Frame(tab2, bg=_BG_DEEP, width=380); right.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 8), pady=8)
+    right.pack_propagate(False)
+
+    # 筛选栏
+    filter_fr = tk.Frame(left, bg=_BG_DEEP); filter_fr.pack(fill=tk.X, pady=(0, 6))
+    tk.Label(filter_fr, text="分类:", bg=_BG_DEEP, fg="#aaa", font=("", 10)).pack(side=tk.LEFT)
+    cat_var = tk.StringVar(value="全部")
+    cats = ["全部"] + [c for c, _, _ in _T_STOCK_LISTS]
+    cb_cat = ttk.Combobox(filter_fr, values=cats, textvariable=cat_var, width=24, state="readonly")
+    cb_cat.pack(side=tk.LEFT, padx=4)
+    tk.Label(filter_fr, text="  搜索:", bg=_BG_DEEP, fg="#aaa", font=("", 10)).pack(side=tk.LEFT)
+    search_var = tk.StringVar()
+    tk.Entry(filter_fr, textvariable=search_var, width=18).pack(side=tk.LEFT, padx=4)
+
+    cols = ("code", "name", "reason")
+    tree = ttk.Treeview(left, columns=cols, show="headings", height=22)
+    tree.heading("code", text="代码")
+    tree.heading("name", text="名称")
+    tree.heading("reason", text="入选理由")
+    tree.column("code", width=90, anchor="center")
+    tree.column("name", width=140)
+    tree.column("reason", width=360)
+    vsb = tk.Scrollbar(left, orient=tk.VERTICAL, command=tree.yview); tree.configure(yscrollcommand=vsb.set)
+    tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+    # 颜色标签
+    for tag_name, color in [("good", "#4CAF50"), ("warn", "#FF9800"), ("bad", "#E57373"), ("etf", "#64B5F6")]:
+        tree.tag_configure(tag_name, foreground=color)
+
+    def _reload_list():
+        for i in tree.get_children(): tree.delete(i)
+        target_cat = cat_var.get()
+        keyword = search_var.get().strip()
+        for cat_name, cat_col, items in _T_STOCK_LISTS:
+            if target_cat != "全部" and cat_name != target_cat: continue
+            for code, name, reason in items:
+                if keyword and keyword not in f"{code}{name}{reason}": continue
+                tag = "good" if "最适合" in cat_name else "warn" if "谨慎" in cat_name else "bad" if "最不适合" in cat_name else "etf"
+                tree.insert("", tk.END, values=(code, name, reason), tags=(tag,))
+
+    _reload_list()
+    cb_cat.bind("<<ComboboxSelected>>", lambda e: _reload_list())
+    search_var.trace_add("write", lambda *_: _reload_list())
+
+    # 双击打开 K 线 + 箱体通道指标
+    def _open_kline_box(evt=None):
+        sel = tree.selection()
+        if not sel: return
+        code, name, reason = tree.item(sel[0])["values"]
+        _open_tzero_kline(code, name, reason, app=app)
+
+    tree.bind("<Double-1>", _open_kline_box)
+
+    # 右侧: 标的详情卡 + 快速操作
+    detail = tk.LabelFrame(right, text="📊 选中标的 · 做T信息", bg=_BG_DEEP, fg="#FFD54F",
+                            font=("", 11, "bold"))
+    detail.pack(fill=tk.BOTH, expand=True)
+    d_txt = scrolledtext.ScrolledText(detail, font=("", 11), wrap=tk.WORD, height=18,
+                                       bg="#0a0a12", fg="#ddd", relief=tk.FLAT, padx=10, pady=10)
+    d_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+    d_txt.tag_configure("h", foreground="#FFD54F", font=("", 12, "bold"))
+    d_txt.tag_configure("g", foreground="#4CAF50")
+    d_txt.tag_configure("o", foreground="#FF9800")
+    d_txt.tag_configure("r", foreground="#E57373")
+
+    def _on_select(evt=None):
+        sel = tree.selection()
+        if not sel: return
+        code, name, reason = tree.item(sel[0])["values"]
+        # 分类
+        cat_name = ""
+        for cn, _, items in _T_STOCK_LISTS:
+            for c2, n2, _ in items:
+                if c2 == code: cat_name = cn; break
+        d_txt.config(state=tk.NORMAL); d_txt.delete("1.0", tk.END)
+        d_txt.insert(tk.END, f"🎯 {name} ({code})\n", "h")
+        d_txt.insert(tk.END, f"📂 分类: {cat_name}\n\n")
+        d_txt.insert(tk.END, f"✅ 入选理由:\n   {reason}\n\n", "g" if "最适合" in cat_name else "o" if "谨慎" in cat_name else "r")
+        # 做T检查清单
+        check_lines = [
+            "━━━━━━━━━━━━━━━━━━━━━━━━",
+            "🔍 做T 5 硬指标自查:",
+            "  □ 日均振幅 3%-6% (够不够赚)",
+            "  □ 箱体上下沿清晰 (有参照物)",
+            "  □ 日成交额 > 5亿 (盘口厚)",
+            "  □ 无近期事件风险 (财报/减持)",
+            "  □ 已持有底仓 (A T+1 前提)",
+            "━━━━━━━━━━━━━━━━━━━━━━━━",
+            "📈 双击列表项 或 点下方按钮 →",
+            "   打开 K线图 + 箱体通道指标",
+            "   自动标记做T买卖点",
+        ]
+        for l in check_lines: d_txt.insert(tk.END, l + "\n")
+        d_txt.config(state=tk.DISABLED)
+
+    tree.bind("<<TreeviewSelect>>", _on_select)
+
+    # 右侧底部按钮
+    btn_fr = tk.Frame(right, bg=_BG_DEEP); btn_fr.pack(fill=tk.X, pady=4)
+
+    def _open_selected():
+        sel = tree.selection()
+        if not sel:
+            tk.messagebox.showinfo("提示", "请先从左侧列表选一只股票")
+            return
+        _open_kline_box()
+
+    tk.Button(btn_fr, text="📈 打开K线 + 箱体通道", font=("", 11, "bold"),
+              bg="#4ECDC4", fg="black", padx=10, pady=4, cursor="hand2",
+              command=_open_selected).pack(fill=tk.X, pady=3)
+    tk.Button(btn_fr, text="💹 看融资盘详情", font=("", 10),
+              bg="#555", fg="white", padx=8, pady=3, cursor="hand2",
+              command=lambda: w.destroy()).pack(fill=tk.X, pady=2)
+    tk.Label(btn_fr, text="\n💡 做T关键: 震荡市做 T\n有锚的做 T (商品/指数)\n没锚的不做 (情绪/海外)",
+             bg=_BG_DEEP, fg="#666", font=("", 9), justify=tk.LEFT).pack(pady=6)
+
+    # 初始选中第一条
+    for c, n, r in _T_STOCK_LISTS[0][2]:
+        for iid in tree.get_children():
+            if tree.item(iid)["values"][0] == c:
+                tree.selection_set(iid); _on_select(); break
+        break
+
+    # ─── Tab3: 🛠️ 箱体指标说明书 ───
+    tab3 = tk.Frame(nb, bg=_BG_DEEP); nb.add(tab3, text="🛠️ 做T箱体指标说明")
+    _build_tzero_box_guide(tab3)
+
+
+def _build_tzero_box_guide(parent):
+    """箱体通道指标原理 + 做T买卖点规则的视觉说明"""
+    container = tk.Frame(parent, bg=_BG_DEEP); container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    # 左: 文字说明
+    left = tk.Frame(container, bg=_BG_DEEP); left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+    txt = scrolledtext.ScrolledText(left, font=("Menlo", 11), wrap=tk.WORD,
+                                     bg="#0a0a12", fg="#ddd", relief=tk.FLAT, padx=12, pady=12)
+    txt.pack(fill=tk.BOTH, expand=True)
+    txt.tag_configure("t", foreground="#FFD54F", font=("", 13, "bold"))
+    txt.tag_configure("s", foreground="#4ECDC4", font=("", 11, "bold"))
+    txt.tag_configure("g", foreground="#4CAF50")
+    txt.tag_configure("r", foreground="#E57373")
+
+    content = [
+        ("📦 什么是箱体通道 (Box Channel)?", "t"),
+        ("", "raw"),
+        ("箱体通道 = 一段时间内的最高价连成上轨, 最低价连成下轨, 形成的水平区间.",
+         "raw"),
+        ("做T的核心就是在箱体内低买高卖.", "raw"),
+        ("", "raw"),
+        ("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "s"),
+        ("📐 计算方法 (参数可改):", "s"),
+        ("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "s"),
+        ("上轨 = 近 N 天最高价 (HHV, Highest High Value)", "raw"),
+        ("下轨 = 近 N 天最低价 (LLV, Lowest Low Value)", "raw"),
+        ("中轨 = (上轨 + 下轨) / 2", "raw"),
+        ("箱体宽度 = 上轨 - 下轨 (波动空间)", "raw"),
+        ("N 推荐 20-60 天: 太短箱体乱跳, 太长跟不上节奏.", "raw"),
+        ("", "raw"),
+        ("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "s"),
+        ("🎯 做T买卖点规则:", "s"),
+        ("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "s"),
+        ("", "raw"),
+        ("🟢 正T (先买后卖):", "g"),
+        ("   触发: 价格回踩下轨附近 (+/-1% 缓冲)", "raw"),
+        ("   止盈: 反弹到中轨或上轨", "raw"),
+        ("   止损: 收盘价跌破下轨 (箱体被击穿 → 立即减仓)", "raw"),
+        ("", "raw"),
+        ("🔴 反T (先卖后买):", "r"),
+        ("   触发: 价格冲高到上轨附近 (+/-1% 缓冲)", "raw"),
+        ("   止盈: 回落到中轨或下轨", "raw"),
+        ("   止损: 收盘价站上上轨 (突破趋势 → 卖飞风险)", "raw"),
+        ("", "raw"),
+        ("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "s"),
+        ("⚠️ 做T失败的常见信号:", "s"),
+        ("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "s"),
+        ("• 连续 2 天收盘价在下轨之外 → 箱体已破, 不能做 T", "raw"),
+        ("• 日内振幅 > 8% 且收盘离下轨远 → 失控, 可能变趋势", "raw"),
+        ("• 跳空高开/低开超过箱体宽度 50% → 黑天鹅, 暂停做 T", "raw"),
+        ("• 成交量突然放大到 20日均量 3 倍以上 → 有大资金进场, 等方向明了", "raw"),
+        ("", "raw"),
+        ("📊 图中元素说明:", "s"),
+        ("  —— 上轨 (蓝色虚线)  压力位, 反T卖点", "raw"),
+        ("  —— 下轨 (红色虚线)  支撑位, 正T买点", "raw"),
+        ("  —— 中轨 (白色虚线)  平仓/观望区", "raw"),
+        ("  ▲ 正T买点 (绿色三角)  价格触及下轨当日低点", "g"),
+        ("  ▼ 反T卖点 (红色三角)  价格触及上轨当日高点", "r"),
+    ]
+    for line, tag in content:
+        if tag == "raw": txt.insert(tk.END, line + "\n")
+        else: txt.insert(tk.END, line + "\n", tag)
+    txt.config(state=tk.DISABLED)
+
+    # 右: 简图示意
+    right = tk.Frame(container, bg=_BG_DEEP, width=400); right.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
+    right.pack_propagate(False)
+    _draw_box_channel_diagram(right)
+
+
+def _draw_box_channel_diagram(parent):
+    """简化的箱体通道示意图 (matplotlib)"""
+    try:
+        import matplotlib
+        matplotlib.use("TkAgg")
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        import numpy as np
+
+        fig = Figure(figsize=(4.2, 6.5), dpi=100, facecolor="#0a0a12")
+        ax = fig.add_subplot(111)
+        ax.set_facecolor("#0a0a12")
+
+        # 模拟 40 天箱体震荡数据
+        np.random.seed(42)
+        n = 40
+        # 构造一个清晰的箱体 + 假突破
+        base = 10.0
+        half = n // 2
+        prices = [base]
+        for i in range(1, n):
+            if i < half - 3:  # 第一半: 稳定震荡
+                ret = np.random.normal(0, 0.25)
+                prices.append(max(base - 1.5, min(base + 1.5, prices[-1] + ret)))
+            elif i < half:    # 假突破上轨
+                prices.append(prices[-1] + np.random.normal(0.4, 0.15))
+            else:             # 回落继续震荡
+                ret = np.random.normal(-0.05, 0.3)
+                prices.append(max(base - 1.5, min(base + 1.5, prices[-1] + ret)))
+
+        # 箱体 (用前 20 天算)
+        box_n = 20
+        upper = max(prices[:box_n])
+        lower = min(prices[:box_n])
+        mid = (upper + lower) / 2
+
+        x = list(range(n))
+        ax.plot(x, prices, color="#4ECDC4", linewidth=1.5, label="价格")
+        ax.axhline(upper, color="#42A5F5", linestyle="--", linewidth=1.2, label=f"上轨 {upper:.2f}")
+        ax.axhline(lower, color="#EF5350", linestyle="--", linewidth=1.2, label=f"下轨 {lower:.2f}")
+        ax.axhline(mid, color="#9E9E9E", linestyle=":", linewidth=0.8, label=f"中轨 {mid:.2f}")
+
+        # 填充箱体
+        ax.fill_between(x, lower, upper, alpha=0.08, color="#4ECDC4", label="箱体")
+
+        # 标记做T买卖点
+        for i in range(1, n):
+            # 正T买点: 当日低点触及下轨
+            if prices[i] <= lower + 0.15 and i >= box_n:
+                ax.scatter(i, prices[i], marker="^", color="#4CAF50", s=80, zorder=5)
+                ax.annotate("正T买", (i, prices[i]), textcoords="offset points",
+                            xytext=(-22, -14), fontsize=8, color="#4CAF50")
+            # 反T卖点: 当日高点触及上轨
+            if prices[i] >= upper - 0.15 and i >= box_n:
+                ax.scatter(i, prices[i], marker="v", color="#EF5350", s=80, zorder=5)
+                ax.annotate("反T卖", (i, prices[i]), textcoords="offset points",
+                            xytext=(-22, 10), fontsize=8, color="#EF5350")
+
+        ax.set_title("📦 箱体通道 · 做T买卖点示意", color="#FFD54F", fontsize=11, pad=10)
+        ax.set_xlabel("交易日", color="#888", fontsize=9)
+        ax.set_ylabel("价格", color="#888", fontsize=9)
+        ax.tick_params(colors="#888", labelsize=8)
+        ax.legend(fontsize=7, loc="upper right", labelcolor="#aaa",
+                  facecolor="#1a1a2e", edgecolor="#444")
+        for spine in ax.spines.values():
+            spine.set_color("#333")
+        ax.grid(True, alpha=0.2, color="#444")
+
+        fig.tight_layout(pad=1.0)
+        canvas = FigureCanvasTkAgg(fig, master=parent); canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+    except Exception as e:
+        tk.Label(parent, text=f"示意图加载失败:\n{e}", bg=_BG_DEEP, fg="#E57373",
+                 font=("", 10)).pack(pady=20)
+
+
+def _open_tzero_kline(code, name, reason, app=None):
+    """🎯 打开 K 线图 + 箱体通道指标 + 做T买卖点标记
+
+    复用主程序的日K线渲染, 额外叠加 BOLL 或自定义箱体通道,
+    并根据触轨自动在图上打 ▲/▼ 标记.
+    """
+    try:
+        import tkinter as tk
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from matplotlib.figure import Figure
+
+        win = tk.Toplevel()
+        win.title(f"📈 {name} ({code}) · K线 + 📦 箱体通道做T指标")
+        try: win.state("zoomed")
+        except: win.geometry("1280x900")
+        win.configure(bg="#121212")
+
+        # 顶部信息栏
+        top = tk.Frame(win, bg="#1A1A1A"); top.pack(fill=tk.X, padx=8, pady=6)
+        tk.Label(top, text=f"📈 {name} ({code})", bg="#1A1A1A", fg="#FFD54F",
+                 font=("", 14, "bold")).pack(side=tk.LEFT)
+        tk.Label(top, text=f"  ✅ {reason}", bg="#1A1A1A", fg="#4ECDC4",
+                 font=("", 10)).pack(side=tk.LEFT, padx=10)
+
+        # 状态
+        st_var = tk.StringVar(value="⏳ 拉取K线数据中...")
+        tk.Label(top, textvariable=st_var, bg="#1A1A1A", fg="#aaa",
+                 font=("", 10)).pack(side=tk.RIGHT, padx=10)
+
+        # 参数栏
+        ctrl = tk.Frame(win, bg="#1A1A1A"); ctrl.pack(fill=tk.X, padx=8, pady=(0, 4))
+        tk.Label(ctrl, text="📐 箱体周期 N:", bg="#1A1A1A", fg="#aaa", font=("", 10)).pack(side=tk.LEFT)
+        n_var = tk.StringVar(value="20")
+        tk.Spinbox(ctrl, from_=10, to=120, width=5, textvariable=n_var).pack(side=tk.LEFT, padx=4)
+        tk.Label(ctrl, text="  缓冲%:", bg="#1A1A1A", fg="#aaa", font=("", 10)).pack(side=tk.LEFT)
+        buf_var = tk.StringVar(value="1.5")
+        tk.Spinbox(ctrl, from_=0.5, to=5.0, increment=0.5, width=5, textvariable=buf_var).pack(side=tk.LEFT, padx=4)
+
+        fig = Figure(figsize=(12.5, 8), dpi=95, facecolor="#121212")
+        canvas = FigureCanvasTkAgg(fig, master=win)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
+
+        def _bg_fetch_and_draw():
+            try:
+                # 1. 拉 K 线 — 优先 akshare ETF/个股日线
+                rows = []
+                try:
+                    import akshare as ak_local
+                    if hasattr(ak_local, "fund_etf_hist_em"):
+                        df = ak_local.fund_etf_hist_em(symbol=code, period="daily", adjust="qfq")
+                        if df is None or len(df) < 5:
+                            df = ak_local.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
+                    else:
+                        df = ak_local.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
+                    if df is not None and len(df) > 10:
+                        col_map = {}
+                        for c in df.columns:
+                            cl = str(c).strip()
+                            if cl in ("日期", "date"): col_map["date"] = c
+                            elif cl in ("开盘", "open"): col_map["open"] = c
+                            elif cl in ("收盘", "close"): col_map["close"] = c
+                            elif cl in ("最高", "high"): col_map["high"] = c
+                            elif cl in ("最低", "low"): col_map["low"] = c
+                            elif cl in ("成交量", "volume"): col_map["vol"] = c
+                        for _, r in df.tail(120).iterrows():
+                            try:
+                                rows.append({
+                                    "date": str(r[col_map["date"]]),
+                                    "open": float(r[col_map["open"]]),
+                                    "close": float(r[col_map["close"]]),
+                                    "high": float(r[col_map["high"]]),
+                                    "low": float(r[col_map["low"]]),
+                                    "vol": float(r.get(col_map.get("vol", ""), 0)),
+                                })
+                            except Exception: pass
+                except Exception as e:
+                    print(f"[做TK线] akshare 失败: {e}")
+
+                if len(rows) < 10:
+                    # 降级: 腾讯行情
+                    try:
+                        import requests
+                        prefix = "sh" if code.startswith(("5", "6")) else "sz"
+                        url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+                        r = requests.get(url, params={"param": f"{prefix}{code},day,,,120,qfq"}, timeout=10)
+                        data = r.json()
+                        kline = data.get("data", {}).get(f"{prefix}{code}", {}).get("day", [])
+                        for k in kline:
+                            try:
+                                rows.append({
+                                    "date": str(k[0]),
+                                    "open": float(k[1]), "close": float(k[2]),
+                                    "high": float(k[3]), "low": float(k[4]),
+                                    "vol": float(k[5]) if len(k) > 5 else 0,
+                                })
+                            except Exception: pass
+                    except Exception as e2:
+                        win.after(0, lambda: tk.messagebox.showerror("错误",
+                            f"拉取K线失败:\n1. akshare: {e}\n2. 腾讯: {e2}", parent=win))
+                        return
+
+                if len(rows) < 10:
+                    win.after(0, lambda: tk.messagebox.showerror("错误", f"K线数据仅 {len(rows)} 条, 无法画箱体", parent=win))
+                    return
+
+                # 2. 计算箱体通道 (动态滚动)
+                ns = int(n_var.get())
+                buf = float(buf_var.get()) / 100.0  # 1.5% → 0.015
+                arr = np.array([r["close"] for r in rows])
+                highs = np.array([r["high"] for r in rows])
+                lows = np.array([r["low"] for r in rows])
+                dates = [r["date"] for r in rows]
+
+                # 滚动最高/最低
+                def _rolling_max(a, n):
+                    return np.array([max(a[max(0, i-n+1):i+1]) for i in range(len(a))])
+                def _rolling_min(a, n):
+                    return np.array([min(a[max(0, i-n+1):i+1]) for i in range(len(a))])
+
+                upper = _rolling_max(highs, ns)
+                lower = _rolling_min(lows, ns)
+                mid = (upper + lower) / 2
+
+                # 3. 做T买卖点标记
+                buy_points = []   # 正T买点 (触下轨)
+                sell_points = []  # 反T卖点 (触上轨)
+                for i in range(ns, len(arr)):
+                    box_w = upper[i] - lower[i]
+                    if box_w <= 0: continue
+                    # 正T: 当日低点触及下轨
+                    if lows[i] <= lower[i] * (1 + buf):
+                        buy_points.append((i, lows[i]))
+                    # 反T: 当日高点触及上轨
+                    if highs[i] >= upper[i] * (1 - buf):
+                        sell_points.append((i, highs[i]))
+
+                # 4. 绘图
+                def _draw():
+                    try:
+                        fig.clear()
+                        ax1 = fig.add_subplot(211)
+                        ax2 = fig.add_subplot(212, sharex=ax1, height_ratio=(0.25, 0.75))
+                        fig.patch.set_facecolor("#121212")
+
+                        n = len(arr); x = np.arange(n)
+                        # K线简化: 用柱状线画
+                        up_col = "#e94560"; dn_col = "#4CAF50"
+                        for i in range(n):
+                            cl = up_col if arr[i] >= rows[i]["open"] else dn_col
+                            ax1.plot([i, i], [lows[i], highs[i]], color=cl, linewidth=0.8)
+                            body_lo = min(rows[i]["open"], arr[i])
+                            body_hi = max(rows[i]["open"], arr[i])
+                            ax1.bar(i, body_hi - body_lo, bottom=body_lo, width=0.7,
+                                    color=cl, edgecolor=cl, linewidth=0.5)
+
+                        # 箱体通道
+                        ax1.plot(x, upper, color="#42A5F5", linestyle="--", linewidth=1.2, label=f"上轨({ns}日最高)")
+                        ax1.plot(x, lower, color="#EF5350", linestyle="--", linewidth=1.2, label=f"下轨({ns}日最低)")
+                        ax1.plot(x, mid, color="#FFD54F", linestyle=":", linewidth=0.8, label="中轨")
+                        ax1.fill_between(x, lower, upper, alpha=0.07, color="#4ECDC4")
+
+                        # 标记做T买卖点
+                        for idx, price in buy_points:
+                            ax1.scatter(idx, price * 0.995, marker="^", color="#4CAF50",
+                                        s=70, zorder=5, edgecolor="white", linewidths=0.5)
+                        for idx, price in sell_points:
+                            ax1.scatter(idx, price * 1.005, marker="v", color="#EF5350",
+                                        s=70, zorder=5, edgecolor="white", linewidths=0.5)
+
+                        # 最近一根K线信息
+                        last = rows[-1]
+                        box_w = upper[-1] - lower[-1]
+                        cur_pct = (arr[-1] - lower[-1]) / box_w * 100 if box_w > 0 else 0
+                        pos_text = f"📍 位置: {cur_pct:.0f}% (0=下轨, 100=上轨)"
+                        ax1.text(0.02, 0.97, pos_text, transform=ax1.transAxes,
+                                fontsize=10, color="#FFD54F", va="top",
+                                bbox=dict(boxstyle="round", fc="#1a1a2e", ec="#FFD54F", alpha=0.8))
+
+                        # 风格
+                        ax1.set_facecolor("#0a0a12")
+                        ax1.tick_params(colors="#aaa")
+                        ax1.title.set_color("#FFD54F")
+                        for sp in ax1.spines.values(): sp.set_color("#333")
+                        ax1.grid(True, alpha=0.15, color="#555")
+                        ax1.legend(fontsize=8, loc="upper right", facecolor="#1a1a2e",
+                                   labelcolor="#aaa", edgecolor="#444")
+                        ax1.set_title(f"{name} ({code}) · 日K + 📦{ns}日箱体通道做T指标 · "
+                                     f"正T买点{len(buy_points)} 反T卖点{len(sell_points)}",
+                                     color="#FFD54F", fontsize=11, padx=8)
+
+                        # 副图: 成交量
+                        vol_arr = np.array([r["vol"] for r in rows])
+                        colors_vol = [up_col if arr[i] >= rows[i]["open"] else dn_col for i in range(n)]
+                        ax2.bar(x, vol_arr, color=colors_vol, alpha=0.7, width=0.7)
+                        ax2.set_facecolor("#0a0a12")
+                        ax2.tick_params(colors="#aaa", labelsize=8)
+                        for sp in ax2.spines.values(): sp.set_color("#333")
+                        ax2.grid(True, alpha=0.15, color="#555")
+                        # x轴日期
+                        step = max(1, n // 10)
+                        ax2.set_xticks(x[::step])
+                        ax2.set_xticklabels([dates[i] for i in range(0, n, step)], rotation=30, fontsize=7)
+
+                        fig.tight_layout(pad=1.2, h_pad=0.8)
+                        canvas.draw()
+                        win.after(0, lambda: st_var.set(
+                            f"✅ K线 {n} 根 · 正T买点 {len(buy_points)} · 反T卖点 {len(sell_points)} · 现价位置 {cur_pct:.0f}%"))
+                    except Exception as e:
+                        win.after(0, lambda: st_var.set(f"❌ 绘图失败: {e}"))
+
+                win.after(0, _draw)
+            except Exception as e:
+                win.after(0, lambda: st_var.set(f"❌ 后台加载异常: {e}"))
+
+        import threading
+        threading.Thread(target=_bg_fetch_and_draw, daemon=True).start()
+
+        # 重绘按钮
+        def _redraw():
+            for child in canvas.get_tk_widget().winfo_children():
+                pass  # canvas 直接重画即可
+            try:
+                _bg_fetch_and_draw()
+            except Exception: pass
+        tk.Button(ctrl, text="🔄 重绘 (改周期/缓冲)", font=("", 10),
+                  bg="#4ECDC4", fg="black", padx=10, pady=2, cursor="hand2",
+                  command=_redraw).pack(side=tk.LEFT, padx=10)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        tk.messagebox.showerror("错误", f"打开做T K线失败: {e}")
 
     return dlg

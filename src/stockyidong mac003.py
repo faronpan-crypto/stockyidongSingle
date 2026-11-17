@@ -378,6 +378,7 @@ from ui.tab_kelly import KellyMixin
 from ui.tab_wordcloud import WordcloudMixin
 from ui.tab_dapan import DapanMixin
 from ui.tab_warning import WarningMixin
+from ui.high_low_swing import show_t_zero_helper
 from ui.tab_cangwei import CangweiMixin
 from ui.tab_wencai import WencaiMixin
 from ui.tab_hot import HotMixin
@@ -5045,6 +5046,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 ("🔥热门榜单", 9, self.show_hotlists_overview),
                 ("💡市场情绪", 9, self.show_market_sentiment_dialog),
                 ("📊融资盘", 8, self._show_margin_dialog),
+                ("🎯做T", 8, lambda: show_t_zero_helper(self.root, app=self)),
             ]
         except Exception as _e4:
             print(f"[📰Row4❌] 按钮定义炸了: {_e4}", flush=True)
