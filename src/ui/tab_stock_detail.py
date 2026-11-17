@@ -379,7 +379,7 @@ class StockDetailMixin:
                 kline_data = self._get_daily_kline_data_tushare(stock_code)
                 if kline_data:
                     # 打开K线图弹窗
-                    self._show_daily_kline_zoom(kline_data, stock_name)
+                    self._show_daily_kline_zoom(kline_data, stock_name, stock_code=str(stock_code).zfill(6))
                 else:
                     messagebox.showwarning("提示", "无法获取股票K线数据", parent=self.root)
             else:
@@ -964,7 +964,7 @@ class StockDetailMixin:
         fig.tight_layout()
         return fig
 
-    def _show_daily_kline_zoom(self, kline_data, stock_name):
+    def _show_daily_kline_zoom(self, kline_data, stock_name, stock_code=None):
         """双击日K线:最大化窗口 + 可选 2~4 个副图指标。"""
         try:
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -1722,7 +1722,20 @@ class StockDetailMixin:
             # 首次 redraw
             win.after(100, redraw)
             ttk.Button(top, text="应用", command=redraw).pack(side=tk.LEFT, padx=(10, 4))
-            current_stock_data = {'kline_data': kline_data, 'stock_name': stock_name}
+            # 🆕 stock_code 兜底: 签名没传就尝试 kline_data 里找或反查
+            if not stock_code:
+                try:
+                    stock_code = kline_data.get("code") or kline_data.get("股票代码")
+                except Exception:
+                    stock_code = None
+                if not stock_code:
+                    try:
+                        from ui.speculator_watch import get_stock_code_by_name as _gsc
+                        stock_code = _gsc(stock_name)
+                    except Exception:
+                        stock_code = None
+            current_stock_data = {'kline_data': kline_data, 'stock_name': stock_name,
+                                   'stock_code': stock_code}
             def calculate_kelly():
                 try:
                     data = current_stock_data['kline_data']
@@ -1813,6 +1826,19 @@ class StockDetailMixin:
                 except Exception as e:
                     messagebox.showerror("错误", f"游资心法打开失败: {e}", parent=win)
             ttk.Button(top2, text="🦅 游资心法", command=open_hotmoney_analysis).pack(side=tk.LEFT, padx=(10, 4))
+            # 🆕 📈指数形态统计按钮
+            def open_index_pattern():
+                try:
+                    from ui.tab_index_pattern import show_index_pattern_analyzer as _sip
+                    _root = getattr(self, 'root', None) or getattr(self, '_root', None)
+                    # 用当前 K 线图的股票作为默认标的
+                    _sip(_root, app=self,
+                         default_code=current_stock_data.get('stock_code', ''),
+                         default_name=current_stock_data.get('stock_name', ''))
+                except Exception as e:
+                    import traceback; traceback.print_exc()
+                    messagebox.showerror("错误", f"指数形态打开失败: {e}", parent=win)
+            ttk.Button(top2, text="📈 指数形态", command=open_index_pattern).pack(side=tk.LEFT, padx=(10, 4))
             # 添加股票输入下拉框和查询按钮
             stock_frame = ttk.Frame(top2, padding=2)
             stock_frame.pack(side=tk.LEFT, padx=(20, 0))
@@ -1951,6 +1977,7 @@ class StockDetailMixin:
                             # 更新当前股票数据,供凯利计算等按钮使用
                             current_stock_data['kline_data'] = kline_data
                             current_stock_data['stock_name'] = stock_name
+                            current_stock_data['stock_code'] = stock_code
                         else:
                             messagebox.showwarning("提示", "无法获取股票K线数据", parent=win)
                     except Exception as e:
@@ -2100,7 +2127,7 @@ class StockDetailMixin:
         except Exception as e:
             messagebox.showerror("错误", f"打开放大K线失败: {e}", parent=self.root)
 
-    def _draw_daily_kline_chart(self, parent, kline_data, stock_name, embed_zoom_handler=True):
+    def _draw_daily_kline_chart(self, parent, kline_data, stock_name, embed_zoom_handler=True, stock_code=None):
         """绘制日K线图(Tushare),含均线与支撑/压力线;双击可弹出最大化查看。"""
         try:
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -2124,7 +2151,7 @@ class StockDetailMixin:
             except Exception:
                 pass
             if embed_zoom_handler:
-                w.bind("<Double-Button-1>", lambda e: self._show_daily_kline_zoom(kline_data, stock_name))
+                w.bind("<Double-Button-1>", lambda e: self._show_daily_kline_zoom(kline_data, stock_name, stock_code=stock_code))
         except Exception as e:
             print(f"绘制日K线图失败: {e}")
             import traceback

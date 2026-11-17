@@ -135,6 +135,106 @@ def classify_daily_pattern(prev_close, open_p, close_p, gap_threshold=0.3):
         return "平走高🟢" if body_pct >= 0 else "平走低🔴"
 
 
+# ═══════════════════════════════════════════════════════
+# 🆕 大盘对比分析
+# ═══════════════════════════════════════════════════════
+def add_index_compare(target_df, index_df):
+    """
+    给标的 df 加上 vs 大盘对比列
+    
+    对比维度:
+    - index_pattern: 大盘当天形态 (高开高走🟢 / 低开低走🔴 ...)
+    - rel_pct:  个股涨幅 - 大盘涨幅 (正=独立强势, 负=弱于大盘)
+    - vs_index: 对比结论 emoji
+        🟢🔼  强于大盘 (独立行情)
+        🔴🔽  弱于大盘 (逆市下跌)  
+        ⚪➖  同步大盘 (跟风)
+        🔶↕️  逆向 (大盘涨它跌 / 大盘跌它涨)
+    
+    Returns: target_df 增加 index_pattern, rel_pct, vs_index 三列
+    """
+    import pandas as pd
+    import numpy as np
+    
+    if target_df is None or index_df is None or len(target_df) == 0 or len(index_df) == 0:
+        return target_df
+    
+    # 确保 date 格式统一
+    target_df["date"] = pd.to_datetime(target_df["date"]).dt.strftime("%Y-%m-%d")
+    index_df["date"] = pd.to_datetime(index_df["date"]).dt.strftime("%Y-%m-%d")
+    
+    # 只取 index_df 里和 target_df 日期重合的行
+    idx_subset = index_df[index_df["date"].isin(target_df["date"])].copy()
+    if len(idx_subset) == 0:
+        target_df["index_pattern"] = "—"
+        target_df["rel_pct"] = np.nan
+        target_df["vs_index"] = "—"
+        return target_df
+    
+    # 选 date, pattern, body_pct 三列, 重命名避免冲突
+    idx_subset = idx_subset[["date", "pattern", "body_pct"]].rename(
+        columns={"pattern": "index_pattern", "body_pct": "index_body_pct"})
+    
+    # merge
+    merged = target_df.merge(idx_subset, on="date", how="left")
+    
+    # 计算相对涨幅
+    merged["rel_pct"] = merged["body_pct"] - merged["index_body_pct"]
+    
+    # 🎯 核心: 判定 vs 大盘关系
+    def _judge(row):
+        mp = str(row.get("index_pattern", ""))
+        tp = str(row.get("pattern", ""))
+        rb = row.get("rel_pct", 0) or 0
+        
+        if not mp or mp == "—":
+            return "—"
+        
+        # 大盘涨跌方向 (绿色=涨, 红色=跌)
+        idx_up = "🟢" in mp or "↑" in mp or "走高" in mp
+        idx_down = "🔴" in mp or "↓" in mp or "走低" in mp
+        tgt_up = "🟢" in tp
+        tgt_down = "🔴" in tp
+        
+        # 逆向 = 大盘涨它跌, 或大盘跌它涨
+        is_inverse = (idx_up and tgt_down) or (idx_down and tgt_up)
+        
+        if is_inverse:
+            if rb > 2:
+                return "🟢🆙 独立强势"     # 大盘跌它狂涨
+            elif rb < -2:
+                return "🔴🆇 逆势下跌"     # 大盘涨它狂跌
+            else:
+                return "🔶↕️ 逆向分化"     # 方向相反但幅度不大
+        elif abs(rb) >= 1.5:
+            if rb > 0:
+                return "🟢🔼 强于大盘"     # 同方向但涨更多
+            else:
+                return "🔴🔽 弱于大盘"     # 同方向但跌更多
+        else:
+            return "⚪➖ 同步大盘"          # 幅度差不多
+    
+    merged["vs_index"] = merged.apply(_judge, axis=1)
+    
+    # 清理: 临时列
+    if "index_body_pct" in merged.columns:
+        merged = merged.drop(columns=["index_body_pct"])
+    
+    return merged
+
+
+def fetch_index_baseline(days=300):
+    """🆕 拉上证指数 (sh000001) 作为大盘基准, 带缓存"""
+    cache_key = ("index_sh000001", "index", days)
+    now = _time.time()
+    if cache_key in _KLINE_CACHE:
+        _df, _ts = _KLINE_CACHE[cache_key]
+        if now - _ts < _KLINE_CACHE_TTL and _df is not None:
+            return _df.copy()
+    df = fetch_kline("000001", kind="index", days=days)
+    return df
+
+
 def fetch_kline(code, kind="index", days=180):
     """
     拉 K 线数据 (带内存缓存 5 分钟)
@@ -849,8 +949,14 @@ def predict_today_from_yesterday(df, code="000001", app=None):
     }
 
 
-def show_index_pattern_analyzer(parent, app=None, parent_frame=None):
-    """📈 指数日走势形态统计 — 独立弹窗 或 嵌入 parent_frame"""
+def show_index_pattern_analyzer(parent, app=None, parent_frame=None,
+                                default_code=None, default_name=None):
+    """📈 指数日走势形态统计 — 独立弹窗 或 嵌入 parent_frame
+    
+    Args:
+        default_code: 从 K 线图弹窗传入的股票代码, 自动选中
+        default_name: 从 K 线图弹窗传入的股票名称
+    """
     import threading
     import queue as _queue
     from datetime import datetime as _DT
@@ -915,13 +1021,39 @@ def show_index_pattern_analyzer(parent, app=None, parent_frame=None):
                 # 整个组都是 None, 不加 "💼 持仓 · ..." 这些
                 pass
 
-    combo_var = tk.StringVar(value=all_items[0])
+    # 🆕 默认选中: 如果 K 线图弹窗传了 default_code, 优先匹配
+    default_item = None
+    if default_code and str(default_code).strip():
+        default_code = str(default_code).strip()
+        default_name = str(default_name or "").strip()
+        # 1. 在现有 all_items 里找
+        for item in all_items:
+            if f"({default_code})" in item:
+                default_item = item
+                break
+        # 2. 找不到就加一条 "🆕 当前K线" 到最前面
+        if default_item is None and len(default_code) == 6 and default_code.isdigit():
+            label_name = default_name or default_code
+            default_item = f"🆕 当前K线 · {label_name} ({default_code})"
+            all_items.insert(0, default_item)
+            # 自动识别类型
+            if default_code.startswith(("51", "56", "58")):
+                type_var_default = "ETF"
+            elif default_code.startswith(("00", "30", "60", "83", "87")):
+                type_var_default = "个股"
+            else:
+                type_var_default = "自动"
+    
+    combo_var = tk.StringVar(value=default_item or all_items[0])
     cb = ttk.Combobox(ctrl, textvariable=combo_var, values=all_items,
                       width=34)  # 可编辑
     cb.pack(side=tk.LEFT, padx=4)
 
     # 标的类型 (自定义时需要)
-    type_var = tk.StringVar(value="自动")
+    if default_item is not None and locals().get("type_var_default"):
+        type_var = tk.StringVar(value=type_var_default)
+    else:
+        type_var = tk.StringVar(value="自动")
     ttk.Combobox(ctrl, textvariable=type_var,
                  values=["自动", "指数", "ETF", "个股"],
                  width=6, state="readonly").pack(side=tk.LEFT, padx=(4, 0))
@@ -971,6 +1103,14 @@ def show_index_pattern_analyzer(parent, app=None, parent_frame=None):
     # Tab 2: 每日明细表格
     tab2 = tk.Frame(nb, bg="#F8FAFC")
     nb.add(tab2, text="📅 每日明细")
+
+    # 🆕 Tab 3: 多维可视化图表
+    tab3 = tk.Frame(nb, bg="#F8FAFC")
+    nb.add(tab3, text="🕸️ 多维可视化")
+
+    # 🆕 Tab 4: 明日走势
+    tab4 = tk.Frame(nb, bg="#F8FAFC")
+    nb.add(tab4, text="🎯 明日走势")
 
     # ── Tab1: 统计卡片 ──
     cards_fr = tk.Frame(tab1, bg="#F8FAFC")
@@ -1150,6 +1290,61 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
   注意: 这是历史统计, 不构成投资建议
 """,
             },
+            "rel": {
+                "title": "相对大盘涨幅 — 个股 − 大盘",
+                "color": "#6A1B9A",
+                "content": """
+rel_pct = 个股 body_pct − 上证指数 body_pct
+
+═══════════════════════════════════
+
+  正  → 个股涨幅 > 大盘 (独立强势)
+  负  → 个股涨幅 < 大盘 (弱于大盘)
+  0   → 同步大盘
+
+═══════════════════════════════════
+
+  |rel_pct| ≥ 1.5% 才认为有意义
+
+  例:
+    大盘涨 +1.0%, 个股涨 +3.5% → rel = +2.5% 独立强势 🟢
+    大盘涨 +1.0%, 个股跌 -0.5% → rel = -1.5% 逆市下跌 🔴
+    大盘跌 -2.0%, 个股跌 -1.5% → rel = +0.5% 相对抗跌
+
+═══════════════════════════════════
+💡 实战意义:
+  选股时优先找"独立行情"的票, 做 T 更安全
+""",
+            },
+            "vs": {
+                "title": "vs大盘 — 综合关系判定",
+                "color": "#00695C",
+                "content": """
+综合判定 个股当天走势 vs 大盘 (上证指数 sh000001)
+
+═══════════════════════════════════
+判定结果及含义
+═══════════════════════════════════
+
+🟢🆙 独立强势  → 大盘跌, 个股反而大涨 (>2%)
+                独立行情, 板块可能有催化剂
+🔴🆇 逆势下跌  → 大盘涨, 个股反而大跌 (>2%)
+                个股有隐藏利空, 谨慎
+🔶↕️ 逆向分化  → 方向相反但幅度不大
+                分歧大, 观察
+🟢🔼 强于大盘  → 同方向但涨更多 (>1.5%)
+                领涨龙头
+🔴🔽 弱于大盘  → 同方向但跌更多 (>1.5%)
+                跟风或有卖压
+⚪➖ 同步大盘  → 幅度差不多
+                纯大盘 beta, 没有独立 alpha
+
+═══════════════════════════════════
+💡 做 T 实战:
+  优先 → 🟢🆙 🟢🔼 独立/强势
+  回避 → 🔴🆇 🔴🔽 逆势/弱于大盘
+""",
+            },
         }
 
         info = helps.get(topic, {"title": "帮助", "color": "#333", "content": ""})
@@ -1172,13 +1367,16 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
 
     # 列定义: (内部key, 显示名, 帮助topic或None, 宽度)
     col_defs = [
-        ("date",     "日期",       None,     100),
-        ("open",     "开盘价",     None,      80),
-        ("close",    "收盘价",     None,      80),
-        ("gap_pct",  "gap_pct ❓",  "gap",     90),
-        ("body_pct", "body_pct ❓", "body",    90),
-        ("pattern",  "形态 ❓",     "pattern", 130),
-        ("next_pct", "次日涨跌 ❓", "next",   100),
+        ("date",          "日期",         None,      90),
+        ("open",          "开盘价",       None,      70),
+        ("close",         "收盘价",       None,      70),
+        ("gap_pct",       "gap_pct ❓",   "gap",     80),
+        ("body_pct",      "body_pct ❓",  "body",    80),
+        ("pattern",       "形态 ❓",      "pattern", 110),
+        ("index_pattern", "大盘形态",     None,      90),
+        ("rel_pct",       "相对大盘 ❓",  "rel",     90),
+        ("vs_index",      "vs大盘 ❓",    "vs",     120),
+        ("next_pct",      "次日涨跌 ❓",  "next",    90),
     ]
     cols2 = tuple(c[0] for c in col_defs)
     tv2 = ttk.Treeview(tab2, columns=cols2, show="headings", height=20)
@@ -1274,11 +1472,20 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
             for _, r in show_df.iterrows():
                 nxt = r.get("next_pct", None)
                 nxt_str = f"{nxt * 100:+.2f}%" if nxt and nxt == nxt else "—"
+                
+                # 🆕 大盘对比三列
+                idx_pt = str(r.get("index_pattern", "—"))
+                rp = r.get("rel_pct", None)
+                rp_str = f"{rp:+.2f}%" if rp is not None and rp == rp else "—"
+                vi = str(r.get("vs_index", "—"))
+                
                 vals = (str(r["date"])[:10],
                         f"{r['open']:.2f}", f"{r['close']:.2f}",
                         f"{r['gap_pct']:+.2f}%", f"{r['body_pct']:+.2f}%",
-                        r["pattern"], nxt_str)
+                        r["pattern"], idx_pt, rp_str, vi, nxt_str)
                 row_id = tv2.insert("", tk.END, values=vals)
+                
+                # 行背景: 标的形态 + vs大盘
                 if "🟢" in str(r["pattern"]):
                     tv2.tag_configure("up", background="#E8F5E9")
                     tv2.item(row_id, tags=("up",))
@@ -1286,9 +1493,485 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
                     tv2.tag_configure("down", background="#FFEBEE")
                     tv2.item(row_id, tags=("down",))
             print(f"[📊index_pattern] ✅ 渲染完成: {len(show_df)}行明细", flush=True)
+
+            # 🆕 Tab3: 多维可视化图表
+            try:
+                import matplotlib
+                matplotlib.use("TkAgg")
+                from matplotlib.figure import Figure
+                from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+                import matplotlib.pyplot as plt
+                import numpy as np
+
+                # 清理旧 canvas
+                for _w in tab3.winfo_children():
+                    _w.destroy()
+
+                fig = Figure(figsize=(14, 13), dpi=100, facecolor="#F8FAFC")
+                gs = fig.add_gridspec(3, 3, hspace=0.55, wspace=0.35)
+
+                # ── 图1: 形态分布柱状图 ──
+                ax1 = fig.add_subplot(gs[0, 0])
+                all_patterns = ["高开高走🟢", "高开低走🔴", "低开高走🟢",
+                                "低开低走🔴", "平走高🟢", "平走低🔴"]
+                p_counts = [stats["overall"].get(p, 0) for p in all_patterns]
+                p_labels = [p.replace("🟢", "").replace("🔴", "") for p in all_patterns]
+                colors1 = ["#2E7D32" if "🟢" in p else "#C62828" for p in all_patterns]
+                bars = ax1.bar(p_labels, p_counts, color=colors1, edgecolor="white")
+                ax1.set_title("📊 形态分布", fontsize=11, fontweight="bold")
+                ax1.set_ylabel("天数")
+                ax1.tick_params(axis="x", rotation=30, labelsize=8)
+                for b, v in zip(bars, p_counts):
+                    ax1.text(b.get_x() + b.get_width()/2, b.get_height(),
+                             str(v), ha="center", va="bottom", fontsize=9, fontweight="bold")
+
+                # ── 图2: 次日上涨概率对比 ──
+                ax2 = fig.add_subplot(gs[0, 1])
+                up_rates = []
+                avg_pcts = []
+                for p in all_patterns:
+                    nd = stats["pattern_next_day"].get(p, {})
+                    up_rates.append(nd.get("up_rate", 0) * 100)
+                    avg_pcts.append(nd.get("avg_next_pct", 0) * 100)
+                x = np.arange(len(all_patterns))
+                w = 0.35
+                ax2.bar(x - w/2, up_rates, w, label="上涨概率%", color="#1565C0", alpha=0.85)
+                ax2.bar(x + w/2, avg_pcts, w, label="平均涨幅%", color="#F57F17", alpha=0.85)
+                ax2.axhline(y=50, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
+                ax2.set_title("📈 次日表现对比", fontsize=11, fontweight="bold")
+                ax2.set_xticks(x)
+                ax2.set_xticklabels(p_labels, rotation=30, fontsize=8)
+                ax2.legend(fontsize=7)
+                ax2.tick_params(axis="y", labelsize=8)
+
+                # ── 图3: 雷达图 (多维度评分) ──
+                ax3 = fig.add_subplot(gs[0, 2], projection="polar")
+                # 维度: 上涨概率、平均涨幅、最大单日涨幅、胜率综合评分
+                dims = ["上涨概率", "平均涨幅", "出现频次", "胜率评分"]
+                N_dims = len(dims)
+                angles = np.linspace(0, 2*np.pi, N_dims, endpoint=False).tolist()
+                angles += angles[:1]  # 闭合
+                # 每种形态一条线
+                for pi, p in enumerate(all_patterns):
+                    nd = stats["pattern_next_day"].get(p, {})
+                    rate = nd.get("up_rate", 0) * 100
+                    avg_g = max(0, nd.get("avg_next_pct", 0) * 100)  # 只取正
+                    freq = p_counts[pi] / max(p_counts) * 100 if max(p_counts) > 0 else 0
+                    score = rate * 0.5 + avg_g * 10 + freq * 0.2  # 综合分
+                    score_norm = min(100, score)
+                    vals = [rate, avg_g*10, freq, score_norm]
+                    vals = [min(100, max(0, v)) for v in vals]
+                    vals += vals[:1]
+                    color = "#2E7D32" if "🟢" in p else "#C62828"
+                    label_short = p_labels[pi]
+                    ax3.plot(angles, vals, "o-", linewidth=1.8, label=label_short, color=color, markersize=3)
+                    ax3.fill(angles, vals, alpha=0.08, color=color)
+                ax3.set_xticks(angles[:-1])
+                ax3.set_xticklabels(dims, fontsize=8)
+                ax3.set_ylim(0, 100)
+                ax3.set_title("🕸️ 多维度雷达", fontsize=11, fontweight="bold", pad=15)
+                ax3.legend(loc="upper right", bbox_to_anchor=(1.35, 1.15), fontsize=7)
+
+                # ── 图4: vs大盘 关系分布饼图 ──
+                ax4 = fig.add_subplot(gs[1, 0])
+                if "vs_index" in df.columns:
+                    vi_counts = df["vs_index"].value_counts()
+                    vi_map = {
+                        "🟢🆙 独立强势": 1, "🟢🔼 强于大盘": 1,
+                        "⚪➖ 同步大盘": 0,
+                        "🔴🔽 弱于大盘": -1, "🔴🆇 逆势下跌": -1, "🔶↕️ 逆向分化": -1,
+                        "—": 0,
+                    }
+                    # 简化三类
+                    strong = sum(c for k, c in vi_counts.items() if vi_map.get(k, 0) > 0)
+                    weak = sum(c for k, c in vi_counts.items() if vi_map.get(k, 0) < 0)
+                    sync = sum(c for k, c in vi_counts.items() if vi_map.get(k, 0) == 0 and k != "—")
+                    total = strong + weak + sync
+                    if total > 0:
+                        sizes = [strong, sync, weak]
+                        lbs = [f"🟢强 {strong}", f"⚪同步 {sync}", f"🔴弱 {weak}"]
+                        clr = ["#2E7D32", "#9E9E9E", "#C62828"]
+                        explode = (0.05, 0, 0.05)
+                        ax4.pie(sizes, labels=lbs, colors=clr, explode=explode,
+                                autopct="%1.0f%%", startangle=90, textprops={"fontsize": 9})
+                        ax4.set_title("🔥 vs大盘 关系分布", fontsize=11, fontweight="bold")
+                    else:
+                        ax4.text(0.5, 0.5, "无大盘对比数据", ha="center", va="center",
+                                 fontsize=10, transform=ax4.transAxes)
+                else:
+                    ax4.text(0.5, 0.5, "大盘对比未启用", ha="center", va="center",
+                             fontsize=10, transform=ax4.transAxes)
+
+                # ── 图5: 累计收益曲线 (不同形态) ──
+                ax5 = fig.add_subplot(gs[1, 1:])
+                if "next_pct" in df.columns:
+                    for p in all_patterns:
+                        mask = df["pattern"] == p
+                        rets = df.loc[mask, "next_pct"].dropna().values
+                        if len(rets) >= 3:
+                            cum = np.cumprod(1 + rets) - 1
+                            cum = np.insert(cum, 0, 0)
+                            color = "#2E7D32" if "🟢" in p else "#C62828"
+                            ax5.plot(cum*100, linewidth=1.5, label=p_labels[all_patterns.index(p)], color=color, alpha=0.85)
+                    ax5.axhline(y=0, color="gray", linestyle="-", linewidth=0.8, alpha=0.5)
+                    ax5.set_title("📉 不同形态入场累计收益", fontsize=11, fontweight="bold")
+                    ax5.set_xlabel("交易次数 (按时间序)")
+                    ax5.set_ylabel("累计收益 %")
+                    ax5.legend(fontsize=8, loc="best")
+                    ax5.grid(True, alpha=0.3)
+                else:
+                    ax5.text(0.5, 0.5, "无 next_pct 数据", ha="center", va="center",
+                             fontsize=10, transform=ax5.transAxes)
+
+                # ── 图6: 每日涨跌幅柱状图 (跨3列) ──
+                ax6 = fig.add_subplot(gs[2, :])
+                if "body_pct" in df.columns:
+                    dates_pct = df["date"].values[-60:]  # 近 60 天
+                    pcts = df["body_pct"].values.astype(float)[-60:]
+                    colors6 = ["#2E7D32" if p >= 0 else "#C62828" for p in pcts]
+                    x6 = np.arange(len(pcts))
+                    ax6.bar(x6, pcts, color=colors6, width=0.8, edgecolor="white", linewidth=0.3)
+                    ax6.axhline(y=0, color="gray", linestyle="-", linewidth=0.8, alpha=0.6)
+                    # MA5/MA20 叠加
+                    ma5_line = np.convolve(pcts, np.ones(5)/5, mode="valid")
+                    ma20_line = np.convolve(pcts, np.ones(20)/20, mode="valid")
+                    ax6.plot(np.arange(2, len(pcts)-2), ma5_line, color="#1565C0",
+                             linewidth=1.2, label="MA5", alpha=0.85)
+                    ax6.plot(np.arange(9, len(pcts)-10), ma20_line, color="#F57F17",
+                             linewidth=1.2, label="MA20", alpha=0.85)
+                    ax6.set_title("📈 每日涨跌幅 (近60日)", fontsize=11, fontweight="bold")
+                    ax6.set_xlabel("日期")
+                    ax6.set_ylabel("涨跌幅 %")
+                    ax6.legend(fontsize=8, loc="upper left")
+                    ax6.grid(True, alpha=0.3, axis="y")
+                    # x 轴日期标签 (稀疏显示, 每 10 个标一个)
+                    tick_positions = list(range(0, len(dates_pct), max(1, len(dates_pct)//10)))
+                    tick_labels = [str(dates_pct[i])[:10][5:] if i < len(dates_pct) else "" for i in tick_positions]
+                    ax6.set_xticks(tick_positions)
+                    ax6.set_xticklabels(tick_labels, rotation=30, fontsize=8)
+                    # 在 y=0 正负区域加浅色背景
+                    ymin, ymax = ax6.get_ylim()
+                    ax6.axhspan(0, ymax, alpha=0.08, color="#2E7D32")
+                    ax6.axhspan(ymin, 0, alpha=0.08, color="#C62828")
+                else:
+                    ax6.text(0.5, 0.5, "无 body_pct 数据", ha="center", va="center",
+                             fontsize=10, transform=ax6.transAxes)
+
+                # 总标题
+                fig.suptitle(f"🕸️ {label_text} — 多维形态可视化",
+                             fontsize=13, fontweight="bold", y=0.98)
+
+                # 渲染到 Tk
+                canvas = FigureCanvasTkAgg(fig, master=tab3)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                print(f"[📊index_pattern] ✅ Tab3 多维图表渲染完成", flush=True)
+            except Exception as _e3:
+                import traceback; traceback.print_exc()
+                print(f"[📊index_pattern] ❌ Tab3 渲染失败: {_e3}", flush=True)
+
+            # 🆕 Tab4: 明日走势分析
+            try:
+                print(f"[📊index_pattern] 🎯 Tab4 开始渲染...", flush=True)
+
+                # 清理旧
+                for _w in tab4.winfo_children():
+                    _w.destroy()
+
+                # ── 1. 今日状态卡片 (顶部, 3列) ──
+                today = df.iloc[-1]
+                today_pat = str(today.get("pattern", "—"))
+                today_pct = float(today.get("body_pct", 0))
+                today_gap = float(today.get("gap_pct", 0))
+                today_vol = float(today.get("volume", 0)) if "volume" in df.columns else 0
+                vol_ma60 = df["volume"].tail(60).mean() if "volume" in df.columns else 1
+                vol_ratio = today_vol / vol_ma60 if vol_ma60 and today_vol else 1.0
+                today_vi = str(today.get("vs_index", "—"))
+                today_idx_pat = str(today.get("index_pattern", "—"))
+                today_rel = today.get("rel_pct", None)
+
+                # 计算当前 MA 多空
+                closes_now = df["close"].values.astype(float)
+                ma20_now = np.mean(closes_now[-20:])
+                ma60_now = np.mean(closes_now[-60:])
+                price_now = closes_now[-1]
+                if price_now > ma20_now > ma60_now:
+                    ma_state = "🟢 多头排列"
+                elif price_now < ma20_now < ma60_now:
+                    ma_state = "🔴 空头排列"
+                elif price_now > ma60_now and price_now < ma20_now:
+                    ma_state = "🔄 回踩期"
+                else:
+                    ma_state = "🔄 反弹期"
+
+                cards4 = tk.Frame(tab4, bg="#F8FAFC")
+                cards4.pack(fill=tk.X, padx=8, pady=(8, 4))
+
+                def _today_card(parent, title, value, color="#2196F3", sub=""):
+                    f = tk.Frame(parent, bg="white", relief="solid", bd=1)
+                    f.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=4)
+                    tk.Label(f, text=title, bg="white", fg="#757575",
+                             font=("", 9)).pack(pady=(6, 0))
+                    tk.Label(f, text=value, bg="white", fg=color,
+                             font=("", 14, "bold")).pack()
+                    if sub:
+                        tk.Label(f, text=sub, bg="white", fg="#9E9E9E",
+                                 font=("", 8)).pack(pady=(0, 6))
+
+                _today_card(cards4, "今日走势形态", today_pat,
+                           color="#2E7D32" if "🟢" in today_pat else "#C62828",
+                           sub=f"gap {today_gap:+.2f}% | body {today_pct:+.2f}%")
+                _today_card(cards4, "量能对比",
+                           f"{vol_ratio:.1f}× 60日均量",
+                           color="#F57F17",
+                           sub="放量" if vol_ratio > 1.3 else ("缩量" if vol_ratio < 0.7 else "平量"))
+                _today_card(cards4, "大盘形态",
+                           today_idx_pat,
+                           sub=f"vs: {today_vi}")
+                _today_card(cards4, "MA多空", ma_state,
+                           color="#1565C0",
+                           sub=f"价{price_now:.0f} / MA20={ma20_now:.0f} / MA60={ma60_now:.0f}")
+
+                # ── 2. 预测结果区 ──
+                pred_fr = tk.LabelFrame(tab4, text="🎯 明日走势预测 (多因子加权)",
+                                        bg="#F8FAFC", fg="#1565C0",
+                                        font=("", 11, "bold"))
+                pred_fr.pack(fill=tk.BOTH, expand=False, padx=8, pady=6)
+
+                # 后台线程跑预测 (可能要几秒)
+                import threading as _th
+                import queue as _q4
+                _q4 = _q4.Queue()
+
+                def _pred_worker():
+                    try:
+                        from ui.tab_index_pattern import predict_next_day_pattern
+                        _res = predict_next_day_pattern(df,
+                                                        code=current_code_for_pred, app=app)
+                        _q4.put(("ok", _res))
+                    except Exception as _e:
+                        import traceback; traceback.print_exc()
+                        _q4.put(("err", str(_e)))
+
+                # 先显示 loading
+                loading_lbl = tk.Label(pred_fr, text="⏳ 多因子计算中... (大数法则 + MA位置 + 量能 + 动量 + 情绪)",
+                                       bg="#F8FAFC", fg="#757575",
+                                       font=("", 10))
+                loading_lbl.pack(pady=10)
+
+                # 启动后台
+                current_code_for_pred = None
+                try:
+                    for _it in all_items:
+                        if f"🆕 当前K线" in _it or str(default_code or "") and f"({default_code})" in _it:
+                            _c = _it.split("(")[-1].rstrip(")")
+                            if _c.isdigit() and len(_c) == 6:
+                                current_code_for_pred = _c
+                                break
+                except Exception:
+                    pass
+                if not current_code_for_pred:
+                    current_code_for_pred = "000001"
+
+                _th.Thread(target=_pred_worker, daemon=True).start()
+
+                def _poll_pred():
+                    try:
+                        while True:
+                            _msg = _q4.get_nowait()
+                            for _c in pred_fr.winfo_children():
+                                _c.destroy()
+
+                            if _msg[0] == "err":
+                                tk.Label(pred_fr, text=f"❌ 预测失败: {_msg[1]}",
+                                         bg="#F8FAFC", fg="#C62828",
+                                         font=("", 10)).pack(pady=10)
+                                break
+
+                            res = _msg[1]
+                            if not res.get("ok", True) and "error" in res:
+                                tk.Label(pred_fr, text=f"⚠️ {res['error']}",
+                                         bg="#F8FAFC", fg="#F57F17",
+                                         font=("", 10)).pack(pady=10)
+                                break
+
+                            best = res.get("best", "")
+                            conf = res.get("confidence", "低")
+                            probs_raw = res.get("probs", [])
+                            factors = res.get("factor_contrib", {})
+                            ts = res.get("today_state", {})
+
+                            if not probs_raw:
+                                tk.Label(pred_fr, text="⚠️ 预测数据为空",
+                                         bg="#F8FAFC", fg="#F57F17",
+                                         font=("", 10)).pack(pady=10)
+                                break
+
+                            # probs → dict
+                            probs = dict(probs_raw) if isinstance(probs_raw, list) else probs_raw
+                            total_p = sum(probs.values()) or 1
+                            max_p = max(probs.values()) or 1
+
+                            # 上涨概率 = 所有绿形态之和 / 总和 (归一化!)
+                            up_prob_raw = sum(v for k, v in probs.items() if "🟢" in k)
+                            up_prob = up_prob_raw / total_p  # 归一到 [0,1]
+
+                            # ── 1. 综合判定卡 ──
+                            concl_fr = tk.Frame(pred_fr, bg="#E3F2FD", relief="solid", bd=1)
+                            concl_fr.pack(fill=tk.X, padx=8, pady=(6, 4))
+                            tk.Label(concl_fr, text="🎯 明日走势综合判定", bg="#1565C0",
+                                     fg="white", font=("", 11, "bold")).pack(fill=tk.X, padx=6, pady=4)
+
+                            v_color = "#2E7D32" if "🟢" in best else ("#C62828" if "🔴" in best else "#1565C0")
+                            verdict_line = f"最可能形态: {best}    |    置信度: {conf}"
+                            tk.Label(concl_fr, text=verdict_line, bg="#E3F2FD", fg=v_color,
+                                     font=("", 15, "bold")).pack(anchor="w", padx=10, pady=3)
+
+                            # 操作建议 (根据 best + conf + today_state)
+                            sent_up = ts.get("sentiment_up", 0.5) if isinstance(ts, dict) else 0.5
+                            vol_b = ts.get("vol_bucket", "") if isinstance(ts, dict) else ""
+                            mom_b = ts.get("mom_bucket", "") if isinstance(ts, dict) else ""
+
+                            if "🟢" in best and conf in ("高", "中高"):
+                                action = f"✅ 明日偏多, 可考虑低吸或持仓待涨"
+                            elif "🔴" in best and conf in ("高", "中高"):
+                                action = f"⚠️ 明日偏空, 建议减仓或观望"
+                            elif "🟢" in best:
+                                action = f"🔶 概率偏多但置信度一般, 轻仓试探"
+                            elif "🔴" in best:
+                                action = f"🔶 概率偏空但置信度一般, 谨慎操作"
+                            else:
+                                action = f"➖ 震荡概率大, 观望为主"
+
+                            tk.Label(concl_fr, text=f"📈 上涨概率: {up_prob*100:.1f}%    |    💡 {action}",
+                                     bg="#E3F2FD", fg="#6A1B9A",
+                                     font=("", 10, "bold")).pack(anchor="w", padx=10, pady=(0, 6))
+
+                            # ── 2. 明日形态概率横条 ──
+                            grid_fr = tk.Frame(pred_fr, bg="#F8FAFC")
+                            grid_fr.pack(fill=tk.X, padx=8, pady=4)
+                            tk.Label(grid_fr, text="📊 明日 6 种形态概率分布:", bg="#F8FAFC",
+                                     fg="#333", font=("", 10, "bold")).pack(anchor="w")
+
+                            for pk, pv in sorted(probs.items(), key=lambda x: -x[1]):
+                                pct = pv / total_p * 100
+                                bar_w = int(pv / max_p * 350)
+                                color = "#2E7D32" if "🟢" in pk else "#C62828"
+                                row = tk.Frame(grid_fr, bg="#F8FAFC")
+                                row.pack(fill=tk.X, pady=1)
+                                tk.Label(row, text=f"{pk[:9]}", bg="#F8FAFC", width=11,
+                                         anchor="w", font=("", 9)).pack(side=tk.LEFT)
+                                bar = tk.Frame(row, bg=color, width=max(4, bar_w), height=14)
+                                bar.pack(side=tk.LEFT)
+                                tk.Label(row, text=f"  {pct:.1f}%", bg="#F8FAFC", width=7,
+                                         anchor="e", font=("", 9, "bold"), fg=color).pack(side=tk.LEFT)
+
+                            # ── 3. 多因子贡献 (哪个因子推哪个方向) ──
+                            factor_fr = tk.LabelFrame(pred_fr, text="📚 5 因子贡献分析",
+                                                      bg="#F8FAFC", fg="#6A1B9A",
+                                                      font=("", 10, "bold"))
+                            factor_fr.pack(fill=tk.X, padx=8, pady=6)
+
+                            factor_desc = {
+                                "①大数法则": "该形态在历史同位置出现频率 (基础概率)",
+                                "②指数位置": "当前股价在 MA20/MA60 的相对位置影响",
+                                "③量能": "今日量能 vs 60 日均量 (放量=趋势确认)",
+                                "④动量": "最近 5 日涨跌动量 (惯性延续)",
+                                "⑤情绪": "市场整体情绪/连板高度对次日的传导",
+                            }
+
+                            for fname, fscores in factors.items():
+                                top_p = max(fscores, key=fscores.get)
+                                top_v = fscores[top_p] * 100
+                                top_color = "#2E7D32" if "🟢" in top_p else "#C62828"
+                                # 计算这个因子的看涨倾向 (绿 - 红)
+                                green_sum = sum(v for k, v in fscores.items() if "🟢" in k)
+                                red_sum = sum(v for k, v in fscores.items() if "🔴" in k)
+                                bias = green_sum - red_sum
+                                bias_txt = "🟢偏多" if bias > 0.01 else ("🔴偏空" if bias < -0.01 else "⚪中性")
+                                bias_color = "#2E7D32" if bias > 0 else ("#C62828" if bias < 0 else "#757575")
+
+                                row2 = tk.Frame(factor_fr, bg="#F8FAFC")
+                                row2.pack(fill=tk.X, padx=6, pady=1)
+                                tk.Label(row2, text=f"{fname}", bg="#F8FAFC", width=10,
+                                         anchor="w", font=("", 9, "bold")).pack(side=tk.LEFT)
+                                tk.Label(row2, text=f"最倾向: {top_p[:9]} ({top_v:.1f}%)", bg="#F8FAFC",
+                                         fg=top_color, font=("", 9)).pack(side=tk.LEFT, padx=(4, 8))
+                                tk.Label(row2, text=bias_txt, bg="#F8FAFC", fg=bias_color,
+                                         font=("", 9, "bold")).pack(side=tk.LEFT)
+
+                            # ── 4. 历史同形态次日查表 ──
+                            table_fr = tk.Frame(pred_fr, bg="#F8FAFC")
+                            table_fr.pack(fill=tk.X, padx=8, pady=4)
+                            tk.Label(table_fr, text="📋 历史上「今日形态」的次日表现:",
+                                     bg="#F8FAFC", fg="#333", font=("", 10, "bold")).pack(anchor="w")
+                            _nd2 = stats["pattern_next_day"].get(today_pat, {})
+                            if _nd2:
+                                _ur = _nd2.get("up_rate", 0) * 100
+                                _avg = _nd2.get("avg_next_pct", 0) * 100
+                                _cnt = _nd2.get("count", 0)
+                                tk.Label(table_fr,
+                                         text=f"  {today_pat[:10]} → 次日涨概率 {_ur:.0f}% | 平均 {_avg:+.2f}% | 样本 {_cnt} 次",
+                                         bg="#F8FAFC", fg="#1565C0", font=("", 9, "bold")).pack(anchor="w", padx=4)
+
+                            # ── 5. vs 大盘 历史次日查表 ──
+                            if "vs_index" in df.columns and today_vi not in ("—", ""):
+                                vi_table_fr = tk.Frame(pred_fr, bg="#F8FAFC")
+                                vi_table_fr.pack(fill=tk.X, padx=8, pady=4)
+                                tk.Label(vi_table_fr,
+                                         text=f"🔥 历史上「今日 vs大盘: {today_vi}」的次日表现:",
+                                         bg="#F8FAFC", fg="#333", font=("", 10, "bold")).pack(anchor="w")
+                                same_vi = df[df["vs_index"] == today_vi].dropna(subset=["next_pct"])
+                                if len(same_vi) >= 3:
+                                    vi_up = (same_vi["next_pct"] > 0).mean() * 100
+                                    vi_avg = same_vi["next_pct"].mean() * 100
+                                    tk.Label(vi_table_fr,
+                                             text=f"  {len(same_vi)} 次样本 → 次日涨概率 {vi_up:.0f}% | 平均 {vi_avg:+.2f}%",
+                                             bg="#F8FAFC", fg="#F57F17", font=("", 9, "bold")).pack(anchor="w", padx=4)
+                                else:
+                                    tk.Label(vi_table_fr,
+                                             text=f"  样本不足 ({len(same_vi)} 次, 需要 ≥3)",
+                                             bg="#F8FAFC", fg="#9E9E9E", font=("", 9)).pack(anchor="w", padx=4)
+
+                            # ── 6. 今日状态速览 (辅助判断) ──
+                            ts_fr = tk.LabelFrame(pred_fr, text="📉 今日状态 (辅助判断)",
+                                                  bg="#F8FAFC", fg="#37474F",
+                                                  font=("", 10, "bold"))
+                            ts_fr.pack(fill=tk.X, padx=8, pady=6)
+                            if isinstance(ts, dict):
+                                row3 = tk.Frame(ts_fr, bg="#F8FAFC")
+                                row3.pack(fill=tk.X, padx=6, pady=3)
+                                tk.Label(row3, text=f"位置: {ts.get('pos_bucket','—')}  ", bg="#F8FAFC",
+                                         font=("", 9)).pack(side=tk.LEFT)
+                                tk.Label(row3, text=f"量能: {ts.get('vol_bucket','—')} (×{ts.get('vol_ratio',0):.1f})  ",
+                                         bg="#F8FAFC", font=("", 9)).pack(side=tk.LEFT)
+                                tk.Label(row3, text=f"动量: {ts.get('mom_bucket','—')}  ", bg="#F8FAFC",
+                                         font=("", 9)).pack(side=tk.LEFT)
+                                sent = ts.get("sentiment_up", 0.5)
+                                tk.Label(row3,
+                                         text=f"情绪: {sent:.0%}看多",
+                                         bg="#F8FAFC",
+                                         fg="#2E7D32" if sent > 0.5 else "#C62828",
+                                         font=("", 9, "bold")).pack(side=tk.LEFT)
+
+                            print(f"[📊index_pattern] ✅ Tab4 明日走势渲染完成", flush=True)
+                            break
+                    except Exception:
+                        try:
+                            win.after(120, _poll_pred)
+                        except Exception:
+                            pass
+                        return
+
+                win.after(100, _poll_pred)
+
+            except Exception as _e4:
+                import traceback; traceback.print_exc()
+                print(f"[📊index_pattern] ❌ Tab4 渲染失败: {_e4}", flush=True)
+
         except Exception as _e:
             import traceback; traceback.print_exc()
-            print(f"[📊index_pattern] ❌ 渲染失败: {_e}", flush=True)
+            print(f"[📊index_pattern] ❌ 渲染总流程失败: {_e}", flush=True)
 
     def _poll():
         try:
@@ -1497,6 +2180,18 @@ next_pct = 次日收盘价 / 当日收盘价 − 1
                 full_df = fetch_kline(code, kind=kind, days=300)
                 if full_df is None or len(full_df) < 30:
                     _q.put(("error", f"{name}({code}) 数据不足")); return
+
+                # 🆕 拉上证指数大盘基准 + 合并对比
+                _q.put(("progress", "📥 拉大盘基准(上证 sh000001)..."))
+                try:
+                    idx_df = fetch_index_baseline(days=300)
+                    if idx_df is not None and len(idx_df) >= 30:
+                        full_df = add_index_compare(full_df, idx_df)
+                        print(f"[📊index_pattern] ✅ 大盘对比已合并: {len(full_df)}行, vs_index 样例={full_df.get('vs_index', pd.Series(['—'])).iloc[-3:].tolist()}", flush=True)
+                    else:
+                        print(f"[📊index_pattern] ⚠️ 大盘基准数据不足, 跳过对比", flush=True)
+                except Exception as _e_idx:
+                    print(f"[📊index_pattern] ⚠️ 大盘对比失败(不影响主流程): {_e_idx}", flush=True)
 
                 work_df = full_df.tail(window_days + 60).copy()
                 work_df["next_pct"] = work_df["close"].shift(-1) / work_df["close"] - 1

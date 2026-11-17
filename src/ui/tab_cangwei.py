@@ -918,7 +918,7 @@ class CangweiMixin:
                             except Exception:
                                 kd = None
                             if kd:
-                                self.root.after(0, lambda: self._show_daily_kline_zoom(kd, sname))
+                                self.root.after(0, lambda: self._show_daily_kline_zoom(kd, sname, stock_code=str(scode).zfill(6)))
                             else:
                                 self.root.after(0, lambda: messagebox.showwarning("提示",
                                     f"无法获取 {sname}({scode}) 的K线数据\n请检查 Tushare 连接或稍后再试", parent=self.root))

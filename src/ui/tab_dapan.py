@@ -14489,6 +14489,166 @@ class DapanMixin:
             l.pack(side=tk.RIGHT)
             l.bind("<Button-1>", lambda e, uu=url: self._open_safe(uu))
 
+        # ── Tab 4: 🚀 机构增持股小票 (市值<200亿) ──
+        t4 = _mk_tab(nb, "🚀 机构增持股小票")
+        tk.Label(t4, text="💡 筛选条件: 机构增持 + 市值 < 200亿 + 活跃 + 有概念题材",
+                 bg="#1E1E2E", fg="#81D4FA", font=("Helvetica", _FS["v"], "bold")).pack(anchor="w", pady=(4,0))
+        top4 = tk.Frame(t4, bg="#1E1E2E"); top4.pack(fill=tk.X, pady=4)
+        tk.Label(top4, text="市值上限(亿):", bg="#1E1E2E", fg="#B0BEC5", font=("Helvetica", _FS["v"])).pack(side=tk.LEFT)
+        _cap_var = tk.StringVar(value="200")
+        tk.Entry(top4, textvariable=_cap_var, width=6, bg="#263238", fg="#FFF",
+                 font=("Helvetica", _FS["v"])).pack(side=tk.LEFT, padx=4)
+        tk.Label(top4, text="  换手率≥:", bg="#1E1E2E", fg="#B0BEC5", font=("Helvetica", _FS["v"])).pack(side=tk.LEFT)
+        _turn_var = tk.StringVar(value="1.0")
+        tk.Entry(top4, textvariable=_turn_var, width=6, bg="#263238", fg="#FFF",
+                 font=("Helvetica", _FS["v"])).pack(side=tk.LEFT, padx=4)
+        _only_concept = tk.BooleanVar(value=True)
+        tk.Checkbutton(top4, text="🏷️只要有概念题材", variable=_only_concept, bg="#1E1E2E",
+                       fg="#B0BEC5", selectcolor="#263238", activebackground="#1E1E2E",
+                       font=("Helvetica", _FS["v"])).pack(side=tk.LEFT, padx=10)
+        _status4 = tk.Label(top4, text="", bg="#1E1E2E", fg="#FFD700", font=("Helvetica", _FS["v"]))
+        _status4.pack(side=tk.RIGHT, padx=8)
+        _container4 = tk.Frame(t4, bg="#1E1E2E"); _container4.pack(fill=tk.BOTH, expand=True)
+        def _render_small_inst(df, container):
+            for w in container.winfo_children(): w.destroy()
+            if df is None or len(df)==0:
+                tk.Label(container, text="⚠️ 无符合条件的小票, 放宽条件试试",
+                         bg="#1E1E2E", fg="#FFA726", font=("Helvetica", _FS["v"]+2)).pack(pady=40)
+                return
+            header = tk.Frame(container, bg="#2A2A3E"); header.pack(fill=tk.X, pady=(0,4))
+            cols = [("代码",70),("名称",90),("收盘",70),("涨跌幅",80),("市值(亿)",80),
+                   ("换手率",80),("增持次数",80),("机构数",70),("概念题材",260),("🔥推荐",120)]
+            for text,w in cols:
+                tk.Label(header,text=text,bg="#2A2A3E",fg="#FFD54F",
+                         font=("Helvetica",10,"bold"),width=w//8).pack(side=tk.LEFT,padx=2)
+            for idx,row in df.iterrows():
+                bg = "#263238" if idx%2==0 else "#1E1E2E"
+                rf = tk.Frame(container,bg=bg); rf.pack(fill=tk.X)
+                pct = row.get("涨跌幅",0) or 0
+                pct_f = f"{pct:+.2f}%"
+                pct_c = "#EF5350" if pct>=0 else "#66BB6A"
+                cap = row.get("市值",0) or 0
+                turnover = row.get("换手率",0) or 0
+                inc_cnt = row.get("增持次数",1)
+                inst_cnt = row.get("机构数",1)
+                concept = str(row.get("概念",""))[:24]
+                score = 0
+                if cap < 50: score += 30
+                elif cap < 100: score += 20
+                elif cap < 200: score += 10
+                if turnover >= 5: score += 25
+                elif turnover >= 2: score += 15
+                elif turnover >= 1: score += 8
+                if inc_cnt >= 3: score += 20
+                elif inc_cnt >= 2: score += 12
+                if 0 < pct < 5: score += 15
+                elif -3 < pct <= 0: score += 5
+                if concept: score += 10
+                stars = "⭐" * min(5, score // 20)
+                data = [str(row.get("代码","")), str(row.get("名称","")),
+                        f"{row.get('收盘价',0):.2f}", pct_f, f"{cap:.0f}",
+                        f"{turnover:.1f}%", str(inc_cnt), str(inst_cnt),
+                        concept or "—", stars]
+                fgs = ["#CE93D8","#ECEFF1","#B0BEC5",pct_c,"#FFD54F","#81C784","#90A4AE","#90A4AE","#4FC3F7","#FF8A65"]
+                for txt,fg in zip(data,fgs):
+                    tk.Label(rf,text=txt,bg=bg,fg=fg,font=("Helvetica",_FS["v"])).pack(side=tk.LEFT,padx=2)
+                def _on_click_row(e, _c=row.get("代码",""), _n=row.get("名称","")):
+                    try: self.open_stock_web(_c, _n)
+                    except: pass
+                rf.bind("<Button-1>", _on_click_row)
+                for _c2 in rf.winfo_children(): _c2.bind("<Button-1>", _on_click_row)
+                tk.Label(rf,text="🌐",bg=bg,fg="#FFD54F",font=("",_FS["v"]),
+                         cursor="hand2").pack(side=tk.RIGHT,padx=4)
+
+        def _small_inst_thread():
+            try:
+                import akshare as ak
+                import pandas as pd
+                cap_max = float(_cap_var.get() or 200)
+                turn_min = float(_turn_var.get() or 1.0)
+                try: df_fund = ak.stock_institutional_position_em(symbol="基金重仓")
+                except Exception as e: df_fund = None; print(f"[小票Tab❌] 基金重仓: {e}")
+                try: df_rt = ak.stock_zh_a_spot_em()
+                except Exception as e: df_rt = None; print(f"[小票Tab❌] 实时行情: {e}")
+                if df_fund is None or df_rt is None:
+                    win.after(0, lambda: _status4.configure(text="❌ 拉取数据失败", fg="#EF5350"))
+                    return
+                code_col = None
+                for c in df_fund.columns:
+                    if "代码" in str(c): code_col = c; break
+                name_col = None
+                for c in df_fund.columns:
+                    if "名称" in str(c): name_col = c; break
+                if code_col is None:
+                    win.after(0, lambda: _status4.configure(text="❌ 基金持仓列名变化", fg="#EF5350"))
+                    return
+                fund_counts = df_fund.groupby(code_col).agg(
+                    机构数=(name_col, "nunique"),
+                    增持次数=(code_col, "count")).reset_index()
+                fund_counts.columns = ["代码","机构数","增持次数"]
+                df_rt_c = df_rt.copy()
+                code_col2 = None
+                for c in df_rt_c.columns:
+                    if "代码" in str(c): code_col2 = c; break
+                name_col2 = None
+                for c in df_rt_c.columns:
+                    if "名称" in str(c): name_col2 = c; break
+                df_rt_c = df_rt_c.rename(columns={code_col2:"代码", name_col2:"名称"})
+                cap_col = None
+                for c in df_rt_c.columns:
+                    if "总市值" in str(c) or "流通市值" in str(c): cap_col = c; break
+                df_rt_c["市值"] = df_rt_c[cap_col]/1e8 if cap_col else 0
+                turn_col = None
+                for c in df_rt_c.columns:
+                    if "换手率" in str(c): turn_col = c; break
+                df_rt_c["换手率"] = df_rt_c[turn_col] if turn_col else 0
+                close_col = None
+                for c in df_rt_c.columns:
+                    if "收盘" in str(c) and "量" not in str(c): close_col = c; break
+                pct_col = None
+                for c in df_rt_c.columns:
+                    if "涨跌幅" in str(c): pct_col = c; break
+                df_rt_c = df_rt_c.rename(columns={close_col:"收盘价", pct_col:"涨跌幅"})
+                merged = pd.merge(fund_counts, df_rt_c[["代码","名称","收盘价","涨跌幅","市值","换手率"]], on="代码", how="inner")
+                merged = merged[(merged["市值"] > 0) & (merged["市值"] <= cap_max)]
+                merged = merged[merged["换手率"] >= turn_min]
+                merged = merged[merged["机构数"] >= 1]
+                if _only_concept.get():
+                    try:
+                        df_board = ak.stock_board_concept_name_em()
+                        concept_map = {}
+                        for _,br in df_board.head(30).iterrows():
+                            bname = str(br.get("板块名称",""))
+                            try:
+                                comps = ak.stock_board_concept_cons_em(symbol=bname)
+                                code_c = None
+                                for cc in comps.columns:
+                                    if "代码" in str(cc): code_c = cc; break
+                                if code_c:
+                                    for c in comps[code_c].astype(str).tolist():
+                                        concept_map.setdefault(c, []).append(bname)
+                            except: pass
+                        merged["概念"] = merged["代码"].astype(str).map(lambda x: ",".join(concept_map.get(x, [])) or "")
+                        merged = merged[merged["概念"] != ""]
+                    except Exception as e:
+                        print(f"[小票Tab⚠️] 概念板失败: {e}"); merged["概念"] = ""
+                else: merged["概念"] = ""
+                merged["_rank"] = merged["机构数"]*2 + merged["增持次数"]
+                merged = merged.sort_values("_rank", ascending=False).head(30).reset_index(drop=True)
+                win.after(0, lambda: (
+                    _status4.configure(text=f"✅ {len(merged)} 只小票 | 市值≤{cap_max}亿 换手≥{turn_min}%", fg="#66BB6A"),
+                    _render_small_inst(merged, _container4)))
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                win.after(0, lambda: _status4.configure(text=f"❌ 失败: {str(e)[:50]}", fg="#EF5350"))
+
+        def _refresh4():
+            _status4.configure(text="⏳ 拉取基金持仓 + 实时行情 + 概念题材...", fg="#FFD700")
+            import threading as _tx; _tx.Thread(target=_small_inst_thread, daemon=True).start()
+        tk.Button(top4, text="🔄 刷新", command=_refresh4, bg="#FFD54F", fg="#111",
+                  relief=tk.FLAT, padx=10, font=("Helvetica", _FS["v"], "bold")).pack(side=tk.RIGHT, padx=4)
+        _refresh4()
+
     def _show_factor_catalog_dialog(self):
         """🎯 量化因子体系 - Barra CNE6 + IC/IR + 合成方法"""
         import tkinter as tk
@@ -15401,6 +15561,35 @@ class DapanMixin:
             _hl(getattr(self, 'root', None) or getattr(self, '_root', None), app=self)
         except Exception as e:
             print(f"[🎯高抛低吸❌] {e}", flush=True); _tb.print_exc()
+
+    def _show_index_pattern(self):
+        """📈 指数日走势形态统计 — 做T指南"""
+        import traceback as _tb
+        print("[📈指数形态] 按钮被点击!", flush=True)
+        try:
+            from ui.tab_index_pattern import show_index_pattern_analyzer as _sip
+            _sip(getattr(self, 'root', None) or getattr(self, '_root', None), app=self)
+        except Exception as e:
+            print(f"[📈指数形态❌] {e}", flush=True); _tb.print_exc()
+
+    def _show_consulting_analysis(self):
+        """💼 麦肯锡/波士顿/埃森哲 咨询框架分析"""
+        import traceback as _tb
+        print("[💼咨询框架] 按钮被点击!", flush=True)
+        try:
+            import sys as _sys, os as _os
+            for _p in [
+                _os.path.dirname(_os.path.abspath(__file__)),
+                _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..'),
+            ]:
+                if _p not in _sys.path: _sys.path.insert(0, _p)
+            import consulting_analysis_gui as _cag
+            _root = getattr(self, 'root', None) or getattr(self, '_root', None)
+            _top = tk.Toplevel(_root)
+            _top.transient(_root)
+            _cag.ConsultingAnalysisApp(_top)
+        except Exception as e:
+            print(f"[💼咨询框架❌] {e}", flush=True); _tb.print_exc()
 
     def _show_margin_dialog(self):
         """📊 融资盘全景 — Tushare + AKShare, 3890只个股两融"""

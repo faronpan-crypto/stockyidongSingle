@@ -4937,13 +4937,13 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         # ═══════════════════════════════════════════════════════════
         # Row1: 🌍 全球·大盘·AI (最高频 — 开盘先看)
         _ROW1 = [
-            ("全", 3, self.show_market_situation),
-            ("📺实时", 7, self._show_combined_realtime_dialog),
-            ("👁️见盘", 6, self._show_combined_jianpan_dialog),
+            ("全", 5, self.show_market_situation),
+            ("📺实时", 8, self._show_combined_realtime_dialog),
+            ("👁️见盘", 8, self._show_combined_jianpan_dialog),
             ("🎯布鲁斯分析", 9, self._show_quant_forecast_dialog),
             ("🌍全球资产", 9, self._show_global_assets_dialog),
-            ("📖见文", 6, self._show_market_read),
-            ("🤖AI设置", 8, self._show_ai_settings),
+            ("📖见文", 8, self._show_market_read),
+            ("🤖AI设置", 9, self._show_ai_settings),
             ("🌪️金融危机", 9, self._show_crisis_dialog),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW1):
@@ -4968,15 +4968,17 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
         try:
             _ROW2 = [
                 ("🦅游资心法", 8, self._open_hotmoney_single_dialog),
-                ("💰提醒", 6, self._show_price_alert_dialog),
-                ("🤝WorkBuddy", 10, self._show_workbuddy_dialog_v2),
-                ("🎯Martin操盘", 10, self._show_martin_dialog),
+                ("💰提醒", 7, self._show_price_alert_dialog),
+                ("🤝WorkBuddy", 9, self._show_workbuddy_dialog_v2),
+                ("🎯Martin操盘", 9, self._show_martin_dialog),
                 ("🎯高抛低吸", 8, self._show_high_low_swing),
+                ("📈指数形态", 9, self._show_index_pattern),
                 ("🎯超跌", 7, self._show_oversold_dialog),
                 ("🎯机会K", 8, self._show_jianlou),
                 ("🪙筹码K", 8, self._show_chouma),
                 ("🎯交易体系", 9, self._show_top_gurus_dialog),
                 ("📊操盘阶段", 9, self._show_tech_stage_dialog),
+                ("💼咨询框架", 9, self._show_consulting_analysis),
             ]
         except Exception as _e:
             print(f"[🎯Row2❌] 按钮定义炸了: {_e}", flush=True)
@@ -5008,12 +5010,12 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
 
         # Row3: 📈 个股·技术·深度分析 (💡主力趋势已合并到 📺实时)
         _ROW3 = [
-            ("📊K线", 6, self.show_kline_dialog),
-            ("📈1minK", 7, self._show_1min_kline_dialog),
-            ("📊深度技术", 8, self._show_stock_analysis_dialog),
-            ("📐β-α", 6, self._show_beta_alpha),
-            ("📈一目均衡", 7, self._show_ichimoku_kline_dialog),
-            ("💼基本面", 8, self.show_fundamental_analysis),
+            ("📊K线", 7, self.show_kline_dialog),
+            ("📈1minK", 8, self._show_1min_kline_dialog),
+            ("📊深度技术", 9, self._show_stock_analysis_dialog),
+            ("📐β-α", 7, self._show_beta_alpha),
+            ("📈一目均衡", 8, self._show_ichimoku_kline_dialog),
+            ("💼基本面", 9, self.show_fundamental_analysis),
             ("📈投资系统", 9, self.show_investment_system),
         ]
         for _idx, (txt, w, cmd) in enumerate(_ROW3):
