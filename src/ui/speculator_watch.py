@@ -4864,13 +4864,32 @@ def _open_hotmoney_dialog(win, code, name):
 # ═══════════════════════════════════════════════════════
 
 def _load_index_closes(index_code="sh000001", days=240):
-    """拉指数日线 closes — 优先新浪接口(真实数据), 失败再兜底"""
+    """拉指数日线 closes — 🆕 缓存优先, 今天已拉过就秒读, 否则走新浪"""
     import numpy as np
     import urllib.request, json, re, ssl
 
     # 新浪 index_code 格式是 sh000001 / sz399001
     if not index_code.startswith(("sh", "sz", "bj")):
         index_code = "sh" + index_code
+
+    # ── 🆕 缓存优先: 今天已拉过就直接返回 (日线每天只变一次!) ──
+    try:
+        import sqlite3 as _sql3, json as _json
+        from datetime import datetime as _dt
+        from data.db import DB_PATH as _DB
+        _conn = _sql3.connect(_DB); _cur = _conn.cursor()
+        _cur.execute("CREATE TABLE IF NOT EXISTS _sw_index_cache (code TEXT PRIMARY KEY, closes TEXT, updated_at TEXT)")
+        _cur.execute("SELECT closes, updated_at FROM _sw_index_cache WHERE code=?", (index_code,))
+        _row = _cur.fetchone(); _conn.close()
+        _today = _dt.now().strftime("%Y-%m-%d")
+        if _row and _row[0] and _row[1] and _row[1][:10] == _today:
+            _arr = _json.loads(_row[0])
+            if len(_arr) >= 60:
+                _cached = np.array(_arr, dtype=float)
+                print(f"[👁️信号] 💾 今日缓存秒读 {index_code}: {len(_cached)}根, 最新={_cached[-1]:.2f}", flush=True)
+                return [f"💾缓存({_row[1]})"] * len(_cached), _cached
+    except Exception as _e:
+        print(f"[👁️信号] 缓存优先检查失败(不影响): {_e}", flush=True)
 
     # ── 主源: 新浪 CN_MarketData.getKLineData 日线 240 根 ──
     try:

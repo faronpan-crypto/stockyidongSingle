@@ -605,7 +605,9 @@ def _show_swing_knowledge(parent, title, def_text, logic_text, cases_list):
 def show_high_low_swing(parent, app=None):
     """🎯 高抛低吸 (做T专区) — 不联网, Lazy import. 
     app: 主程序实例, 用于从持仓 tab 拿真实持仓股列表"""
-    import threading
+    import threading, time as _time
+    _t0 = _time.time()
+    print(f"[🎯弹窗] 入口 t=0.00s", flush=True)
     win = tk.Toplevel(parent)
     win.title("🎯 高抛低吸 (做T专区)")
     win.geometry("1280x820")
@@ -614,6 +616,9 @@ def show_high_low_swing(parent, app=None):
 
     # ── 字体可变 widgets 集合 (A-/A+ 后 config) ──
     _font_widgets = []
+
+    # 🆕 共享日线缓存: 左侧拉完240根存这里, 右侧直接用避免重复网络请求
+    _cached_daily_closes = [None]
 
     def _refresh_fonts():
         for w, key in _font_widgets:
@@ -846,106 +851,124 @@ def show_high_low_swing(parent, app=None):
         _signal_labels[k] = lbl
 
     def _refresh_left_chart():
-        """🆕 刷新左侧 matplotlib 图表 + 择时信号卡片 (真实数据!)"""
+        """🆕 刷新左侧 matplotlib 图表 + 择时信号卡片 (异步加载!)"""
         nonlocal _fig_widget, _fig, _ax
         if not _mpl_ok:
             return
-        try:
-            from ui.speculator_watch import _load_index_closes
-            _, closes = _load_index_closes("sh000001", days=240)
-            if closes is None or len(closes) < 60:
-                _chart_status.config(text="⚠️ 日线数据不足", fg="#EF5350")
-                _ax.clear(); _ax.set_facecolor("#1a1a2e")
-                _ax.text(0.5, 0.5, "⚠️ 新浪日线数据获取失败\n请检查网络连接",
-                         ha="center", va="center", transform=_ax.transAxes,
-                         fontsize=14, color="#EF5350")
-                _ax.set_xticks([]); _ax.set_yticks([])
-                _safe_draw()
-                return
+        # 先显示占位
+        _chart_status.config(text="⏳ 加载中...", fg="#FFD54F")
+        _ax.clear(); _ax.set_facecolor("#1a1a2e")
+        _ax.text(0.5, 0.5, "⏳ 加载日线数据中...\n(首次需要网络)",
+                 ha="center", va="center", transform=_ax.transAxes,
+                 fontsize=14, color="#FFD54F")
+        _ax.set_xticks([]); _ax.set_yticks([])
+        _safe_draw()
 
-            closes = np.array(closes, dtype=float)
-            n = len(closes)
-            x = np.arange(n)
-            ma60 = np.array([np.mean(closes[max(0, i-59):i+1]) for i in range(n)])
+        # 🧠 后台线程拉数据 (网络最慢, 必须异步)
+        def _bg_load():
+            try:
+                from ui.speculator_watch import _load_index_closes
+                _, closes = _load_index_closes("sh000001", days=240)
+                win.after(0, lambda: _render_chart(closes))
+            except Exception as e:
+                win.after(0, lambda: (
+                    _chart_status.config(text=f"❌ 加载失败: {e}", fg="#EF5350"),
+                    _ax.clear(), _ax.set_facecolor("#1a1a2e"),
+                    _ax.text(0.5, 0.5, f"❌ 加载失败\n{e}",
+                             ha="center", va="center", transform=_ax.transAxes,
+                             fontsize=12, color="#EF5350"),
+                    _safe_draw()
+                ))
+        _bg_thread = threading.Thread(target=_bg_load, daemon=True)
+        _bg_thread.start()
 
-            # 上穿/跌破检测
-            ma60_now = ma60[-1]; ma60_prev = ma60[-2] if n >= 2 else ma60_now
-            ma60_dir = "up" if ma60_now > ma60_prev * 1.001 else ("down" if ma60_now < ma60_prev * 0.999 else "flat")
-            above = closes[-1] > ma60_now
-            cross = (closes[-2] < ma60[-2]) and above if n >= 2 else False
-
-            # 绘图
-            _ax.clear()
-            _ax.set_facecolor("#1a1a2e")
-            _ax.plot(x, closes, color="#64B5F6", linewidth=1.5, label="上证日线", alpha=0.9)
-            _ax.plot(x, ma60, color="#FFD54F", linewidth=2.0, label="MA60", alpha=0.95)
-
-            # 标记当前位置
-            _ax.axvline(x=n-1, color="#CE93D8", linestyle="--", alpha=0.6, linewidth=1)
-            _ax.scatter([n-1], [closes[-1]], color="#CE93D8", s=80, zorder=5)
-
-            # 高亮 MA60 方向拐点
-            if n >= 62:
-                _ax.annotate("⬆️ MA60拐头", xy=(n-1, ma60_now),
-                             xytext=(n-30, ma60_now + (ma60[-10] - ma60_now) * 0.3),
-                             arrowprops=dict(arrowstyle="->", color="#66BB6A"),
-                             color="#66BB6A", fontsize=9) if ma60_dir == "up" else None
-
-            # 上穿标记
-            if cross:
-                _ax.annotate("🟢 上穿MA60", xy=(n-1, closes[-1]),
-                             xytext=(n-50, closes[-1] + 30),
-                             arrowprops=dict(arrowstyle="->", color="#66BB6A", lw=2),
-                             color="#66BB6A", fontsize=11, fontweight="bold")
-            elif not above and ma60_dir == "up":
-                _ax.annotate("🔴 跌破MA60", xy=(n-1, closes[-1]),
-                             xytext=(n-50, closes[-1] - 40),
-                             arrowprops=dict(arrowstyle="->", color="#EF5350", lw=2),
-                             color="#EF5350", fontsize=11, fontweight="bold")
-
-            # 坐标轴美化
-            _ax.tick_params(colors="#aaa", labelsize=9)
-            for spine in _ax.spines.values():
-                spine.set_color("#444")
-            _ax.grid(True, alpha=0.2, color="#555")
-            _ax.legend(loc="upper left", facecolor="#222", edgecolor="#555",
-                       labelcolor="#ddd", fontsize=9)
-
-            # 标题
-            dir_emoji = "🟢向上" if ma60_dir == "up" else ("🔴向下" if ma60_dir == "down" else "⚪走平")
-            cross_tag = "上穿" if cross else ("跌破" if not above else "上方运行")
-            _ax.set_title(f"📈 上证 MA60={dir_emoji} | 价格{cross_tag}",
-                          color="#FFD54F", fontsize=12, fontweight="bold", pad=10)
-
-            _chart_status.config(text=f"✅ {n}根日线 | MA60={ma60_now:.0f}", fg="#66BB6A")
+    def _render_chart(closes):
+        """主线程渲染 matplotlib + 更新卡片"""
+        nonlocal _fig_widget, _fig, _ax
+        if closes is None or len(closes) < 60:
+            _chart_status.config(text="⚠️ 日线数据不足", fg="#EF5350")
+            _ax.clear(); _ax.set_facecolor("#1a1a2e")
+            _ax.text(0.5, 0.5, "⚠️ 新浪日线数据获取失败\n请检查网络连接",
+                     ha="center", va="center", transform=_ax.transAxes,
+                     fontsize=14, color="#EF5350")
+            _ax.set_xticks([]); _ax.set_yticks([])
             _safe_draw()
+            return
 
-            # 更新速览卡片 (全部 5 项)
-            _signal_labels["ma60"].config(
-                text=f"{dir_emoji}",
-                fg="#66BB6A" if ma60_dir == "up" else ("#EF5350" if ma60_dir == "down" else "#FFD54F"))
-            _signal_labels["cross"].config(
-                text=f"{'🟢上穿' if cross else '🔴跌破' if not above else '⚪上方'}",
-                fg="#66BB6A" if (cross and ma60_dir == "up") else ("#EF5350" if (not above and ma60_dir == "up") else "#FFD54F"))
+        closes = np.array(closes, dtype=float)
+        _cached_daily_closes[0] = closes  # 🆕 存共享缓存给右侧复用
+        n = len(closes)
+        x = np.arange(n)
+        ma60 = np.array([np.mean(closes[max(0, i-59):i+1]) for i in range(n)])
 
-            # 实时数据 + score (独立拉取, 与右侧同步)
+        # 上穿/跌破检测
+        ma60_now = ma60[-1]; ma60_prev = ma60[-2] if n >= 2 else ma60_now
+        ma60_dir = "up" if ma60_now > ma60_prev * 1.001 else ("down" if ma60_now < ma60_prev * 0.999 else "flat")
+        above = closes[-1] > ma60_now
+        cross = (closes[-2] < ma60[-2]) and above if n >= 2 else False
+
+        # 绘图
+        _ax.clear()
+        _ax.set_facecolor("#1a1a2e")
+        _ax.plot(x, closes, color="#64B5F6", linewidth=1.5, label="上证日线", alpha=0.9)
+        _ax.plot(x, ma60, color="#FFD54F", linewidth=2.0, label="MA60", alpha=0.95)
+
+        # 标记当前位置
+        _ax.axvline(x=n-1, color="#CE93D8", linestyle="--", alpha=0.6, linewidth=1)
+        _ax.scatter([n-1], [closes[-1]], color="#CE93D8", s=80, zorder=5)
+
+        # 高亮 MA60 方向拐点
+        if n >= 62:
+            _ax.annotate("⬆️ MA60拐头", xy=(n-1, ma60_now),
+                         xytext=(n-30, ma60_now + (ma60[-10] - ma60_now) * 0.3),
+                         arrowprops=dict(arrowstyle="->", color="#66BB6A"),
+                         color="#66BB6A", fontsize=9) if ma60_dir == "up" else None
+
+        # 上穿标记
+        if cross:
+            _ax.annotate("🟢 上穿MA60", xy=(n-1, closes[-1]),
+                         xytext=(n-50, closes[-1] + 30),
+                         arrowprops=dict(arrowstyle="->", color="#66BB6A", lw=2),
+                         color="#66BB6A", fontsize=11, fontweight="bold")
+        elif not above and ma60_dir == "up":
+            _ax.annotate("🔴 跌破MA60", xy=(n-1, closes[-1]),
+                         xytext=(n-50, closes[-1] - 40),
+                         arrowprops=dict(arrowstyle="->", color="#EF5350", lw=2),
+                         color="#EF5350", fontsize=11, fontweight="bold")
+
+        # 坐标轴美化
+        _ax.tick_params(colors="#aaa", labelsize=9)
+        for spine in _ax.spines.values():
+            spine.set_color("#444")
+        _ax.grid(True, alpha=0.2, color="#555")
+        _ax.legend(loc="upper left", facecolor="#222", edgecolor="#555",
+                   labelcolor="#ddd", fontsize=9)
+
+        # 标题
+        dir_emoji = "🟢向上" if ma60_dir == "up" else ("🔴向下" if ma60_dir == "down" else "⚪走平")
+        cross_tag = "上穿" if cross else ("跌破" if not above else "上方运行")
+        _ax.set_title(f"📈 上证 MA60={dir_emoji} | 价格{cross_tag}",
+                      color="#FFD54F", fontsize=12, fontweight="bold", pad=10)
+
+        _chart_status.config(text=f"✅ {n}根日线 | MA60={ma60_now:.0f}", fg="#66BB6A")
+        _safe_draw()
+
+        # 🧠 异步加载速览卡片 (也是网络请求)
+        def _bg_signal():
             try:
                 from ui.speculator_watch import _get_sina_realtime
                 _rt2 = _get_sina_realtime()
                 sh_pct2 = _rt2.get("indices", {}).get("IH", {}).get("pct", 0) if _rt2 else 0
-                # 涨跌家数: 优先 app 实例方法
                 up2 = 2400; down2 = 2800
                 try:
                     if app is not None and hasattr(app, '_get_market_up_down_counts'):
                         _upd2 = app._get_market_up_down_counts()
                         if _upd2 and isinstance(_upd2, dict):
                             up2 = _upd2.get("up", up2); down2 = _upd2.get("down", down2)
-                except Exception:
-                    pass
+                except Exception: pass
                 total2 = up2 + down2
                 pct_up2 = up2 / total2 * 100 if total2 > 0 else 50
 
-                # 简化 score 计算 (与 _do_dynamic 一致)
                 _score = 0
                 if ma60_dir == "down": _score += 3
                 elif ma60_dir == "up": _score -= 3
@@ -956,38 +979,27 @@ def show_high_low_swing(parent, app=None):
                 if pct_up2 < 35: _score += 2
                 elif pct_up2 > 65: _score -= 2
 
-                # pct 卡片
-                _signal_labels["pct"].config(
-                    text=f"{'🟢' if sh_pct2 >= 0 else '🔴'} {sh_pct2:+.2f}%",
-                    fg="#66BB6A" if sh_pct2 >= 0 else "#EF5350")
-                # updown 卡片
-                _signal_labels["updown"].config(
-                    text=f"{up2}涨/{down2}跌 ({pct_up2:.0f}%)",
-                    fg="#66BB6A" if pct_up2 >= 50 else "#EF5350")
-                # score 卡片
-                if _score >= 6:
-                    _s_text, _s_fg = f"🔴 高抛({_score})", "#EF5350"
-                elif _score >= 3:
-                    _s_text, _s_fg = f"🟠 反弹卖({_score})", "#FF8A65"
-                elif _score <= -6:
-                    _s_text, _s_fg = f"🟢 低吸({_score})", "#66BB6A"
-                elif _score <= -3:
-                    _s_text, _s_fg = f"🟡 持有({_score})", "#FFD54F"
-                else:
-                    _s_text, _s_fg = f"⚪ 中性({_score})", "#aaa"
-                _signal_labels["score"].config(text=_s_text, fg=_s_fg)
-            except Exception:
-                pass  # 速览失败不影响图表主流程
+                if _score >= 6: _s_text, _s_fg = f"🔴 高抛({_score})", "#EF5350"
+                elif _score >= 3: _s_text, _s_fg = f"🟠 反弹卖({_score})", "#FF8A65"
+                elif _score <= -6: _s_text, _s_fg = f"🟢 低吸({_score})", "#66BB6A"
+                elif _score <= -3: _s_text, _s_fg = f"🟡 持有({_score})", "#FFD54F"
+                else: _s_text, _s_fg = f"⚪ 中性({_score})", "#aaa"
 
-        except Exception as e:
-            import traceback; traceback.print_exc()
-            _chart_status.config(text=f"❌ {e.__class__.__name__}", fg="#EF5350")
-            _ax.clear(); _ax.set_facecolor("#1a1a2e")
-            _ax.text(0.5, 0.5, f"❌ 图表渲染失败: {e}",
-                     ha="center", va="center", transform=_ax.transAxes,
-                     fontsize=12, color="#EF5350")
-            _ax.set_xticks([]); _ax.set_yticks([])
-            _safe_draw()
+                dir_emoji = "🟢向上" if ma60_dir == "up" else ("🔴向下" if ma60_dir == "down" else "⚪走平")
+                cross_tag = "🟢上穿" if cross else ("🔴跌破" if not above else "⚪上方")
+                win.after(0, lambda: (
+                    _signal_labels["ma60"].config(text=dir_emoji,
+                        fg="#66BB6A" if ma60_dir == "up" else ("#EF5350" if ma60_dir == "down" else "#FFD54F")),
+                    _signal_labels["cross"].config(text=cross_tag,
+                        fg="#66BB6A" if (cross and ma60_dir == "up") else ("#EF5350" if (not above and ma60_dir == "up") else "#FFD54F")),
+                    _signal_labels["pct"].config(text=f"{'🟢' if sh_pct2 >= 0 else '🔴'} {sh_pct2:+.2f}%",
+                        fg="#66BB6A" if sh_pct2 >= 0 else "#EF5350"),
+                    _signal_labels["updown"].config(text=f"{up2}涨/{down2}跌 ({pct_up2:.0f}%)",
+                        fg="#66BB6A" if pct_up2 >= 50 else "#EF5350"),
+                    _signal_labels["score"].config(text=_s_text, fg=_s_fg),
+                ))
+            except Exception: pass
+        threading.Thread(target=_bg_signal, daemon=True).start()
 
     # 🆕 关闭标志位 — 避免 GIL 崩溃 (Fatal Python error PyEval_RestoreThread)
     _closing = [False]
@@ -1180,8 +1192,13 @@ def show_high_low_swing(parent, app=None):
         # ═══════════════════════════════════════════
         ma60_dir = "flat"; ma60_event = "等待数据"; ma60_detail = ""
         try:
-            from ui.speculator_watch import _load_index_closes
-            _, _closes = _load_index_closes("sh000001", days=120)
+            # 🆕 优先用左侧已拉的共享缓存 (避免重复2-3s网络请求!)
+            _closes = None
+            if _cached_daily_closes[0] is not None:
+                _closes = list(_cached_daily_closes[0])[-120:]  # 取最近120根
+            else:
+                from ui.speculator_watch import _load_index_closes
+                _, _closes = _load_index_closes("sh000001", days=120)
             if _closes is not None and len(_closes) >= 60:
                 ma60_now = np.mean(_closes[-60:])
                 ma60_prev = np.mean(_closes[-61:-1]) if len(_closes) >= 61 else ma60_now
@@ -1289,12 +1306,18 @@ def show_high_low_swing(parent, app=None):
         else:
             conclusion, action, color = "⚪ 中性震荡区", "⏸️ 轻仓30-50% + 日内T为主", "#424242"
         return tech_text, fund_text, sent_text, conclusion, action, color
-    def _refresh_right():
-        for w in right_body.winfo_children(): w.destroy()
-        d = date_var.get().strip(); h_val = int(h_var.get()); m_val = int(m_var.get()); h = f"{h_val:02d}"; m = f"{m_val:02d}"
-        obj_t = obj_var.get(); obj_n = holding_combo.get() if obj_t == "持仓股" else obj_t
-        tech, fund, sent, conclusion, action, color = _do_dynamic(d, h_val, m_val, obj_t, obj_n)
 
+    # ── 🆕 右侧异步刷新: 后台拉数据, 主线程渲染 ──
+    def _show_right_placeholder():
+        """主线程先显示占位"""
+        for w in right_body.winfo_children(): w.destroy()
+        tk.Label(right_body, text="⏳ 加载中...\n(首次需要网络)", bg=_BG_PANEL, fg=_FG_GOLD,
+                 font=("", 14, "bold"), justify=tk.CENTER, pady=40).pack(expand=True)
+
+    def _render_right(d, h_val, m_val, h, m, obj_t, obj_n,
+                      tech, fund, sent, conclusion, action, color):
+        """主线程渲染右侧 UI (纯 Tk widget 操作)"""
+        for w in right_body.winfo_children(): w.destroy()
 
         tk.Label(right_body, text=f"⏰ {obj_t}: {obj_n}", bg=_BG_PANEL, fg=_FG_DIM,
                  font=("", _FONT_SM[0])).pack(anchor="w", padx=6, pady=(4, 2))
@@ -1313,12 +1336,11 @@ def show_high_low_swing(parent, app=None):
 
         tk.Frame(right_body, bg=_FG_DIM, height=1).pack(fill=tk.X, padx=6, pady=6)
 
-        # 三维分析折叠区 — 自定义标题行 + ❓ + 🩺诊断 (共用外部 _diagnose_1min)
+        # 三维分析折叠区
         for k, title, txt in [("tech", "① 技术面", tech), ("fund", "② 资金面", fund), ("sent", "③ 情绪面", sent)]:
             lf = tk.LabelFrame(right_body, bg=_BG_PANEL, fg=_FG_GOLD, font=("", 9, "bold"))
             lf.pack(fill=tk.X, padx=3, pady=2)
 
-            # 自定义标题行 (无 LabelFrame 默认 text, 自己画)
             head = tk.Frame(lf, bg=_BG_PANEL); head.pack(fill=tk.X, padx=2, pady=1)
             tk.Label(head, text=f"  {title}  ", bg=_BG_PANEL, fg=_FG_GOLD,
                      font=("", 9, "bold")).pack(side=tk.LEFT)
@@ -1356,7 +1378,6 @@ def show_high_low_swing(parent, app=None):
                      width=6, anchor="w").pack(side=tk.LEFT)
             tk.Label(row, text=label, bg=_BG_PANEL, fg=c, font=("", _FONT_SM[0])).pack(side=tk.LEFT, padx=(2, 6))
 
-
         # 🔥 自动把 right_body 所有 Label 加入 _font_widgets
         def _collect_font(w):
             for c in w.winfo_children():
@@ -1365,17 +1386,60 @@ def show_high_low_swing(parent, app=None):
                 if hasattr(c, 'winfo_children'):
                     _collect_font(c)
         _collect_font(right_body)
-        _refresh_left_chart()  # 🆕 同步刷新左侧图表 + 速览卡片
-    # 🔥 自动把 right_body 所有 Label 加入 _font_widgets (A-/A+ 实时生效)
-    def _collect_font(w):
-        for c in w.winfo_children():
-            if isinstance(c, tk.Label):
-                _font_widgets.append((c, "body"))
-            if hasattr(c, 'winfo_children'):
-                _collect_font(c)
-    _collect_font(right_body)
 
-    _refresh_right()
+    def _refresh_right():
+        """🆕 异步刷新右侧: 占位 → 后台拉数据 → 主线程渲染"""
+        d = date_var.get().strip(); h_val = int(h_var.get()); m_val = int(m_var.get())
+        h = f"{h_val:02d}"; m = f"{m_val:02d}"
+        obj_t = obj_var.get(); obj_n = holding_combo.get() if obj_t == "持仓股" else obj_t
+
+        # 主线程: 先显示占位 (立即响应, 0 阻塞)
+        _show_right_placeholder()
+
+        # 后台线程: 拉数据 + 计算
+        def _bg_fetch():
+            import traceback as _tb
+            try:
+                print(f"[🎯右侧] _bg_fetch 开始: obj_t={obj_t}, obj_n={obj_n}", flush=True)
+                tech, fund, sent, conclusion, action, color = _do_dynamic(
+                    d, h_val, m_val, obj_t, obj_n)
+                print(f"[🎯右侧] _do_dynamic 完成, conclusion={conclusion[:20]}", flush=True)
+                # 回主线程渲染
+                def _do_render():
+                    print(f"[🎯右侧] _do_render 被调度, 开始渲染...", flush=True)
+                    try:
+                        _render_right(d, h_val, m_val, h, m, obj_t, obj_n,
+                                      tech, fund, sent, conclusion, action, color)
+                        print(f"[🎯右侧] _do_render 渲染完成!", flush=True)
+                    except Exception as _re:
+                        print(f"[🎯右侧❌] _render_right 内部异常: {_re}", flush=True)
+                        _tb.print_exc()
+                print(f"[🎯右侧] 调 win.after(0, _do_render)...", flush=True)
+                win.after(0, _do_render)
+                print(f"[🎯右侧] win.after 已返回", flush=True)
+            except Exception as e:
+                print(f"[🎯右侧❌] _bg_fetch 异常: {e}", flush=True)
+                _tb.print_exc()
+                try:
+                    win.after(0, lambda: (
+                        [w.destroy() for w in right_body.winfo_children()],
+                        tk.Label(right_body, text=f"❌ 加载失败: {e}", bg=_BG_PANEL,
+                                 fg="#EF5350", font=("", 12)).pack(padx=10, pady=20)
+                    ))
+                except Exception as e2:
+                    print(f"[🎯右侧❌] 渲染错误文本也失败: {e2}", flush=True)
+                    _tb.print_exc()
+        threading.Thread(target=_bg_fetch, daemon=True).start()
+
+    # 🧠 异步加载: 弹窗秒出, 后台拉数据 + 渲染
+    import threading as _th
+    def _bg_init():
+        print(f"[🎯弹窗] _bg_init 启动 t={_time.time()-_t0:.2f}s", flush=True)
+        # ⚠️ 必须 win.after 回主线程! 因为两个函数内部都有 Tk widget 操作
+        win.after(0, _refresh_left_chart)
+        win.after(100, _refresh_right)  # 略延迟让左侧先占位
+    print(f"[🎯弹窗] 即将启动 _bg_init 线程 t={_time.time()-_t0:.2f}s", flush=True)
+    _th.Thread(target=_bg_init, daemon=True).start()
 
     # ═══════════════════════════════════════════════
     # 🩺 诊断 helper (顶层, 所有卡片共用)
@@ -1972,17 +2036,38 @@ def _show_minute_kline_dialog(parent_root, app=None, default_code=None, diagnose
     ]
     # ⚠️ ETF 新浪只有日线 (scale=240), 无 1min
     _ETF_LIST = [
-        "证券ETF sh512880", "券商ETF sh512000", "半导体ETF sh512480",
-        "科创50ETF sh588000", "创业板ETF sz159915", "沪深300ETF sh510300",
-        "中证500ETF sh510500", "中证1000ETF sh512100",
-        "纳指ETF sh513100", "日经ETF sh513520", "标普ETF sh513500",
-        "黄金ETF sh518880", "白银ETF sh161226", "原油ETF sh501018",
-        "光伏ETF sh515790", "新能源车ETF sh515030",
-        "医疗ETF sh512170", "医药ETF sz159928",
-        "军工ETF sh512660", "白酒ETF sh512690", "消费ETF sz159928",
-        "恒生ETF sz159920", "中概互联ETF sz513050",
-        "AI ETF sh515070", "机器人ETF sz159529",
-        "红利ETF sh510880", "国债ETF sh511010",
+        # ── 宽基 (做T首选, 波动+流动性好) ──
+        "科创50ETF sh588000", "沪深300ETF sh510300", "中证500ETF sh510500",
+        "中证1000ETF sh512100", "创业板ETF sz159915", "北证50ETF bj899050",
+        # ── 行业主题 (高波动, 日内做T空间大) ──
+        "证券ETF sh512880", "券商ETF sh512000",
+        "半导体ETF sh512480", "芯片ETF sh512760", "科创芯片ETF sh588170",
+        "科创半导体ETF sh588210", "科创信息ETF sh588100",
+        "光伏ETF sh515790", "新能源车ETF sh515030", "锂电池ETF sz159840",
+        "有色金属ETF sh512400", "稀土ETF sz159713", "黄金ETF sh518880",
+        "白银ETF sh161226", "原油ETF sh501018", "煤炭ETF sh515220",
+        "钢铁ETF sh515210", "化工ETF sh516020", "农业ETF sz159825",
+        "医药ETF sz159928", "医疗ETF sh512170", "创新药ETF sh516060",
+        "白酒ETF sh512690", "消费ETF sz159928", "食品饮料ETF sh515170",
+        "军工ETF sh512660", "国防ETF sh512670",
+        "通信ETF sh515880", "5G ETF sh515050", "AI ETF sh515070",
+        "机器人ETF sz159529", "智能制造ETF sh516800",
+        "金融ETF sh510230", "银行ETF sh512800", "保险ETF sh512070",
+        "地产ETF sh512200", "基建ETF sh516950",
+        "传媒ETF sh512980", "电影ETF sz159819", "游戏ETF sz159992",
+        "环保ETF sh512580", "碳中和ETF sh516390",
+        "红利ETF sh510880", "价值ETF sh510030",
+        # ── 跨境 (收盘买 / 次日开盘卖首选!) ──
+        "纳指ETF sh513100", "纳斯达克100ETF sh513330",
+        "标普500ETF sh513500", "道琼斯ETF sh513560",
+        "日经ETF sh513520", "日经225ETF sh513880",
+        "德国ETF sh513030", "法国ETF sh513080",
+        "恒生ETF sz159920", "恒生科技ETF sz513180",
+        "恒生医疗ETF sz513060", "中概互联ETF sz513050",
+        "原油基金 sh501018", "德国DAXETF sh513030",
+        # ── 债券固收 (保守做T/夜盘替代) ──
+        "国债ETF sh511010", "十年国债ETF sh511260", "五年国债ETF sh511020",
+        "城投ETF sh511220",
     ]
     _LEADER_LIST = [
         "贵州茅台 sh600519", "宁德时代 sz300750", "比亚迪 sz002594",
