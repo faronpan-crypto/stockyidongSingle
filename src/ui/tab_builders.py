@@ -13561,9 +13561,149 @@ except Exception as e:
 
         tk.Label(add_frame, text="代码:", bg="#1a1a3e", fg="white", font=("", 11)).grid(row=0, column=0, sticky="w", padx=3)
         code_var = tk.StringVar()
-        code_entry = ttk.Entry(add_frame, textvariable=code_var, width=10, font=("", 11))
-        code_entry.grid(row=0, column=1, padx=3)
-        tk.Label(add_frame, text="(6位, 如 600519)", bg="#1a1a3e", fg="#888", font=("", 9)).grid(row=0, column=2, sticky="w")
+
+        # ── 构建下拉股票池 (5 组 + 全量兜底) ──
+        def _build_code_pool():
+            import re as _rx, json as _j, glob as _gl
+
+            def _c6(raw):
+                if not raw: return ""
+                m = _rx.search(r"(\d{6})", str(raw))
+                return m.group(1) if m else ""
+
+            def _add(pool, c6, name, source):
+                if c6 and c6 not in pool:
+                    pool[c6] = {"name": name or "", "src": source}
+                elif c6 and not pool[c6].get("name") and name:
+                    pool[c6]["name"] = name
+                elif c6 and name and name not in pool[c6].get("name", ""):
+                    # 多个来源都有, 合并标注
+                    if source not in pool[c6].get("src", ""):
+                        pool[c6]["src"] = pool[c6].get("src", "") + "+" + source
+
+            pool = {}  # c6 -> {"name", "src"}
+
+            # ── 1) 持仓股 (holding_stocks_1~8) ──
+            for _gi in range(1, 9):
+                _attr = f"holding_stocks_{_gi}" if _gi > 1 else "holding_stocks"
+                _arr = getattr(self, _attr, None)
+                if not _arr: continue
+                for _item in _arr:
+                    if not _item: continue
+                    if isinstance(_item, (list, tuple)) and len(_item) >= 2:
+                        _name, _code = str(_item[0]), str(_item[1])
+                    elif isinstance(_item, dict):
+                        _name = str(_item.get("name") or _item.get("stock_name") or "")
+                        _code = str(_item.get("code") or _item.get("stock_code") or "")
+                    else:
+                        continue
+                    _c = _c6(_code)
+                    if _c: _add(pool, _c, _name, "持仓")
+
+            # ── 2) 龙头/涨停/热门 (tab_dapan / akshare) ──
+            for _attr, _src_label in [("_taoguba_stamp_data", "淘股吧"),
+                                       ("_jiuyan_stamp_data", "韭研公社")]:
+                for _row in getattr(self, _attr, None) or []:
+                    if isinstance(_row, dict):
+                        _c = _c6(_row.get("code", ""))
+                        if _c: _add(pool, _c, _row.get("name", ""), _src_label)
+
+            # ── 3) 资讯股 (snapshot) ──
+            try:
+                from src.data import snapshot as _snap
+                _news = _snap.get_news_stocks_merged_recent_days(ndays=3)
+                if _news:
+                    for _n in _news:
+                        _c = _c6(_n.get("code", "") if isinstance(_n, dict) else _n)
+                        _nm = _n.get("name", "") if isinstance(_n, dict) else ""
+                        if _c: _add(pool, _c, _nm, "资讯")
+            except Exception: pass
+
+            # ── 4) 已存的提醒 ──
+            for _a in alerts:
+                _c = _c6(_a.get("code", ""))
+                if _c: _add(pool, _c, _a.get("name", ""), "提醒")
+
+            # ── 5) 邮票格子缓存文件兜底 (最近 2 天, 重启后也能有) ──
+            try:
+                for _days in range(2):
+                    _d = (datetime.now() - timedelta(days=_days)).strftime("%Y%m%d")
+                    for _src, _lbl in (("taoguba", "淘股吧"), ("jiuyan", "韭研公社")):
+                        _fp = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                           "..", "..", "data", f"stamp_cache_{_src}_{_d}.json")
+                        if os.path.exists(_fp):
+                            with open(_fp, "r", encoding="utf-8") as _f:
+                                for _it in _j.load(_f):
+                                    _c = _c6(_it.get("code", ""))
+                                    if _c: _add(pool, _c, _it.get("name", ""), _lbl)
+            except Exception: pass
+
+            # ── 6) 全量字典兜底 (补齐名字 + 长尾) ──
+            _sd = getattr(self, "STOCK_CODES_DICT", None)
+            if isinstance(_sd, dict):
+                for _c, _n in _sd.items():
+                    _c6 = _c6(_c)
+                    if _c6:
+                        if _c6 not in pool:
+                            pool[_c6] = {"name": str(_n), "src": "全量"}
+                        elif not pool[_c6].get("name"):
+                            pool[_c6]["name"] = str(_n)
+
+            # ── 排序: 多来源优先 (活跃股), 然后持仓/淘韭/资讯排前 ──
+            def _priority(item):
+                c, info = item
+                srcs = info.get("src", "")
+                mult = srcs.count("+") + (1 if "持仓" in srcs else 0) \
+                       + (1 if "淘股吧" in srcs else 0) + (1 if "韭研" in srcs else 0) \
+                       + (1 if "资讯" in srcs else 0)
+                return (-mult, info.get("name", ""))
+
+            return pool, sorted(pool.items(), key=_priority)
+
+        _pool_map, _pool_sorted = _build_code_pool()
+
+        # 显示格式: "600519 贵州茅台 [持仓+淘]" — 多来源高亮
+        def _fmt_display(c6, info):
+            nm = info.get("name", "")
+            src = info.get("src", "")
+            tags = []
+            if "持仓" in src: tags.append("仓")
+            if "淘股吧" in src: tags.append("淘")
+            if "韭研" in src: tags.append("韭")
+            if "资讯" in src: tags.append("讯")
+            if "提醒" in src: tags.append("⭐")
+            tag_str = f" [{'+'.join(tags)}]" if tags else ""
+            return f"{c6} {nm}{tag_str}".strip()
+
+        _display_list = [_fmt_display(c6, info) for c6, info in _pool_sorted[:800]]
+
+        code_combo = ttk.Combobox(add_frame, textvariable=code_var, values=_display_list,
+                                   width=32, font=("", 11))
+        code_combo.grid(row=0, column=1, columnspan=2, padx=3, sticky="w")
+
+        # 从显示串里提取纯 6 位代码
+        def _extract_c6(raw):
+            import re as _rx
+            m = _rx.search(r"(\d{6})", raw or "")
+            return m.group(1) if m else ""
+
+        def _on_combo_select(evt=None):
+            raw = code_var.get().strip()
+            c6 = _extract_c6(raw)
+            if c6:
+                code_var.set(c6)
+                # 自动填名称
+                info = _pool_map.get(c6, {})
+                nm = info.get("name", "")
+                if not nm:
+                    try:
+                        rt = self._fetch_realtime_prices([c6])
+                        nm = rt.get(c6, {}).get("name", "")
+                    except: pass
+                if nm: name_var.set(nm)
+
+        code_combo.bind("<<ComboboxSelected>>", _on_combo_select)
+        code_combo.bind("<FocusOut>", _on_combo_select)
 
         tk.Label(add_frame, text="名称:", bg="#1a1a3e", fg="white", font=("", 11)).grid(row=0, column=3, sticky="w", padx=(12, 3))
         name_var = tk.StringVar()
@@ -13657,10 +13797,10 @@ except Exception as e:
         tv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        tv.tag_configure("enabled", foreground="#E0E0E0")
-        tv.tag_configure("disabled", foreground="#666666")
-        tv.tag_configure("buy_hit", background="#1B5E20", foreground="#A5D6A7")
-        tv.tag_configure("sell_hit", background="#B71C1C", foreground="#FFCDD2")
+        tv.tag_configure("enabled", foreground="#000000", background="#FFFFFF")
+        tv.tag_configure("disabled", foreground="#888888", background="#F5F5F5")
+        tv.tag_configure("buy_hit", foreground="#000000", background="#C8E6C9")
+        tv.tag_configure("sell_hit", foreground="#000000", background="#FFCDD2")
 
         def _refresh_table():
             """刷新表格 + 拉取实时行情"""
