@@ -6124,8 +6124,219 @@ def show_t_zero_helper(parent, app=None):
         else: st.insert(tk.END, line + "\n")
     st.config(state=tk.DISABLED)
 
-    # ─── Tab2: 📋 分类标的 List (双击打开 K 线) ───
-    tab2 = tk.Frame(nb, bg=_BG_DEEP); nb.add(tab2, text="📋 适合做T的标的List")
+    # ─── 通用: 从 (name, code) tuples 提取 ───
+    def _from_holding_tuples(app, attr_names):
+        rows = []
+        for attr in attr_names:
+            items = getattr(app, attr, None) or []
+            for it in items:
+                if not it: continue
+                if isinstance(it, (list, tuple)) and len(it) >= 2:
+                    n, c = it[0], it[1]
+                    if c and n: rows.append((str(c).strip(), str(n).strip(), attr))
+        return rows
+
+    def _from_stamp_data(app, attr_name):
+        """淘股吧/韭研 stamp_cache dict → list of (code6, name, reason)"""
+        rows = []
+        items = getattr(app, attr_name, None) or []
+        for it in items:
+            if not isinstance(it, dict): continue
+            raw = str(it.get("code", "")).strip()  # e.g. "sh600519"
+            c6 = raw[2:] if len(raw) == 8 and raw[:2] in ("sh", "sz") else raw
+            name = str(it.get("name", "")).strip()
+            pct = it.get("pct", "")
+            freq = it.get("freq", "")
+            reason = f"涨幅{pct:+.2f}% 频次{freq}" if isinstance(pct, (int, float)) else ""
+            if c6 and name: rows.append((c6, name, reason))
+        return rows
+
+    # ─── 通用 Treeview 构建器 ───
+    def _make_list_tab(parent_frame, title, rows_src_fn, app_ref=None):
+        """构建一个独立 Tab: Treeview + 双击K线 + 右侧详情卡
+
+        rows_src_fn(): list of (code6, name, reason)
+        """
+        frame = tk.Frame(parent_frame, bg=_BG_DEEP)
+        nb.add(frame, text=title)
+
+        left = tk.Frame(frame, bg=_BG_DEEP); left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 4), pady=8)
+        right = tk.Frame(frame, bg=_BG_DEEP, width=320); right.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 8), pady=8)
+        right.pack_propagate(False)
+
+        # 顶部状态 + 刷新
+        top_fr = tk.Frame(left, bg=_BG_DEEP); top_fr.pack(fill=tk.X, pady=(0, 4))
+        status_var = tk.StringVar(value="⏳ 加载中...")
+        tk.Label(top_fr, textvariable=status_var, bg=_BG_DEEP, fg="#aaa", font=("", 10)).pack(side=tk.LEFT)
+        search_var = tk.StringVar()
+        tk.Entry(top_fr, textvariable=search_var, width=18).pack(side=tk.RIGHT, padx=2)
+        tk.Label(top_fr, text="搜索:", bg=_BG_DEEP, fg="#aaa", font=("", 10)).pack(side=tk.RIGHT)
+
+        cols = ("code", "name", "reason")
+        tree = ttk.Treeview(left, columns=cols, show="headings", height=20)
+        tree.heading("code", text="代码")
+        tree.heading("name", text="名称")
+        tree.heading("reason", text="备注")
+        tree.column("code", width=80, anchor="center")
+        tree.column("name", width=130)
+        tree.column("reason", width=300)
+        vsb = tk.Scrollbar(left, orient=tk.VERTICAL, command=tree.yview); tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def _reload():
+            for i in tree.get_children(): tree.delete(i)
+            rows = rows_src_fn()
+            kw = search_var.get().strip()
+            shown = 0
+            for code, name, reason in rows:
+                if kw and kw not in f"{code}{name}{reason}": continue
+                if shown >= 120: break  # 最多显示120条, 避免卡顿
+                tree.insert("", tk.END, values=(code, name, reason))
+                shown += 1
+            total = len(rows)
+            status_var.set(f"📊 {total} 只 · 显示 {shown} 只 (双击打K线)")
+
+        # 右侧详情卡
+        detail = tk.LabelFrame(right, text="📊 选中 · 做T信息", bg=_BG_DEEP, fg="#FFD54F", font=("", 11, "bold"))
+        detail.pack(fill=tk.BOTH, expand=True)
+        d_txt = scrolledtext.ScrolledText(detail, font=("", 10), wrap=tk.WORD, height=14,
+                                           bg="#0a0a12", fg="#ddd", relief=tk.FLAT, padx=8, pady=8)
+        d_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        d_txt.tag_configure("h", foreground="#FFD54F", font=("", 12, "bold"))
+        d_txt.tag_configure("y", foreground="#FFA726")
+        d_txt.tag_configure("g", foreground="#4CAF50")
+
+        def _on_select(evt=None):
+            sel = tree.selection()
+            if not sel: return
+            code, name, reason = tree.item(sel[0])["values"]
+            d_txt.config(state=tk.NORMAL); d_txt.delete("1.0", tk.END)
+            d_txt.insert(tk.END, f"🎯 {name} ({code})\n", "h")
+            d_txt.insert(tk.END, f"📋 {reason}\n\n", "y" if reason else "")
+            for l in ["━━━━━━━━━━━━━━━━", "🔍 做T 5 硬指标:", "  □ 日均振幅 3%-6%", "  □ 箱体上下沿清晰",
+                      "  □ 日成交额 > 5亿", "  □ 无近期事件风险", "  □ 已持有底仓", "━━━━━━━━━━━━━━━━",
+                      "📈 双击 / 点按钮 打开:", "   K线 + 📦箱体通道指标", "   ▲正T买点 ▼反T卖点 自动标记"]:
+                d_txt.insert(tk.END, l + "\n", "g" if "指标" in l or "双击" in l else "")
+            d_txt.config(state=tk.DISABLED)
+
+        def _open_selected():
+            sel = tree.selection()
+            if not sel:
+                tk.messagebox.showinfo("提示", "请先选一只股票"); return
+            code, name, reason = tree.item(sel[0])["values"]
+            _open_tzero_kline(code, name, reason, app=app_ref)
+
+        tree.bind("<<TreeviewSelect>>", _on_select)
+        tree.bind("<Double-1>", lambda e: _open_selected())
+        search_var.trace_add("write", lambda *_: _reload())
+
+        # 右侧底部按钮
+        btns = tk.Frame(right, bg=_BG_DEEP); btns.pack(fill=tk.X, pady=6)
+        tk.Button(btns, text="📈 打开 K线 + 箱体通道", font=("", 11, "bold"),
+                  bg="#4ECDC4", fg="black", padx=8, pady=4, cursor="hand2",
+                  command=_open_selected).pack(fill=tk.X, pady=3)
+        tk.Button(btns, text="🔄 刷新数据", font=("", 10),
+                  bg="#555", fg="white", padx=8, pady=3, cursor="hand2",
+                  command=_reload).pack(fill=tk.X, pady=2)
+
+        # 初始加载
+        _reload()
+        return frame
+
+    # ════════════════════════════════════════════
+    # Tab 1: 💼 持仓股 (所有持仓组 1-14 合并)
+    # ════════════════════════════════════════════
+    def _collect_holdings():
+        """合并所有持仓组 (1-14), 去重"""
+        all_rows = []
+        seen = set()
+        # group 1 是 self.holding_stocks, group 2-14 是 holding_stocks_{n}
+        if app is not None:
+            for group_idx in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]:
+                if group_idx == 1:
+                    items = getattr(app, "holding_stocks", None) or []
+                else:
+                    items = getattr(app, f"holding_stocks_{group_idx}", None) or []
+                for it in items:
+                    if not it: continue
+                    try:
+                        n, c = it[0], it[1]
+                    except Exception: continue
+                    c6 = str(c).strip()
+                    nm = str(n).strip()
+                    if not c6 or not c6.isdigit() or len(c6) != 6: continue
+                    if c6 in seen: continue
+                    seen.add(c6)
+                    group_name_map = {2: "龙头股", 3: "15Min", 4: "Main资讯", 5: "历史股", 6: "同花顺"}
+                    gname = group_name_map.get(group_idx, f"持仓{group_idx}")
+                    all_rows.append((c6, nm, gname))
+        return all_rows
+    _make_list_tab(nb, "💼 持仓股", _collect_holdings, app)
+
+    # ════════════════════════════════════════════
+    # Tab 2: 👑 龙头股 (group 2)
+    # ════════════════════════════════════════════
+    def _collect_longtou():
+        items = getattr(app, "holding_stocks_2", None) or []
+        rows = []
+        for it in items:
+            if not it: continue
+            try: n, c = it[0], it[1]
+            except Exception: continue
+            c6 = str(c).strip()
+            if c6 and c6.isdigit() and len(c6) == 6:
+                rows.append((c6, str(n).strip(), "龙头股"))
+        return rows
+    _make_list_tab(nb, "👑 龙头股", _collect_longtou, app)
+
+    # ════════════════════════════════════════════
+    # Tab 3: 📰 资讯股 (Main group 4)
+    # ════════════════════════════════════════════
+    def _collect_zixun():
+        items = getattr(app, "holding_stocks_4", None) or []
+        rows = []
+        for it in items:
+            if not it: continue
+            try: n, c = it[0], it[1]
+            except Exception: continue
+            c6 = str(c).strip()
+            if c6 and c6.isdigit() and len(c6) == 6:
+                rows.append((c6, str(n).strip(), "Main资讯"))
+        return rows
+    _make_list_tab(nb, "📰 资讯股", _collect_zixun, app)
+
+    # ════════════════════════════════════════════
+    # Tab 4: 🕰️ 历史股 (group 5)
+    # ════════════════════════════════════════════
+    def _collect_history():
+        items = getattr(app, "holding_stocks_5", None) or []
+        rows = []
+        for it in items:
+            if not it: continue
+            try: n, c = it[0], it[1]
+            except Exception: continue
+            c6 = str(c).strip()
+            if c6 and c6.isdigit() and len(c6) == 6:
+                rows.append((c6, str(n).strip(), "历史股"))
+        return rows
+    _make_list_tab(nb, "🕰️ 历史股", _collect_history, app)
+
+    # ════════════════════════════════════════════
+    # Tab 5: 🔥 淘股吧 (stamp cache dict list)
+    # ════════════════════════════════════════════
+    def _collect_taoguba():
+        return _from_stamp_data(app, "_taoguba_stamp_data") if app else []
+    _make_list_tab(nb, "🔥 淘股吧", _collect_taoguba, app)
+
+    # ════════════════════════════════════════════
+    # Tab 6: 🔥 韭研 (stamp cache dict list)
+    # ════════════════════════════════════════════
+    def _collect_jiuyan():
+        return _from_stamp_data(app, "_jiuyan_stamp_data") if app else []
+    _make_list_tab(nb, "🔥 韭研热股", _collect_jiuyan, app)
+
+    # ─── Tab7: 📋 做T分类推荐 (原有静态 list, 保留) ───
+    tab2 = tk.Frame(nb, bg=_BG_DEEP); nb.add(tab2, text="📋 做T分类推荐")
 
     # 左侧: Treeview 列表
     left = tk.Frame(tab2, bg=_BG_DEEP); left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 4), pady=8)
@@ -6451,15 +6662,19 @@ def _open_tzero_kline(code, name, reason, app=None):
             try:
                 # 1. 拉 K 线 — 优先 akshare ETF/个股日线
                 rows = []
+                code_s = str(code).strip()
                 try:
                     import akshare as ak_local
-                    if hasattr(ak_local, "fund_etf_hist_em"):
-                        df = ak_local.fund_etf_hist_em(symbol=code, period="daily", adjust="qfq")
-                        if df is None or len(df) < 5:
-                            df = ak_local.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
-                    else:
-                        df = ak_local.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
-                    if df is not None and len(df) > 10:
+                    # ETF (51/58/15/16 开头) 优先用 fund_etf_hist_em
+                    is_etf = code_s.startswith(("51", "52", "56", "58", "15", "16", "18", "50"))
+                    df = None
+                    if is_etf:
+                        try:
+                            df = ak_local.fund_etf_hist_em(symbol=code_s, period="daily", adjust="qfq")
+                        except Exception: pass
+                    if df is None or df.empty or len(df) < 5:
+                        df = ak_local.stock_zh_a_hist(symbol=code_s, period="daily", adjust="qfq")
+                    if df is not None and len(df) > 5:
                         col_map = {}
                         for c in df.columns:
                             cl = str(c).strip()
@@ -6487,11 +6702,11 @@ def _open_tzero_kline(code, name, reason, app=None):
                     # 降级: 腾讯行情
                     try:
                         import requests
-                        prefix = "sh" if code.startswith(("5", "6")) else "sz"
+                        prefix = "sh" if code_s.startswith(("5", "6")) else "sz"
                         url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-                        r = requests.get(url, params={"param": f"{prefix}{code},day,,,120,qfq"}, timeout=10)
+                        r = requests.get(url, params={"param": f"{prefix}{code_s},day,,,120,qfq"}, timeout=10)
                         data = r.json()
-                        kline = data.get("data", {}).get(f"{prefix}{code}", {}).get("day", [])
+                        kline = data.get("data", {}).get(f"{prefix}{code_s}", {}).get("day", [])
                         for k in kline:
                             try:
                                 rows.append({
@@ -6545,8 +6760,9 @@ def _open_tzero_kline(code, name, reason, app=None):
                 def _draw():
                     try:
                         fig.clear()
-                        ax1 = fig.add_subplot(211)
-                        ax2 = fig.add_subplot(212, sharex=ax1, height_ratio=(0.25, 0.75))
+                        gs = fig.add_gridspec(2, 1, height_ratios=(3, 1), hspace=0.05)
+                        ax1 = fig.add_subplot(gs[0])
+                        ax2 = fig.add_subplot(gs[1], sharex=ax1)
                         fig.patch.set_facecolor("#121212")
 
                         n = len(arr); x = np.arange(n)
@@ -6593,7 +6809,7 @@ def _open_tzero_kline(code, name, reason, app=None):
                                    labelcolor="#aaa", edgecolor="#444")
                         ax1.set_title(f"{name} ({code}) · 日K + 📦{ns}日箱体通道做T指标 · "
                                      f"正T买点{len(buy_points)} 反T卖点{len(sell_points)}",
-                                     color="#FFD54F", fontsize=11, padx=8)
+                                     color="#FFD54F", fontsize=11, pad=10)
 
                         # 副图: 成交量
                         vol_arr = np.array([r["vol"] for r in rows])
@@ -6613,11 +6829,17 @@ def _open_tzero_kline(code, name, reason, app=None):
                         win.after(0, lambda: st_var.set(
                             f"✅ K线 {n} 根 · 正T买点 {len(buy_points)} · 反T卖点 {len(sell_points)} · 现价位置 {cur_pct:.0f}%"))
                     except Exception as e:
-                        win.after(0, lambda: st_var.set(f"❌ 绘图失败: {e}"))
+                        import traceback
+                        traceback.print_exc()
+                        print(f"[做T绘图] ❌ {e}", flush=True)
+                        win.after(0, lambda e=e: st_var.set(f"❌ 绘图失败: {e}"))
 
                 win.after(0, _draw)
             except Exception as e:
-                win.after(0, lambda: st_var.set(f"❌ 后台加载异常: {e}"))
+                import traceback
+                traceback.print_exc()
+                print(f"[做TK线] ❌ 后台异常: {e}", flush=True)
+                win.after(0, lambda e=e: st_var.set(f"❌ 后台加载异常: {e}"))
 
         import threading
         threading.Thread(target=_bg_fetch_and_draw, daemon=True).start()
