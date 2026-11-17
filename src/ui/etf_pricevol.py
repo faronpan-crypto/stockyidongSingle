@@ -959,6 +959,8 @@ def _show_etf_cycle_dialog(self):
         ("创业板ETF",  "sz159915", "📈 宽基ETF", True),
         ("上证50ETF",  "sh510050", "📈 宽基ETF", False),
         ("半导体ETF",  "sh512760", "🎯 α/β ETF", True),
+        ("科创半导华夏", "sh588260", "🎯 α/β ETF", True),
+        ("科创半导华泰", "sh588130", "🎯 α/β ETF", True),
         ("医药ETF",    "sh512010", "🎯 α/β ETF", False),
         ("新能源ETF",  "sh516160", "🎯 α/β ETF", False),
         ("纳指ETF",    "sh513100", "🎯 α/β ETF", True),

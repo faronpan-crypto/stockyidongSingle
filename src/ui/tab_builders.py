@@ -13301,7 +13301,7 @@ except Exception as e:
             result = {}
             for bi in range(0, len(sina_codes), batch_size):
                 batch = sina_codes[bi:bi + batch_size]
-                r = _req.get(f"https://qt.gtimg.cn/q={','.join(batch)}", timeout=8,
+                r = _req.get(f"https://qt.gtimg.cn/q={','.join(batch)}", timeout=3,
                              headers={"User-Agent": "Mozilla/5.0", "Referer": "https://gu.qq.com/"})
                 for seg in r.text.strip().split(";"):
                     if "=" not in seg or '"' not in seg:
@@ -14401,6 +14401,888 @@ except Exception as e:
         ttk.Button(bottom, text="关闭", command=w.destroy).pack(side=tk.RIGHT, padx=4)
 
         print(f"[🤝WorkBuddy] 面板打开: {total} skills, {stock} 股票相关, {len(watch_stocks)} 关注股", flush=True)
+
+    # ═══════════════════════════════════════════════════════════
+    # 🚀 Skill 本地执行框架 — 触发词 → 本地数据源 → 结构化结果
+    # ═══════════════════════════════════════════════════════════
+
+    def _wb_match_intent(self, skill_name, skill_desc):
+        """根据 skill 名称+描述匹配意图类型"""
+        text = (skill_name + " " + skill_desc).lower()
+        mapping = [
+            ("选股", ["选股", "pick", "breakout", "筛选", "找", "挑"]),
+            ("资金", ["资金", "capital", "集中度", "流入", "流出"]),
+            ("筹码", ["筹码", "chip", "blood", "血", "峰值"]),
+            ("大盘", ["大盘", "market", "择时", "timing", "指数", "上证"]),
+            ("涨停", ["涨停", "zt", "limit", "连板"]),
+            ("回测", ["quant", "backtest", "回测", "量", "因子"]),
+            ("龙虎榜", ["龙虎", "dragon", "tiger"]),
+            ("超跌", ["超跌", "oversold", "反弹"]),
+            ("早盘", ["早盘", "morning", "开盘"]),
+            ("晚报", ["晚报", "evening", "收盘"]),
+            ("明日", ["明日", "tomorrow", "预测"]),
+            ("贵金属", ["黄金", "白银", "贵金属", "metal"]),
+        ]
+        for intent, kws in mapping:
+            if any(k in text for k in kws):
+                return intent
+        return "通用"
+
+    def _wb_run_skill_local(self, skill_name, skill_desc, intent):
+        """本地执行一个 skill, 返回结构化结果字典"""
+        import re as _rx, json as _j, time as _time
+        result = {
+            "skill": skill_name,
+            "intent": intent,
+            "run_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
+            "text_lines": [],
+            "stocks": [],  # [(code6, name, price, pct, note)]
+            "tables": [],  # [{headers:[], rows:[[]]}]
+            "ok": False,
+        }
+
+        try:
+            # ── 1) 从 SKILL.md 里提取关键词 (作为补充查询词) ──
+            extra_kw = []
+            try:
+                md_path = os.path.join(self._wb_home(), "skills", skill_name, "SKILL.md")
+                if os.path.exists(md_path):
+                    with open(md_path, "r", encoding="utf-8") as f:
+                        md = f.read(3000)
+                    # 从 ## 触发词 / 使用方法 / keywords 段里找中文
+                    for seg in _rx.findall(r"(?:触发词|关键词|使用方法|示例)[:：]\s*([^\n]+)", md):
+                        for kw in _rx.findall(r"[\u4e00-\u9fff]{2,8}", seg):
+                            extra_kw.append(kw)
+            except Exception:
+                pass
+
+            result["text_lines"].append(f"📋 Skill: {skill_name}")
+            result["text_lines"].append(f"🎯 意图: {intent}")
+            if extra_kw:
+                result["text_lines"].append(f"🔑 触发词: {' / '.join(extra_kw[:6])}")
+
+            # ── 2) 根据 intent 路由到本地执行器 ──
+            # 先确保 _fetch_realtime_prices 可用
+            fetch_price = getattr(self, "_fetch_realtime_prices", None)
+
+            if intent in ("选股", "涨停"):
+                # 选股 → 聚合持仓+淘韭+邮票缓存 → 拉行情 → 按涨跌幅/成交额排序
+                self._wb_exec_stock_picker(result, fetch_price)
+            elif intent == "资金":
+                self._wb_exec_capital_flow(result, fetch_price)
+            elif intent == "筹码":
+                self._wb_exec_chip_scan(result, fetch_price)
+            elif intent == "大盘":
+                self._wb_exec_market_overview(result, fetch_price)
+            elif intent in ("早盘", "晚报"):
+                self._wb_exec_daily_report(result, fetch_price)
+            elif intent == "贵金属":
+                self._wb_exec_precious_metal(result, fetch_price)
+            elif intent == "超跌":
+                self._wb_exec_oversold(result, fetch_price)
+            elif intent == "龙虎榜":
+                self._wb_exec_dragon_tiger(result, fetch_price)
+            else:
+                # 通用 → 聚合关注股 + 行情
+                self._wb_exec_generic(result, fetch_price)
+
+            result["ok"] = True
+        except Exception as e:
+            import traceback
+            result["text_lines"].append(f"❌ 执行出错: {e}")
+            result["text_lines"].extend(traceback.format_exc().split("\n")[:8])
+            result["ok"] = False
+
+        return result
+
+    # ── 各意图执行器 (都往 result["text_lines"] / ["stocks"] / ["tables"] 填数据) ──
+
+    def _wb_exec_stock_picker(self, result, fetch_price):
+        """选股/涨停 → 聚合关注股 + 行情 → 排序输出"""
+        stocks = self._wb_collect_watch_stocks()[:40]
+        if not stocks:
+            result["text_lines"].append("⚠️ 没有聚合到任何股票, 请先添加持仓或邮票格子有数据")
+            return
+        codes = [c for c, _, _ in stocks]
+        prices = fetch_price(codes) if fetch_price else {}
+        rows = []
+        for i, (c, nm, srcs) in enumerate(stocks, 1):
+            rt = prices.get(c, {})
+            cur = rt.get("price", 0)
+            pct = rt.get("pct", 0)
+            rows.append([i, c, nm, "+".join(srcs)[:20], f"{cur:.2f}" if cur else "-", f"{pct:+.2f}%"])
+            result["stocks"].append((c, nm, cur, pct, "+".join(srcs)))
+        # 按涨跌幅排序
+        rows.sort(key=lambda r: -float(r[5].rstrip("%")) if r[5].replace(".","").replace("-","").replace("+","").replace("%","").isdigit() else 0, reverse=True)
+        result["tables"].append({
+            "headers": ["#", "代码", "名称", "来源", "现价", "涨跌幅"],
+            "rows": rows,
+        })
+        result["text_lines"].append(f"\n✅ 聚合 {len(stocks)} 只候选, 按涨跌幅排序")
+        result["text_lines"].append("💡 双击任何一行里的股票代码可打开 K 线图")
+
+    def _wb_exec_capital_flow(self, result, fetch_price):
+        """资金流向 → 拉行情 → 按成交额/量比排序 (量比近似主力关注度)"""
+        import requests as _req, re as _rx
+        stocks = self._wb_collect_watch_stocks()[:30]
+        codes = [c for c, _, _ in stocks]
+        # 腾讯行情批量拉 (60 个字段里有成交额, 但需要完整解析)
+        rows = []
+        try:
+            sina_map = lambda c: f"sh{c}" if c.startswith(("6","9")) else f"sz{c}"
+            sina_codes = [sina_map(c) for c in codes]
+            for bi in range(0, len(sina_codes), 40):
+                batch = sina_codes[bi:bi+40]
+                r = _req.get(f"https://qt.gtimg.cn/q={','.join(batch)}", timeout=3,
+                             headers={"User-Agent": "Mozilla/5.0", "Referer": "https://gu.qq.com/"})
+                for seg in r.text.strip().split(";"):
+                    if "=" not in seg or '"' not in seg: continue
+                    var_part, val_part = seg.split("=", 1)
+                    scode = var_part.split("_")[-1]
+                    m = _rx.search(r"(\d{6})", scode)
+                    c6 = m.group(1) if m else scode
+                    fields = val_part.strip('"').split("~")
+                    if len(fields) < 50: continue
+                    # 腾讯字段: 3=现价, 4=昨收, 5=今开, 36=成交额(万), 37=量比
+                    try:
+                        now = float(fields[3]) if fields[3] else 0
+                        vol = float(fields[6]) if fields[6] else 0
+                        amount = float(fields[36]) if len(fields)>36 and fields[36] else 0
+                        lb = float(fields[37]) if len(fields)>37 and fields[37] else 0
+                        name = fields[1] or fields[2] or ""
+                        close = float(fields[4]) if fields[4] else 0
+                        pct = (now - close) / close * 100 if close > 0 else 0
+                    except: continue
+                    if c6 in codes:
+                        rows.append([c6, name, f"{now:.2f}", f"{pct:+.2f}%", f"{amount/100:.0f}亿", f"{lb:.2f}", f"{vol/10000:.0f}万手"])
+                        result["stocks"].append((c6, name, now, pct, f"量比{lb:.1f}"))
+            rows.sort(key=lambda r: -float(r[5]), reverse=False)  # 量比降序
+            result["tables"].append({
+                "headers": ["代码", "名称", "现价", "涨跌幅", "成交额", "量比", "成交量"],
+                "rows": rows[:20],
+            })
+            result["text_lines"].append(f"\n✅ 资金关注度 Top {len(rows)} (按量比排序, 量比>1 放量)")
+        except Exception as e:
+            result["text_lines"].append(f"⚠️ 资金流向数据拉取失败: {e}")
+
+    def _wb_exec_chip_scan(self, result, fetch_price):
+        """筹码 → 复用 akshare 的筹码峰数据 (如果可用), 否则提示"""
+        result["text_lines"].append("\n⚠️ 筹码扫描需要 akshare/通达信 数据源, 本地暂不支持完整筹码分布")
+        result["text_lines"].append("💡 建议: 在 WorkBuddy 里用 breakout-detector 或 chip-peak-screener skill")
+        # 做个轻量替代: 聚合关注股 + 涨跌统计
+        stocks = self._wb_collect_watch_stocks()[:20]
+        if fetch_price and stocks:
+            prices = fetch_price([c for c, _, _ in stocks])
+            up = sum(1 for c, _, _ in stocks if prices.get(c, {}).get("pct", 0) > 0)
+            down = sum(1 for c, _, _ in stocks if prices.get(c, {}).get("pct", 0) < 0)
+            flat = len(stocks) - up - down
+            result["text_lines"].append(f"\n📊 关注股涨跌统计: 红 {up} / 绿 {down} / 平 {flat}")
+
+    def _wb_exec_market_overview(self, result, fetch_price):
+        """大盘 → 上证指数 + 涨跌家数 + 情绪周期"""
+        try:
+            # 上证/深证/创业板
+            sina_codes = "sh000001,sz399001,sz399006,sh000688"
+            import requests as _req
+            r = _req.get(f"https://qt.gtimg.cn/q={sina_codes}", timeout=8,
+                         headers={"User-Agent": "Mozilla/5.0", "Referer": "https://gu.qq.com/"})
+            idx_rows = []
+            for seg in r.text.strip().split(";"):
+                if "=" not in seg or '"' not in seg: continue
+                _, val_part = seg.split("=", 1)
+                fields = val_part.strip('"').split("~")
+                if len(fields) < 5: continue
+                name = fields[1]
+                now = float(fields[3]) if fields[3] else 0
+                close = float(fields[4]) if fields[4] else 0
+                pct = (now - close) / close * 100 if close > 0 else 0
+                idx_rows.append([name, f"{now:.2f}", f"{pct:+.2f}%"])
+            result["tables"].append({"headers": ["指数", "点位", "涨跌幅"], "rows": idx_rows})
+
+            # 涨跌家数
+            try:
+                snap = getattr(self, "snapshot", None)
+                if snap and hasattr(snap, "get_up_down_counts"):
+                    ud = snap.get_up_down_counts()
+                    result["text_lines"].append(f"\n📊 涨跌家数: 红 {ud.get('up',0)} / 绿 {ud.get('down',0)} / 平 {ud.get('flat',0)}")
+                    # 情绪判定
+                    up_count = ud.get("up", 0); down_count = ud.get("down", 0)
+                    if up_count > 3000: emo = "🟢 亢奋期"
+                    elif up_count > 1600: emo = "🟡 活跃期"
+                    elif up_count > 800: emo = "⚪ 观望期"
+                    elif down_count > 3000: emo = "🔴 恐慌期"
+                    else: emo = "⚪ 震荡期"
+                    result["text_lines"].append(f"🎭 情绪周期判定: {emo}")
+            except Exception: pass
+
+            result["text_lines"].append("\n💡 想更深入? 用 大盘风险仪表盘 / 明日涨跌预测 skill")
+        except Exception as e:
+            result["text_lines"].append(f"⚠️ 大盘数据拉取失败: {e}")
+
+    def _wb_exec_daily_report(self, result, fetch_price):
+        """早盘/晚报 → 大盘概览 + 热门股摘要"""
+        self._wb_exec_market_overview(result, fetch_price)
+        self._wb_exec_stock_picker(result, fetch_price)
+        result["text_lines"].insert(2, "\n" + "="*50 + "\n📅 " + result["run_at"] + " 市场快照\n" + "="*50)
+
+    def _wb_exec_precious_metal(self, result, fetch_price):
+        """贵金属 → 提示 WorkBuddy skill"""
+        result["text_lines"].append("\n💡 贵金属分析建议: 在 WorkBuddy 里执行 gold-trend-finder / 贵金属趋势 skill")
+        # 用 AKShare 黄金现货
+        try:
+            import akshare as ak
+            df = ak.spot_golden_benchmark_sge(start_date="", end_date="")
+            if df is not None and len(df) > 0:
+                last = df.iloc[-1]
+                result["text_lines"].append(f"📊 上期所黄金基准价: {last.to_dict()}")
+        except Exception as e:
+            result["text_lines"].append(f"⚠️ AKShare 黄金数据拉取失败: {e}")
+
+    def _wb_exec_oversold(self, result, fetch_price):
+        """超跌 → 找关注股里跌幅最大的"""
+        stocks = self._wb_collect_watch_stocks()[:50]
+        if fetch_price:
+            prices = fetch_price([c for c, _, _ in stocks])
+            oversold = []
+            for c, nm, srcs in stocks:
+                rt = prices.get(c, {})
+                pct = rt.get("pct", 0)
+                cur = rt.get("price", 0)
+                if pct < -3:  # 跌幅 >3%
+                    oversold.append((c, nm, cur, pct, srcs))
+            oversold.sort(key=lambda x: x[3])
+            rows = [[i, c, nm, f"{cur:.2f}", f"{pct:+.2f}%"] for i, (c, nm, cur, pct, _) in enumerate(oversold[:15], 1)]
+            result["tables"].append({"headers": ["#", "代码", "名称", "现价", "涨跌幅"], "rows": rows})
+            result["text_lines"].append(f"\n✅ 超跌股扫描: 关注股中 {len(oversold)} 只跌幅 >3%")
+            for c, nm, cur, pct, _ in oversold[:10]:
+                result["stocks"].append((c, nm, cur, pct, "超跌候选"))
+
+    def _wb_exec_dragon_tiger(self, result, fetch_price):
+        """龙虎榜 → 提示"""
+        result["text_lines"].append("\n💡 龙虎榜数据需要 akshare/通达信 外部接口, 本地暂不支持")
+        result["text_lines"].append("📊 用资金集中度/主力净流入可近似替代 — 建议在 WorkBuddy 用 capital-concentration skill")
+
+    def _wb_exec_generic(self, result, fetch_price):
+        """通用 → 关注股 + 行情"""
+        self._wb_exec_stock_picker(result, fetch_price)
+
+    # ═══════════════════════════════════════════════════════════
+    # 📊 WorkBuddy 弹窗 4 Tab 重写 (加 Tab 4 执行面板)
+    # ═══════════════════════════════════════════════════════════
+
+    def _show_workbuddy_dialog_v2(self):
+        """🤝 WorkBuddy 完整桥接面板 (含 skill 执行 + K线)"""
+        w = self._safe_toplevel(self.root)
+        w.title("🤝 WorkBuddy 桥接面板")
+        w.geometry("1280x820")
+        w.transient(getattr(self, 'root', None))
+        w.configure(bg="#1a1a3e")
+        w.minsize(1000, 600)
+        try: w.grab_set()
+        except: pass
+
+        # 🎨 深蓝顶栏
+        header = tk.Frame(w, bg="#1565C0", height=48)
+        header.pack(fill=tk.X)
+        tk.Label(header, text="🤝 WorkBuddy 桥接面板", bg="#1565C0", fg="white",
+                 font=("Microsoft YaHei", 15, "bold")).pack(side=tk.LEFT, padx=18, pady=8)
+        wb_home = self._wb_home()
+        tk.Label(header, text=f"📂 {wb_home}", bg="#1565C0", fg="#BBDEFB",
+                 font=("", 9)).pack(side=tk.RIGHT, padx=18, pady=14)
+
+        # Notebook 4 Tab
+        nb = ttk.Notebook(w)
+        nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        # ═══ Tab 1: 📦 Skills 列表 + ▶运行按钮 ═══
+        tab1 = tk.Frame(nb, bg="#1a1a3e")
+        nb.add(tab1, text="📦 Skills (▶可运行)")
+
+        try:
+            skills = self._wb_read_skills()
+        except Exception:
+            skills = []
+
+        # 上半: 筛选 + Treeview
+        top = tk.Frame(tab1, bg="#1a1a3e"); top.pack(fill=tk.X, pady=4)
+        tk.Label(top, text="筛选:", bg="#1a1a3e", fg="white", font=("", 11)).pack(side=tk.LEFT, padx=4)
+        flt_var = tk.StringVar(value="仅股票相关")
+        ttk.Combobox(top, textvariable=flt_var, width=14,
+                     values=["全部", "仅股票相关", "选股/买入", "资金/筹码", "大盘/择时", "超跌/反弹", "贵金属"]
+                     ).pack(side=tk.LEFT, padx=4)
+
+        # 运行配置
+        tk.Label(top, text="双击=运行  |  ", bg="#1a1a3e", fg="#FFD54F", font=("", 10)).pack(side=tk.LEFT, padx=10)
+        run_btn = ttk.Button(top, text="▶ 运行选中 Skill", command=lambda: _run_selected())
+        run_btn.pack(side=tk.LEFT, padx=4)
+
+        cols = ("name", "intent", "desc")
+        tv1 = ttk.Treeview(tab1, columns=cols, show="headings", height=12)
+        for c, t, w_ in [("name","Skill 名称",200),("intent","意图",100),("desc","描述/触发词",700)]:
+            tv1.heading(c, text=t); tv1.column(c, width=w_, anchor="w", stretch=True)
+        vsb = ttk.Scrollbar(tab1, orient="vertical", command=tv1.yview)
+        tv1.configure(yscrollcommand=vsb.set)
+        tv1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        tv1.tag_configure("stock", background="#1B5E20", foreground="#FFFFFF")
+        tv1.tag_configure("other", background="#37474F", foreground="#ECEFF1")
+
+        _tv1_rows = []  # 记录当前 Treeview 行对应的 skill 对象 (过滤后)
+
+        def _refresh_skills():
+            for iid in tv1.get_children(): tv1.delete(iid)
+            _tv1_rows.clear()
+            flt = flt_var.get()
+            for s in skills:
+                if flt == "仅股票相关" and not s["stock"]: continue
+                if flt == "选股/买入" and not any(k in s["name"]+s["desc"] for k in ["选股","挑","breakout","buy","position"]): continue
+                if flt == "资金/筹码" and not any(k in s["name"]+s["desc"] for k in ["筹码","资金","chip","capital"]): continue
+                if flt == "大盘/择时" and not any(k in s["name"]+s["desc"] for k in ["大盘","择时","market","timing"]): continue
+                if flt == "超跌/反弹" and not any(k in s["name"]+s["desc"] for k in ["超跌","oversold","反弹"]): continue
+                if flt == "贵金属" and not any(k in s["name"]+s["desc"] for k in ["黄金","白银","贵金属"]): continue
+                intent = self._wb_match_intent(s["name"], s["desc"])
+                tag = "stock" if s["stock"] else "other"
+                tv1.insert("", "end", values=(s["name"], intent, s["desc"][:60]), tags=(tag,))
+                _tv1_rows.append(s)
+
+        _refresh_skills()
+        flt_var.trace_add("write", lambda *a: _refresh_skills())
+
+        def _run_selected():
+            sel = tv1.selection()
+            if not sel:
+                messagebox.showinfo("提示", "请先点选一个 Skill", parent=w); return
+            iid = sel[0]
+            idx = int(iid)
+            if idx >= len(_tv1_rows): return
+            s = _tv1_rows[idx]
+            _launch_run_inner(s["name"], s["desc"], self._wb_match_intent(s["name"], s["desc"]))
+
+        tv1.bind("<Double-1>", lambda e: _run_selected())
+        tv1.bind("<Return>", lambda e: _run_selected())
+
+        # ═══ Tab 2: 🎯 关注股 (复用已有) ═══
+        tab2 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab2, text="🎯 关注股")
+        try:
+            watch = self._wb_collect_watch_stocks()
+        except Exception: watch = []
+        tk.Label(tab2, text=f"🔍 共 {len(watch)} 只聚合股 (持仓+淘韭+邮票+价格提醒)",
+                 bg="#1a1a3e", fg="#90CAF9", font=("", 11, "bold")).pack(pady=6)
+
+        cols2 = ("#", "code", "name", "src", "cur", "pct")
+        tv_w = ttk.Treeview(tab2, columns=cols2, show="headings", height=18)
+        for c, t, w_, a_ in [("#","#",35,"center"),("code","代码",72,"center"),("name","名称",120,"w"),
+                             ("src","来源",200,"w"),("cur","现价",78,"center"),("pct","%",62,"center")]:
+            tv_w.heading(c, text=t); tv_w.column(c, width=w_, anchor=a_, stretch=True)
+        vsb2 = ttk.Scrollbar(tab2, orient="vertical", command=tv_w.yview)
+        tv_w.configure(yscrollcommand=vsb2.set)
+        tv_w.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=8, pady=4)
+        vsb2.pack(side=tk.RIGHT, fill=tk.Y)
+        tv_w.tag_configure("hot", background="#FF6F00", foreground="white")
+        tv_w.tag_configure("multi", background="#2E7D32", foreground="#C8E6C9")
+        tv_w.tag_configure("single", background="#37474F", foreground="#ECEFF1")
+
+        def _refresh_watch_async():
+            """后台线程拉行情 → 主线程渲染 + 缓存"""
+            import threading as _th, time as _time
+            # 先显示占位
+            for iid in tv_w.get_children(): tv_w.delete(iid)
+            for i, (c6, nm, srcs) in enumerate(watch[:20], 1):
+                tv_w.insert("", "end", values=(i, c6, nm, "+".join(srcs)[:30],
+                                               "⏳", "⏳"))
+            # 后台拉行情
+            def _bg():
+                try:
+                    # 5 分钟缓存
+                    cache = getattr(self, '_wb_price_cache', {})
+                    now = _time.time()
+                    codes = [c for c, _, _ in watch[:60]]
+                    missing = [c for c in codes if c not in cache or now - cache.get(c, (0,{}))[0] > 300]
+                    if missing:
+                        fresh = self._fetch_realtime_prices(missing)
+                        for c, v in fresh.items():
+                            cache[c] = (now, v)
+                        self._wb_price_cache = cache
+                    prices = {c: cache.get(c, (0, {}))[1] for c in codes}
+                    self.root.after(0, lambda: _render_watch(prices))
+                except Exception as e:
+                    import traceback
+                    self.root.after(0, lambda: tv_w.insert("", "end", values=(f"❌ 行情拉取失败: {e}",), tags=("single",)))
+
+            _th.Thread(target=_bg, daemon=True).start()
+
+        def _render_watch(prices):
+            for iid in tv_w.get_children(): tv_w.delete(iid)
+            for i, (c6, nm, srcs) in enumerate(watch[:60], 1):
+                rt = prices.get(c6, {}) or {}
+                sc = len(srcs)
+                tag = "hot" if sc>=3 else "multi" if sc>=2 else "single"
+                cur = rt.get("price", 0); pct = rt.get("pct", 0)
+                tv_w.insert("", "end", values=(i, c6, nm, "+".join(srcs)[:30],
+                                               f"{cur:.2f}" if cur else "-",
+                                               f"{pct:+.2f}%" if cur else "-"), tags=(tag,))
+
+        _refresh_watch_async()  # 启动即异步, UI 秒出
+        tv_w.bind("<Double-1>", lambda e: self._open_kline_for_selection(tv_w))
+
+        # ═══ Tab 3: 🤖 快照推送 ═══ (复用简化)
+        tab3 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab3, text="🤖 推送快照")
+        tk.Label(tab3, text=f"把当前状态打包成 JSON → {wb_home}/snapshots/\n让 WorkBuddy 下次启动自动读取",
+                 bg="#1a1a3e", fg="#ECEFF1", font=("", 11)).pack(pady=20, padx=20, anchor="w")
+        result_lbl = tk.Label(tab3, text="", bg="#1a1a3e", fg="#A5D6A7", font=("", 11), justify=tk.LEFT)
+        result_lbl.pack(pady=10)
+        def _do_push():
+            try:
+                path, ns, na, nk = self._wb_push_snapshot()
+                result_lbl.config(text=f"✅ 已推送 → {path}\n📈{ns}只 💰{na}条 📦{nk}个Skills")
+            except Exception as e:
+                result_lbl.config(text=f"❌ 失败: {e}")
+        tk.Button(tab3, text="🚀 生成并推送", command=_do_push,
+                  bg="#1565C0", fg="white", font=("", 12, "bold"), padx=20, pady=8, relief=tk.FLAT).pack(pady=6)
+
+        # ═══ Tab 4: 📊 Skill 执行结果 ═══
+        tab4 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab4, text="📊 执行结果")
+
+        # 顶部: 工具栏 (运行配置)
+        tool = tk.Frame(tab4, bg="#1a1a3e"); tool.pack(fill=tk.X, pady=4)
+        tk.Label(tool, text="字体:", bg="#1a1a3e", fg="white", font=("", 11)).pack(side=tk.LEFT, padx=4)
+        font_var = tk.IntVar(value=13)
+        ttk.Spinbox(tool, from_=10, to=22, textvariable=font_var, width=4,
+                     command=lambda: tv_result.tag_configure("body", font=("", font_var.get()))
+                     ).pack(side=tk.LEFT, padx=2)
+        font_var.trace_add("write", lambda *a: tv_result.tag_configure("body", font=("", font_var.get())))
+
+        tk.Label(tool, text="  颜色:", bg="#1a1a3e", fg="white", font=("", 11)).pack(side=tk.LEFT, padx=4)
+        color_var = tk.StringVar(value="#000000")
+        ttk.Combobox(tool, textvariable=color_var, width=10,
+                     values=["#000000 黑", "#C62828 红", "#2E7D32 绿", "#1565C0 蓝", "#6A1B9A 紫"]
+                     ).pack(side=tk.LEFT, padx=2)
+        color_var.trace_add("write", lambda *a: tv_result.tag_configure("body",
+                     foreground=color_var.get().split()[0] if color_var.get().split() else "#000000"))
+
+        tk.Button(tool, text="🗑️ 清空", command=lambda: _clear_result(),
+                  bg="#37474F", fg="white", relief=tk.FLAT, padx=10).pack(side=tk.RIGHT, padx=4)
+        tk.Button(tool, text="📤 导出", command=lambda: _export_result(),
+                  bg="#37474F", fg="white", relief=tk.FLAT, padx=10).pack(side=tk.RIGHT, padx=4)
+
+        # ⏳ 进度条 + 状态文字
+        status_bar = tk.Frame(tab4, bg="#1a1a3e")
+        status_bar.pack(fill=tk.X, pady=2)
+        status_var = tk.StringVar(value="● 就绪")
+        tk.Label(status_bar, textvariable=status_var, bg="#1a1a3e", fg="#FFD54F",
+                 font=("", 10)).pack(side=tk.LEFT, padx=4)
+        pb = ttk.Progressbar(status_bar, mode="indeterminate", length=300)
+        pb.pack(side=tk.LEFT, padx=6)
+
+        # 结果 Treeview (多行文本 + 表格混合)
+        tv_frame = tk.Frame(tab4, bg="#1a1a3e")
+        tv_frame.pack(fill=tk.BOTH, expand=True, pady=4)
+
+        tv_result = tk.Text(tv_frame, wrap=tk.WORD, bg="#FFFFFF", fg="#000000",
+                             font=("", font_var.get()), padx=12, pady=10, relief=tk.FLAT,
+                             cursor="hand2")
+        vsb_r = ttk.Scrollbar(tv_frame, orient="vertical", command=tv_result.yview)
+        tv_result.configure(yscrollcommand=vsb_r.set)
+        tv_result.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb_r.pack(side=tk.RIGHT, fill=tk.Y)
+
+        tv_result.tag_configure("body", foreground="#000000", font=("", font_var.get()))
+        tv_result.tag_configure("headline", foreground="#1565C0", font=("", font_var.get()+2, "bold"))
+        tv_result.tag_configure("ok", foreground="#2E7D32", font=("", font_var.get()))
+        tv_result.tag_configure("err", foreground="#C62828", font=("", font_var.get()))
+        tv_result.tag_configure("code", foreground="#C62828", font=("", font_var.get(), "bold"), underline=True)
+        tv_result.tag_configure("table", font=("Courier", font_var.get()-1))
+
+        def _clear_result():
+            tv_result.delete("1.0", "end")
+
+        def _export_result():
+            import tkinter.filedialog as _fd
+            path = _fd.asksaveasfilename(defaultextension=".txt",
+                                          filetypes=[("文本", "*.txt"), ("Markdown", "*.md")])
+            if path:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(tv_result.get("1.0", "end"))
+                messagebox.showinfo("完成", f"已导出 → {path}", parent=w)
+
+        # 股票代码点击 → 打开 K 线
+        _current_stocks = {}  # "1.5-1.10": (c6, name)
+        _click_start = None
+
+        def _on_text_click(evt):
+            nonlocal _click_start
+            _click_start = tv_result.index("@%s,%s" % (evt.x, evt.y))
+
+        def _on_text_release(evt):
+            nonlocal _click_start
+            end = tv_result.index("@%s,%s" % (evt.x, evt.y))
+            if _click_start and _click_start == end:
+                # 单击 → 检查是否点在 code tag 上
+                tags = tv_result.tag_names(_click_start)
+                if "code" in tags:
+                    c6 = tv_result.get(_click_start, _click_start + "+6c")
+                    # 找到对应的 name
+                    for (st, en), (cc, nm) in _current_stocks.items():
+                        if st <= _click_start <= en:
+                            self._open_kline_for_code(cc, nm)
+                            return
+
+        tv_result.bind("<Button-1>", _on_text_click)
+        tv_result.bind("<ButtonRelease-1>", _on_text_release)
+
+        # ═══ Tab 5: 📈 K线图 (直接内嵌) ═══
+        tab5 = tk.Frame(nb, bg="#1a1a3e"); nb.add(tab5, text="📈 K线图")
+
+        # 周期选择栏
+        period_bar = tk.Frame(tab5, bg="#1a1a3e"); period_bar.pack(fill=tk.X, pady=4)
+        tk.Label(period_bar, text="股票代码:", bg="#1a1a3e", fg="white", font=("", 11)).pack(side=tk.LEFT, padx=4)
+        kline_code_var = tk.StringVar()
+        ttk.Entry(period_bar, textvariable=kline_code_var, width=10).pack(side=tk.LEFT, padx=2)
+        tk.Label(period_bar, text="周期:", bg="#1a1a3e", fg="white", font=("", 11)).pack(side=tk.LEFT, padx=(10,2))
+        period_var = tk.StringVar(value="日K")
+        ttk.Combobox(period_bar, textvariable=period_var, width=8,
+                     values=["15分钟", "60分钟", "日K", "周K", "月K"]).pack(side=tk.LEFT, padx=2)
+        ttk.Button(period_bar, text="📊 画图",
+                   command=lambda: self._wb_render_kline(tab5, kline_code_var.get().strip(),
+                                                          period_var.get(), font_var)
+                   ).pack(side=tk.LEFT, padx=8)
+
+        # ── 底部按钮 ──
+        bottom = tk.Frame(w, bg="#1a1a3e"); bottom.pack(fill=tk.X, padx=10, pady=(0, 10))
+        ttk.Button(bottom, text="打开 WorkBuddy", command=lambda: os.system('open -a "WorkBuddy"')).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bottom, text="打开 skills 文件夹", command=lambda: os.system(f'open "{wb_home}/skills"')).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bottom, text="关闭", command=w.destroy).pack(side=tk.RIGHT, padx=4)
+
+        print(f"[🤝WorkBuddyV2] 面板打开: {len(skills)} skills", flush=True)
+
+        # ═══════════════════════════════════════════════════════════
+        # 🚀 skill 运行回调 — 统一入口
+        # ═══════════════════════════════════════════════════════════
+        def _launch_run_inner(skill_name, skill_desc, intent):
+            """在后台线程跑 → 主线程渲染 + 进度条"""
+            import threading as _th
+            tv_result.tag_configure("body", foreground=color_var.get().split()[0] if color_var.get() else "#000000",
+                                    font=("", font_var.get()))
+            tv_result.insert("end", f"\n{'='*50}\n🚀 运行 Skill: {skill_name} (意图: {intent})\n{'='*50}\n", "headline")
+            tv_result.see("end")
+            # 启动进度条 + 状态
+            pb.start(10)
+            status_var.set(f"● 运行中: {skill_name} ...")
+
+            def _bg():
+                try:
+                    res = self._wb_run_skill_local(skill_name, skill_desc, intent)
+                    self.root.after(0, lambda: _render_result(res))
+                except Exception as e:
+                    import traceback
+                    self.root.after(0, lambda: (
+                        pb.stop(),
+                        status_var.set("● 出错"),
+                        tv_result.insert("end", f"❌ 异常: {e}\n{traceback.format_exc()[:200]}\n", "err")
+                    ))
+
+            _th.Thread(target=_bg, daemon=True).start()
+
+        def _render_result(res):
+            """把执行结果渲染到 Text widget + 停进度条"""
+            pb.stop()
+            status_var.set("● 完成 ✅" if res.get("ok") else "● 完成 ❌")
+            _current_stocks.clear()
+
+            # 文本行
+            for line in res.get("text_lines", []):
+                if line.startswith("✅") or line.startswith("📊") or line.startswith("🎯"):
+                    tv_result.insert("end", line + "\n", "ok")
+                elif line.startswith("❌") or line.startswith("⚠️"):
+                    tv_result.insert("end", line + "\n", "err")
+                elif line.startswith("💡") or line.startswith("📋"):
+                    tv_result.insert("end", line + "\n", "body")
+                else:
+                    tv_result.insert("end", line + "\n", "body")
+
+            # 表格
+            for tbl in res.get("tables", []):
+                headers = tbl.get("headers", [])
+                rows = tbl.get("rows", [])
+                if not headers or not rows: continue
+                # 简单 ASCII 表格 + 股票代码高亮
+                tv_result.insert("end", "\n")
+                tv_result.insert("end", "│ " + " │ ".join(headers) + " │\n", "table")
+                tv_result.insert("end", "├─" + "─┼─".join(["─"*10]*len(headers)) + "─┤\n", "table")
+                for row in rows:
+                    for j, cell in enumerate(row):
+                        txt = str(cell)
+                        # 6 位代码 → 红色可点击
+                        import re as _rx
+                        if _rx.match(r"^\d{6}$", txt):
+                            start_idx = tv_result.index("end-1c")
+                            tv_result.insert("end", txt, "code")
+                            end_idx = tv_result.index("end-1c")
+                            _current_stocks[(start_idx, end_idx)] = (txt, row[2] if len(row)>2 else "")
+                            tv_result.tag_bind("code", "<Button-1>",
+                                lambda e, c=txt, n=row[2] if len(row)>2 else "": self._open_kline_for_code(c, n))
+                        else:
+                            tv_result.insert("end", txt, "body")
+                        if j < len(row) - 1:
+                            tv_result.insert("end", " │ ", "table")
+                    tv_result.insert("end", "\n", "table")
+
+            tv_result.insert("end", f"\n⏱️ 完成于 {res.get('run_at', '')}\n", "headline")
+            tv_result.see("end")
+            nb.select(tab4)  # 自动切到结果 Tab
+
+        def _wb_launch_run(skill_name, skill_desc, _nb_ref, _tab2_ref, _tv_res_ref, _font_var, _self_ref):
+            """由 Tab1 调用 → 匹配意图 → 后台执行 → 渲染结果"""
+            intent = self._wb_match_intent(skill_name, skill_desc)
+            _launch_run_inner(skill_name, skill_desc, intent)
+
+        # 初始: 自动选 Tab 4
+        nb.select(tab4)
+
+        print(f"[🤝WorkBuddyV2] 初始化完成: {len(skills)} skills", flush=True)
+
+    # ═══════════════════════════════════════════════════════════
+    # 📈 K线图弹窗 — 15min/60min/日/周/月 + 附图 + 情绪背景
+    # ═══════════════════════════════════════════════════════════
+
+    def _open_kline_for_selection(self, tv):
+        """Treeview 双击 → 取代码列 → 开 K 线"""
+        sel = tv.selection()
+        if not sel: return
+        iid = sel[0]
+        vals = tv.item(iid, "values")
+        # 找代码列 (6位数字)
+        import re as _rx
+        c6 = next((str(v) for v in vals if _rx.match(r"^\d{6}$", str(v))), "")
+        nm = str(vals[2]) if len(vals) > 2 else ""
+        if c6: self._open_kline_for_code(c6, nm)
+
+    def _open_kline_for_code(self, c6, name=""):
+        """弹出独立 K 线图窗口 (matplotlib, 带周期切换 + 附图 + 情绪背景)"""
+        import traceback
+        try:
+            self._wb_kline_popup(c6, name)
+        except Exception as e:
+            print(f"[📈K线] 弹窗失败: {e}\n{traceback.format_exc()}", flush=True)
+            # 兜底 messagebox
+            try:
+                messagebox.showerror("K线图错误", f"无法打开 K 线图:\n{e}\n\n请检查 akshare/matplotlib 是否安装")
+            except Exception:
+                pass
+
+    def _wb_kline_popup(self, c6, name=""):
+        """独立 K 线弹窗 (matplotlib)"""
+        import matplotlib
+        matplotlib.use("TkAgg")
+        import matplotlib.pyplot as plt
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        import matplotlib.dates as mdates
+        import numpy as np
+
+        win = self._safe_toplevel(self.root)
+        win.title(f"📈 {name or c6} K线图")
+        win.geometry("1100x680")
+        win.configure(bg="#1a1a3e")
+
+        # 周期选择
+        top = tk.Frame(win, bg="#1a1a3e"); top.pack(fill=tk.X, pady=4)
+        tk.Label(top, text=f"📈 {c6} {name}", bg="#1a1a3e", fg="white",
+                 font=("", 12, "bold")).pack(side=tk.LEFT, padx=10)
+        period_var = tk.StringVar(value="日K")
+        periods = [("15分钟", "15"), ("60分钟", "60"), ("日K", "daily"), ("周K", "weekly"), ("月K", "monthly")]
+        for label, val in periods:
+            tk.Radiobutton(top, text=label, value=val, variable=period_var,
+                           bg="#1a1a3e", fg="white", selectcolor="#1565C0", activebackground="#1a1a3e",
+                           font=("", 10)).pack(side=tk.LEFT, padx=3)
+
+        # 情绪背景选择
+        emo_var = tk.StringVar(value="震荡")
+        emo_frame = tk.Frame(top, bg="#1a1a3e"); emo_frame.pack(side=tk.RIGHT, padx=10)
+        tk.Label(emo_frame, text="🎭情绪:", bg="#1a1a3e", fg="white", font=("", 10)).pack(side=tk.LEFT)
+        for lbl, val in [("↑上行", "up"), ("═震荡", "side"), ("↓下行", "down")]:
+            tk.Radiobutton(emo_frame, text=lbl, value=val, variable=emo_var,
+                           bg="#1a1a3e", fg="white", selectcolor="#1565C0", activebackground="#1a1a3e",
+                           font=("", 10)).pack(side=tk.LEFT, padx=2)
+
+        # 附图指标选择
+        sub_var = tk.StringVar(value="MACD")
+        tk.Label(top, text="附图:", bg="#1a1a3e", fg="white", font=("", 10)).pack(side=tk.LEFT, padx=(10,2))
+        ttk.Combobox(top, textvariable=sub_var, width=8,
+                     values=["无", "MACD", "KDJ", "RSI", "成交量"]).pack(side=tk.LEFT, padx=2)
+
+        # matplotlib Figure
+        fig = Figure(figsize=(11, 6), dpi=100, facecolor="#1a1a3e")
+        canvas = FigureCanvasTkAgg(fig, master=win)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # 情绪背景色
+        emo_bg = {"up": "#C8E6C9", "side": "#F5F5F5", "down": "#FFCDD2"}
+
+        def _redraw():
+            fig.clear()
+            period = period_var.get()
+            emo = emo_var.get()
+            sub = sub_var.get()
+
+            # ── 拉数据 (新浪/akshare) ──
+            try:
+                import akshare as ak
+                import pandas as pd
+                symbol = f"sh{c6}" if c6.startswith(("6","9")) else f"sz{c6}"
+                # 日线为主
+                if period in ("daily", "weekly", "monthly"):
+                    df = ak.stock_zh_a_hist(symbol=c6, period="daily", adjust="qfq")
+                    if df is None or len(df) == 0:
+                        fig.text(0.5, 0.5, f"⚠️ {c6} 无日线数据", ha="center", fontsize=16)
+                        canvas.draw(); return
+                    # 周/月重采样
+                    df["日期"] = pd.to_datetime(df["日期"])
+                    if period == "weekly":
+                        df = df.set_index("日期").resample("W").agg({"开盘":"first","收盘":"last","最高":"max","最低":"min","成交量":"sum","成交额":"sum"}).dropna().reset_index()
+                    elif period == "monthly":
+                        df = df.set_index("日期").resample("ME").agg({"开盘":"first","收盘":"last","最高":"max","最低":"min","成交量":"sum","成交额":"sum"}).dropna().reset_index()
+                    dates = df["日期"]
+                    open_ = df["开盘"].values.astype(float)
+                    close_ = df["收盘"].values.astype(float)
+                    high_ = df["最高"].values.astype(float)
+                    low_ = df["最低"].values.astype(float)
+                    vol_ = df["成交量"].values.astype(float)
+                elif period in ("15", "60"):
+                    # 分钟线 (akshare 支持)
+                    try:
+                        df = ak.stock_zh_a_minute(symbol=symbol, period=period, adjust="qfq")
+                        if df is None or len(df) == 0: raise Exception("无分钟数据")
+                        dates = pd.to_datetime(df["day"])
+                        open_ = df["open"].values.astype(float)
+                        close_ = df["close"].values.astype(float)
+                        high_ = df["high"].values.astype(float)
+                        low_ = df["low"].values.astype(float)
+                        vol_ = df["volume"].values.astype(float) if "volume" in df.columns else np.zeros_like(close_)
+                    except Exception as e2:
+                        fig.text(0.5, 0.5, f"⚠️ 分钟线不可用 ({e2})\n请用日K", ha="center", fontsize=14)
+                        canvas.draw(); return
+                else:
+                    fig.text(0.5, 0.5, "⚠️ 未知周期", ha="center"); canvas.draw(); return
+            except Exception as e:
+                fig.text(0.5, 0.5, f"⚠️ 数据拉取失败:\n{e}", ha="center", fontsize=12)
+                canvas.draw(); return
+
+            n = len(close_)
+            if n == 0:
+                fig.text(0.5, 0.5, "⚠️ 无数据", ha="center"); canvas.draw(); return
+
+            # 截断最多 250 根
+            if n > 250:
+                sl = slice(-250, None)
+                dates = dates[sl]; open_ = open_[sl]; close_ = close_[sl]
+                high_ = high_[sl]; low_ = low_[sl]; vol_ = vol_[sl]
+
+            # ── 画 K 线 (主图) ──
+            has_sub = sub in ("MACD", "KDJ", "RSI", "成交量")
+            n_axes = 2 if has_sub else 1
+            ax1 = fig.add_subplot(n_axes, 1, 1)
+            if has_sub: ax2 = fig.add_subplot(n_axes, 1, 2, sharex=ax1)
+
+            ax1.set_facecolor(emo_bg.get(emo, "#F5F5F5"))
+            fig.patch.set_facecolor("#1a1a3e")
+            for label in ax1.get_xticklabels() + ax1.get_yticklabels():
+                label.set_color("#ECEFF1")
+            ax1.tick_params(colors="#ECEFF1")
+            for spine in ax1.spines.values():
+                spine.set_color("#546E7A")
+
+            x = np.arange(len(close_))
+            # 影线
+            for i in range(len(close_)):
+                color = "#C62828" if close_[i] >= open_[i] else "#2E7D32"
+                ax1.plot([x[i], x[i]], [low_[i], high_[i]], color=color, linewidth=0.8)
+            # 实体
+            w = 0.6
+            for i in range(len(close_)):
+                color = "#C62828" if close_[i] >= open_[i] else "#2E7D32"
+                body_bottom = min(open_[i], close_[i])
+                body_h = abs(close_[i] - open_[i]) or 0.01
+                ax1.add_patch(plt.Rectangle((x[i]-w/2, body_bottom), w, body_h,
+                                             facecolor=color, edgecolor=color))
+
+            # MA5/10/20
+            for ma_n, ma_c, ma_l in [(5, "#FFD54F", "MA5"), (10, "#4FC3F7", "MA10"), (20, "#BA68C8", "MA20")]:
+                ma = np.convolve(close_, np.ones(ma_n)/ma_n, mode="valid")
+                ax1.plot(x[ma_n-1:], ma, color=ma_c, linewidth=1.2, label=ma_l)
+            ax1.set_title(f"{c6} {name} — {period_var.get()} K线 | {emo}情绪背景", color="#ECEFF1", fontsize=13)
+            ax1.legend(loc="upper left", fontsize=9, facecolor="#37474F", labelcolor="#ECEFF1")
+            ax1.grid(True, alpha=0.3, color="#546E7A")
+
+            # ── 附图 ──
+            if has_sub:
+                ax2.set_facecolor(emo_bg.get(emo, "#F5F5F5"))
+                for label in ax2.get_xticklabels() + ax2.get_yticklabels():
+                    label.set_color("#ECEFF1")
+                ax2.tick_params(colors="#ECEFF1")
+                for spine in ax2.spines.values():
+                    spine.set_color("#546E7A")
+
+                if sub == "成交量":
+                    colors = ["#C62828" if close_[i] >= open_[i] else "#2E7D32" for i in range(len(close_))]
+                    ax2.bar(x, vol_, color=colors, width=0.6)
+                    ax2.set_ylabel("成交量", color="#ECEFF1")
+                elif sub == "MACD":
+                    ema12 = self._ema(close_, 12)
+                    ema26 = self._ema(close_, 26)
+                    dif = ema12 - ema26
+                    dea = self._ema(dif, 9)
+                    macd_hist = 2 * (dif - dea)
+                    valid = ~np.isnan(dif)
+                    ax2.plot(x[valid], dif[valid], color="#4FC3F7", label="DIF", linewidth=1)
+                    ax2.plot(x[valid], dea[valid], color="#FFD54F", label="DEA", linewidth=1)
+                    cols = ["#C62828" if v >= 0 else "#2E7D32" for v in macd_hist[valid]]
+                    ax2.bar(x[valid], macd_hist[valid], color=cols, width=0.6)
+                    ax2.legend(loc="upper left", fontsize=8, facecolor="#37474F", labelcolor="#ECEFF1")
+                elif sub == "RSI":
+                    rsi = self._rsi(close_, 14)
+                    ax2.plot(x, rsi, color="#BA68C8", linewidth=1.5, label="RSI(14)")
+                    ax2.axhline(70, color="#C62828", linestyle="--", alpha=0.5)
+                    ax2.axhline(30, color="#2E7D32", linestyle="--", alpha=0.5)
+                    ax2.set_ylim(0, 100)
+                    ax2.legend(loc="upper left", fontsize=8, facecolor="#37474F", labelcolor="#ECEFF1")
+                elif sub == "KDJ":
+                    # 简化 KDJ
+                    low_min = np.convolve(low_, np.ones(9)/9, mode="valid")
+                    high_max = np.convolve(high_, np.ones(9)/9, mode="valid")
+                    rsv = (close_[8:] - low_min) / (high_max - low_min + 1e-10) * 100
+                    k = self._ema(rsv, 3); d = self._ema(k, 3); j = 3*k - 2*d
+                    vx = x[8:]
+                    ax2.plot(vx, k, color="#4FC3F7", label="K", linewidth=1)
+                    ax2.plot(vx, d, color="#FFD54F", label="D", linewidth=1)
+                    ax2.plot(vx, j, color="#BA68C8", label="J", linewidth=1)
+                    ax2.legend(loc="upper left", fontsize=8, facecolor="#37474F", labelcolor="#ECEFF1")
+
+            fig.autofmt_xdate()
+            fig.tight_layout()
+            canvas.draw()
+
+        _redraw()
+        period_var.trace_add("write", lambda *a: _redraw())
+        emo_var.trace_add("write", lambda *a: _redraw())
+        sub_var.trace_add("write", lambda *a: _redraw())
+
+        # 工具栏
+        toolbar = NavigationToolbar2Tk(canvas, win)
+        toolbar.update()
+        canvas.get_tk_widget().pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
+
+    def _wb_render_kline(self, parent_frame, c6, period, font_var):
+        """内嵌 K 线到 tab5 (调用 _wb_kline_popup 类似逻辑, 但在 frame 里)"""
+        # 简化: 直接复用 _wb_kline_popup 的图
+        if not c6:
+            tk.Label(parent_frame, text="⚠️ 请输入股票代码 (如 600519)",
+                     bg="#1a1a3e", fg="#C62828", font=("", 12)).pack(pady=40)
+            return
+        # 直接开弹窗更简单
+        self._open_kline_for_code(c6)
+
 
 
 def _detail_win(parent, skill):
