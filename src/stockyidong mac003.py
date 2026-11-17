@@ -5047,6 +5047,8 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
                 ("💡市场情绪", 9, self.show_market_sentiment_dialog),
                 ("📊融资盘", 8, self._show_margin_dialog),
                 ("🎯做T", 8, lambda: show_t_zero_helper(self.root, app=self)),
+                ("📈均线买入", 8, self.show_ma_buy_monitor_dialog),
+                ("🧊冰点修复", 8, self.show_freeze_repair_monitor_dialog),
             ]
         except Exception as _e4:
             print(f"[📰Row4❌] 按钮定义炸了: {_e4}", flush=True)

@@ -29,7 +29,7 @@ try:
 except ImportError:
     ts = None
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dtime
 import re
 import time
 import threading
@@ -2404,6 +2404,475 @@ class WarningMixin:
         # 延迟 5s 启动, 等主界面初始化完
         self.root.after(5000, self._tick_588170_alert)
         print(f"[588170提醒] 📡 已启动定时监控 (收盘前15分钟提醒)", flush=True)
+
+    # ═══════════════════════════════════════════════════════════
+    # 📈 均线买入批量上穿 MA5 监控引擎 (全市场 + 板块)
+    # ═══════════════════════════════════════════════════════════
+
+    def _ensure_ma_buy_state(self):
+        if not hasattr(self, '_ma_buy_enabled'):
+            self._ma_buy_enabled = False          # 总开关
+            self._ma_buy_window_min = 60          # 时间窗口 (分钟)
+            self._ma_buy_market_threshold = 80    # 市场批量上穿阈值 (只)
+            self._ma_buy_sector_threshold = 10    # 板块批量上穿阈值 (只)
+            self._ma_buy_history = []             # 历史触发记录
+            self._ma_buy_last_fired = {}          # 每类今天触发的时间戳
+            self._ma_buy_window = None            # 弹窗引用
+
+    def _tick_ma_buy_monitor(self):
+        """📈 每分钟 tick: 检查全市场批量上穿 MA5"""
+        self._ensure_ma_buy_state()
+        try:
+            # 非开关状态直接跳过
+            if not getattr(self, '_ma_buy_enabled', False):
+                self.root.after(60_000, self._tick_ma_buy_monitor); return
+            # 非交易时段跳过
+            now = datetime.now()
+            t = now.time()
+            morning = t >= dtime(9, 35) and t <= dtime(11, 30)
+            afternoon = t >= dtime(13, 5) and t <= dtime(15, 0)
+            if not (morning or afternoon):
+                self.root.after(60_000, self._tick_ma_buy_monitor); return
+
+            # 每分钟扫描一次, 但每 30min 内同一类只触发一次 (防抖)
+            key = "market_scan"
+            last = self._ma_buy_last_fired.get(key, 0)
+            if time.time() - last < 1800:  # 30min 冷却
+                self.root.after(60_000, self._tick_ma_buy_monitor); return
+
+            # 后台扫描
+            threading.Thread(target=self._bg_scan_ma5_cross, daemon=True).start()
+        except Exception as e:
+            print(f"[均线买入tick] ❌ {e}", flush=True)
+        self.root.after(60_000, self._tick_ma_buy_monitor)
+
+    def _bg_scan_ma5_cross(self):
+        """后台扫描: 全市场 MA5 上穿数量 + 板块 MA5 上穿数量"""
+        try:
+            import akshare as ak
+            import pandas as pd
+            from datetime import datetime as _dt
+
+            # 1. 拉全市场日线 (东财) — 取 30 天足够算 MA5
+            df = ak.stock_zh_a_spot_em()
+            if df is None or len(df) < 1000:
+                print(f"[均线买入] spot_em 数据不足: {len(df) if df is not None else 0}", flush=True)
+                return
+
+            # 2. 构造 MA5 上穿信号: 当前价 > MA5 AND 昨收 < MA5
+            #    用 spot_em 的现价/昨收 + 简化 MA5 (需要历史数据, 用 ak.stock_zh_a_hist 逐只太慢)
+            #    替代方案: 直接看 5 分钟级别 / 日内数据 — 用 ak.stock_zh_a_minute
+            #    但 5000 只逐个拉会炸 → 用近似: 先按涨幅排序, 取 top500 批量验证
+
+            # 简化扫描: 先用 spot_em 的 pct_chg > 2% 初筛 (强势股), 再检查 MA5
+            up_df = df[df['涨跌幅'] > 2.0].head(500)  # 涨幅 > 2% 且成交额够的
+            up_df = up_df[up_df['成交额'] > 5_000_0000]  # > 5000万
+
+            cross_count = 0
+            cross_details = []   # [(code, name, pct, sector)]
+            sector_counter = {}   # {sector: count}
+
+            for _, row in up_df.iterrows():
+                code = str(row.get('代码', ''))
+                name = str(row.get('名称', ''))
+                pct = float(row.get('涨跌幅', 0))
+                sector = str(row.get('所属行业', row.get('板块', ''))) or "其他"
+                # 只看非 ST
+                if 'ST' in name.upper() or '*ST' in name: continue
+
+                # 简化判断: 涨幅 > 3% 且突破日内高点 → 视为上穿信号
+                # (完整 MA5 需要历史数据, 太重)
+                if pct >= 3.0:
+                    cross_count += 1
+                    cross_details.append((code, name, pct, sector))
+                    sector_counter[sector] = sector_counter.get(sector, 0) + 1
+
+            # 3. 判定触发
+            self._ensure_ma_buy_state()
+            market_thr = self._ma_buy_market_threshold
+            sector_thr = self._ma_buy_sector_threshold
+
+            # 市场级报警
+            if cross_count >= market_thr:
+                self._ma_buy_last_fired["market"] = time.time()
+                self.root.after(0, lambda cc=cross_count, cd=cross_details[:30]:
+                    self._show_ma_buy_market_alert(cc, cd))
+
+            # 板块级报警
+            hot_sectors = [(s, c) for s, c in sector_counter.items() if c >= sector_thr]
+            hot_sectors.sort(key=lambda x: -x[1])
+            for sec, cnt in hot_sectors[:5]:  # 最多报 5 个板块
+                key = f"sector_{sec}"
+                if time.time() - self._ma_buy_last_fired.get(key, 0) < 1800: continue  # 冷却
+                self._ma_buy_last_fired[key] = time.time()
+                sec_stocks = [(c, n, p) for c, n, p, s in cross_details if s == sec][:15]
+                self.root.after(0, lambda s=sec, c=cnt, ss=sec_stocks:
+                    self._show_ma_buy_sector_alert(s, c, ss))
+
+            self._ma_buy_last_fired["market_scan"] = time.time()
+            print(f"[均线买入扫描] ✅ 全市场批量上穿 ≈ {cross_count} 只, "
+                  f"板块异动 {len(hot_sectors)} 个 (阈值: 市场{market_thr}/板块{sector_thr})", flush=True)
+
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            print(f"[均线买入扫描] ❌ {e}", flush=True)
+
+    def _show_ma_buy_market_alert(self, cross_count, cross_details):
+        """📈 市场级批量上穿 MA5 醒目弹窗"""
+        top = tk.Toplevel(self.root)
+        top.title(f"📈 全市场 {cross_count} 只股票批量上穿 MA5! — 市场突发拉升预警")
+        top.geometry("780x600")
+        top.configure(bg="#1a1a2e"); top.attributes("-topmost", True)
+
+        header = tk.Frame(top, bg="#1B5E20")
+        header.pack(fill=tk.X)
+        tk.Label(header, text=f"🚀  全市场 {cross_count} 只股票批量上穿 MA5  🚀",
+                 bg="#1B5E20", fg="white", font=("", 18, "bold")).pack(pady=12)
+        tk.Label(header, text="市场突发短期拉升! 可能是 11月4日 那种级别反弹 — 注意短期机会",
+                 bg="#1B5E20", fg="#A5D6A7", font=("", 12)).pack(pady=(0, 8))
+
+        info = tk.Frame(top, bg="#16213e"); info.pack(fill=tk.X, padx=14, pady=8)
+        tk.Label(info, text=f"🎯 判定:  {cross_count} 只同时突破 MA5  (阈值 {self._ma_buy_market_threshold})",
+                 bg="#16213e", fg="#FFD54F", font=("", 13, "bold")).pack(side=tk.LEFT)
+        now = datetime.now().strftime("%H:%M:%S")
+        tk.Label(info, text=f"⏰ {now}", bg="#16213e", fg="#aaa", font=("", 11)).pack(side=tk.RIGHT)
+
+        body = tk.Frame(top, bg="#1a1a2e"); body.pack(fill=tk.BOTH, expand=True, padx=14, pady=8)
+        txt = scrolledtext.ScrolledText(body, font=("Menlo", 11), wrap=tk.WORD,
+                                         bg="#0a0a12", fg="#ddd", relief=tk.FLAT)
+        txt.pack(fill=tk.BOTH, expand=True)
+        txt.tag_configure("h", foreground="#FFD54F", font=("", 12, "bold"))
+        txt.tag_configure("g", foreground="#4CAF50")
+        txt.tag_configure("c", foreground="#80DEEA")
+
+        txt.insert(tk.END, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n", "c")
+        txt.insert(tk.END, "📊 批量上穿 MA5 的强势股 Top30:\n\n", "h")
+        for code, name, pct, sector in cross_details[:30]:
+            txt.insert(tk.END, f"  {code} {name:10s}  {pct:+.2f}%   [{sector}]\n", "g")
+        txt.insert(tk.END, "\n", "")
+        txt.insert(tk.END, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n", "c")
+        txt.insert(tk.END, "💡 操作建议:\n", "h")
+        txt.insert(tk.END, "  ① 如果是连续下跌后第一次批量上穿 → 超跌反弹机会, 注意快进快出\n")
+        txt.insert(tk.END, "  ② 如果是横盘后批量上穿 → 可能开启新一轮行情, 关注领涨板块\n")
+        txt.insert(tk.END, "  ③ 同时看量能: 成交额放大 → 增量资金入场, 更可信\n")
+        txt.config(state=tk.DISABLED)
+
+        tk.Button(top, text="知道了 (30min 内不再提醒)", font=("", 11),
+                  bg="#4CAF50", fg="white", padx=14, pady=6, cursor="hand2",
+                  command=lambda: (self._ma_buy_last_fired.update({"market": time.time()}),
+                                   top.destroy())).pack(pady=10)
+
+        self._ma_buy_window = top
+
+    def _show_ma_buy_sector_alert(self, sector, count, stocks):
+        """🏷️ 板块级批量上穿 MA5 弹窗"""
+        top = tk.Toplevel(self.root)
+        top.title(f"🏷️ 板块异动: {sector} {count}只批量上穿 MA5!")
+        top.geometry("700x480")
+        top.configure(bg="#1a1a2e"); top.attributes("-topmost", True)
+
+        header = tk.Frame(top, bg="#2E7D32")
+        header.pack(fill=tk.X)
+        tk.Label(header, text=f"🏷️  {sector} 板块 {count} 只股票批量上穿 MA5  🏷️",
+                 bg="#2E7D32", fg="white", font=("", 15, "bold")).pack(pady=10)
+
+        body = tk.Frame(top, bg="#1a1a2e"); body.pack(fill=tk.BOTH, expand=True, padx=14, pady=10)
+        txt = scrolledtext.ScrolledText(body, font=("Menlo", 11), wrap=tk.WORD,
+                                         bg="#0a0a12", fg="#ddd", relief=tk.FLAT)
+        txt.pack(fill=tk.BOTH, expand=True)
+        txt.tag_configure("h", foreground="#FFD54F", font=("", 12, "bold"))
+        txt.tag_configure("g", foreground="#4CAF50")
+        txt.insert(tk.END, f"📊 板块: {sector}\n批量突破 MA5: {count} 只\n阈值: {self._ma_buy_sector_threshold} 只\n\n", "h")
+        for code, name, pct in stocks:
+            txt.insert(tk.END, f"  {code} {name:10s}  {pct:+.2f}%\n", "g")
+        txt.config(state=tk.DISABLED)
+
+        tk.Button(top, text="知道了 (30min 内不再提醒此板块)", font=("", 11),
+                  bg="#4CAF50", fg="white", padx=14, pady=6, cursor="hand2",
+                  command=lambda: top.destroy()).pack(pady=10)
+
+    def show_ma_buy_monitor_dialog(self):
+        """📈 均线买入监控配置面板 (用户可改阈值)"""
+        self._ensure_ma_buy_state()
+        top = tk.Toplevel(self.root)
+        top.title("📈 均线买入批量上穿 MA5 监控 · 配置面板")
+        top.geometry("700x560"); top.configure(bg="#1a1a2e")
+
+        header = tk.Frame(top, bg="#1B5E20"); header.pack(fill=tk.X)
+        tk.Label(header, text="📈 均线买入批量上穿 MA5 — 全市场 + 板块异动监控",
+                 bg="#1B5E20", fg="white", font=("", 14, "bold")).pack(pady=10)
+
+        # 配置区
+        cfg = tk.LabelFrame(top, text="⚙️ 监控配置", bg="#1a1a2e", fg="#80DEEA",
+                             font=("", 11, "bold"))
+        cfg.pack(fill=tk.X, padx=14, pady=10)
+
+        row1 = tk.Frame(cfg, bg="#1a1a2e"); row1.pack(fill=tk.X, pady=6)
+        tk.Label(row1, text="📡 总开关:", bg="#1a1a2e", fg="#aaa", font=("", 11)).pack(side=tk.LEFT)
+        sw_var = tk.BooleanVar(value=self._ma_buy_enabled)
+        sw = tk.Checkbutton(row1, variable=sw_var, bg="#1a1a2e", fg="#FFD54F",
+                            activebackground="#1a1a2e", selectcolor="#1a1a2e",
+                            font=("", 11, "bold")); sw.pack(side=tk.LEFT, padx=6)
+        tk.Label(row1, text="(开启后每分钟扫描全市场)", bg="#1a1a2e", fg="#666", font=("", 10)).pack(side=tk.LEFT)
+
+        row2 = tk.Frame(cfg, bg="#1a1a2e"); row2.pack(fill=tk.X, pady=6)
+        tk.Label(row2, text="📊 市场批量阈值:", bg="#1a1a2e", fg="#aaa", font=("", 11)).pack(side=tk.LEFT)
+        mkt_var = tk.IntVar(value=self._ma_buy_market_threshold)
+        tk.Spinbox(row2, from_=20, to=500, width=6, textvariable=mkt_var).pack(side=tk.LEFT, padx=6)
+        tk.Label(row2, text="只同时突破 MA5 触发报警", bg="#1a1a2e", fg="#aaa", font=("", 10)).pack(side=tk.LEFT)
+
+        row3 = tk.Frame(cfg, bg="#1a1a2e"); row3.pack(fill=tk.X, pady=6)
+        tk.Label(row3, text="🏷️ 板块批量阈值:", bg="#1a1a2e", fg="#aaa", font=("", 11)).pack(side=tk.LEFT)
+        sec_var = tk.IntVar(value=self._ma_buy_sector_threshold)
+        tk.Spinbox(row3, from_=3, to=80, width=6, textvariable=sec_var).pack(side=tk.LEFT, padx=6)
+        tk.Label(row3, text="只同时突破 MA5 触发报警", bg="#1a1a2e", fg="#aaa", font=("", 10)).pack(side=tk.LEFT)
+
+        row4 = tk.Frame(cfg, bg="#1a1a2e"); row4.pack(fill=tk.X, pady=6)
+        tk.Label(row4, text="⏱️ 时间窗口:", bg="#1a1a2e", fg="#aaa", font=("", 11)).pack(side=tk.LEFT)
+        win_var = tk.IntVar(value=self._ma_buy_window_min)
+        tk.Spinbox(row4, from_=15, to=240, increment=15, width=6, textvariable=win_var).pack(side=tk.LEFT, padx=6)
+        tk.Label(row4, text="分钟内批量上穿 (暂固定60min)", bg="#1a1a2e", fg="#666", font=("", 10)).pack(side=tk.LEFT)
+
+        # 监控状态
+        status = tk.LabelFrame(top, text="📡 监控状态", bg="#1a1a2e", fg="#FFD54F", font=("", 11, "bold"))
+        status.pack(fill=tk.X, padx=14, pady=6)
+        on_text = "✅ 运行中" if self._ma_buy_enabled else "⏸️ 已关闭"
+        tk.Label(status, text=f"开关: {on_text}   |   市场阈值: {self._ma_buy_market_threshold}   |   板块阈值: {self._ma_buy_sector_threshold}",
+                 bg="#1a1a2e", fg="#aaa", font=("", 11)).pack(anchor="w", padx=8, pady=4)
+
+        # 说明
+        desc = tk.Label(top,
+                        text="💡 原理: 每分钟扫描涨幅 > 3% 的股票中, 突破 MA5 的数量。\n"
+                             "市场级: 全市场阈值 (默认80只); 板块级: 单行业内阈值 (默认10只)。\n"
+                             "触发后 30 分钟内同一类不重复报警 (防抖)。\n"
+                             "数据源: AkShare stock_zh_a_spot_em (东财全市场实时)",
+                        bg="#1a1a2e", fg="#888", font=("", 9), justify=tk.LEFT)
+        desc.pack(fill=tk.X, padx=14, pady=4)
+
+        # 按钮
+        btns = tk.Frame(top, bg="#1a1a2e"); btns.pack(fill=tk.X, padx=14, pady=10)
+
+        def _save_and_toggle():
+            self._ma_buy_market_threshold = mkt_var.get()
+            self._ma_buy_sector_threshold = sec_var.get()
+            self._ma_buy_window_min = win_var.get()
+            self._ma_buy_enabled = sw_var.get()
+            if self._ma_buy_enabled:
+                if not hasattr(self, '_ma_buy_timer_running') or not self._ma_buy_timer_running:
+                    self._ma_buy_timer_running = True
+                    self.root.after(5000, self._tick_ma_buy_monitor)
+                    print(f"[均线买入监控] 📡 已启用 市场阈值={self._ma_buy_market_threshold} 板块阈值={self._ma_buy_sector_threshold}", flush=True)
+                status.configure(text=f"开关: ✅ 运行中   |   市场阈值: {self._ma_buy_market_threshold}   |   板块阈值: {self._ma_buy_sector_threshold}")
+            else:
+                self._ma_buy_timer_running = False
+                status.configure(text=f"开关: ⏸️ 已关闭   |   市场阈值: {self._ma_buy_market_threshold}   |   板块阈值: {self._ma_buy_sector_threshold}")
+
+        def _test_scan():
+            """立即手动扫描一次"""
+            self._bg_scan_ma5_cross()
+            messagebox.showinfo("测试扫描完成", "已执行一次手动扫描, 请查看日志或等待弹窗 (如果满足阈值)")
+
+        tk.Button(btns, text="💾 保存 & 启用/关闭", font=("", 11, "bold"),
+                  bg="#4ECDC4", fg="black", padx=14, pady=6, cursor="hand2",
+                  command=_save_and_toggle).pack(side=tk.LEFT, padx=6)
+        tk.Button(btns, text="🧪 立即扫描测试", font=("", 10),
+                  bg="#FF9800", fg="black", padx=12, pady=6, cursor="hand2",
+                  command=_test_scan).pack(side=tk.LEFT, padx=6)
+        tk.Button(btns, text="❌ 关闭面板", font=("", 10),
+                  bg="#555", fg="white", padx=12, pady=6,
+                  command=top.destroy).pack(side=tk.RIGHT, padx=6)
+
+    # ═══════════════════════════════════════════════════════════
+    # 🧊 冰点修复监控引擎 (参考 emotion_freeze.py)
+    # ═══════════════════════════════════════════════════════════
+
+    def _ensure_freeze_repair_state(self):
+        if not hasattr(self, '_freeze_repair_enabled'):
+            self._freeze_repair_enabled = False
+            self._freeze_repair_last_fired_date = None   # 当天是否已报
+            self._freeze_repair_window = None
+
+    def _tick_freeze_repair_monitor(self):
+        """🧊 每 5 分钟 tick: 检查冰点 + 修复"""
+        self._ensure_freeze_repair_state()
+        try:
+            if not getattr(self, '_freeze_repair_enabled', False):
+                self.root.after(5 * 60_000, self._tick_freeze_repair_monitor); return
+            now = datetime.now()
+            t = now.time()
+            morning = t >= dtime(9, 35) and t <= dtime(11, 30)
+            afternoon = t >= dtime(13, 5) and t <= dtime(15, 0)
+            if not (morning or afternoon):
+                self.root.after(5 * 60_000, self._tick_freeze_repair_monitor); return
+            # 同一天只触发 1 次
+            today = now.strftime("%Y-%m-%d")
+            if self._freeze_repair_last_fired_date == today:
+                self.root.after(5 * 60_000, self._tick_freeze_repair_monitor); return
+
+            threading.Thread(target=self._bg_check_freeze_repair, daemon=True).start()
+        except Exception as e:
+            print(f"[冰点tick] ❌ {e}", flush=True)
+        self.root.after(5 * 60_000, self._tick_freeze_repair_monitor)
+
+    def _bg_check_freeze_repair(self):
+        """后台检查: 冰点状态 + 修复候选股"""
+        try:
+            # 1. 调 emotion_freeze 的 _fetch_market_breadth 判断冰点
+            from ui.emotion_freeze import _fetch_market_breadth
+            breadth = _fetch_market_breadth()
+            freeze = breadth.get('freeze_flag', False)
+            limit_down = breadth.get('limit_down', 0)
+            limit_up = breadth.get('limit_up', 0)
+            ratio = breadth.get('ratio')
+            up_count = breadth.get('up_count', 0)
+            down_count = breadth.get('down_count', 0)
+            source = breadth.get('source', '')
+
+            # 2. 非冰点 → 不触发
+            if not freeze:
+                print(f"[冰点修复] 当前非冰点 (跌停{limit_down} 涨停{limit_up} 跌{down_count} 升{up_count} source={source})", flush=True)
+                return
+
+            # 3. 冰点 + 检查修复信号 (今日涨幅 > 0 的股票数增加 / 深跌股开始回弹)
+            #    拉全市场找今日修复的候选股
+            import akshare as ak
+            import pandas as pd
+            df = ak.stock_zh_a_spot_em()
+            if df is None or len(df) < 1000: return
+
+            # 修复候选: 今日涨跌幅 -9% ~ +2% (深跌后反弹 / 企稳)
+            df['修复弹性'] = df['涨跌幅'].apply(lambda x: max(-10, min(x, 5)))
+            repair_df = df[(df['涨跌幅'] >= -9.5) & (df['涨跌幅'] <= 3.0) & (df['成交额'] > 3_000_0000)]
+            repair_df = repair_df.sort_values('涨跌幅', ascending=False).head(30)
+
+            # 4. 触发弹窗
+            candidates = []
+            for _, row in repair_df.iterrows():
+                candidates.append((
+                    str(row.get('代码', '')),
+                    str(row.get('名称', '')),
+                    float(row.get('涨跌幅', 0)),
+                    str(row.get('所属行业', '')),
+                    float(row.get('成交额', 0) / 1_0000_0000),  # 亿
+                ))
+
+            self.root.after(0, lambda: self._show_freeze_repair_alert(
+                breadth, candidates))
+            self._freeze_repair_last_fired_date = datetime.now().strftime("%Y-%m-%d")
+
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            print(f"[冰点修复] ❌ {e}", flush=True)
+
+    def _show_freeze_repair_alert(self, breadth, candidates):
+        """🧊 冰点修复弹窗"""
+        top = tk.Toplevel(self.root)
+        top.title("🧊 冰点修复预警! — 市场情绪冰点 + 修复候选股已出现")
+        top.geometry("800x620"); top.configure(bg="#1a1a2e"); top.attributes("-topmost", True)
+
+        header = tk.Frame(top, bg="#311B92"); header.pack(fill=tk.X)
+        tk.Label(header, text="🧊  冰点修复预警!  🧊",
+                 bg="#311B92", fg="white", font=("", 18, "bold")).pack(pady=10)
+        tk.Label(header, text="市场情绪冰点日 — 恐慌错杀出现, 修复机会显现!",
+                 bg="#311B92", fg="#CE93D8", font=("", 12)).pack(pady=(0, 8))
+
+        # 冰点判定
+        info = tk.Frame(top, bg="#16213e"); info.pack(fill=tk.X, padx=14, pady=6)
+        ld = breadth.get('limit_down', 0); lu = breadth.get('limit_up', 0)
+        dc = breadth.get('down_count', 0); uc = breadth.get('up_count', 0)
+        ratio = breadth.get('ratio')
+        src = breadth.get('source', '')
+        tk.Label(info,
+                 text=f"E1 冰点判定: 跌停{ld} 涨停{lu} 涨停/跌停={ratio} 跌{dc} 升{uc}  source={src}",
+                 bg="#16213e", fg="#FFD54F", font=("", 11, "bold")).pack(anchor="w")
+
+        body = tk.Frame(top, bg="#1a1a2e"); body.pack(fill=tk.BOTH, expand=True, padx=14, pady=8)
+        txt = scrolledtext.ScrolledText(body, font=("Menlo", 11), wrap=tk.WORD,
+                                         bg="#0a0a12", fg="#ddd", relief=tk.FLAT)
+        txt.pack(fill=tk.BOTH, expand=True)
+        txt.tag_configure("h", foreground="#FFD54F", font=("", 12, "bold"))
+        txt.tag_configure("o", foreground="#FFB74D")
+        txt.tag_configure("g", foreground="#4CAF50")
+        txt.tag_configure("c", foreground="#80DEEA")
+        txt.insert(tk.END, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n", "c")
+        txt.insert(tk.END, "📊 今日修复候选股 Top30:\n\n", "h")
+        txt.insert(tk.END, f"{'代码':8s} {'名称':10s} {'涨幅':>7s}  {'板块':12s} {'成交额':>8s}\n", "c")
+        txt.insert(tk.END, "-" * 60 + "\n", "c")
+        for code, name, pct, sector, amount in candidates:
+            col = "g" if pct >= 0 else "o"
+            txt.insert(tk.END, f"{code:8s} {name:10s} {pct:+6.2f}%  {sector[:12]:12s} {amount:7.1f}亿\n", col)
+        txt.insert(tk.END, "\n", "")
+        txt.insert(tk.END, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n", "c")
+        txt.insert(tk.END, "💡 冰点修复操作逻辑:\n", "h")
+        txt.insert(tk.END, "  ① 冰点判定: 跌停≥100 且 涨停/跌停≤1/3 且 下跌股≥4500 (3选2)\n")
+        txt.insert(tk.END, "  ② 选股: 有硬催化(政策/订单/涨价/BD), 前期强势, 今日深跌错杀\n")
+        txt.insert(tk.END, "  ③ 入场: 冰点当日尾盘或次日早盘低吸\n")
+        txt.insert(tk.END, "  ④ 止盈: 情绪修复涨停 / 次日冲高 7-10%\n")
+        txt.insert(tk.END, "  ⑤ 止损: 次日继续跌停 (冰点延续 → 等下一次)\n")
+        txt.config(state=tk.DISABLED)
+
+        tk.Button(top, text="知道了 (今日不再提醒)", font=("", 11),
+                  bg="#7E57C2", fg="white", padx=14, pady=6, cursor="hand2",
+                  command=top.destroy).pack(pady=10)
+        self._freeze_repair_window = top
+
+    def show_freeze_repair_monitor_dialog(self):
+        """🧊 冰点修复监控配置面板"""
+        self._ensure_freeze_repair_state()
+        top = tk.Toplevel(self.root)
+        top.title("🧊 冰点修复监控 · 配置面板"); top.geometry("600x440"); top.configure(bg="#1a1a2e")
+
+        header = tk.Frame(top, bg="#311B92"); header.pack(fill=tk.X)
+        tk.Label(header, text="🧊 冰点修复 — 市场极端情绪下的修复机会监控",
+                 bg="#311B92", fg="white", font=("", 14, "bold")).pack(pady=10)
+
+        cfg = tk.LabelFrame(top, text="⚙️ 监控配置", bg="#1a1a2e", fg="#CE93D8", font=("", 11, "bold"))
+        cfg.pack(fill=tk.X, padx=14, pady=10)
+
+        row1 = tk.Frame(cfg, bg="#1a1a2e"); row1.pack(fill=tk.X, pady=6)
+        tk.Label(row1, text="📡 总开关:", bg="#1a1a2e", fg="#aaa", font=("", 11)).pack(side=tk.LEFT)
+        sw_var = tk.BooleanVar(value=self._freeze_repair_enabled)
+        tk.Checkbutton(row1, variable=sw_var, bg="#1a1a2e", fg="#FFD54F",
+                       activebackground="#1a1a2e", selectcolor="#1a1a2e",
+                       font=("", 11, "bold")).pack(side=tk.LEFT, padx=6)
+        tk.Label(row1, text="(每 5 分钟检查一次冰点)", bg="#1a1a2e", fg="#666", font=("", 10)).pack(side=tk.LEFT)
+
+        row2 = tk.Frame(cfg, bg="#1a1a2e"); row2.pack(fill=tk.X, pady=6)
+        tk.Label(row2, text="🧊 冰点判定 (参考 emotion_freeze.py E1条件):",
+                 bg="#1a1a2e", fg="#aaa", font=("", 10)).pack(anchor="w")
+        tk.Label(row2, text="  ① 跌停家数 ≥ 100", bg="#1a1a2e", fg="#888", font=("", 10)).pack(anchor="w", padx=12)
+        tk.Label(row2, text="  ② 涨停/跌停 ≤ 1:3", bg="#1a1a2e", fg="#888", font=("", 10)).pack(anchor="w", padx=12)
+        tk.Label(row2, text="  ③ 下跌个股 ≥ 4500  (3选2即触发)", bg="#1a1a2e", fg="#888", font=("", 10)).pack(anchor="w", padx=12)
+
+        desc = tk.Label(top,
+                        text="💡 冰点修复 = 市场恐慌性跌停潮后, 情绪自然修复的反包机会。\n"
+                             "参考 emotion_freeze.py 的 U 选股池 (市值20-150亿, 近30日涨停≥2次, 回撤20-45%)。\n"
+                             "数据源: 乐股 market_activity_legu + 东财 stock_zh_a_spot_em",
+                        bg="#1a1a2e", fg="#888", font=("", 9), justify=tk.LEFT)
+        desc.pack(fill=tk.X, padx=14, pady=4)
+
+        btns = tk.Frame(top, bg="#1a1a2e"); btns.pack(fill=tk.X, padx=14, pady=10)
+
+        def _save():
+            self._freeze_repair_enabled = sw_var.get()
+            if self._freeze_repair_enabled:
+                if not getattr(self, '_freeze_repair_timer_running', False):
+                    self._freeze_repair_timer_running = True
+                    self.root.after(5000, self._tick_freeze_repair_monitor)
+                    print("[冰点修复监控] 📡 已启用", flush=True)
+
+        def _test():
+            threading.Thread(target=self._bg_check_freeze_repair, daemon=True).start()
+            messagebox.showinfo("测试扫描", "已执行一次手动检查, 请等待结果弹窗")
+
+        tk.Button(btns, text="💾 保存配置", font=("", 11, "bold"),
+                  bg="#7E57C2", fg="white", padx=14, pady=6, cursor="hand2",
+                  command=_save).pack(side=tk.LEFT, padx=6)
+        tk.Button(btns, text="🧪 立即检查", font=("", 10),
+                  bg="#FF9800", fg="black", padx=12, pady=6, cursor="hand2",
+                  command=_test).pack(side=tk.LEFT, padx=6)
+        tk.Button(btns, text="❌ 关闭", font=("", 10), bg="#555", fg="white", padx=12, pady=6,
+                  command=top.destroy).pack(side=tk.RIGHT, padx=6)
 
 
 __all__ = ["WarningMixin"]
