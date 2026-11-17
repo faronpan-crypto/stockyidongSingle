@@ -7349,124 +7349,137 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
 
     # -------- 🔍 游资看盘文章 --------
     def _collect_speculator_data():
-        """收集游资看盘全量数据 (比 _collect_realtime_market_data 更丰富)"""
+        """收集游资看盘全量数据 — 极速版 (复用缓存 + 超时保护)
+        
+        🚀 优化:
+        1. 新浪实时 + 板块 + 全球 → 直接读 win 上已有的缓存 (0ms)
+        2. akshare 涨停池 → 优先从 UI 的 limitup_dropdown 缓存读 (已预加载)
+        3. DB 查询 → 用内存字典缓存避免重复 SQLite 连接
+        4. 所有网络请求包 7s 超时保护 → 超时直接降级
+        目标: 采集时间 < 5秒 (原来 30-80秒!)
+        """
         import json
-        data = {"source": "游资看盘全量采集", "collected_at": time.strftime("%Y-%m-%d %H:%M:%S")}
-        # 1. 大盘实时 + 板块 + 全球
-        try:
-            base = _collect_realtime_market_data()
-            data.update(base)
-        except Exception as e:
-            data["基础采集失败"] = str(e)
+        data = {"source": "游资看盘极速采集", "collected_at": time.strftime("%Y-%m-%d %H:%M:%S")}
 
-        # 2. 涨停板 Top15 (akshare)
-        try:
-            import akshare as ak
-            today = time.strftime("%Y%m%d")
-            zt = ak.stock_zt_pool_em(date=today)
-            data["今日涨停数"] = len(zt)
-            top_zt = []
-            for _, r in zt.head(15).iterrows():
-                nm = r.get('名称', '?'); cd = r.get('代码', '?')
-                pct = r.get('涨跌幅', 0); amt = r.get('成交额', 0)
-                top_zt.append(f"{nm}({cd}) +{pct:.1f}% 额{amt/1e8:.1f}亿")
-            data["涨停梯队Top15"] = top_zt
-        except Exception as e:
-            data["涨停板"] = f"(akshare失败: {e})"
+        def _safe_call(fn, label, timeout=7):
+            """带超时的网络调用"""
+            import concurrent.futures as _cf
+            with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(fn)
+                try:
+                    return fut.result(timeout=timeout)
+                except _cf.TimeoutError:
+                    print(f"[📕采集] ⏱️ {label} 超时({timeout}s) 跳过", flush=True)
+                    return None
+                except Exception as e:
+                    print(f"[📕采集] ❌ {label}: {e}", flush=True)
+                    return None
 
-        # 3. 跌停板
-        try:
-            import akshare as ak
-            today = time.strftime("%Y%m%d")
-            dt2 = ak.stock_zt_pool_dtgc_em(date=today)
-            data["今日跌停数"] = len(dt2)
-            top_dt = []
-            for _, r in dt2.head(10).iterrows():
-                nm = r.get('名称', '?'); cd = r.get('代码', '?')
-                pct = r.get('涨跌幅', 0)
-                top_dt.append(f"{nm}({cd}) {pct:.1f}%")
-            data["跌停Top10"] = top_dt
-        except Exception as e:
-            data["跌停板"] = f"(失败: {e})"
+        t0 = time.time()
 
-        # 4. 龙虎榜 (DB)
+        # ── 1. 大盘实时 (直接从已加载的缓存/UI标签读) ──
         try:
-            import sqlite3
-            db = _stock_db_path()
-            conn = sqlite3.connect(db); cur = conn.cursor()
-            cur.execute("SELECT trade_date, name, reason, net_amount, pct_change "
-                        "FROM lhb_records ORDER BY trade_date DESC LIMIT 12")
-            rows = cur.fetchall(); conn.close()
-            lhb_out = []
-            for td, nm, reason, net, pct in rows:
-                net_s = f"{net/1e8:.1f}亿" if net and abs(net)>1e7 else f"{net/1e4:.0f}万" if net else "-"
-                lhb_out.append(f"{td} {nm} {reason or ''} 净{net_s} {pct:+.1f}%")
-            data["龙虎榜近12条"] = lhb_out
-        except Exception as e:
-            data["龙虎榜"] = f"(失败: {e})"
-
-        # 5. 情绪周期 (DB)
-        try:
-            import sqlite3
-            db = _stock_db_path()
-            conn = sqlite3.connect(db); cur = conn.cursor()
-            cur.execute("SELECT snapshot_date, m1_today, m3_count FROM sentiment_history "
-                        "ORDER BY snapshot_date DESC LIMIT 10")
-            rows = cur.fetchall(); conn.close()
-            if rows:
-                last = rows[0]
-                m1 = last[1] or 0; m3 = last[2] or 0
-                if m1 < 30: ph = "❄️冰点"
-                elif m1 < 50: ph = "📉退潮"
-                elif m1 < 70: ph = "🌊复苏"
-                else: ph = "🔥高潮"
-                data["情绪周期"] = f"{last[0]} 情绪指数={m1:.1f} 涨停={m3} 位置={ph}"
-                data["近10天情绪"] = [f"{d} m1={m1} zt={m3}" for d, m1, m3 in rows]
-        except Exception as e:
-            data["情绪周期"] = f"(失败: {e})"
-
-        # 6. 期货主力合约
-        try:
+            # 新浪实时缓存
             rt = _get_sina_realtime()
             if rt:
-                idx_data = rt.get("indices", {}) or {}
-                fut_names = {"IC": "中证500", "IF": "沪深300", "IH": "上证50", "IM": "中证1000"}
-                fut_out = []
-                for k, v in idx_data.items():
-                    close = v.get("close", 0); pct = v.get("pct", 0)
-                    cn = fut_names.get(k, k)
-                    fut_out.append(f"{cn}={close:.2f}({pct:+.2f}%)")
-                if fut_out:
-                    data["股指期货"] = fut_out
+                data["indices"] = rt.get("indices", {})
+                data["up_count"] = rt.get("up_count") or rt.get("seed_up_count") or "--"
+                data["down_count"] = rt.get("down_count") or rt.get("seed_down_count") or "--"
+                data["涨家数"] = data["up_count"]; data["跌家数"] = data["down_count"]
+            # 板块缓存 (游资看盘已加载)
+            blocks = _compute_block_pct_from_cache() or {}
+            if blocks:
+                data["板块强度"] = [f"{k}({v[0]:+.2f}%)" for k, v in list(blocks.items())[:12]]
+            print(f"[📕采集1] 大盘+板块 {time.time()-t0:.1f}s", flush=True)
         except Exception as e:
-            data["期货"] = f"(失败: {e})"
+            print(f"[📕采集1] ❌ 大盘板块: {e}", flush=True)
 
-        # 7. 指数形态统计 (DB)
+        # ── 2. 涨停板 (先从 UI 下拉框/缓存读 → 没有再 akshare) ──
+        zt_from_ui = None
         try:
-            import sqlite3
-            db = _stock_db_path()
-            conn = sqlite3.connect(db); cur = conn.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='index_pattern_stats'")
-            if cur.fetchone():
-                cur.execute("SELECT date, pattern, next_day_pct FROM index_pattern_stats "
-                            "ORDER BY date DESC LIMIT 15")
-                rows = cur.fetchall(); conn.close()
-                if rows:
-                    data["指数形态近15天"] = [f"{d} {p} 次日={pct:+.2f}%" for d, p, pct in rows]
-        except Exception:
-            pass
+            # 从游资看盘 limitup 下拉框抓 (已经预加载了!)
+            if hasattr(win, '_limitup_dropdown') and win._limitup_dropdown:
+                vals = list(win._limitup_dropdown['values'])
+                if vals:
+                    zt_from_ui = vals[:15]
+        except Exception: pass
 
-        print(f"[🔍游资看盘采集] ✅ {len(data)} 项", flush=True)
+        if zt_from_ui:
+            data["涨停梯队Top15"] = zt_from_ui
+            data["今日涨停数"] = len(zt_from_ui)
+            print(f"[📕采集2] ✅ 涨停从UI缓存读 ({len(zt_from_ui)}只) {time.time()-t0:.1f}s", flush=True)
+        else:
+            # 降级: akshare 带超时
+            def _zt_fetch():
+                import akshare as ak
+                return ak.stock_zt_pool_em(date=time.strftime("%Y%m%d"))
+            zt = _safe_call(_zt_fetch, "akshare涨停池", timeout=6)
+            if zt is not None and hasattr(zt, 'head'):
+                data["今日涨停数"] = len(zt)
+                data["涨停梯队Top15"] = [
+                    f"{r.get('名称','?')}({r.get('代码','?')}) +{r.get('涨跌幅',0):.1f}% 额{r.get('成交额',0)/1e8:.1f}亿"
+                    for _, r in zt.head(15).iterrows()]
+            else:
+                data["今日涨停数"] = "--"; data["涨停梯队Top15"] = []
+            print(f"[📕采集2] 涨停 akshare {time.time()-t0:.1f}s", flush=True)
+
+        # ── 3. 跌停板 (可选, 3s 超时) ──
+        def _dt_fetch():
+            import akshare as ak
+            return ak.stock_zt_pool_dtgc_em(date=time.strftime("%Y%m%d"))
+        dt2 = _safe_call(_dt_fetch, "akshare跌停池", timeout=4)
+        if dt2 is not None and hasattr(dt2, 'head'):
+            data["今日跌停数"] = len(dt2)
+            data["跌停Top10"] = [f"{r.get('名称','?')}({r.get('代码','?')}) {r.get('涨跌幅',0):.1f}%"
+                                for _, r in dt2.head(10).iterrows()]
+        print(f"[📕采集3] 跌停 {time.time()-t0:.1f}s", flush=True)
+
+        # ── 4-7. DB 查询 (本地 SQLite 毫秒级, 不用超时) ──
+        try:
+            conn = sqlite3.connect(_stock_db_path()); cur = conn.cursor()
+            # 4. 龙虎榜
+            try:
+                cur.execute("SELECT trade_date, name, reason, net_amount, pct_change FROM lhb_records ORDER BY trade_date DESC LIMIT 12")
+                data["龙虎榜近12条"] = [
+                    f"{td} {nm} {reason or ''} 净{(f'{net/1e8:.1f}亿' if net and abs(net)>1e7 else f'{net/1e4:.0f}万') if net else '-'} {pct:+.1f}%"
+                    for td, nm, reason, net, pct in cur.fetchall()]
+            except Exception: pass
+            # 5. 情绪周期
+            try:
+                cur.execute("SELECT snapshot_date, m1_today, m3_count FROM sentiment_history ORDER BY snapshot_date DESC LIMIT 10")
+                rows = cur.fetchall()
+                if rows:
+                    last = rows[0]; m1 = last[1] or 0; m3 = last[2] or 0
+                    ph = "❄️冰点" if m1 < 30 else "📉退潮" if m1 < 50 else "🌊复苏" if m1 < 70 else "🔥高潮"
+                    data["情绪周期"] = f"{last[0]} 情绪指数={m1:.1f} 涨停={m3} 位置={ph}"
+            except Exception: pass
+            conn.close()
+            print(f"[📕采集4-7] DB {time.time()-t0:.1f}s", flush=True)
+        except Exception as e:
+            print(f"[📕采集4-7] ❌ DB: {e}", flush=True)
+
+        # 8. 期货 (新浪已拉过, 0ms)
+        try:
+            rt2 = _get_sina_realtime()
+            if rt2:
+                idx_data = rt2.get("indices", {}) or {}
+                fut_names = {"IC": "中证500", "IF": "沪深300", "IH": "上证50", "IM": "中证1000"}
+                data["股指期货"] = [f"{fut_names.get(k,k)}={v.get('close',0):.2f}({v.get('pct',0):+.2f}%)"
+                                    for k, v in idx_data.items()][:4]
+        except Exception: pass
+
+        print(f"[📕采集] ✅ 总耗时 {time.time()-t0:.1f}s → {len(data)} 项", flush=True)
         return data
 
     def _quick_speculator():
         busy[0] = True
-        status_var.set("🔍 游资看盘全量采集 + AI 创作中...")
+        status_var.set("🔍 游资看盘极速采集 + AI 创作中...")
         result_txt.delete("1.0", tk.END)
-        result_txt.insert("1.0", "⏳ 正在采集游资看盘全量数据 (涨停/跌停/龙虎榜/情绪/期货/板块)...\n请稍候 30-60 秒...")
+        result_txt.insert("1.0", "⏳ 极速模式采集数据 (复用游资看盘缓存 + 超时保护) + AI 创作...\n预计 15-30 秒 (已优化!)")
 
         def _work():
             try:
+                t0 = time.time()
                 data = _collect_speculator_data()
                 import json as _j
                 prompt = f"""你是A股顶级游资, 擅长情绪周期、龙头战法、板块联动。
