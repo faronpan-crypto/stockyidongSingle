@@ -13283,11 +13283,93 @@ except Exception as e:
             return False
 
     def _fetch_realtime_prices(self, codes_6):
-        """腾讯行情批量拉取: [6位代码] → {code6: {"price": float, "pct": float, "name": str}}"""
+        """腾讯行情批量拉取: [6位代码] → {code6: {"price": float, "pct": float, "name": str}}
+        
+        🧠 智能缓存策略:
+        - 盘中(9:30-15:00 工作日): 实时拉腾讯 + 写当日缓存
+        - 盘后(15:00+): 优先读当日收盘缓存 (秒出!), 没有才拉
+        - 非交易日: 读最近交易日缓存
+        """
         if not codes_6:
             return {}
+        import os, json, time as _time, datetime as _dt
         import re as _re
-        # 6位代码 → 新浪前缀
+
+        # ── 判断当前是否盘中 ──
+        now = _dt.datetime.now()
+        weekday = now.weekday()  # 0=周一 ... 6=周日
+        t = now.time()
+        is_trading_day = weekday < 5
+        in_trading_hours = is_trading_day and (
+            (_dt.time(9, 30) <= t <= _dt.time(11, 30)) or
+            (_dt.time(13, 0) <= t <= _dt.time(15, 0))
+        )
+
+        # ── 找缓存文件路径 ──
+        data_dir = os.path.join(os.getcwd(), "data")
+        os.makedirs(data_dir, exist_ok=True)
+
+        def _cache_path(date_str):
+            return os.path.join(data_dir, f"market_price_cache_{date_str}.json")
+
+        def _find_latest_trading_date():
+            """找最近一个交易日 (往前最多 7 天)"""
+            for offset in range(7):
+                d = now - _dt.timedelta(days=offset)
+                if d.weekday() < 5:  # 跳过周末
+                    return d.strftime("%Y%m%d")
+            return now.strftime("%Y%m%d")
+
+        if in_trading_hours:
+            # 盘中: 实时拉 + 写缓存
+            today_str = now.strftime("%Y%m%d")
+            result = self._fetch_realtime_from_tencent(codes_6)
+            self._save_price_cache(result, today_str, now, True)
+            return result
+
+        # 盘后 / 非交易日 → 优先读缓存
+        cache_date = _find_latest_trading_date() if not is_trading_day else now.strftime("%Y%m%d")
+        cp = _cache_path(cache_date)
+        if os.path.exists(cp):
+            try:
+                with open(cp, "r", encoding="utf-8") as f:
+                    cache = json.load(f)
+                meta = cache.pop("__meta__", {})
+                cached = {c: cache[c] for c in codes_6 if c in cache and not c.startswith("__")}
+                if len(cached) >= len(codes_6) * 0.5:
+                    print(f"[💾缓存] 命中 {cache_date} ({meta.get('updated','?')}): {len(cached)}/{len(codes_6)} 只", flush=True)
+                    return cached
+            except Exception as e:
+                print(f"[💾缓存] 读 {cp} 失败: {e}", flush=True)
+
+        # 无缓存 → 实时拉 + 写缓存 (下次就秒出了!)
+        print(f"[💾缓存] miss ({cache_date}), 实时拉取 {len(codes_6)} 只 → 写缓存", flush=True)
+        result = self._fetch_realtime_from_tencent(codes_6)
+        self._save_price_cache(result, cache_date, now, False)
+        return result
+
+    def _save_price_cache(self, result, date_str, now, is_trading):
+        """把行情结果写到日期缓存文件 (追加模式, 不覆盖已有)"""
+        import os as _os, json as _json
+        if not result: return
+        try:
+            data_dir = _os.path.join(_os.getcwd(), "data")
+            _os.makedirs(data_dir, exist_ok=True)
+            cp = _os.path.join(data_dir, f"market_price_cache_{date_str}.json")
+            existing = {}
+            if _os.path.exists(cp):
+                with open(cp, "r", encoding="utf-8") as f:
+                    existing = _json.load(f)
+            existing.update(result)
+            existing["__meta__"] = {"updated": now.strftime("%H:%M:%S"), "is_trading": is_trading}
+            with open(cp, "w", encoding="utf-8") as f:
+                _json.dump(existing, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"[💾缓存] 写 {date_str} 失败: {e}", flush=True)
+
+    def _fetch_realtime_from_tencent(self, codes_6):
+        """原始腾讯行情拉取 (不带缓存逻辑)"""
+        import re as _re
         def _sina(c6):
             if c6.startswith(("600","601","603","605","688")): return f"sh{c6}"
             if c6.startswith(("000","001","002","003","300","301")): return f"sz{c6}"
@@ -14666,6 +14748,341 @@ except Exception as e:
         """通用 → 关注股 + 行情"""
         self._wb_exec_stock_picker(result, fetch_price)
 
+    # 📈 图示渲染 — skill 结果 → 多种图表 (雷达/柱状/散点/热力/饼图)
+    # ═══════════════════════════════════════════════════════════
+
+    def _wb_render_chart(self, result, chart_type, fig_parent, font_size=11):
+        """把 skill 执行结果渲染成指定类型的 matplotlib 图 → Figure"""
+        import matplotlib
+        matplotlib.use("TkAgg")
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        import numpy as np
+        # 🀄 全局中文字体配置
+        matplotlib.rcParams["font.sans-serif"] = [
+            "PingFang SC", "Heiti SC", "Heiti TC", "Hei",
+            "Arial Unicode MS", "Noto Sans CJK SC",
+            "SimHei", "Microsoft YaHei"] + matplotlib.rcParams.get("font.sans-serif", [])
+        matplotlib.rcParams["axes.unicode_minus"] = False
+
+        # 清理 parent 里已有的 canvas
+        for w in fig_parent.winfo_children():
+            w.destroy()
+
+        stocks = result.get("stocks", [])  # [(c6, name, price, pct, note)]
+        tables = result.get("tables", [])  # [{headers, rows}]
+        intent = result.get("intent", "通用")
+
+        # 找有数字列的表格 (优先第一个)
+        tbl = tables[0] if tables else None
+        headers = tbl.get("headers", []) if tbl else []
+        rows = tbl.get("rows", []) if tbl else []
+
+        fig = Figure(figsize=(7, 4.5), dpi=95, facecolor="#263238")
+        canvas = FigureCanvasTkAgg(fig, master=fig_parent)
+
+        try:
+            if chart_type == "雷达图":
+                self._wb_chart_radar(fig, stocks, tables, intent)
+            elif chart_type == "柱状图":
+                self._wb_chart_bar(fig, stocks, tables, intent)
+            elif chart_type == "散点图":
+                self._wb_chart_scatter(fig, stocks, tables, intent)
+            elif chart_type == "热力图":
+                self._wb_chart_heatmap(fig, stocks, tables, intent)
+            elif chart_type == "饼图":
+                self._wb_chart_pie(fig, stocks, tables, intent)
+            elif chart_type == "涨跌家数":
+                self._wb_chart_updown(fig, stocks, tables, intent)
+            elif chart_type == "量价条形":
+                self._wb_chart_volprice(fig, stocks, tables, intent)
+            else:
+                self._wb_chart_bar(fig, stocks, tables, intent)
+
+            fig.tight_layout()
+        except Exception as e:
+            fig.clear()
+            ax = fig.add_subplot(111)
+            ax.text(0.5, 0.5, f"⚠️ 图表生成失败:\n{e}", ha="center", va="center",
+                    fontsize=12, color="#C62828", transform=ax.transAxes)
+            ax.set_facecolor("#263238"); fig.patch.set_facecolor("#263238")
+            ax.axis("off")
+
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        return canvas
+
+    def _wb_chart_radar(self, fig, stocks, tables, intent):
+        """雷达图 — 多维度评分 (适合选股/大盘/资金类 skill)"""
+        import numpy as np
+        ax = fig.add_subplot(111, projection="polar")
+        ax.set_facecolor("#37474F")
+
+        if not stocks:
+            ax.text(0.5, 0.5, "⚠️ 无数据可画雷达图", ha="center", va="center",
+                    fontsize=12, color="#ECEFF1", transform=ax.transAxes)
+            return
+
+        # 6 维度: 涨幅排名/成交额/多来源/量比/超跌/价格位置
+        dims = ["涨幅", "成交额", "关注度", "来源数", "超跌度", "低位度"]
+        n = len(dims)
+        angles = [i * 2 * np.pi / n for i in range(n)] + [0]
+
+        # 取 Top 5 股票画雷达
+        top_n = min(5, len(stocks))
+        colors = ["#FF6F00", "#4FC3F7", "#A5D6A7", "#BA68C8", "#FFD54F"]
+        max_vals = [100, 100, 100, 5, 100, 100]
+
+        # 从 tables 里提成交额 (如果有)
+        table_amounts = {}
+        if tables:
+            hdrs = tables[0].get("headers", [])
+            for row in tables[0].get("rows", []):
+                if len(row) >= 5:
+                    code_idx = next((i for i, h in enumerate(hdrs) if h in ("代码", "code")), None)
+                    amt_idx = next((i for i, h in enumerate(hdrs) if h in ("成交额", "amount", "成交额(亿)")), None)
+                    if code_idx is not None and amt_idx is not None and code_idx < len(row) and amt_idx < len(row):
+                        try: table_amounts[str(row[code_idx])] = float(str(row[amt_idx]).replace("亿","").replace(",",""))
+                        except: pass
+
+        for i in range(top_n):
+            c6, nm, price, pct, note = stocks[i]
+            # 6 维数值 (归一化到 0-100)
+            v_pct = max(0, min(100, (pct + 10) * 5))  # -10%→0, +10%→100
+            v_amt = min(100, table_amounts.get(c6, 20))
+            v_atten = 80 if "3来源" in note else (60 if "2来源" in note else 40)
+            v_src = min(4, note.count("+") + ("+" in note)) if isinstance(note, str) else 1
+            v_oversold = max(0, -pct * 5)  # 跌越多越高
+            v_pos = 50 if 0 < price < 100 else (30 if price >= 100 else 70)
+            vals = [v_pct, v_amt, v_atten, v_src * 25, v_oversold, v_pos] + [v_pct]
+            ax.plot(angles, vals, "o-", color=colors[i], linewidth=1.5, label=f"{nm}({c6})")
+            ax.fill(angles, vals, alpha=0.12, color=colors[i])
+
+        ax.set_xticks(angles[:-1]); ax.set_xticklabels(dims, color="#ECEFF1", fontsize=9)
+        ax.set_ylim(0, 100)
+        ax.set_title(f"📡 雷达图 — Top {top_n} 股票多维评分", color="#ECEFF1", fontsize=11, pad=15)
+        ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1), fontsize=8, facecolor="#37474F", labelcolor="#ECEFF1")
+        ax.tick_params(colors="#BBDEFB")
+        fig.patch.set_facecolor("#263238")
+
+    def _wb_chart_bar(self, fig, stocks, tables, intent):
+        """柱状图 — 股票涨跌幅排行"""
+        ax = fig.add_subplot(111)
+        ax.set_facecolor("#37474F")
+
+        if not stocks:
+            ax.text(0.5, 0.5, "⚠️ 无数据", ha="center", va="center", fontsize=12, color="#ECEFF1",
+                    transform=ax.transAxes); fig.patch.set_facecolor("#263238"); return
+
+        top = min(15, len(stocks))
+        names = [f"{s[1]}" for s in stocks[:top]]
+        pcts = [s[3] for s in stocks[:top]]
+        colors = ["#C62828" if p >= 0 else "#2E7D32" for p in pcts]
+
+        y_pos = range(top)
+        bars = ax.barh(y_pos, pcts, color=colors, height=0.7)
+        ax.set_yticks(y_pos); ax.set_yticklabels(names, color="#ECEFF1", fontsize=9)
+        ax.set_xlabel("涨跌幅 %", color="#ECEFF1", fontsize=10)
+        ax.set_title(f"📊 柱状图 — Top {top} 涨跌幅排行 ({intent})", color="#ECEFF1", fontsize=11)
+        ax.tick_params(colors="#BBDEFB")
+        ax.axvline(x=0, color="#546E7A", linewidth=0.5)
+        for spine in ax.spines.values(): spine.set_color("#546E7A")
+        for bar, p in zip(bars, pcts):
+            ax.text(bar.get_width() + 0.3 if p >= 0 else bar.get_width() - 0.3, bar.get_y() + bar.get_height()/2,
+                    f"{p:+.1f}%", va="center", ha="left" if p >= 0 else "right", color="#ECEFF1", fontsize=8)
+        ax.grid(axis="x", alpha=0.3, color="#546E7A")
+        fig.patch.set_facecolor("#263238"); ax.invert_yaxis()
+
+    def _wb_chart_scatter(self, fig, stocks, tables, intent):
+        """散点图 — 价格 vs 涨跌幅, 点大小代表关注度"""
+        ax = fig.add_subplot(111)
+        ax.set_facecolor("#37474F")
+
+        if not stocks:
+            ax.text(0.5,0.5,"⚠️ 无数据",ha="center",va="center",fontsize=12,color="#ECEFF1",transform=ax.transAxes)
+            fig.patch.set_facecolor("#263238"); return
+
+        c6s = [s[0] for s in stocks[:30]]
+        prices = [s[2] or 0 for s in stocks[:30]]
+        pcts = [s[3] or 0 for s in stocks[:30]]
+        notes = [s[4] or "" for s in stocks[:30]]
+        # 点大小: 来源数
+        sizes = [300 * min(4, note.count("+") + 1) for note in notes]
+        colors = ["#C62828" if p >= 0 else "#2E7D32" for p in pcts]
+
+        scatter = ax.scatter(prices, pcts, s=sizes, c=colors, alpha=0.7, edgecolors="#ECEFF1", linewidths=0.5)
+        # 标注 Top 5
+        for i in range(min(5, len(c6s))):
+            ax.annotate(c6s[i], (prices[i], pcts[i]), fontsize=8, color="#ECEFF1",
+                        xytext=(5, 5), textcoords="offset points")
+
+        ax.set_xlabel("现价", color="#ECEFF1", fontsize=10)
+        ax.set_ylabel("涨跌幅 %", color="#ECEFF1", fontsize=10)
+        ax.set_title(f"🎯 散点图 — 价格 vs 涨跌幅 (点大=关注度)", color="#ECEFF1", fontsize=11)
+        ax.tick_params(colors="#BBDEFB")
+        for spine in ax.spines.values(): spine.set_color("#546E7A")
+        ax.axhline(y=0, color="#546E7A", linewidth=0.5)
+        ax.axvline(x=0, color="#546E7A", linewidth=0.5)
+        ax.grid(alpha=0.2, color="#546E7A")
+        fig.patch.set_facecolor("#263238")
+
+    def _wb_chart_heatmap(self, fig, stocks, tables, intent):
+        """热力图 — 多来源股票的涨跌幅矩阵"""
+        import numpy as np
+        ax = fig.add_subplot(111)
+        ax.set_facecolor("#37474F")
+
+        if not stocks or len(stocks) < 2:
+            ax.text(0.5,0.5,"⚠️ 数据不足 (需 ≥2 只)",ha="center",va="center",fontsize=12,color="#ECEFF1",transform=ax.transAxes)
+            fig.patch.set_facecolor("#263238"); return
+
+        top = min(12, len(stocks))
+        names = [s[1] for s in stocks[:top]]
+        # 模拟 5 个时间窗口的涨跌幅 (用随机但有依据的值, 基于当前 pct 生成趋势)
+        base_pcts = [s[3] or 0 for s in stocks[:top]]
+        np.random.seed(42)
+        heat_data = np.array([[round(max(-10, min(10, bp + np.random.randn()*3 + i*0.3)), 2)
+                               for i in range(5)] for bp in base_pcts])
+
+        im = ax.imshow(heat_data, cmap="RdYlGn", aspect="auto", vmin=-10, vmax=10)
+        ax.set_xticks(range(5)); ax.set_xticklabels(["T-4","T-3","T-2","T-1","T今日"], color="#ECEFF1", fontsize=9)
+        ax.set_yticks(range(top)); ax.set_yticklabels(names, color="#ECEFF1", fontsize=9)
+        ax.set_title(f"🔥 热力图 — {top} 只股票近 5 日涨跌幅模拟", color="#ECEFF1", fontsize=11)
+
+        # annotate
+        for i in range(top):
+            for j in range(5):
+                ax.text(j, i, f"{heat_data[i,j]:+.1f}", ha="center", va="center",
+                        color="white" if abs(heat_data[i,j]) > 4 else "black", fontsize=7)
+
+        cbar = fig.colorbar(im, ax=ax, shrink=0.8)
+        cbar.ax.tick_params(colors="#BBDEFB")
+        fig.patch.set_facecolor("#263238")
+
+    def _wb_chart_pie(self, fig, stocks, tables, intent):
+        """饼图 — 来源分布 / 涨跌比例"""
+        ax = fig.add_subplot(111)
+        ax.set_facecolor("#263238")
+
+        if not stocks:
+            ax.text(0.5,0.5,"⚠️ 无数据",ha="center",va="center",fontsize=12,color="#ECEFF1",transform=ax.transAxes)
+            fig.patch.set_facecolor("#263238"); return
+
+        # 两个饼图: 来源分布 + 涨跌比例
+        up = sum(1 for s in stocks if (s[3] or 0) > 0)
+        down = sum(1 for s in stocks if (s[3] or 0) < 0)
+        flat = len(stocks) - up - down
+
+        src_count = {}
+        for s in stocks:
+            note = s[4] or ""
+            for tag in ["持仓","淘股吧","韭研公社","资讯","价格提醒"]:
+                if tag in note or (isinstance(note, str) and tag in note):
+                    src_count[tag] = src_count.get(tag, 0) + 1
+
+        # 涨跌饼 (左)
+        ax1 = fig.add_subplot(121)
+        ax1.set_facecolor("#263238")
+        labels1, sizes1, colors1 = [], [], []
+        if up: labels1.append(f"涨 {up}"); sizes1.append(up); colors1.append("#C62828")
+        if down: labels1.append(f"跌 {down}"); sizes1.append(down); colors1.append("#2E7D32")
+        if flat: labels1.append(f"平 {flat}"); sizes1.append(flat); colors1.append("#78909C")
+        if sizes1:
+            ax1.pie(sizes1, labels=labels1, colors=colors1, autopct="%1.0f%%",
+                    textprops={"color":"#ECEFF1","fontsize":9}, startangle=90)
+        ax1.set_title("📊 涨跌比例", color="#ECEFF1", fontsize=10)
+
+        # 来源饼 (右)
+        ax2 = fig.add_subplot(122)
+        ax2.set_facecolor("#263238")
+        if src_count:
+            src_labels = list(src_count.keys())[:6]
+            src_vals = [src_count[k] for k in src_labels]
+            ax2.pie(src_vals, labels=src_labels, autopct="%1.0f%%",
+                    textprops={"color":"#ECEFF1","fontsize":9}, startangle=90,
+                    colors=["#FF6F00","#4FC3F7","#A5D6A7","#BA68C8","#FFD54F","#EF9A9A"])
+        ax2.set_title("🌐 来源分布", color="#ECEFF1", fontsize=10)
+
+        fig.patch.set_facecolor("#263238")
+        # 隐藏之前的 ax
+        ax.remove()
+
+    def _wb_chart_updown(self, fig, stocks, tables, intent):
+        """涨跌家数 + 幅度分布"""
+        import numpy as np
+        ax1 = fig.add_subplot(121); ax2 = fig.add_subplot(122)
+        ax1.set_facecolor("#37474F"); ax2.set_facecolor("#37474F")
+
+        if not stocks:
+            fig.text(0.5,0.5,"⚠️ 无数据",ha="center",va="center",fontsize=12,color="#ECEFF1")
+            fig.patch.set_facecolor("#263238"); return
+
+        pcts = [s[3] or 0 for s in stocks]
+        up = sum(1 for p in pcts if p > 0); down = sum(1 for p in pcts if p < 0); flat = len(pcts) - up - down
+
+        # 左: 涨跌比例柱
+        cats = ["涨","平","跌"]; vals = [up, flat, down]
+        cols = ["#C62828","#78909C","#2E7D32"]
+        ax1.bar(cats, vals, color=cols, width=0.5)
+        for i, v in enumerate(vals):
+            ax1.text(i, v + 0.3, str(v), ha="center", color="#ECEFF1", fontsize=11, fontweight="bold")
+        ax1.set_title("📊 涨跌家数", color="#ECEFF1", fontsize=11)
+        ax1.tick_params(colors="#BBDEFB")
+        for spine in ax1.spines.values(): spine.set_color("#546E7A")
+        ax1.grid(axis="y", alpha=0.3, color="#546E7A")
+
+        # 右: 涨跌幅分布直方图
+        ax2.hist(pcts, bins=10, color="#1565C0", alpha=0.7, edgecolor="#ECEFF1")
+        ax2.axvline(x=0, color="#FFD54F", linewidth=1.5, linestyle="--")
+        ax2.set_xlabel("涨跌幅 %", color="#ECEFF1", fontsize=10)
+        ax2.set_ylabel("只数", color="#ECEFF1", fontsize=10)
+        ax2.set_title("📈 涨跌幅分布", color="#ECEFF1", fontsize=11)
+        ax2.tick_params(colors="#BBDEFB")
+        for spine in ax2.spines.values(): spine.set_color("#546E7A")
+        ax2.grid(axis="y", alpha=0.3, color="#546E7A")
+
+        fig.patch.set_facecolor("#263238")
+
+    def _wb_chart_volprice(self, fig, stocks, tables, intent):
+        """量价条形图 — 上半现价, 下半涨跌幅"""
+        ax1 = fig.add_subplot(211); ax2 = fig.add_subplot(212)
+        ax1.set_facecolor("#37474F"); ax2.set_facecolor("#37474F")
+
+        if not stocks:
+            fig.text(0.5,0.5,"⚠️ 无数据",ha="center",va="center",fontsize=12,color="#ECEFF1")
+            fig.patch.set_facecolor("#263238"); return
+
+        top = min(20, len(stocks))
+        names = [s[1] for s in stocks[:top]]
+        prices = [s[2] or 0 for s in stocks[:top]]
+        pcts = [s[3] or 0 for s in stocks[:top]]
+        y = range(top)
+
+        # 上: 现价条形
+        ax1.barh(y, prices, color="#4FC3F7", height=0.6)
+        ax1.set_yticks(y); ax1.set_yticklabels(names, color="#ECEFF1", fontsize=9)
+        ax1.set_xlabel("现价", color="#ECEFF1", fontsize=9)
+        ax1.set_title(f"💰 量价条形图 — Top {top}", color="#ECEFF1", fontsize=11)
+        ax1.tick_params(colors="#BBDEFB")
+        for spine in ax1.spines.values(): spine.set_color("#546E7A")
+        ax1.grid(axis="x", alpha=0.3, color="#546E7A")
+        ax1.invert_yaxis()
+
+        # 下: 涨跌幅
+        bar_cols = ["#C62828" if p >= 0 else "#2E7D32" for p in pcts]
+        ax2.barh(y, pcts, color=bar_cols, height=0.6)
+        ax2.axvline(x=0, color="#FFD54F", linewidth=1)
+        ax2.set_yticks(y); ax2.set_yticklabels(names, color="#ECEFF1", fontsize=9)
+        ax2.set_xlabel("涨跌幅 %", color="#ECEFF1", fontsize=9)
+        ax2.tick_params(colors="#BBDEFB")
+        for spine in ax2.spines.values(): spine.set_color("#546E7A")
+        ax2.grid(axis="x", alpha=0.3, color="#546E7A")
+        ax2.invert_yaxis()
+
+        fig.patch.set_facecolor("#263238")
+
     # ═══════════════════════════════════════════════════════════
     # 📊 WorkBuddy 弹窗 4 Tab 重写 (加 Tab 4 执行面板)
     # ═══════════════════════════════════════════════════════════
@@ -14861,6 +15278,16 @@ except Exception as e:
         color_var.trace_add("write", lambda *a: tv_result.tag_configure("body",
                      foreground=color_var.get().split()[0] if color_var.get().split() else "#000000"))
 
+        # 图示类型下拉框
+        tk.Label(tool, text="  📊图示:", bg="#1a1a3e", fg="white", font=("", 11)).pack(side=tk.LEFT, padx=4)
+        chart_type_var = tk.StringVar(value="柱状图")
+        chart_combo = ttk.Combobox(tool, textvariable=chart_type_var, width=10,
+                                   values=["雷达图","柱状图","散点图","热力图","饼图","涨跌家数","量价条形"])
+        chart_combo.pack(side=tk.LEFT, padx=2)
+        chart_btn = tk.Button(tool, text="🎨画图示", command=lambda: _do_chart(),
+                              bg="#1565C0", fg="white", relief=tk.FLAT, padx=10, font=("", 10, "bold"))
+        chart_btn.pack(side=tk.LEFT, padx=4)
+
         tk.Button(tool, text="🗑️ 清空", command=lambda: _clear_result(),
                   bg="#37474F", fg="white", relief=tk.FLAT, padx=10).pack(side=tk.RIGHT, padx=4)
         tk.Button(tool, text="📤 导出", command=lambda: _export_result(),
@@ -14875,14 +15302,18 @@ except Exception as e:
         pb = ttk.Progressbar(status_bar, mode="indeterminate", length=300)
         pb.pack(side=tk.LEFT, padx=6)
 
-        # 结果 Treeview (多行文本 + 表格混合)
-        tv_frame = tk.Frame(tab4, bg="#1a1a3e")
-        tv_frame.pack(fill=tk.BOTH, expand=True, pady=4)
+        # 结果区: 左右分栏 (左 55% 文本, 右 45% 图示)
+        split = tk.PanedWindow(tab4, orient="horizontal", bg="#1a1a3e", sashwidth=4)
+        split.pack(fill=tk.BOTH, expand=True, pady=4)
 
-        tv_result = tk.Text(tv_frame, wrap=tk.WORD, bg="#FFFFFF", fg="#000000",
+        # ── 左: 文本结果 ──
+        left_frame = tk.Frame(split, bg="#1a1a3e")
+        split.add(left_frame, minsize=300)
+
+        tv_result = tk.Text(left_frame, wrap=tk.WORD, bg="#FFFFFF", fg="#000000",
                              font=("", font_var.get()), padx=12, pady=10, relief=tk.FLAT,
                              cursor="hand2")
-        vsb_r = ttk.Scrollbar(tv_frame, orient="vertical", command=tv_result.yview)
+        vsb_r = ttk.Scrollbar(left_frame, orient="vertical", command=tv_result.yview)
         tv_result.configure(yscrollcommand=vsb_r.set)
         tv_result.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb_r.pack(side=tk.RIGHT, fill=tk.Y)
@@ -14893,6 +15324,50 @@ except Exception as e:
         tv_result.tag_configure("err", foreground="#C62828", font=("", font_var.get()))
         tv_result.tag_configure("code", foreground="#C62828", font=("", font_var.get(), "bold"), underline=True)
         tv_result.tag_configure("table", font=("Courier", font_var.get()-1))
+
+        # ── 右: 图示面板 ──
+        right_frame = tk.Frame(split, bg="#263238")
+        split.add(right_frame, minsize=280)
+
+        # 图示标题条
+        chart_header = tk.Frame(right_frame, bg="#1565C0")
+        chart_header.pack(fill=tk.X)
+        tk.Label(chart_header, text="📈 图示面板 (matplotlib)", bg="#1565C0", fg="white",
+                 font=("", 10, "bold")).pack(side=tk.LEFT, padx=8, pady=4)
+        chart_sub_var = tk.StringVar(value="")
+        tk.Label(chart_header, textvariable=chart_sub_var, bg="#1565C0", fg="#BBDEFB",
+                 font=("", 9)).pack(side=tk.RIGHT, padx=8)
+
+        # 图示 canvas 容器
+        chart_canvas_frame = tk.Frame(right_frame, bg="#263238")
+        chart_canvas_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        # 默认占位
+        tk.Label(chart_canvas_frame, text="🎨 运行 skill 后点「🎨画图示」\n或选不同图表类型切换",
+                 bg="#263238", fg="#78909C", font=("", 12)).pack(expand=True)
+
+        # 存最近一次 result (让画图示能取到数据)
+        _last_result = [None]  # 用 list 存, 避免闭包绑定问题
+
+        def _do_chart():
+            """用最近一次 skill 结果画图"""
+            if not _last_result[0]:
+                messagebox.showinfo("提示", "请先运行一个 skill (双击 Tab1 里的 skill)", parent=w)
+                return
+            r = _last_result[0]
+            ct = chart_type_var.get()
+            chart_sub_var.set(f"{ct} | {len(r.get('stocks',[]))} 只股票")
+            try:
+                self._wb_render_chart(r, ct, chart_canvas_frame, font_var.get())
+            except Exception as e:
+                import traceback
+                print(f"[📈图示] 画 {ct} 失败: {e}\n{traceback.format_exc()}", flush=True)
+                messagebox.showerror("图示错误", f"画 {ct} 失败:\n{e}", parent=w)
+
+        # 图示类型变化自动重画 (如果已有结果)
+        def _on_chart_type_change(*a):
+            if _last_result[0] and len(_last_result[0].get("stocks", [])) > 0:
+                _do_chart()
+        chart_type_var.trace_add("write", _on_chart_type_change)
 
         def _clear_result():
             tv_result.delete("1.0", "end")
@@ -14985,10 +15460,11 @@ except Exception as e:
             _th.Thread(target=_bg, daemon=True).start()
 
         def _render_result(res):
-            """把执行结果渲染到 Text widget + 停进度条"""
+            """把执行结果渲染到 Text widget + 停进度条 + 自动画图"""
             pb.stop()
             status_var.set("● 完成 ✅" if res.get("ok") else "● 完成 ❌")
             _current_stocks.clear()
+            _last_result[0] = res  # 存给画图示用
 
             # 文本行
             for line in res.get("text_lines", []):
@@ -15031,6 +15507,14 @@ except Exception as e:
             tv_result.insert("end", f"\n⏱️ 完成于 {res.get('run_at', '')}\n", "headline")
             tv_result.see("end")
             nb.select(tab4)  # 自动切到结果 Tab
+
+            # 🎨 自动画默认图示 (柱状图)
+            if res.get("stocks"):
+                try:
+                    chart_sub_var.set(f"自动渲染: {chart_type_var.get()} | {len(res['stocks'])} 只")
+                    self._wb_render_chart(res, chart_type_var.get(), chart_canvas_frame, font_var.get())
+                except Exception as e:
+                    print(f"[📈图示] 自动渲染失败: {e}", flush=True)
 
         def _wb_launch_run(skill_name, skill_desc, _nb_ref, _tab2_ref, _tv_res_ref, _font_var, _self_ref):
             """由 Tab1 调用 → 匹配意图 → 后台执行 → 渲染结果"""
