@@ -13237,249 +13237,6 @@ except Exception as e:
         # Walk-forward 自动跑一次
         self.root.after(500, _run_f)
 
-
-__all__ = ["BuildersMixin"]
-
-# ================================================================
-# 📚 指标帮助字典 — 双击 ❓ 可查看完整解释、公式、用例、参考资料
-# ================================================================
-_HELP_DB = {
-    # ---- Tab1 市场宽广度 ----
-    "breadth": {
-        "title": "📊 市场宽广度 (Market Breadth)",
-        "define": "衡量市场整体上涨/下跌股票的数量分布，反映市场内部强弱而非仅看指数（指数可能被权重股绑架）。",
-        "formula": "红盘率 = 上涨股票数 / (上涨+下跌+平盘) × 100%\n涨停家数 = 涨幅 ≥ 9.5% 的股票数\n跌停家数 = 跌幅 ≤ -9.5% 的股票数",
-        "example": "某日 5000 只股票中 800 上涨 / 4000 下跌 → 红盘率 16%，典型的空头市场",
-        "url": "https://school.stockstars.com/indicators/market-breadth/",
-        "book": "《技术分析实战指南》- 约翰·墨菲 (John Murphy)",
-    },
-    "red_pct": {
-        "title": "🔴 红盘率 (上涨占比)",
-        "define": "当日收盘价高于开盘价的股票占所有交易股票的比例。最基础的市场情绪指标。",
-        "formula": "红盘率 = count(close > prev_close) / count(all) × 100%",
-        "example": "红盘率 > 60%：普涨行情，板块共振强\n红盘率 < 20%：恐慌性抛售，需警惕",
-        "url": "https://www.investopedia.com/terms/b/breadth.asp",
-        "book": "《股市趋势技术分析》- 爱德华兹 & 迈吉",
-    },
-    "limit_up": {
-        "title": "🚀 涨停家数",
-        "define": "当日涨幅触及涨停板的股票数量（主板 ≥9.5%，创业板/科创板 ≥19.5%）。反映市场赚钱效应和短线情绪。",
-        "formula": "涨停 = count(pct_chg ≥ 9.5%)  [注：实际含创业板 20%]",
-        "example": "涨停 > 100 家：市场情绪亢奋，注意回调风险\n涨停 < 10 家：市场无热点，观望为主",
-        "url": "https://baike.baidu.com/item/%E6%B6%A8%E5%81%9C/10246752",
-        "book": "《短线交易圣经》- 杰克·伯恩斯坦",
-    },
-    "limit_dn": {
-        "title": "💥 跌停家数",
-        "define": "当日跌幅触及跌停板的股票数量。反映市场恐慌程度。",
-        "formula": "跌停 = count(pct_chg ≤ -9.5%)",
-        "example": "跌停 > 100 家：踩踏式出逃，可能有系统性风险\n跌停 < 5 家：抛压很轻",
-        "url": "https://baike.baidu.com/item/%E8%B7%8C%E5%81%9C/10246762",
-        "book": "《风险控制手册》- 范·撒普",
-    },
-    "trin": {
-        "title": "⚖️ TRIN 广度指数 (Trading Index)",
-        "define": "由 Richard Arms 发明，也叫 ARMS 指数。比较上涨/下跌股票数与上涨/下跌成交额的比值，判断资金是流入少数股还是广泛分布。",
-        "formula": "TRIN = (上涨股数 / 下跌股数) / (上涨成交额 / 下跌成交额)\nTRIN < 0.7 → 多头强势（涨得多+资金集中推涨）\nTRIN > 1.3 → 空头强势（跌得多+资金集中砸盘）",
-        "example": "牛市初期常看到 TRIN < 0.5 且红盘率 > 70%\n熊市反弹常看到红盘率 50% 但 TRIN > 2（少数权重股拉指数）",
-        "url": "https://school.stockstars.com/indicators/trin/",
-        "book": "《成交量与价格分析》- 理查德·阿姆斯特朗",
-    },
-    "mcl": {
-        "title": "📈 MCL (McClellan Oscillator)",
-        "define": "Sherman McClellan 发明的广度震荡指标。本版本用多条指数的涨跌差模拟：正数表示多头持续扩散，负数表示空头持续扩散。",
-        "formula": "MCL = EMA(涨跌差, 19) - EMA(涨跌差, 39)\n涨跌差 = 当日上涨指数数 - 当日下跌指数数",
-        "example": "MCL 从负转正：市场底部可能形成\nMCL 从正转负：市场顶部可能形成（背离信号）",
-        "url": "https://school.stockstars.com/indicators/mcclellan-oscillator/",
-        "book": "《广度指标大全》- 蒂莫西·海登",
-    },
-    # ---- Tab2 技术指标 ----
-    "ma_arr": {
-        "title": "📐 MA 多头排列",
-        "define": "Moving Average 均线排列。短期均线在上、长期均线在下 = 多头排列；反之 = 空头排列。",
-        "formula": "多头排列 = MA20 > MA60 > MA250（得分 100）\n空头排列 = MA20 < MA60 < MA250（得分 0）\n纠缠 = 介于两者之间（得分 50）",
-        "example": "2024 年 9 月底部：MA20 上穿 MA60 形成金叉 → 后续 3 个月涨 30%\n2025 年 1 月顶部：MA20 下穿 MA60 形成死叉 → 后续 2 个月跌 15%",
-        "url": "https://school.stockstars.com/indicators/moving-averages/",
-        "book": "《均线战法》- 约翰·墨菲",
-    },
-    "macd": {
-        "title": "💫 MACD 指数平滑异同移动平均线",
-        "define": "Gerald Appel 发明。通过快慢 EMA 的差值（DIF）和其 EMA（DEA/信号线）来判断趋势方向和动量强弱。",
-        "formula": "EMA12, EMA26\nDIF = EMA12 - EMA26\nDEA = EMA(DIF, 9)\nMACD柱 = 2×(DIF - DEA)",
-        "example": "DIF 上穿 DEA（金叉）+ DIF > 0：强势信号\nDIF 下穿 DEA（死叉）+ DIF < 0：弱势信号\n顶背离（价格新高但 MACD 不新高）= 强烈卖出信号",
-        "url": "https://school.stockstars.com/indicators/macd/",
-        "book": "《MACD 实战手册》- 杰拉尔德·阿佩尔",
-    },
-    "rsi": {
-        "title": "🎯 RSI 相对强弱指标",
-        "define": "Welles Wilder 发明。衡量一段时间内价格上涨/下跌的相对强度，范围 0-100。",
-        "formula": "RS = avg_gain / avg_loss\nRSI = 100 - 100/(1+RS)\n通常用 14 日窗口",
-        "example": "RSI > 70：超买，可能回调\nRSI < 30：超卖，可能反弹\n顶背离：价格新高 RSI 不新高 → 卖出\n底背离：价格新低 RSI 不新低 → 买入",
-        "url": "https://school.stockstars.com/indicators/rsi/",
-        "book": "《技术指标原理》- 威尔斯·怀尔德",
-    },
-    "dev_ma": {
-        "title": "📏 MA 偏离度 (Deviation)",
-        "define": "当前收盘价相对于某条均线的百分比偏离。用于判断价格是否过度偏离均值（均值回归思想）。",
-        "formula": "偏离度 = (close - MA) / MA × 100%",
-        "example": "上证指数偏离 MA60 > +5%：短期过热，注意回调\n上证指数偏离 MA250 < -15%：严重超卖，可能有反弹机会",
-        "url": "https://school.stockstars.com/indicators/price-deviation/",
-        "book": "《均值回归策略》- 托马斯·斯特尔纳",
-    },
-    # ---- Tab3 历史形态拟合 ----
-    "historical_sim": {
-        "title": "🔍 历史形态拟合 (Pattern Matching)",
-        "define": "把当前市场的多维度特征（MA偏离、趋势、排列状态）映射到历史上最相似的时刻，看当时之后的走势。核心假设：相似的因产生相似的果。",
-        "formula": "特征向量 = [dev20, dev60, dev250, ret20d, MA排列]\n距离 = √Σ((当前-历史)² / 权重²) → 欧氏距离",
-        "example": "2022 年 10 月底部形态匹配 2018 年 12 月底部 → 后续均有 20%+ 反弹",
-        "url": "https://en.wikipedia.org/wiki/Pattern_recognition",
-        "book": "《统计学习方法》- 李航 (最近邻思想)",
-    },
-    "euclidean_dist": {
-        "title": "📐 欧氏距离 (Euclidean Distance)",
-        "define": "衡量两个向量在多维空间中的直线距离。本算法用加权版（不同维度权重不同），使长期趋势比短期波动更重要。",
-        "formula": "d = √(Σ((aᵢ - bᵢ)² / wᵢ²))\n本算法权重: dev20=3, dev60=3, dev250=5, ret20=8, arr=50",
-        "example": "距离 < 1：形态非常相似\n距离 > 3：形态差异较大",
-        "url": "https://en.wikipedia.org/wiki/Euclidean_distance",
-        "book": "《机器学习》- 周志华",
-    },
-    # ---- Tab4 KNN ----
-    "knn": {
-        "title": "🧠 KNN K近邻算法 (K-Nearest Neighbors)",
-        "define": "经典惰性学习算法。取当前 60 日走势曲线，在历史中找最相似的 K 段，用它们的后续表现做投票。本算法用归一化消除绝对价格影响。",
-        "formula": "归一化: (price - min) / (max - min)\n对每段历史窗口计算欧氏距离\n取最近的 7 个 → 计算上行概率 = count(后续20日>0) / 7",
-        "example": "KNN Top7 中 5 个后续 20 日上涨 → 上行概率 ≈ 71%",
-        "url": "https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm",
-        "book": "《统计学习方法》第 2 版 - 李航",
-    },
-    "normalized_window": {
-        "title": "📊 归一化窗口 (Normalized Window)",
-        "define": "把固定长度（60日）的价格窗口缩放到 [0,1] 区间，消除绝对价位影响（3000 点和 6000 点的指数归一化后可比）。",
-        "formula": "norm(x) = (x - min) / (max - min + ε)",
-        "example": "上证指数 3000→3100 和创业板指 2000→2100，归一化后走势完全一样 → KNN 能识别同形态",
-        "url": "https://en.wikipedia.org/wiki/Feature_scaling",
-        "book": "《数据挖掘》- 韩家炜",
-    },
-    # ---- 综合 ----
-    "quant_score": {
-        "title": "🏆 综合量化评分 (0-100)",
-        "define": "把 5 个维度的信号加权合成一个总分，给出一个整体判断。权重反映各维度的预测力强弱。",
-        "formula": "总分 = 量化评分×30% + 红盘率×20% + TRIN×15% + 形态拟合×20% + KNN×15%\n\n≥65 强多 / ≥50 中性 / ≥38 震荡 / ≥25 防御 / <25 下行",
-        "example": "2024.09.24 底部: 总分 72 → 🟢 上行概率大（后续 3 个月涨 30%）\n2025.01.15 顶部: 总分 28 → 🟡🔴 防御为主（后续 2 个月跌 12%）",
-        "url": "https://en.wikipedia.org/wiki/Composite_index",
-        "book": "《量化投资实战》- 西蒙斯 / 《打开量化投资的黑箱》- 里什·纳兰",
-    },
-    "conclusion": {
-        "title": "📌 结论阈值说明",
-        "define": "综合评分对应的行动建议。注意：量化预测仅供参考，实际操作需结合基本面、政策面和个人风险偏好。",
-        "formula": "≥65 🟢 强多：积极做多，可加仓\n≥50 🟢🟡 中性偏多：控制仓位，等待确认\n≥38 🟡 震荡：观望为主，高抛低吸\n≥25 🟡🔴 防御：减仓防御，控制回撤\n<25 🔴 下行：轻仓或空仓，防范风险",
-        "example": "2026.10.30 总分 20.2 → 🔴 下行，建议轻仓",
-        "url": "https://en.wikipedia.org/wiki/Decision_making",
-        "book": "《交易决策的艺术》- 马克·道格拉斯",
-    },
-    # ---- Tab7 引擎帮助 ----
-    "engine_overview": {
-        "title": "🎯 quant/ 量化引擎 v1.0 总览",
-        "define": "集成 4 种主流量化模型（ARIMA/SVM/RF/LSTM）+ vectorbt 向量化回溯验证的完整量化引擎包。从数据获取→特征工程→多模型预测→Ensemble 融合→Walk-forward 验证，形成闭环。",
-        "formula": "数据流:\n  get_index_hist() → features.py(20+因子) → forecast.py(传统评分) → models/(4模型)\n                                                                                    ↓\n                                                                              ensemble.py(融合)\n                                                                                    ↓\n                                                                              backtest.py(验证)",
-        "example": "传统评分 0.1s · 0依赖，Ensemble 6~150s，Walk-forward 5s。先从 ① 开始，再 ②，最后 ⑤ 验证策略有效性。",
-        "url": "https://vectorbt.dev / https://pmdarima.com / https://pytorch.org",
-        "book": "《打开量化投资的黑箱》- 里什·纳兰 / 《深度学习在量化中的应用》",
-    },
-    "engine_traditional": {
-        "title": "① 传统量化评分",
-        "define": "纯技术指标加权评分（0-100），包含 MA 排列、MACD、RSI、趋势偏离度 4 个子分。速度极快（0.1s），无需 sklearn/torch 等重依赖。",
-        "formula": "quant_score = ma_score×30% + macd_score×30% + trend_score×40%\nma_score: MA20>MA60>MA250 多头 → 100, 反之 0, 中间按比例\nmacd_score: DIF-DEA 正值且扩大 → 100\ntrend_score: 20/60/250 日偏离 MA 的综合判断",
-        "example": "quant_score=14.4 → 极度超卖区（RSI=28.3, MA 空头排列）\nquant_score=85+ → 多头强势区",
-        "url": "https://school.stockcharts.com",
-        "book": "《技术分析》- 马丁·普林格",
-    },
-    "engine_forecast": {
-        "title": "② Ensemble Forecast 多模型融合",
-        "define": "同时运行多个预测模型，按模型 confidence 加权融合得出最终共识。支持 ARIMA（统计时序）、SVM/RF（机器学习分类）、LSTM（深度学习序列）。ARIMA 6s, SVM/RF 秒级, LSTM 150s（torch MPS 训练 40 epoch）。",
-        "formula": "ensemble_up_prob = Σ(model_up_prob × model_confidence) / Σ(model_confidence)\nconclusion: 模型共识度≥0.7 → 单边, 否则震荡观望",
-        "example": "arima conf=0.20, svm conf=0.65, rf conf=0.58 → up_prob 接近 SVM/RF 方向\n若 arima/svm/rf 方向不一致 → conclusion 显示「模型分歧较大，观望」",
-        "url": "https://scikit-learn.org / https://pmdarima.com",
-        "book": "《统计学习方法》- 李航 / 《Hands-on Machine Learning》- Geron",
-    },
-    "engine_backtest": {
-        "title": "③ vectorbt 单次回溯",
-        "define": "指定一个 buy_threshold 和 sell_threshold，用 vectorbt 向量化计算整个历史区间的策略表现。vectorbt 基于 NumPy，运行 3650 日仅需 ~1s。",
-        "formula": "buy 条件: quant_score ≥ buy_threshold (55)\nsell 条件: quant_score < sell_threshold (30)\n交易规则: 信号次日开盘成交，满仓/空仓切换（无杠杆无手续费）\nalpha = 策略总收益 - 买入持有总收益",
-        "example": "buy≥55 sell<30 → ret=+24.6% sharpe=0.31 alpha=+17.3% (vs 持有+7.3%)",
-        "url": "https://vectorbt.dev/api/base/",
-        "book": "《量化投资：Python 实现》",
-    },
-    "engine_grid": {
-        "title": "④ 参数网格搜索",
-        "define": "遍历多组 buy_threshold / sell_threshold 组合，对每组都跑一次 vectorbt 回溯，按 Sharpe ratio 排序输出 TOP10~15。用来找「最优阈值」，但要警惕过拟合。",
-        "formula": "buy_range: np.arange(start, end, step) → [40,45,50,...,70]\nsell_range: np.arange(15, 35, step) → [15,20,25,30]\n遍历所有 buy>sell 组合，按 sharpe 降序排列",
-        "example": "网格 7×4=28 组合，TOP1 buy≥55 sell<30 → sharpe=0.31 ret=+24.6%\n⚠️ 过拟合警告：网格最优不一定是 Walk-forward 最优",
-        "url": "https://en.wikipedia.org/wiki/Hyperparameter_optimization",
-        "book": "《统计学习的要素》- Hastie/Tibshirani",
-    },
-    "engine_wfv": {
-        "title": "⑤ Walk-forward 滚动验证",
-        "define": "把历史分成 8 个滚动窗口（train=720 天 → test=180 天），用训练集选参数、测试集独立验证。这是检验策略**是否过拟合**的黄金标准 — 训练好测试差 = 过拟合。",
-        "formula": "W1: 2020.11~2021.08 (test=180d)\nW2: 2021.08~2022.05\n...\nW8: 2026.01~2026.10\noverfit_gap = 训练集均值 - 测试集均值\n gap > 5% → 严重过拟合\n gap ≈ 0  → 策略真实有效",
-        "example": "本次上证 Walk-forward: 测试集 avg=-0.7%, overfit=-1.9%\n→ ❌ 策略熊市保护不住，不能实盘",
-        "url": "https://en.wikipedia.org/wiki/Walk-forward_analysis",
-        "book": "《金融时间序列分析》- Ruey Tsay",
-    },
-}
-
-def _try_load_help_json():
-    """优先从 data/help_knowledge.json 读帮助 (学习Tab可编辑的那套)"""
-    import os as _os, json as _json
-    _fp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-                        "data", "help_knowledge.json")
-    if not _os.path.exists(_fp): return None
-    try:
-        with open(_fp, "r", encoding="utf-8") as f:
-            items = _json.load(f)
-        return {h["key"]: {k: h.get(k, "") for k in ("title","define","formula","example","url","book")}
-                for h in items if h.get("key")}
-    except Exception:
-        return None
-
-def _show_help_popup(parent, key):
-    """双击 ❓ 弹出指标解释窗口 — 优先读 JSON 帮助知识库"""
-    info = None
-    # 1. 先尝试学习Tab的 JSON (可编辑)
-    _json_db = _try_load_help_json()
-    if _json_db and key in _json_db:
-        info = _json_db[key]
-    # 2. fallback 到硬编码 _HELP_DB
-    if info is None:
-        info = _HELP_DB.get(key)
-    if not info:
-        messagebox.showinfo("📖 帮助", f"暂无「{key}」的详细说明", parent=parent)
-        return
-    w = tk.Toplevel(parent)
-    w.title(info["title"]); w.geometry("720x580"); w.transient(parent)
-    w.grab_set()
-
-    # 🎨 深蓝顶栏 (统一风格)
-    header = tk.Frame(w, bg="#1565C0", height=52); header.pack(fill=tk.X)
-    tk.Label(header, text=info["title"], bg="#1565C0", fg="white",
-             font=("Microsoft YaHei", 15, "bold")).pack(side=tk.LEFT, padx=18, pady=12)
-    tk.Label(header, text="📖 技术指标详解", bg="#1565C0", fg="#BBDEFB",
-             font=("", 11)).pack(side=tk.RIGHT, padx=18, pady=16)
-
-    body = tk.Frame(w, bg="#F5F5F5"); body.pack(fill=tk.BOTH, expand=True, padx=14, pady=14)
-
-    # 📖 【定义】卡片 (绿)
-    _section_card(body, "📖 定义", "#2E7D32", info["define"])
-    # 🧮 【公式】卡片 (蓝)
-    _section_card(body, "🧮 公式", "#1565C0", info["formula"])
-    # 💡 【用例/信号】卡片 (橙)
-    _section_card(body, "💡 用例 / 信号", "#E65100", info["example"])
-    # 🔗 【参考】链接
-    _section_card(body, "🔗 参考", "#6A1B9A", f"网址: {info['url']}\n书籍: {info['book']}")
-
-    # 关闭按钮
-    ttk.Button(body, text="关闭", command=w.destroy).pack(pady=(12, 0))
-
     # ═══════════════════════════════════════════════════════════
     # 💰 价格提醒系统 (买入价/卖出价到价弹窗)
     # ═══════════════════════════════════════════════════════════
@@ -13761,7 +13518,9 @@ def _show_help_popup(parent, key):
                 c6 = alert.get("code", "")
                 name = alert.get("name", "")
                 if c6:
-                    self.root.after(100, lambda c=c6, n=name: self._show_kline_or_analyze(c, n))
+                    # 尝试调已有的 K 线/股票详情弹窗 (兼容不同 mixin)
+                    try: self.root.after(100, self.show_kline_dialog)
+                    except Exception: pass
             except Exception:
                 pass
 
@@ -14104,6 +13863,250 @@ def _show_help_popup(parent, key):
 
         print(f"[💰提醒] 主弹窗打开: {len(alerts)} 只提醒", flush=True)
 
+
+
+
+__all__ = ["BuildersMixin"]
+
+# ================================================================
+# 📚 指标帮助字典 — 双击 ❓ 可查看完整解释、公式、用例、参考资料
+# ================================================================
+_HELP_DB = {
+    # ---- Tab1 市场宽广度 ----
+    "breadth": {
+        "title": "📊 市场宽广度 (Market Breadth)",
+        "define": "衡量市场整体上涨/下跌股票的数量分布，反映市场内部强弱而非仅看指数（指数可能被权重股绑架）。",
+        "formula": "红盘率 = 上涨股票数 / (上涨+下跌+平盘) × 100%\n涨停家数 = 涨幅 ≥ 9.5% 的股票数\n跌停家数 = 跌幅 ≤ -9.5% 的股票数",
+        "example": "某日 5000 只股票中 800 上涨 / 4000 下跌 → 红盘率 16%，典型的空头市场",
+        "url": "https://school.stockstars.com/indicators/market-breadth/",
+        "book": "《技术分析实战指南》- 约翰·墨菲 (John Murphy)",
+    },
+    "red_pct": {
+        "title": "🔴 红盘率 (上涨占比)",
+        "define": "当日收盘价高于开盘价的股票占所有交易股票的比例。最基础的市场情绪指标。",
+        "formula": "红盘率 = count(close > prev_close) / count(all) × 100%",
+        "example": "红盘率 > 60%：普涨行情，板块共振强\n红盘率 < 20%：恐慌性抛售，需警惕",
+        "url": "https://www.investopedia.com/terms/b/breadth.asp",
+        "book": "《股市趋势技术分析》- 爱德华兹 & 迈吉",
+    },
+    "limit_up": {
+        "title": "🚀 涨停家数",
+        "define": "当日涨幅触及涨停板的股票数量（主板 ≥9.5%，创业板/科创板 ≥19.5%）。反映市场赚钱效应和短线情绪。",
+        "formula": "涨停 = count(pct_chg ≥ 9.5%)  [注：实际含创业板 20%]",
+        "example": "涨停 > 100 家：市场情绪亢奋，注意回调风险\n涨停 < 10 家：市场无热点，观望为主",
+        "url": "https://baike.baidu.com/item/%E6%B6%A8%E5%81%9C/10246752",
+        "book": "《短线交易圣经》- 杰克·伯恩斯坦",
+    },
+    "limit_dn": {
+        "title": "💥 跌停家数",
+        "define": "当日跌幅触及跌停板的股票数量。反映市场恐慌程度。",
+        "formula": "跌停 = count(pct_chg ≤ -9.5%)",
+        "example": "跌停 > 100 家：踩踏式出逃，可能有系统性风险\n跌停 < 5 家：抛压很轻",
+        "url": "https://baike.baidu.com/item/%E8%B7%8C%E5%81%9C/10246762",
+        "book": "《风险控制手册》- 范·撒普",
+    },
+    "trin": {
+        "title": "⚖️ TRIN 广度指数 (Trading Index)",
+        "define": "由 Richard Arms 发明，也叫 ARMS 指数。比较上涨/下跌股票数与上涨/下跌成交额的比值，判断资金是流入少数股还是广泛分布。",
+        "formula": "TRIN = (上涨股数 / 下跌股数) / (上涨成交额 / 下跌成交额)\nTRIN < 0.7 → 多头强势（涨得多+资金集中推涨）\nTRIN > 1.3 → 空头强势（跌得多+资金集中砸盘）",
+        "example": "牛市初期常看到 TRIN < 0.5 且红盘率 > 70%\n熊市反弹常看到红盘率 50% 但 TRIN > 2（少数权重股拉指数）",
+        "url": "https://school.stockstars.com/indicators/trin/",
+        "book": "《成交量与价格分析》- 理查德·阿姆斯特朗",
+    },
+    "mcl": {
+        "title": "📈 MCL (McClellan Oscillator)",
+        "define": "Sherman McClellan 发明的广度震荡指标。本版本用多条指数的涨跌差模拟：正数表示多头持续扩散，负数表示空头持续扩散。",
+        "formula": "MCL = EMA(涨跌差, 19) - EMA(涨跌差, 39)\n涨跌差 = 当日上涨指数数 - 当日下跌指数数",
+        "example": "MCL 从负转正：市场底部可能形成\nMCL 从正转负：市场顶部可能形成（背离信号）",
+        "url": "https://school.stockstars.com/indicators/mcclellan-oscillator/",
+        "book": "《广度指标大全》- 蒂莫西·海登",
+    },
+    # ---- Tab2 技术指标 ----
+    "ma_arr": {
+        "title": "📐 MA 多头排列",
+        "define": "Moving Average 均线排列。短期均线在上、长期均线在下 = 多头排列；反之 = 空头排列。",
+        "formula": "多头排列 = MA20 > MA60 > MA250（得分 100）\n空头排列 = MA20 < MA60 < MA250（得分 0）\n纠缠 = 介于两者之间（得分 50）",
+        "example": "2024 年 9 月底部：MA20 上穿 MA60 形成金叉 → 后续 3 个月涨 30%\n2025 年 1 月顶部：MA20 下穿 MA60 形成死叉 → 后续 2 个月跌 15%",
+        "url": "https://school.stockstars.com/indicators/moving-averages/",
+        "book": "《均线战法》- 约翰·墨菲",
+    },
+    "macd": {
+        "title": "💫 MACD 指数平滑异同移动平均线",
+        "define": "Gerald Appel 发明。通过快慢 EMA 的差值（DIF）和其 EMA（DEA/信号线）来判断趋势方向和动量强弱。",
+        "formula": "EMA12, EMA26\nDIF = EMA12 - EMA26\nDEA = EMA(DIF, 9)\nMACD柱 = 2×(DIF - DEA)",
+        "example": "DIF 上穿 DEA（金叉）+ DIF > 0：强势信号\nDIF 下穿 DEA（死叉）+ DIF < 0：弱势信号\n顶背离（价格新高但 MACD 不新高）= 强烈卖出信号",
+        "url": "https://school.stockstars.com/indicators/macd/",
+        "book": "《MACD 实战手册》- 杰拉尔德·阿佩尔",
+    },
+    "rsi": {
+        "title": "🎯 RSI 相对强弱指标",
+        "define": "Welles Wilder 发明。衡量一段时间内价格上涨/下跌的相对强度，范围 0-100。",
+        "formula": "RS = avg_gain / avg_loss\nRSI = 100 - 100/(1+RS)\n通常用 14 日窗口",
+        "example": "RSI > 70：超买，可能回调\nRSI < 30：超卖，可能反弹\n顶背离：价格新高 RSI 不新高 → 卖出\n底背离：价格新低 RSI 不新低 → 买入",
+        "url": "https://school.stockstars.com/indicators/rsi/",
+        "book": "《技术指标原理》- 威尔斯·怀尔德",
+    },
+    "dev_ma": {
+        "title": "📏 MA 偏离度 (Deviation)",
+        "define": "当前收盘价相对于某条均线的百分比偏离。用于判断价格是否过度偏离均值（均值回归思想）。",
+        "formula": "偏离度 = (close - MA) / MA × 100%",
+        "example": "上证指数偏离 MA60 > +5%：短期过热，注意回调\n上证指数偏离 MA250 < -15%：严重超卖，可能有反弹机会",
+        "url": "https://school.stockstars.com/indicators/price-deviation/",
+        "book": "《均值回归策略》- 托马斯·斯特尔纳",
+    },
+    # ---- Tab3 历史形态拟合 ----
+    "historical_sim": {
+        "title": "🔍 历史形态拟合 (Pattern Matching)",
+        "define": "把当前市场的多维度特征（MA偏离、趋势、排列状态）映射到历史上最相似的时刻，看当时之后的走势。核心假设：相似的因产生相似的果。",
+        "formula": "特征向量 = [dev20, dev60, dev250, ret20d, MA排列]\n距离 = √Σ((当前-历史)² / 权重²) → 欧氏距离",
+        "example": "2022 年 10 月底部形态匹配 2018 年 12 月底部 → 后续均有 20%+ 反弹",
+        "url": "https://en.wikipedia.org/wiki/Pattern_recognition",
+        "book": "《统计学习方法》- 李航 (最近邻思想)",
+    },
+    "euclidean_dist": {
+        "title": "📐 欧氏距离 (Euclidean Distance)",
+        "define": "衡量两个向量在多维空间中的直线距离。本算法用加权版（不同维度权重不同），使长期趋势比短期波动更重要。",
+        "formula": "d = √(Σ((aᵢ - bᵢ)² / wᵢ²))\n本算法权重: dev20=3, dev60=3, dev250=5, ret20=8, arr=50",
+        "example": "距离 < 1：形态非常相似\n距离 > 3：形态差异较大",
+        "url": "https://en.wikipedia.org/wiki/Euclidean_distance",
+        "book": "《机器学习》- 周志华",
+    },
+    # ---- Tab4 KNN ----
+    "knn": {
+        "title": "🧠 KNN K近邻算法 (K-Nearest Neighbors)",
+        "define": "经典惰性学习算法。取当前 60 日走势曲线，在历史中找最相似的 K 段，用它们的后续表现做投票。本算法用归一化消除绝对价格影响。",
+        "formula": "归一化: (price - min) / (max - min)\n对每段历史窗口计算欧氏距离\n取最近的 7 个 → 计算上行概率 = count(后续20日>0) / 7",
+        "example": "KNN Top7 中 5 个后续 20 日上涨 → 上行概率 ≈ 71%",
+        "url": "https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm",
+        "book": "《统计学习方法》第 2 版 - 李航",
+    },
+    "normalized_window": {
+        "title": "📊 归一化窗口 (Normalized Window)",
+        "define": "把固定长度（60日）的价格窗口缩放到 [0,1] 区间，消除绝对价位影响（3000 点和 6000 点的指数归一化后可比）。",
+        "formula": "norm(x) = (x - min) / (max - min + ε)",
+        "example": "上证指数 3000→3100 和创业板指 2000→2100，归一化后走势完全一样 → KNN 能识别同形态",
+        "url": "https://en.wikipedia.org/wiki/Feature_scaling",
+        "book": "《数据挖掘》- 韩家炜",
+    },
+    # ---- 综合 ----
+    "quant_score": {
+        "title": "🏆 综合量化评分 (0-100)",
+        "define": "把 5 个维度的信号加权合成一个总分，给出一个整体判断。权重反映各维度的预测力强弱。",
+        "formula": "总分 = 量化评分×30% + 红盘率×20% + TRIN×15% + 形态拟合×20% + KNN×15%\n\n≥65 强多 / ≥50 中性 / ≥38 震荡 / ≥25 防御 / <25 下行",
+        "example": "2024.09.24 底部: 总分 72 → 🟢 上行概率大（后续 3 个月涨 30%）\n2025.01.15 顶部: 总分 28 → 🟡🔴 防御为主（后续 2 个月跌 12%）",
+        "url": "https://en.wikipedia.org/wiki/Composite_index",
+        "book": "《量化投资实战》- 西蒙斯 / 《打开量化投资的黑箱》- 里什·纳兰",
+    },
+    "conclusion": {
+        "title": "📌 结论阈值说明",
+        "define": "综合评分对应的行动建议。注意：量化预测仅供参考，实际操作需结合基本面、政策面和个人风险偏好。",
+        "formula": "≥65 🟢 强多：积极做多，可加仓\n≥50 🟢🟡 中性偏多：控制仓位，等待确认\n≥38 🟡 震荡：观望为主，高抛低吸\n≥25 🟡🔴 防御：减仓防御，控制回撤\n<25 🔴 下行：轻仓或空仓，防范风险",
+        "example": "2026.10.30 总分 20.2 → 🔴 下行，建议轻仓",
+        "url": "https://en.wikipedia.org/wiki/Decision_making",
+        "book": "《交易决策的艺术》- 马克·道格拉斯",
+    },
+    # ---- Tab7 引擎帮助 ----
+    "engine_overview": {
+        "title": "🎯 quant/ 量化引擎 v1.0 总览",
+        "define": "集成 4 种主流量化模型（ARIMA/SVM/RF/LSTM）+ vectorbt 向量化回溯验证的完整量化引擎包。从数据获取→特征工程→多模型预测→Ensemble 融合→Walk-forward 验证，形成闭环。",
+        "formula": "数据流:\n  get_index_hist() → features.py(20+因子) → forecast.py(传统评分) → models/(4模型)\n                                                                                    ↓\n                                                                              ensemble.py(融合)\n                                                                                    ↓\n                                                                              backtest.py(验证)",
+        "example": "传统评分 0.1s · 0依赖，Ensemble 6~150s，Walk-forward 5s。先从 ① 开始，再 ②，最后 ⑤ 验证策略有效性。",
+        "url": "https://vectorbt.dev / https://pmdarima.com / https://pytorch.org",
+        "book": "《打开量化投资的黑箱》- 里什·纳兰 / 《深度学习在量化中的应用》",
+    },
+    "engine_traditional": {
+        "title": "① 传统量化评分",
+        "define": "纯技术指标加权评分（0-100），包含 MA 排列、MACD、RSI、趋势偏离度 4 个子分。速度极快（0.1s），无需 sklearn/torch 等重依赖。",
+        "formula": "quant_score = ma_score×30% + macd_score×30% + trend_score×40%\nma_score: MA20>MA60>MA250 多头 → 100, 反之 0, 中间按比例\nmacd_score: DIF-DEA 正值且扩大 → 100\ntrend_score: 20/60/250 日偏离 MA 的综合判断",
+        "example": "quant_score=14.4 → 极度超卖区（RSI=28.3, MA 空头排列）\nquant_score=85+ → 多头强势区",
+        "url": "https://school.stockcharts.com",
+        "book": "《技术分析》- 马丁·普林格",
+    },
+    "engine_forecast": {
+        "title": "② Ensemble Forecast 多模型融合",
+        "define": "同时运行多个预测模型，按模型 confidence 加权融合得出最终共识。支持 ARIMA（统计时序）、SVM/RF（机器学习分类）、LSTM（深度学习序列）。ARIMA 6s, SVM/RF 秒级, LSTM 150s（torch MPS 训练 40 epoch）。",
+        "formula": "ensemble_up_prob = Σ(model_up_prob × model_confidence) / Σ(model_confidence)\nconclusion: 模型共识度≥0.7 → 单边, 否则震荡观望",
+        "example": "arima conf=0.20, svm conf=0.65, rf conf=0.58 → up_prob 接近 SVM/RF 方向\n若 arima/svm/rf 方向不一致 → conclusion 显示「模型分歧较大，观望」",
+        "url": "https://scikit-learn.org / https://pmdarima.com",
+        "book": "《统计学习方法》- 李航 / 《Hands-on Machine Learning》- Geron",
+    },
+    "engine_backtest": {
+        "title": "③ vectorbt 单次回溯",
+        "define": "指定一个 buy_threshold 和 sell_threshold，用 vectorbt 向量化计算整个历史区间的策略表现。vectorbt 基于 NumPy，运行 3650 日仅需 ~1s。",
+        "formula": "buy 条件: quant_score ≥ buy_threshold (55)\nsell 条件: quant_score < sell_threshold (30)\n交易规则: 信号次日开盘成交，满仓/空仓切换（无杠杆无手续费）\nalpha = 策略总收益 - 买入持有总收益",
+        "example": "buy≥55 sell<30 → ret=+24.6% sharpe=0.31 alpha=+17.3% (vs 持有+7.3%)",
+        "url": "https://vectorbt.dev/api/base/",
+        "book": "《量化投资：Python 实现》",
+    },
+    "engine_grid": {
+        "title": "④ 参数网格搜索",
+        "define": "遍历多组 buy_threshold / sell_threshold 组合，对每组都跑一次 vectorbt 回溯，按 Sharpe ratio 排序输出 TOP10~15。用来找「最优阈值」，但要警惕过拟合。",
+        "formula": "buy_range: np.arange(start, end, step) → [40,45,50,...,70]\nsell_range: np.arange(15, 35, step) → [15,20,25,30]\n遍历所有 buy>sell 组合，按 sharpe 降序排列",
+        "example": "网格 7×4=28 组合，TOP1 buy≥55 sell<30 → sharpe=0.31 ret=+24.6%\n⚠️ 过拟合警告：网格最优不一定是 Walk-forward 最优",
+        "url": "https://en.wikipedia.org/wiki/Hyperparameter_optimization",
+        "book": "《统计学习的要素》- Hastie/Tibshirani",
+    },
+    "engine_wfv": {
+        "title": "⑤ Walk-forward 滚动验证",
+        "define": "把历史分成 8 个滚动窗口（train=720 天 → test=180 天），用训练集选参数、测试集独立验证。这是检验策略**是否过拟合**的黄金标准 — 训练好测试差 = 过拟合。",
+        "formula": "W1: 2020.11~2021.08 (test=180d)\nW2: 2021.08~2022.05\n...\nW8: 2026.01~2026.10\noverfit_gap = 训练集均值 - 测试集均值\n gap > 5% → 严重过拟合\n gap ≈ 0  → 策略真实有效",
+        "example": "本次上证 Walk-forward: 测试集 avg=-0.7%, overfit=-1.9%\n→ ❌ 策略熊市保护不住，不能实盘",
+        "url": "https://en.wikipedia.org/wiki/Walk-forward_analysis",
+        "book": "《金融时间序列分析》- Ruey Tsay",
+    },
+}
+
+def _try_load_help_json():
+    """优先从 data/help_knowledge.json 读帮助 (学习Tab可编辑的那套)"""
+    import os as _os, json as _json
+    _fp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                        "data", "help_knowledge.json")
+    if not _os.path.exists(_fp): return None
+    try:
+        with open(_fp, "r", encoding="utf-8") as f:
+            items = _json.load(f)
+        return {h["key"]: {k: h.get(k, "") for k in ("title","define","formula","example","url","book")}
+                for h in items if h.get("key")}
+    except Exception:
+        return None
+
+def _show_help_popup(parent, key):
+    """双击 ❓ 弹出指标解释窗口 — 优先读 JSON 帮助知识库"""
+    info = None
+    # 1. 先尝试学习Tab的 JSON (可编辑)
+    _json_db = _try_load_help_json()
+    if _json_db and key in _json_db:
+        info = _json_db[key]
+    # 2. fallback 到硬编码 _HELP_DB
+    if info is None:
+        info = _HELP_DB.get(key)
+    if not info:
+        messagebox.showinfo("📖 帮助", f"暂无「{key}」的详细说明", parent=parent)
+        return
+    w = tk.Toplevel(parent)
+    w.title(info["title"]); w.geometry("720x580"); w.transient(parent)
+    w.grab_set()
+
+    # 🎨 深蓝顶栏 (统一风格)
+    header = tk.Frame(w, bg="#1565C0", height=52); header.pack(fill=tk.X)
+    tk.Label(header, text=info["title"], bg="#1565C0", fg="white",
+             font=("Microsoft YaHei", 15, "bold")).pack(side=tk.LEFT, padx=18, pady=12)
+    tk.Label(header, text="📖 技术指标详解", bg="#1565C0", fg="#BBDEFB",
+             font=("", 11)).pack(side=tk.RIGHT, padx=18, pady=16)
+
+    body = tk.Frame(w, bg="#F5F5F5"); body.pack(fill=tk.BOTH, expand=True, padx=14, pady=14)
+
+    # 📖 【定义】卡片 (绿)
+    _section_card(body, "📖 定义", "#2E7D32", info["define"])
+    # 🧮 【公式】卡片 (蓝)
+    _section_card(body, "🧮 公式", "#1565C0", info["formula"])
+    # 💡 【用例/信号】卡片 (橙)
+    _section_card(body, "💡 用例 / 信号", "#E65100", info["example"])
+    # 🔗 【参考】链接
+    _section_card(body, "🔗 参考", "#6A1B9A", f"网址: {info['url']}\n书籍: {info['book']}")
+
+    # 关闭按钮
+    ttk.Button(body, text="关闭", command=w.destroy).pack(pady=(12, 0))
 
 def _section_card(parent, title, color, content):
     """帮助弹窗内的彩色分区卡片"""
