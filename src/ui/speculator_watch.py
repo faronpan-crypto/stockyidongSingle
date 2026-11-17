@@ -6874,8 +6874,9 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
                                           max_tokens=3000, win=win)
                 if not result:
                     result = _article_fallback(prompt, "淘股吧游资", "游资复盘", "微信公众号", "3000字深度")
-                # 转 HTML
-                html = _to_wechat_html(result, title=f"游资看盘 · {time.strftime('%m月%d日')}")
+                # 🧱 生成数据豆腐干卡片 + 转 HTML
+                cards = _build_speculator_data_cards(data)
+                html = _to_wechat_html(result, title=f"游资看盘 · {time.strftime('%m月%d日')}", data_cards=cards)
                 dlg.after(0, lambda: _show_result_with_html(result, html, "🔍游资看盘"))
             except Exception as e:
                 import traceback
@@ -7092,7 +7093,9 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
                                           max_tokens=2800, win=win)
                 if not result:
                     result = _article_fallback(prompt, "量化理性派", "大盘择时", "微信公众号", "1500字标准")
-                html = _to_wechat_html(result, title=f"布鲁斯择时 · {time.strftime('%m月%d日')}")
+                # 🧱 布鲁斯也可以生成数据卡片 (含5维评分)
+                cards = _build_speculator_data_cards(data)
+                html = _to_wechat_html(result, title=f"布鲁斯择时 · {time.strftime('%m月%d日')}", data_cards=cards)
                 dlg.after(0, lambda: _show_result_with_html(result, html, "🎯布鲁斯量化"))
             except Exception as e:
                 import traceback
@@ -7108,47 +7111,266 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
                           cursor="hand2", command=_quick_bruce)
     bruce_btn.pack(side=tk.LEFT, padx=(0, 8))
 
-    # -------- 辅助: MD → 微信 HTML --------
-    def _to_wechat_html(md_text, title=""):
-        """复用 wechat_article 模块的公众号 HTML 转换"""
+    # -------- 🧱 游资看盘数据豆腐干 → 彩色卡片 --------
+    def _build_speculator_data_cards(data):
+        """把游资看盘收集的结构化数据 → 手机端美观 HTML 卡片
+        
+        卡片类型:
+        1. 📊 大盘涨跌家数 (红涨绿跌大数字)
+        2. 🗂️ 板块强度九宫格 (涨红跌绿小方块)
+        3. 🔥 涨停梯队 Top15 (连板高度)
+        4. 💀 跌停/核按钮 (警示红)
+        5. 🐉 龙虎榜主力动向 (净买卖)
+        6. 📈 情绪周期温度计
+        7. 📉 股指期货实时
+        """
+        cards = []
+        date_str = time.strftime("%Y-%m-%d")
+
+        card_css = ("border-radius:10px;padding:12px;margin:12px 0;"
+                    "font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;")
+
+        # ── 1. 大盘涨跌家数 ──
         try:
-            from ui.wechat_article import _md_to_wechat_html as _w2h
-            return _w2h(md_text)
-        except Exception:
-            # 内联降级版
-            import re as _re
-            lines = md_text.split("\n")
-            html_parts = []
-            for line in lines:
-                line = line.rstrip()
-                if not line:
-                    html_parts.append('<p style="margin:8px 0;"></p>'); continue
-                if line.startswith("# "):
-                    t = line[2:].strip()
-                    html_parts.append(f'<h1 style="font-size:22px;font-weight:bold;color:#1a1a2e;text-align:center;margin:20px 0;">{t}</h1>'); continue
-                if line.startswith("## "):
-                    t = line[3:].strip()
-                    html_parts.append(f'<h2 style="font-size:18px;font-weight:bold;color:#16213e;margin:18px 0 10px;border-left:4px solid #e94560;padding-left:10px;">{t}</h2>'); continue
-                if line.startswith("### "):
-                    t = line[4:].strip()
-                    html_parts.append(f'<h3 style="font-size:16px;font-weight:bold;color:#0f3460;margin:14px 0 8px;">{t}</h3>'); continue
-                if line.strip() == "---":
-                    html_parts.append('<hr style="border:none;border-top:1px dashed #ccc;margin:20px 0;">'); continue
-                if line.startswith(("- ", "* ", "· ")):
-                    t = line[2:].strip()
-                    t = _re.sub(r'\*\*(.+?)\*\*', r'<strong style="color:#e94560;">\1</strong>', t)
-                    html_parts.append(f'<p style="margin:4px 0;padding-left:20px;color:#444;font-size:14px;line-height:1.7;">• {t}</p>'); continue
-                line = _re.sub(r'\*\*(.+?)\*\*', r'<strong style="color:#e94560;">\1</strong>', line)
-                html_parts.append(f'<p style="margin:8px 0;color:#333;font-size:15px;line-height:1.8;">{line}</p>')
-            body = "\n".join(html_parts)
-            page_title = title or "A股财经文章"
-            return f'''<!DOCTYPE html>
+            up = data.get("涨家数") or data.get("上涨家数_UI") or data.get("广度细节", {}).get("上涨", "--")
+            down = data.get("跌家数") or data.get("下跌家数_UI") or data.get("广度细节", {}).get("下跌", "--")
+            if up != "--" or down != "--":
+                total = ""
+                try:
+                    up_n = int(str(up).replace(",", ""))
+                    dn_n = int(str(down).replace(",", ""))
+                    total = f'<div style="font-size:12px;color:#888;margin-top:4px;">总计 {up_n+dn_n} 只 · 上涨比 {up_n/(up_n+dn_n)*100:.0f}%</div>'
+                except Exception: pass
+                cards.append(f'''<div style="{card_css}background:linear-gradient(135deg,#1a1a2e,#16213e);color:#eee;">
+<div style="font-size:14px;font-weight:bold;margin-bottom:10px;display:flex;align-items:center;">📊 大盘涨跌家数 <span style="font-size:11px;color:#888;margin-left:auto;">{date_str}</span></div>
+<div style="display:flex;gap:8px;">
+<div style="flex:1;background:#e9456020;border:1px solid #e94560;border-radius:8px;padding:10px;text-align:center;">
+<div style="font-size:28px;font-weight:bold;color:#e94560;">{up}</div><div style="font-size:11px;color:#aaa;">上涨家数</div></div>
+<div style="flex:1;background:#4CAF5020;border:1px solid #4CAF50;border-radius:8px;padding:10px;text-align:center;">
+<div style="font-size:28px;font-weight:bold;color:#4CAF50;">{down}</div><div style="font-size:11px;color:#aaa;">下跌家数</div></div>
+</div>{total}</div>''')
+        except Exception: pass
+
+        # ── 2. 板块强度九宫格 ──
+        try:
+            sectors = data.get("板块强度") or data.get("领涨板块", []) + data.get("领跌板块", [])
+            if sectors and len(sectors) >= 3:
+                # 解析每个板块 (格式如 "半导体(+3.21%, 42只, 龙头: xxx)")
+                parsed = []
+                for s in sectors[:12]:
+                    import re as _re
+                    m = _re.match(r'([^\(]+)\(([+-][\d.]+)%', s)
+                    if m:
+                        name = m.group(1).strip()
+                        pct = float(m.group(2))
+                        parsed.append((name, pct))
+                    else:
+                        parsed.append((s, 0))
+                if parsed:
+                    cells_html = ""
+                    for name, pct in parsed[:12]:
+                        bg = "#e9456020" if pct > 0 else "#4CAF5020" if pct < 0 else "#555220"
+                        bd = "#e94560" if pct > 0 else "#4CAF50" if pct < 0 else "#888"
+                        col = "#e94560" if pct > 0 else "#4CAF50" if pct < 0 else "#888"
+                        sign = "+" if pct > 0 else ""
+                        cells_html += (f'<div style="background:{bg};border:1px solid {bd};border-radius:6px;padding:6px 4px;'
+                                       f'text-align:center;font-size:11px;">'
+                                       f'<div style="color:{col};font-weight:bold;">{sign}{pct:.1f}%</div>'
+                                       f'<div style="color:#aaa;font-size:10px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{name}</div>'
+                                       f'</div>')
+                    cards.append(f'''<div style="{card_css}background:#0f0f1a;color:#eee;">
+<div style="font-size:14px;font-weight:bold;margin-bottom:10px;">🗂️ 板块强度分布 Top12</div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">{cells_html}</div>
+<div style="font-size:10px;color:#666;margin-top:8px;">红=涨 / 绿=跌 / 上→下 领涨→领跌</div></div>''')
+        except Exception: pass
+
+        # ── 3. 涨停梯队 ──
+        try:
+            zt_list = data.get("涨停梯队Top15", [])
+            zt_count = data.get("今日涨停数", "?")
+            if zt_list:
+                rows = ""
+                for i, s in enumerate(zt_list[:10]):
+                    bg = "#e9456015" if i < 3 else "#1a1a2e"
+                    rows += f'<div style="background:{bg};padding:6px 10px;border-radius:4px;margin:3px 0;font-size:13px;">🔥 {s}</div>'
+                cards.append(f'''<div style="{card_css}background:linear-gradient(135deg,#4a1c1c,#2a0f0f);color:#eee;">
+<div style="font-size:14px;font-weight:bold;margin-bottom:10px;display:flex;align-items:center;">🔥 今日涨停梯队 <span style="margin-left:auto;background:#e94560;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">共{zt_count}只</span></div>
+{rows}</div>''')
+        except Exception: pass
+
+        # ── 4. 跌停/核按钮 ──
+        try:
+            dt_list = data.get("跌停Top10", [])
+            dt_count = data.get("今日跌停数", "?")
+            if dt_list and str(dt_count) != "?":
+                rows = ""
+                for s in dt_list[:8]:
+                    rows += f'<div style="background:#4CAF5015;padding:5px 10px;border-radius:4px;margin:2px 0;font-size:12px;">💀 {s}</div>'
+                cards.append(f'''<div style="{card_css}background:#0f1a0f;color:#eee;">
+<div style="font-size:13px;font-weight:bold;margin-bottom:8px;display:flex;align-items:center;">💀 跌停/核按钮警示 <span style="margin-left:auto;background:#4CAF50;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">共{dt_count}只</span></div>
+{rows}</div>''')
+        except Exception: pass
+
+        # ── 5. 龙虎榜 ──
+        try:
+            lhb = data.get("龙虎榜近12条", [])
+            if lhb:
+                rows = ""
+                for s in lhb[:8]:
+                    rows += f'<div style="background:#1a1a2e;padding:6px 10px;border-radius:4px;margin:3px 0;font-size:12px;border-left:3px solid #ffd700;">🐉 {s}</div>'
+                cards.append(f'''<div style="{card_css}background:#1a1510;color:#eee;">
+<div style="font-size:13px;font-weight:bold;margin-bottom:8px;">🐉 龙虎榜近3日主力动向</div>{rows}</div>''')
+        except Exception: pass
+
+        # ── 6. 情绪周期 ──
+        try:
+            sent = data.get("情绪周期", "")
+            if sent:
+                import re as _re
+                # 提取情绪指数数字
+                m = _re.search(r'情绪指数=([\d.]+)', sent)
+                m1_val = float(m.group(1)) if m else 50
+                if m1_val < 30: ph_icon = "❄️"; ph_col = "#4CAF50"; ph_bg = "#4CAF5020"; ph_name = "冰点"
+                elif m1_val < 50: ph_icon = "📉"; ph_col = "#FF9800"; ph_bg = "#FF980020"; ph_name = "退潮"
+                elif m1_val < 70: ph_icon = "🌊"; ph_col = "#4ecdc4"; ph_bg = "#4ecdc420"; ph_name = "复苏"
+                else: ph_icon = "🔥"; ph_col = "#e94560"; ph_bg = "#e9456020"; ph_name = "高潮"
+                # 温度计
+                thermo_w = int(m1_val * 2)  # 0-100 → 0-200px
+                cards.append(f'''<div style="{card_css}background:linear-gradient(135deg,#0f2027,#203a43);color:#eee;">
+<div style="font-size:13px;font-weight:bold;margin-bottom:10px;">📈 情绪周期温度计</div>
+<div style="display:flex;align-items:center;gap:10px;">
+<div style="width:60px;height:60px;border-radius:50%;background:{ph_bg};border:3px solid {ph_col};display:flex;align-items:center;justify-content:center;font-size:28px;">{ph_icon}</div>
+<div style="flex:1;">
+<div style="font-size:16px;font-weight:bold;color:{ph_col};">{ph_name} (指数 {m1_val:.1f})</div>
+<div style="background:#333;border-radius:4px;height:12px;margin-top:6px;overflow:hidden;">
+<div style="width:{thermo_w}px;background:linear-gradient(90deg,#4CAF50,#ffd700,#e94560);height:100%;border-radius:4px;"></div>
+</div>
+<div style="font-size:10px;color:#888;margin-top:4px;">冰点30 ← 正常区间 → 高潮70</div>
+</div></div>
+<div style="font-size:11px;color:#888;margin-top:6px;">{sent}</div></div>''')
+        except Exception: pass
+
+        # ── 7. 股指期货 ──
+        try:
+            fut = data.get("股指期货") or data.get("大盘指数实时", {})
+            if fut:
+                if isinstance(fut, list):
+                    fut_html = "".join(
+                        f'<div style="background:#1a1a2e;padding:8px;border-radius:6px;font-size:12px;margin:3px 0;">📉 {s}</div>'
+                        for s in fut[:4])
+                elif isinstance(fut, dict):
+                    fut_html = ""
+                    for k, v in list(fut.items())[:4]:
+                        pct = v.get("pct", 0) if isinstance(v, dict) else 0
+                        col = "#e94560" if pct > 0 else "#4CAF50"
+                        fut_html += f'<div style="background:#1a1a2e;padding:8px;border-radius:6px;font-size:12px;margin:3px 0;">📉 {k} <span style="color:{col};font-weight:bold;">{pct:+.2f}%</span></div>'
+                else:
+                    fut_html = ""
+                if fut_html:
+                    cards.append(f'''<div style="{card_css}background:#0a0f1a;color:#eee;">
+<div style="font-size:13px;font-weight:bold;margin-bottom:8px;">📉 股指期货实时</div>{fut_html}</div>''')
+        except Exception: pass
+
+        # ── 8. 布鲁斯5维评分 (如果有) ──
+        try:
+            bruce = data.get("布鲁斯5维评分", {})
+            if bruce and isinstance(bruce, dict) and bruce.get("composite"):
+                comp = bruce.get("composite", 50)
+                verdict = bruce.get("verdict", "")
+                dims = {
+                    "📈趋势动量": bruce.get("趋势动量", 0),
+                    "📊量价配合": bruce.get("量价配合", 0),
+                    "🌊广度扩散": bruce.get("广度扩散", 0),
+                    "💰资金情绪": bruce.get("资金情绪", 0),
+                }
+                dim_html = ""
+                for name, score in dims.items():
+                    col = "#e94560" if score >= 65 else "#ffd700" if score >= 45 else "#4CAF50"
+                    bar_w = int(score * 1.8)  # max 180px
+                    dim_html += (f'<div style="margin:6px 0;">'
+                                 f'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px;">'
+                                 f'<span style="color:#ccc;">{name}</span><span style="color:{col};font-weight:bold;">{score}</span></div>'
+                                 f'<div style="background:#333;border-radius:3px;height:8px;overflow:hidden;">'
+                                 f'<div style="width:{bar_w}px;background:{col};height:100%;border-radius:3px;"></div></div>'
+                                 f'</div>')
+                cards.append(f'''<div style="{card_css}background:linear-gradient(135deg,#3e2723,#5d4037);color:#eee;">
+<div style="display:flex;align-items:center;margin-bottom:10px;">
+<div style="font-size:14px;font-weight:bold;">🎯 布鲁斯5维量化</div>
+<div style="margin-left:auto;background:rgba(255,255,255,0.1);padding:3px 10px;border-radius:12px;font-size:11px;">综合分 <span style="font-size:16px;font-weight:bold;color:#FFB74D;">{comp}</span>/100</div>
+</div>
+<div style="background:rgba(255,255,255,0.08);padding:8px;border-radius:6px;font-size:12px;margin-bottom:10px;">{verdict}</div>
+{dims_html}</div>''')
+        except Exception: pass
+
+        # ── 9. 全球资产 ──
+        try:
+            gl = data.get("全球资产", [])
+            if gl:
+                gl_html = ""
+                for s in gl[:5]:
+                    import re as _re
+                    m = _re.search(r'([+-][\d.]+)%', s)
+                    col = "#e94560" if m and "+" in m.group(1) else "#4CAF50" if m else "#aaa"
+                    gl_html += f'<div style="background:#1a1a2e;padding:6px 10px;border-radius:4px;font-size:12px;margin:3px 0;color:{col};">🌍 {s}</div>'
+                cards.append(f'''<div style="{card_css}background:#0a1a1a;color:#eee;">
+<div style="font-size:13px;font-weight:bold;margin-bottom:8px;">🌍 全球五资产</div>{gl_html}</div>''')
+        except Exception: pass
+
+        # 合并所有卡片 + 页脚
+        if not cards:
+            return ""
+        footer = f'<div style="text-align:center;color:#666;font-size:10px;margin:20px 0;padding-top:12px;border-top:1px dashed #ddd;">📊 数据来源: 游资看盘自动采集 · {date_str}</div>'
+        return "\n".join(cards) + footer
+
+    # -------- 辅助: MD → 微信 HTML --------
+    def _to_wechat_html(md_text, title="", data_cards=None):
+        """MD → 公众号 HTML, 可嵌入数据卡片"""
+        import re as _re
+        # 先转 MD → HTML body
+        lines = md_text.split("\n")
+        html_parts = []
+        for line in lines:
+            line = line.rstrip()
+            if not line:
+                html_parts.append('<p style="margin:8px 0;"></p>'); continue
+            if line.startswith("# "):
+                t = line[2:].strip()
+                html_parts.append(f'<h1 style="font-size:22px;font-weight:bold;color:#1a1a2e;text-align:center;margin:20px 0;">{t}</h1>'); continue
+            if line.startswith("## "):
+                t = line[3:].strip()
+                html_parts.append(f'<h2 style="font-size:18px;font-weight:bold;color:#16213e;margin:18px 0 10px;border-left:4px solid #e94560;padding-left:10px;">{t}</h2>'); continue
+            if line.startswith("### "):
+                t = line[4:].strip()
+                html_parts.append(f'<h3 style="font-size:16px;font-weight:bold;color:#0f3460;margin:14px 0 8px;">{t}</h3>'); continue
+            if line.strip() == "---":
+                html_parts.append('<hr style="border:none;border-top:1px dashed #ccc;margin:20px 0;">'); continue
+            if line.startswith(("- ", "* ", "· ")):
+                t = line[2:].strip()
+                t = _re.sub(r'\*\*(.+?)\*\*', r'<strong style="color:#e94560;">\1</strong>', t)
+                html_parts.append(f'<p style="margin:4px 0;padding-left:20px;color:#444;font-size:14px;line-height:1.7;">• {t}</p>'); continue
+            line = _re.sub(r'\*\*(.+?)\*\*', r'<strong style="color:#e94560;">\1</strong>', line)
+            html_parts.append(f'<p style="margin:8px 0;color:#333;font-size:15px;line-height:1.8;">{line}</p>')
+        body = "\n".join(html_parts)
+
+        # 组合: 数据卡片在标题之后、正文之前
+        header_cards = ""
+        if data_cards:
+            # 如果有 h1, 在其后插入卡片; 否则在开头
+            if body.startswith("<h1"):
+                idx = body.find("</h1>") + 5
+                header_cards = body[:idx] + "\n" + data_cards + "\n"
+                body = body[idx:].lstrip()
+            else:
+                header_cards = data_cards + "\n"
+
+        page_title = title or "A股财经文章"
+        return f'''<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>{page_title}</title></head>
 <body style="margin:0;padding:12px;background:#f5f5f5;">
 <section style="max-width:677px;margin:0 auto;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:#fff;padding:18px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
-{body}</section>
+{header_cards}{body}</section>
 </body></html>'''
 
     def _show_result_with_html(md, html, label=""):
