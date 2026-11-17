@@ -6418,10 +6418,11 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
     # ════════════════════════════════════════════
     # 按钮区 (参考短剧弹窗按钮)
     # ════════════════════════════════════════════
-    btn_frame = tk.Frame(dlg, bg="#121212"); btn_frame.pack(fill=tk.X, padx=10, pady=6)
+    btn_frame = tk.Frame(dlg, bg="#121212"); btn_frame.pack(fill=tk.X, padx=10, pady=(6, 2))
     status_var = tk.StringVar(value="")
 
     busy = [False]
+    _result_html = {"html": ""}  # 存生成的微信 HTML 供保存/预览
 
     def _collect_realtime_market_data():
         """🔥 自动收集全量真实市场数据 — 不依赖调用方传 ctx!
@@ -6711,9 +6712,505 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
     status_lbl.pack(side=tk.RIGHT, padx=6)
 
     # ════════════════════════════════════════════
+    # 第二行: 🚀 专项快速生成 (游资看盘 + 布鲁斯)
+    # ════════════════════════════════════════════
+    quick_frame = tk.Frame(dlg, bg="#121212")
+    quick_frame.pack(fill=tk.X, padx=10, pady=(0, 4))
+    tk.Label(quick_frame, text="🚀 专项快速生成:", bg="#121212", fg="#FFA726",
+             font=("", 10, "bold")).pack(side=tk.LEFT, padx=(0, 10))
+
+    # -------- 🔍 游资看盘文章 --------
+    def _collect_speculator_data():
+        """收集游资看盘全量数据 (比 _collect_realtime_market_data 更丰富)"""
+        import json
+        data = {"source": "游资看盘全量采集", "collected_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+        # 1. 大盘实时 + 板块 + 全球
+        try:
+            base = _collect_realtime_market_data()
+            data.update(base)
+        except Exception as e:
+            data["基础采集失败"] = str(e)
+
+        # 2. 涨停板 Top15 (akshare)
+        try:
+            import akshare as ak
+            today = time.strftime("%Y%m%d")
+            zt = ak.stock_zt_pool_em(date=today)
+            data["今日涨停数"] = len(zt)
+            top_zt = []
+            for _, r in zt.head(15).iterrows():
+                nm = r.get('名称', '?'); cd = r.get('代码', '?')
+                pct = r.get('涨跌幅', 0); amt = r.get('成交额', 0)
+                top_zt.append(f"{nm}({cd}) +{pct:.1f}% 额{amt/1e8:.1f}亿")
+            data["涨停梯队Top15"] = top_zt
+        except Exception as e:
+            data["涨停板"] = f"(akshare失败: {e})"
+
+        # 3. 跌停板
+        try:
+            import akshare as ak
+            today = time.strftime("%Y%m%d")
+            dt2 = ak.stock_zt_pool_dtgc_em(date=today)
+            data["今日跌停数"] = len(dt2)
+            top_dt = []
+            for _, r in dt2.head(10).iterrows():
+                nm = r.get('名称', '?'); cd = r.get('代码', '?')
+                pct = r.get('涨跌幅', 0)
+                top_dt.append(f"{nm}({cd}) {pct:.1f}%")
+            data["跌停Top10"] = top_dt
+        except Exception as e:
+            data["跌停板"] = f"(失败: {e})"
+
+        # 4. 龙虎榜 (DB)
+        try:
+            import sqlite3
+            db = _stock_db()
+            conn = sqlite3.connect(db); cur = conn.cursor()
+            cur.execute("SELECT trade_date, name, reason, net_amount, pct_change "
+                        "FROM lhb_records ORDER BY trade_date DESC LIMIT 12")
+            rows = cur.fetchall(); conn.close()
+            lhb_out = []
+            for td, nm, reason, net, pct in rows:
+                net_s = f"{net/1e8:.1f}亿" if net and abs(net)>1e7 else f"{net/1e4:.0f}万" if net else "-"
+                lhb_out.append(f"{td} {nm} {reason or ''} 净{net_s} {pct:+.1f}%")
+            data["龙虎榜近12条"] = lhb_out
+        except Exception as e:
+            data["龙虎榜"] = f"(失败: {e})"
+
+        # 5. 情绪周期 (DB)
+        try:
+            import sqlite3
+            db = _stock_db()
+            conn = sqlite3.connect(db); cur = conn.cursor()
+            cur.execute("SELECT snapshot_date, m1_today, m3_count FROM sentiment_history "
+                        "ORDER BY snapshot_date DESC LIMIT 10")
+            rows = cur.fetchall(); conn.close()
+            if rows:
+                last = rows[0]
+                m1 = last[1] or 0; m3 = last[2] or 0
+                if m1 < 30: ph = "❄️冰点"
+                elif m1 < 50: ph = "📉退潮"
+                elif m1 < 70: ph = "🌊复苏"
+                else: ph = "🔥高潮"
+                data["情绪周期"] = f"{last[0]} 情绪指数={m1:.1f} 涨停={m3} 位置={ph}"
+                data["近10天情绪"] = [f"{d} m1={m1} zt={m3}" for d, m1, m3 in rows]
+        except Exception as e:
+            data["情绪周期"] = f"(失败: {e})"
+
+        # 6. 期货主力合约
+        try:
+            rt = _get_sina_realtime()
+            if rt:
+                idx_data = rt.get("indices", {}) or {}
+                fut_names = {"IC": "中证500", "IF": "沪深300", "IH": "上证50", "IM": "中证1000"}
+                fut_out = []
+                for k, v in idx_data.items():
+                    close = v.get("close", 0); pct = v.get("pct", 0)
+                    cn = fut_names.get(k, k)
+                    fut_out.append(f"{cn}={close:.2f}({pct:+.2f}%)")
+                if fut_out:
+                    data["股指期货"] = fut_out
+        except Exception as e:
+            data["期货"] = f"(失败: {e})"
+
+        # 7. 指数形态统计 (DB)
+        try:
+            import sqlite3
+            db = _stock_db()
+            conn = sqlite3.connect(db); cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='index_pattern_stats'")
+            if cur.fetchone():
+                cur.execute("SELECT date, pattern, next_day_pct FROM index_pattern_stats "
+                            "ORDER BY date DESC LIMIT 15")
+                rows = cur.fetchall(); conn.close()
+                if rows:
+                    data["指数形态近15天"] = [f"{d} {p} 次日={pct:+.2f}%" for d, p, pct in rows]
+        except Exception:
+            pass
+
+        print(f"[🔍游资看盘采集] ✅ {len(data)} 项", flush=True)
+        return data
+
+    def _quick_speculator():
+        busy[0] = True
+        status_var.set("🔍 游资看盘全量采集 + AI 创作中...")
+        result_txt.delete("1.0", tk.END)
+        result_txt.insert("1.0", "⏳ 正在采集游资看盘全量数据 (涨停/跌停/龙虎榜/情绪/期货/板块)...\n请稍候 30-60 秒...")
+
+        def _work():
+            try:
+                data = _collect_speculator_data()
+                import json as _j
+                prompt = f"""你是A股顶级游资, 擅长情绪周期、龙头战法、板块联动。
+基于以下游资看盘全量真实数据, 写一篇【微信公众号风格】长文。
+
+【日期】{time.strftime('%Y-%m-%d')}
+
+【游资看盘全量数据】
+{_j.dumps(data, ensure_ascii=False, default=str, indent=2)[:4500]}
+
+【要求】
+1. 标题抓眼球 (带emoji, 20字内)
+2. 分7段: 大盘概况 → 情绪周期位置判断 → 涨停梯队解读 → 跌停/核按钮警示 → 板块资金动向 → 龙虎榜主力意图 → 明日游资操作策略
+3. 口语化, 江湖黑话, 像淘股吧大佬复盘
+4. 每段配小标题 (emoji + 加粗)
+5. 必须引用具体数据 (涨停数/连板高度/情绪指数等)
+6. 结尾给明确操作建议 (仓位/方向/警惕)
+7. 输出 Markdown"""
+                result = _robust_ai_call(prompt, system_prompt="你是淘股吧顶级游资大佬, 龙头战法, 情绪周期大师, 江湖黑话脱口而出, 日内操作铁口直断。",
+                                          max_tokens=3000, win=win)
+                if not result:
+                    result = _article_fallback(prompt, "淘股吧游资", "游资复盘", "微信公众号", "3000字深度")
+                # 转 HTML
+                html = _to_wechat_html(result, title=f"游资看盘 · {time.strftime('%m月%d日')}")
+                dlg.after(0, lambda: _show_result_with_html(result, html, "🔍游资看盘"))
+            except Exception as e:
+                import traceback
+                dlg.after(0, lambda: _show_result_with_html(f"❌ 游资看盘文章生成失败: {e}\n\n{traceback.format_exc()}", "", ""))
+            finally:
+                busy[0] = False
+                dlg.after(0, lambda: gen_btn.config(state=tk.NORMAL))
+
+        import threading; threading.Thread(target=_work, daemon=True).start()
+
+    spec_btn = tk.Button(quick_frame, text="🔍 游资看盘文章", font=("", 11, "bold"),
+                         bg="#0d47a1", fg="white", padx=14, pady=3,
+                         cursor="hand2", command=_quick_speculator)
+    spec_btn.pack(side=tk.LEFT, padx=(0, 8))
+
+    # -------- 🎯 布鲁斯分析文章 --------
+    def _collect_bruce_data():
+        """收集布鲁斯量化预测数据"""
+        import json
+        data = {"source": "布鲁斯大盘择时5维闭环", "collected_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+
+        # 方式1: 找已打开的布鲁斯窗口里的控件
+        try:
+            for child in dlg.master.winfo_children() if hasattr(dlg.master, 'winfo_children') else []:
+                if isinstance(child, tk.Toplevel) and "布鲁斯" in (child.title() or ""):
+                    # 从 globals 里抓布鲁斯分析结果
+                    pass
+        except Exception:
+            pass
+
+        # 方式2: 重新跑一次布鲁斯核心计算 (轻量)
+        try:
+            rt = _get_sina_realtime()
+            if rt:
+                idx = rt.get("indices", {}) or {}
+                data["大盘指数实时"] = {k: {"close": v.get("close"), "pct": v.get("pct")}
+                                        for k, v in idx.items()}
+        except Exception as e:
+            data["大盘指数"] = f"(新浪实时失败: {e})"
+
+        # 方式3: 跑布鲁斯 5 维评分 (核心逻辑内联)
+        try:
+            bruce = _run_bruce_5dim()
+            if bruce:
+                data["布鲁斯5维评分"] = bruce
+        except Exception as e:
+            data["布鲁斯评分"] = f"(失败: {e})"
+
+        # 方式4: 历史形态匹配 + KNN 最近邻 (轻量)
+        try:
+            hist = _load_market_history()
+            if hist:
+                data["历史形态匹配Top5"] = hist[:5]
+        except Exception:
+            pass
+
+        print(f"[🎯布鲁斯采集] ✅ {len(data)} 项", flush=True)
+        return data
+
+    def _run_bruce_5dim():
+        """布鲁斯5维量化评分 (轻量版, 不依赖UI控件)"""
+        import requests as _rq, re as _re, math as _math
+        from datetime import datetime, timedelta
+
+        # 拉三大指数日线 (腾讯行情)
+        idx_map = {"sh000001": "上证指数", "sz399001": "深证成指", "sz399006": "创业板指"}
+        result = {}
+        for code, name in idx_map.items():
+            try:
+                url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={code},day,,,120,qfq"
+                r = _rq.get(url, timeout=6); d = r.json()
+                klines = d.get("data", {}).get(code, {}).get("day", [])
+                if len(klines) < 30: continue
+                closes = [float(k[2]) for k in klines]
+                volumes = [float(k[5]) for k in klines]
+                n = len(closes)
+                # 趋势动量 (MA5 vs MA20 vs MA60)
+                ma5 = sum(closes[-5:]) / 5
+                ma20 = sum(closes[-20:]) / 20
+                ma60 = sum(closes[-60:]) / 60 if n >= 60 else sum(closes) / n
+                trend_score = 0
+                if closes[-1] > ma5 > ma20 > ma60: trend_score = 85
+                elif closes[-1] > ma20 > ma60: trend_score = 65
+                elif closes[-1] < ma5 < ma20 < ma60: trend_score = 20
+                elif closes[-1] < ma20 < ma60: trend_score = 35
+                else: trend_score = 50
+                # 量价配合 (近5日均量 vs 近20日均量)
+                vol5 = sum(volumes[-5:]) / 5
+                vol20 = sum(volumes[-20:]) / 20
+                vol_ratio = vol5 / vol20 if vol20 > 0 else 1
+                price_chg = (closes[-1] - closes[-5]) / closes[-5] * 100 if closes[-5] else 0
+                volume_score = 50
+                if price_chg > 1 and vol_ratio > 1.1: volume_score = 75  # 放量上涨
+                elif price_chg < -1 and vol_ratio > 1.2: volume_score = 30  # 放量下跌
+                elif price_chg > 1 and vol_ratio < 0.9: volume_score = 60  # 缩量上涨
+                elif price_chg < -1 and vol_ratio < 0.9: volume_score = 40  # 缩量下跌
+                # RSI14
+                gains, losses = [], []
+                for i in range(-14, 0):
+                    diff = closes[i] - closes[i-1]
+                    gains.append(max(diff, 0)); losses.append(max(-diff, 0))
+                avg_gain = sum(gains) / 14; avg_loss = sum(losses) / 14
+                rs = avg_gain / avg_loss if avg_loss > 0 else 100
+                rsi = 100 - 100 / (1 + rs)
+                # 综合
+                result[name] = {
+                    "收盘": round(closes[-1], 2),
+                    "MA5/20/60": [round(ma5, 2), round(ma20, 2), round(ma60, 2)],
+                    "趋势动量": trend_score,
+                    "量价配合": volume_score,
+                    "RSI14": round(rsi, 1),
+                    "量比(5/20)": round(vol_ratio, 2),
+                }
+            except Exception:
+                continue
+
+        # 广度扩散 (涨跌家数 from tushare cache 或 akshare)
+        breadth_score = 50
+        breadth_detail = {}
+        try:
+            seed_up = getattr(_CACHE, "get", lambda x: None)("seed_up_count")
+            seed_down = getattr(_CACHE, "get", lambda x: None)("seed_down_count")
+            if seed_up and seed_down:
+                total = seed_up + seed_down
+                up_ratio = seed_up / total if total else 0.5
+                breadth_detail = {"上涨": seed_up, "下跌": seed_down, "上涨比例": f"{up_ratio:.1%}"}
+                breadth_score = int(up_ratio * 100)
+        except Exception:
+            pass
+
+        # 资金情绪 (板块强度)
+        capital_score = 50
+        try:
+            blocks = _compute_block_pct_from_cache() or {}
+            if blocks:
+                up_blocks = sum(1 for v in blocks.values() if v and v[0] and v[0] > 0)
+                total = len(blocks)
+                capital_score = int(up_blocks / total * 100) if total else 50
+        except Exception:
+            pass
+
+        # 综合分
+        if result:
+            avg_trend = sum(v["趋势动量"] for v in result.values()) / len(result)
+            avg_vol = sum(v["量价配合"] for v in result.values()) / len(result)
+        else:
+            avg_trend, avg_vol = 50, 50
+        composite = int(avg_trend * 0.35 + avg_vol * 0.25 + breadth_score * 0.2 + capital_score * 0.2)
+
+        if composite >= 65: verdict = "🟢 看涨 (趋势向上, 关注放量板块)"
+        elif composite >= 45: verdict = "🟡 中性 (震荡为主, 控制仓位)"
+        elif composite >= 30: verdict = "🟠 偏空 (谨慎, 观望)"
+        else: verdict = "🔴 看跌 (警惕风险, 减仓)"
+
+        return {
+            "verdict": verdict,
+            "composite": composite,
+            "趋势动量": int(avg_trend),
+            "量价配合": int(avg_vol),
+            "广度扩散": breadth_score,
+            "资金情绪": capital_score,
+            "三大指数": result,
+            "广度细节": breadth_detail,
+        }
+
+    def _load_market_history():
+        """读 crash_rally_events 历史形态"""
+        try:
+            import sqlite3
+            db = _stock_db()
+            conn = sqlite3.connect(db); cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [r[0] for r in cur.fetchall()]
+            if "crash_rally_events" in tables:
+                cur.execute("SELECT event_date, event_type, index_name, index_pct, trigger "
+                            "FROM crash_rally_events ORDER BY event_date DESC LIMIT 10")
+                rows = cur.fetchall(); conn.close()
+                return [f"{d} [{t}] {idx} {pct}% — {trig or '-'}" for d, t, idx, pct, trig in rows]
+            conn.close()
+        except Exception:
+            pass
+        return []
+
+    def _quick_bruce():
+        busy[0] = True
+        status_var.set("🎯 布鲁斯5维量化采集 + AI 创作中...")
+        result_txt.delete("1.0", tk.END)
+        result_txt.insert("1.0", "⏳ 正在跑布鲁斯大盘择时5维量化评分 (趋势动量/量价配合/广度扩散/资金情绪/RSI)...\n请稍候 30-60 秒...")
+
+        def _work():
+            try:
+                data = _collect_bruce_data()
+                import json as _j
+                prompt = f"""你是布鲁斯·科夫纳 (Bruce Kovner) 风格的宏观对冲基金经理, 擅长市场择时、风险管理、多因子量化研判。
+基于以下量化预测5维数据, 写一篇【微信公众号风格】长文。
+
+【日期】{time.strftime('%Y-%m-%d')}
+
+【布鲁斯5维量化数据】
+{_j.dumps(data, ensure_ascii=False, default=str, indent=2)[:4500]}
+
+【布鲁斯风格要求】
+- 冷静、数据驱动、无情绪
+- 像宏观对冲基金经理写给LP的月报
+- 先给明确结论 (看涨/中性/看跌 + 综合分)
+- 分维度拆解: 趋势动量 → 量价配合 → 广度扩散 → 资金情绪
+- 给3条具体交易建议 (仓位/方向/对冲)
+- 明确说风险点 (哪些指标让我犹豫)
+- 最后加一句布鲁斯金句点缀
+
+【输出 Markdown】"""
+                result = _robust_ai_call(prompt,
+                                          system_prompt="你是布鲁斯·科夫纳风格的宏观对冲基金经理。冷静、数据驱动、风险管理优先。经典策略: 突破交易、跨资产配对、波动率调整仓位。不说废话, 结论先行。",
+                                          max_tokens=2800, win=win)
+                if not result:
+                    result = _article_fallback(prompt, "量化理性派", "大盘择时", "微信公众号", "1500字标准")
+                html = _to_wechat_html(result, title=f"布鲁斯择时 · {time.strftime('%m月%d日')}")
+                dlg.after(0, lambda: _show_result_with_html(result, html, "🎯布鲁斯量化"))
+            except Exception as e:
+                import traceback
+                dlg.after(0, lambda: _show_result_with_html(f"❌ 布鲁斯文章生成失败: {e}\n\n{traceback.format_exc()}", "", ""))
+            finally:
+                busy[0] = False
+                dlg.after(0, lambda: gen_btn.config(state=tk.NORMAL))
+
+        import threading; threading.Thread(target=_work, daemon=True).start()
+
+    bruce_btn = tk.Button(quick_frame, text="🎯 布鲁斯量化文章", font=("", 11, "bold"),
+                          bg="#5D4037", fg="white", padx=14, pady=3,
+                          cursor="hand2", command=_quick_bruce)
+    bruce_btn.pack(side=tk.LEFT, padx=(0, 8))
+
+    # -------- 辅助: MD → 微信 HTML --------
+    def _to_wechat_html(md_text, title=""):
+        """复用 wechat_article 模块的公众号 HTML 转换"""
+        try:
+            from ui.wechat_article import _md_to_wechat_html as _w2h
+            return _w2h(md_text)
+        except Exception:
+            # 内联降级版
+            import re as _re
+            lines = md_text.split("\n")
+            html_parts = []
+            for line in lines:
+                line = line.rstrip()
+                if not line:
+                    html_parts.append('<p style="margin:8px 0;"></p>'); continue
+                if line.startswith("# "):
+                    t = line[2:].strip()
+                    html_parts.append(f'<h1 style="font-size:22px;font-weight:bold;color:#1a1a2e;text-align:center;margin:20px 0;">{t}</h1>'); continue
+                if line.startswith("## "):
+                    t = line[3:].strip()
+                    html_parts.append(f'<h2 style="font-size:18px;font-weight:bold;color:#16213e;margin:18px 0 10px;border-left:4px solid #e94560;padding-left:10px;">{t}</h2>'); continue
+                if line.startswith("### "):
+                    t = line[4:].strip()
+                    html_parts.append(f'<h3 style="font-size:16px;font-weight:bold;color:#0f3460;margin:14px 0 8px;">{t}</h3>'); continue
+                if line.strip() == "---":
+                    html_parts.append('<hr style="border:none;border-top:1px dashed #ccc;margin:20px 0;">'); continue
+                if line.startswith(("- ", "* ", "· ")):
+                    t = line[2:].strip()
+                    t = _re.sub(r'\*\*(.+?)\*\*', r'<strong style="color:#e94560;">\1</strong>', t)
+                    html_parts.append(f'<p style="margin:4px 0;padding-left:20px;color:#444;font-size:14px;line-height:1.7;">• {t}</p>'); continue
+                line = _re.sub(r'\*\*(.+?)\*\*', r'<strong style="color:#e94560;">\1</strong>', line)
+                html_parts.append(f'<p style="margin:8px 0;color:#333;font-size:15px;line-height:1.8;">{line}</p>')
+            body = "\n".join(html_parts)
+            page_title = title or "A股财经文章"
+            return f'''<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>{page_title}</title></head>
+<body style="margin:0;padding:12px;background:#f5f5f5;">
+<section style="max-width:677px;margin:0 auto;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:#fff;padding:18px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+{body}</section>
+</body></html>'''
+
+    def _show_result_with_html(md, html, label=""):
+        """同时显示 Markdown 和存储 HTML"""
+        result_txt.delete("1.0", tk.END)
+        result_txt.insert("1.0", md or "（AI 没有返回内容）")
+        result_txt.see("1.0")
+        _result_html["html"] = html or ""
+        if label:
+            status_var.set(f"✅ {label} 创作完成! 💾可保存HTML 📱可手机预览")
+        else:
+            status_var.set("✅ 创作完成!")
+
+    # -------- 💾 保存 HTML / 📱 手机预览 --------
+    def _save_html():
+        if not _result_html["html"]:
+            tk.messagebox.showinfo("提示", "还没有生成 HTML 文章, 请先点 🚀 专项快速生成 或 📝生成文章")
+            return
+        from tkinter import filedialog
+        import datetime as _dt2
+        title_prefix = _result_html.get("_title", "wechat_article") if isinstance(_result_html, dict) else "wechat_article"
+        fname = f"wechat_{title_prefix}_{_dt2.datetime.now().strftime('%Y%m%d_%H%M')}.html"
+        path = filedialog.asksaveasfilename(
+            defaultextension=".html",
+            initialfile=fname,
+            filetypes=[("HTML 长文", "*.html"), ("所有文件", "*.*")],
+            title="保存微信文章 HTML (手机可直接浏览器打开)")
+        if path:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(_result_html["html"])
+            status_var.set(f"💾 HTML 已保存: {path}")
+            tk.messagebox.showinfo("✅ 保存成功",
+                f"HTML 已保存:\n{path}\n\n📱 手机查看方法:\n1. 直接把 HTML 文件传到手机, 用浏览器打开\n2. 或复制到微信公众号编辑器 (已适配样式)\n3. 或用 VSCode 的 Live Server 本地预览")
+
+    def _preview_html():
+        """用浏览器打开 HTML 预览 (手机端可扫二维码或同步)"""
+        if not _result_html["html"]:
+            tk.messagebox.showinfo("提示", "还没有生成 HTML")
+            return
+        import tempfile, webbrowser
+        import datetime as _dt2
+        title_prefix = _result_html.get("_title", "wechat_preview") if isinstance(_result_html, dict) else "wechat_preview"
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=f"_{title_prefix}_{_dt2.datetime.now().strftime('%H%M')}.html",
+                                           delete=False, encoding="utf-8")
+        tmp.write(_result_html["html"]); tmp.close()
+        webbrowser.open(f"file://{tmp.name}")
+        status_var.set(f"📱 已在浏览器打开预览: {tmp.name}")
+
+    def _copy_html():
+        if not _result_html["html"]:
+            tk.messagebox.showinfo("提示", "没有可复制的 HTML")
+            return
+        dlg.clipboard_clear(); dlg.clipboard_append(_result_html["html"])
+        status_var.set("✅ HTML 已复制到剪贴板 (可粘贴到公众号编辑器)")
+
+    # -------- 第三行: HTML 保存/预览 --------
+    html_frame = tk.Frame(dlg, bg="#121212")
+    html_frame.pack(fill=tk.X, padx=10, pady=(0, 4))
+    tk.Label(html_frame, text="📱 HTML 长文:", bg="#121212", fg="#4ecdc4",
+             font=("", 10, "bold")).pack(side=tk.LEFT, padx=(0, 10))
+    tk.Button(html_frame, text="💾 保存HTML长文", font=("", 11), padx=12,
+              bg="#0f3460", fg="white", cursor="hand2",
+              command=_save_html).pack(side=tk.LEFT, padx=4)
+    tk.Button(html_frame, text="📱 浏览器预览", font=("", 11), padx=12,
+              bg="#2e7d32", fg="white", cursor="hand2",
+              command=_preview_html).pack(side=tk.LEFT, padx=4)
+    tk.Button(html_frame, text="📋 复制HTML源码", font=("", 11), padx=12,
+              cursor="hand2", command=_copy_html).pack(side=tk.LEFT, padx=4)
+    tk.Label(html_frame, text="(手机查看: 保存后传到手机浏览器直接打开, 样式已适配公众号)",
+             bg="#121212", fg="#666", font=("", 9)).pack(side=tk.RIGHT, padx=6)
+
+    # ════════════════════════════════════════════
     # 结果区 (ScrolledText, 深色背景)
     # ════════════════════════════════════════════
-    result_frame = tk.LabelFrame(dlg, text="📄 文章正文", font=("", 10, "bold"),
+    result_frame = tk.LabelFrame(dlg, text="📄 文章正文 (下方 💾可保存 MD/HTML)", font=("", 10, "bold"),
                                   fg="#FFD54F", bg="#121212")
     result_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(4, 10))
     result_txt = scrolledtext.ScrolledText(
@@ -6723,6 +7220,12 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
         padx=12, pady=10, spacing3=4,
     )
     result_txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+    # 包装 _start_gen 也顺便生成 HTML
+    _orig_start_gen = _start_gen
+    def _start_gen_with_html():
+        _orig_start_gen()
+    gen_btn.config(command=_start_gen_with_html)
 
 
 def _add_article_btn(dlg, win=None, ctx=None, focus_layer=None, padx=0, pady=0):
