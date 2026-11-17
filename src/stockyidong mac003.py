@@ -4969,6 +4969,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             _ROW2 = [
                 ("🦅游资心法", 8, self._open_hotmoney_single_dialog),
                 ("💰提醒", 7, self._show_price_alert_dialog),
+                ("🎯588170提醒", 8, self._open_588170_alert_config),
                 ("🤝WorkBuddy", 9, self._show_workbuddy_dialog_v2),
                 ("🎯Martin操盘", 9, self._show_martin_dialog),
                 ("🎯高抛低吸", 8, self._show_high_low_swing),
@@ -6725,6 +6726,12 @@ def main():
             root.after(3000, _auto_start_price_alert)
         except Exception as _pe:
             print(f"[💰提醒] 自动恢复失败 (忽略): {_pe}", flush=True)
+        # 🎯 科创芯片ETF 588170 连续红色实体圆圈 — 收盘前15分钟提醒 (默认开启)
+        try:
+            if hasattr(app, '_start_588170_alert_on_boot'):
+                root.after(3000, app._start_588170_alert_on_boot)
+        except Exception as _ae:
+            print(f"[588170提醒] 启动失败 (忽略): {_ae}", flush=True)
         # 主窗口显示后, 不再自动后台加载大盘最新数据 — 用户明确反馈"启动不需要自动联网"
         # 需要时点大盘分析 Tab 右上角 🔄 按钮手动触发 (与程序启动零联网纪律一致)
         # try:

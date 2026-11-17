@@ -2055,5 +2055,355 @@ class WarningMixin:
             print("[预警开关] 破20日预警已关闭")
 
 
+    # ════════════════════════════════════════════════════
+    # 🎯 科创芯片ETF 588170 — 红色实体圆圈连续2天 收盘前15分钟提醒
+    # ════════════════════════════════════════════════════
+
+    def _ensure_588170_alert_state(self):
+        """初始化 588170 提醒的状态变量 (幂等)"""
+        if not hasattr(self, '_588170_alert_last_fired'):
+            self._588170_alert_last_fired = ""   # 最近触发日期 YYYY-MM-DD, 同一天不重复
+        if not hasattr(self, '_588170_alert_enabled'):
+            self._588170_alert_enabled = True    # 开关, 默认开
+        if not hasattr(self, '_588170_alert_after_id'):
+            self._588170_alert_after_id = None
+        if not hasattr(self, '_588170_alert_window'):
+            self._588170_alert_window = None
+
+    def _is_trading_day(self, d=None):
+        """粗略判断是否交易日 (跳过周末) — 节假日简化处理"""
+        d = d or datetime.now()
+        return d.weekday() < 5  # 0=Mon ... 4=Fri
+
+    def _is_in_alert_window(self, now=None):
+        """判断当前时间是否在收盘前15分钟窗口 [14:45, 15:00)"""
+        now = now or datetime.now()
+        if not self._is_trading_day(now): return False
+        hh, mm = now.hour, now.minute
+        return (hh == 14 and mm >= 45) or (hh == 14 and mm <= 59)
+
+    def _fetch_588170_daily(self, n=10):
+        """拉科创芯片ETF 588170 最近 n 天日线, 返回 list of dict {date, open, close}"""
+        rows = []
+        try:
+            if ak is not None:
+                # akshare ETF 日线
+                df = ak.fund_etf_hist_em(symbol="588170", period="daily", adjust="qfq")
+                if df is not None and len(df) > 0:
+                    # 列名: 日期,开盘,收盘,最高,最低,成交量,成交额,振幅,涨跌幅,涨跌额,换手率
+                    col_map = {}
+                    for c in df.columns:
+                        cl = str(c).strip()
+                        if cl in ("日期", "date"): col_map["date"] = c
+                        elif cl in ("开盘", "open"): col_map["open"] = c
+                        elif cl in ("收盘", "close"): col_map["close"] = c
+                    if len(col_map) >= 3:
+                        df2 = df.rename(columns={col_map["date"]: "date",
+                                                  col_map["open"]: "open",
+                                                  col_map["close"]: "close"})
+                        for _, r in df2.tail(n + 1).iterrows():
+                            try:
+                                rows.append({
+                                    "date": str(r["date"]),
+                                    "open": float(r["open"]),
+                                    "close": float(r["close"]),
+                                })
+                            except Exception: pass
+        except Exception as e:
+            print(f"[588170] akshare 拉取失败: {e}", flush=True)
+
+        if not rows:
+            # 降级: 用腾讯行情
+            try:
+                import requests
+                url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+                params = {"param": "sh588170,day,,,60,qfq"}
+                r = requests.get(url, params=params, timeout=10)
+                data = r.json()
+                kline = data.get("data", {}).get("sh588170", {}).get("day", [])
+                for k in kline[-(n + 1):]:
+                    try:
+                        rows.append({
+                            "date": str(k[0]),
+                            "open": float(k[1]),
+                            "close": float(k[2]),
+                        })
+                    except Exception: pass
+            except Exception as e:
+                print(f"[588170] 腾讯行情拉取失败: {e}", flush=True)
+        return rows
+
+    def _classify_daily_pattern_local(self, prev_close, open_p, close_p, gap_threshold=0.3):
+        """本地版 classify_daily_pattern (避免循环导入)"""
+        if prev_close <= 0 or open_p <= 0: return None
+        gap_pct = (open_p - prev_close) / prev_close * 100
+        body_pct = (close_p - open_p) / open_p * 100
+        if gap_pct > gap_threshold:
+            return "高开高走🟢" if body_pct >= 0 else "高开低走🔴"
+        elif gap_pct < -gap_threshold:
+            return "低开高走🟢" if body_pct >= 0 else "低开低走🔴"
+        else:
+            return "平走高🟢" if body_pct >= 0 else "平走低🔴"
+
+    def _check_588170_alert_condition(self):
+        """检查科创芯片ETF 588170 是否连续2天红色实体圆圈形态
+        返回: (triggered: bool, detail: str, recent_patterns: list)
+        """
+        rows = self._fetch_588170_daily(n=5)
+        if len(rows) < 3:
+            return False, f"日线数据不足(仅{len(rows)}行),跳过检查", []
+
+        # 逐日分类
+        patterns = []
+        for i in range(1, len(rows)):
+            prev_c = rows[i - 1]["close"]
+            o = rows[i]["open"]
+            c = rows[i]["close"]
+            p = self._classify_daily_pattern_local(prev_c, o, c)
+            pct_o = (o - prev_c) / prev_c * 100
+            pct_c = (c - prev_c) / prev_c * 100
+            patterns.append({
+                "date": rows[i]["date"],
+                "open": o, "close": c,
+                "gap_pct": round(pct_o, 2),
+                "close_pct": round(pct_c, 2),
+                "pattern": p,
+            })
+
+        if len(patterns) < 2:
+            return False, "分类后不足2天", patterns
+
+        # 取最新2天 (patterns[-2] 和 patterns[-1])
+        # 但注意: 日线在盘中时, 最后一行可能是今天(未收盘或刚收盘),
+        # 对于"连续两天红色"——收盘前15分钟时, 昨天已经是完整数据,
+        # 今天的 open/close 也已经有了(盘中 close = 当前价)
+        # 我们要的是"已完成的"连续2天 → 取 patterns[-2] 和 patterns[-1]
+        latest = patterns[-2:]  # 最近两个交易日
+        red_types = {"高开低走🔴", "低开低走🔴"}
+        all_red = all(p["pattern"] in red_types for p in latest)
+
+        detail_lines = []
+        for p in patterns[-4:]:
+            flag = "🔴" if p["pattern"] in red_types else "🟢⚪"
+            detail_lines.append(
+                f"{flag} {p['date']} O={p['open']:.3f} C={p['close']:.3f} "
+                f"gap={p['gap_pct']:+.2f}% close={p['close_pct']:+.2f}% → {p['pattern']}")
+        detail = "\n".join(detail_lines)
+
+        return all_red, detail, patterns
+
+    def _show_588170_alert(self, detail, patterns):
+        """⚠️ 科创芯片ETF 588170 连续红色实体圆圈 — 醒目弹窗"""
+        self._ensure_588170_alert_state()
+        # 只允许同时一个弹窗
+        if self._588170_alert_window and getattr(self._588170_alert_window, 'winfo_exists', lambda: False)():
+            try: self._588170_alert_window.lift(); self._588170_alert_window.focus()
+            except Exception: pass
+            return
+
+        top = tk.Toplevel(self.root)
+        top.title("⚠️ 科创芯片ETF 588170 — 连续红色实体圆圈预警!")
+        top.geometry("720x560")
+        top.configure(bg="#1a1a2e")
+        top.attributes("-topmost", True)
+        self._588170_alert_window = top
+
+        # 红色闪烁标题栏
+        header = tk.Frame(top, bg="#B71C1C")
+        header.pack(fill=tk.X)
+        tk.Label(header, text="⚠️  连续 2 天红色实体圆圈形态!  ⚠️",
+                 bg="#B71C1C", fg="white", font=("", 18, "bold")).pack(pady=12)
+
+        # 标的信息卡
+        info = tk.Frame(top, bg="#16213e"); info.pack(fill=tk.X, padx=14, pady=(10, 4))
+        tk.Label(info, text="🎯 科创芯片ETF (sh588170)",
+                 bg="#16213e", fg="#FFD54F", font=("", 14, "bold")).pack(side=tk.LEFT)
+        tk.Label(info, text="连续 2 个交易日出现高开/低开低走 🔴",
+                 bg="#16213e", fg="#E57373", font=("", 12)).pack(side=tk.RIGHT)
+
+        # 今日实时
+        now_sec = tk.Frame(top, bg="#16213e"); now_sec.pack(fill=tk.X, padx=14, pady=4)
+        try:
+            import requests
+            r = requests.get("https://qt.gtimg.cn/q=sh588170", timeout=5)
+            tokens = r.text.strip().split(";")[0].split("=")[1].strip('"').split("~")
+            if len(tokens) >= 48:
+                name, price, last_close, open_p, volume, turnover = tokens[1], tokens[3], tokens[4], tokens[5], tokens[6], tokens[37]
+                chg = (float(price) - float(last_close)) / float(last_close) * 100
+                col = "#e94560" if chg >= 0 else "#4CAF50"
+                tk.Label(now_sec,
+                         text=f"📌 现价 {price}   昨收 {last_close}   今开 {open_p}   涨幅 {chg:+.2f}%",
+                         bg="#16213e", fg=col, font=("", 13, "bold")).pack(side=tk.LEFT)
+        except Exception:
+            tk.Label(now_sec, text="(实时行情获取中...)", bg="#16213e", fg="#888", font=("", 11)).pack(side=tk.LEFT)
+
+        # 最近形态表格
+        body = tk.Frame(top, bg="#1a1a2e"); body.pack(fill=tk.BOTH, expand=True, padx=14, pady=10)
+        txt = scrolledtext.ScrolledText(body, font=("Menlo", 11), wrap=tk.WORD,
+                                         bg="#0a0a12", fg="#ddd", relief=tk.FLAT)
+        txt.pack(fill=tk.BOTH, expand=True)
+        txt.tag_configure("red", foreground="#e94560", font=("", 11, "bold"))
+        txt.tag_configure("green", foreground="#4CAF50", font=("", 11, "bold"))
+        txt.tag_configure("warn", foreground="#FFD54F", font=("", 11, "bold"))
+
+        txt.insert(tk.END, "📅 最近 4 个交易日形态:\n\n", "warn")
+        for line in detail.split("\n"):
+            if "🔴" in line: txt.insert(tk.END, line + "\n", "red")
+            elif "🟢" in line: txt.insert(tk.END, line + "\n", "green")
+            else: txt.insert(tk.END, line + "\n")
+        txt.insert(tk.END, "\n\n⚠️  连续红色实体圆圈 = 收盘前低走 + 次日继续低走\n", "warn")
+        txt.insert(tk.END, "💡  操作建议: 尾盘逢高减仓 / 做T兑现 / 等待止跌信号\n", "warn")
+        txt.insert(tk.END, "⏰  提醒窗口: 收盘前15分钟 (14:45)\n", "warn")
+        txt.config(state=tk.DISABLED)
+
+        # 底部按钮
+        btns = tk.Frame(top, bg="#1a1a2e"); btns.pack(fill=tk.X, padx=14, pady=(0, 14))
+
+        def _open_kline():
+            try:
+                self._open_stock_kline("588170", is_etf=True)
+            except Exception:
+                try: self._open_stock_kline("sh588170")
+                except Exception:
+                    tk.messagebox.showinfo("提示", "K线图入口不可用, 可双击主界面股票进入")
+
+        tk.Button(btns, text="📈 打开 K 线图", font=("", 12, "bold"),
+                  bg="#e94560", fg="white", padx=14, pady=4, cursor="hand2",
+                  command=_open_kline).pack(side=tk.LEFT, padx=4)
+        tk.Button(btns, text="👀 知道了 (今天不再弹)", font=("", 11),
+                  bg="#555", fg="white", padx=12, pady=4, cursor="hand2",
+                  command=top.destroy).pack(side=tk.RIGHT, padx=4)
+
+        # 闪烁标题 (吸引注意力)
+        self._blink_588170_alert(top)
+
+    def _blink_588170_alert(self, win, count=0):
+        """标题栏闪红提醒"""
+        try:
+            if not win.winfo_exists(): return
+            cur = win.cget("bg")
+            if cur == "#1a1a2e":
+                win.configure(bg="#3a1a1a")
+            else:
+                win.configure(bg="#1a1a2e")
+            if count < 10:
+                self.root.after(400, lambda: self._blink_588170_alert(win, count + 1))
+        except Exception: pass
+
+    def _tick_588170_alert(self):
+        """每分钟 tick: 检查是否进入收盘前15分钟窗口 + 条件触发"""
+        self._ensure_588170_alert_state()
+        try:
+            now = datetime.now()
+            today = now.strftime("%Y-%m-%d")
+
+            if self._588170_alert_enabled and self._is_in_alert_window(now):
+                if self._588170_alert_last_fired != today:
+                    triggered, detail, patterns = self._check_588170_alert_condition()
+                    if triggered:
+                        print(f"[588170提醒] ✅ 条件触发! 连续2天红色实体圆圈 → 弹窗!", flush=True)
+                        self._588170_alert_last_fired = today
+                        self.root.after(0, lambda: self._show_588170_alert(detail, patterns))
+                    else:
+                        # 条件不满足, 打个日志方便调试
+                        if now.minute == 45:
+                            print(f"[588170提醒] 14:45窗口, 条件未触发:\n{detail}", flush=True)
+
+            # 下一分钟再查 (但只在交易时段查, 省CPU)
+            hh = now.hour
+            if 8 <= hh <= 15:
+                self._588170_alert_after_id = self.root.after(60 * 1000, self._tick_588170_alert)
+            else:
+                # 非交易时段, 5分钟后再查
+                self._588170_alert_after_id = self.root.after(5 * 60 * 1000, self._tick_588170_alert)
+        except Exception as e:
+            print(f"[588170提醒] tick 异常: {e}", flush=True)
+            self._588170_alert_after_id = self.root.after(60 * 1000, self._tick_588170_alert)
+
+    # -------- 按钮: 提醒设置面板 --------
+    def _open_588170_alert_config(self):
+        """💡 588170 形态提醒设置面板 (可开关/手动测试)"""
+        self._ensure_588170_alert_state()
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("💡 科创芯片ETF 588170 — 红色实体圆圈提醒")
+        dlg.geometry("560x420"); dlg.configure(bg="#1a1a2e")
+
+        header = tk.Frame(dlg, bg="#0f3460"); header.pack(fill=tk.X)
+        tk.Label(header, text="💡 科创芯片ETF (sh588170) — 连续红色实体圆圈提醒",
+                 bg="#0f3460", fg="#FFD54F", font=("", 13, "bold")).pack(pady=10)
+
+        body = tk.Frame(dlg, bg="#1a1a2e"); body.pack(fill=tk.BOTH, expand=True, padx=14, pady=10)
+
+        tk.Label(body, text="🎯 触发条件:", bg="#1a1a2e", fg="#FFD54F",
+                 font=("", 11, "bold"), anchor="w").pack(fill=tk.X)
+        tk.Label(body, text="• 科创芯片ETF (sh588170) 连续 2 个交易日形态为:\n"
+                            "   高开低走🔴 或 低开低走🔴\n"
+                            "• 检测窗口: 每个交易日 14:45 ~ 15:00 (收盘前15分钟)\n"
+                            "• 同一天只提醒 1 次 (弹窗前闪烁标题栏)",
+                 bg="#1a1a2e", fg="#aaa", font=("", 10), justify=tk.LEFT,
+                 anchor="w").pack(fill=tk.X, pady=(4, 10))
+
+        # 开关
+        self._588170_alert_var = tk.BooleanVar(value=self._588170_alert_enabled)
+        cb = tk.Checkbutton(body, text="✅ 启用收盘前15分钟提醒",
+                            variable=self._588170_alert_var,
+                            bg="#1a1a2e", fg="#E57373", selectcolor="#333",
+                            font=("", 12, "bold"), activebackground="#1a1a2e",
+                            command=lambda: self._set_588170_alert_enable(self._588170_alert_var.get()))
+        cb.pack(pady=8)
+
+        # 状态
+        status = tk.Frame(body, bg="#1a1a2e"); status.pack(fill=tk.X, pady=4)
+        st_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        st1 = "✅ 运行中" if self._588170_alert_after_id else "⏸️ 未启动"
+        st2 = f"上次提醒: {self._588170_alert_last_fired or '从未'}"
+        tk.Label(status, text=f"📡 监控状态: {st1}  |  📅 {st2}",
+                 bg="#1a1a2e", fg="#888", font=("", 10)).pack(side=tk.LEFT)
+
+        # 手动测试按钮
+        def _test_now():
+            triggered, detail, patterns = self._check_588170_alert_condition()
+            if triggered:
+                self._show_588170_alert(detail, patterns)
+                tk.messagebox.showinfo("✅", f"触发条件满足, 弹窗已打开!\n\n{detail}")
+            else:
+                tk.messagebox.showinfo("ℹ️",
+                    f"当前不满足连续2天红色实体圆圈条件\n\n最近形态:\n{detail}")
+
+        btns = tk.Frame(body, bg="#1a1a2e"); btns.pack(pady=14)
+        tk.Button(btns, text="🧪 立即检查 & 弹窗测试", font=("", 12, "bold"),
+                  bg="#e94560", fg="white", padx=16, pady=6, cursor="hand2",
+                  command=_test_now).pack(side=tk.LEFT, padx=6)
+        tk.Button(btns, text="关闭", font=("", 11), padx=10,
+                  command=dlg.destroy).pack(side=tk.LEFT, padx=6)
+
+        # 启动定时器 (确保已在跑)
+        self._ensure_588170_alert_state()
+        if self._588170_alert_after_id is None:
+            self._tick_588170_alert()
+
+    def _set_588170_alert_enable(self, on):
+        """开关切换"""
+        self._588170_alert_enabled = on
+        if on:
+            self._ensure_588170_alert_state()
+            if self._588170_alert_after_id is None:
+                self._tick_588170_alert()
+            print(f"[588170提醒] ✅ 已启用", flush=True)
+        else:
+            if self._588170_alert_after_id:
+                try: self.root.after_cancel(self._588170_alert_after_id)
+                except Exception: pass
+                self._588170_alert_after_id = None
+            print(f"[588170提醒] ⏸️ 已关闭", flush=True)
+
+    def _start_588170_alert_on_boot(self):
+        """程序启动时自动开启 588170 提醒 (主程序 __init__ 中调用)"""
+        self._ensure_588170_alert_state()
+        # 延迟 5s 启动, 等主界面初始化完
+        self.root.after(5000, self._tick_588170_alert)
+        print(f"[588170提醒] 📡 已启动定时监控 (收盘前15分钟提醒)", flush=True)
+
 
 __all__ = ["WarningMixin"]
