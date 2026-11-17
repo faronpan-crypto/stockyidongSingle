@@ -6424,6 +6424,19 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
     busy = [False]
     _result_html = {"html": ""}  # 存生成的微信 HTML 供保存/预览
 
+    # 统一 DB 路径查找 (复用 wechat_article 模块)
+    try:
+        from ui.wechat_article import _stock_db as _stock_db_path
+    except Exception:
+        def _stock_db_path():
+            import os as _os_local
+            here = _os_local.path.dirname(_os_local.path.abspath(__file__))
+            root = _os_local.path.dirname(_os_local.path.dirname(here))
+            for p in [_os_local.path.join(root, "data", "stock_analysis.db"),
+                      _os_local.path.expanduser("~/.qclaw/stock_analysis.db")]:
+                if _os_local.path.exists(p): return p
+            return _os_local.path.expanduser("~/.qclaw/stock_analysis.db")
+
     def _collect_realtime_market_data():
         """🔥 自动收集全量真实市场数据 — 不依赖调用方传 ctx!
         
@@ -6764,7 +6777,7 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
         # 4. 龙虎榜 (DB)
         try:
             import sqlite3
-            db = _stock_db()
+            db = _stock_db_path()
             conn = sqlite3.connect(db); cur = conn.cursor()
             cur.execute("SELECT trade_date, name, reason, net_amount, pct_change "
                         "FROM lhb_records ORDER BY trade_date DESC LIMIT 12")
@@ -6780,7 +6793,7 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
         # 5. 情绪周期 (DB)
         try:
             import sqlite3
-            db = _stock_db()
+            db = _stock_db_path()
             conn = sqlite3.connect(db); cur = conn.cursor()
             cur.execute("SELECT snapshot_date, m1_today, m3_count FROM sentiment_history "
                         "ORDER BY snapshot_date DESC LIMIT 10")
@@ -6816,7 +6829,7 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
         # 7. 指数形态统计 (DB)
         try:
             import sqlite3
-            db = _stock_db()
+            db = _stock_db_path()
             conn = sqlite3.connect(db); cur = conn.cursor()
             cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='index_pattern_stats'")
             if cur.fetchone():
@@ -7032,7 +7045,7 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
         """读 crash_rally_events 历史形态"""
         try:
             import sqlite3
-            db = _stock_db()
+            db = _stock_db_path()
             conn = sqlite3.connect(db); cur = conn.cursor()
             cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = [r[0] for r in cur.fetchall()]
