@@ -6422,9 +6422,9 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
     status_var = tk.StringVar(value="")
 
     busy = [False]
-    _result_html = {"html": ""}  # 存生成的微信 HTML 供保存/预览
+    _result_html = {"html": "", "article_id": None}  # 存生成的微信 HTML + 当前存档ID
 
-    # 统一 DB 路径查找 (复用 wechat_article 模块)
+    # 统一 DB 路径查找 (复用 wechat_article 模块) — ⚠️ 必须在存档/DB操作之前
     try:
         from ui.wechat_article import _stock_db as _stock_db_path
     except Exception:
@@ -6436,6 +6436,63 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
                       _os_local.path.expanduser("~/.qclaw/stock_analysis.db")]:
                 if _os_local.path.exists(p): return p
             return _os_local.path.expanduser("~/.qclaw/stock_analysis.db")
+
+    # ===== 文章历史存档 (SQLite) =====
+    try:
+        import sqlite3 as _sql3
+        _ART_DB = _stock_db_path()
+        _ART_CONN = _sql3.connect(_ART_DB)
+        _ART_CUR = _ART_CONN.cursor()
+        _ART_CUR.execute("""CREATE TABLE IF NOT EXISTS wechat_articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT,
+            title TEXT,
+            source TEXT,
+            author TEXT,
+            mode TEXT,
+            platform TEXT,
+            markdown TEXT,
+            html TEXT,
+            archived_at TEXT
+        )""")
+        _ART_CONN.commit()
+        def _archive_article(title, source, author, mode, platform, md, html):
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                cur = _ART_CONN.cursor()
+                cur.execute(
+                    "INSERT INTO wechat_articles(created_at,title,source,author,mode,platform,markdown,html,archived_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?)",
+                    (now, title[:80], source[:20], author[:20], mode[:20], platform[:20], md, html, now))
+                _ART_CONN.commit()
+                return cur.lastrowid
+            except Exception as e:
+                print(f"[📚存档] 失败: {e}", flush=True); return None
+        def _list_articles(limit=30):
+            try:
+                cur = _ART_CONN.cursor()
+                cur.execute("SELECT id,created_at,title,source,LENGTH(markdown) FROM wechat_articles ORDER BY id DESC LIMIT ?", (limit,))
+                return cur.fetchall()
+            except Exception: return []
+        def _get_article(article_id):
+            try:
+                cur = _ART_CONN.cursor()
+                cur.execute("SELECT * FROM wechat_articles WHERE id=?", (article_id,))
+                return cur.fetchone()
+            except Exception: return None
+        def _delete_article(article_id):
+            try:
+                cur = _ART_CONN.cursor()
+                cur.execute("DELETE FROM wechat_articles WHERE id=?", (article_id,))
+                _ART_CONN.commit(); return True
+            except Exception: return False
+    except Exception as _e_art:
+        print(f"[📚存档] DB初始化失败: {_e_art}", flush=True)
+        _ART_CONN = None
+        def _archive_article(*a, **k): return None
+        def _list_articles(*a, **k): return []
+        def _get_article(*a, **k): return None
+        def _delete_article(*a, **k): return False
 
     def _collect_realtime_market_data():
         """🔥 自动收集全量真实市场数据 — 不依赖调用方传 ctx!
@@ -6877,7 +6934,7 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
                 # 🧱 生成数据豆腐干卡片 + 转 HTML
                 cards = _build_speculator_data_cards(data)
                 html = _to_wechat_html(result, title=f"游资看盘 · {time.strftime('%m月%d日')}", data_cards=cards)
-                dlg.after(0, lambda: _show_result_with_html(result, html, "🔍游资看盘"))
+                dlg.after(0, lambda: _show_result_with_html(result, html, "🔍游资看盘", source="🔍游资看盘"))
             except Exception as e:
                 import traceback
                 dlg.after(0, lambda: _show_result_with_html(f"❌ 游资看盘文章生成失败: {e}\n\n{traceback.format_exc()}", "", ""))
@@ -7096,7 +7153,7 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
                 # 🧱 布鲁斯也可以生成数据卡片 (含5维评分)
                 cards = _build_speculator_data_cards(data)
                 html = _to_wechat_html(result, title=f"布鲁斯择时 · {time.strftime('%m月%d日')}", data_cards=cards)
-                dlg.after(0, lambda: _show_result_with_html(result, html, "🎯布鲁斯量化"))
+                dlg.after(0, lambda: _show_result_with_html(result, html, "🎯布鲁斯量化", source="🎯布鲁斯量化"))
             except Exception as e:
                 import traceback
                 dlg.after(0, lambda: _show_result_with_html(f"❌ 布鲁斯文章生成失败: {e}\n\n{traceback.format_exc()}", "", ""))
@@ -7373,79 +7430,369 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
 {header_cards}{body}</section>
 </body></html>'''
 
-    def _show_result_with_html(md, html, label=""):
-        """同时显示 Markdown 和存储 HTML"""
+    def _show_result_with_html(md, html, label="", source=""):
+        """显示结果 + 自动存档 + 存HTML"""
         result_txt.delete("1.0", tk.END)
         result_txt.insert("1.0", md or "（AI 没有返回内容）")
         result_txt.see("1.0")
         _result_html["html"] = html or ""
         if label:
-            status_var.set(f"✅ {label} 创作完成! 💾可保存HTML 📱可手机预览")
+            status_var.set(f"✅ {label} 创作完成! 📚已自动存档")
         else:
             status_var.set("✅ 创作完成!")
+        # 📚 自动存档到 SQLite
+        try:
+            title_line = (md or "").split("\n")[0].strip().lstrip("# ").strip()[:80] or "无标题文章"
+            try:
+                _author = selected_author.get()
+                _mode = selected_mode.get()
+                _plat = selected_plat.get()
+            except Exception:
+                _author = "自定义"; _mode = "自定义"; _plat = "微信公众号"
+            art_id = _archive_article(
+                title=title_line,
+                source=source or label or "📝自定义",
+                author=_author, mode=_mode, platform=_plat,
+                md=md or "", html=html or "")
+            _result_html["article_id"] = art_id
+            if art_id:
+                print(f"[📚存档] ✅ id={art_id} title={title_line[:30]}", flush=True)
+        except Exception as e:
+            print(f"[📚存档] 失败: {e}", flush=True)
 
-    # -------- 💾 保存 HTML / 📱 手机预览 --------
+    # -------- 历史回顾弹窗 --------
+    def _open_history():
+        hist = tk.Toplevel(dlg)
+        hist.title("📚 文章历史存档")
+        hist.geometry("900x620")
+        hist.configure(bg="#1a1a2e")
+
+        bar = tk.Frame(hist, bg="#1a1a2e"); bar.pack(fill=tk.X, padx=10, pady=8)
+        tk.Label(bar, text="📚 已存档文章 (双击查看 · 选中后分享/删除)",
+                 bg="#1a1a2e", fg="#FFD54F", font=("", 12, "bold")).pack(side=tk.LEFT)
+        count = len(_list_articles(100))
+        tk.Label(bar, text=f"共 {count} 篇", bg="#1a1a2e", fg="#888", font=("", 10)).pack(side=tk.RIGHT)
+
+        # Treeview 列表
+        import tkinter.ttk as _ttk2
+        tree_frame = tk.Frame(hist, bg="#1a1a2e")
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+        cols = ("id", "created_at", "title", "source", "size")
+        tree = _ttk2.Treeview(tree_frame, columns=cols, show="headings", height=18)
+        tree.heading("id", text="ID"); tree.heading("created_at", text="创建时间")
+        tree.heading("title", text="标题"); tree.heading("source", text="来源")
+        tree.heading("size", text="字数")
+        tree.column("id", width=50); tree.column("created_at", width=140)
+        tree.column("title", width=420); tree.column("source", width=120)
+        tree.column("size", width=80)
+        vsb = tk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def _reload():
+            for item in tree.get_children(): tree.delete(item)
+            for row in _list_articles(100):
+                tree.insert("", tk.END, values=row)
+        _reload()
+
+        # 查看/分享弹窗
+        def _view_or_share(article_id):
+            art = _get_article(article_id)
+            if not art:
+                tk.messagebox.showerror("错误", "文章不存在")
+                return
+            # art tuple: (id, created_at, title, source, author, mode, platform, markdown, html, archived_at)
+            _, created_at, title, source, author, mode, platform, md, html, archived = art
+
+            detail = tk.Toplevel(hist)
+            detail.title(f"📖 {title[:50]}")
+            detail.geometry("1000x700"); detail.configure(bg="#1a1a2e")
+
+            meta = tk.Frame(detail, bg="#1a1a2e"); meta.pack(fill=tk.X, padx=10, pady=8)
+            tk.Label(meta, text=f"📖 {title}", bg="#1a1a2e", fg="#FFD54F",
+                     font=("", 13, "bold")).pack(side=tk.LEFT)
+            tk.Label(meta, text=f"🕐 {created_at} · {source} · {author} · {mode}",
+                     bg="#1a1a2e", fg="#888", font=("", 10)).pack(side=tk.LEFT, padx=10)
+
+            nb2 = _ttk2.Notebook(detail); nb2.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+            tab_md = tk.Frame(nb2, bg="#0f0f1a"); nb2.add(tab_md, text="📝 Markdown 正文")
+            tab_html = tk.Frame(nb2, bg="#0f0f1a"); nb2.add(tab_html, text="📱 HTML 预览")
+
+            md_txt = scrolledtext.ScrolledText(tab_md, font=("", 11), wrap=tk.WORD,
+                                                bg="#0a0a12", fg="#ddd", relief=tk.FLAT)
+            md_txt.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+            md_txt.insert("1.0", md or "(空)")
+
+            html_txt = scrolledtext.ScrolledText(tab_html, font=("Menlo", 10), wrap=tk.WORD,
+                                                  bg="#0a0a12", fg="#4ecdc4", relief=tk.FLAT)
+            html_txt.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+            html_txt.insert("1.0", html or "(空)")
+
+            # 分享按钮
+            def _share_to_wechat():
+                _do_share(title, md, html, dest_dlg=detail)
+
+            def _open_browser():
+                if html:
+                    import tempfile, webbrowser
+                    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=f"_art{article_id}.html",
+                                                      delete=False, encoding="utf-8")
+                    tmp.write(html); tmp.close()
+                    webbrowser.open(f"file://{tmp.name}")
+                    status_var.set(f"📱 已在浏览器打开历史文章 #{article_id}")
+
+            def _copy_md():
+                detail.clipboard_clear(); detail.clipboard_append(md or "")
+                tk.messagebox.showinfo("✅", "Markdown 已复制, 可粘贴到微信发给朋友")
+
+            def _copy_html():
+                detail.clipboard_clear(); detail.clipboard_append(html or "")
+                tk.messagebox.showinfo("✅", "HTML 源码已复制")
+
+            btn_fr = tk.Frame(detail, bg="#1a1a2e"); btn_fr.pack(fill=tk.X, padx=10, pady=(0, 8))
+            tk.Button(btn_fr, text="📤 分享到微信朋友", font=("", 11, "bold"),
+                      bg="#07C160", fg="white", padx=14, pady=4, cursor="hand2",
+                      command=_share_to_wechat).pack(side=tk.LEFT, padx=4)
+            tk.Button(btn_fr, text="📱 浏览器预览", font=("", 11), padx=10,
+                      bg="#2e7d32", fg="white", command=_open_browser).pack(side=tk.LEFT, padx=4)
+            tk.Button(btn_fr, text="📋 复制MD正文", font=("", 11), padx=10,
+                      command=_copy_md).pack(side=tk.LEFT, padx=4)
+            tk.Button(btn_fr, text="📋 复制HTML源码", font=("", 11), padx=10,
+                      command=_copy_html).pack(side=tk.LEFT, padx=4)
+
+        # 双击查看
+        def _on_double(e):
+            sel = tree.selection()
+            if sel:
+                _view_or_share(tree.item(sel[0])["values"][0])
+        tree.bind("<Double-1>", _on_double)
+
+        # 底部按钮
+        bot = tk.Frame(hist, bg="#1a1a2e"); bot.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        def _share_selected():
+            sel = tree.selection()
+            if not sel:
+                tk.messagebox.showinfo("提示", "请先选中一篇文章")
+                return
+            art_id = tree.item(sel[0])["values"][0]
+            _view_or_share(art_id)
+
+        def _delete_selected():
+            sel = tree.selection()
+            if not sel: return
+            art_id = tree.item(sel[0])["values"][0]
+            if tk.messagebox.askyesno("确认", f"确定删除文章 #{art_id} ?"):
+                if _delete_article(art_id):
+                    _reload(); status_var.set(f"🗑️ 已删除文章 #{art_id}")
+
+        def _export_all():
+            arts = _list_articles(100)
+            if not arts:
+                tk.messagebox.showinfo("提示", "没有存档文章")
+                return
+            from tkinter import filedialog
+            folder = filedialog.askdirectory(title="选择导出目录 (将保存为 HTML 文件方便微信分享)")
+            if not folder: return
+            import os
+            cnt = 0
+            for row in arts:
+                art = _get_article(row[0])
+                if art and art[8]:  # has html
+                    title = art[2].replace("/", "_")[:40]
+                    fname = f"{row[1].replace(':','-').replace(' ','_')}_{title}.html"
+                    try:
+                        with open(os.path.join(folder, fname), "w", encoding="utf-8") as f:
+                            f.write(art[8]); cnt += 1
+                    except Exception: pass
+            tk.messagebox.showinfo("✅", f"已导出 {cnt} 篇 HTML 到:\n{folder}\n\n📱 把文件夹传到手机即可用浏览器打开")
+
+        tk.Button(bot, text="📖 查看/分享选中", font=("", 11, "bold"),
+                  bg="#07C160", fg="white", padx=14, pady=4,
+                  command=_share_selected).pack(side=tk.LEFT, padx=4)
+        tk.Button(bot, text="🗑️ 删除选中", font=("", 11), padx=10,
+                  bg="#B71C1C", fg="white", command=_delete_selected).pack(side=tk.LEFT, padx=4)
+        tk.Button(bot, text="📤 批量导出HTML", font=("", 11), padx=10,
+                  command=_export_all).pack(side=tk.LEFT, padx=4)
+        tk.Button(bot, text="🔄 刷新", font=("", 11), padx=10,
+                  command=_reload).pack(side=tk.LEFT, padx=4)
+
+    # -------- 📤 分享到微信 (多渠道) --------
+    def _do_share(title, md, html, dest_dlg=None):
+        """分享对话框 — 4种方式"""
+        share = tk.Toplevel(dest_dlg or dlg)
+        share.title(f"📤 分享: {title[:25]}")
+        share.configure(bg="#1a1a2e"); share.geometry("560x520")
+
+        tk.Label(share, text=f"📤 分享文章到微信朋友",
+                 bg="#1a1a2e", fg="#FFD54F",
+                 font=("", 13, "bold")).pack(pady=(16, 10))
+        tk.Label(share, text=f"📄 {title[:50]}",
+                 bg="#1a1a2e", fg="#888", font=("", 10)).pack()
+
+        tk.Frame(share, bg="#333", height=1).pack(fill=tk.X, padx=20, pady=14)
+
+        # 方式1: 存桌面文件夹 (手机 AirDrop 最方便)
+        def _share_to_desktop():
+            import os, webbrowser
+            desktop = os.path.expanduser("~/Desktop")
+            folder = os.path.join(desktop, "📈股票文章分享")
+            os.makedirs(folder, exist_ok=True)
+            fname = f"分享_{time.strftime('%m%d_%H%M')}_{title[:15].replace('/','_')}.html"
+            path = os.path.join(folder, fname)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(html or _to_wechat_html(md, title=title))
+            # 同时存 MD
+            md_path = path.replace(".html", ".md")
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(md or "")
+            tk.messagebox.showinfo("✅ 已保存到桌面",
+                f"📁 文件夹: {folder}\n\n📱 给朋友方法:\n"
+                f"1️⃣ Mac 和朋友都开 AirDrop → 直接把 HTML 拖给他\n"
+                f"2️⃣ 微信 Mac版 → 拖 HTML 文件到聊天框\n"
+                f"3️⃣ 用微信「文件传输助手」发给自己 → 手机浏览器打开\n"
+                f"4️⃣ 朋友收到后用手机浏览器打开 HTML, 图文并茂")
+            status_var.set(f"✅ 已存桌面: {folder}")
+            # 打开文件夹
+            import subprocess
+            subprocess.Popen(["open", folder])
+
+        tk.Button(share, text="① 存桌面「📈股票文章分享」文件夹\n(AirDrop / 微信文件传输助手发给手机)",
+                  font=("", 11), bg="#0d47a1", fg="white", padx=12, pady=10,
+                  width=50, justify=tk.LEFT, cursor="hand2",
+                  command=_share_to_desktop).pack(pady=6, padx=20, fill=tk.X)
+
+        # 方式2: macOS 分享面板 (微信/邮件/AirDrop)
+        def _share_via_macos():
+            import os, tempfile, subprocess
+            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=f"_share.html",
+                                              delete=False, encoding="utf-8")
+            tmp.write(html or _to_wechat_html(md, title=title)); tmp.close()
+            # osascript 调 macOS share sheet
+            script = f'''set theFile to POSIX file "{tmp.name}"
+tell application "System Events" to share item (theFile as alias)'''
+            try:
+                subprocess.Popen(["osascript", "-e", script])
+                tk.messagebox.showinfo("✅", "macOS 分享面板已打开\n选择「微信」发给朋友即可")
+            except Exception:
+                # 降级: 直接在浏览器打开
+                import webbrowser
+                webbrowser.open(f"file://{tmp.name}")
+                tk.messagebox.showinfo("⚠️", "分享面板调起失败, 已在浏览器打开\n可 ⌘+S 保存, 或复制链接发给朋友")
+
+        tk.Button(share, text="② 调 macOS 分享面板\n(直接选微信/邮件/AirDrop)",
+                  font=("", 11), bg="#5d4037", fg="white", padx=12, pady=10,
+                  width=50, justify=tk.LEFT, cursor="hand2",
+                  command=_share_via_macos).pack(pady=6, padx=20, fill=tk.X)
+
+        # 方式3: 复制 MD (微信粘贴)
+        def _copy_md_clip():
+            share.clipboard_clear()
+            share.clipboard_append(md or "")
+            tk.messagebox.showinfo("✅",
+                "Markdown 正文已复制!\n\n📱 粘贴到:\n• 微信聊天框 (朋友直接看到文字)\n• 公众号后台 → 样式自动识别")
+
+        tk.Button(share, text="③ 复制 Markdown 正文\n(微信聊天框直接粘贴发送)",
+                  font=("", 11), bg="#2e7d32", fg="white", padx=12, pady=10,
+                  width=50, justify=tk.LEFT, cursor="hand2",
+                  command=_copy_md_clip).pack(pady=6, padx=20, fill=tk.X)
+
+        # 方式4: 打开预览 + 手动保存
+        def _open_and_save():
+            import tempfile, webbrowser, subprocess
+            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=f"_{title[:10]}.html",
+                                              delete=False, encoding="utf-8")
+            tmp.write(html or _to_wechat_html(md, title=title)); tmp.close()
+            webbrowser.open(f"file://{tmp.name}")
+            status_var.set(f"📱 已打开浏览器预览: {tmp.name}")
+            # 在 Finder 里显示
+            subprocess.Popen(["open", "-R", tmp.name])
+
+        tk.Button(share, text="④ 浏览器预览 + Finder 显示文件\n(⌘+S 存到任何位置)",
+                  font=("", 11), bg="#0f3460", fg="white", padx=12, pady=10,
+                  width=50, justify=tk.LEFT, cursor="hand2",
+                  command=_open_and_save).pack(pady=6, padx=20, fill=tk.X)
+
+        tk.Label(share, text="\n💡 推荐方式: 存桌面 → AirDrop 给朋友, 手机浏览器打开图文并茂",
+                 bg="#1a1a2e", fg="#666", font=("", 9)).pack(pady=8)
+
+    # -------- 💾 保存 HTML / 📱 手机预览 (改造版) --------
     def _save_html():
         if not _result_html["html"]:
-            tk.messagebox.showinfo("提示", "还没有生成 HTML 文章, 请先点 🚀 专项快速生成 或 📝生成文章")
+            tk.messagebox.showinfo("提示", "还没有生成 HTML 文章")
             return
         from tkinter import filedialog
         import datetime as _dt2
-        title_prefix = _result_html.get("_title", "wechat_article") if isinstance(_result_html, dict) else "wechat_article"
-        fname = f"wechat_{title_prefix}_{_dt2.datetime.now().strftime('%Y%m%d_%H%M')}.html"
+        fname = f"wechat_article_{_dt2.datetime.now().strftime('%Y%m%d_%H%M')}.html"
         path = filedialog.asksaveasfilename(
-            defaultextension=".html",
-            initialfile=fname,
+            defaultextension=".html", initialfile=fname,
             filetypes=[("HTML 长文", "*.html"), ("所有文件", "*.*")],
-            title="保存微信文章 HTML (手机可直接浏览器打开)")
+            title="保存微信文章 HTML")
         if path:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(_result_html["html"])
-            status_var.set(f"💾 HTML 已保存: {path}")
-            tk.messagebox.showinfo("✅ 保存成功",
-                f"HTML 已保存:\n{path}\n\n📱 手机查看方法:\n1. 直接把 HTML 文件传到手机, 用浏览器打开\n2. 或复制到微信公众号编辑器 (已适配样式)\n3. 或用 VSCode 的 Live Server 本地预览")
+            status_var.set(f"💾 已保存: {path}")
+            tk.messagebox.showinfo("✅", f"HTML 已保存:\n{path}")
 
     def _preview_html():
-        """用浏览器打开 HTML 预览 (手机端可扫二维码或同步)"""
         if not _result_html["html"]:
-            tk.messagebox.showinfo("提示", "还没有生成 HTML")
-            return
+            tk.messagebox.showinfo("提示", "还没有生成 HTML"); return
         import tempfile, webbrowser
-        import datetime as _dt2
-        title_prefix = _result_html.get("_title", "wechat_preview") if isinstance(_result_html, dict) else "wechat_preview"
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=f"_{title_prefix}_{_dt2.datetime.now().strftime('%H%M')}.html",
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix="_preview.html",
                                            delete=False, encoding="utf-8")
         tmp.write(_result_html["html"]); tmp.close()
         webbrowser.open(f"file://{tmp.name}")
-        status_var.set(f"📱 已在浏览器打开预览: {tmp.name}")
+        status_var.set(f"📱 已在浏览器预览")
 
     def _copy_html():
         if not _result_html["html"]:
-            tk.messagebox.showinfo("提示", "没有可复制的 HTML")
-            return
+            tk.messagebox.showinfo("提示", "没有 HTML"); return
         dlg.clipboard_clear(); dlg.clipboard_append(_result_html["html"])
-        status_var.set("✅ HTML 已复制到剪贴板 (可粘贴到公众号编辑器)")
+        status_var.set("✅ HTML 已复制 (可粘贴公众号编辑器)")
 
-    # -------- 第三行: HTML 保存/预览 --------
+    def _copy_md_now():
+        text = result_txt.get("1.0", tk.END).strip()
+        if not text:
+            tk.messagebox.showinfo("提示", "没有可复制的内容"); return
+        dlg.clipboard_clear(); dlg.clipboard_append(text)
+        status_var.set("✅ Markdown 已复制 (可粘贴微信聊天框)")
+
+    def _share_now():
+        """分享当前这篇"""
+        text = result_txt.get("1.0", tk.END).strip()
+        if not text:
+            tk.messagebox.showinfo("提示", "还没有生成文章, 请先点 🔍游资看盘 / 🎯布鲁斯"); return
+        _do_share("当前文章", text, _result_html["html"])
+
+    # -------- 第三行: 📚历史 / 💾保存 / 📤分享 --------
     html_frame = tk.Frame(dlg, bg="#121212")
     html_frame.pack(fill=tk.X, padx=10, pady=(0, 4))
-    tk.Label(html_frame, text="📱 HTML 长文:", bg="#121212", fg="#4ecdc4",
-             font=("", 10, "bold")).pack(side=tk.LEFT, padx=(0, 10))
-    tk.Button(html_frame, text="💾 保存HTML长文", font=("", 11), padx=12,
-              bg="#0f3460", fg="white", cursor="hand2",
-              command=_save_html).pack(side=tk.LEFT, padx=4)
-    tk.Button(html_frame, text="📱 浏览器预览", font=("", 11), padx=12,
-              bg="#2e7d32", fg="white", cursor="hand2",
-              command=_preview_html).pack(side=tk.LEFT, padx=4)
-    tk.Button(html_frame, text="📋 复制HTML源码", font=("", 11), padx=12,
-              cursor="hand2", command=_copy_html).pack(side=tk.LEFT, padx=4)
-    tk.Label(html_frame, text="(手机查看: 保存后传到手机浏览器直接打开, 样式已适配公众号)",
-             bg="#121212", fg="#666", font=("", 9)).pack(side=tk.RIGHT, padx=6)
+    tk.Label(html_frame, text="📚历史·分享:", bg="#121212", fg="#FFD54F",
+             font=("", 10, "bold")).pack(side=tk.LEFT, padx=(0, 6))
+    tk.Button(html_frame, text="📚历史回顾", font=("", 11, "bold"), padx=10,
+              bg="#FFA726", fg="black", cursor="hand2",
+              command=_open_history).pack(side=tk.LEFT, padx=3)
+    tk.Button(html_frame, text="📤分享到微信", font=("", 11, "bold"), padx=10,
+              bg="#07C160", fg="white", cursor="hand2",
+              command=_share_now).pack(side=tk.LEFT, padx=3)
+    tk.Button(html_frame, text="💾存桌面分享文件夹", font=("", 11), padx=10,
+              bg="#0d47a1", fg="white", cursor="hand2",
+              command=lambda: _do_share("", result_txt.get("1.0", tk.END).strip(),
+                                          _result_html["html"])).pack(side=tk.LEFT, padx=3)
+    tk.Label(html_frame, text="|", bg="#121212", fg="#444").pack(side=tk.LEFT, padx=4)
+    tk.Button(html_frame, text="📱浏览器预览", font=("", 11), padx=8,
+              bg="#2e7d32", fg="white", command=_preview_html).pack(side=tk.LEFT, padx=2)
+    tk.Button(html_frame, text="📋复制MD", font=("", 11), padx=8,
+              command=_copy_md_now).pack(side=tk.LEFT, padx=2)
+    tk.Button(html_frame, text="📋复制HTML", font=("", 11), padx=8,
+              command=_copy_html).pack(side=tk.LEFT, padx=2)
+    tk.Button(html_frame, text="💾保存HTML", font=("", 11), padx=8,
+              bg="#0f3460", fg="white", command=_save_html).pack(side=tk.LEFT, padx=2)
 
     # ════════════════════════════════════════════
-    # 结果区 (ScrolledText, 深色背景)
+    # 结果区
     # ════════════════════════════════════════════
-    result_frame = tk.LabelFrame(dlg, text="📄 文章正文 (下方 💾可保存 MD/HTML)", font=("", 10, "bold"),
+    result_frame = tk.LabelFrame(dlg, text="📄 文章正文 (生成后自动存档 📚历史回顾)", font=("", 10, "bold"),
                                   fg="#FFD54F", bg="#121212")
     result_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(4, 10))
     result_txt = scrolledtext.ScrolledText(
