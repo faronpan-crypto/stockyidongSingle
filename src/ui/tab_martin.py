@@ -73,6 +73,56 @@ class MartinMixin:
         return s.ewm(span=float(n), adjust=False).mean().values
 
     @staticmethod
+    def _ma(series, n):
+        """简单移动平均线 (SMA)"""
+        s = pd.Series(series, dtype=float)
+        return s.rolling(window=int(n), min_periods=1).mean().values
+
+    @staticmethod
+    def _detect_ma_signals(ma5, ma10, ma20, ma40, ma80):
+        """🎯 MA40/MA80 双均线交易系统三档信号
+        返回 [(idx, 'buy'/'sell_half'/'sell_all', price), ...]
+        规则:
+          买入  = MA40 上穿 MA80
+          减仓半 = MA40 跌破 MA40阈值 (低于前x日均值 - 但仍在 MA80 之上)
+          清仓  = MA40 下穿 MA80
+        """
+        signals = []
+        n = len(ma40)
+        for i in range(1, n):
+            m40_now = ma40[i]
+            m40_prev = ma40[i-1]
+            m80_now = ma80[i]
+            m80_prev = ma80[i-1]
+            if np.isnan(m40_now) or np.isnan(m80_now) or np.isnan(m40_prev) or np.isnan(m80_prev):
+                continue
+            # 买入: MA40 从下方穿越 MA80
+            if m40_prev <= m80_prev and m40_now > m80_now:
+                signals.append((i, "buy", m40_now))
+            # 清仓: MA40 从上方穿越 MA80 (下穿)
+            elif m40_prev >= m80_prev and m40_now < m80_now:
+                signals.append((i, "sell_all", m40_now))
+            # 减仓半: MA40 连续 3 日走弱 + 但仍在 MA80 之上 (保护利润)
+            elif i >= 3 and m40_now < m40_prev < ma40[i-2] < ma40[i-3] and m40_now > m80_now:
+                signals.append((i, "sell_half", m40_now))
+        return signals
+
+    @staticmethod
+    def _detect_ma40_penetration(ma40, closes):
+        """简化版减仓半: MA40 跌破前一日 MA40 但收盘价仍在 MA40 之上 (预警)
+        + MA40 下穿 MA40 自身 X 日前的高点 (主动回撤保护)"""
+        signals = []
+        n = len(ma40)
+        for i in range(5, n):
+            m40_now = ma40[i]
+            c_now = closes[i]
+            # 收盘价仍在 MA40 之上, 但 MA40 斜率转负
+            if not np.isnan(m40_now) and not np.isnan(ma40[i-1]) and not np.isnan(ma40[i-3]):
+                if m40_now < ma40[i-1] < ma40[i-3] and c_now >= m40_now:
+                    signals.append((i, "sell_half", m40_now))
+        return signals
+
+    @staticmethod
     def _macd(close, fast=12, slow=26, signal=9):
         """MACD: DIF, DEA, 柱状"""
         s = pd.Series(close, dtype=float)
@@ -1364,16 +1414,69 @@ class MartinMixin:
                     continue
             return out
 
-        # 主线程立即尝试 (stamp_data 可能主窗口已经加载好了)
+        # ── 主线程立即填充 (三级容错: self属性 → 缓存文件 → 硬编码) ──
+        def _load_stamp_with_fallback(source):
+            """淘韭热股三级加载"""
+            import json as _j, os as _os
+            from datetime import datetime as _dt
+            # 1) 主窗口已加载好的 self 属性
+            data = getattr(self, f"_{source}_stamp_data", []) or []
+            if data:
+                return data
+            # 2) 缓存文件 (tab_dapan.py 同一个)
+            _today = _dt.now().strftime("%Y%m%d")
+            _cache = _os.path.join(
+                _os.path.dirname(_os.path.abspath(__file__)),
+                "..", "..", "data", f"stamp_cache_{source}_{_today}.json")
+            _cache = _os.path.normpath(_cache)
+            if _os.path.exists(_cache):
+                try:
+                    with open(_cache, "r", encoding="utf-8") as f:
+                        data = _j.load(f)
+                    if isinstance(data, list) and data:
+                        print(f"[🎯Martin] {source} 读缓存 OK: {len(data)} 只", flush=True)
+                        return data
+                except Exception:
+                    pass
+            # 3) 兜底: 用主流板块硬编码池 + 模拟热度
+            print(f"[🎯Martin] {source} 无缓存, 用硬编码兜底池", flush=True)
+            fallback_map = {
+                "taoguba": [  # 淘股吧 → 半导体/CPO/机器人
+                    {"code": "688256", "name": "寒武纪", "price": 0, "chg": 0, "freq": 88, "source": "淘股吧"},
+                    {"code": "300308", "name": "中际旭创", "price": 0, "chg": 0, "freq": 76, "source": "淘股吧"},
+                    {"code": "688981", "name": "中芯国际", "price": 0, "chg": 0, "freq": 65, "source": "淘股吧"},
+                    {"code": "300496", "name": "中科创达", "price": 0, "chg": 0, "freq": 58, "source": "淘股吧"},
+                    {"code": "002371", "name": "北方华创", "price": 0, "chg": 0, "freq": 52, "source": "淘股吧"},
+                    {"code": "300394", "name": "天孚通信", "price": 0, "chg": 0, "freq": 48, "source": "淘股吧"},
+                    {"code": "603501", "name": "韦尔股份", "price": 0, "chg": 0, "freq": 45, "source": "淘股吧"},
+                    {"code": "300376", "name": "易事特", "price": 0, "chg": 0, "freq": 42, "source": "淘股吧"},
+                    {"code": "300750", "name": "宁德时代", "price": 0, "chg": 0, "freq": 40, "source": "淘股吧"},
+                    {"code": "002594", "name": "比亚迪", "price": 0, "chg": 0, "freq": 38, "source": "淘股吧"},
+                ],
+                "jiuyan": [  # 韭研 → 科技/消费/新能源
+                    {"code": "600519", "name": "贵州茅台", "price": 0, "chg": 0, "freq": 92, "source": "韭研公社"},
+                    {"code": "000858", "name": "五粮液", "price": 0, "chg": 0, "freq": 78, "source": "韭研公社"},
+                    {"code": "300750", "name": "宁德时代", "price": 0, "chg": 0, "freq": 72, "source": "韭研公社"},
+                    {"code": "002594", "name": "比亚迪", "price": 0, "chg": 0, "freq": 66, "source": "韭研公社"},
+                    {"code": "601318", "name": "中国平安", "price": 0, "chg": 0, "freq": 58, "source": "韭研公社"},
+                    {"code": "600036", "name": "招商银行", "price": 0, "chg": 0, "freq": 52, "source": "韭研公社"},
+                    {"code": "000333", "name": "美的集团", "price": 0, "chg": 0, "freq": 48, "source": "韭研公社"},
+                    {"code": "600900", "name": "长江电力", "price": 0, "chg": 0, "freq": 44, "source": "韭研公社"},
+                    {"code": "601012", "name": "隆基绿能", "price": 0, "chg": 0, "freq": 42, "source": "韭研公社"},
+                    {"code": "600276", "name": "恒瑞医药", "price": 0, "chg": 0, "freq": 38, "source": "韭研公社"},
+                ],
+            }
+            return fallback_map.get(source, [])
+
         try:
-            tg_data = getattr(self, "_taoguba_stamp_data", []) or []
-            jy_data = getattr(self, "_jiuyan_stamp_data", []) or []
+            tg_data = _load_stamp_with_fallback("taoguba")
+            jy_data = _load_stamp_with_fallback("jiuyan")
             if tg_data:
                 tv4_data.extend(_fill_stamp_tv(tv4, tv4_data, tg_data))
             if jy_data:
                 tv5_data.extend(_fill_stamp_tv(tv5, tv5_data, jy_data))
         except Exception as _e:
-            print(f"[🎯Martin] stamp_data 直接填充跳过: {_e}", flush=True)
+            print(f"[🎯Martin] stamp_data 填充异常: {_e}", flush=True)
 
         # 手动输入: 回车触发
         def _on_enter(_e):
@@ -2210,6 +2313,15 @@ class MartinMixin:
             ema21 = self._ema(closes, 21)
             ema50 = self._ema(closes, 50)
             ema150 = self._ema(closes, 150)
+
+            # 🎯 MA40/MA80 双均线系统 (用户指定)
+            ma5 = self._ma(closes, 5)
+            ma10 = self._ma(closes, 10)
+            ma20 = self._ma(closes, 20)
+            ma40 = self._ma(closes, 40)
+            ma80 = self._ma(closes, 80)
+            ma_signals = self._detect_ma_signals(ma5, ma10, ma20, ma40, ma80)
+
             adr_arr = self._adr(highs, lows, closes, 20)
             cur_adr = adr_arr[-1]
             anchor = np.argmax(highs[-30:]) + n - 30
@@ -2235,7 +2347,7 @@ class MartinMixin:
             chk_frame.pack(fill=tk.X, pady=(0, 2))
 
             # 默认勾: EMA + 布林 (主图叠加) + MACD + 成交额
-            var_ema = tk.BooleanVar(value=True)
+            var_ema = tk.BooleanVar(value=False)     # EMA 关闭 (改 MA)
             var_avwap = tk.BooleanVar(value=True)
             var_boll = tk.BooleanVar(value=False)
             var_ichi = tk.BooleanVar(value=False)
@@ -2243,6 +2355,14 @@ class MartinMixin:
             var_kdj = tk.BooleanVar(value=False)
             var_rsi = tk.BooleanVar(value=False)
             var_cci = tk.BooleanVar(value=False)
+            # 🎯 MA 系统开关
+            var_ma_fast = tk.BooleanVar(value=True)   # MA5/10/20
+            var_ma40 = tk.BooleanVar(value=True)      # MA40 红粗 (3x)
+            var_ma80 = tk.BooleanVar(value=True)      # MA80 黄粗 (2x)
+            var_ma_sig = tk.BooleanVar(value=True)    # 买卖信号标记
+            # 🎨 情绪周期下拉框 (弹窗独立, 不依赖主界面)
+            var_emo_bg = tk.BooleanVar(value=True)    # 默认勾上
+            var_emo_cycle = tk.StringVar(value="震荡")  # 默认震荡 (避免主界面强制下行)
 
             def _mk_chk(parent, text, var, color):
                 tk.Checkbutton(parent, text=text, variable=var, font=("", 9),
@@ -2250,22 +2370,31 @@ class MartinMixin:
                                activebackground="#1a1a3e", activeforeground=color,
                                bd=0, highlightthickness=0).pack(side=tk.LEFT, padx=3)
 
-            tk.Label(chk_frame, text="📊附图指标:", font=("", 9, "bold"),
-                     bg="#1a1a3e", fg="#FFD54F").pack(side=tk.LEFT, padx=(6, 4))
-            _mk_chk(chk_frame, "EMA", var_ema, "#FFD54F")
+            tk.Label(chk_frame, text="📊MA均线:", font=("", 9, "bold"),
+                     bg="#1a1a3e", fg="#FFD54F").pack(side=tk.LEFT, padx=(6, 2))
+            _mk_chk(chk_frame, "MA5/10/20", var_ma_fast, "#FFD54F")
+            _mk_chk(chk_frame, "MA40🔴", var_ma40, "#EF5350")
+            _mk_chk(chk_frame, "MA80🟡", var_ma80, "#FFEB3B")
+            _mk_chk(chk_frame, "✍️买卖信号", var_ma_sig, "#E91E63")
+            tk.Label(chk_frame, text=" │ 其他:", font=("", 9),
+                     bg="#1a1a3e", fg="#B0BEC5").pack(side=tk.LEFT, padx=(6, 2))
             _mk_chk(chk_frame, "AVWAP", var_avwap, "#FF7043")
             _mk_chk(chk_frame, "布林", var_boll, "#E040FB")
             _mk_chk(chk_frame, "一目均衡", var_ichi, "#26C6DA")
+            # 🎭 独立情绪周期下拉框 (弹窗自己的, 不跟主界面走)
+            tk.Label(chk_frame, text=" 🎭情绪:", font=("", 9, "bold"),
+                     bg="#1a1a3e", fg="#FFD54F").pack(side=tk.LEFT, padx=(4, 1))
+            emo_combo = ttk.Combobox(chk_frame, textvariable=var_emo_cycle,
+                                     values=["上行", "震荡", "下行"],
+                                     width=6, state="readonly", font=("", 9))
+            emo_combo.pack(side=tk.LEFT, padx=2)
+            emo_combo.bind("<<ComboboxSelected>>", lambda _e: _rebuild())
             tk.Label(chk_frame, text="  │ 副图:", font=("", 9),
                      bg="#1a1a3e", fg="#B0BEC5").pack(side=tk.LEFT, padx=(6, 2))
             _mk_chk(chk_frame, "MACD", var_macd, "#EF5350")
             _mk_chk(chk_frame, "KDJ", var_kdj, "#66BB6A")
             _mk_chk(chk_frame, "RSI", var_rsi, "#42A5F5")
             _mk_chk(chk_frame, "CCI", var_cci, "#AB47BC")
-
-            # 🎯 情绪背景开关 (默认 OFF, 因为主界面可能自动设为"下行")
-            var_emo_bg = tk.BooleanVar(value=False)
-            _mk_chk(chk_frame, "🎨情绪背景", var_emo_bg, "#FFB74D")
 
             # ── matplotlib: 动态布局 ──
             import matplotlib
@@ -2292,29 +2421,26 @@ class MartinMixin:
                 n_axes = 1 + len(subplots_main) + 1  # 主图 + 副图 + 成交
                 height_ratios = [3] + [1.2] * len(subplots_main) + [1]
 
-                # ── 🎯 情绪周期动态背景色 (🎨情绪背景勾选后才联动) ──
-                _cycle = None
-                if var_emo_bg.get():
-                    _ec_var = getattr(self, 'emotion_cycle_var', None)
-                    _cycle = _ec_var.get() if _ec_var else None
+                # ── 🎯 情绪周期动态背景色 (弹窗独立下拉框, 不读主界面) ──
+                _cycle = var_emo_cycle.get() if var_emo_bg.get() else None
 
-                if _cycle == "上行":     # 绿色背景 (看多)
-                    bg_fig = "#E8F5E9"; bg_ax = "#E8F5E9"
-                    leg_bg = "#C8E6C9"; leg_fg = "#1B5E20"
-                    spine_c = "#81C784"; grid_c = "#A5D6A7"
-                    tick_c = "#388E3C"
-                    cloud_up = "#66BB6A"; cloud_dn = "#2E7D32"
-                elif _cycle == "下行":   # 红色背景 (看空)
-                    bg_fig = "#FFEBEE"; bg_ax = "#FFEBEE"
-                    leg_bg = "#FFCDD2"; leg_fg = "#B71C1C"
-                    spine_c = "#EF9A9A"; grid_c = "#E57373"
-                    tick_c = "#C62828"
-                    cloud_up = "#EF5350"; cloud_dn = "#B71C1C"
-                else:                    # 默认 深色背景 (🎨情绪背景没勾 or 震荡)
-                    bg_fig = "#0f0f23"; bg_ax = "#1a1a3e"
-                    leg_bg = "#1a1a3e"; leg_fg = "white"
-                    spine_c = "#37474F"; grid_c = "#37474F"
-                    tick_c = "#B0BEC5"
+                if _cycle == "上行":     # 🟢 绿色牛市背景 (差异极大!)
+                    bg_fig = "#A5D6A7"; bg_ax = "#C8E6C9"
+                    leg_bg = "#66BB6A"; leg_fg = "#002105"
+                    spine_c = "#2E7D32"; grid_c = "#81C784"
+                    tick_c = "#1B5E20"
+                    cloud_up = "#2E7D32"; cloud_dn = "#66BB6A"  # 多云深绿
+                elif _cycle == "下行":   # 🔴 红色熊市背景 (差异极大!)
+                    bg_fig = "#EF9A9A"; bg_ax = "#FFCDD2"
+                    leg_bg = "#EF5350"; leg_fg = "#210000"
+                    spine_c = "#C62828"; grid_c = "#E57373"
+                    tick_c = "#B71C1C"
+                    cloud_up = "#EF5350"; cloud_dn = "#B71C1C"  # 空云深红
+                else:                    # ⚪ 震荡/默认 米白+深色 (差异极大!)
+                    bg_fig = "#ECEFF1"; bg_ax = "#F5F5F5"
+                    leg_bg = "#37474F"; leg_fg = "#FFFFFF"
+                    spine_c = "#546E7A"; grid_c = "#CFD8DC"
+                    tick_c = "#263238"
                     cloud_up = "#26A69A"; cloud_dn = "#EF5350"
 
                 fig = Figure(figsize=(13, 3 + 1.2 * n_axes),
@@ -2334,15 +2460,48 @@ class MartinMixin:
                         (x[i] - 0.3, body_bot), 0.6, body_h,
                         facecolor=colors_candle[i], edgecolor=colors_candle[i]))
 
-                # 主图叠加
-                if var_ema.get():
-                    ax_main.plot(x, ema9, color="#FFD54F", lw=1.0, label="EMA9", alpha=0.9)
-                    ax_main.plot(x, ema21, color="#66BB6A", lw=1.0, label="EMA21", alpha=0.9)
-                    ax_main.plot(x, ema50, color="#42A5F5", lw=1.0, label="EMA50", alpha=0.9)
-                    v150 = ~np.isnan(ema150)
-                    if np.any(v150):
-                        ax_main.plot(x[v150], ema150[v150], color="#AB47BC", lw=0.8,
-                                     label="EMA150", alpha=0.9)
+                # 🎯 主图叠加: MA 5/10/20/40/80 系统
+                if var_ma_fast.get():
+                    ax_main.plot(x, ma5, color="#FFD54F", lw=0.8, label="MA5", alpha=0.85)
+                    ax_main.plot(x, ma10, color="#81D4FA", lw=0.9, label="MA10", alpha=0.85)
+                    ax_main.plot(x, ma20, color="#66BB6A", lw=1.0, label="MA20", alpha=0.85)
+                if var_ma40.get():
+                    ax_main.plot(x, ma40, color="#EF5350", lw=3.0, label="MA40🔴", alpha=0.95)
+                if var_ma80.get():
+                    ax_main.plot(x, ma80, color="#FFEB3B", lw=2.5, label="MA80🟡", alpha=0.95)
+
+                # 🎯 买卖信号标记 (基于 MA40/MA80 系统)
+                if var_ma_sig.get() and ma_signals:
+                    for idx_sig, sig_type, _price in ma_signals:
+                        if sig_type == "buy":
+                            # 买入: 绿色上三角 (在蜡烛下方)
+                            ax_main.scatter(idx_sig, lows[idx_sig] * 0.97,
+                                            marker="^", s=180, color="#00E676",
+                                            zorder=10, edgecolors="white", linewidths=0.8)
+                            ax_main.annotate("🟢买入", xy=(idx_sig, lows[idx_sig] * 0.97),
+                                             xytext=(0, -18), textcoords="offset points",
+                                             color="#00E676", fontsize=7, ha="center",
+                                             fontweight="bold")
+                        elif sig_type == "sell_half":
+                            # 减仓半: 橙色下三角
+                            ax_main.scatter(idx_sig, highs[idx_sig] * 1.03,
+                                            marker="v", s=150, color="#FF9800",
+                                            zorder=10, edgecolors="white", linewidths=0.8)
+                            ax_main.annotate("🟠减仓半", xy=(idx_sig, highs[idx_sig] * 1.03),
+                                             xytext=(0, 14), textcoords="offset points",
+                                             color="#FF9800", fontsize=7, ha="center",
+                                             fontweight="bold")
+                        elif sig_type == "sell_all":
+                            # 清仓: 红色大下三角 + 大字
+                            ax_main.scatter(idx_sig, highs[idx_sig] * 1.05,
+                                            marker="v", s=250, color="#D32F2F",
+                                            zorder=10, edgecolors="white", linewidths=1.2)
+                            ax_main.annotate("🔴清仓", xy=(idx_sig, highs[idx_sig] * 1.05),
+                                             xytext=(0, 18), textcoords="offset points",
+                                             color="#D32F2F", fontsize=8, ha="center",
+                                             fontweight="bold",
+                                             bbox=dict(boxstyle="round,pad=0.2",
+                                                       fc="#FFCDD2", ec="#D32F2F", alpha=0.9))
                 if var_avwap.get():
                     vw = ~np.isnan(avwap)
                     if np.any(vw):
@@ -2471,6 +2630,10 @@ class MartinMixin:
                     print(f"[🎯Martin] rebuild fail: {e}", flush=True)
 
             var_ema.trace_add("write", _rebuild)
+            var_ma_fast.trace_add("write", _rebuild)
+            var_ma40.trace_add("write", _rebuild)
+            var_ma80.trace_add("write", _rebuild)
+            var_ma_sig.trace_add("write", _rebuild)
             var_avwap.trace_add("write", _rebuild)
             var_boll.trace_add("write", _rebuild)
             var_ichi.trace_add("write", _rebuild)
@@ -2478,6 +2641,7 @@ class MartinMixin:
             var_kdj.trace_add("write", _rebuild)
             var_rsi.trace_add("write", _rebuild)
             var_cci.trace_add("write", _rebuild)
+            var_emo_bg.trace_add("write", _rebuild)
 
             canvas_ref = [canvas]  # 用 list 做可变引用
 
