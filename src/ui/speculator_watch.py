@@ -5,8 +5,7 @@
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
-import threading, time, os, json, traceback, random, sqlite3, subprocess
-import numpy as np
+import threading, time, os, json, traceback, random
 from datetime import datetime, timedelta
 
 # ── Splitter 持久化 ──
@@ -1012,563 +1011,6 @@ def show_speculator_watch(root=None, app=None, parent_frame=None):
     tk.Button(header, text="📜 回看历史", width=10, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#6A1B9A", highlightthickness=2, bd=1,
               font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
               command=_open_history_dialog).pack(side=tk.LEFT, padx=4, pady=10)
-
-    # ── 🆕 📊 精美多维度图表 ──
-    def _open_chart_studio():
-        """游资看盘 → 专业 matplotlib 精美图表工作室
-        
-        图表模板:
-        1. 📊 大盘涨跌家数仪表盘 (gauge)
-        2. 📈 板块热度 Top12 条形图 (horizontal bar)
-        3. 🎯 板块涨跌散点气泡图 (sector scatter)
-        4. 🔥 涨停梯队树状图 (ladder tree)
-        5. 💼 龙虎榜资金流向桑基图 (s Sankey 简化)
-        6. 📉 情绪周期近30日时序 + EMA (line + heatmap)
-        7. 🌐 股指期货雷达图 (radar)
-        8. 🎨 综合仪表盘 3×3 gridspec (9图合一)
-        """
-        studio = tk.Toplevel(win)
-        studio.title("📊 游资看盘 · 精美图表工作室")
-        studio.geometry("960x680"); studio.configure(bg="#0f0f1a")
-
-        # ═══════════ 顶部: 状态 + 刷新数据按钮 ═══════════
-        top_bar = tk.Frame(studio, bg="#0f0f1a"); top_bar.pack(fill=tk.X, padx=12, pady=(12, 6))
-        tk.Label(top_bar, text="📊 游资看盘 · 精美多维度图表工作室", bg="#0f0f1a",
-                 fg="#FFD54F", font=("", 15, "bold")).pack(side=tk.LEFT)
-        status_lbl = tk.Label(top_bar, text="⏳ 准备采集数据...", bg="#0f0f1a",
-                              fg="#888", font=("", 11))
-        status_lbl.pack(side=tk.RIGHT, padx=10)
-
-        # ═══════════ Matplotlib 全局主题 (专业暗黑风) ═══════════
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        from matplotlib import font_manager as fm
-        plt.rcParams.update({
-            "font.sans-serif": ["PingFang SC", "Heiti SC", "STHeiti", "Arial Unicode MS",
-                                "Apple Color Emoji", "Segoe UI Emoji"],
-            "axes.unicode_minus": False,
-            "figure.facecolor": "#0f0f1a",
-            "axes.facecolor": "#1a1a2e",
-            "savefig.facecolor": "#0f0f1a",
-            "text.color": "#E0E0E0",
-            "axes.labelcolor": "#E0E0E0",
-            "xtick.color": "#9E9E9E",
-            "ytick.color": "#9E9E9E",
-            "axes.edgecolor": "#424242",
-            "grid.color": "#333333",
-            "grid.linewidth": 0.5,
-            "axes.grid": True,
-            "grid.alpha": 0.6,
-        })
-        STOCK_RED = "#E94560"; STOCK_GREEN = "#07C160"; GOLD = "#FFD700"
-        ACCENT = "#4ECDC4"; PURPLE = "#9B59B6"; BLUE = "#3498DB"
-        OUTPUT_DIR = os.path.expanduser("~/Desktop/📈股票文章分享/图表")
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-        # ═══════════ 数据采集 (复用现有函数) ═══════════
-        _cache_ref = win if hasattr(win, '_AK_SPOT_CACHE') else None
-        _watch_data = {}
-
-        def _collect_chart_data():
-            """从游资看盘界面各模块抓实时数据"""
-            import json as _j2
-            d = {}
-            try:
-                # 涨跌家数
-                rt = _get_sina_realtime()
-                d["indices"] = rt.get("indices", {}) if rt else {}
-                up = rt.get("up_count", None) if rt else None
-                dn = rt.get("down_count", None) if rt else None
-                # 从缓存或 UI 标签里取
-                if up is None and _CACHE:
-                    up = _CACHE.get("up_count", None) or _CACHE.get("seed_up_count", None)
-                    dn = _CACHE.get("down_count", None) or _CACHE.get("seed_down_count", None)
-                d["up_count"] = up; d["down_count"] = dn
-                d["limit_up"] = rt.get("limit_up_count", None) if rt else None
-                d["limit_down"] = rt.get("limit_down_count", None) if rt else None
-            except Exception as e: d["err1"] = str(e)
-
-            # 板块数据
-            try:
-                blocks = _compute_block_pct_from_cache() or {}
-                d["blocks"] = blocks  # {name: (pct, count, leader)}
-            except Exception: d["blocks"] = {}
-
-            # akshare 涨停池
-            try:
-                import akshare as ak
-                today = time.strftime("%Y%m%d")
-                zt = ak.stock_zt_pool_em(date=today)
-                d["zt_pool"] = []
-                for _, r in zt.head(30).iterrows():
-                    d["zt_pool"].append({
-                        "name": r.get("名称", "?"), "code": r.get("代码", "?"),
-                        "pct": r.get("涨跌幅", 0), "amount": r.get("成交额", 0)
-                    })
-            except Exception: d["zt_pool"] = []
-
-            # 情绪周期历史 (DB)
-            try:
-                conn = sqlite3.connect(_stock_db_path())
-                cur = conn.cursor()
-                cur.execute("SELECT snapshot_date, m1_today, m3_count FROM sentiment_history ORDER BY snapshot_date DESC LIMIT 60")
-                d["sentiment"] = list(reversed(cur.fetchall())); conn.close()
-            except Exception: d["sentiment"] = []
-
-            # 龙虎榜 (DB)
-            try:
-                conn = sqlite3.connect(_stock_db_path())
-                cur = conn.cursor()
-                cur.execute("SELECT trade_date, name, reason, net_amount, pct_change FROM lhb_records ORDER BY trade_date DESC LIMIT 30")
-                d["lhb"] = cur.fetchall(); conn.close()
-            except Exception: d["lhb"] = []
-
-            print(f"[📊图表采集] ✅ 涨跌/板块/涨停/情绪/龙虎榜", flush=True)
-            return d
-
-        # ═══════════ 图表生成函数 (matplotlib 专业版) ═══════════
-        _generated = []  # (chart_id, path)
-
-        def _save(fig, name):
-            ts = time.strftime("%m%d_%H%M")
-            path = os.path.join(OUTPUT_DIR, f"{name}_{ts}.png")
-            fig.savefig(path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
-            plt.close(fig)
-            return path
-
-        def _chart_dashboard():
-            """1️⃣ 大盘涨跌仪表盘 — 双半圆 gauge"""
-            d = _watch_data
-            up = int(d.get("up_count") or 3000); dn = int(d.get("down_count") or 2000)
-            fig, ax = plt.subplots(figsize=(10, 6), subplot_kw=dict(polar=True))
-            fig.patch.set_facecolor("#0f0f1a")
-            theta = [0, np.pi * up / (up + dn)]
-            # 红半圆 (上涨)
-            ax.bar(np.pi / 4, 0.7, width=np.pi * up / (up + dn), bottom=0.3,
-                   color=STOCK_RED, alpha=0.9, edgecolor="white", linewidth=1.5)
-            ax.bar(np.pi / 4 + np.pi * up / (up + dn) / 2, 0.7,
-                   width=np.pi * dn / (up + dn), bottom=0.3,
-                   color=STOCK_GREEN, alpha=0.9, edgecolor="white", linewidth=1.5)
-            ax.set_ylim(0, 1.2); ax.set_xlim(0, np.pi)
-            ax.set_thetamin(180); ax.set_thetamax(360)
-            ax.set_yticks([]); ax.set_xticks([])
-            ax.spines["polar"].set_color("#333")
-            # 中心大数字
-            ax.text(np.pi / 2, 0.15, f"{up}", ha="center", va="center",
-                    fontsize=48, color=STOCK_RED, fontweight="bold")
-            ax.text(np.pi / 2, -0.1, f"涨 {up}  跌 {dn}",
-                    ha="center", va="center", fontsize=14, color="#9E9E9E")
-            ax.set_title(f"📊 大盘涨跌家数 · {time.strftime('%m-%d %H:%M')}",
-                         y=1.1, fontsize=16, color="#FFD54F", fontweight="bold")
-            return _save(fig, "1_涨跌仪表盘")
-
-        def _chart_sector_bar():
-            """2️⃣ 板块热度水平条形图 — Top12"""
-            d = _watch_data
-            blocks = d.get("blocks") or {}
-            items = [(k, v[0] if v and isinstance(v, tuple) else 0) for k, v in blocks.items()]
-            items.sort(key=lambda x: abs(x[1]), reverse=True)
-            items = items[:12]
-            if not items: return None
-            names, pcts = zip(*items)
-            names = list(reversed(names)); pcts = list(reversed(pcts))
-            colors = [STOCK_RED if p > 0 else STOCK_GREEN for p in pcts]
-            fig, ax = plt.subplots(figsize=(12, 7))
-            fig.patch.set_facecolor("#0f0f1a")
-            y_pos = range(len(names))
-            bars = ax.barh(y_pos, pcts, color=colors, alpha=0.85,
-                           edgecolor="white", linewidth=0.5, height=0.7)
-            ax.set_yticks(y_pos); ax.set_yticklabels(names, fontsize=12)
-            ax.axvline(x=0, color="#666", linewidth=1)
-            ax.bar_label(bars, fmt="%+.2f%%", padding=4, color="#E0E0E0", fontsize=11, fontweight="bold")
-            ax.set_title(f"📈 板块热度 Top{len(items)} · 真实涨跌幅",
-                         fontsize=16, color="#FFD54F", fontweight="bold", pad=15)
-            ax.set_xlabel("涨跌幅 (%)", color="#9E9E9E")
-            for spine in ax.spines.values(): spine.set_color("#424242")
-            return _save(fig, "2_板块热度条形图")
-
-        def _chart_sector_bubble():
-            """3️⃣ 板块涨跌气泡散点图 — 涨幅 vs 市值 vs 成交"""
-            d = _watch_data
-            blocks = d.get("blocks") or {}
-            items = []
-            for k, v in blocks.items():
-                if v and isinstance(v, tuple) and len(v) >= 2:
-                    pct = v[0]; count = v[1] if len(v) > 1 else 10
-                    items.append((k, pct, count))
-            items = items[:20]
-            if not items: return None
-            fig, ax = plt.subplots(figsize=(12, 8))
-            fig.patch.set_facecolor("#0f0f1a")
-            xs = [x[1] for x in items]; ys = [x[2] if x[2] > 0 else 10 for x in items]
-            sizes = [max(80, min(500, x[2] * 12)) for x in items]
-            colors_b = [STOCK_RED if x > 0 else STOCK_GREEN for x in xs]
-            sc = ax.scatter(xs, ys, s=sizes, c=colors_b, alpha=0.6,
-                            edgecolors="white", linewidths=1.2, zorder=5)
-            # 标注
-            for n, x, y in zip([i[0] for i in items], xs, ys):
-                ax.annotate(n, (x, y), textcoords="offset points",
-                           xytext=(8, 4), fontsize=9, color="#E0E0E0")
-            ax.axvline(x=0, color="#555", linewidth=1, linestyle="--")
-            ax.set_xlabel("板块涨跌幅 (%)", color="#9E9E9E", fontsize=12)
-            ax.set_ylabel("上涨家数 (气泡=成交额)", color="#9E9E9E", fontsize=12)
-            ax.set_title("🎯 板块涨跌散点图 (x=涨跌幅, y=上涨家数, 气泡大小=成交额)",
-                         fontsize=15, color="#FFD54F", fontweight="bold", pad=15)
-            for spine in ax.spines.values(): spine.set_color("#424242")
-            return _save(fig, "3_板块气泡散点图")
-
-        def _chart_zt_ladder():
-            """4️⃣ 涨停梯队树状图 — 连板高度分布"""
-            d = _watch_data
-            zt = d.get("zt_pool") or []
-            if not zt: return None
-            # 按成交额分梯队
-            zt.sort(key=lambda x: x.get("amount", 0), reverse=True)
-            fig, ax = plt.subplots(figsize=(14, 8))
-            fig.patch.set_facecolor("#0f0f1a")
-            names = [z["name"][:6] for z in zt[:25]]
-            amounts = [z.get("amount", 0) / 1e8 for z in zt[:25]]  # 亿
-            colors_l = [GOLD if i < 3 else STOCK_RED if i < 10 else "#FF7043" for i in range(len(names))]
-            # 用水平条形 + 渐变
-            y_pos = range(len(names))
-            ax.barh(y_pos, amounts, color=colors_l, alpha=0.85, edgecolor="white", height=0.7)
-            ax.set_yticks(y_pos); ax.set_yticklabels(names, fontsize=10)
-            ax.bar_label(ax.containers[0], fmt="%.1f亿", padding=3, color="#E0E0E0", fontsize=9)
-            ax.set_title(f"🔥 今日涨停梯队 · Top {len(names)} · 按成交额排序 (亿)",
-                         fontsize=15, color=GOLD, fontweight="bold", pad=15)
-            ax.set_xlabel("成交额 (亿元)", color="#9E9E9E")
-            # 分界线
-            for y in [2.5, 9.5]:
-                ax.axhline(y, color="#FFD700", linewidth=0.8, linestyle=":", alpha=0.5)
-            for spine in ax.spines.values(): spine.set_color("#424242")
-            return _save(fig, "4_涨停梯队树状图")
-
-        def _chart_lhb_flow():
-            """5️⃣ 龙虎榜资金流向 — 主力净买卖条"""
-            d = _watch_data
-            lhb = d.get("lhb") or []
-            if not lhb: return None
-            fig, ax = plt.subplots(figsize=(12, 7))
-            fig.patch.set_facecolor("#0f0f1a")
-            # 取近 15 天
-            recent = lhb[:12]
-            names = [f"{r[2] or ''}\n{r[1]}" if r[2] else r[1] for r in recent]
-            net = [r[3] / 1e8 if r[3] else 0 for r in recent]  # 亿
-            colors_f = [STOCK_RED if n > 0 else STOCK_GREEN for n in net]
-            y_pos = range(len(recent))
-            ax.barh(y_pos, net, color=colors_f, alpha=0.85, edgecolor="white", height=0.7)
-            ax.set_yticks(y_pos); ax.set_yticklabels(names, fontsize=10)
-            ax.axvline(x=0, color="#888", linewidth=1.5)
-            # 数值标签
-            for i, v in enumerate(net):
-                sign = "+" if v > 0 else ""
-                ax.text(v + (0.05 if v > 0 else -0.05), i, f"{sign}{v:.1f}亿",
-                        va="center", ha="left" if v > 0 else "right",
-                        fontsize=10, color="#E0E0E0", fontweight="bold")
-            ax.set_title("💼 龙虎榜主力净买卖 (亿元) · 近12日",
-                         fontsize=15, color="#FFD54F", fontweight="bold", pad=15)
-            ax.set_xlabel("净额 (亿元)", color="#9E9E9E")
-            for spine in ax.spines.values(): spine.set_color("#424242")
-            return _save(fig, "5_龙虎榜资金流")
-
-        def _chart_sentiment_heatmap():
-            """6️⃣ 情绪周期近60日 — 时序 + EMA + 热力条"""
-            d = _watch_data
-            sent = d.get("sentiment") or []
-            if not sent: return None
-            dates = [r[0] for r in sent]
-            m1 = [r[1] or 0 for r in sent]
-            zt_cnt = [r[2] or 0 for r in sent]
-            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), gridspec_kw={"height_ratios": [3, 1]})
-            fig.patch.set_facecolor("#0f0f1a")
-            # 情绪指数线
-            x = range(len(m1))
-            from scipy import signal as _sig
-            try:
-                ema = _sig.wiener(m1, 5)  # 简单平滑
-            except Exception:
-                ema = m1
-            ax1.plot(x, m1, color="#90CAF9", alpha=0.5, linewidth=1.2, label="情绪指数")
-            ax1.plot(x, ema, color=GOLD, linewidth=2.5, label="EMA5", zorder=5)
-            ax1.fill_between(x, m1, ema, alpha=0.15, color=ACCENT)
-            # 情绪区间背景
-            ax1.axhspan(70, 100, alpha=0.08, color=STOCK_RED, label="高潮区")
-            ax1.axhspan(30, 50, alpha=0.08, color="#FF9500", label="退潮区")
-            ax1.axhspan(0, 30, alpha=0.08, color=STOCK_GREEN, label="冰点区")
-            ax1.axhspan(50, 70, alpha=0.06, color=ACCENT, label="复苏区")
-            ax1.set_ylabel("情绪指数", fontsize=12); ax1.set_ylim(0, 100)
-            ax1.set_title("📉 情绪周期近60日 · 指数走势 + 情绪区间",
-                          fontsize=15, color="#FFD54F", fontweight="bold", pad=15)
-            ax1.legend(loc="upper right", fontsize=9, framealpha=0.3)
-            ax1.spines["bottom"].set_color("#424242")
-            # X 轴只显示部分日期
-            step = max(1, len(dates) // 10)
-            ax1.set_xticks(list(range(0, len(dates), step)))
-            ax1.set_xticklabels([dates[i][5:] for i in range(0, len(dates), step)], rotation=30, fontsize=9)
-            # 热力条 (涨停数)
-            colors_h = [STOCK_RED if z > 50 else "#FF9500" if z > 30 else STOCK_GREEN for z in zt_cnt]
-            ax2.bar(x, zt_cnt, color=colors_h, alpha=0.8, edgecolor="white", width=0.9)
-            ax2.set_ylabel("涨停数", fontsize=11); ax2.set_xlabel("日期", fontsize=11)
-            ax2.set_xticks(list(range(0, len(dates), step)))
-            ax2.set_xticklabels([dates[i][5:] for i in range(0, len(dates), step)], rotation=30, fontsize=9)
-            ax2.spines["top"].set_visible(False)
-            return _save(fig, "6_情绪周期时序热力图")
-
-        def _chart_futures_radar():
-            """7️⃣ 股指期货雷达图 — IF/IC/IH/IM 多维度"""
-            d = _watch_data
-            rt = d.get("indices", {}) or {}
-            fut_keys = ["IF", "IC", "IH", "IM"]
-            fut_names = {"IF": "沪深300", "IC": "中证500", "IH": "上证50", "IM": "中证1000"}
-            fig = plt.figure(figsize=(10, 8)); fig.patch.set_facecolor("#0f0f1a")
-            ax = fig.add_subplot(111, polar=True)
-            # 维度: 涨跌幅绝对值 / 量能活跃度 (0-100)
-            dims = ["涨跌幅", "相对大盘", "活跃度", "动量", "波动率"]
-            theta = np.linspace(0, 2 * np.pi, len(dims), endpoint=False).tolist()
-            theta += theta[:1]
-            for key in fut_keys:
-                info = rt.get(key, {}) if isinstance(rt.get(key), dict) else {}
-                pct = abs(info.get("pct", 0)) * 10 + 30
-                vals = [min(pct, 100), 50 + info.get("pct", 0) * 100, 60, 55, 45]
-                vals += vals[:1]
-                ax.plot(theta, vals, "o-", label=f"{fut_names.get(key, key)}", linewidth=2, markersize=5)
-                ax.fill(theta, vals, alpha=0.12)
-            ax.set_xticks(theta[:-1]); ax.set_xticklabels(dims, fontsize=12)
-            ax.set_ylim(0, 100)
-            ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1), fontsize=10, facecolor="#1a1a2e", labelcolor="#E0E0E0")
-            ax.set_title("🌐 股指期货雷达图 (IF/IC/IH/IM)",
-                         fontsize=15, color="#FFD54F", fontweight="bold", pad=20)
-            ax.spines["polar"].set_color("#444"); ax.grid(color="#444")
-            return _save(fig, "7_股指期货雷达图")
-
-        def _chart_dashboard_3x3():
-            """8️⃣ 综合仪表盘 — 3×3 gridspec 9图合一 (最震撼)"""
-            d = _watch_data
-            fig = plt.figure(figsize=(20, 18))
-            fig.patch.set_facecolor("#0f0f1a")
-            gs = fig.add_gridspec(3, 3, hspace=0.35, wspace=0.3)
-
-            def _setup(ax, title):
-                ax.set_facecolor("#1a1a2e")
-                ax.set_title(title, fontsize=11, color="#FFD54F", fontweight="bold", pad=8)
-                for s in ax.spines.values(): s.set_color("#424242")
-
-            # (0,0) 涨跌家数大数字
-            ax = fig.add_subplot(gs[0, 0]); _setup(ax, "📊 涨跌家数")
-            up = int(d.get("up_count") or 3000); dn = int(d.get("down_count") or 2000)
-            ax.text(0.5, 0.6, f"{up}", ha="center", fontsize=56, color=STOCK_RED, fontweight="bold")
-            ax.text(0.5, 0.4, f"↑ {up}   ↓ {dn}", ha="center", fontsize=18, color="#E0E0E0")
-            ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
-
-            # (0,1) 板块 Top10 bar
-            ax = fig.add_subplot(gs[0, 1]); _setup(ax, "📈 板块热度 Top10")
-            blocks = d.get("blocks") or {}
-            items = [(k, v[0] if v and isinstance(v, tuple) else 0) for k, v in blocks.items()]
-            items.sort(key=lambda x: abs(x[1]), reverse=True)
-            items = items[:10]
-            if items:
-                ns, ps = zip(*items); ns = list(reversed(ns)); ps = list(reversed(ps))
-                cs = [STOCK_RED if p > 0 else STOCK_GREEN for p in ps]
-                ax.barh(range(len(ns)), ps, color=cs, alpha=0.85, edgecolor="white", height=0.7)
-                ax.set_yticks(range(len(ns))); ax.set_yticklabels(ns, fontsize=9)
-                ax.axvline(x=0, color="#555")
-
-            # (0,2) 涨停梯队 horizontal
-            ax = fig.add_subplot(gs[0, 2]); _setup(ax, "🔥 涨停梯队")
-            zt = d.get("zt_pool") or []
-            if zt:
-                zt_sorted = sorted(zt[:12], key=lambda x: x.get("amount", 0), reverse=True)
-                ns = [z["name"][:5] for z in zt_sorted]
-                amts = [z.get("amount", 0) / 1e8 for z in zt_sorted]
-                cs = [GOLD if i < 3 else STOCK_RED for i in range(len(ns))]
-                ax.barh(range(len(ns)), amts, color=cs, alpha=0.85, height=0.7, edgecolor="white")
-                ax.set_yticks(range(len(ns))); ax.set_yticklabels(ns, fontsize=9)
-                ax.bar_label(ax.containers[0], fmt="%.1f", padding=3, fontsize=8)
-
-            # (1,0) 情绪周期近20日线
-            ax = fig.add_subplot(gs[1, 0]); _setup(ax, "📉 情绪周期 20日")
-            sent = d.get("sentiment") or []
-            if len(sent) >= 5:
-                m1 = [r[1] or 0 for r in sent[-20:]]
-                ax.plot(range(len(m1)), m1, color=GOLD, linewidth=2, marker="o", markersize=3)
-                ax.fill_between(range(len(m1)), m1, alpha=0.2, color=GOLD)
-                ax.axhspan(70, 100, alpha=0.1, color=STOCK_RED); ax.axhspan(0, 30, alpha=0.1, color=STOCK_GREEN)
-                ax.set_ylim(0, 100)
-
-            # (1,1) 龙虎榜资金流向
-            ax = fig.add_subplot(gs[1, 1]); _setup(ax, "💼 龙虎榜资金流")
-            lhb = d.get("lhb") or []
-            if lhb:
-                recent = lhb[:10]
-                ns = [r[1][:6] for r in recent]
-                nets = [r[3] / 1e8 if r[3] else 0 for r in recent]
-                cs = [STOCK_RED if n > 0 else STOCK_GREEN for n in nets]
-                ax.barh(range(len(ns)), nets, color=cs, alpha=0.85, height=0.7)
-                ax.set_yticks(range(len(ns))); ax.set_yticklabels(ns, fontsize=9)
-                ax.axvline(x=0, color="#555")
-
-            # (1,2) 板块气泡散点 (mini)
-            ax = fig.add_subplot(gs[1, 2]); _setup(ax, "🎯 板块散点 (涨vs量)")
-            items2 = []
-            for k, v in (blocks or {}).items():
-                if v and isinstance(v, tuple) and len(v) >= 2:
-                    items2.append((k[:4], v[0], v[1] if v[1] > 0 else 10))
-            if items2:
-                xs = [x[1] for x in items2]; ys = [x[2] for x in items2]
-                cs = [STOCK_RED if x > 0 else STOCK_GREEN for x in xs]
-                ax.scatter(xs, ys, s=100, c=cs, alpha=0.7, edgecolors="white")
-                for n, x, y in items2[:6]:
-                    ax.annotate(n, (x, y), fontsize=8, color="#ccc", xytext=(5, 5), textcoords="offset points")
-                ax.axvline(x=0, color="#555", linestyle="--")
-
-            # (2,0) 股指期货 mini 雷达
-            ax = fig.add_subplot(gs[2, 0], projection="polar")
-            ax.set_facecolor("#1a1a2e"); ax.grid(color="#444")
-            ax.set_title("🌐 股指期货", fontsize=10, color="#FFD54F", fontweight="bold", pad=8)
-            for spine in ax.spines.values(): spine.set_color("#444")
-            rt = d.get("indices", {}) or {}
-            fut_keys = ["IF", "IC", "IH"]
-            theta3 = np.linspace(0, 2 * np.pi, 5, endpoint=False).tolist(); theta3 += theta3[:1]
-            for key in fut_keys:
-                info = rt.get(key, {}) if isinstance(rt.get(key), dict) else {}
-                pct = abs(info.get("pct", 0)) * 10 + 30
-                vals = [min(pct, 100)] * 5; vals += vals[:1]
-                ax.plot(theta3, vals, "o-", linewidth=1.5, markersize=3)
-                ax.fill(theta3, vals, alpha=0.1)
-            ax.set_xticks(theta3[:-1])
-
-            # (2,1) 涨停数历史柱
-            ax = fig.add_subplot(gs[2, 1]); _setup(ax, "🔥 近15日涨停数")
-            if len(sent) >= 3:
-                zts = [r[2] or 0 for r in sent[-15:]]
-                cs = [STOCK_RED if z > 50 else "#FF9500" if z > 30 else STOCK_GREEN for z in zts]
-                ax.bar(range(len(zts)), zts, color=cs, alpha=0.85, edgecolor="white", width=0.8)
-                ax.axhline(y=50, color=STOCK_RED, linestyle=":", alpha=0.5, linewidth=1)
-
-            # (2,2) 综合信息面板
-            ax = fig.add_subplot(gs[2, 2]); _setup(ax, "📝 综合摘要")
-            ax.axis("off")
-            lines = [
-                f"📅 {time.strftime('%Y-%m-%d %H:%M')}",
-                f"🔼 上涨 {up}   🔽 下跌 {dn}",
-                f"🔥 涨停 {d.get('zt_pool') and len(d['zt_pool']) or '?'} 只",
-                f"📈 板块 {len(blocks or {})} 个",
-                f"💼 龙虎榜 {len(lhb or [])} 条",
-                f"📉 情绪近 {len(sent or [])} 天",
-            ]
-            cur_y = 0.9
-            for l in lines:
-                ax.text(0.05, cur_y, l, transform=ax.transAxes,
-                        fontsize=12, color="#E0E0E0", va="center",
-                        bbox=dict(boxstyle="round,pad=0.3", facecolor="#222", edgecolor="#444", alpha=0.7))
-                cur_y -= 0.12
-
-            fig.suptitle(f"🎨 游资看盘 · 综合仪表盘 · {time.strftime('%Y-%m-%d %H:%M')}",
-                        fontsize=22, color="#FFD54F", fontweight="bold", y=0.98)
-            return _save(fig, "8_综合仪表盘_9合1")
-
-        # ═══════════ 图表按钮 UI ═══════════
-        chart_funcs = [
-            ("📊 涨跌仪表盘", _chart_dashboard, "Gauge: 红涨绿跌双半圆"),
-            ("📈 板块热度条形图", _chart_sector_bar, "Horizontal Bar: Top12 真实涨跌幅"),
-            ("🎯 板块气泡散点图", _chart_sector_bubble, "Bubble: 涨跌幅 vs 上涨家数 vs 成交额"),
-            ("🔥 涨停梯队树状图", _chart_zt_ladder, "Ladder: 今日涨停 Top25 按成交额"),
-            ("💼 龙虎榜资金流", _chart_lhb_flow, "Net Flow: 主力净买卖 亿元"),
-            ("📉 情绪周期热力图", _chart_sentiment_heatmap, "Line + Bar: 60日走势 + 情绪区间"),
-            ("🌐 股指期货雷达图", _chart_futures_radar, "Radar: IF/IC/IH/IM 多维度"),
-            ("🎨 综合仪表盘 3×3", _chart_dashboard_3x3, "Gridspec: 9图合一最震撼"),
-        ]
-
-        btn_grid = tk.Frame(studio, bg="#0f0f1a")
-        btn_grid.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
-        import tkinter.ttk as _ttk3
-        style = _ttk3.Style(); style.theme_use("clam")
-        style.configure("Dark.TButton", background="#1a1a2e", foreground="#FFD54F",
-                        font=("", 11, "bold"), padding=8)
-
-        def _make_chart(idx, name, fn, desc):
-            def _on():
-                if not _watch_data:
-                    status_lbl.config(text="⏳ 先点「🔄 采集数据」")
-                    return
-                try:
-                    status_lbl.config(text=f"📊 生成中: {name}...")
-                    path = fn()
-                    if path:
-                        _generated.append((idx, path))
-                        status_lbl.config(text=f"✅ {name} → {os.path.basename(path)}")
-                        # 自动预览
-                        import webbrowser; webbrowser.open(f"file://{path}")
-                    else:
-                        status_lbl.config(text=f"⚠️ {name} 数据不足, 试试先 🔄 刷新游资看盘")
-                except Exception as e:
-                    status_lbl.config(text=f"❌ {name}: {e}")
-                    traceback.print_exc()
-            return _on
-
-        # 2 列布局
-        for i, (name, fn, desc) in enumerate(chart_funcs):
-            r, c = divmod(i, 2)
-            cell = tk.Frame(btn_grid, bg="#1a1a2e", highlightbackground="#424242", highlightthickness=1)
-            cell.grid(row=r, column=c, padx=6, pady=6, sticky="nsew")
-            tk.Label(cell, text=name, bg="#1a1a2e", fg="#FFD54F",
-                     font=("", 12, "bold")).pack(pady=(10, 2))
-            tk.Label(cell, text=desc, bg="#1a1a2e", fg="#888",
-                     font=("", 9), wraplength=420, justify=tk.CENTER).pack(pady=(0, 6))
-            tk.Button(cell, text="🎨 生成", bg="#1976D2", fg="white", font=("", 11, "bold"),
-                      padx=16, pady=4, cursor="hand2",
-                      command=_make_chart(i, name, fn, desc)).pack(pady=(0, 10))
-
-        btn_grid.columnconfigure(0, weight=1); btn_grid.columnconfigure(1, weight=1)
-        for r in range(4): btn_grid.rowconfigure(r, weight=1)
-
-        # 底部栏
-        bot = tk.Frame(studio, bg="#0f0f1a"); bot.pack(fill=tk.X, padx=12, pady=(0, 12))
-
-        def _do_collect():
-            status_lbl.config(text="⏳ 正在采集游资看盘全量数据...")
-            def _bg():
-                _watch_data.clear(); _watch_data.update(_collect_chart_data())
-                studio.after(0, lambda: status_lbl.config(
-                    text=f"✅ 采集完成 | 输出目录: {OUTPUT_DIR}"))
-            threading.Thread(target=_bg, daemon=True).start()
-
-        def _gen_all():
-            if not _watch_data:
-                _do_collect()
-            def _bg():
-                paths = []
-                for name, fn, desc in chart_funcs:
-                    try:
-                        status_lbl.config(text=f"⏳ {name}...")
-                        path = fn()
-                        if path: paths.append(path)
-                    except Exception as e:
-                        print(f"[📊批量] {name} ❌ {e}", flush=True)
-                studio.after(0, lambda: status_lbl.config(
-                    text=f"✅ 批量完成! {len(paths)} 张图 → {OUTPUT_DIR}"))
-                studio.after(0, lambda: subprocess.Popen(["open", OUTPUT_DIR]))
-            threading.Thread(target=_bg, daemon=True).start()
-
-        def _open_dir():
-            subprocess.Popen(["open", OUTPUT_DIR])
-
-        tk.Button(bot, text="🔄 采集游资看盘数据", bg="#1565C0", fg="white", font=("", 11, "bold"),
-                  padx=14, pady=5, cursor="hand2", command=_do_collect).pack(side=tk.LEFT, padx=4)
-        tk.Button(bot, text="🎨 批量生成全部 8 张图", bg="#FFD54F", fg="black", font=("", 11, "bold"),
-                  padx=14, pady=5, cursor="hand2", command=_gen_all).pack(side=tk.LEFT, padx=4)
-        tk.Button(bot, text="📁 打开图表文件夹", bg="#4CAF50", fg="white", font=("", 11),
-                  padx=10, pady=5, cursor="hand2", command=_open_dir).pack(side=tk.LEFT, padx=4)
-        tk.Label(bot, text=f"📂 {OUTPUT_DIR}", bg="#0f0f1a", fg="#666", font=("", 10)).pack(side=tk.RIGHT)
-
-        # 自动采集
-        _do_collect()
-
-    tk.Button(header, text="📊 精美图表", width=10, bg="#FFD54F", fg="black",
-              activebackground="#FFCA28", bd=1, font=("", 10, "bold"),
-              relief=tk.FLAT, cursor="hand2",
-              command=_open_chart_studio).pack(side=tk.LEFT, padx=4, pady=10)
 
     fs_box = tk.Frame(header, bg="#121212"); fs_box.pack(side=tk.RIGHT, padx=14)
     tk.Label(fs_box, text="🔤 字体:", bg="#121212", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT)
@@ -7349,137 +6791,124 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
 
     # -------- 🔍 游资看盘文章 --------
     def _collect_speculator_data():
-        """收集游资看盘全量数据 — 极速版 (复用缓存 + 超时保护)
-        
-        🚀 优化:
-        1. 新浪实时 + 板块 + 全球 → 直接读 win 上已有的缓存 (0ms)
-        2. akshare 涨停池 → 优先从 UI 的 limitup_dropdown 缓存读 (已预加载)
-        3. DB 查询 → 用内存字典缓存避免重复 SQLite 连接
-        4. 所有网络请求包 7s 超时保护 → 超时直接降级
-        目标: 采集时间 < 5秒 (原来 30-80秒!)
-        """
+        """收集游资看盘全量数据 (比 _collect_realtime_market_data 更丰富)"""
         import json
-        data = {"source": "游资看盘极速采集", "collected_at": time.strftime("%Y-%m-%d %H:%M:%S")}
-
-        def _safe_call(fn, label, timeout=7):
-            """带超时的网络调用"""
-            import concurrent.futures as _cf
-            with _cf.ThreadPoolExecutor(max_workers=1) as ex:
-                fut = ex.submit(fn)
-                try:
-                    return fut.result(timeout=timeout)
-                except _cf.TimeoutError:
-                    print(f"[📕采集] ⏱️ {label} 超时({timeout}s) 跳过", flush=True)
-                    return None
-                except Exception as e:
-                    print(f"[📕采集] ❌ {label}: {e}", flush=True)
-                    return None
-
-        t0 = time.time()
-
-        # ── 1. 大盘实时 (直接从已加载的缓存/UI标签读) ──
+        data = {"source": "游资看盘全量采集", "collected_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+        # 1. 大盘实时 + 板块 + 全球
         try:
-            # 新浪实时缓存
+            base = _collect_realtime_market_data()
+            data.update(base)
+        except Exception as e:
+            data["基础采集失败"] = str(e)
+
+        # 2. 涨停板 Top15 (akshare)
+        try:
+            import akshare as ak
+            today = time.strftime("%Y%m%d")
+            zt = ak.stock_zt_pool_em(date=today)
+            data["今日涨停数"] = len(zt)
+            top_zt = []
+            for _, r in zt.head(15).iterrows():
+                nm = r.get('名称', '?'); cd = r.get('代码', '?')
+                pct = r.get('涨跌幅', 0); amt = r.get('成交额', 0)
+                top_zt.append(f"{nm}({cd}) +{pct:.1f}% 额{amt/1e8:.1f}亿")
+            data["涨停梯队Top15"] = top_zt
+        except Exception as e:
+            data["涨停板"] = f"(akshare失败: {e})"
+
+        # 3. 跌停板
+        try:
+            import akshare as ak
+            today = time.strftime("%Y%m%d")
+            dt2 = ak.stock_zt_pool_dtgc_em(date=today)
+            data["今日跌停数"] = len(dt2)
+            top_dt = []
+            for _, r in dt2.head(10).iterrows():
+                nm = r.get('名称', '?'); cd = r.get('代码', '?')
+                pct = r.get('涨跌幅', 0)
+                top_dt.append(f"{nm}({cd}) {pct:.1f}%")
+            data["跌停Top10"] = top_dt
+        except Exception as e:
+            data["跌停板"] = f"(失败: {e})"
+
+        # 4. 龙虎榜 (DB)
+        try:
+            import sqlite3
+            db = _stock_db_path()
+            conn = sqlite3.connect(db); cur = conn.cursor()
+            cur.execute("SELECT trade_date, name, reason, net_amount, pct_change "
+                        "FROM lhb_records ORDER BY trade_date DESC LIMIT 12")
+            rows = cur.fetchall(); conn.close()
+            lhb_out = []
+            for td, nm, reason, net, pct in rows:
+                net_s = f"{net/1e8:.1f}亿" if net and abs(net)>1e7 else f"{net/1e4:.0f}万" if net else "-"
+                lhb_out.append(f"{td} {nm} {reason or ''} 净{net_s} {pct:+.1f}%")
+            data["龙虎榜近12条"] = lhb_out
+        except Exception as e:
+            data["龙虎榜"] = f"(失败: {e})"
+
+        # 5. 情绪周期 (DB)
+        try:
+            import sqlite3
+            db = _stock_db_path()
+            conn = sqlite3.connect(db); cur = conn.cursor()
+            cur.execute("SELECT snapshot_date, m1_today, m3_count FROM sentiment_history "
+                        "ORDER BY snapshot_date DESC LIMIT 10")
+            rows = cur.fetchall(); conn.close()
+            if rows:
+                last = rows[0]
+                m1 = last[1] or 0; m3 = last[2] or 0
+                if m1 < 30: ph = "❄️冰点"
+                elif m1 < 50: ph = "📉退潮"
+                elif m1 < 70: ph = "🌊复苏"
+                else: ph = "🔥高潮"
+                data["情绪周期"] = f"{last[0]} 情绪指数={m1:.1f} 涨停={m3} 位置={ph}"
+                data["近10天情绪"] = [f"{d} m1={m1} zt={m3}" for d, m1, m3 in rows]
+        except Exception as e:
+            data["情绪周期"] = f"(失败: {e})"
+
+        # 6. 期货主力合约
+        try:
             rt = _get_sina_realtime()
             if rt:
-                data["indices"] = rt.get("indices", {})
-                data["up_count"] = rt.get("up_count") or rt.get("seed_up_count") or "--"
-                data["down_count"] = rt.get("down_count") or rt.get("seed_down_count") or "--"
-                data["涨家数"] = data["up_count"]; data["跌家数"] = data["down_count"]
-            # 板块缓存 (游资看盘已加载)
-            blocks = _compute_block_pct_from_cache() or {}
-            if blocks:
-                data["板块强度"] = [f"{k}({v[0]:+.2f}%)" for k, v in list(blocks.items())[:12]]
-            print(f"[📕采集1] 大盘+板块 {time.time()-t0:.1f}s", flush=True)
-        except Exception as e:
-            print(f"[📕采集1] ❌ 大盘板块: {e}", flush=True)
-
-        # ── 2. 涨停板 (先从 UI 下拉框/缓存读 → 没有再 akshare) ──
-        zt_from_ui = None
-        try:
-            # 从游资看盘 limitup 下拉框抓 (已经预加载了!)
-            if hasattr(win, '_limitup_dropdown') and win._limitup_dropdown:
-                vals = list(win._limitup_dropdown['values'])
-                if vals:
-                    zt_from_ui = vals[:15]
-        except Exception: pass
-
-        if zt_from_ui:
-            data["涨停梯队Top15"] = zt_from_ui
-            data["今日涨停数"] = len(zt_from_ui)
-            print(f"[📕采集2] ✅ 涨停从UI缓存读 ({len(zt_from_ui)}只) {time.time()-t0:.1f}s", flush=True)
-        else:
-            # 降级: akshare 带超时
-            def _zt_fetch():
-                import akshare as ak
-                return ak.stock_zt_pool_em(date=time.strftime("%Y%m%d"))
-            zt = _safe_call(_zt_fetch, "akshare涨停池", timeout=6)
-            if zt is not None and hasattr(zt, 'head'):
-                data["今日涨停数"] = len(zt)
-                data["涨停梯队Top15"] = [
-                    f"{r.get('名称','?')}({r.get('代码','?')}) +{r.get('涨跌幅',0):.1f}% 额{r.get('成交额',0)/1e8:.1f}亿"
-                    for _, r in zt.head(15).iterrows()]
-            else:
-                data["今日涨停数"] = "--"; data["涨停梯队Top15"] = []
-            print(f"[📕采集2] 涨停 akshare {time.time()-t0:.1f}s", flush=True)
-
-        # ── 3. 跌停板 (可选, 3s 超时) ──
-        def _dt_fetch():
-            import akshare as ak
-            return ak.stock_zt_pool_dtgc_em(date=time.strftime("%Y%m%d"))
-        dt2 = _safe_call(_dt_fetch, "akshare跌停池", timeout=4)
-        if dt2 is not None and hasattr(dt2, 'head'):
-            data["今日跌停数"] = len(dt2)
-            data["跌停Top10"] = [f"{r.get('名称','?')}({r.get('代码','?')}) {r.get('涨跌幅',0):.1f}%"
-                                for _, r in dt2.head(10).iterrows()]
-        print(f"[📕采集3] 跌停 {time.time()-t0:.1f}s", flush=True)
-
-        # ── 4-7. DB 查询 (本地 SQLite 毫秒级, 不用超时) ──
-        try:
-            conn = sqlite3.connect(_stock_db_path()); cur = conn.cursor()
-            # 4. 龙虎榜
-            try:
-                cur.execute("SELECT trade_date, name, reason, net_amount, pct_change FROM lhb_records ORDER BY trade_date DESC LIMIT 12")
-                data["龙虎榜近12条"] = [
-                    f"{td} {nm} {reason or ''} 净{(f'{net/1e8:.1f}亿' if net and abs(net)>1e7 else f'{net/1e4:.0f}万') if net else '-'} {pct:+.1f}%"
-                    for td, nm, reason, net, pct in cur.fetchall()]
-            except Exception: pass
-            # 5. 情绪周期
-            try:
-                cur.execute("SELECT snapshot_date, m1_today, m3_count FROM sentiment_history ORDER BY snapshot_date DESC LIMIT 10")
-                rows = cur.fetchall()
-                if rows:
-                    last = rows[0]; m1 = last[1] or 0; m3 = last[2] or 0
-                    ph = "❄️冰点" if m1 < 30 else "📉退潮" if m1 < 50 else "🌊复苏" if m1 < 70 else "🔥高潮"
-                    data["情绪周期"] = f"{last[0]} 情绪指数={m1:.1f} 涨停={m3} 位置={ph}"
-            except Exception: pass
-            conn.close()
-            print(f"[📕采集4-7] DB {time.time()-t0:.1f}s", flush=True)
-        except Exception as e:
-            print(f"[📕采集4-7] ❌ DB: {e}", flush=True)
-
-        # 8. 期货 (新浪已拉过, 0ms)
-        try:
-            rt2 = _get_sina_realtime()
-            if rt2:
-                idx_data = rt2.get("indices", {}) or {}
+                idx_data = rt.get("indices", {}) or {}
                 fut_names = {"IC": "中证500", "IF": "沪深300", "IH": "上证50", "IM": "中证1000"}
-                data["股指期货"] = [f"{fut_names.get(k,k)}={v.get('close',0):.2f}({v.get('pct',0):+.2f}%)"
-                                    for k, v in idx_data.items()][:4]
-        except Exception: pass
+                fut_out = []
+                for k, v in idx_data.items():
+                    close = v.get("close", 0); pct = v.get("pct", 0)
+                    cn = fut_names.get(k, k)
+                    fut_out.append(f"{cn}={close:.2f}({pct:+.2f}%)")
+                if fut_out:
+                    data["股指期货"] = fut_out
+        except Exception as e:
+            data["期货"] = f"(失败: {e})"
 
-        print(f"[📕采集] ✅ 总耗时 {time.time()-t0:.1f}s → {len(data)} 项", flush=True)
+        # 7. 指数形态统计 (DB)
+        try:
+            import sqlite3
+            db = _stock_db_path()
+            conn = sqlite3.connect(db); cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='index_pattern_stats'")
+            if cur.fetchone():
+                cur.execute("SELECT date, pattern, next_day_pct FROM index_pattern_stats "
+                            "ORDER BY date DESC LIMIT 15")
+                rows = cur.fetchall(); conn.close()
+                if rows:
+                    data["指数形态近15天"] = [f"{d} {p} 次日={pct:+.2f}%" for d, p, pct in rows]
+        except Exception:
+            pass
+
+        print(f"[🔍游资看盘采集] ✅ {len(data)} 项", flush=True)
         return data
 
     def _quick_speculator():
         busy[0] = True
-        status_var.set("🔍 游资看盘极速采集 + AI 创作中...")
+        status_var.set("🔍 游资看盘全量采集 + AI 创作中...")
         result_txt.delete("1.0", tk.END)
-        result_txt.insert("1.0", "⏳ 极速模式采集数据 (复用游资看盘缓存 + 超时保护) + AI 创作...\n预计 15-30 秒 (已优化!)")
+        result_txt.insert("1.0", "⏳ 正在采集游资看盘全量数据 (涨停/跌停/龙虎榜/情绪/期货/板块)...\n请稍候 30-60 秒...")
 
         def _work():
             try:
-                t0 = time.time()
                 data = _collect_speculator_data()
                 import json as _j
                 prompt = f"""你是A股顶级游资, 擅长情绪周期、龙头战法、板块联动。
@@ -7738,372 +7167,6 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
                           bg="#5D4037", fg="white", padx=14, pady=3,
                           cursor="hand2", command=_quick_bruce)
     bruce_btn.pack(side=tk.LEFT, padx=(0, 8))
-
-    # -------- 📕 小红书图文笔记 --------
-    def _quick_xiaohongshu():
-        busy[0] = True
-        status_var.set("📕 小红书图文笔记生成中 (AI文案 + 9:16竖图)...")
-        result_txt.delete("1.0", tk.END)
-        result_txt.insert("1.0", "⏳ 正在采集数据 + AI 写小红书种草文 + 生成 9:16 竖图...\n请稍候 40-80 秒...")
-
-        def _work():
-            try:
-                # 1. 采数据
-                data = _collect_speculator_data()
-                # 2. AI 写小红书风格文案
-                import json as _j
-                prompt = f"""你是小红书财经博主, 30万粉, 风格活泼亲切, 大量emoji, 短句, 用"姐妹们""家人们""宝子们"的口吻, 像闺蜜分享。
-
-【今日日期】{time.strftime('%Y-%m-%d')}
-
-【真实市场数据】
-{_j.dumps(data, ensure_ascii=False, default=str, indent=2)[:3000]}
-
-【严格要求 — 小红书格式】
-1️⃣ 标题 (20字内, 必须含emoji + 数字/反差感): 例 "今天大盘居然...震惊了🤯"
-2️⃣ 封面大字 (8-12字, 独立一行, 要炸): 例 "家人们! 今天AI又爆了🔥"
-3️⃣ 正文:
-   - 每段 1-3 句, 短! 短句!
-   - emoji 密集 (每段至少1-2个)
-   - 分小标题 (用 emoji+加粗)
-   - 必须引用真实数据 (涨停数/板块/情绪指数)
-   - 结尾 1-2 句话术引导互动 (点赞/收藏/关注)
-4️⃣ 话题标签 (10-15个): #A股 #炒股 #游资看盘 #短线交易 #情绪周期 #今日复盘 #投资笔记 #理财 #财经 #交易心得 #板块分析 #涨停板 #龙虎榜 #股票 #干货分享
-
-【输出 Markdown — 结构清晰】"""
-                result = _robust_ai_call(prompt,
-                                          system_prompt="你是小红书30万粉财经博主。活泼、亲切、emoji密集、短句、口语化、像闺蜜分享。标题抓眼球, 封面大字要炸, 话题标签10个以上。不说专业黑话, 用'家人们''宝子们''姐妹们'。",
-                                          max_tokens=2200, win=win)
-                if not result:
-                    result = _article_fallback(prompt, "小红书种草", "今日复盘", "小红书", "800字种草文")
-
-                # 3. 生成 9:16 竖图 (封面 + 2张内页)
-                images = _generate_xhs_images(result, data)
-
-                # 4. 存到桌面分享文件夹
-                import os as _os2
-                desktop = _os2.path.expanduser("~/Desktop")
-                folder = _os2.path.join(desktop, "📈股票文章分享")
-                _os2.makedirs(folder, exist_ok=True)
-                ts = time.strftime("%m%d_%H%M")
-                saved_paths = []
-                for i, img in enumerate(images):
-                    p = _os2.path.join(folder, f"小红书_{ts}_{i+1}.png")
-                    try:
-                        img.save(p, "PNG"); saved_paths.append(p)
-                    except Exception as e:
-                        print(f"[📕存图] 失败 {p}: {e}", flush=True)
-
-                # 5. 存 MD 文案
-                md_path = _os2.path.join(folder, f"小红书_{ts}_文案.md")
-                with open(md_path, "w", encoding="utf-8") as f:
-                    f.write(result)
-
-                # 6. 自动存档
-                cards = _build_speculator_data_cards(data)
-                html = _to_wechat_html(result, title=f"小红书·{time.strftime('%m月%d日')}", data_cards=cards)
-                _archive_article(
-                    title=result.split("\n")[0].lstrip("# ").strip()[:80] or "小红书笔记",
-                    source="📕小红书", author="小红书博主", mode="种草文",
-                    platform="小红书", md=result, html=html)
-
-                # 7. 回 UI 显示
-                n_imgs = len(saved_paths)
-                summary = (f"{result}\n\n{'='*40}\n"
-                           f"📕 已生成 {n_imgs} 张 9:16 竖图:\n" +
-                           "\n".join(f"   {i+1}. {os.path.basename(p)}" for i, p in enumerate(saved_paths)) +
-                           f"\n\n📁 文件夹: {folder}\n"
-                           f"👉 点下方「📕打开小红书创作页」一键发布!")
-
-                dlg.after(0, lambda: _show_result_with_html(summary, html, "📕小红书", source="📕小红书"))
-                dlg.after(0, lambda: status_var.set(
-                    f"✅ 📕小红书笔记生成完成! {n_imgs}张图+文案已存桌面 → 点「📕打开小红书创作页」发布"))
-            except Exception as e:
-                import traceback
-                dlg.after(0, lambda: _show_result_with_html(
-                    f"❌ 小红书生成失败: {e}\n\n{traceback.format_exc()}", "", ""))
-            finally:
-                busy[0] = False
-                dlg.after(0, lambda: gen_btn.config(state=tk.NORMAL))
-
-        import threading; threading.Thread(target=_work, daemon=True).start()
-
-    # -------- 🎨 生成 9:16 竖图 (封面 + 内页) --------
-    def _generate_xhs_images(md_text, data):
-        """用 Pillow 生成小红书风格 9:16 竖图
-        
-        生成 3 张:
-          1. 封面图 (大标题 + 情绪周期 emoji + 渐变底)
-          2. 数据页 (涨跌家数 + 板块九宫格)
-          3. 策略页 (操作建议 + 话题标签)
-        """
-        from PIL import Image, ImageDraw, ImageFont, ImageFilter
-        import os as _os_img
-
-        W, H = 1080, 1920  # 9:16 小红书标准尺寸
-
-        # 找字体 — macOS 苹方
-        font_paths = [
-            "/System/Library/Fonts/PingFang.ttc",
-            "/System/Library/Fonts/STHeiti Medium.ttc",
-            "/System/Library/Fonts/Hiragino Sans GB.ttc",
-            "/System/Library/Fonts/Supplemental/Songti.ttc",
-        ]
-        def _font(size, bold=False):
-            for fp in font_paths:
-                if _os_img.path.exists(fp):
-                    try:
-                        return ImageFont.truetype(fp, size)
-                    except Exception: pass
-            return ImageFont.load_default()
-
-        images = []
-
-        # ════════════════════════════════════════════
-        # 图1: 封面 — 大字标题 + 情绪周期
-        # ════════════════════════════════════════════
-        img = Image.new("RGB", (W, H), "#1a1a2e")
-        draw = ImageDraw.Draw(img)
-        # 渐变背景 (粉→紫→蓝)
-        for y in range(H):
-            r = int(255 * y / H + 30); g = int(60 * y / H + 20); b = int(180 - 120 * y / H)
-            draw.line([(0, y), (W, y)], fill=(min(r, 255), min(g, 255), min(b, 255)))
-        # 模糊光晕
-        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        od = ImageDraw.Draw(overlay)
-        od.ellipse([-200, 200, W + 200, 800], fill=(255, 100, 150, 60))
-        od.ellipse([-100, 1200, W + 100, 1700], fill=(100, 80, 255, 60))
-        overlay = overlay.filter(ImageFilter.GaussianBlur(80))
-        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-        draw = ImageDraw.Draw(img)
-
-        # 小红书 logo 位置 (右上角)
-        draw.rounded_rectangle([W - 260, 60, W - 60, 120], radius=30,
-                                fill="#FF2442")
-        draw.text((W - 230, 72), "📕 今日复盘", fill="white", font=_font(28, True))
-
-        # 主标题 (大字)
-        lines = (md_text.split("\n")[0].lstrip("# ").strip() or "今日A股复盘").split("\n")
-        main_title = lines[0][:20]
-        # 分行
-        if len(main_title) > 12:
-            t1 = main_title[:len(main_title)//2]
-            t2 = main_title[len(main_title)//2:]
-        else:
-            t1 = main_title; t2 = ""
-
-        # 画大字阴影
-        shadow_font = _font(96, True)
-        def _draw_big_text(text, y_center, color="#ffffff", shadow="#000000"):
-            if not text: return
-            # 阴影
-            for dx, dy in [(-4,-4),(4,-4),(-4,4),(4,4)]:
-                draw.text((W//2 - shadow_font.getlength(text)//2 + dx, y_center + dy),
-                          text, fill=shadow, font=shadow_font)
-            draw.text((W//2 - shadow_font.getlength(text)//2, y_center),
-                      text, fill=color, font=shadow_font)
-
-        _draw_big_text(t1, 500, "#ffffff")
-        if t2:
-            shadow_font2 = _font(96, True)
-            # 第二行用渐变色
-            _draw_big_text(t2, 620, "#FFE4EC")
-
-        # 情绪周期 emoji 大字
-        import re as _re_img
-        sent = data.get("情绪周期", "")
-        m = _re_img.search(r'位置=([^\s]+)', sent)
-        emo_pos = m.group(1) if m else "🌊复苏"
-        emo_font = _font(72)
-        emo_text = emo_pos
-        draw.text((W//2 - emo_font.getlength(emo_text)//2, 820), emo_text,
-                  fill="#FFD700", font=emo_font)
-
-        # 日期 + 小红书风格
-        date_font = _font(32)
-        date_text = time.strftime("📅 %Y年%m月%d日  周六/日/一/二/三/四/五"[:18])
-        draw.text((W//2 - date_font.getlength(date_text)//2, 960), date_text,
-                  fill="#ffffffcc", font=date_font)
-
-        # 大字数据: 涨停数
-        zt_count = data.get("今日涨停数", "?")
-        up = data.get("涨家数", "?"); dn = data.get("跌家数", "?")
-        big_font = _font(120, True)
-        try:
-            draw.text((120, 1100), f"🔥 {zt_count}", fill="#FF2442", font=big_font)
-            draw.text((120, 1240), "只涨停", fill="#ffffff99", font=_font(32))
-        except Exception: pass
-
-        # 底部标签
-        tags_y = 1700
-        tag_font = _font(26)
-        tag_text = "#A股 #今日复盘 #游资看盘 #财经"
-        draw.text((W//2 - tag_font.getlength(tag_text)//2, tags_y), tag_text,
-                  fill="#ffffffaa", font=tag_font)
-        images.append(img)
-
-        # ════════════════════════════════════════════
-        # 图2: 数据页 — 涨跌家数 + 板块九宫格
-        # ════════════════════════════════════════════
-        img2 = Image.new("RGB", (W, H), "#ffffff")
-        draw2 = ImageDraw.Draw(img2)
-        # 顶部彩色条
-        draw2.rectangle([0, 0, W, 6], fill="#FF2442")
-        draw2.rounded_rectangle([60, 60, 380, 120], radius=30, fill="#FF2442")
-        draw2.text((100, 72), "📊 今日数据", fill="white", font=_font(36, True))
-
-        # 涨跌家数大卡
-        def _draw_stat_card(x, y, w, h, label, value, color):
-            draw2.rounded_rectangle([x, y, x+w, y+h], radius=20, fill=color + "20", outline=color, width=2)
-            vf = _font(72, True); lf = _font(28)
-            # 测量文字居中
-            vw = vf.getlength(str(value))
-            lw = lf.getlength(label)
-            draw2.text((x + w//2 - vw//2, y + 40), str(value), fill=color, font=vf)
-            draw2.text((x + w//2 - lw//2, y + h - 60), label, fill="#333", font=lf)
-
-        _draw_stat_card(60, 160, 470, 220, "上涨家数", up if str(up) != "?" else "--", "#FF2442")
-        _draw_stat_card(550, 160, 470, 220, "下跌家数", dn if str(dn) != "?" else "--", "#07C160")
-
-        # 情绪 + 涨停
-        _draw_stat_card(60, 420, 300, 160, "涨停数", zt_count, "#FF9500")
-        # 情绪指数
-        try:
-            m2 = _re_img.search(r'情绪指数=([\d.]+)', sent)
-            if m2:
-                _draw_stat_card(390, 420, 300, 160, "情绪指数", m2.group(1), "#5856D6")
-        except Exception: pass
-        # 跌停
-        dt_count = data.get("今日跌停数", "?")
-        _draw_stat_card(720, 420, 300, 160, "跌停数", dt_count, "#34C759")
-
-        # 板块九宫格标题
-        draw2.text((60, 620), "🗂️ 板块涨跌分布", fill="#333", font=_font(36, True))
-
-        # 板块九宫格 4列 x 3行
-        sectors = data.get("板块强度", []) or []
-        parsed2 = []
-        for s in sectors[:12]:
-            m3 = _re_img.match(r'([^\(]+)\(([+-][\d.]+)%', s)
-            if m3:
-                parsed2.append((m3.group(1).strip()[:6], float(m3.group(2))))
-        grid_x0 = 60; grid_y0 = 680; cell_w = (W - 120 - 20) // 4; cell_h = 120
-        for i in range(12):
-            col = i % 4; row = i // 4
-            x = grid_x0 + col * (cell_w + 6)
-            y = grid_y0 + row * (cell_h + 6)
-            if i < len(parsed2):
-                name, pct = parsed2[i]
-                bg = "#FF2442" if pct > 0 else "#07C160"
-                draw2.rounded_rectangle([x, y, x+cell_w, y+cell_h], radius=12,
-                                         fill=bg + ("30" if bg == "#FF2442" else "30"),
-                                         outline=bg, width=2)
-                sign = "+" if pct > 0 else ""
-                draw2.text((x+8, y+12), f"{sign}{pct:.1f}%", fill=bg, font=_font(30, True))
-                # 名字截断
-                name_short = name[:5]
-                nf = _font(22)
-                nw = nf.getlength(name_short)
-                if nw > cell_w - 16:
-                    # 缩小
-                    for sz in [20, 18, 16]:
-                        nf = _font(sz)
-                        nw = nf.getlength(name_short)
-                        if nw <= cell_w - 16: break
-                draw2.text((x + cell_w//2 - nw//2, y + cell_h - 42),
-                           name_short, fill="#333", font=nf)
-            else:
-                draw2.rounded_rectangle([x, y, x+cell_w, y+cell_h], radius=12,
-                                         fill="#f5f5f5", outline="#ddd", width=1)
-
-        images.append(img2)
-
-        # ════════════════════════════════════════════
-        # 图3: 策略页 — 操作建议 + 话题标签
-        # ════════════════════════════════════════════
-        img3 = Image.new("RGB", (W, H), "#FFF5F7")
-        draw3 = ImageDraw.Draw(img3)
-        # 顶部渐变条
-        for y in range(200):
-            r = int(255 - 80 * y / 200); g = int(36 + 100 * y / 200); b = int(66 + 80 * y / 200)
-            draw3.line([(0, y), (W, y)], fill=(max(r, 100), min(g, 200), min(b, 180)))
-        draw3.text((60, 60), "💡 明日操作建议", fill="white", font=_font(40, True))
-
-        # 从 AI 文案里提取策略 (简单切分 "建议" 或仓位相关的行)
-        strategy_lines = []
-        for l in md_text.split("\n"):
-            l = l.strip()
-            if not l: continue
-            if any(k in l for k in ["建议", "仓位", "方向", "警惕", "操作", "明天", "明日"]):
-                # 去掉 markdown 符号
-                clean = l.lstrip("-*·# ").strip()
-                if 10 < len(clean) < 80:
-                    strategy_lines.append(clean)
-                    if len(strategy_lines) >= 5: break
-
-        if not strategy_lines:
-            strategy_lines = [
-                "📈 仓位控制在 5-6 成, 别追高",
-                "🔥 方向: AI算力 + 半导体 领涨板块",
-                "⚠️ 警惕白酒/地产 继续调整",
-                "💀 核按钮股票坚决回避",
-                "📚 收藏关注不迷路, 明天接着看!",
-            ]
-
-        # 画建议卡片
-        sy = 260
-        sf = _font(34)
-        for i, line in enumerate(strategy_lines[:5]):
-            card_h = 140
-            draw3.rounded_rectangle([60, sy, W - 60, sy + card_h], radius=16,
-                                     fill="white", outline="#FF2442" if i < 2 else "#FFD700" if i == 2 else "#eee", width=2)
-            # 序号圆
-            circle_cx = 120; circle_cy = sy + 30
-            draw3.ellipse([circle_cx - 26, circle_cy, circle_cx + 26, circle_cy + 52],
-                           fill="#FF2442" if i < 2 else "#FF9500" if i == 2 else "#5856D6")
-            draw3.text((circle_cx - 10, circle_cy + 2), str(i+1), fill="white", font=_font(28, True))
-            # 文字 (自动换行)
-            text_x = 170; text_y = sy + 20; max_w = W - 60 - text_x - 20
-            # 简单按字符拆
-            cur_line = ""
-            for ch in line:
-                if sf.getlength(cur_line + ch) > max_w:
-                    draw3.text((text_x, text_y), cur_line, fill="#333", font=sf)
-                    text_y += 42; cur_line = ch
-                else:
-                    cur_line += ch
-            if cur_line:
-                draw3.text((text_x, text_y), cur_line, fill="#333", font=sf)
-            sy += card_h + 12
-
-        # 话题标签区
-        tags = ["#A股", "#今日复盘", "#游资看盘", "#财经", "#炒股", "#短线交易",
-                "#情绪周期", "#投资笔记", "#理财", "#干货分享", "#板块分析", "#涨停板"]
-        ty = H - 400
-        tf = _font(28)
-        tx = 60
-        for tag in tags:
-            tw = tf.getlength(tag) + 24
-            if tx + tw > W - 60:
-                tx = 60; ty += 48
-            draw3.rounded_rectangle([tx, ty, tx + tw, ty + 40], radius=18,
-                                     fill="#FF244220", outline="#FF2442", width=1)
-            draw3.text((tx + 12, ty + 6), tag, fill="#FF2442", font=tf)
-            tx += tw + 10
-
-        # 底部签名
-        sig_y = H - 80
-        sf2 = _font(26)
-        draw3.text((W - 200, sig_y), "@游资看盘AI", fill="#FF2442", font=sf2)
-
-        images.append(img3)
-
-        return images
-
-    xhs_btn = tk.Button(quick_frame, text="📕 小红书图文笔记", font=("", 11, "bold"),
-                        bg="#FF2442", fg="white", padx=14, pady=3,
-                        cursor="hand2", command=_quick_xiaohongshu)
-    xhs_btn.pack(side=tk.LEFT, padx=(0, 8))
 
     # -------- 🧱 游资看盘数据豆腐干 → 彩色卡片 --------
     def _build_speculator_data_cards(data):
@@ -8709,9 +7772,6 @@ tell application "System Events" to share item (theFile as alias)'''
     tk.Button(html_frame, text="📚历史回顾", font=("", 11, "bold"), padx=10,
               bg="#FFA726", fg="black", cursor="hand2",
               command=_open_history).pack(side=tk.LEFT, padx=3)
-    tk.Button(html_frame, text="📕打开小红书创作页", font=("", 11, "bold"), padx=10,
-              bg="#FF2442", fg="white", cursor="hand2",
-              command=_open_xhs_creator).pack(side=tk.LEFT, padx=3)
     tk.Button(html_frame, text="📤分享到微信", font=("", 11, "bold"), padx=10,
               bg="#07C160", fg="white", cursor="hand2",
               command=_share_now).pack(side=tk.LEFT, padx=3)
@@ -8728,39 +7788,6 @@ tell application "System Events" to share item (theFile as alias)'''
               command=_copy_html).pack(side=tk.LEFT, padx=2)
     tk.Button(html_frame, text="💾保存HTML", font=("", 11), padx=8,
               bg="#0f3460", fg="white", command=_save_html).pack(side=tk.LEFT, padx=2)
-
-    # -------- 📕 小红书一键发布引导 --------
-    def _open_xhs_creator():
-        """打开小红书创作页 + 复制文案 + Finder 显示图片"""
-        import webbrowser, subprocess, os as _os3
-        text = result_txt.get("1.0", tk.END).strip()
-        # 打开小红书创作页
-        url = "https://creator.xiaohongshu.com/publish/publish"
-        webbrowser.open(url)
-
-        # 找最新的小红书图片文件夹
-        folder = _os3.path.expanduser("~/Desktop/📈股票文章分享")
-        if _os3.path.exists(folder):
-            subprocess.Popen(["open", folder])
-            status_var.set("📕 已打开小红书创作页 + Finder 显示图片文件夹")
-            # 自动复制文案
-            dlg.clipboard_clear()
-            # 只取文案部分 (去掉 = 分隔线之后的提示)
-            md_only = text.split("=" * 40)[0].strip() if "=" * 40 in text else text
-            # 去掉 markdown 标题符号
-            import re as _rx
-            md_only = _rx.sub(r'^#+\s*', '', md_only, flags=_rx.MULTILINE)
-            dlg.clipboard_append(md_only)
-            tk.messagebox.showinfo("📕 小红书发布引导",
-                f"✅ 已打开小红书创作页!\n\n📋 文案已自动复制 (⌘V 粘贴)\n📁 图片文件夹已显示在 Finder\n\n📲 发布步骤:\n"
-                f"1. 在浏览器创作页点击「上传图文」\n"
-                f"2. 把 Finder 里的 3 张 9:16 竖图拖进去 (封面图排第一)\n"
-                f"3. ⌘V 粘贴标题和正文\n"
-                f"4. 检查话题标签 (末尾已含10个+)\n"
-                f"5. 点「发布」即可!")
-        else:
-            tk.messagebox.showinfo("📕 提示",
-                "小红书图片文件夹还没生成!\n\n请先点 📕小红书图文笔记 生成图片,\n然后再打开创作页发布~")
 
     # ════════════════════════════════════════════
     # 结果区
