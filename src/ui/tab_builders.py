@@ -13827,14 +13827,93 @@ except Exception as e:
 
         ttk.Button(add_frame, text="🔍查名", width=6, command=_lookup_code).grid(row=0, column=11, padx=(6, 3))
 
+        def _resolve_code_name(raw_code, raw_name):
+            """名字和代码互相解析 — 支持输入名字、代码、或 '代码 名称' 混用格式
+            
+            返回: (code6, name)  — 都尽量填上, 查不到则保留用户输入
+            """
+            c = (raw_code or "").strip()
+            nm = (raw_name or "").strip()
+
+            # 如果 code 里混了名字 (如 "道华燃气" 或 "002766 道华燃气")
+            if c and not c.isdigit():
+                # 尝试用名字反查代码
+                try:
+                    from logic.stock_names import STOCK_NAME_TO_CODE as _n2c, load_stock_names
+                    load_stock_names()  # 确保缓存加载
+                    # 精确匹配
+                    if c in _n2c:
+                        nm = c  # code字段里放的是名字
+                        c = _n2c[c]
+                    else:
+                        # 模糊匹配 (包含关系)
+                        for _n, _c6 in _n2c.items():
+                            if c in _n or _n in c:
+                                nm = _n; c = _c6; break
+                except Exception: pass
+
+            # 如果 code 还是不对, 尝试空格切分
+            if c and not c.isdigit():
+                parts = re.split(r'\s+', c)
+                for p in parts:
+                    if p.isdigit() and len(p) == 6:
+                        c = p; break
+
+            # 有代码但没名字 → 自动补名
+            if c and c.isdigit() and len(c) == 6 and not nm:
+                try:
+                    from logic.stock_names import STOCK_CODES_DICT as _c2n, load_stock_names
+                    load_stock_names()
+                    nm = _c2n.get(c, "")
+                except Exception: pass
+                if not nm:
+                    try:
+                        rt = self._fetch_realtime_prices([c])
+                        nm = rt.get(c, {}).get("name", "")
+                    except Exception: pass
+
+            # 有名字但代码不是6位 → 名字反查代码
+            if nm and (not c or not c.isdigit() or len(c) != 6):
+                try:
+                    from logic.stock_names import STOCK_NAME_TO_CODE as _n2c, load_stock_names
+                    load_stock_names()
+                    if nm in _n2c:
+                        c = _n2c[nm]
+                    else:
+                        # 模糊匹配
+                        for _n, _c6 in _n2c.items():
+                            if nm in _n or _n in nm:
+                                c = _c6; nm = _n; break
+                except Exception: pass
+
+            return c, nm
+
         def _add_alert():
-            c = code_var.get().strip()
-            nm = name_var.get().strip()
+            c_raw = code_var.get().strip()
+            nm_raw = name_var.get().strip()
             b = buy_var.get().strip()
             s = sell_var.get().strip()
             nt = note_var.get().strip()
-            if not c or len(c) != 6 or not c.isdigit():
-                messagebox.showwarning("提示", "请输入 6 位数字代码", parent=w); return
+
+            # 🎯 名字↔代码双向解析 — 用户输什么都能匹配
+            c, nm = _resolve_code_name(c_raw, nm_raw)
+
+            # 还是没解析出6位代码 → 提示
+            if not c or not c.isdigit() or len(c) != 6:
+                # 给个更友好的提示, 列出可能的匹配
+                hint = ""
+                if c_raw and not c_raw.isdigit():
+                    try:
+                        from logic.stock_names import STOCK_NAME_TO_CODE as _n2c, load_stock_names
+                        load_stock_names()
+                        matches = [(n, cd) for n, cd in _n2c.items()
+                                   if c_raw in n or n in c_raw][:3]
+                        if matches:
+                            hint = "\n\n💡 可能匹配:\n" + "\n".join(f"  {cd} {n}" for n, cd in matches)
+                    except Exception: pass
+                messagebox.showwarning("提示", f"无法识别为有效股票代码\n请输入6位数字代码或完整股票名称{hint}", parent=w)
+                return
+
             buy_p = float(b) if b else 0
             sell_p = float(s) if s else 0
             if buy_p <= 0 and sell_p <= 0:
