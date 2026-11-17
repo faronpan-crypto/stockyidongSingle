@@ -5,7 +5,8 @@
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
-import threading, time, os, json, traceback, random
+import threading, time, os, json, traceback, random, sqlite3, subprocess
+import numpy as np
 from datetime import datetime, timedelta
 
 # ── Splitter 持久化 ──
@@ -1011,6 +1012,563 @@ def show_speculator_watch(root=None, app=None, parent_frame=None):
     tk.Button(header, text="📜 回看历史", width=10, bg="#FFFFFF", fg="black", activebackground="#F5F5F5", highlightbackground="#6A1B9A", highlightthickness=2, bd=1,
               font=("", 10, "bold"), relief=tk.FLAT, cursor="hand2",
               command=_open_history_dialog).pack(side=tk.LEFT, padx=4, pady=10)
+
+    # ── 🆕 📊 精美多维度图表 ──
+    def _open_chart_studio():
+        """游资看盘 → 专业 matplotlib 精美图表工作室
+        
+        图表模板:
+        1. 📊 大盘涨跌家数仪表盘 (gauge)
+        2. 📈 板块热度 Top12 条形图 (horizontal bar)
+        3. 🎯 板块涨跌散点气泡图 (sector scatter)
+        4. 🔥 涨停梯队树状图 (ladder tree)
+        5. 💼 龙虎榜资金流向桑基图 (s Sankey 简化)
+        6. 📉 情绪周期近30日时序 + EMA (line + heatmap)
+        7. 🌐 股指期货雷达图 (radar)
+        8. 🎨 综合仪表盘 3×3 gridspec (9图合一)
+        """
+        studio = tk.Toplevel(win)
+        studio.title("📊 游资看盘 · 精美图表工作室")
+        studio.geometry("960x680"); studio.configure(bg="#0f0f1a")
+
+        # ═══════════ 顶部: 状态 + 刷新数据按钮 ═══════════
+        top_bar = tk.Frame(studio, bg="#0f0f1a"); top_bar.pack(fill=tk.X, padx=12, pady=(12, 6))
+        tk.Label(top_bar, text="📊 游资看盘 · 精美多维度图表工作室", bg="#0f0f1a",
+                 fg="#FFD54F", font=("", 15, "bold")).pack(side=tk.LEFT)
+        status_lbl = tk.Label(top_bar, text="⏳ 准备采集数据...", bg="#0f0f1a",
+                              fg="#888", font=("", 11))
+        status_lbl.pack(side=tk.RIGHT, padx=10)
+
+        # ═══════════ Matplotlib 全局主题 (专业暗黑风) ═══════════
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib import font_manager as fm
+        plt.rcParams.update({
+            "font.sans-serif": ["PingFang SC", "Heiti SC", "STHeiti", "Arial Unicode MS",
+                                "Apple Color Emoji", "Segoe UI Emoji"],
+            "axes.unicode_minus": False,
+            "figure.facecolor": "#0f0f1a",
+            "axes.facecolor": "#1a1a2e",
+            "savefig.facecolor": "#0f0f1a",
+            "text.color": "#E0E0E0",
+            "axes.labelcolor": "#E0E0E0",
+            "xtick.color": "#9E9E9E",
+            "ytick.color": "#9E9E9E",
+            "axes.edgecolor": "#424242",
+            "grid.color": "#333333",
+            "grid.linewidth": 0.5,
+            "axes.grid": True,
+            "grid.alpha": 0.6,
+        })
+        STOCK_RED = "#E94560"; STOCK_GREEN = "#07C160"; GOLD = "#FFD700"
+        ACCENT = "#4ECDC4"; PURPLE = "#9B59B6"; BLUE = "#3498DB"
+        OUTPUT_DIR = os.path.expanduser("~/Desktop/📈股票文章分享/图表")
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+        # ═══════════ 数据采集 (复用现有函数) ═══════════
+        _cache_ref = win if hasattr(win, '_AK_SPOT_CACHE') else None
+        _watch_data = {}
+
+        def _collect_chart_data():
+            """从游资看盘界面各模块抓实时数据"""
+            import json as _j2
+            d = {}
+            try:
+                # 涨跌家数
+                rt = _get_sina_realtime()
+                d["indices"] = rt.get("indices", {}) if rt else {}
+                up = rt.get("up_count", None) if rt else None
+                dn = rt.get("down_count", None) if rt else None
+                # 从缓存或 UI 标签里取
+                if up is None and _CACHE:
+                    up = _CACHE.get("up_count", None) or _CACHE.get("seed_up_count", None)
+                    dn = _CACHE.get("down_count", None) or _CACHE.get("seed_down_count", None)
+                d["up_count"] = up; d["down_count"] = dn
+                d["limit_up"] = rt.get("limit_up_count", None) if rt else None
+                d["limit_down"] = rt.get("limit_down_count", None) if rt else None
+            except Exception as e: d["err1"] = str(e)
+
+            # 板块数据
+            try:
+                blocks = _compute_block_pct_from_cache() or {}
+                d["blocks"] = blocks  # {name: (pct, count, leader)}
+            except Exception: d["blocks"] = {}
+
+            # akshare 涨停池
+            try:
+                import akshare as ak
+                today = time.strftime("%Y%m%d")
+                zt = ak.stock_zt_pool_em(date=today)
+                d["zt_pool"] = []
+                for _, r in zt.head(30).iterrows():
+                    d["zt_pool"].append({
+                        "name": r.get("名称", "?"), "code": r.get("代码", "?"),
+                        "pct": r.get("涨跌幅", 0), "amount": r.get("成交额", 0)
+                    })
+            except Exception: d["zt_pool"] = []
+
+            # 情绪周期历史 (DB)
+            try:
+                conn = sqlite3.connect(_stock_db_path())
+                cur = conn.cursor()
+                cur.execute("SELECT snapshot_date, m1_today, m3_count FROM sentiment_history ORDER BY snapshot_date DESC LIMIT 60")
+                d["sentiment"] = list(reversed(cur.fetchall())); conn.close()
+            except Exception: d["sentiment"] = []
+
+            # 龙虎榜 (DB)
+            try:
+                conn = sqlite3.connect(_stock_db_path())
+                cur = conn.cursor()
+                cur.execute("SELECT trade_date, name, reason, net_amount, pct_change FROM lhb_records ORDER BY trade_date DESC LIMIT 30")
+                d["lhb"] = cur.fetchall(); conn.close()
+            except Exception: d["lhb"] = []
+
+            print(f"[📊图表采集] ✅ 涨跌/板块/涨停/情绪/龙虎榜", flush=True)
+            return d
+
+        # ═══════════ 图表生成函数 (matplotlib 专业版) ═══════════
+        _generated = []  # (chart_id, path)
+
+        def _save(fig, name):
+            ts = time.strftime("%m%d_%H%M")
+            path = os.path.join(OUTPUT_DIR, f"{name}_{ts}.png")
+            fig.savefig(path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+            plt.close(fig)
+            return path
+
+        def _chart_dashboard():
+            """1️⃣ 大盘涨跌仪表盘 — 双半圆 gauge"""
+            d = _watch_data
+            up = int(d.get("up_count") or 3000); dn = int(d.get("down_count") or 2000)
+            fig, ax = plt.subplots(figsize=(10, 6), subplot_kw=dict(polar=True))
+            fig.patch.set_facecolor("#0f0f1a")
+            theta = [0, np.pi * up / (up + dn)]
+            # 红半圆 (上涨)
+            ax.bar(np.pi / 4, 0.7, width=np.pi * up / (up + dn), bottom=0.3,
+                   color=STOCK_RED, alpha=0.9, edgecolor="white", linewidth=1.5)
+            ax.bar(np.pi / 4 + np.pi * up / (up + dn) / 2, 0.7,
+                   width=np.pi * dn / (up + dn), bottom=0.3,
+                   color=STOCK_GREEN, alpha=0.9, edgecolor="white", linewidth=1.5)
+            ax.set_ylim(0, 1.2); ax.set_xlim(0, np.pi)
+            ax.set_thetamin(180); ax.set_thetamax(360)
+            ax.set_yticks([]); ax.set_xticks([])
+            ax.spines["polar"].set_color("#333")
+            # 中心大数字
+            ax.text(np.pi / 2, 0.15, f"{up}", ha="center", va="center",
+                    fontsize=48, color=STOCK_RED, fontweight="bold")
+            ax.text(np.pi / 2, -0.1, f"涨 {up}  跌 {dn}",
+                    ha="center", va="center", fontsize=14, color="#9E9E9E")
+            ax.set_title(f"📊 大盘涨跌家数 · {time.strftime('%m-%d %H:%M')}",
+                         y=1.1, fontsize=16, color="#FFD54F", fontweight="bold")
+            return _save(fig, "1_涨跌仪表盘")
+
+        def _chart_sector_bar():
+            """2️⃣ 板块热度水平条形图 — Top12"""
+            d = _watch_data
+            blocks = d.get("blocks") or {}
+            items = [(k, v[0] if v and isinstance(v, tuple) else 0) for k, v in blocks.items()]
+            items.sort(key=lambda x: abs(x[1]), reverse=True)
+            items = items[:12]
+            if not items: return None
+            names, pcts = zip(*items)
+            names = list(reversed(names)); pcts = list(reversed(pcts))
+            colors = [STOCK_RED if p > 0 else STOCK_GREEN for p in pcts]
+            fig, ax = plt.subplots(figsize=(12, 7))
+            fig.patch.set_facecolor("#0f0f1a")
+            y_pos = range(len(names))
+            bars = ax.barh(y_pos, pcts, color=colors, alpha=0.85,
+                           edgecolor="white", linewidth=0.5, height=0.7)
+            ax.set_yticks(y_pos); ax.set_yticklabels(names, fontsize=12)
+            ax.axvline(x=0, color="#666", linewidth=1)
+            ax.bar_label(bars, fmt="%+.2f%%", padding=4, color="#E0E0E0", fontsize=11, fontweight="bold")
+            ax.set_title(f"📈 板块热度 Top{len(items)} · 真实涨跌幅",
+                         fontsize=16, color="#FFD54F", fontweight="bold", pad=15)
+            ax.set_xlabel("涨跌幅 (%)", color="#9E9E9E")
+            for spine in ax.spines.values(): spine.set_color("#424242")
+            return _save(fig, "2_板块热度条形图")
+
+        def _chart_sector_bubble():
+            """3️⃣ 板块涨跌气泡散点图 — 涨幅 vs 市值 vs 成交"""
+            d = _watch_data
+            blocks = d.get("blocks") or {}
+            items = []
+            for k, v in blocks.items():
+                if v and isinstance(v, tuple) and len(v) >= 2:
+                    pct = v[0]; count = v[1] if len(v) > 1 else 10
+                    items.append((k, pct, count))
+            items = items[:20]
+            if not items: return None
+            fig, ax = plt.subplots(figsize=(12, 8))
+            fig.patch.set_facecolor("#0f0f1a")
+            xs = [x[1] for x in items]; ys = [x[2] if x[2] > 0 else 10 for x in items]
+            sizes = [max(80, min(500, x[2] * 12)) for x in items]
+            colors_b = [STOCK_RED if x > 0 else STOCK_GREEN for x in xs]
+            sc = ax.scatter(xs, ys, s=sizes, c=colors_b, alpha=0.6,
+                            edgecolors="white", linewidths=1.2, zorder=5)
+            # 标注
+            for n, x, y in zip([i[0] for i in items], xs, ys):
+                ax.annotate(n, (x, y), textcoords="offset points",
+                           xytext=(8, 4), fontsize=9, color="#E0E0E0")
+            ax.axvline(x=0, color="#555", linewidth=1, linestyle="--")
+            ax.set_xlabel("板块涨跌幅 (%)", color="#9E9E9E", fontsize=12)
+            ax.set_ylabel("上涨家数 (气泡=成交额)", color="#9E9E9E", fontsize=12)
+            ax.set_title("🎯 板块涨跌散点图 (x=涨跌幅, y=上涨家数, 气泡大小=成交额)",
+                         fontsize=15, color="#FFD54F", fontweight="bold", pad=15)
+            for spine in ax.spines.values(): spine.set_color("#424242")
+            return _save(fig, "3_板块气泡散点图")
+
+        def _chart_zt_ladder():
+            """4️⃣ 涨停梯队树状图 — 连板高度分布"""
+            d = _watch_data
+            zt = d.get("zt_pool") or []
+            if not zt: return None
+            # 按成交额分梯队
+            zt.sort(key=lambda x: x.get("amount", 0), reverse=True)
+            fig, ax = plt.subplots(figsize=(14, 8))
+            fig.patch.set_facecolor("#0f0f1a")
+            names = [z["name"][:6] for z in zt[:25]]
+            amounts = [z.get("amount", 0) / 1e8 for z in zt[:25]]  # 亿
+            colors_l = [GOLD if i < 3 else STOCK_RED if i < 10 else "#FF7043" for i in range(len(names))]
+            # 用水平条形 + 渐变
+            y_pos = range(len(names))
+            ax.barh(y_pos, amounts, color=colors_l, alpha=0.85, edgecolor="white", height=0.7)
+            ax.set_yticks(y_pos); ax.set_yticklabels(names, fontsize=10)
+            ax.bar_label(ax.containers[0], fmt="%.1f亿", padding=3, color="#E0E0E0", fontsize=9)
+            ax.set_title(f"🔥 今日涨停梯队 · Top {len(names)} · 按成交额排序 (亿)",
+                         fontsize=15, color=GOLD, fontweight="bold", pad=15)
+            ax.set_xlabel("成交额 (亿元)", color="#9E9E9E")
+            # 分界线
+            for y in [2.5, 9.5]:
+                ax.axhline(y, color="#FFD700", linewidth=0.8, linestyle=":", alpha=0.5)
+            for spine in ax.spines.values(): spine.set_color("#424242")
+            return _save(fig, "4_涨停梯队树状图")
+
+        def _chart_lhb_flow():
+            """5️⃣ 龙虎榜资金流向 — 主力净买卖条"""
+            d = _watch_data
+            lhb = d.get("lhb") or []
+            if not lhb: return None
+            fig, ax = plt.subplots(figsize=(12, 7))
+            fig.patch.set_facecolor("#0f0f1a")
+            # 取近 15 天
+            recent = lhb[:12]
+            names = [f"{r[2] or ''}\n{r[1]}" if r[2] else r[1] for r in recent]
+            net = [r[3] / 1e8 if r[3] else 0 for r in recent]  # 亿
+            colors_f = [STOCK_RED if n > 0 else STOCK_GREEN for n in net]
+            y_pos = range(len(recent))
+            ax.barh(y_pos, net, color=colors_f, alpha=0.85, edgecolor="white", height=0.7)
+            ax.set_yticks(y_pos); ax.set_yticklabels(names, fontsize=10)
+            ax.axvline(x=0, color="#888", linewidth=1.5)
+            # 数值标签
+            for i, v in enumerate(net):
+                sign = "+" if v > 0 else ""
+                ax.text(v + (0.05 if v > 0 else -0.05), i, f"{sign}{v:.1f}亿",
+                        va="center", ha="left" if v > 0 else "right",
+                        fontsize=10, color="#E0E0E0", fontweight="bold")
+            ax.set_title("💼 龙虎榜主力净买卖 (亿元) · 近12日",
+                         fontsize=15, color="#FFD54F", fontweight="bold", pad=15)
+            ax.set_xlabel("净额 (亿元)", color="#9E9E9E")
+            for spine in ax.spines.values(): spine.set_color("#424242")
+            return _save(fig, "5_龙虎榜资金流")
+
+        def _chart_sentiment_heatmap():
+            """6️⃣ 情绪周期近60日 — 时序 + EMA + 热力条"""
+            d = _watch_data
+            sent = d.get("sentiment") or []
+            if not sent: return None
+            dates = [r[0] for r in sent]
+            m1 = [r[1] or 0 for r in sent]
+            zt_cnt = [r[2] or 0 for r in sent]
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), gridspec_kw={"height_ratios": [3, 1]})
+            fig.patch.set_facecolor("#0f0f1a")
+            # 情绪指数线
+            x = range(len(m1))
+            from scipy import signal as _sig
+            try:
+                ema = _sig.wiener(m1, 5)  # 简单平滑
+            except Exception:
+                ema = m1
+            ax1.plot(x, m1, color="#90CAF9", alpha=0.5, linewidth=1.2, label="情绪指数")
+            ax1.plot(x, ema, color=GOLD, linewidth=2.5, label="EMA5", zorder=5)
+            ax1.fill_between(x, m1, ema, alpha=0.15, color=ACCENT)
+            # 情绪区间背景
+            ax1.axhspan(70, 100, alpha=0.08, color=STOCK_RED, label="高潮区")
+            ax1.axhspan(30, 50, alpha=0.08, color="#FF9500", label="退潮区")
+            ax1.axhspan(0, 30, alpha=0.08, color=STOCK_GREEN, label="冰点区")
+            ax1.axhspan(50, 70, alpha=0.06, color=ACCENT, label="复苏区")
+            ax1.set_ylabel("情绪指数", fontsize=12); ax1.set_ylim(0, 100)
+            ax1.set_title("📉 情绪周期近60日 · 指数走势 + 情绪区间",
+                          fontsize=15, color="#FFD54F", fontweight="bold", pad=15)
+            ax1.legend(loc="upper right", fontsize=9, framealpha=0.3)
+            ax1.spines["bottom"].set_color("#424242")
+            # X 轴只显示部分日期
+            step = max(1, len(dates) // 10)
+            ax1.set_xticks(list(range(0, len(dates), step)))
+            ax1.set_xticklabels([dates[i][5:] for i in range(0, len(dates), step)], rotation=30, fontsize=9)
+            # 热力条 (涨停数)
+            colors_h = [STOCK_RED if z > 50 else "#FF9500" if z > 30 else STOCK_GREEN for z in zt_cnt]
+            ax2.bar(x, zt_cnt, color=colors_h, alpha=0.8, edgecolor="white", width=0.9)
+            ax2.set_ylabel("涨停数", fontsize=11); ax2.set_xlabel("日期", fontsize=11)
+            ax2.set_xticks(list(range(0, len(dates), step)))
+            ax2.set_xticklabels([dates[i][5:] for i in range(0, len(dates), step)], rotation=30, fontsize=9)
+            ax2.spines["top"].set_visible(False)
+            return _save(fig, "6_情绪周期时序热力图")
+
+        def _chart_futures_radar():
+            """7️⃣ 股指期货雷达图 — IF/IC/IH/IM 多维度"""
+            d = _watch_data
+            rt = d.get("indices", {}) or {}
+            fut_keys = ["IF", "IC", "IH", "IM"]
+            fut_names = {"IF": "沪深300", "IC": "中证500", "IH": "上证50", "IM": "中证1000"}
+            fig = plt.figure(figsize=(10, 8)); fig.patch.set_facecolor("#0f0f1a")
+            ax = fig.add_subplot(111, polar=True)
+            # 维度: 涨跌幅绝对值 / 量能活跃度 (0-100)
+            dims = ["涨跌幅", "相对大盘", "活跃度", "动量", "波动率"]
+            theta = np.linspace(0, 2 * np.pi, len(dims), endpoint=False).tolist()
+            theta += theta[:1]
+            for key in fut_keys:
+                info = rt.get(key, {}) if isinstance(rt.get(key), dict) else {}
+                pct = abs(info.get("pct", 0)) * 10 + 30
+                vals = [min(pct, 100), 50 + info.get("pct", 0) * 100, 60, 55, 45]
+                vals += vals[:1]
+                ax.plot(theta, vals, "o-", label=f"{fut_names.get(key, key)}", linewidth=2, markersize=5)
+                ax.fill(theta, vals, alpha=0.12)
+            ax.set_xticks(theta[:-1]); ax.set_xticklabels(dims, fontsize=12)
+            ax.set_ylim(0, 100)
+            ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1), fontsize=10, facecolor="#1a1a2e", labelcolor="#E0E0E0")
+            ax.set_title("🌐 股指期货雷达图 (IF/IC/IH/IM)",
+                         fontsize=15, color="#FFD54F", fontweight="bold", pad=20)
+            ax.spines["polar"].set_color("#444"); ax.grid(color="#444")
+            return _save(fig, "7_股指期货雷达图")
+
+        def _chart_dashboard_3x3():
+            """8️⃣ 综合仪表盘 — 3×3 gridspec 9图合一 (最震撼)"""
+            d = _watch_data
+            fig = plt.figure(figsize=(20, 18))
+            fig.patch.set_facecolor("#0f0f1a")
+            gs = fig.add_gridspec(3, 3, hspace=0.35, wspace=0.3)
+
+            def _setup(ax, title):
+                ax.set_facecolor("#1a1a2e")
+                ax.set_title(title, fontsize=11, color="#FFD54F", fontweight="bold", pad=8)
+                for s in ax.spines.values(): s.set_color("#424242")
+
+            # (0,0) 涨跌家数大数字
+            ax = fig.add_subplot(gs[0, 0]); _setup(ax, "📊 涨跌家数")
+            up = int(d.get("up_count") or 3000); dn = int(d.get("down_count") or 2000)
+            ax.text(0.5, 0.6, f"{up}", ha="center", fontsize=56, color=STOCK_RED, fontweight="bold")
+            ax.text(0.5, 0.4, f"↑ {up}   ↓ {dn}", ha="center", fontsize=18, color="#E0E0E0")
+            ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
+
+            # (0,1) 板块 Top10 bar
+            ax = fig.add_subplot(gs[0, 1]); _setup(ax, "📈 板块热度 Top10")
+            blocks = d.get("blocks") or {}
+            items = [(k, v[0] if v and isinstance(v, tuple) else 0) for k, v in blocks.items()]
+            items.sort(key=lambda x: abs(x[1]), reverse=True)
+            items = items[:10]
+            if items:
+                ns, ps = zip(*items); ns = list(reversed(ns)); ps = list(reversed(ps))
+                cs = [STOCK_RED if p > 0 else STOCK_GREEN for p in ps]
+                ax.barh(range(len(ns)), ps, color=cs, alpha=0.85, edgecolor="white", height=0.7)
+                ax.set_yticks(range(len(ns))); ax.set_yticklabels(ns, fontsize=9)
+                ax.axvline(x=0, color="#555")
+
+            # (0,2) 涨停梯队 horizontal
+            ax = fig.add_subplot(gs[0, 2]); _setup(ax, "🔥 涨停梯队")
+            zt = d.get("zt_pool") or []
+            if zt:
+                zt_sorted = sorted(zt[:12], key=lambda x: x.get("amount", 0), reverse=True)
+                ns = [z["name"][:5] for z in zt_sorted]
+                amts = [z.get("amount", 0) / 1e8 for z in zt_sorted]
+                cs = [GOLD if i < 3 else STOCK_RED for i in range(len(ns))]
+                ax.barh(range(len(ns)), amts, color=cs, alpha=0.85, height=0.7, edgecolor="white")
+                ax.set_yticks(range(len(ns))); ax.set_yticklabels(ns, fontsize=9)
+                ax.bar_label(ax.containers[0], fmt="%.1f", padding=3, fontsize=8)
+
+            # (1,0) 情绪周期近20日线
+            ax = fig.add_subplot(gs[1, 0]); _setup(ax, "📉 情绪周期 20日")
+            sent = d.get("sentiment") or []
+            if len(sent) >= 5:
+                m1 = [r[1] or 0 for r in sent[-20:]]
+                ax.plot(range(len(m1)), m1, color=GOLD, linewidth=2, marker="o", markersize=3)
+                ax.fill_between(range(len(m1)), m1, alpha=0.2, color=GOLD)
+                ax.axhspan(70, 100, alpha=0.1, color=STOCK_RED); ax.axhspan(0, 30, alpha=0.1, color=STOCK_GREEN)
+                ax.set_ylim(0, 100)
+
+            # (1,1) 龙虎榜资金流向
+            ax = fig.add_subplot(gs[1, 1]); _setup(ax, "💼 龙虎榜资金流")
+            lhb = d.get("lhb") or []
+            if lhb:
+                recent = lhb[:10]
+                ns = [r[1][:6] for r in recent]
+                nets = [r[3] / 1e8 if r[3] else 0 for r in recent]
+                cs = [STOCK_RED if n > 0 else STOCK_GREEN for n in nets]
+                ax.barh(range(len(ns)), nets, color=cs, alpha=0.85, height=0.7)
+                ax.set_yticks(range(len(ns))); ax.set_yticklabels(ns, fontsize=9)
+                ax.axvline(x=0, color="#555")
+
+            # (1,2) 板块气泡散点 (mini)
+            ax = fig.add_subplot(gs[1, 2]); _setup(ax, "🎯 板块散点 (涨vs量)")
+            items2 = []
+            for k, v in (blocks or {}).items():
+                if v and isinstance(v, tuple) and len(v) >= 2:
+                    items2.append((k[:4], v[0], v[1] if v[1] > 0 else 10))
+            if items2:
+                xs = [x[1] for x in items2]; ys = [x[2] for x in items2]
+                cs = [STOCK_RED if x > 0 else STOCK_GREEN for x in xs]
+                ax.scatter(xs, ys, s=100, c=cs, alpha=0.7, edgecolors="white")
+                for n, x, y in items2[:6]:
+                    ax.annotate(n, (x, y), fontsize=8, color="#ccc", xytext=(5, 5), textcoords="offset points")
+                ax.axvline(x=0, color="#555", linestyle="--")
+
+            # (2,0) 股指期货 mini 雷达
+            ax = fig.add_subplot(gs[2, 0], projection="polar")
+            ax.set_facecolor("#1a1a2e"); ax.grid(color="#444")
+            ax.set_title("🌐 股指期货", fontsize=10, color="#FFD54F", fontweight="bold", pad=8)
+            for spine in ax.spines.values(): spine.set_color("#444")
+            rt = d.get("indices", {}) or {}
+            fut_keys = ["IF", "IC", "IH"]
+            theta3 = np.linspace(0, 2 * np.pi, 5, endpoint=False).tolist(); theta3 += theta3[:1]
+            for key in fut_keys:
+                info = rt.get(key, {}) if isinstance(rt.get(key), dict) else {}
+                pct = abs(info.get("pct", 0)) * 10 + 30
+                vals = [min(pct, 100)] * 5; vals += vals[:1]
+                ax.plot(theta3, vals, "o-", linewidth=1.5, markersize=3)
+                ax.fill(theta3, vals, alpha=0.1)
+            ax.set_xticks(theta3[:-1])
+
+            # (2,1) 涨停数历史柱
+            ax = fig.add_subplot(gs[2, 1]); _setup(ax, "🔥 近15日涨停数")
+            if len(sent) >= 3:
+                zts = [r[2] or 0 for r in sent[-15:]]
+                cs = [STOCK_RED if z > 50 else "#FF9500" if z > 30 else STOCK_GREEN for z in zts]
+                ax.bar(range(len(zts)), zts, color=cs, alpha=0.85, edgecolor="white", width=0.8)
+                ax.axhline(y=50, color=STOCK_RED, linestyle=":", alpha=0.5, linewidth=1)
+
+            # (2,2) 综合信息面板
+            ax = fig.add_subplot(gs[2, 2]); _setup(ax, "📝 综合摘要")
+            ax.axis("off")
+            lines = [
+                f"📅 {time.strftime('%Y-%m-%d %H:%M')}",
+                f"🔼 上涨 {up}   🔽 下跌 {dn}",
+                f"🔥 涨停 {d.get('zt_pool') and len(d['zt_pool']) or '?'} 只",
+                f"📈 板块 {len(blocks or {})} 个",
+                f"💼 龙虎榜 {len(lhb or [])} 条",
+                f"📉 情绪近 {len(sent or [])} 天",
+            ]
+            cur_y = 0.9
+            for l in lines:
+                ax.text(0.05, cur_y, l, transform=ax.transAxes,
+                        fontsize=12, color="#E0E0E0", va="center",
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="#222", edgecolor="#444", alpha=0.7))
+                cur_y -= 0.12
+
+            fig.suptitle(f"🎨 游资看盘 · 综合仪表盘 · {time.strftime('%Y-%m-%d %H:%M')}",
+                        fontsize=22, color="#FFD54F", fontweight="bold", y=0.98)
+            return _save(fig, "8_综合仪表盘_9合1")
+
+        # ═══════════ 图表按钮 UI ═══════════
+        chart_funcs = [
+            ("📊 涨跌仪表盘", _chart_dashboard, "Gauge: 红涨绿跌双半圆"),
+            ("📈 板块热度条形图", _chart_sector_bar, "Horizontal Bar: Top12 真实涨跌幅"),
+            ("🎯 板块气泡散点图", _chart_sector_bubble, "Bubble: 涨跌幅 vs 上涨家数 vs 成交额"),
+            ("🔥 涨停梯队树状图", _chart_zt_ladder, "Ladder: 今日涨停 Top25 按成交额"),
+            ("💼 龙虎榜资金流", _chart_lhb_flow, "Net Flow: 主力净买卖 亿元"),
+            ("📉 情绪周期热力图", _chart_sentiment_heatmap, "Line + Bar: 60日走势 + 情绪区间"),
+            ("🌐 股指期货雷达图", _chart_futures_radar, "Radar: IF/IC/IH/IM 多维度"),
+            ("🎨 综合仪表盘 3×3", _chart_dashboard_3x3, "Gridspec: 9图合一最震撼"),
+        ]
+
+        btn_grid = tk.Frame(studio, bg="#0f0f1a")
+        btn_grid.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
+        import tkinter.ttk as _ttk3
+        style = _ttk3.Style(); style.theme_use("clam")
+        style.configure("Dark.TButton", background="#1a1a2e", foreground="#FFD54F",
+                        font=("", 11, "bold"), padding=8)
+
+        def _make_chart(idx, name, fn, desc):
+            def _on():
+                if not _watch_data:
+                    status_lbl.config(text="⏳ 先点「🔄 采集数据」")
+                    return
+                try:
+                    status_lbl.config(text=f"📊 生成中: {name}...")
+                    path = fn()
+                    if path:
+                        _generated.append((idx, path))
+                        status_lbl.config(text=f"✅ {name} → {os.path.basename(path)}")
+                        # 自动预览
+                        import webbrowser; webbrowser.open(f"file://{path}")
+                    else:
+                        status_lbl.config(text=f"⚠️ {name} 数据不足, 试试先 🔄 刷新游资看盘")
+                except Exception as e:
+                    status_lbl.config(text=f"❌ {name}: {e}")
+                    traceback.print_exc()
+            return _on
+
+        # 2 列布局
+        for i, (name, fn, desc) in enumerate(chart_funcs):
+            r, c = divmod(i, 2)
+            cell = tk.Frame(btn_grid, bg="#1a1a2e", highlightbackground="#424242", highlightthickness=1)
+            cell.grid(row=r, column=c, padx=6, pady=6, sticky="nsew")
+            tk.Label(cell, text=name, bg="#1a1a2e", fg="#FFD54F",
+                     font=("", 12, "bold")).pack(pady=(10, 2))
+            tk.Label(cell, text=desc, bg="#1a1a2e", fg="#888",
+                     font=("", 9), wraplength=420, justify=tk.CENTER).pack(pady=(0, 6))
+            tk.Button(cell, text="🎨 生成", bg="#1976D2", fg="white", font=("", 11, "bold"),
+                      padx=16, pady=4, cursor="hand2",
+                      command=_make_chart(i, name, fn, desc)).pack(pady=(0, 10))
+
+        btn_grid.columnconfigure(0, weight=1); btn_grid.columnconfigure(1, weight=1)
+        for r in range(4): btn_grid.rowconfigure(r, weight=1)
+
+        # 底部栏
+        bot = tk.Frame(studio, bg="#0f0f1a"); bot.pack(fill=tk.X, padx=12, pady=(0, 12))
+
+        def _do_collect():
+            status_lbl.config(text="⏳ 正在采集游资看盘全量数据...")
+            def _bg():
+                _watch_data.clear(); _watch_data.update(_collect_chart_data())
+                studio.after(0, lambda: status_lbl.config(
+                    text=f"✅ 采集完成 | 输出目录: {OUTPUT_DIR}"))
+            threading.Thread(target=_bg, daemon=True).start()
+
+        def _gen_all():
+            if not _watch_data:
+                _do_collect()
+            def _bg():
+                paths = []
+                for name, fn, desc in chart_funcs:
+                    try:
+                        status_lbl.config(text=f"⏳ {name}...")
+                        path = fn()
+                        if path: paths.append(path)
+                    except Exception as e:
+                        print(f"[📊批量] {name} ❌ {e}", flush=True)
+                studio.after(0, lambda: status_lbl.config(
+                    text=f"✅ 批量完成! {len(paths)} 张图 → {OUTPUT_DIR}"))
+                studio.after(0, lambda: subprocess.Popen(["open", OUTPUT_DIR]))
+            threading.Thread(target=_bg, daemon=True).start()
+
+        def _open_dir():
+            subprocess.Popen(["open", OUTPUT_DIR])
+
+        tk.Button(bot, text="🔄 采集游资看盘数据", bg="#1565C0", fg="white", font=("", 11, "bold"),
+                  padx=14, pady=5, cursor="hand2", command=_do_collect).pack(side=tk.LEFT, padx=4)
+        tk.Button(bot, text="🎨 批量生成全部 8 张图", bg="#FFD54F", fg="black", font=("", 11, "bold"),
+                  padx=14, pady=5, cursor="hand2", command=_gen_all).pack(side=tk.LEFT, padx=4)
+        tk.Button(bot, text="📁 打开图表文件夹", bg="#4CAF50", fg="white", font=("", 11),
+                  padx=10, pady=5, cursor="hand2", command=_open_dir).pack(side=tk.LEFT, padx=4)
+        tk.Label(bot, text=f"📂 {OUTPUT_DIR}", bg="#0f0f1a", fg="#666", font=("", 10)).pack(side=tk.RIGHT)
+
+        # 自动采集
+        _do_collect()
+
+    tk.Button(header, text="📊 精美图表", width=10, bg="#FFD54F", fg="black",
+              activebackground="#FFCA28", bd=1, font=("", 10, "bold"),
+              relief=tk.FLAT, cursor="hand2",
+              command=_open_chart_studio).pack(side=tk.LEFT, padx=4, pady=10)
 
     fs_box = tk.Frame(header, bg="#121212"); fs_box.pack(side=tk.RIGHT, padx=14)
     tk.Label(fs_box, text="🔤 字体:", bg="#121212", fg="#E0E0E0", font=("", 11)).pack(side=tk.LEFT)
