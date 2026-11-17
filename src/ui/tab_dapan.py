@@ -18726,8 +18726,8 @@ AI 将基于实时市场数据生成深度分析报告
                             close = float(fields[4]) if fields[4] else 0.0
                             pct = (now - close) / close * 100 if close > 0 else 0.0
                         except Exception:
-                            pct = 0.0
-                        stock_info[code] = {"name": name, "pct": round(pct, 2)}
+                            now = 0.0; close = 0.0; pct = 0.0
+                        stock_info[code] = {"name": name, "price": round(now, 2), "pct": round(pct, 2)}
                 except Exception as e:
                     print(f"[邮票格子] 腾讯行情 batch {bi} 失败: {e}", flush=True)
             if not stock_info:
@@ -18736,7 +18736,7 @@ AI 将基于实时市场数据生成深度分析报告
             # ── Step 3: 组装 rows ──
             rows = []
             for code, score, src in stock_rank:
-                info = stock_info.get(code, {"name": code[-6:], "pct": 0.0})
+                info = stock_info.get(code, {"name": code[-6:], "price": 0.0, "pct": 0.0})
                 # 爬取代码: 直接用 freq_counter 里的真实提及次数 + 来源
                 if code in freq_counter:
                     freq = freq_counter[code]
@@ -18759,9 +18759,9 @@ AI 将基于实时市场数据生成深度分析报告
                         if len(arts) >= 3: break
                 rows.append({
                     "code": code, "name": info["name"],
-                    "pct": info["pct"], "freq": freq,
-                    "origin": origin,  # 来源标签 "韭研SSR"/"淘股吧详情"/"换手率"/"预设"
-                    "articles": arts[:3],  # [{title, summary, time}]
+                    "price": info.get("price", 0), "pct": info["pct"],
+                    "freq": freq, "origin": origin,
+                    "articles": arts[:3],
                 })
 
             # 爬取代码置顶 (按提及次数排), 热股池按 score 排
@@ -19023,11 +19023,17 @@ AI 将基于实时市场数据生成深度分析报告
         tv.tag_configure("blkhead", background="#263238", foreground="#FFD54F")
         tv.tag_configure("crawl", background="#1A3A2A")
 
+        import re as _re_code
+        def _clean_code(c):
+            """sh600519 → 600519, sz002594 → 002594"""
+            m = _re_code.search(r"(\d{6})", str(c))
+            return m.group(1) if m else str(c)
         seen_blocks = set()
         for blk_name, items in sorted_blocks:
             for i, item in enumerate(items):
                 pct = item.get("pct", 0); freq = item.get("freq", 0)
                 code = item.get("code", ""); name = item.get("name", "")
+                _disp_code = _clean_code(code)  # 显示用: 去掉 sh/sz 前缀
                 blk_disp = blk_name if blk_name not in seen_blocks else ""
                 if blk_name not in seen_blocks: seen_blocks.add(blk_name)
                 freq_disp = f"🔥{freq}" if freq >= 3 else ""
@@ -19046,7 +19052,7 @@ AI 将基于实时市场数据生成深度分析报告
                 origin = item.get("origin", "")
                 if origin in ("taogubaSSR","taoguba详情","jiuyanSSR","jiuyan详情") or "爬取" in origin:
                     tags += ("crawl",)
-                tv.insert("", "end", values=(blk_disp, name, code, f"{pct:+.2f}%", freq_disp, logic_disp), tags=tags)
+                tv.insert("", "end", values=(blk_disp, name, _disp_code, f"{pct:+.2f}%", freq_disp, logic_disp), tags=tags)
 
         # 双击 → 打开 K 线图
         def _tree_double(_evt=None):

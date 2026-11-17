@@ -1416,13 +1416,38 @@ class MartinMixin:
 
         # ── 主线程立即填充 (三级容错: self属性 → 缓存文件 → 硬编码) ──
         def _load_stamp_with_fallback(source):
-            """淘韭热股三级加载"""
+            """淘韭热股三级加载 + 字段归一化 (tab_dapan缓存格式 → tab_martin标准格式)"""
             import json as _j, os as _os
+            import re as _rx
             from datetime import datetime as _dt
+
+            def _normalize(raw_list):
+                """sh601318/pct/origin → 601318/chg/source"""
+                out = []
+                for item in raw_list:
+                    if not isinstance(item, dict):
+                        continue
+                    raw_code = str(item.get("code", ""))
+                    m = _rx.search(r"(\d{6})", raw_code)
+                    c6 = m.group(1) if m else raw_code
+                    # 字段兼容: tab_dapan 用 pct/origin, tab_martin 期望 chg/source
+                    out.append({
+                        "code": c6,
+                        "name": item.get("name", ""),
+                        "price": item.get("price", item.get("close", 0)),
+                        "chg": item.get("chg", item.get("pct", item.get("pct_chg", 0))),
+                        "freq": item.get("freq", item.get("count", item.get("mentions", 0))),
+                        "source": item.get("source", item.get("src", item.get("origin", ""))),
+                        "articles": item.get("articles", []),
+                    })
+                return out
+
             # 1) 主窗口已加载好的 self 属性
             data = getattr(self, f"_{source}_stamp_data", []) or []
             if data:
-                return data
+                _norm = _normalize(data)
+                print(f"[🎯Martin] {source} self属性加载: {len(data)}→{len(_norm)}只 (已归一化)", flush=True)
+                return _norm
             # 2) 缓存文件 (tab_dapan.py 同一个)
             _today = _dt.now().strftime("%Y%m%d")
             _cache = _os.path.join(
@@ -1434,11 +1459,12 @@ class MartinMixin:
                     with open(_cache, "r", encoding="utf-8") as f:
                         data = _j.load(f)
                     if isinstance(data, list) and data:
-                        print(f"[🎯Martin] {source} 读缓存 OK: {len(data)} 只", flush=True)
-                        return data
+                        _norm = _normalize(data)
+                        print(f"[🎯Martin] {source} 缓存文件加载: {len(data)}→{len(_norm)}只 (已归一化)", flush=True)
+                        return _norm
                 except Exception:
                     pass
-            # 3) 兜底: 用主流板块硬编码池 + 模拟热度
+            # 3) 兜底: 硬编码池 (已经是标准格式)
             print(f"[🎯Martin] {source} 无缓存, 用硬编码兜底池", flush=True)
             fallback_map = {
                 "taoguba": [  # 淘股吧 → 半导体/CPO/机器人
