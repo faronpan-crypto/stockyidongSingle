@@ -14003,6 +14003,454 @@ except Exception as e:
 
         print(f"[💰提醒] 主弹窗打开: {len(alerts)} 只提醒", flush=True)
 
+    # ═══════════════════════════════════════════════════════════
+    # 🤝 WorkBuddy 桥接面板 — 打通本地 WorkBuddy skills + 股票异动程序
+    # ═══════════════════════════════════════════════════════════
+
+    def _wb_home(self):
+        return os.path.expanduser("~/.workbuddy")
+
+    def _wb_read_skills(self):
+        """从 workbuddy.db local_skills 表 + skills 目录读用户 skills 清单"""
+        import sqlite3, glob as _gl
+        wb = self._wb_home()
+        db = os.path.join(wb, "workbuddy.db")
+        skills_dir = os.path.join(wb, "skills")
+        stock_keywords = ["stock", "quant", "chip", "breakout", "capital", "market",
+                          "position", "ashare", "a-share", "zixun", "news",
+                          "股票", "选股", "筹码", "涨停", "资金", "行情",
+                          "择时", "买卖", "仓位", "大盘", "明日", "早盘",
+                          "贵金属", "龙虎榜", "洗筹", "超跌", "反弹"]
+        results = []  # [{name, desc, stock, md_path, has_md}]
+        seen = set()
+
+        # 1) SQLite local_skills 表 (主)
+        if os.path.exists(db):
+            try:
+                conn = sqlite3.connect(db, timeout=2)
+                rows = conn.execute(
+                    "SELECT name, description, file_path FROM local_skills "
+                    "WHERE disabled=0 ORDER BY name"
+                ).fetchall()
+                conn.close()
+                for name, desc, fp in rows:
+                    if not name or name in seen: continue
+                    seen.add(name)
+                    desc_str = (desc or "")
+                    is_stock = any(k in name.lower() + desc_str.lower() or
+                                   k in name + desc_str for k in stock_keywords)
+                    md_path = fp or os.path.join(skills_dir, name, "SKILL.md")
+                    results.append({
+                        "name": name,
+                        "desc": desc_str[:200],
+                        "stock": is_stock,
+                        "md_path": md_path,
+                        "has_md": os.path.exists(md_path) if md_path else False,
+                        "source": "db",
+                    })
+            except Exception as e:
+                print(f"[🤝WorkBuddy] DB 读取失败: {e}", flush=True)
+
+        # 2) skills 目录补充 (DB 没覆盖到的)
+        if os.path.isdir(skills_dir):
+            for d in sorted(os.listdir(skills_dir)):
+                if d in seen: continue
+                fp = os.path.join(skills_dir, d, "SKILL.md")
+                if not os.path.exists(fp): continue
+                try:
+                    with open(fp, "r", encoding="utf-8") as f:
+                        content = f.read(3000)
+                    # 从 SKILL.md 里提取 name 和 description
+                    name = d
+                    # 找第一行 "# xxx" 或 ## xxx
+                    first_line = ""
+                    for line in content.split("\n"):
+                        s = line.strip()
+                        if s.startswith("#"):
+                            first_line = s.lstrip("# ").strip()
+                            break
+                    desc = first_line or content[:120].replace("\n", " ")
+                    is_stock = any(k in name.lower() + desc.lower() or
+                                   k in name + desc for k in stock_keywords)
+                    results.append({
+                        "name": name,
+                        "desc": desc[:200],
+                        "stock": is_stock,
+                        "md_path": fp,
+                        "has_md": True,
+                        "source": "dir",
+                    })
+                    seen.add(name)
+                except Exception:
+                    pass
+
+        results.sort(key=lambda x: (not x["stock"], x["name"]))
+        return results
+
+    def _wb_collect_watch_stocks(self):
+        """聚合"你最近关注的股票": 持仓 + 淘韭爬取 + 邮票缓存 + 已存价格提醒 + 全量"""
+        import re as _rx
+        pool = {}
+
+        def _add(c6, name, src):
+            if not c6: return
+            if c6 not in pool:
+                pool[c6] = {"name": name or "", "src": set()}
+            pool[c6]["src"].add(src)
+            if name and not pool[c6]["name"]:
+                pool[c6]["name"] = name
+
+        def _c6(raw):
+            if not raw: return ""
+            m = _rx.search(r"(\d{6})", str(raw))
+            return m.group(1) if m else ""
+
+        # 持仓股
+        for gi in range(1, 9):
+            attr = f"holding_stocks_{gi}" if gi > 1 else "holding_stocks"
+            arr = getattr(self, attr, None)
+            if not arr: continue
+            for item in arr:
+                if not item: continue
+                try:
+                    if isinstance(item, (list, tuple)) and len(item) >= 2:
+                        _add(_c6(item[1]), str(item[0]), "持仓")
+                    elif isinstance(item, dict):
+                        _add(_c6(item.get("code", "")), str(item.get("name", "")), "持仓")
+                except Exception: pass
+
+        # 淘韭爬取
+        for attr, lbl in [("_taoguba_stamp_data", "淘股吧"), ("_jiuyan_stamp_data", "韭研公社")]:
+            for row in getattr(self, attr, None) or []:
+                if isinstance(row, dict):
+                    _add(_c6(row.get("code", "")), row.get("name", ""), lbl)
+
+        # 邮票缓存 (兜底)
+        skills_dir = os.path.join(self._wb_home(), "skills")  # 占位, 下面用
+        try:
+            for days in range(2):
+                from datetime import datetime, timedelta
+                d = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+                for src, lbl in (("taoguba", "淘股吧"), ("jiuyan", "韭研公社")):
+                    fp = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      "..", "..", "data", f"stamp_cache_{src}_{d}.json")
+                    if os.path.exists(fp):
+                        with open(fp, "r", encoding="utf-8") as f:
+                            for it in json.load(f):
+                                _add(_c6(it.get("code", "")), it.get("name", ""), lbl)
+        except Exception: pass
+
+        # 已存价格提醒
+        try:
+            alerts = self._load_price_alerts()
+            for a in alerts:
+                _add(a.get("code", ""), a.get("name", ""), "价格提醒")
+        except Exception: pass
+
+        # 全量字典补齐名字
+        sd = getattr(self, "STOCK_CODES_DICT", None)
+        if isinstance(sd, dict):
+            for c, n in sd.items():
+                _c = _c6(c)
+                if _c and _c in pool and not pool[_c]["name"]:
+                    pool[_c]["name"] = str(n)
+
+        # 按来源数量排序
+        items = sorted(pool.items(), key=lambda x: -len(x[1]["src"]))
+        return [(c, info["name"], sorted(info["src"])) for c, info in items]
+
+    def _wb_push_snapshot(self):
+        """生成当前市场快照 JSON, 让 WorkBuddy 下次启动就能读到"""
+        import re as _rx, time as _time
+        wb = self._wb_home()
+        out_dir = os.path.join(wb, "snapshots")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"stockyidong_snapshot_{_time.strftime('%Y%m%d_%H%M%S')}.json")
+
+        snapshot = {
+            "generated_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
+            "source": "stockyidong 股票异动程序",
+            "watch_list": [],
+            "alerts": [],
+            "skills_available": [],
+        }
+
+        # 关注股 Top 30
+        stocks = self._wb_collect_watch_stocks()[:30]
+        snapshot["watch_list"] = [
+            {"code": c, "name": n, "sources": s} for c, n, s in stocks
+        ]
+
+        # 价格提醒
+        try:
+            alerts = self._load_price_alerts()
+            for a in alerts:
+                snapshot["alerts"].append({
+                    "code": a.get("code"), "name": a.get("name"),
+                    "buy_price": a.get("buy_price"), "sell_price": a.get("sell_price"),
+                    "enabled": a.get("enabled", True),
+                    "note": a.get("note", ""),
+                })
+        except Exception: pass
+
+        # WorkBuddy skills 清单 (股票相关)
+        try:
+            skills = self._wb_read_skills()
+            snapshot["skills_available"] = [
+                {"name": s["name"], "desc": s["desc"], "stock": s["stock"]} for s in skills if s["stock"]
+            ]
+        except Exception: pass
+
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, ensure_ascii=False, indent=2)
+        return out_path, len(stocks), len(snapshot["alerts"]), len(snapshot["skills_available"])
+
+    def _show_workbuddy_dialog(self):
+        """🤝 WorkBuddy 桥接主弹窗"""
+        w = self._safe_toplevel(self.root)
+        w.title("🤝 WorkBuddy 桥接面板")
+        w.geometry("1180x720")
+        w.transient(getattr(self, 'root', None))
+        w.configure(bg="#1a1a3e")
+        w.minsize(900, 580)
+        try: w.grab_set()
+        except: pass
+
+        # 🎨 深蓝顶栏
+        header = tk.Frame(w, bg="#1565C0", height=52)
+        header.pack(fill=tk.X)
+        tk.Label(header, text="🤝 WorkBuddy 桥接面板", bg="#1565C0", fg="white",
+                 font=("Microsoft YaHei", 16, "bold")).pack(side=tk.LEFT, padx=18, pady=10)
+        wb_home = self._wb_home()
+        wb_running = any("WorkBuddy.app" in p for p in os.popen("ps aux").read().split("\n"))
+        tk.Label(header, text=f"WorkBuddy路径: {wb_home} | {'🟢运行中' if wb_running else '⚪未运行'}",
+                 bg="#1565C0", fg="#BBDEFB", font=("", 10)).pack(side=tk.RIGHT, padx=18, pady=16)
+
+        # Notebook 3 Tab
+        nb = ttk.Notebook(w)
+        nb.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # ═══════ Tab 1: 📦 Skills ═══════
+        tab1 = tk.Frame(nb, bg="#1a1a3e")
+        nb.add(tab1, text="📦 我的 Skills")
+
+        # 统计标签
+        try:
+            skills = self._wb_read_skills()
+        except Exception:
+            skills = []
+        total = len(skills)
+        stock = sum(1 for s in skills if s["stock"])
+        frame = sum(1 for s in skills if s.get("source") == "db")
+        dir_ = total - frame
+
+        stat_bar = tk.Frame(tab1, bg="#1a1a3e")
+        stat_bar.pack(fill=tk.X, pady=(6, 2))
+        for text, color in [
+            (f"  📦 总装 {total} 个", "#90CAF9"),
+            (f"  📈 股票相关 {stock} 个", "#A5D6A7"),
+            (f"  🗄️ DB {frame}  + 📂 目录 {dir_}", "#FFD54F"),
+        ]:
+            tk.Label(stat_bar, text=text, bg="#1a1a3e", fg=color, font=("", 11, "bold")).pack(side=tk.LEFT, padx=6)
+
+        # 过滤栏
+        filter_bar = tk.Frame(tab1, bg="#1a1a3e")
+        filter_bar.pack(fill=tk.X, pady=4)
+        filter_var = tk.StringVar(value="全部")
+        tk.Label(filter_bar, text="筛选:", bg="#1a1a3e", fg="white", font=("", 11)).pack(side=tk.LEFT, padx=4)
+        ttk.Combobox(filter_bar, textvariable=filter_var, width=12,
+                     values=["全部", "仅股票相关", "仅非股票", "有SKILL.md", "A股选股", "资金/筹码", "量化/回测", "大盘/择时"]
+                     ).pack(side=tk.LEFT, padx=4)
+
+        # Treeview
+        cols = ("name", "stock", "desc", "src", "md")
+        tv1 = ttk.Treeview(tab1, columns=cols, show="headings", height=20)
+        for c, t, w_ in [("name","Skill 名称",180),("stock","📈",35),
+                         ("desc","描述 / 触发词",520),("src","来源",60),("md","SKILL.md",80)]:
+            tv1.heading(c, text=t)
+            tv1.column(c, width=w_, anchor="w" if c in ("desc","name") else "center", stretch=True)
+        vsb1 = ttk.Scrollbar(tab1, orient="vertical", command=tv1.yview)
+        tv1.configure(yscrollcommand=vsb1.set)
+        tv1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb1.pack(side=tk.RIGHT, fill=tk.Y)
+
+        tv1.tag_configure("stock", background="#1B5E20", foreground="#A5D6A7")
+        tv1.tag_configure("normal", background="#263238", foreground="#ECEFF1")
+
+        def _refresh_skills():
+            for iid in tv1.get_children(): tv1.delete(iid)
+            flt = filter_var.get()
+            for s in skills:
+                if flt == "仅股票相关" and not s["stock"]: continue
+                if flt == "仅非股票" and s["stock"]: continue
+                if flt == "有SKILL.md" and not s.get("has_md"): continue
+                if flt == "A股选股" and not any(k in s["name"] + s["desc"] for k in ["选股", "breakout", "selection", "挑", "筛"]): continue
+                if flt == "资金/筹码" and not any(k in s["name"] + s["desc"] for k in ["筹码", "资金", "chip", "capital", "blood"]): continue
+                if flt == "量化/回测" and not any(k in s["name"] + s["desc"] for k in ["quant", "backtest", "量", "回测", "因子"]): continue
+                if flt == "大盘/择时" and not any(k in s["name"] + s["desc"] for k in ["大盘", "择时", "market", "timing", "指数", "情绪"]): continue
+                tag = "stock" if s["stock"] else "normal"
+                stock_marker = "⭐" if s["stock"] else ""
+                md_marker = "📄 有" if s.get("has_md") else ""
+                src = "DB" if s.get("source") == "db" else "Dir"
+                tv1.insert("", "end", values=(s["name"], stock_marker, s["desc"][:80], src, md_marker), tags=(tag,))
+
+        _refresh_skills()
+        filter_var.trace_add("write", lambda *a: _refresh_skills())
+
+        # 双击打开 SKILL.md 详情
+        def _on_skill_double(evt):
+            sel = tv1.selection()
+            if not sel: return
+            iid = sel[0]
+            idx = int(iid)
+            if idx >= len(skills): return
+            s = skills[idx]
+            _detail_win(self, s)
+
+        tv1.bind("<Double-1>", _on_skill_double)
+
+        # ── Tab 2: 🎯 关注股 ──
+        tab2 = tk.Frame(nb, bg="#1a1a3e")
+        nb.add(tab2, text="🎯 你关注的股票")
+
+        try:
+            watch_stocks = self._wb_collect_watch_stocks()
+        except Exception:
+            watch_stocks = []
+
+        stat2 = tk.Frame(tab2, bg="#1a1a3e")
+        stat2.pack(fill=tk.X, pady=6)
+        tk.Label(stat2, text=f"🔍 共 {len(watch_stocks)} 只聚合股 (持仓 + 淘韭 + 邮票 + 价格提醒)",
+                 bg="#1a1a3e", fg="#90CAF9", font=("", 11, "bold")).pack(side=tk.LEFT, padx=8)
+
+        cols2 = ("rank", "code", "name", "src_count", "sources", "cur", "pct")
+        tv2 = ttk.Treeview(tab2, columns=cols2, show="headings", height=20)
+        for c, t, w_, an in [("rank","#",35,"center"),("code","代码",72,"center"),
+                             ("name","名称",120,"w"),("src_count","来源数",55,"center"),
+                             ("sources","来源标签",280,"w"),("cur","现价",78,"center"),
+                             ("pct","%",62,"center")]:
+            tv2.heading(c, text=t); tv2.column(c, width=w_, anchor=an, stretch=True)
+        vsb2 = ttk.Scrollbar(tab2, orient="vertical", command=tv2.yview)
+        tv2.configure(yscrollcommand=vsb2.set)
+        tv2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb2.pack(side=tk.RIGHT, fill=tk.Y)
+
+        tv2.tag_configure("hot", background="#FF6F00", foreground="white")
+        tv2.tag_configure("multi", background="#2E7D32", foreground="#C8E6C9")
+        tv2.tag_configure("single", background="#37474F", foreground="#ECEFF1")
+
+        def _refresh_watch():
+            for iid in tv2.get_children(): tv2.delete(iid)
+            codes = [c for c, _, _ in watch_stocks[:60]]
+            prices = self._fetch_realtime_prices(codes) if codes else {}
+            for i, (c6, nm, srcs) in enumerate(watch_stocks[:60], 1):
+                rt = prices.get(c6, {})
+                cur = rt.get("price", 0)
+                pct = rt.get("pct", 0)
+                sc = len(srcs)
+                if sc >= 3: tag = "hot"
+                elif sc >= 2: tag = "multi"
+                else: tag = "single"
+                tv2.insert("", "end", values=(i, c6, nm, sc, "+".join(srcs)[:40],
+                                               f"{cur:.2f}" if cur else "-",
+                                               f"{pct:+.2f}%" if cur else "-"), tags=(tag,))
+
+        _refresh_watch()
+
+        tk.Button(tab2, text="🔄 刷新行情", command=_refresh_watch,
+                  bg="#37474F", fg="white", relief=tk.FLAT, padx=12).pack(pady=4)
+
+        # ── Tab 3: 🤖 快照推送 ──
+        tab3 = tk.Frame(nb, bg="#1a1a3e")
+        nb.add(tab3, text="🤖 推送给 WorkBuddy")
+
+        tk.Label(tab3, text="把当前股票异动程序的核心数据打包成 JSON 快照,\n"
+                            f"存到 WorkBuddy 本地目录 ({wb_home}/snapshots/),\n"
+                            "下次 WorkBuddy 启动时自动读取, 让 AI 知道你关注什么、有哪些提醒",
+                 bg="#1a1a3e", fg="#ECEFF1", font=("", 11), justify=tk.LEFT
+                 ).pack(pady=14, padx=18, anchor="w")
+
+        def _do_push():
+            try:
+                path, n_stk, n_alt, n_skill = self._wb_push_snapshot()
+                result_var.set(f"✅ 已推送 → {path}\n\n"
+                               f"  📈 关注股 {n_stk} 只\n"
+                               f"  💰 价格提醒 {n_alt} 条\n"
+                               f"  📦 股票 Skills {n_skill} 个")
+            except Exception as e:
+                result_var.set(f"❌ 推送失败: {e}")
+
+        push_frame = tk.Frame(tab3, bg="#1a1a3e")
+        push_frame.pack(pady=6)
+        tk.Button(push_frame, text="🚀 生成并推送快照", command=_do_push,
+                  bg="#1565C0", fg="white", font=("", 12, "bold"),
+                  padx=20, pady=8, relief=tk.FLAT).pack()
+
+        result_var = tk.StringVar(value="")
+        result_lbl = tk.Label(tab3, textvariable=result_var, bg="#1a1a3e", fg="#A5D6A7",
+                              font=("", 11), justify=tk.LEFT)
+        result_lbl.pack(pady=12, padx=18, anchor="w")
+
+        # ── 底部按钮 ──
+        bottom = tk.Frame(w, bg="#1a1a3e")
+        bottom.pack(fill=tk.X, padx=10, pady=(0, 10))
+        ttk.Button(bottom, text="打开 WorkBuddy 应用",
+                   command=lambda: os.system('open -a "WorkBuddy"')).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bottom, text="打开 skills 文件夹",
+                   command=lambda: os.system(f'open "{wb_home}/skills"')).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bottom, text="关闭", command=w.destroy).pack(side=tk.RIGHT, padx=4)
+
+        print(f"[🤝WorkBuddy] 面板打开: {total} skills, {stock} 股票相关, {len(watch_stocks)} 关注股", flush=True)
+
+
+def _detail_win(parent, skill):
+    """SKILL.md 详情弹窗"""
+    dlg = tk.Toplevel(parent.root if hasattr(parent, 'root') else parent)
+    dlg.title(f"📄 {skill['name']}")
+    dlg.geometry("720x560")
+    dlg.configure(bg="#263238")
+    try: dlg.grab_set()
+    except: pass
+
+    header = tk.Frame(dlg, bg="#1565C0", height=48)
+    header.pack(fill=tk.X)
+    tk.Label(header, text=f"📦 {skill['name']}", bg="#1565C0", fg="white",
+             font=("Microsoft YaHei", 14, "bold")).pack(side=tk.LEFT, padx=16, pady=10)
+    tk.Label(header, text="📈股票相关" if skill.get("stock") else "📋通用",
+             bg="#1565C0", fg="#FFD54F" if skill.get("stock") else "#BBDEFB",
+             font=("", 10)).pack(side=tk.RIGHT, padx=16, pady=14)
+
+    body = tk.Frame(dlg, bg="#263238")
+    body.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    text = tk.Text(body, wrap=tk.WORD, bg="#37474F", fg="#ECEFF1",
+                   font=("", 11), padx=10, pady=8, relief=tk.FLAT)
+    vsb = ttk.Scrollbar(body, orient="vertical", command=text.yview)
+    text.configure(yscrollcommand=vsb.set)
+    text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+    md_path = skill.get("md_path")
+    content = ""
+    if md_path and os.path.exists(md_path):
+        try:
+            with open(md_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception as e:
+            content = f"⚠️ 读取失败: {e}"
+    else:
+        content = f"📄 SKILL.md 不存在\n\n来源: {skill.get('source', '?')}\n描述: {skill.get('desc', '')}"
+
+    text.insert("1.0", content)
+    text.configure(state="disabled")
+
+    btn = tk.Frame(dlg, bg="#263238")
+    btn.pack(fill=tk.X, padx=10, pady=(0, 10))
+    ttk.Button(btn, text="在 Finder 中显示",
+               command=lambda: os.system(f'open -R "{md_path}"') if md_path else None
+               ).pack(side=tk.LEFT, padx=4)
+    ttk.Button(btn, text="关闭", command=dlg.destroy).pack(side=tk.RIGHT, padx=4)
+
 
 
 

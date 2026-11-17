@@ -4969,6 +4969,7 @@ class StockKeywordAnalyzerGUI(AKShareMixin, AiMixin, AnalysisMixin, BreadcrumbMi
             _ROW2 = [
                 ("🦅游资心法", 8, self._open_hotmoney_single_dialog),
                 ("💰提醒", 6, self._show_price_alert_dialog),
+                ("🤝WorkBuddy", 10, self._show_workbuddy_dialog),
                 ("🎯Martin操盘", 10, self._show_martin_dialog),
                 ("🎯高抛低吸", 8, self._show_high_low_swing),
                 ("🎯超跌", 7, self._show_oversold_dialog),
