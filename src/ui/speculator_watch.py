@@ -7168,6 +7168,372 @@ def _article_output_dialog(win, ctx=None, focus_layer=None):
                           cursor="hand2", command=_quick_bruce)
     bruce_btn.pack(side=tk.LEFT, padx=(0, 8))
 
+    # -------- 📕 小红书图文笔记 --------
+    def _quick_xiaohongshu():
+        busy[0] = True
+        status_var.set("📕 小红书图文笔记生成中 (AI文案 + 9:16竖图)...")
+        result_txt.delete("1.0", tk.END)
+        result_txt.insert("1.0", "⏳ 正在采集数据 + AI 写小红书种草文 + 生成 9:16 竖图...\n请稍候 40-80 秒...")
+
+        def _work():
+            try:
+                # 1. 采数据
+                data = _collect_speculator_data()
+                # 2. AI 写小红书风格文案
+                import json as _j
+                prompt = f"""你是小红书财经博主, 30万粉, 风格活泼亲切, 大量emoji, 短句, 用"姐妹们""家人们""宝子们"的口吻, 像闺蜜分享。
+
+【今日日期】{time.strftime('%Y-%m-%d')}
+
+【真实市场数据】
+{_j.dumps(data, ensure_ascii=False, default=str, indent=2)[:3000]}
+
+【严格要求 — 小红书格式】
+1️⃣ 标题 (20字内, 必须含emoji + 数字/反差感): 例 "今天大盘居然...震惊了🤯"
+2️⃣ 封面大字 (8-12字, 独立一行, 要炸): 例 "家人们! 今天AI又爆了🔥"
+3️⃣ 正文:
+   - 每段 1-3 句, 短! 短句!
+   - emoji 密集 (每段至少1-2个)
+   - 分小标题 (用 emoji+加粗)
+   - 必须引用真实数据 (涨停数/板块/情绪指数)
+   - 结尾 1-2 句话术引导互动 (点赞/收藏/关注)
+4️⃣ 话题标签 (10-15个): #A股 #炒股 #游资看盘 #短线交易 #情绪周期 #今日复盘 #投资笔记 #理财 #财经 #交易心得 #板块分析 #涨停板 #龙虎榜 #股票 #干货分享
+
+【输出 Markdown — 结构清晰】"""
+                result = _robust_ai_call(prompt,
+                                          system_prompt="你是小红书30万粉财经博主。活泼、亲切、emoji密集、短句、口语化、像闺蜜分享。标题抓眼球, 封面大字要炸, 话题标签10个以上。不说专业黑话, 用'家人们''宝子们''姐妹们'。",
+                                          max_tokens=2200, win=win)
+                if not result:
+                    result = _article_fallback(prompt, "小红书种草", "今日复盘", "小红书", "800字种草文")
+
+                # 3. 生成 9:16 竖图 (封面 + 2张内页)
+                images = _generate_xhs_images(result, data)
+
+                # 4. 存到桌面分享文件夹
+                import os as _os2
+                desktop = _os2.path.expanduser("~/Desktop")
+                folder = _os2.path.join(desktop, "📈股票文章分享")
+                _os2.makedirs(folder, exist_ok=True)
+                ts = time.strftime("%m%d_%H%M")
+                saved_paths = []
+                for i, img in enumerate(images):
+                    p = _os2.path.join(folder, f"小红书_{ts}_{i+1}.png")
+                    try:
+                        img.save(p, "PNG"); saved_paths.append(p)
+                    except Exception as e:
+                        print(f"[📕存图] 失败 {p}: {e}", flush=True)
+
+                # 5. 存 MD 文案
+                md_path = _os2.path.join(folder, f"小红书_{ts}_文案.md")
+                with open(md_path, "w", encoding="utf-8") as f:
+                    f.write(result)
+
+                # 6. 自动存档
+                cards = _build_speculator_data_cards(data)
+                html = _to_wechat_html(result, title=f"小红书·{time.strftime('%m月%d日')}", data_cards=cards)
+                _archive_article(
+                    title=result.split("\n")[0].lstrip("# ").strip()[:80] or "小红书笔记",
+                    source="📕小红书", author="小红书博主", mode="种草文",
+                    platform="小红书", md=result, html=html)
+
+                # 7. 回 UI 显示
+                n_imgs = len(saved_paths)
+                summary = (f"{result}\n\n{'='*40}\n"
+                           f"📕 已生成 {n_imgs} 张 9:16 竖图:\n" +
+                           "\n".join(f"   {i+1}. {os.path.basename(p)}" for i, p in enumerate(saved_paths)) +
+                           f"\n\n📁 文件夹: {folder}\n"
+                           f"👉 点下方「📕打开小红书创作页」一键发布!")
+
+                dlg.after(0, lambda: _show_result_with_html(summary, html, "📕小红书", source="📕小红书"))
+                dlg.after(0, lambda: status_var.set(
+                    f"✅ 📕小红书笔记生成完成! {n_imgs}张图+文案已存桌面 → 点「📕打开小红书创作页」发布"))
+            except Exception as e:
+                import traceback
+                dlg.after(0, lambda: _show_result_with_html(
+                    f"❌ 小红书生成失败: {e}\n\n{traceback.format_exc()}", "", ""))
+            finally:
+                busy[0] = False
+                dlg.after(0, lambda: gen_btn.config(state=tk.NORMAL))
+
+        import threading; threading.Thread(target=_work, daemon=True).start()
+
+    # -------- 🎨 生成 9:16 竖图 (封面 + 内页) --------
+    def _generate_xhs_images(md_text, data):
+        """用 Pillow 生成小红书风格 9:16 竖图
+        
+        生成 3 张:
+          1. 封面图 (大标题 + 情绪周期 emoji + 渐变底)
+          2. 数据页 (涨跌家数 + 板块九宫格)
+          3. 策略页 (操作建议 + 话题标签)
+        """
+        from PIL import Image, ImageDraw, ImageFont, ImageFilter
+        import os as _os_img
+
+        W, H = 1080, 1920  # 9:16 小红书标准尺寸
+
+        # 找字体 — macOS 苹方
+        font_paths = [
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/STHeiti Medium.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/System/Library/Fonts/Supplemental/Songti.ttc",
+        ]
+        def _font(size, bold=False):
+            for fp in font_paths:
+                if _os_img.path.exists(fp):
+                    try:
+                        return ImageFont.truetype(fp, size)
+                    except Exception: pass
+            return ImageFont.load_default()
+
+        images = []
+
+        # ════════════════════════════════════════════
+        # 图1: 封面 — 大字标题 + 情绪周期
+        # ════════════════════════════════════════════
+        img = Image.new("RGB", (W, H), "#1a1a2e")
+        draw = ImageDraw.Draw(img)
+        # 渐变背景 (粉→紫→蓝)
+        for y in range(H):
+            r = int(255 * y / H + 30); g = int(60 * y / H + 20); b = int(180 - 120 * y / H)
+            draw.line([(0, y), (W, y)], fill=(min(r, 255), min(g, 255), min(b, 255)))
+        # 模糊光晕
+        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        od = ImageDraw.Draw(overlay)
+        od.ellipse([-200, 200, W + 200, 800], fill=(255, 100, 150, 60))
+        od.ellipse([-100, 1200, W + 100, 1700], fill=(100, 80, 255, 60))
+        overlay = overlay.filter(ImageFilter.GaussianBlur(80))
+        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+        draw = ImageDraw.Draw(img)
+
+        # 小红书 logo 位置 (右上角)
+        draw.rounded_rectangle([W - 260, 60, W - 60, 120], radius=30,
+                                fill="#FF2442")
+        draw.text((W - 230, 72), "📕 今日复盘", fill="white", font=_font(28, True))
+
+        # 主标题 (大字)
+        lines = (md_text.split("\n")[0].lstrip("# ").strip() or "今日A股复盘").split("\n")
+        main_title = lines[0][:20]
+        # 分行
+        if len(main_title) > 12:
+            t1 = main_title[:len(main_title)//2]
+            t2 = main_title[len(main_title)//2:]
+        else:
+            t1 = main_title; t2 = ""
+
+        # 画大字阴影
+        shadow_font = _font(96, True)
+        def _draw_big_text(text, y_center, color="#ffffff", shadow="#000000"):
+            if not text: return
+            # 阴影
+            for dx, dy in [(-4,-4),(4,-4),(-4,4),(4,4)]:
+                draw.text((W//2 - shadow_font.getlength(text)//2 + dx, y_center + dy),
+                          text, fill=shadow, font=shadow_font)
+            draw.text((W//2 - shadow_font.getlength(text)//2, y_center),
+                      text, fill=color, font=shadow_font)
+
+        _draw_big_text(t1, 500, "#ffffff")
+        if t2:
+            shadow_font2 = _font(96, True)
+            # 第二行用渐变色
+            _draw_big_text(t2, 620, "#FFE4EC")
+
+        # 情绪周期 emoji 大字
+        import re as _re_img
+        sent = data.get("情绪周期", "")
+        m = _re_img.search(r'位置=([^\s]+)', sent)
+        emo_pos = m.group(1) if m else "🌊复苏"
+        emo_font = _font(72)
+        emo_text = emo_pos
+        draw.text((W//2 - emo_font.getlength(emo_text)//2, 820), emo_text,
+                  fill="#FFD700", font=emo_font)
+
+        # 日期 + 小红书风格
+        date_font = _font(32)
+        date_text = time.strftime("📅 %Y年%m月%d日  周六/日/一/二/三/四/五"[:18])
+        draw.text((W//2 - date_font.getlength(date_text)//2, 960), date_text,
+                  fill="#ffffffcc", font=date_font)
+
+        # 大字数据: 涨停数
+        zt_count = data.get("今日涨停数", "?")
+        up = data.get("涨家数", "?"); dn = data.get("跌家数", "?")
+        big_font = _font(120, True)
+        try:
+            draw.text((120, 1100), f"🔥 {zt_count}", fill="#FF2442", font=big_font)
+            draw.text((120, 1240), "只涨停", fill="#ffffff99", font=_font(32))
+        except Exception: pass
+
+        # 底部标签
+        tags_y = 1700
+        tag_font = _font(26)
+        tag_text = "#A股 #今日复盘 #游资看盘 #财经"
+        draw.text((W//2 - tag_font.getlength(tag_text)//2, tags_y), tag_text,
+                  fill="#ffffffaa", font=tag_font)
+        images.append(img)
+
+        # ════════════════════════════════════════════
+        # 图2: 数据页 — 涨跌家数 + 板块九宫格
+        # ════════════════════════════════════════════
+        img2 = Image.new("RGB", (W, H), "#ffffff")
+        draw2 = ImageDraw.Draw(img2)
+        # 顶部彩色条
+        draw2.rectangle([0, 0, W, 6], fill="#FF2442")
+        draw2.rounded_rectangle([60, 60, 380, 120], radius=30, fill="#FF2442")
+        draw2.text((100, 72), "📊 今日数据", fill="white", font=_font(36, True))
+
+        # 涨跌家数大卡
+        def _draw_stat_card(x, y, w, h, label, value, color):
+            draw2.rounded_rectangle([x, y, x+w, y+h], radius=20, fill=color + "20", outline=color, width=2)
+            vf = _font(72, True); lf = _font(28)
+            # 测量文字居中
+            vw = vf.getlength(str(value))
+            lw = lf.getlength(label)
+            draw2.text((x + w//2 - vw//2, y + 40), str(value), fill=color, font=vf)
+            draw2.text((x + w//2 - lw//2, y + h - 60), label, fill="#333", font=lf)
+
+        _draw_stat_card(60, 160, 470, 220, "上涨家数", up if str(up) != "?" else "--", "#FF2442")
+        _draw_stat_card(550, 160, 470, 220, "下跌家数", dn if str(dn) != "?" else "--", "#07C160")
+
+        # 情绪 + 涨停
+        _draw_stat_card(60, 420, 300, 160, "涨停数", zt_count, "#FF9500")
+        # 情绪指数
+        try:
+            m2 = _re_img.search(r'情绪指数=([\d.]+)', sent)
+            if m2:
+                _draw_stat_card(390, 420, 300, 160, "情绪指数", m2.group(1), "#5856D6")
+        except Exception: pass
+        # 跌停
+        dt_count = data.get("今日跌停数", "?")
+        _draw_stat_card(720, 420, 300, 160, "跌停数", dt_count, "#34C759")
+
+        # 板块九宫格标题
+        draw2.text((60, 620), "🗂️ 板块涨跌分布", fill="#333", font=_font(36, True))
+
+        # 板块九宫格 4列 x 3行
+        sectors = data.get("板块强度", []) or []
+        parsed2 = []
+        for s in sectors[:12]:
+            m3 = _re_img.match(r'([^\(]+)\(([+-][\d.]+)%', s)
+            if m3:
+                parsed2.append((m3.group(1).strip()[:6], float(m3.group(2))))
+        grid_x0 = 60; grid_y0 = 680; cell_w = (W - 120 - 20) // 4; cell_h = 120
+        for i in range(12):
+            col = i % 4; row = i // 4
+            x = grid_x0 + col * (cell_w + 6)
+            y = grid_y0 + row * (cell_h + 6)
+            if i < len(parsed2):
+                name, pct = parsed2[i]
+                bg = "#FF2442" if pct > 0 else "#07C160"
+                draw2.rounded_rectangle([x, y, x+cell_w, y+cell_h], radius=12,
+                                         fill=bg + ("30" if bg == "#FF2442" else "30"),
+                                         outline=bg, width=2)
+                sign = "+" if pct > 0 else ""
+                draw2.text((x+8, y+12), f"{sign}{pct:.1f}%", fill=bg, font=_font(30, True))
+                # 名字截断
+                name_short = name[:5]
+                nf = _font(22)
+                nw = nf.getlength(name_short)
+                if nw > cell_w - 16:
+                    # 缩小
+                    for sz in [20, 18, 16]:
+                        nf = _font(sz)
+                        nw = nf.getlength(name_short)
+                        if nw <= cell_w - 16: break
+                draw2.text((x + cell_w//2 - nw//2, y + cell_h - 42),
+                           name_short, fill="#333", font=nf)
+            else:
+                draw2.rounded_rectangle([x, y, x+cell_w, y+cell_h], radius=12,
+                                         fill="#f5f5f5", outline="#ddd", width=1)
+
+        images.append(img2)
+
+        # ════════════════════════════════════════════
+        # 图3: 策略页 — 操作建议 + 话题标签
+        # ════════════════════════════════════════════
+        img3 = Image.new("RGB", (W, H), "#FFF5F7")
+        draw3 = ImageDraw.Draw(img3)
+        # 顶部渐变条
+        for y in range(200):
+            r = int(255 - 80 * y / 200); g = int(36 + 100 * y / 200); b = int(66 + 80 * y / 200)
+            draw3.line([(0, y), (W, y)], fill=(max(r, 100), min(g, 200), min(b, 180)))
+        draw3.text((60, 60), "💡 明日操作建议", fill="white", font=_font(40, True))
+
+        # 从 AI 文案里提取策略 (简单切分 "建议" 或仓位相关的行)
+        strategy_lines = []
+        for l in md_text.split("\n"):
+            l = l.strip()
+            if not l: continue
+            if any(k in l for k in ["建议", "仓位", "方向", "警惕", "操作", "明天", "明日"]):
+                # 去掉 markdown 符号
+                clean = l.lstrip("-*·# ").strip()
+                if 10 < len(clean) < 80:
+                    strategy_lines.append(clean)
+                    if len(strategy_lines) >= 5: break
+
+        if not strategy_lines:
+            strategy_lines = [
+                "📈 仓位控制在 5-6 成, 别追高",
+                "🔥 方向: AI算力 + 半导体 领涨板块",
+                "⚠️ 警惕白酒/地产 继续调整",
+                "💀 核按钮股票坚决回避",
+                "📚 收藏关注不迷路, 明天接着看!",
+            ]
+
+        # 画建议卡片
+        sy = 260
+        sf = _font(34)
+        for i, line in enumerate(strategy_lines[:5]):
+            card_h = 140
+            draw3.rounded_rectangle([60, sy, W - 60, sy + card_h], radius=16,
+                                     fill="white", outline="#FF2442" if i < 2 else "#FFD700" if i == 2 else "#eee", width=2)
+            # 序号圆
+            circle_cx = 120; circle_cy = sy + 30
+            draw3.ellipse([circle_cx - 26, circle_cy, circle_cx + 26, circle_cy + 52],
+                           fill="#FF2442" if i < 2 else "#FF9500" if i == 2 else "#5856D6")
+            draw3.text((circle_cx - 10, circle_cy + 2), str(i+1), fill="white", font=_font(28, True))
+            # 文字 (自动换行)
+            text_x = 170; text_y = sy + 20; max_w = W - 60 - text_x - 20
+            # 简单按字符拆
+            cur_line = ""
+            for ch in line:
+                if sf.getlength(cur_line + ch) > max_w:
+                    draw3.text((text_x, text_y), cur_line, fill="#333", font=sf)
+                    text_y += 42; cur_line = ch
+                else:
+                    cur_line += ch
+            if cur_line:
+                draw3.text((text_x, text_y), cur_line, fill="#333", font=sf)
+            sy += card_h + 12
+
+        # 话题标签区
+        tags = ["#A股", "#今日复盘", "#游资看盘", "#财经", "#炒股", "#短线交易",
+                "#情绪周期", "#投资笔记", "#理财", "#干货分享", "#板块分析", "#涨停板"]
+        ty = H - 400
+        tf = _font(28)
+        tx = 60
+        for tag in tags:
+            tw = tf.getlength(tag) + 24
+            if tx + tw > W - 60:
+                tx = 60; ty += 48
+            draw3.rounded_rectangle([tx, ty, tx + tw, ty + 40], radius=18,
+                                     fill="#FF244220", outline="#FF2442", width=1)
+            draw3.text((tx + 12, ty + 6), tag, fill="#FF2442", font=tf)
+            tx += tw + 10
+
+        # 底部签名
+        sig_y = H - 80
+        sf2 = _font(26)
+        draw3.text((W - 200, sig_y), "@游资看盘AI", fill="#FF2442", font=sf2)
+
+        images.append(img3)
+
+        return images
+
+    xhs_btn = tk.Button(quick_frame, text="📕 小红书图文笔记", font=("", 11, "bold"),
+                        bg="#FF2442", fg="white", padx=14, pady=3,
+                        cursor="hand2", command=_quick_xiaohongshu)
+    xhs_btn.pack(side=tk.LEFT, padx=(0, 8))
+
     # -------- 🧱 游资看盘数据豆腐干 → 彩色卡片 --------
     def _build_speculator_data_cards(data):
         """把游资看盘收集的结构化数据 → 手机端美观 HTML 卡片
@@ -7772,6 +8138,9 @@ tell application "System Events" to share item (theFile as alias)'''
     tk.Button(html_frame, text="📚历史回顾", font=("", 11, "bold"), padx=10,
               bg="#FFA726", fg="black", cursor="hand2",
               command=_open_history).pack(side=tk.LEFT, padx=3)
+    tk.Button(html_frame, text="📕打开小红书创作页", font=("", 11, "bold"), padx=10,
+              bg="#FF2442", fg="white", cursor="hand2",
+              command=_open_xhs_creator).pack(side=tk.LEFT, padx=3)
     tk.Button(html_frame, text="📤分享到微信", font=("", 11, "bold"), padx=10,
               bg="#07C160", fg="white", cursor="hand2",
               command=_share_now).pack(side=tk.LEFT, padx=3)
@@ -7788,6 +8157,39 @@ tell application "System Events" to share item (theFile as alias)'''
               command=_copy_html).pack(side=tk.LEFT, padx=2)
     tk.Button(html_frame, text="💾保存HTML", font=("", 11), padx=8,
               bg="#0f3460", fg="white", command=_save_html).pack(side=tk.LEFT, padx=2)
+
+    # -------- 📕 小红书一键发布引导 --------
+    def _open_xhs_creator():
+        """打开小红书创作页 + 复制文案 + Finder 显示图片"""
+        import webbrowser, subprocess, os as _os3
+        text = result_txt.get("1.0", tk.END).strip()
+        # 打开小红书创作页
+        url = "https://creator.xiaohongshu.com/publish/publish"
+        webbrowser.open(url)
+
+        # 找最新的小红书图片文件夹
+        folder = _os3.path.expanduser("~/Desktop/📈股票文章分享")
+        if _os3.path.exists(folder):
+            subprocess.Popen(["open", folder])
+            status_var.set("📕 已打开小红书创作页 + Finder 显示图片文件夹")
+            # 自动复制文案
+            dlg.clipboard_clear()
+            # 只取文案部分 (去掉 = 分隔线之后的提示)
+            md_only = text.split("=" * 40)[0].strip() if "=" * 40 in text else text
+            # 去掉 markdown 标题符号
+            import re as _rx
+            md_only = _rx.sub(r'^#+\s*', '', md_only, flags=_rx.MULTILINE)
+            dlg.clipboard_append(md_only)
+            tk.messagebox.showinfo("📕 小红书发布引导",
+                f"✅ 已打开小红书创作页!\n\n📋 文案已自动复制 (⌘V 粘贴)\n📁 图片文件夹已显示在 Finder\n\n📲 发布步骤:\n"
+                f"1. 在浏览器创作页点击「上传图文」\n"
+                f"2. 把 Finder 里的 3 张 9:16 竖图拖进去 (封面图排第一)\n"
+                f"3. ⌘V 粘贴标题和正文\n"
+                f"4. 检查话题标签 (末尾已含10个+)\n"
+                f"5. 点「发布」即可!")
+        else:
+            tk.messagebox.showinfo("📕 提示",
+                "小红书图片文件夹还没生成!\n\n请先点 📕小红书图文笔记 生成图片,\n然后再打开创作页发布~")
 
     # ════════════════════════════════════════════
     # 结果区
